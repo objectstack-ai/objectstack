@@ -1250,9 +1250,48 @@ export class ApprovalService implements IApprovalService {
    * Position holders (ADR-0090 D3): `sys_user_position` is the platform-owned
    * assignment table, keyed by the position's machine name (ADR-0057 D4),
    * unioned with the better-auth membership string (`sys_member.role`) as a
-   * transition source — the same semantics as `PositionGraphService` in
-   * `plugin-sharing`, so an approval routes to exactly the users the sharing
-   * engine would expand for the same position.
+   * transition source.
+   *
+   * ⚠️ This is a ROUTING read (approver slates and escalation targets), and it
+   * is deliberately NOT the same read as `PositionGraphService` in
+   * `plugin-sharing`, whatever the shared method name suggests. Both answer
+   * "who holds position P"; this one reads the directory RAW — neither the
+   * ADR-0091 D2 validity window nor the `sys_position.active` catalogue flag is
+   * applied. Maintainer ruling, 2026-08-15 (#8710, inheriting #8613), verbatim:
+   *
+   * > Access-conferring paths filter deactivated positions; addressing paths
+   * > do not.
+   *
+   * Routing is an addressing path, so dropping a holder here is fail-OPEN, not
+   * fail-closed: an expansion that comes back empty does not narrow the slate,
+   * it falls through to the literal `position:` slot no user can ever act on —
+   * the permanently stuck request of #3807 / #3424. A step routing to nobody is
+   * worse than one routing to a lapsed holder, so the lapsed holder stays.
+   *
+   * Where the two implementations actually stand, per source. Both limbs are
+   * listed because a statement about one of them is not a statement about this
+   * method:
+   *
+   *  1. `sys_user_position` — sharing projects `valid_from` / `valid_until` and
+   *     drops rows on `isGrantActive` inside its own helper; we project
+   *     `user_id` alone, so an assignment that expired last month still routes.
+   *     This is the one real divergence, and it is the intended one.
+   *  2. `sys_member.role` — raw on BOTH sides (`TeamGraphService.expandRoleUsers`
+   *     projects `user_id` too). The table carries no window columns at all and
+   *     `isGrantActive` reads an absent bound as unbounded, so there is nothing
+   *     a filter could do here; membership tier names have no `sys_position`
+   *     row either (#8710's "a name with no row is untouched" fallback), so no
+   *     catalogue flag either. This limb cannot be brought into parity by
+   *     adding a filter — see {@link expandMembershipTierUsers}.
+   *  3. `sys_position.active` — the sharing engine's gate for it lives at the
+   *     RULE EVALUATOR's call site (`positionConfersAccess` in
+   *     `sharing-rule-service.ts`), not inside `PositionGraphService`; the same
+   *     ruling gives it no counterpart on this path.
+   *
+   * The omission is per-READ, not a missing dependency: `isGrantActive` is
+   * imported in this file and IS applied to `sys_approval_delegation` in
+   * {@link lookupActiveDelegation}. ⛔ So do not "fix" this by adding the window
+   * filter here — that is the option #8710 rejected, on the reasoning above.
    */
   private async expandPositionUsers(positionName: string, organizationId?: string | null): Promise<string[]> {
     if (!positionName) return [];
@@ -1281,6 +1320,13 @@ export class ApprovalService implements IApprovalService {
    * NOT positions. Named for the projection (`org_membership_level`, ADR-0057
    * D7 / ADR-0090 D3), not for better-auth's column: the column name is theirs
    * and stays, the platform-facing word does not.
+   *
+   * Read RAW, like every routing read here, and with nothing available to
+   * filter even if it were not: `sys_member` carries no ADR-0091 D2 window
+   * columns, and a tier name has no `sys_position` row to read `active` off.
+   * {@link expandPositionUsers} carries the ruling both reads inherit
+   * (#8613 / #8710) — this method is also the second limb of that union, so a
+   * change here changes position routing too.
    */
   private async expandMembershipTierUsers(tier: string, organizationId?: string | null): Promise<string[]> {
     if (!tier) return [];

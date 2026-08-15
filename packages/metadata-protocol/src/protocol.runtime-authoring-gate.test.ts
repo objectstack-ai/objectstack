@@ -520,12 +520,27 @@ describe('#6710 — gate activation is keyed on the declared authoring channel',
     // Note the one cell whose verdict FLIPS: `('env_test', 'package-author')`
     // was gated and is not any more. That is #6710's direction applied
     // honestly rather than half-applied — a kernel that claims to BE the
-    // package author is treated as one by both doors, and package authoring is
-    // gated at build time instead (`validateSecurityPosture` is `CLI_ONLY` in
-    // `AUTHORING_RULES`, and R1's own message prescribes exactly that route:
-    // "widen it in the package source and publish through the package
-    // pipeline"). No assembly in this repo declares that channel today; only
-    // the genuine control plane may.
+    // package author is treated as one by both doors, because package
+    // authoring is judged at BUILD time by the same rules, on their CLI
+    // surface, before anything is published (R1's own message prescribes
+    // exactly that route: "widen it in the package source and publish through
+    // the package pipeline"). No assembly in this repo declares that channel
+    // today; only the genuine control plane may.
+    //
+    // [#8310] That build-time reason is the carve-out's ONLY footing. It does
+    // not also rest on the runtime door lacking the rule, and must not be
+    // re-founded on one: `validateSecurityPosture` declares both authoring
+    // surfaces (PR #8390) and PR #8600 put `object` in its `runtimeTypes`, so
+    // it answers at the runtime publish door as well as on every CLI command.
+    // What skips a `package-author` write is the CHANNEL —
+    // `assertRuntimeAuthoringRules` returns early on it at every call site,
+    // and the single `runAuthoringGate` call is guarded by the same check —
+    // never a gap in that rule's reach. The reach moves with every #7891
+    // slice; the channel does not, which is the whole reason to state the
+    // carve-out this way round. What the object door then does with the writes
+    // it DOES judge — the order of the two doors, and ADR-0094's R1/R2 outcome
+    // — is pinned in `packages/rest/src/meta-object-owd-gate.test.ts` rather
+    // than restated here.
     it.each([
         { envId: undefined, channel: undefined, gated: true, why: 'THE DEFECT: the host-config assembler — `new ObjectQLPlugin()`, no environment id, undeclared channel ⇒ the fail-safe default' },
         { envId: 'env_test', channel: undefined, gated: true, why: 'the ordinary tenant kernel, unchanged' },
