@@ -233,12 +233,23 @@ interface RlsFilterOptions {
    * (`owner_only_writes` / `owner_only_deletes` — see
    * `platform-ownership-policies.ts`) from Layer 1.
    *
-   * Set ONLY by the by-id write pre-image gate, and only when
-   * `ISharingService.checkEdit` / `checkDelete` answered `allow` — a positive
-   * basis (ownership at write DEPTH, an `edit`-level `sys_record_share`, or the
+   * Set only when `ISharingService.checkEdit` / `checkDelete` answered `allow`
+   * for the row this filter is about to be enforced against — a positive basis
+   * (ownership at write DEPTH, an `edit`-level `sys_record_share`, or the
    * `modifyAllRecords` bypass). `abstain` and `deny` both leave it in place, so
    * a row record sharing does not enforce on keeps the floor as its only
    * row-level write gate.
+   *
+   * [#8865] TWO call sites set it, and that is the point rather than a
+   * duplication: the by-id write pre-image gate (step 2.7) asks about the row
+   * being written, and ADR-0055's master gate
+   * ({@link SecurityPlugin.assertControlledByParentWrite}, step 2.8, leg 1) asks
+   * the identical question about the MASTER row whose editability a detail write
+   * derives from. Leg 1 used to compute the master's write filter with the floor
+   * left standing, so one principal, one master row and one `update` got two
+   * answers — permitted asked directly, `403 … (row-level security)` asked on
+   * behalf of a child. Maintainer ruling 2026-08-15: one ownership composition,
+   * both paths.
    *
    * Never affects Layer 0 (the tenant wall) or any app-authored policy.
    */
@@ -4983,6 +4994,18 @@ export class SecurityPlugin implements Plugin {
    * details under masters they could neither read nor edit. The sharing gate is
    * therefore asked UNCONDITIONALLY, not only when half 1 produced a filter.
    *
+   * [#8865] Half 1 composes the master's write RLS with the SAME ownership
+   * authority the by-id write pre-image gate does — `resolveSharingWriteVerdict`
+   * on the master row, and the platform ownership floor comes off on `allow`
+   * (maintainer ruling 2026-08-15, direction 1). Before that, the floor stood
+   * here and was dropped there, so the same principal was permitted to PATCH a
+   * master by id and refused on its children: the #8679 divergence one leg over,
+   * with the same resolution — one composition rather than two kept in agreement
+   * by hand. It WIDENS who may write details: a principal whose sharing verdict
+   * on the master is `allow` (ownership at write DEPTH, an `edit`-level
+   * `sys_record_share`, `modifyAllRecords`) now reaches the master's children,
+   * which is exactly the set that already reaches the master itself.
+   *
    * v1 scope: single-id writes. Bulk writes flow through the AST and are already
    * scoped by the controlled-by-parent READ filter (to readable masters).
    *
@@ -5103,7 +5126,76 @@ export class SecurityPlugin implements Plugin {
     if (!this.permissionEvaluator.checkObjectPermission('update', rel.master, permissionSets)) {
       denyMasterEdit(`no edit permission on master '${rel.master}'`, masterId);
     }
-    const masterWriteFilter = await this.computeRlsFilter(permissionSets, rel.master, 'update', context);
+    // [#8865] The master's own write RLS — composed with the SAME ownership
+    // authority the by-id write pre-image gate (step 2.7) composes with, which
+    // is the whole of this card.
+    //
+    // This leg used to call `computeRlsFilter(rel.master, 'update')` with no
+    // options, so the platform's ownership floor (`created_by ==
+    // current_user.id`, `member_default`) stood here while step 2.7 dropped it
+    // for the identical (principal, master row, `update`) on a sharing `allow`.
+    // Net: every widening mechanism the platform declares — write DEPTH, an
+    // `edit`-level `sys_record_share`, `modifyAllRecords` — worked on the master
+    // itself and was inert for its children, so an app author saw a master they
+    // could edit and children they could not. Same shape #8679 closed in leg 2
+    // below, one leg over; maintainer ruling 2026-08-15, direction 1: one
+    // composition, both paths, and the permission-boundary widening (children
+    // become writable by principals whose sharing verdict on the master is
+    // `allow`) is explicitly approved.
+    //
+    // The composition is step 2.7's, clause for clause, and each clause is
+    // load-bearing:
+    //
+    //  • ask the verdict ONLY when the floor is actually in play for this
+    //    (principal, master, `update`) — no floor, nothing to replace, and no
+    //    reason to spend a sharing probe on every detail write;
+    //  • `allow` alone drops it. `abstain` (record sharing does not enforce on
+    //    this master at all) and `deny` both leave it standing — #5492's E2
+    //    measurement is what makes the tri-state necessary here, and
+    //    {@link resolveSharingWriteVerdict} answers `deny` when its own probe
+    //    throws, so no failure mode of this composition can widen;
+    //  • the verb is `update`, matching the object-level check above and leg 2
+    //    below: this gate's question is EDIT access to the master, never the
+    //    detail's own verb;
+    //  • `masterGateCoversThisWrite` is deliberately NOT set. That knob is
+    //    #8757's, and it hands a `controlled_by_parent` object's floor to THIS
+    //    gate; setting it here would hand a nested master's floor to a gate that
+    //    is already running, on a path no measurement covers. A master that is
+    //    itself a detail keeps its floor exactly as it does today.
+    //
+    // [ADR-0090 D10] The on-behalf-of path is EXCLUDED, mirroring step 2.7's
+    // `floorApplies`. The delegation fact is read off `opCtx.context` rather
+    // than off `context`, because THIS METHOD RUNS TWICE for a delegated write
+    // — once per principal, with the delegator's own context substituted — and
+    // only the shared `opCtx` carries the link on both passes. (At this point
+    // `!!opCtx.context?.onBehalfOf?.userId` is the middleware's `!!delegatorSets`:
+    // step 2.8's guard has already established `permissionSets.length > 0`, and
+    // a link naming a non-existent delegator throws before either call.) Reading
+    // `context` instead would drop the floor for the delegator's pass and keep
+    // it for the agent's — the half-state #8757 recorded as a residual rather
+    // than resolve by a guess. The delegated write keeps BOTH floors, exactly as
+    // before this change.
+    const delegatedWrite = !!opCtx?.context?.onBehalfOf?.userId;
+    const masterFloorApplies =
+      !delegatedWrite &&
+      this.collectRLSPolicies(
+        permissionSets,
+        rel.master,
+        'update',
+        (context?.positions ?? []) as string[],
+      ).some(isPlatformOwnershipFloorPolicy);
+    const dropPlatformOwnershipFloor = masterFloorApplies
+      ? (await this.resolveSharingWriteVerdict(
+          'update',
+          rel.master,
+          String(masterId),
+          context,
+          permissionSets,
+        )) === 'allow'
+      : false;
+    const masterWriteFilter = await this.computeRlsFilter(permissionSets, rel.master, 'update', context, {
+      dropPlatformOwnershipFloor,
+    });
     if (masterWriteFilter) {
       let visible: unknown = null;
       // [#7505] This catch STAYS, and the difference from the existence probe

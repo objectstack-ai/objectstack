@@ -24,8 +24,10 @@ import {
     isObjectSchemaMaskingEnabled,
     resolveObjectSchemaMaskPosture,
     type ObjectSchemaMaskPosture,
+    // [#8805] Moved to `metadata-core` so the REST `/meta` write doors decide
+    // this the same way rather than through a second copy. Behaviour unchanged.
+    organizationIdForMetaWrite,
 } from '@objectstack/metadata-core';
-import { organizationIdForMetaWrite } from '../meta-write-org-scope.js';
 import { buildApiError } from '../error-envelope.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -406,8 +408,10 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // boot never reads: `SysMetadataRepository.put` stamps
                     // `organization_id` for EVERY type, while `loadMetaFromDb`
                     // hydrates `organization_id IS NULL` only. See
-                    // `../meta-write-org-scope.js` for why the predicate is the
-                    // static registry flag and not `isOverlayAllowed`.
+                    // `@objectstack/metadata-core`'s `meta-write-org-scope.ts`
+                    // for why the predicate is the static registry flag and not
+                    // `isOverlayAllowed` — and, since #8805, why it lives there:
+                    // the REST `/meta` write doors run the same one.
                     const activeOrganizationId = await deps.resolveActiveOrganizationId(_context);
                     const organizationId = organizationIdForMetaWrite(type, activeOrganizationId);
                     const result = await protocol.saveMetaItem({ type, name, item, organizationId, ...(packageId ? { packageId } : {}) });

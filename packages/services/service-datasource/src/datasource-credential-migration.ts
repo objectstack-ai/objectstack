@@ -72,7 +72,7 @@
 
 import {
   redactableConfigKeys,
-  redactUrlPassword,
+  redactUrlCredentials,
   refusedCredentialKeys,
   validateDriverConfig,
 } from '@objectstack/spec/data';
@@ -109,17 +109,20 @@ function stringValued(config: Record<string, unknown> | undefined): Array<[strin
 }
 
 /**
- * Config keys whose string value embeds a credential in a URL's userinfo.
+ * Config keys whose string value embeds a credential in a URL — userinfo
+ * password (#8082) or credential-bearing query parameter (#8337,
+ * `?authToken=` / `?password=`).
  *
- * Uses the spec's own detector (`redactUrlPassword`, the read path's URL half)
- * rather than a second regex: "did redaction change this value?" is exactly the
- * question, and the boundaries it draws — greedy to the LAST `@` before the
- * path, `/?#` excluded from every class — are the ones the write door's
- * refusal draws too.
+ * Uses the spec's own detector (`redactUrlCredentials`, the read path's URL
+ * half) rather than a second regex: "did redaction change this value?" is
+ * exactly the question, and the boundaries it draws are the ones the write
+ * door's refusal draws too — both syntaxes included, so a stored
+ * `?authToken=` row is refused with the per-row remedy instead of planning
+ * `nothing-to-migrate` while a JWT sits cleartext in its URL.
  */
 export function urlCredentialKeys(config: Record<string, unknown> | undefined): string[] {
   return stringValued(config)
-    .filter(([, value]) => redactUrlPassword(value) !== value)
+    .filter(([, value]) => redactUrlCredentials(value) !== value)
     .map(([key]) => key)
     .sort();
 }
@@ -178,7 +181,8 @@ export function planCredentialMigration(record: StoredDatasource): CredentialMig
         + 'verbatim and drop the injected secret, so re-homing it here could leave this datasource '
         + 'connecting with no credential at all.',
       remedy:
-        'Edit the datasource in Setup → Datasources: remove the password from the URL (a bare '
+        'Edit the datasource in Setup → Datasources: remove the credential from the URL (the '
+        + 'userinfo password and/or the `?authToken=` / `?password=` query parameter; a bare '
         + '`user@host` is accepted) and enter it in the connection form\'s secret field, which binds '
         + 'it into the secret store.',
     };

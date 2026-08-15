@@ -6,6 +6,7 @@ import { lazySchema } from '../../shared/lazy-schema';
 import { strictObject } from '../../shared/strict-object';
 import type { DriverDefinition } from '../datasource.zod';
 import {
+  CREDENTIAL_URL_QUERY_PARAMS,
   credentialFreeUrl,
   driverConfigJsonSchema,
   INLINE_CREDENTIAL_REFUSED,
@@ -129,7 +130,11 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
      *
      * Credential-free by contract since #8082: a `user:password@` userinfo is
      * refused at publish exactly like an inline `authToken` (#7990) — bind the
-     * secret and it reaches the driver at connect time. Placeholder-free since
+     * secret and it reaches the driver at connect time. Since #8337 the same
+     * closure covers the query string: `?authToken=` is the third spelling of
+     * the identical JWT — persisted cleartext into `sys_metadata`, and honoured
+     * by `@libsql/core` OVER the binder-injected token (measured; see
+     * `CREDENTIAL_URL_QUERY_PARAMS` in common.zod.ts). Placeholder-free since
      * #8336: a `${…}` span anywhere in the value is refused — placeholders in
      * authored metadata are resolved by nothing. Runtime-environment
      * DSNs (`OS_DATABASE_URL` + `OS_DATABASE_AUTH_TOKEN`) never pass through
@@ -143,7 +148,7 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
     // docs link checker resolves as an internationalised domain name, and
     // fails on (caught by CI on this very key). Concrete example URLs belong
     // in the TSDoc above the key, which the reference tables do not inline.
-    url: placeholderFree(credentialFreeUrl(z.string().min(1), 'url'), 'url')
+    url: placeholderFree(credentialFreeUrl(z.string().min(1), 'url', CREDENTIAL_URL_QUERY_PARAMS.turso), 'url')
       .describe('libSQL endpoint or local file: a remote libsql/https Turso URL, a file path, or :memory:')
       .meta({ title: 'Database URL' }),
 
@@ -178,9 +183,14 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
      * Judged by the same #8082 value-level parse as `url`: it is an authored
      * URL persisted into the identical `sys_metadata` sink, so a
      * `user:password@` userinfo is refused the same way — and by the same
-     * #8336 parse too (placeholder-free).
+     * #8336 parse too (placeholder-free), and the same #8337 query-parameter
+     * closure (`?authToken=`): the at-rest half is identical whichever URL
+     * key carries the token.
      */
-    syncUrl: placeholderFree(credentialFreeUrl(z.string(), 'syncUrl'), 'syncUrl').optional()
+    syncUrl: placeholderFree(
+      credentialFreeUrl(z.string(), 'syncUrl', CREDENTIAL_URL_QUERY_PARAMS.turso),
+      'syncUrl',
+    ).optional()
       .describe('Remote sync URL for embedded-replica mode: a libsql or https Turso endpoint')
       .meta({ title: 'Sync URL' }),
 

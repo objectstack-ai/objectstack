@@ -65,3 +65,16 @@ export * from './object-schema-fls.js';
 // not the other's is still collapsed. `objectql` re-exports
 // `ITEM_KEY_DISCRIMINATORS` from `registry.ts`, so its surface is unchanged.
 export * from './item-key-discriminators.js';
+
+// [#6190 / #7018 / #8805] Which metadata WRITES carry the caller's active
+// organization — sunk here from `@objectstack/runtime` by the same criterion as
+// the FLS projection above, and for a defect of the same shape. The #6190
+// ruling is a decision the CALLER must make (the protocol deliberately REFUSES
+// an org-scoped write of a non-overridable type rather than coercing it, so the
+// tenancy statement the author made is never silently rewritten) — which means
+// every door that writes metadata needs the same predicate. The dispatcher owned
+// the only implementation, and `@objectstack/rest` cannot import it: `runtime`
+// depends on `rest`, so the reverse edge is a cycle turbo refuses — the exact
+// situation this package exists to resolve. `runtime` imports it from here now,
+// so its behaviour is unchanged and there is no second copy to drift.
+export * from './meta-write-org-scope.js';

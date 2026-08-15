@@ -45,7 +45,9 @@ import { isWritablePackage } from '@objectstack/metadata-protocol';
 // private restatement of "when may a caught sentence be quoted" is where the
 // two copies start answering differently.
 import { clientFacingFailureText, seedRequestValidationError } from '@objectstack/metadata-protocol';
-import { organizationIdForMetaWrite } from '../meta-write-org-scope.js';
+// [#8805] Moved to `metadata-core` so the REST `/meta` write doors decide this
+// the same way rather than through a second copy. Behaviour unchanged.
+import { organizationIdForMetaWrite } from '@objectstack/metadata-core';
 import { setPackageDisabled } from '../package-state-store.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';

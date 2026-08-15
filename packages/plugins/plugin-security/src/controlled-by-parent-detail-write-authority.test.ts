@@ -134,6 +134,47 @@ const ORPHAN_SCHEMA = {
   },
 };
 
+/**
+ * [#8865] A MASTER on which record sharing ABSTAINS — `private`, but with no
+ * owner field, so `checkEdit` returns `abstain` at its `hasOwnerField` gate
+ * before the `modifyAllRecords` branch is ever reached.
+ *
+ * It is the tri-state's negative half, and the sharpest probe that leg 1 drops
+ * the master's floor on `allow` ALONE. `abstain` means record sharing does not
+ * enforce on this master at all, so the platform floor is the only row-level
+ * write gate it has (#5492's E2 measurement) — and a composition that read the
+ * boolean projection (`canEdit`, which is `!== 'deny'`) instead of the verdict
+ * would drop the floor here and go green while opening exactly that hole.
+ */
+const PROGRAM_SCHEMA = {
+  name: 'crm_program',
+  sharingModel: 'private',
+  fields: {
+    id: { name: 'id', type: 'text' },
+    name: { name: 'name', type: 'text' },
+    created_by: { name: 'created_by', type: 'lookup', reference: 'sys_user' },
+    organization_id: { name: 'organization_id', type: 'text' },
+  },
+};
+
+/** Its `controlled_by_parent` detail — same posture as the campaign member. */
+const PROGRAM_STEP_SCHEMA = {
+  name: 'crm_program_step',
+  sharingModel: 'controlled_by_parent',
+  fields: {
+    id: { name: 'id', type: 'text' },
+    crm_program: {
+      name: 'crm_program',
+      type: 'master_detail',
+      required: true,
+      reference: 'crm_program',
+    },
+    status: { name: 'status', type: 'text' },
+    created_by: { name: 'created_by', type: 'lookup', reference: 'sys_user' },
+    organization_id: { name: 'organization_id', type: 'text' },
+  },
+};
+
 const SHARE_SCHEMA = {
   name: 'sys_record_share',
   isSystem: true,
@@ -153,6 +194,8 @@ const SCHEMAS: Record<string, unknown> = {
   crm_campaign_member: MEMBER_SCHEMA,
   crm_note: NOTE_SCHEMA,
   crm_orphan_detail: ORPHAN_SCHEMA,
+  crm_program: PROGRAM_SCHEMA,
+  crm_program_step: PROGRAM_STEP_SCHEMA,
   sys_record_share: SHARE_SCHEMA,
 };
 
@@ -193,6 +236,8 @@ const MARKETING: PermissionSet = PermissionSetSchema.parse({
     crm_campaign_member: { ...CRUD },
     crm_note: { ...CRUD },
     crm_orphan_detail: { ...CRUD },
+    crm_program: { ...CRUD },
+    crm_program_step: { ...CRUD },
   },
 });
 
@@ -209,10 +254,35 @@ const ADMIN_SET: PermissionSet = PermissionSetSchema.parse({
     crm_campaign_member: { ...CRUD, viewAllRecords: true, modifyAllRecords: true },
     crm_note: { ...CRUD, viewAllRecords: true, modifyAllRecords: true },
     crm_orphan_detail: { ...CRUD, viewAllRecords: true, modifyAllRecords: true },
+    crm_program: { ...CRUD, viewAllRecords: true, modifyAllRecords: true },
+    crm_program_step: { ...CRUD, viewAllRecords: true, modifyAllRecords: true },
   },
 });
 
-const PERMISSION_SETS: PermissionSet[] = [MEMBER_DEFAULT, MARKETING, ADMIN_SET];
+/**
+ * [#8865] An APP-AUTHORED write policy on the MASTER, carried by a set that
+ * grants nothing else. Nothing the platform ships spells it, so it is the
+ * provenance control: dropping the PLATFORM floor must leave this policy
+ * compiling and refusing exactly as before (ADR-0049 — a declared security
+ * property stays declared; ADR-0105 F1 — a token match must not swallow an
+ * authored policy that happens to look like the floor).
+ */
+const AUTHORED_CAMPAIGN_SET: PermissionSet = PermissionSetSchema.parse({
+  name: 'campaign_authored',
+  // No object grants of its own: the CRUD bits come from `admin_set`, so this
+  // set contributes exactly one thing — the authored row-level policy.
+  objects: {},
+  rowLevelSecurity: [
+    {
+      name: 'campaign_owner_writes',
+      object: 'crm_campaign',
+      operation: 'update',
+      using: 'owner_id == current_user.id',
+    },
+  ],
+});
+
+const PERMISSION_SETS: PermissionSet[] = [MEMBER_DEFAULT, MARKETING, ADMIN_SET, AUTHORED_CAMPAIGN_SET];
 
 type Row = Record<string, unknown>;
 
@@ -249,7 +319,37 @@ function fixtureRows(): Record<string, Row[]> {
     crm_orphan_detail: [
       { id: 'orph_admin', status: 'sent', created_by: ADMIN, organization_id: ORG },
     ],
+    // [#8865] The owner-less master, one per principal so each case can be run
+    // against a master the principal did NOT create — the only state in which
+    // the floor has anything to say. The pair mirrors the campaign fixture
+    // exactly but for the missing owner column, which is what turns the sharing
+    // verdict from `allow` into `abstain`.
+    crm_program: [
+      { id: 'prog_admin', name: 'Admin Program', created_by: ADMIN, organization_id: ORG },
+      { id: 'prog_mkt', name: 'Marketing Program', created_by: MKT, organization_id: ORG },
+    ],
+    crm_program_step: [
+      { id: 'step_admin', crm_program: 'prog_admin', status: 'sent', created_by: ADMIN, organization_id: ORG },
+      { id: 'step_mkt', crm_program: 'prog_mkt', status: 'sent', created_by: MKT, organization_id: ORG },
+    ],
     sys_record_share: [],
+  };
+}
+
+/**
+ * [#8865] An `edit`-level record share — one of the three wideners the platform
+ * declares, and the one that is neither ownership nor a superuser bit. Seeding
+ * it is how a case varies the SHARING VERDICT and nothing else.
+ */
+function editShare(object: string, recordId: string, recipientId: string): Row {
+  return {
+    id: `shr_${object}_${recordId}_${recipientId}`,
+    object_name: object,
+    record_id: recordId,
+    recipient_type: 'user',
+    recipient_id: recipientId,
+    access_level: 'edit',
+    owner_id: ADMIN,
   };
 }
 
@@ -293,8 +393,13 @@ interface Outcome {
  * middleware over the REAL `SharingService`, wired through the same late binding
  * the kernel uses.
  */
-async function boot() {
-  const store = makeStore(fixtureRows());
+async function boot(seed: { shares?: Row[] } = {}) {
+  const rows = fixtureRows();
+  // [#8865] The ONLY fixture axis a case may vary: which record shares exist.
+  // Everything else is fixed, so a verdict that moves moved because the declared
+  // widener moved.
+  if (seed.shares) rows.sys_record_share = seed.shares;
+  const store = makeStore(rows);
 
   const securityMiddlewares: any[] = [];
   const ql = {
@@ -520,28 +625,30 @@ describe('[#8757] §2 the card\'s three measured refusals become the master gate
     expect(await h.byIdDetailWrite('update', 'mem_admin_selfmade', admin)).toMatchObject({ ok: true });
   });
 
-  it('RESIDUAL (#8865): card line 2 is refused ONE GATE LATER now, and that refusal is a separate defect', async () => {
+  it('[#8865 LANDED] card line 2 is permitted — the master gate\'s write-RLS leg dropped the MASTER floor too', async () => {
     const h = await boot();
     const admin = h.ctxFor(ADMIN, 'admin_set');
     // The card's sharpest line — `admin_set` updating `mem_mkt`, a child it did
-    // not create, under a master it does not own — is no longer refused by the
-    // DETAIL's floor, which is this card's whole subject. It is refused one gate
-    // later, by the master gate's own write-RLS leg.
+    // not create, under a master it does not own. #8757 took the DETAIL's floor
+    // off, and this assertion then pinned the REFUSAL that survived one gate
+    // later: the master gate's write-RLS leg (leg 1) still ran
+    // `computeRlsFilter(master, 'update')` with the MASTER's platform ownership
+    // floor standing, while the by-id path dropped it on a sharing `allow`.
+    // That was the #8679 divergence surviving in the sibling leg, filed as
+    // #8865, and it is what this assertion said until #8865 landed.
     //
-    // That leg calls `computeRlsFilter(master, 'update')` with no
-    // `dropPlatformOwnershipFloor`, so the MASTER's floor stands there while the
-    // by-id path drops it on a sharing `allow` — the #8679 divergence surviving
-    // in the sibling leg (#8679 fixed the record-sharing half of the same gate).
-    // Filed as #8865 and deliberately NOT fixed here: a different object's
-    // floor, a different leg, and `assertControlledByParentWrite` has #8688
-    // queued behind this card.
-    const outcome = await h.byIdDetailWrite('update', 'mem_mkt', admin);
-    expect(outcome).toMatchObject({ ok: false, code: 'PERMISSION_DENIED', status: 403 });
-    expect(outcome.message).toContain("master 'crm_campaign' not editable by this user (row-level security)");
-    // THE WITNESS that makes the line above a divergence rather than an answer:
-    // the same principal, the same master row, the same operation — asked
-    // DIRECTLY — is permitted. When #8865 lands the assertion above flips to
-    // `{ ok: true }`; this witness stays exactly as it is.
+    // Maintainer ruling 2026-08-15 (direction 1): leg 1 adopts step 2.7's
+    // composition — `resolveSharingWriteVerdict('update', master, masterId, …)`,
+    // floor dropped on `allow`. `admin_set` holds `modifyAllRecords` on
+    // `crm_campaign`, so the verdict is `allow`, the master floor comes off, and
+    // the two paths now answer the same. §5 below is what proves the flip is
+    // THAT composition and not a relaxation.
+    expect(await h.byIdDetailWrite('update', 'mem_mkt', admin)).toMatchObject({ ok: true });
+    // THE WITNESS, unchanged from the day it was written: the same principal,
+    // the same master row, the same operation — asked DIRECTLY — is permitted.
+    // It was the proof that the refusal above was a divergence; it is now the
+    // proof that the permission above is the SAME answer rather than a second
+    // one that happens to agree today.
     expect(await h.byIdDetailWrite('update', 'camp_mkt', admin, 'crm_campaign')).toMatchObject({ ok: true });
   });
 
@@ -618,5 +725,159 @@ describe('[#8757] §4 NON-REGRESSION — everything the floor is still the only 
     // policies are `update` / `delete` only).
     expect(injected).toContain('crm_campaign');
     expect(injected).not.toContain('created_by');
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * [#8865] §5 ONE ownership composition, both paths — and the bounds that make
+ * the flip above attributable to it.
+ *
+ * ## What this section is for
+ *
+ * §2's card-line-2 assertion flipped from a refusal to a permission. A flip on
+ * its own is ambiguous: any relaxation anywhere upstream produces the same
+ * green. So every case here varies ONE input of leg 1's new composition and
+ * asserts the verdict moves with it, in BOTH directions:
+ *
+ *   • which widener the principal holds (a record share, seeded or not);
+ *   • whether the sharing authority answers `allow` or `abstain` (an owner-less
+ *     master, where `checkEdit` abstains for everyone — `modifyAllRecords`
+ *     included);
+ *   • whether the policy standing in the way is the PLATFORM's floor or an
+ *     APP-AUTHORED one (only the first is droppable, ADR-0049).
+ *
+ * ## The DIRECT witness is asserted in every case, deliberately
+ *
+ * The defect this card closes was never "a child write is refused" — it was
+ * "the same principal, the same master row and the same `update` get two
+ * answers depending on who asks" (#8679's ruling, one leg over). A case that
+ * asserted only the child's verdict would go green on a gate that refuses
+ * everything, and — worse — would not notice the divergence coming back on the
+ * other side. So each case asserts the master's own by-id write too, and the
+ * two must agree.
+ *
+ * ## Not covered here, and why
+ *
+ * The ADR-0090 D10 on-behalf-of path: leg 1 excludes it (the delegation link is
+ * read off `opCtx.context`, which both of the gate's per-principal passes
+ * share), so a delegated write keeps BOTH principals' floors exactly as before.
+ * This harness cannot reach that path — `resolveDelegatorContext` reconstructs
+ * the delegator from `sys_user` and its grant tables, and with none of them in
+ * the fixture the write is refused at delegator resolution, long before either
+ * row gate runs. The exclusion is therefore the unchanged-behaviour direction
+ * by construction rather than by measurement here.
+ */
+describe('[#8865] §5 leg 1 composes with the SAME ownership authority the by-id path does', () => {
+  it('an `edit`-level record share on the MASTER now reaches its children — and the same share is what moved it', async () => {
+    // A: no share. `marketing` is not `camp_admin`'s owner or creator and holds
+    // no bypass, so the sharing verdict is `deny`, the master's floor stays, and
+    // leg 1 refuses. The DIRECT write of the master is refused too — the two
+    // paths agree in the refusing direction, which is the state this card was
+    // never about breaking.
+    const without = await boot();
+    const mktA = without.ctxFor(MKT, 'marketing');
+    const refused = await without.byIdDetailWrite('update', 'mem_admin', mktA);
+    expect(refused).toMatchObject({ ok: false, code: 'PERMISSION_DENIED', status: 403 });
+    expect(refused.message).toContain("master 'crm_campaign' not editable by this user (row-level security)");
+    expect(await without.byIdDetailWrite('update', 'camp_admin', mktA, 'crm_campaign')).toMatchObject({
+      ok: false,
+      code: 'PERMISSION_DENIED',
+      status: 403,
+    });
+
+    // B: the SAME fixture plus one `edit` share on the MASTER. Nothing else
+    // moves — same principal, same rows, same permission sets. The verdict
+    // becomes `allow`, leg 1 drops the master's platform floor, and the child
+    // write lands. This is the mechanism the card named as inert for children:
+    // an `edit`-level `sys_record_share` that already worked on the master.
+    const withShare = await boot({ shares: [editShare('crm_campaign', 'camp_admin', MKT)] });
+    const mktB = withShare.ctxFor(MKT, 'marketing');
+    expect(await withShare.byIdDetailWrite('update', 'mem_admin', mktB)).toMatchObject({ ok: true });
+    // …and the direct write of that master is permitted on the same stack. Both
+    // answers move together, which is the whole of the ruling.
+    expect(await withShare.byIdDetailWrite('update', 'camp_admin', mktB, 'crm_campaign')).toMatchObject({
+      ok: true,
+    });
+  });
+
+  it('`abstain` does NOT drop the master floor — an owner-less master keeps it, Modify All Data included', async () => {
+    // `crm_program` has no owner field, so `checkEdit` returns `abstain` at its
+    // `hasOwnerField` gate — for ADMIN too, because the `modifyAllRecords`
+    // branch sits BELOW that gate. `abstain` means record sharing does not
+    // enforce on this master at all, which is exactly when the platform floor is
+    // its only row-level write gate (#5492's E2 measurement).
+    //
+    // This is the case that separates the ruled composition (`=== 'allow'`) from
+    // the boolean projection leg 2 uses (`canEdit`, i.e. `!== 'deny'`): reading
+    // the projection here would drop the floor on an abstention and hand every
+    // member cross-creator writes on an owner-less master's children.
+    //
+    // Each principal is run against a master it did NOT create, so the floor is
+    // the deciding fact rather than a formality. The Modify All Data row is the
+    // sharp one: it is §2's flipped line with ONE variable changed — the master
+    // has no owner column — and it must NOT flip.
+    const h = await boot();
+    for (const [label, ctx, master, step] of [
+      ['an ordinary member', h.ctxFor(MKT, 'marketing'), 'prog_admin', 'step_admin'],
+      ['a Modify All Data holder', h.ctxFor(ADMIN, 'admin_set'), 'prog_mkt', 'step_mkt'],
+    ] as const) {
+      const outcome = await h.byIdDetailWrite('update', step, ctx, 'crm_program_step');
+      expect(outcome, label).toMatchObject({ ok: false, code: 'PERMISSION_DENIED', status: 403 });
+      expect(outcome.message, label).toContain(
+        "master 'crm_program' not editable by this user (row-level security)",
+      );
+      // The direct write of the owner-less master is refused on the same terms
+      // — by step 2.7, whose floor is likewise not droppable on an abstention.
+      // Same principal, same row, same operation, same answer: no divergence is
+      // created in the other direction either.
+      const direct = await h.byIdDetailWrite('update', master, ctx, 'crm_program');
+      expect(direct, label).toMatchObject({ ok: false, code: 'PERMISSION_DENIED', status: 403 });
+    }
+  });
+
+  it('only the PLATFORM floor is droppable — an app-authored policy on the master still refuses', async () => {
+    // `campaign_authored` declares `owner_id == current_user.id` for `update` on
+    // `crm_campaign`. ADMIN holds `modifyAllRecords`, so the sharing verdict is
+    // `allow` and the platform floor comes off — but the authored policy is not
+    // the platform's and reaches the compiler untouched, so `camp_mkt`
+    // (`owner_id: MKT`) stays outside ADMIN's master write filter.
+    const h = await boot();
+    const authoredAdmin = h.ctxFor(ADMIN, 'admin_set', 'campaign_authored');
+    const outcome = await h.byIdDetailWrite('update', 'mem_mkt', authoredAdmin);
+    expect(outcome).toMatchObject({ ok: false, code: 'PERMISSION_DENIED', status: 403 });
+    expect(outcome.message).toContain("master 'crm_campaign' not editable by this user (row-level security)");
+    // The direct write of the master is refused by the same authored policy at
+    // step 2.7 — the paths agree here too, so the drop's provenance bound is one
+    // rule and not two.
+    expect(await h.byIdDetailWrite('update', 'camp_mkt', authoredAdmin, 'crm_campaign')).toMatchObject({
+      ok: false,
+      code: 'PERMISSION_DENIED',
+      status: 403,
+    });
+    // The control that keeps the case from being vacuous: WITHOUT the authored
+    // set, the identical write is permitted (§2's flipped line). So the refusal
+    // above is attributable to the authored policy alone.
+    const plainAdmin = h.ctxFor(ADMIN, 'admin_set');
+    expect(await h.byIdDetailWrite('update', 'mem_mkt', plainAdmin)).toMatchObject({ ok: true });
+  });
+
+  it('the master gate still refuses when NOTHING widens the master — leg 1, not a fallthrough', async () => {
+    // The negative twin of the whole section, on the sharpest fixture: MKT
+    // updating a child of `camp_admin` with no share, no ownership and no
+    // bypass. The verdict is `deny`, the floor stays, and leg 1 answers with its
+    // own sentence — asserted rather than the shared prefix, because leg 2
+    // refuses with `(record sharing)` and a prefix-only assertion cannot tell
+    // which leg is still doing its job.
+    const h = await boot();
+    const mkt = h.ctxFor(MKT, 'marketing');
+    const outcome = await h.byIdDetailWrite('update', 'mem_admin', mkt);
+    expect(outcome).toMatchObject({ ok: false, code: 'PERMISSION_DENIED', status: 403 });
+    expect(outcome.message).toContain("master 'crm_campaign' not editable by this user (row-level security)");
+    // Step 2.7 localizes its refusal and carries the operator sentence on
+    // `developerMessage`; the master gate carries none. Asserting the absence is
+    // what proves the DETAIL's own floor is not what answered.
+    expect(outcome.developerMessage).toBeUndefined();
   });
 });

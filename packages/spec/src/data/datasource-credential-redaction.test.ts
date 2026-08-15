@@ -28,11 +28,15 @@ import { describe, expect, it } from 'vitest';
 
 import {
   BUILTIN_DRIVER_IDS,
+  CREDENTIAL_URL_QUERY_PARAM_NAMES,
   getDriverConfigSchema,
+  urlCredentialQueryParams,
   urlUserinfoPassword,
 } from './driver/index';
 import {
   redactDatasourceConfig,
+  redactUrlCredentialQueryParams,
+  redactUrlCredentials,
   redactUrlPassword,
   redactableConfigKeys,
   refusedCredentialKeys,
@@ -176,5 +180,80 @@ describe('write-door alignment: redactUrlPassword removes exactly what urlUserin
       expect(urlUserinfoPassword(url)).toBeUndefined();
       expect(redactUrlPassword(url)).toBe(url);
     }
+  });
+});
+
+describe('redactUrlCredentialQueryParams — the #8337 read half', () => {
+  it('strips the credential pair whole and serves the parameter-absent shape', () => {
+    expect(redactUrlCredentialQueryParams('libsql://x.turso.io?authToken=eyJhbGci.x.y'))
+      .toBe('libsql://x.turso.io');
+    expect(redactUrlCredentialQueryParams('postgresql://svc@db:5432/app?password=hunter2'))
+      .toBe('postgresql://svc@db:5432/app');
+  });
+
+  it('preserves benign parameters, their order, and the fragment byte-for-byte', () => {
+    expect(redactUrlCredentialQueryParams('libsql://h?tls=1&authToken=x&a=b%20c#frag'))
+      .toBe('libsql://h?tls=1&a=b%20c#frag');
+    expect(redactUrlCredentialQueryParams('postgresql://db/app?sslmode=require&password=x&connect_timeout=10'))
+      .toBe('postgresql://db/app?sslmode=require&connect_timeout=10');
+  });
+
+  it('strips the spellings the write door refuses: percent-encoded and case variants', () => {
+    expect(redactUrlCredentialQueryParams('libsql://h?auth%54oken=x')).toBe('libsql://h');
+    expect(redactUrlCredentialQueryParams('libsql://h?AUTHTOKEN=x')).toBe('libsql://h');
+  });
+
+  it('an empty value carries no secret and is left in place — the query twin of `user:@host`', () => {
+    for (const url of ['libsql://h?authToken=', 'libsql://h?authToken', 'libsql://h?tls=1', 'libsql://h', ':memory:']) {
+      expect(redactUrlCredentialQueryParams(url)).toBe(url);
+    }
+  });
+
+  it('is name-based and driver-independent — a `?password=` in ANY served string is a leak', () => {
+    // The write door refuses only what a measured client reads (mysql's
+    // client ignores `?password=`), but the read door strips it anyway: the
+    // same asymmetry the module documents for unknown drivers' inline keys.
+    expect(redactUrlCredentialQueryParams('mysql://svc@db:3306/app?password=x'))
+      .toBe('mysql://svc@db:3306/app');
+  });
+});
+
+describe('write-door alignment, query half: redactUrlCredentials removes exactly what the doors refuse', () => {
+  const QUERY_CARRYING = [
+    'libsql://x.turso.io?authToken=eyJhbGci.x.y',
+    'libsql://x.turso.io?tls=1&authToken=x',
+    'file:./data/db.sqlite?authToken=x',
+    'postgresql://svc:hunter2@db:5432/app?password=also', // both syntaxes at once
+  ];
+
+  it('the redacted form of a query-carrying URL is exactly what the write door accepts', () => {
+    for (const url of QUERY_CARRYING) {
+      const redacted = redactUrlCredentials(url);
+      expect(redacted).not.toBe(url);
+      // Neither door finds anything left: userinfo …
+      expect(urlUserinfoPassword(redacted)).toBeUndefined();
+      // … and the query half, judged with the same union list the redactor uses.
+      expect(urlCredentialQueryParams(redacted, CREDENTIAL_URL_QUERY_PARAM_NAMES)).toEqual([]);
+    }
+  });
+
+  it('redactDatasourceConfig serves a stored `?authToken=` row parameter-free, naming `url` (the #8337 served-back-cleartext regression)', () => {
+    const { config, redactedKeys } = redactDatasourceConfig('turso', {
+      url: 'libsql://x.turso.io?authToken=eyJhbGci.x.y',
+      syncUrl: 'libsql://x.turso.io?tls=1&authToken=eyJhbGci.x.y',
+    });
+    expect(config).toEqual({
+      url: 'libsql://x.turso.io',
+      syncUrl: 'libsql://x.turso.io?tls=1',
+    });
+    expect(redactedKeys).toEqual(['syncUrl', 'url']);
+  });
+
+  it('a driver with no shipped contract still has query-embedded credentials stripped', () => {
+    const { config, redactedKeys } = redactDatasourceConfig('not-a-real-driver', {
+      url: 'someproto://h/db?password=x&keep=1',
+    });
+    expect(config).toEqual({ url: 'someproto://h/db?keep=1' });
+    expect(redactedKeys).toEqual(['url']);
   });
 });

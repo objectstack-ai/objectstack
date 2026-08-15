@@ -31,12 +31,14 @@
  * #8154's, deliberately not built here.
  */
 
-import { redactableConfigKeys, redactUrlPassword } from '@objectstack/spec/data';
+import { redactableConfigKeys, redactUrlCredentials } from '@objectstack/spec/data';
 
 export {
   refusedCredentialKeys,
   redactableConfigKeys,
   redactUrlPassword,
+  redactUrlCredentialQueryParams,
+  redactUrlCredentials,
   redactDatasourceConfig,
   type RedactedDatasourceConfig,
 } from '@objectstack/spec/data';
@@ -74,7 +76,10 @@ export function restoreRedactedConfig(
 
   for (const [key, storedValue] of Object.entries(stored)) {
     if (hidden.has(key) || typeof storedValue !== 'string') continue;
-    const redactedStored = redactUrlPassword(storedValue);
+    // The SAME composite the read path applies (userinfo password + #8337
+    // credential query parameters) — a redaction this compare did not mirror
+    // would make the untouched "Save" it exists for delete the credential.
+    const redactedStored = redactUrlCredentials(storedValue);
     // Unchanged by redaction ⇒ it carried no credential ⇒ nothing to restore.
     if (redactedStored === storedValue) continue;
     if (out[key] === redactedStored) out[key] = storedValue;

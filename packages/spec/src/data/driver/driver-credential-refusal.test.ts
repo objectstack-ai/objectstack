@@ -27,7 +27,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { DatasourceSchema } from '../datasource.zod';
-import { urlUserinfoPassword } from './common.zod';
+import {
+  CREDENTIAL_URL_QUERY_PARAMS,
+  urlCredentialQueryParams,
+  urlUserinfoPassword,
+} from './common.zod';
 import {
   getMongoConfigJsonSchema,
   MongoConfigSchema,
@@ -165,6 +169,23 @@ describe('DatasourceSchema — the refusal reaches the authored artefact (#7990)
     expect(DatasourceSchema.parse(refBased)).toEqual(result.data);
   });
 
+  it('query-parameter credentials are REFUSED at `config.url` too (#8337 — the authored artefact door)', () => {
+    // Same envelope note as the #8082 pin below: the zod issue's `code` and
+    // re-pathed location are the whole envelope at this layer; the publish
+    // door wraps every schema refusal uniformly (`422 INVALID_METADATA`).
+    const result = DatasourceSchema.safeParse({
+      name: 'turso-db',
+      driver: 'turso',
+      config: { url: 'libsql://x.turso.io?authToken=eyJhbGciOiJFZERTQSJ9.x.y' },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'config.url');
+    expect(issue, 'refusal must be re-pathed at `config.url`').toBeDefined();
+    expect(issue!.code).toBe('custom');
+    expect(issue!.message).toContain('?authToken=');
+    expect(issue!.message).toContain('external.credentialsRef');
+  });
+
   it('embedded-in-URL credentials are REFUSED at `config.url` (#8082 — the inverted #8078 pin)', () => {
     // This test used to pin the ACCEPTANCE of exactly this input as a measured
     // fact (#7990 open question). The 2026-08-12 #8082 ruling (Option A)
@@ -294,6 +315,182 @@ describe.each(URL_FAMILY)('$name — URL-embedded credential refusal (#8082)', (
       expect(before.success, JSON.stringify(before.error?.issues)).toBe(true);
       expect(f.schema.parse(config)).toEqual(before.data);
     }
+  });
+});
+
+/**
+ * The query-parameter spelling of the same secret (#8337) — refused only where
+ * a MEASURED client reads it: turso `url`/`syncUrl` `?authToken=`
+ * (`@libsql/core@0.17.4` assigns it OVER the binder-injected token) and
+ * postgres `url` `?password=` (`pg-connection-string@2.14.0` copies every
+ * query parameter into the client config, winning over userinfo).
+ */
+const QUERY_FAMILY = [
+  {
+    name: 'turso url ?authToken=',
+    schema: TursoConfigSchema,
+    key: 'url',
+    param: 'authToken',
+    make: (url: string) => ({ url }),
+    sample: (query: string) => `libsql://x.turso.io${query}`,
+    benign: '?tls=1',
+  },
+  {
+    name: 'turso syncUrl ?authToken=',
+    schema: TursoConfigSchema,
+    key: 'syncUrl',
+    param: 'authToken',
+    make: (syncUrl: string) => ({ url: 'file:./data/replica.db', syncUrl }),
+    sample: (query: string) => `libsql://x.turso.io${query}`,
+    benign: '?tls=1',
+  },
+  {
+    name: 'postgres url ?password=',
+    schema: PostgresConfigSchema,
+    key: 'url',
+    param: 'password',
+    make: (url: string) => ({ url }),
+    sample: (query: string) => `postgresql://svc@db.example.com:5432/prod${query}`,
+    benign: '?sslmode=require&connect_timeout=10',
+  },
+] as const;
+
+describe.each(QUERY_FAMILY)('$name — URL query-parameter credential refusal (#8337)', (f) => {
+  const refusalAt = (config: Record<string, unknown>) => {
+    const result = f.schema.safeParse(config);
+    if (result.success) return undefined;
+    return result.error.issues.find((i) => i.path.join('.') === f.key);
+  };
+
+  it(`refuses \`?${f.param}=\`, naming the parameter, the mechanisms and the carve-out`, () => {
+    const issue = refusalAt(f.make(f.sample(`?${f.param}=hunter2`)));
+    expect(issue, `refusal must be pathed at \`${f.key}\``).toBeDefined();
+    expect(issue!.code).toBe('custom');
+    expect(issue!.message).toContain(`\`${f.key}\``);
+    expect(issue!.message).toContain(`?${f.param}=`);
+    expect(issue!.message).toContain('external.credentialsRef');
+    expect(issue!.message).toContain('sys_secret');
+    expect(issue!.message).toContain('secret binder');
+    // Same binding constraints as the userinfo message (#8082 ruling): no
+    // steering toward the broken `${…}` escape, and the runtime-DSN carve-out
+    // stated rather than implied.
+    expect(issue!.message).toContain('resolved by nothing');
+    expect(issue!.message).toContain('OS_DATABASE_URL');
+    expect(issue!.message).toContain('unaffected');
+    // What the userinfo message must NOT be copied on: for the query form the
+    // bound secret does not reliably win at connect (libsql assigns the URL
+    // token over it, measured), so the message must not promise it does.
+    expect(issue!.message).not.toContain('wins over');
+  });
+
+  it('refuses the parameter wherever it sits among benign ones', () => {
+    expect(refusalAt(f.make(f.sample(`${f.benign}&${f.param}=hunter2`)))).toBeDefined();
+    expect(refusalAt(f.make(f.sample(`?${f.param}=hunter2&${f.benign.slice(1)}`)))).toBeDefined();
+  });
+
+  it('refuses a percent-encoded spelling of the parameter name — encoding is not absence', () => {
+    // `@libsql/core` percent-decodes query keys before matching (measured), so
+    // an encoded spelling authenticates exactly like the plain one.
+    const encoded = `%${f.param.charCodeAt(0).toString(16)}${f.param.slice(1)}`;
+    expect(refusalAt(f.make(f.sample(`?${encoded}=hunter2`)))).toBeDefined();
+  });
+
+  it('refuses a case-variant spelling — the at-rest half is case-independent', () => {
+    // No measured client reads the variant (libsql throws URL_PARAM_NOT_
+    // SUPPORTED, pg leaves it an unread config key), so nothing that works is
+    // refused — but the secret still landed cleartext in `sys_metadata`.
+    expect(refusalAt(f.make(f.sample(`?${f.param.toUpperCase()}=hunter2`)))).toBeDefined();
+  });
+
+  it('refuses a `${…}` placeholder value exactly like a real one — placeholders resolve to nothing', () => {
+    expect(refusalAt(f.make(f.sample(`?${f.param}=\${DB_TOKEN}`)))).toBeDefined();
+  });
+
+  it('accepts an EMPTY value — the query twin of `user:@host` carries no secret', () => {
+    expect(refusalAt(f.make(f.sample(`?${f.param}=`)))).toBeUndefined();
+  });
+
+  it('accepts benign query parameters byte-identically (pin) — including the redacted round-trip shape', () => {
+    // The parameter-absent URL is exactly what the #8337 read path serves for
+    // a legacy stored `?authToken=` row, and what the Studio edit form PUTs
+    // back: this acceptance keeps "Save" on an untouched legacy row working.
+    for (const query of ['', f.benign]) {
+      const config = f.make(f.sample(query));
+      const before = f.schema.safeParse(config);
+      expect(before.success, JSON.stringify(before.error?.issues)).toBe(true);
+      expect(f.schema.parse(config)).toEqual(before.data);
+    }
+  });
+
+  it('a fragment is not a query — `#…` content is read by nothing', () => {
+    expect(refusalAt(f.make(f.sample(`#${f.param}=hunter2`)))).toBeUndefined();
+  });
+});
+
+describe('the deliberately-absent entries (#8337) — measured as NOT read, so not refused', () => {
+  it('mysql `?password=` stays accepted: mysql2 seeds `password` from userinfo and skips the query key', () => {
+    // `mysql2`'s `parseUrl` runs `if (key in options) continue;` over the
+    // query, and `password` is always pre-set from userinfo — the parameter
+    // never reaches the connection, so refusing it would be the speculative
+    // widening the ruling forbids. An author who writes it gets a loud auth
+    // failure at connect; the read path still strips it from served configs.
+    const result = MysqlConfigSchema.safeParse({ url: 'mysql://svc@db.example.com:3306/prod?password=x' });
+    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+  });
+
+  it('mongo `?password=` stays accepted: the mongodb driver takes credentials from userinfo only', () => {
+    const result = MongoConfigSchema.safeParse({ url: 'mongodb://svc@mongo.example.com:27017/events?password=x' });
+    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+  });
+});
+
+describe('urlCredentialQueryParams — the shared value-level parse (#8337)', () => {
+  const TURSO = CREDENTIAL_URL_QUERY_PARAMS.turso;
+
+  it('finds the declared parameter with a non-empty value, at any position, once', () => {
+    expect(urlCredentialQueryParams('libsql://h?authToken=x', TURSO)).toEqual(['authToken']);
+    expect(urlCredentialQueryParams('libsql://h?tls=1&authToken=x&a=1', TURSO)).toEqual(['authToken']);
+    expect(urlCredentialQueryParams('libsql://h?authToken=x&authToken=y', TURSO)).toEqual(['authToken']);
+    expect(urlCredentialQueryParams('libsql://h?tls=1', TURSO)).toEqual([]);
+  });
+
+  it('no `=`, or an empty value, carries no secret', () => {
+    expect(urlCredentialQueryParams('libsql://h?authToken', TURSO)).toEqual([]);
+    expect(urlCredentialQueryParams('libsql://h?authToken=', TURSO)).toEqual([]);
+    expect(urlCredentialQueryParams('libsql://h?authToken=&tls=1', TURSO)).toEqual([]);
+  });
+
+  it('the key boundary is the FIRST `=` — a value containing `=` is still the same key', () => {
+    expect(urlCredentialQueryParams('libsql://h?authToken=a=b', TURSO)).toEqual(['authToken']);
+  });
+
+  it('keys are percent-decoded and `+`-decoded before matching, as the measured clients decode them', () => {
+    expect(urlCredentialQueryParams('libsql://h?auth%54oken=x', TURSO)).toEqual(['authToken']);
+    // `auth+Token` decodes to `auth Token` — a different name, no match.
+    expect(urlCredentialQueryParams('libsql://h?auth+Token=x', TURSO)).toEqual([]);
+    // Malformed percent-encoding must not throw inside a parse; the raw
+    // spelling cannot name the parameter, and the client throws on it anyway.
+    expect(urlCredentialQueryParams('libsql://h?auth%zzoken=x', TURSO)).toEqual([]);
+  });
+
+  it('names match case-insensitively (the at-rest rationale on CREDENTIAL_URL_QUERY_PARAMS)', () => {
+    expect(urlCredentialQueryParams('libsql://h?AUTHTOKEN=x', TURSO)).toEqual(['authToken']);
+    expect(urlCredentialQueryParams('libsql://h?authtoken=x', TURSO)).toEqual(['authToken']);
+  });
+
+  it('the query ends at the fragment, and a fragment-only `?` is fragment text', () => {
+    expect(urlCredentialQueryParams('libsql://h?tls=1#authToken=x', TURSO)).toEqual([]);
+    expect(urlCredentialQueryParams('libsql://h#f?authToken=x', TURSO)).toEqual([]);
+    expect(urlCredentialQueryParams('libsql://h?authToken=x#frag', TURSO)).toEqual(['authToken']);
+  });
+
+  it('no authority required — libSQL `file:` URLs carry query parameters too', () => {
+    expect(urlCredentialQueryParams('file:./data/db.sqlite?authToken=x', TURSO)).toEqual(['authToken']);
+    expect(urlCredentialQueryParams(':memory:', TURSO)).toEqual([]);
+  });
+
+  it('an empty declared list judges nothing — the non-turso/postgres drivers today', () => {
+    expect(urlCredentialQueryParams('mysql://h/db?password=x', [])).toEqual([]);
   });
 });
 
