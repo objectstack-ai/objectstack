@@ -155,9 +155,27 @@ export function registerDatasourceAdminRoutes(
    * route dispatches to (`SERVICE_ERROR_CODE`) and the service's own message.
    * `service` is the same name the route passed to `resolve` — restating it is
    * what keeps the attribution honest per route (#4249).
+   *
+   * [#6504] One exception, and it is a relay rather than a new decision: a
+   * service that threw an error already carrying the `503`/`SERVICE_UNAVAILABLE`
+   * envelope has classified its own refusal as a DEPENDENCY OUTAGE, and 400
+   * would tell the caller its request was malformed — the opposite of the
+   * truth, and the opposite of "retry this". The only thrower today is
+   * `removeDatasource` refusing to delete on a bound-object count it could not
+   * take completely. Read off the error rather than special-cased per route, so
+   * the next refusal of this class needs no second edit here; both fields are
+   * required so an unrelated error carrying a stray `status` cannot re-route
+   * itself. `sendError`'s parameter type is the closed `ErrorCode` union, so
+   * the code below is checked at compile time rather than trusted from the
+   * throw site.
    */
-  const badRequest = (res: any, service: ServiceName, err: unknown) =>
-    sendError(res, 400, SERVICE_ERROR_CODE[service], err instanceof Error ? err.message : String(err));
+  const badRequest = (res: any, service: ServiceName, err: unknown) => {
+    const envelope = err as { code?: unknown; status?: unknown } | null | undefined;
+    if (envelope?.status === 503 && envelope?.code === 'SERVICE_UNAVAILABLE') {
+      return sendError(res, 503, 'SERVICE_UNAVAILABLE', (err as Error).message);
+    }
+    return sendError(res, 400, SERVICE_ERROR_CODE[service], err instanceof Error ? err.message : String(err));
+  };
 
   /** Split an inline `{ secret, ...draft }` body into (draft, secret). */
   const splitSecret = (body: any): { draft: any; secret: any } => {

@@ -31,6 +31,13 @@ interface MetadataServiceLike {
   register: (type: string, name: string, data: unknown) => Promise<void>;
   unregister: (type: string, name: string) => Promise<void>;
   listObjects?: () => Promise<unknown[]>;
+  /**
+   * [#6504] The plural ADR-0110 D3 verdict. Optional on this structural type
+   * for the reason it is optional on `IMetadataService` itself: a service that
+   * predates it cannot report the distinction, so its absence means the
+   * bound-object guard behaves exactly as it did before.
+   */
+  listDiagnosed?: (type: string) => Promise<{ items: unknown[]; degraded: boolean; errors: string[] }>;
 }
 
 /** Engine surface used for hot pool (de)registration. */
@@ -338,6 +345,40 @@ export class DatasourceAdminServicePlugin implements Plugin {
           (await metadata?.list('object')) ??
           []) as Array<{ datasource?: string }>;
         return objects.filter((o) => o?.datasource === datasource).length;
+      },
+
+      // [#6504] The same count with the completeness verdict attached — see
+      // `DatasourceAdminService.removeDatasource` for why this one guard is
+      // worth the extra read while the neighbouring listing above is not.
+      //
+      // The composition is PR #7721's, deliberately: the items come from the
+      // resolver that already answers this question (`listObjects()`, falling
+      // back to `list('object')`), and only the verdict — "could that answer be
+      // trusted as complete?" — is asked of `listDiagnosed('object')`, the
+      // member declared to answer it. Re-resolving the objects THROUGH
+      // `listDiagnosed` instead would quietly assume `listObjects()` and
+      // `list('object')` are the same read; `IMetadataService` declares no such
+      // equivalence, and presuming one at a consumer is the private dialect
+      // Prime Directive #12 forbids. On the implementation that ships they are
+      // the same read and share one cache entry and one single-flight slot, so
+      // the probe costs nothing; on a host where they differ the verdict
+      // describes the loader set, which can only WITHHOLD a completeness claim,
+      // never manufacture one.
+      countBoundObjectsDiagnosed: async (datasource) => {
+        const metadata = metadataOf();
+        const objects = ((await metadata?.listObjects?.()) ??
+          (await metadata?.list('object')) ??
+          []) as Array<{ datasource?: string }>;
+        const count = objects.filter((o) => o?.datasource === datasource).length;
+        if (typeof metadata?.listDiagnosed !== 'function') {
+          return { count, degraded: false, errors: [] };
+        }
+        const diagnosed = await metadata.listDiagnosed('object');
+        return {
+          count,
+          degraded: diagnosed?.degraded === true,
+          errors: Array.isArray(diagnosed?.errors) ? diagnosed.errors : [],
+        };
       },
 
       // Hot pool (de)registration converges on the shared
