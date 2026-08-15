@@ -12682,9 +12682,18 @@ export class ObjectStackProtocolImplementation implements
         //    the promotion below DID find the row, because it reads the folded
         //    `singularType`. That asymmetry is the one thing here that was not
         //    fail-closed.
-        //  • the audit row, the receipt sentence and `ensureObjectStorage`,
-        //    which all read `request.type` and recorded/keyed the caller's
-        //    spelling for a row written under the canonical one.
+        //  • the ADR-0010 audit row and the receipt sentence, which both read
+        //    `request.type` and so recorded the CALLER's spelling for a row
+        //    written under the canonical one — a compliance query on
+        //    `type = 'view'` missed a publish addressed `/meta/views/…`.
+        //
+        // ⚠️ `ensureObjectStorage` is NOT in that list, though it also reads
+        // `request.type`: it opens `if (type !== 'object' && type !== 'objects')`
+        // and so answered both spellings identically before this fold and after
+        // it. Its `'objects'` limb is now unreachable — both of its call sites
+        // stand behind a fold — but it is a spelling-tolerant lookup one layer
+        // down, which is the shape {@link canonicalMetaType}'s header rejects,
+        // so it is recorded rather than quietly deleted here (out of region).
         //
         // ⛔ This does NOT make `promoteDraftForPublish`'s fold redundant — that
         // helper's other caller is `publishPackageDrafts`, which feeds it stored
