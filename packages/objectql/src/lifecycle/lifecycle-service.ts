@@ -1119,6 +1119,32 @@ export class LifecycleService {
         limit: ARCHIVE_BATCH_SIZE,
       });
       if (!rows.length) break;
+      // [#8807] The conflict target stays `['id']`, and that is a measured
+      // conclusion rather than an untouched line.
+      //
+      // #8807 ruled that an upsert must never modify a row whose identity the
+      // caller did not supply and whose conflict key it did not name — the
+      // MySQL `ON DUPLICATE KEY UPDATE` merge can land on any UNIQUE key,
+      // including one nobody named. The enforcement options included refusing
+      // this exact call shape on any table carrying a non-primary UNIQUE key,
+      // which would have refused archival wholesale, so the ruling required the
+      // blast radius on THIS caller be measured before anything shipped.
+      //
+      // Measured: of the objects in this repo that declare `lifecycle.archive`
+      // — `sys_audit_log` and `sys_metadata_audit`, the only two — ZERO declare
+      // a non-primary unique field or a `unique` index. The archiver therefore
+      // never even reaches the check today.
+      //
+      // It is also correct by construction for a customer object that DOES
+      // carry one, which is why no opt-out is threaded through here: this loop
+      // copies a row that already has an `id` and re-copies it idempotently, so
+      // the merge lands on the identity it supplied and the check passes. The
+      // one case it would refuse is a cold row that collides on a business key
+      // while carrying a DIFFERENT id — which is not archival working, it is
+      // archival about to overwrite an unrelated archived record. Refusing
+      // there is the Archiver's own safety rule ("hot-delete only what the cold
+      // store has taken"): the upsert throws, `bulkDelete` below never runs,
+      // and the hot rows survive for the next sweep.
       for (const row of rows) {
         await cold.upsert(object, row, ['id']);
       }

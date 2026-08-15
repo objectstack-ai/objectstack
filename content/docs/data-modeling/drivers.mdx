@@ -339,8 +339,8 @@ before any row is written and before any auto-number is reserved:
 
 | Call, on MySQL | Result |
 | :--- | :--- |
-| `upsert(o, row)` — no `conflictKeys` | Merges. Not pre-flighted (see the residue below). |
-| `upsert(o, row, ['id'])` — the primary key | Merges. Compiles identically to the line above. |
+| `upsert(o, row)` — no `conflictKeys` | Merges on the primary key. **Refused** if the merge lands on a different row (see below). |
+| `upsert(o, row, ['id'])` — the primary key | Identical to the line above — same statement, same answer. |
 | `upsert(o, row, ['email'])`, the table's only UNIQUE key being on `email` | Merges on `email`. **The common shape is unaffected.** |
 | `upsert(o, row, ['email'])`, the table also carrying `UNIQUE(tax_id)` | **Refused.** The message names `tax_id`'s index and the workarounds. |
 | `upsert(o, row, ['email'])`, no unique index on `email` at all | **Refused** on every dialect ([#8621](https://github.com/objectstack-ai/objectstack/issues/8621)). |
@@ -353,13 +353,43 @@ Two ways out, both stated in the error message:
    appropriate when both keys are genuine business constraints, since one of them
    must otherwise be given up.
 
+### The merge that lands on a row you never identified
+
+The pre-flight above covers a *caller-named* non-primary target. It cannot cover
+the `conflictKeys`-less default or an explicitly named primary key, because
+neither call names anything a pre-flight could check — and those two compile to
+the same statement. On a table with several UNIQUE keys that statement can still
+collide on a key you did not name, and MySQL will merge there:
+
+```text
+seed  upsert({ email: 'd@b.com', tax_id: 'T-9', title: 'first'  })  -- no conflictKeys
+      -> inserted, id = iVvD35rMk4BIayYc
+B     upsert({ email: 'e@b.com', tax_id: 'T-9', title: 'second' })  -- no conflictKeys
+      -> the fresh id did not collide; `tax_id` did, so MySQL merged onto the
+         SEEDED row — rewriting an `email` this call never asked to touch.
+```
+
+So the driver checks, after the statement and inside the same transaction,
+whether the row it landed on is the one the call supplied. If it is not, the
+write is **rolled back** and the call is refused with `code: 'VALIDATION_ERROR'`
+and `status: 400`. Nothing is left changed.
+
+| Call, on MySQL, table carrying a rival UNIQUE key | Result |
+| :--- | :--- |
+| The row is new, or matches an existing row's `id` | **Merges**, exactly as before. |
+| The row collides on a UNIQUE key you did not name | **Refused**, and the write is rolled back. |
+
 <Callout type="info">
-**The residue, stated rather than hidden.** The refusal covers a *caller-named*
-non-primary target. It does not cover the `conflictKeys`-less default or an
-explicitly named primary key: those two compile to the same statement, and on a
-table with several UNIQUE keys that statement can still merge on one you did not
-name. If you need the target honoured exactly, name it — and on MySQL, keep one
-UNIQUE key per table.
+**This check is selective, and only MySQL pays for it.** A table whose only key
+is its primary key can never exhibit the condition, so nothing is verified and
+no transaction is opened there. SQLite and PostgreSQL compile
+`ON CONFLICT (id)`, which honours the arbiter and raises a unique violation on
+any other key — they already behave this way and are unchanged.
+
+If you meant to merge on a business key, **name it** (`conflictKeys`), which
+makes the intent checkable. On MySQL, a table with more than one UNIQUE key
+cannot have every merge honoured — keep one UNIQUE key per table, or run the
+object on SQLite/PostgreSQL.
 </Callout>
 
 ## MongoDB
