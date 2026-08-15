@@ -620,7 +620,9 @@ const CATEGORY_BLURBS: Record<string, string> = {
   automation: 'Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records.',
   cloud: 'Environments, packages and versions, marketplace, developer portal, tenancy.',
   data: 'Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer.',
-  identity: 'Users and accounts, organizations, positions, API keys, SCIM provisioning.',
+  // "API keys" deliberately absent since #8715: the sys_api_key table is
+  // declared by @objectstack/platform-objects, not by a spec identity schema.
+  identity: 'Users and accounts, organizations, positions, SCIM provisioning.',
   integration: 'The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances.',
   kernel: 'Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry.',
   qa: 'Declarative test suites — scenarios, steps, actions and assertions.',
