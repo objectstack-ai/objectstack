@@ -91,8 +91,9 @@ const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/**/*.object.ts',
       // src/identity/position-delegatable-enforcer.pin.test.ts reads the lint rule sources
       'packages/lint/src/**',
-      // scripts/root-index.test.ts
-      'content/docs/references/index.mdx',
+      // scripts/root-index.test.ts reads the index; scripts/category-title.test.ts and
+      // scripts/file-description.test.ts walk the whole references tree by category.
+      'content/docs/references/**',
       // scripts/dist-freshness.test.ts stages a fixture around the root scripts dir
       'scripts/**',
       // scripts/liveness/evidence.test.ts resolves the evidence paths the
@@ -169,7 +170,30 @@ const CROSS_PACKAGE_TEST_INPUTS = {
       // flow-trigger / validation conformance pin spec's zod schemas.
       'packages/spec/src/automation/**',
       'packages/spec/src/data/**',
+      // showcase-declarative-*.dogfood.test.ts chdir into the showcase app and
+      // compile it, so the app IS an input, and they assert on the artifact the
+      // compile pipeline and the metadata plugin produce.
+      'examples/app-showcase/**',
+      'packages/cli/src/commands/**',
+      'packages/metadata/src/**',
     ],
+  },
+  '@objectstack/formula': {
+    // src/rls-predicate.test.ts pins spec's RLS zod source against the
+    // predicate compiler; src/skill-catalog-sync.test.ts pins the published
+    // formula skill's stdlib table against the implementation.
+    globs: ['packages/spec/src/security/rls.zod.ts', 'skills/objectstack-formula/**'],
+  },
+  '@objectstack/metadata-protocol': {
+    // src/sys-metadata-repository.draft-drain.test.ts reads the durability
+    // log-level gate's own source to pin that the repository stays inside it.
+    globs: ['scripts/check-durability-degradation-log-level.mjs'],
+  },
+  '@objectstack/downstream-contract': {
+    // test/source-resolution.pin.test.ts resolves every spec specifier a
+    // downstream consumer can import, against spec's real source tree and the
+    // `exports` map in its package.json.
+    globs: ['packages/spec/src/**', 'packages/spec/package.json'],
   },
   'create-objectstack': {
     // src/template-consistency.test.ts reads doc frontmatter by repo-relative
