@@ -235,7 +235,7 @@ describe('#8798 — a history-table outage now answers the same way for every ty
      * nothing to do with reading history.
      *
      * These pins do not endorse swallowing the outage — that `catch` predates
-     * this card and is filed separately. They pin that the answer no longer
+     * this card and is filed as #8833. They pin that the answer no longer
      * depends on the type.
      */
     it('gated-open type falls through to an empty diff instead of throwing', async () => {
