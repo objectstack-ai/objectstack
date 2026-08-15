@@ -36,8 +36,11 @@
 export const INTERNAL_ERROR_MESSAGE = 'Internal server error';
 
 /**
- * [#8132] The phrasings of the dialects this repo actually RUNS, each anchored
- * on the driver's own errmsg template rather than on its tail.
+ * [#8132] The dialect phrasings this list COVERS — the SQLite family and
+ * Postgres — each anchored on the driver's own errmsg template rather than on
+ * its tail. Coverage, not a census of what this repo runs: see "What this list
+ * covers, and what it does not" below, which is the load-bearing half for
+ * anyone sizing a disclosure residual.
  *
  * The gap that forced these: the keyword set below caught SQLite's
  * `SQLITE_ERROR: no such table: sys_metadata` through the `sqlite_` limb, while
@@ -53,13 +56,39 @@ export const INTERNAL_ERROR_MESSAGE = 'Internal server error';
  * not — a quoted identifier, or the trailing colon of SQLite's template. The
  * negative cases in `error-leak.test.ts` pin that distinction.
  *
- * **Why the list stops here.** The module note above argues against growing a
- * driver taxonomy, and it is right that the list is unbounded *across dialects*
- * — MySQL/MSSQL/Oracle each phrase all of this differently and nobody here runs
- * them. These are not a census: they are the two engines `driver-sql`,
- * `driver-turso` and `driver-sqlite-wasm` actually reach. A dialect this repo
- * does not run gets no entry, and {@link declaresServerFault} remains the
- * answer that does not depend on phrasing at all.
+ * **What this list covers, and what it does not.** The module note above argues
+ * against growing a driver taxonomy, and that reason still holds on its own: a
+ * phrasing list is unbounded *across dialects*, because every dialect spells
+ * every one of these conditions its own way. So these entries are a COVERAGE
+ * statement, not a census — they are the two spellings #8132 measured the gap
+ * on, and {@link declaresServerFault} remains the answer that does not depend
+ * on phrasing at all.
+ *
+ * ⚠️ **This list's silence is NOT evidence that a dialect is unreachable.**
+ * Until #8739 this paragraph said "nobody here runs" MySQL/MSSQL/Oracle, and a
+ * reviewer sizing a disclosure residual read it as one. It was false for MySQL,
+ * measurably, on the same tree:
+ *
+ *  - `driver-sql` branches on `mysql`/`mysql2` — the `isMysql` getter,
+ *    `withUtcSession`, and the `dialect === 'mysql'` arms of
+ *    `textMatchPredicate` / `likePatternPredicate`.
+ *  - CI stands up a live `mysql:8.0` service for the job named
+ *    `Temporal Conformance (live PG + MySQL)`, which IS a required check, and
+ *    its `OS_EXPECT_LIVE_DIALECT_MATRIX` flag turns a missing MySQL URL into a
+ *    named red rather than a quiet skip.
+ *  - Live MySQL 8.0.46 measurements produced merged driver fixes (#8621,
+ *    #8622), and `unique-violation.ts` — one file over — names sqlite /
+ *    postgres / mysql as the three dialect families `sql-driver.ts` recognises.
+ *
+ * Whether MySQL is a **supported deployment target** or merely a **tested
+ * dialect** is an open product question (#8739); this file does not answer it,
+ * and neither answer changes the rule a reader needs. What is true either way,
+ * and is the only thing to carry away: on a MySQL deployment this predicate is
+ * SILENT, not clearing. Its phrasings of these same conditions —
+ * `Unknown column 'c' in 'field list'`, `Table 'app.t' doesn't exist`,
+ * `Duplicate entry 'x' for key 'i'` — all return FALSE here, pinned in
+ * `error-leak.test.ts`. Adding them would change what gets suppressed at three
+ * boundaries, so it belongs to that decision, not to a comment.
  *
  * ⚠️ Related but NOT reusable: `relation-sub-object.ts` owns the same Postgres
  * sentence for two other questions (which column? / is this a sub-object?), and
@@ -94,7 +123,10 @@ const DIALECT_LEAK_PHRASINGS: readonly RegExp[] = [
  * (a message that *starts* as `SELECT`/`INSERT INTO`/`UPDATE`/`DELETE FROM` —
  * drivers prefix the offending SQL to their message), constraint-violation
  * dumps, which name physical tables and columns, and the
- * {@link DIALECT_LEAK_PHRASINGS} of the engines this repo ships.
+ * {@link DIALECT_LEAK_PHRASINGS} the list covers — the SQLite family and
+ * Postgres. A dialect outside that coverage (MySQL is reachable here, and is
+ * not covered) makes this return FALSE without meaning the text is safe; read
+ * {@link DIALECT_LEAK_PHRASINGS}' note before sizing anything on a `false`.
  *
  * Does NOT match ordinary business or validation messages, which is why the
  * statement forms are anchored with `startsWith` and the dialect phrasings on
