@@ -115,6 +115,21 @@ import { isMissingTableError } from '@objectstack/metadata/errors';
 import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
 // [#8682] The write-path loggers' redaction — bound values never reach the log.
 import { redactBoundStatement } from './driver-fault-redaction.js';
+// [#8844] The runtime half of #8686's ruling: a system-context write on a
+// tenant-scoped object resolves the install's organization the way a session
+// write does, or is refused rather than filed under the `__global__`
+// pseudo-tenant. The decision is a pure function of measured facts; this file
+// supplies the facts and turns a `refuse` into the throw.
+import {
+  resolveSystemWriteOrganization,
+  resolveTenantFieldName,
+  isPlatformNamespaceObject,
+  carriesOrganization,
+  SystemWriteOrganizationRequiredError,
+  ORGANIZATION_OBJECT,
+} from './tenancy/system-write-organization.js';
+import { resolveTenancyPosture } from '@objectstack/types';
+import { normalizeTenancyPosture, type TenancyPosture } from '@objectstack/spec/security';
 
 /**
  * Per-row outcome of {@link ObjectQL.insertMany} (framework#3172). One entry
@@ -2009,6 +2024,11 @@ export class ObjectQL implements IObjectQLEngine {
   // absent = equality scoping (fail toward isolation).
   private tenancyPostureProvider?: () => string | undefined;
 
+  // [#8844] The install's organizations, capped at two — memoised across system
+  // writes and dropped whenever `sys_organization` is written through this
+  // engine. See `probeInstallOrganizations` for the stale window this accepts.
+  private organizationProbeMemo?: readonly string[];
+
   // Per-engine SchemaRegistry instance.
   //
   // Historically SchemaRegistry was a process-wide singleton of static state,
@@ -2945,6 +2965,141 @@ export class ObjectQL implements IObjectQLEngine {
       opts.preserveAudit = true;
     }
     return opts;
+  }
+
+  /**
+   * [#8844] The tenancy posture IN FORCE for this engine, by the same two-step
+   * `app-plugin.organizationWallActive` uses and for the same reason: the
+   * injected provider is the `tenancy` service's answer (what is actually
+   * ENFORCED, degraded boots included), and the env resolution is what the
+   * operator ASKED for — the best fact available to a lean embedding that
+   * mounts no SecurityPlugin.
+   *
+   * ⛔ Never `resolveMultiOrgEnabled()`: ADR-0105 D1 demoted that boolean to a
+   * back-compat INPUT of `resolveTenancyPosture()`, so it reads `false` on a
+   * deployment configured the documented way and would put a fully walled
+   * install on the single-tenant branch below — the third recurrence of that
+   * shape is what `app-plugin` documents.
+   *
+   * Read live per call, never cached: nothing here may freeze a verdict a later
+   * boot phase can still change. `resolveTenancyPosture()` THROWS on an
+   * unrecognized `OS_TENANCY_POSTURE` (deliberately — a typo'd posture must not
+   * silently remove the wall); a write is not the place that refusal belongs,
+   * and an unreadable posture is exactly the case where guessing `single` would
+   * be worst, so it degrades to the walled reading and the write is refused.
+   */
+  private resolveEnginePosture(): TenancyPosture {
+    const injected = normalizeTenancyPosture(this.tenancyPostureProvider?.());
+    if (injected) return injected;
+    try {
+      return resolveTenancyPosture();
+    } catch {
+      return 'isolated';
+    }
+  }
+
+  /**
+   * [#8844] The install's organizations, capped at two — only "none / exactly
+   * one / several" changes any decision.
+   *
+   * Memoised because a cron loop inserting N rows would otherwise pay N probes
+   * for an answer that changes only when `sys_organization` itself is written,
+   * and every such write passes through this engine's own write faces, which
+   * clear it ({@link invalidateOrganizationProbe}). The stale window is
+   * therefore an organization created by ANOTHER process against the same
+   * database — and on the `single` posture this memo serves, a second
+   * organization appearing is the ambiguous topology the next boot refuses
+   * anyway.
+   *
+   * `isSystem` on the read: resolving the install's organization must not
+   * depend on the caller's own reach, and this runs on writes that have no
+   * caller reach at all.
+   */
+  private async probeInstallOrganizations(): Promise<readonly string[]> {
+    if (this.organizationProbeMemo) return this.organizationProbeMemo;
+    let ids: readonly string[] = [];
+    try {
+      const rows = await this.find(ORGANIZATION_OBJECT, {
+        fields: ['id'],
+        limit: 2,
+        context: { isSystem: true },
+      } as any);
+      ids = (Array.isArray(rows) ? rows : [])
+        .map((r: any) => (r?.id ?? r?._id))
+        .filter((id: unknown) => id != null && String(id) !== '')
+        .map((id: unknown) => String(id));
+    } catch {
+      // `sys_organization` may not be registered at all (a lean embedding, a
+      // bare-kernel test). No organizations is the honest reading, and it is
+      // the branch that changes nothing.
+      ids = [];
+    }
+    this.organizationProbeMemo = ids;
+    return ids;
+  }
+
+  /** [#8844] Drop the memo — any write that can change the organization set. */
+  private invalidateOrganizationProbe(): void {
+    this.organizationProbeMemo = undefined;
+  }
+
+  /**
+   * [#8844] Resolve the organization a SYSTEM-context insert carries, per the
+   * 2026-08-15 ruling (Option 1) — or refuse it.
+   *
+   * Returns the organization id to thread as `DriverOptions.tenantId` (the same
+   * knob a session write sets, so the driver stamps the column and the counter
+   * scopes by it), or `undefined` when there is nothing to resolve. Throws
+   * {@link SystemWriteOrganizationRequiredError} on the multi-organization
+   * branch.
+   *
+   * Called AFTER the beforeInsert hooks on purpose: a hook that stamps the
+   * organization itself has carried it, and must not then be refused for a
+   * value it just supplied.
+   *
+   * Every early return below is a population the refusal must not touch — see
+   * the module header for why each is outside the rule by construction rather
+   * than by exemption. They are ordered cheapest-first, so an ordinary write
+   * pays two property reads and a regexp.
+   */
+  private async resolveSystemInsertOrganization(
+    object: string,
+    execCtx: ExecutionContext | undefined,
+    rows: readonly Record<string, unknown>[],
+  ): Promise<string | undefined> {
+    // Already carrying an organization on the context — a session write, or a
+    // system write that threaded one. Nothing to resolve; this is the shape the
+    // ruling asks every system write to reach.
+    if (carriesOrganization(execCtx?.tenantId)) return undefined;
+    // Platform namespaces stay global by design (#8672's reasoning, which the
+    // #8844 ruling confirms does not generalize to application objects).
+    if (isPlatformNamespaceObject(object)) return undefined;
+    const objectSchema = this._registry.getObject(object) as any;
+    // A federated object's schema is the REMOTE's (ADR-0015); the platform's
+    // injected column says nothing about it, which is the same reason
+    // `buildDriverOptions` withholds `tenantId` there.
+    if (objectSchema?.external != null) return undefined;
+    const tenantField = resolveTenantFieldName(objectSchema);
+    if (!tenantField) return undefined;
+    // A row that names its own organization has carried one explicitly. Only a
+    // row still missing it can fork a counter, so a batch where every row is
+    // stamped resolves nothing — and a batch where some are not is decided by
+    // the ones that are not.
+    if (rows.every((row) => carriesOrganization(row?.[tenantField]))) return undefined;
+
+    const posture = this.resolveEnginePosture();
+    const decision = await resolveSystemWriteOrganization({
+      posture,
+      probeOrganizations: () => this.probeInstallOrganizations(),
+    });
+    if (decision.kind === 'derived') return decision.organizationId;
+    if (decision.kind === 'no-organization-yet') return undefined;
+    throw new SystemWriteOrganizationRequiredError(
+      object,
+      posture,
+      decision.reason,
+      decision.organizationCount,
+    );
   }
 
   /**
@@ -8103,6 +8258,10 @@ export class ObjectQL implements IObjectQLEngine {
     object = this.resolveObjectName(object);
     this.logger.debug('Insert operation starting', { object, isBatch: Array.isArray(data) });
     this.assertWriteAllowed(object, 'insert');
+    // [#8844] The organization set is about to change. Dropped BEFORE the write
+    // rather than after it, so a concurrent read cannot repopulate the memo from
+    // a snapshot this insert is in the middle of invalidating.
+    if (object === ORGANIZATION_OBJECT) this.invalidateOrganizationProbe();
     const driver = this.getDriver(object);
     // [#5351/#5696] Same-origin gate: refuse a cross-driver BUSINESS write,
     // carve an append-only system ledger out of the transaction. Before any
@@ -8238,7 +8397,33 @@ export class ObjectQL implements IObjectQLEngine {
       // Base the merge on the first row context's options: hooks share the
       // same underlying options object (in-place mutations are visible), and
       // for single inserts this is exactly the pre-#2922 behaviour.
-      const driverOptions = this.buildDriverOptions(object, opCtx.context, rowHookContexts[0]?.input.options as any);
+      //
+      // [#8844] The system-context organization resolution runs HERE — after
+      // the beforeInsert hooks (a hook that stamped the organization has
+      // carried it) and before anything reads the resolved options: the
+      // credential channel below, `applyAutonumbers`, and the driver dispatch
+      // itself. It resolves to the SAME knob a session write sets
+      // (`DriverOptions.tenantId`), so the driver stamps the column via
+      // `injectTenantOnInsert` and its counter scopes by the real organization
+      // instead of the `__global__` pseudo-tenant — one mechanism, both write
+      // paths, and no driver had to change (which matters twice over here:
+      // `fillAutoNumberFields` is duplicated in `driver-sql` and
+      // `driver-turso`). `buildDriverOptions` preserves an explicitly-supplied
+      // `base.tenantId`, so passing it in as the base is how the derived value
+      // survives the merge.
+      const derivedOrganizationId = await this.resolveSystemInsertOrganization(
+        object,
+        opCtx.context,
+        rowHookContexts.map((rowCtx) => rowCtx.input.data as Record<string, unknown>),
+      );
+      const optionsBase = rowHookContexts[0]?.input.options as any;
+      const driverOptions = this.buildDriverOptions(
+        object,
+        opCtx.context,
+        derivedOrganizationId !== undefined
+          ? { ...(optionsBase && typeof optionsBase === 'object' ? optionsBase : {}), tenantId: derivedOrganizationId }
+          : optionsBase,
+      );
       for (const rowCtx of rowHookContexts) {
         rowCtx.input.options = driverOptions;
       }
@@ -8629,6 +8814,9 @@ export class ObjectQL implements IObjectQLEngine {
      object = this.resolveObjectName(object);
      this.logger.debug('Update operation starting', { object });
      this.assertWriteAllowed(object, 'update');
+     // [#8844] See the insert face — an organization row that changes identity
+     // invalidates the memo just as one that appears does.
+     if (object === ORGANIZATION_OBJECT) this.invalidateOrganizationProbe();
      const driver = this.getDriver(object);
      // [#5351/#5696] Same-origin gate: refuse a cross-driver BUSINESS write,
      // carve an append-only system ledger out of the transaction. Before any
@@ -9981,6 +10169,9 @@ export class ObjectQL implements IObjectQLEngine {
     object = this.resolveObjectName(object);
     this.logger.debug('Delete operation starting', { object });
     this.assertWriteAllowed(object, 'delete');
+    // [#8844] See the insert face — deleting the install's only organization
+    // must not leave the memo answering with it.
+    if (object === ORGANIZATION_OBJECT) this.invalidateOrganizationProbe();
     const driver = this.getDriver(object);
     // [#5351/#5696] Same-origin gate: refuse a cross-driver BUSINESS write,
     // carve an append-only system ledger out of the transaction. Before any
