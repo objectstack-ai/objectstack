@@ -48,6 +48,23 @@ import { SysActivity } from './index.js';
  * authorised #8147's two removals); this file only guarantees that the census
  * is REDONE whenever the enum moves, by failing until the inventory below is
  * brought back into agreement with the declaration.
+ *
+ * ## A writerless value is not a dead value — there is a downstream READER
+ *
+ * Recorded because it changes what "no writer" licenses. objectui's
+ * `packages/plugin-detail/src/renderers/recordActivityFeed.ts` maps
+ * `sys_activity.type` onto a feed item type, and its key set is set-equal to
+ * this enum today — the seven writerless values included. Six carry a
+ * deliberate rendering decision (`assigned` / `shared` map to `field_change`,
+ * `system` to `system`; `commented` / `mentioned` / `login` / `logout` are
+ * dropped as not-record-activity). So a writer census answers "may this value
+ * be retired?" only in part: a second consumer sits across a repo boundary,
+ * and nothing in this file covers it.
+ *
+ * That mirror is unguarded in both directions — objectui pins its key set
+ * against a hardcoded literal rather than against this declaration, so an
+ * addition here does not reach it. Filed as #8852; deliberately NOT asserted
+ * here, since this package cannot import objectui.
  */
 
 /**
