@@ -13046,13 +13046,38 @@ export class ObjectStackProtocolImplementation implements
         //    written under the canonical one — a compliance query on
         //    `type = 'view'` missed a publish addressed `/meta/views/…`.
         //
-        // ⚠️ `ensureObjectStorage` is NOT in that list, though it also reads
-        // `request.type`: it opens `if (type !== 'object' && type !== 'objects')`
-        // and so answered both spellings identically before this fold and after
-        // it. Its `'objects'` limb is now unreachable — both of its call sites
-        // stand behind a fold — but it is a spelling-tolerant lookup one layer
-        // down, which is the shape {@link canonicalMetaType}'s header rejects,
-        // so it is recorded rather than quietly deleted here (out of region).
+        // ⚠️ `ensureObjectStorage` is NOT in that list, because it answered both
+        // spellings identically before this fold and after it: it opens
+        // `if (type !== 'object' && type !== 'objects')`, a spelling-tolerant
+        // lookup one layer down — the shape {@link canonicalMetaType}'s header
+        // rejects.
+        //
+        // [#8820] This paragraph used to justify that with "both of its call
+        // sites stand behind a fold". That reason was FALSE. Counting the
+        // helper's own two call sites is not the reachability question: the
+        // second one lives inside {@link runPublishSideEffects}, which has TWO
+        // callers — this method (folded) and `publishPackageDrafts`, which is
+        // NOT folded, since `listDrafts` hands back the draft row's stored
+        // `type` verbatim.
+        //
+        // The conclusion survived the correction, for a reason nothing here had
+        // stated: a draft row stored under a plural `type` cannot be promoted
+        // at all. `promoteDraftForPublish` addresses it by the folded singular
+        // and `SysMetadataRepository.whereFor` emits that spelling with no
+        // at-rest fallback, so the promote raises `NO_DRAFT` and the
+        // all-or-nothing batch (ADR-0067 D2) aborts before Phase 2 ever runs.
+        // Measured in `protocol.publish-side-effects-canonical-type.test.ts`,
+        // which had no predecessor — the batch path's DDL step had NO coverage,
+        // so deleting the tolerant limb was green across the whole package
+        // either way, and "the suite still passes" could not have told anyone
+        // which of these two stories was true.
+        //
+        // The lesson worth keeping: a reachability claim has to be traced to
+        // each caller's PRODUCER, not to the immediate call sites, and an
+        // invariant that load-bears across three frames belongs in the type,
+        // not in a comment. #8820 did that — `runPublishSideEffects` now takes
+        // only the folded `singularType`, so the unfolded value is gone from
+        // its parameter list and no future consumer can reach for it.
         //
         // ⛔ This does NOT make `promoteDraftForPublish`'s fold redundant — that
         // helper's other caller is `publishPackageDrafts`, which feeds it stored
@@ -13116,7 +13141,6 @@ export class ObjectStackProtocolImplementation implements
         };
         const effects = await this.runPublishSideEffects({
             singularType,
-            requestType: request.type,
             name: request.name,
             orgId,
             body: result.item.body,
@@ -13300,7 +13324,6 @@ export class ObjectStackProtocolImplementation implements
      */
     private async runPublishSideEffects(args: {
         singularType: string;
-        requestType: string;
         name: string;
         orgId: string | null;
         body: unknown;
@@ -13331,7 +13354,27 @@ export class ObjectStackProtocolImplementation implements
             organizationId: args.orgId,
         });
         // Create the object's table now so it's CRUD-able without a restart.
-        await this.ensureObjectStorage(args.requestType, args.name);
+        //
+        // [#8820] Reads the FOLDED `singularType`, like every other consumer in
+        // this helper. It used to read a separate, UNFOLDED `requestType`, and
+        // it was that parameter's only consumer.
+        //
+        // Behaviour is identical either way — `type` is read only by
+        // `ensureObjectStorage`'s guard and never reaches `syncObjectSchema`,
+        // which takes `name` alone — so this is a refactor, not a fix. What it
+        // removes is a structural hazard: `publishPackageDrafts` passes the
+        // draft row's STORED `type` (`listDrafts` applies no fold), so the
+        // parameter's contract said a plural could arrive here, and the only
+        // thing that actually stopped one was an unstated invariant three
+        // frames away — `promoteDraftForPublish` addresses the row by its
+        // folded singular and `SysMetadataRepository.whereFor` emits that
+        // spelling verbatim with no at-rest fallback, so a plural row raises
+        // `NO_DRAFT` and the all-or-nothing batch aborts before Phase 2. That
+        // is measured, in `protocol.publish-side-effects-canonical-type.test.ts`
+        // — but it is a fact about a repository read, load-bearing for a guard
+        // two files away, and nothing said so at either end. Folding at the
+        // producer retires the question instead of restating the invariant.
+        await this.ensureObjectStorage(args.singularType, args.name);
         // Publishing a `seed` is what makes its rows live — materialize them
         // NOW (best-effort, never fails the publish) so every publish path
         // (per-ref REST publish, the home banner, package publish-drafts)
@@ -14093,7 +14136,6 @@ export class ObjectStackProtocolImplementation implements
             try {
                 const eff = await this.runPublishSideEffects({
                     singularType: p.singularType,
-                    requestType: p.d.type,
                     name: p.d.name,
                     orgId,
                     body: p.body,
