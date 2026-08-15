@@ -576,7 +576,18 @@ export class SysMetadataRepository implements MetadataRepository {
 
   async delete(
     ref: MetaRef,
-    opts: DeleteOptions & { state?: OverlayState },
+    /**
+     * [#8907] `packageId` is a LOCAL extension, exactly as `state` is: the
+     * shared {@link DeleteOptions} contract is unchanged, so no other
+     * implementation of `MetadataRepository` is affected. Stated → the row is
+     * resolved under the ADR-0048 key `(org, type, name, package_id)`; omitted
+     * → today's "match any package" resolution, unchanged for every existing
+     * caller. The only caller stating it today is the post-promotion draft
+     * drain ({@link dropPromotedDraftRow}). Whether the USER-FACING delete verb
+     * should state it too is the open question this card deliberately did not
+     * answer — see {@link whereFor} and #6215.
+     */
+    opts: DeleteOptions & { state?: OverlayState; packageId?: string | null },
   ): Promise<DeleteResult> {
     this.assertOpen();
     // [#6960] The DELETE verb's own gate — see {@link assertDeleteAllowed}.
@@ -587,7 +598,11 @@ export class SysMetadataRepository implements MetadataRepository {
     const state: OverlayState = opts.state ?? 'active';
     const result = await this.withTxn(async (ctx) => {
       const existing = await this.engine.findOne('sys_metadata', {
-        where: this.whereFor(ref, state),
+        where: this.whereFor(
+          ref,
+          state,
+          'packageId' in opts ? (opts.packageId ?? null) : undefined,
+        ),
         context: ctx,
       });
       if (!existing) {
@@ -696,7 +711,31 @@ export class SysMetadataRepository implements MetadataRepository {
    */
   async promoteDraft(
     ref: MetaRef,
-    opts: { actor: string | null; source?: string; message?: string; intent?: MetadataWriteIntent },
+    opts: {
+      actor: string | null;
+      source?: string;
+      message?: string;
+      intent?: MetadataWriteIntent;
+      /**
+       * [#8907] ADR-0048 — the package whose draft is being promoted, when the
+       * caller knows it. Supplied → the draft is resolved (and drained) under
+       * `(org, type, name, package_id)`, the same key the caller listed it by.
+       * Omitted → the historical "match any package" resolution, which is only
+       * sound when the caller genuinely has no package in hand.
+       *
+       * `null` is NOT the same as omitted: it pins the lookup to the unbound
+       * (`package_id IS NULL`) row, which is what a package-less draft is.
+       *
+       * Why a caller must state it: `publishPackageDrafts` lists a package's
+       * drafts with `listDrafts({ packageId })` and then promoted each one
+       * through a lookup that dropped the package dimension. With two packages
+       * holding drafts for the same `(type, name)` the two spellings disagree —
+       * publishing A promoted B's unreviewed draft, drained B's row, recorded
+       * it under A's ADR-0067 commit, and left A's own edit pending while
+       * answering `success: true`. Which row won was driver-order dependent.
+       */
+      packageId?: string | null;
+    },
   ): Promise<{
     version: string;
     seq: number;
@@ -715,8 +754,17 @@ export class SysMetadataRepository implements MetadataRepository {
     // flip (`getMetaItems({ type:'app', packageId })` → unhide), which then
     // never matched the just-published app and left AI-built apps `hidden`
     // (invisible in the app switcher / home) forever.
+    // [#8907] Resolve under the SAME key the caller listed the draft by. When
+    // `opts.packageId` is stated the package dimension is part of the lookup,
+    // so a second package's same-name draft can no longer be the row this
+    // promotion picks up. Omitted → unchanged "match any package" behaviour for
+    // callers that have no package in hand (`publishMetaItem`).
     const draftRow = await this.engine.findOne('sys_metadata', {
-      where: this.whereFor(ref, 'draft'),
+      where: this.whereFor(
+        ref,
+        'draft',
+        'packageId' in opts ? (opts.packageId ?? null) : undefined,
+      ),
     });
     if (!draftRow) {
       const err: any = new Error(
@@ -743,9 +791,19 @@ export class SysMetadataRepository implements MetadataRepository {
       packageId: draftPackageId,
     });
     // Drop the draft row — it has been promoted.
+    //
+    // [#8907] Drained under the binding of the row we actually PROMOTED
+    // (`draftPackageId`, read off that row above), not package-agnostically.
+    // The drain is the other half of this defect: an unscoped drain re-runs the
+    // same ambiguous lookup, so it could delete a DIFFERENT package's draft —
+    // and when the two bodies differ it instead hits the optimistic-lock
+    // mismatch, which {@link draftDrainVerdict} classifies as the benign
+    // "a newer draft was saved" race and silences, leaving the row we just
+    // published still pending forever. Draining what we promoted makes the
+    // read and the write name one row by construction.
     let draftDrainFailed: DraftDrainFailure | undefined;
     try {
-      await this.dropPromotedDraftRow(ref, draft.hash, opts);
+      await this.dropPromotedDraftRow(ref, draft.hash, opts, draftPackageId);
     } catch (error) {
       draftDrainFailed = this.draftDrainVerdict(error, ref, draft.hash);
     }
@@ -1398,10 +1456,23 @@ export class SysMetadataRepository implements MetadataRepository {
     // same name each get their OWN customization row (a package-less / global
     // overlay uses `package_id IS NULL`). When `packageId` is omitted, the
     // package dimension is left out so the query keeps its historical "match
-    // any package" behaviour — which is what the RESOLVING reads want
-    // (delete/promote/restore each locate the one row whatever it is bound to).
-    // The writes never rely on it: they resolve the binding from the row that
-    // read returned and state it (#6215).
+    // any package" behaviour. The writes never rely on it: they resolve the
+    // binding from the row that read returned and state it (#6215).
+    //
+    // ⚠️ [#8907] "Match any package" is a fallback for a caller that genuinely
+    // has no package in hand — NOT a property the RESOLVING reads may lean on.
+    // This comment used to claim the opposite ("which is what the RESOLVING
+    // reads want — delete/promote/restore each locate the one row whatever it
+    // is bound to"), and "the one row" is an assumption the ADR-0048 key model
+    // does not grant: with two packages holding rows for the same
+    // `(org, type, name)` the query cannot distinguish them, so `findOne`
+    // returns a driver-order coin toss. Measured on `promoteDraft`: publishing
+    // package A promoted package B's pending draft, drained B's row, recorded
+    // it under A's commit, and left A's own edit pending while answering
+    // `success: true`. A caller that KNOWS the binding must state it — see
+    // {@link promoteDraft}'s `packageId`. The same question is open for the
+    // `delete` and `restoreVersion` resolving reads (#6215); they are
+    // deliberately unchanged here.
     if (packageId !== undefined) where.package_id = packageId; // string → eq; null → IS NULL
     return where;
   }
@@ -1607,6 +1678,13 @@ export class SysMetadataRepository implements MetadataRepository {
     ref: MetaRef,
     draftHash: string,
     opts: { actor: string | null; source?: string; intent?: MetadataWriteIntent },
+    /**
+     * [#8907] ADR-0048 binding of the row that was promoted. Threaded so the
+     * drain deletes THAT row rather than re-resolving `(org, type, name)`
+     * package-agnostically — see the call site for why an unscoped drain is the
+     * second face of the same defect.
+     */
+    packageId: string | null,
   ): Promise<void> {
     await this.delete(ref, {
       parentVersion: draftHash,
@@ -1614,6 +1692,7 @@ export class SysMetadataRepository implements MetadataRepository {
       source: opts.source ?? 'sys-metadata-repo.publish',
       intent: opts.intent ?? 'override-artifact',
       state: 'draft',
+      packageId,
     });
   }
 

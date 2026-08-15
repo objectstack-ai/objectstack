@@ -13195,6 +13195,19 @@ export class ObjectStackProtocolImplementation implements
      */
     private async promoteDraftForPublish(request: {
         type: string; name: string; organizationId?: string; actor?: string; message?: string;
+        /**
+         * [#8907] ADR-0048 — the package binding of the draft being promoted,
+         * when the caller listed it under one. Threaded straight into
+         * `repo.promoteDraft` so the promotion resolves the draft under the
+         * SAME key it was listed by, exactly as `organizationId` above threads
+         * the draft's own org scope for the #3115 partition analogue.
+         *
+         * `undefined` (the `publishMetaItem` path, which names no package)
+         * keeps the historical "match any package" resolution. `null` pins the
+         * lookup to the unbound row — so the field is passed through only when
+         * the caller actually has a binding to state.
+         */
+        packageId?: string | null;
     }): Promise<{
         singularType: string;
         orgId: string | null;
@@ -13283,6 +13296,11 @@ export class ObjectStackProtocolImplementation implements
                 source: 'protocol.publishMetaItem',
                 ...(request.message ? { message: request.message } : {}),
                 intent,
+                // [#8907] Spread, not `packageId: request.packageId`: `null` is
+                // a meaningful scope (the unbound row) and `undefined` means
+                // "no package in hand", so the key must be ABSENT rather than
+                // present-and-undefined for the historical resolution to hold.
+                ...('packageId' in request ? { packageId: request.packageId ?? null } : {}),
             });
             return { singularType, orgId, result };
         } catch (err: any) {
@@ -13912,6 +13930,18 @@ export class ObjectStackProtocolImplementation implements
                             type: d.type,
                             name: d.name,
                             ...(draftOrgId ? { organizationId: draftOrgId } : {}),
+                            // [#8907] Promote each draft under the PACKAGE
+                            // `listDrafts` surfaced it from, for the same reason
+                            // `draftOrgId` above threads its org: ADR-0048 keys
+                            // overlay rows by `(org, type, name, package_id)`,
+                            // so with two packages holding drafts for one
+                            // `(type, name)` a promote that omits the package
+                            // dimension cannot tell them apart — publishing A
+                            // promoted and drained B's row, left A's own edit
+                            // pending, and still answered `success: true`.
+                            // `d.packageId` is the row's own binding, so this
+                            // is the listed key restated, never a new one.
+                            packageId: d.packageId,
                             ...(request.actor ? { actor: request.actor } : {}),
                             message: `publish app package '${request.packageId}'`,
                         });
