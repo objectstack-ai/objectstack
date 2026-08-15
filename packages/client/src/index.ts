@@ -3435,14 +3435,22 @@ export class ObjectStackClient {
        * perform `operation` on `object` — the same code paths enforcement
        * runs, so the report is explained by construction. Explaining ANOTHER
        * user requires `manage_users` (403 otherwise); `recordId` narrows to
-       * one concrete row (ADR-0095). Sent via the POST transport; the GET
-       * query form is the same contract. (#3587 gap closure)
+       * one concrete row (ADR-0095). `recordIds` is the batch form of the
+       * same record-grained question (ADR-0095 / #8326): 1–200 ids answered
+       * in one round trip, `decision.records[i]` answering `recordIds[i]`;
+       * mutually exclusive with `recordId` — the server refuses a request
+       * carrying both, or an empty/over-200 array, with a 400
+       * (`ExplainRequestSchema` in `@objectstack/spec` is the authority;
+       * this method forwards the body verbatim and does not itself
+       * validate it). Sent via the POST transport; the GET query form is
+       * the same contract. (#3587 gap closure)
        */
       explain: async (request: {
           object: string;
           operation?: 'read' | 'create' | 'update' | 'delete' | 'transfer' | 'restore' | 'purge';
           userId?: string;
           recordId?: string;
+          recordIds?: string[];
       }): Promise<any> => {
           const res = await this.fetch(`${this.baseUrl}/api/v1/security/explain`, {
               method: 'POST',
