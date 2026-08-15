@@ -6418,10 +6418,40 @@ export class RestServer {
                     const limit = req.query?.limit !== undefined
                         ? Number(req.query.limit)
                         : undefined;
+                    // [#8747] SCOPE THE READ. Without an organization this
+                    // route returned every tenant's audit rows for a
+                    // `(type, name)` — measured, not inferred — and it carries
+                    // no capability gate (unlike its `PUT` twin, which gates on
+                    // `manage_metadata`), so the cohort was any authenticated
+                    // principal of any tenant, on the published SDK surface.
+                    //
+                    // The organization comes from `resolveExecCtx`, which this
+                    // file already calls in 40+ handlers including the `PUT`
+                    // twin — `computeExecCtx` assembles `tenantId` from the
+                    // shared `resolveAuthzContext` (an API key's principal
+                    // tenant, else the session's `activeOrganizationId`).
+                    //
+                    // ⚠️ This deliberately does NOT mint the seam the
+                    // `/published` route's comment forbids further down this
+                    // file: no `resolveActiveOrganizationId`, no new org
+                    // plumbing in `packages/rest`. It reads a field the
+                    // execution context already carries. `?? null` keeps the
+                    // fail-closed direction — an unresolved organization reads
+                    // env-wide rows, never everyone's.
+                    //
+                    // `environmentId` is GONE from this payload, and that is a
+                    // deletion of dead weight rather than a behaviour change:
+                    // `auditMetaItem`'s request type never declared it and its
+                    // body never read it. Environment scoping is unaffected
+                    // because it comes from WHICH protocol `resolveProtocol`
+                    // hands back — the same reasoning the `/published` route
+                    // states below — not from the request payload. It is still
+                    // read on the two lines that need it.
+                    const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
                     const result = await (p as any).auditMetaItem({
                         type: req.params.type,
                         name: req.params.name,
-                        ...(environmentId ? { environmentId } : {}),
+                        organizationId: ctx?.tenantId ?? null,
                         ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
                     });
                     res.json(result);

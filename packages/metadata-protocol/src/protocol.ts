@@ -6087,6 +6087,12 @@ export class ObjectStackProtocolImplementation implements
      * environment has not yet provisioned the table (legacy install
      * prior to ADR-0010) the call returns `{ events: [] }` instead of
      * raising, keeping the Studio tab harmless.
+     *
+     * `organizationId` SCOPES the read and is enforced in the query below:
+     * rows for that organization plus env-wide (`organization_id IS NULL`)
+     * rows, and nothing else. Omitted (or `null`) reads the env-wide rows
+     * only. It is never a hint — a caller that does not supply it does not
+     * get another tenant's rows.
      */
     async auditMetaItem(request: {
         type: string;
@@ -6113,13 +6119,58 @@ export class ObjectStackProtocolImplementation implements
             Math.max(1, request.limit ?? 100),
             500,
         );
+        // [#8747] `request.organizationId` is READ here. It was declared and
+        // never used, while the comment below described the filter it would
+        // have built — a live cross-tenant disclosure, measured rather than
+        // argued: three saves of one view name under `org_alpha`, `org_beta`
+        // and env-wide, then one `auditMetaItem({ type, name })`, returned all
+        // three orgs' rows (`actor`, `note`, `lock_state` with them).
+        //
+        // ⚠️ Nothing below this method compensates, and all three candidates
+        // were eliminated by measurement, not by reading:
+        //  - the driver's tenant wall never engages — `buildDriverOptions`
+        //    sets `DriverOptions.tenantId` only from `execCtx.tenantId`
+        //    (`objectql/engine.ts`), and this read passes no context;
+        //  - plugin-security's Layer 0 never engages — the middleware takes
+        //    its principal-less `return next()` thousands of lines before the
+        //    `objectFields.has('organization_id')` gate that would have
+        //    carried it;
+        //  - no posture would save it anyway: `computeTenantLayer0Filter`
+        //    yields `null` under `single` and the deny sentinel under
+        //    `isolated` with no tenantId.
+        // So the scope has to be BUILT here. It is unconditional — it does not
+        // depend on a posture, a principal, or a layer below choosing to act.
+        //
+        // `?? null` is the same normalization the sibling `/published` door
+        // applies (`request.organizationId ?? null`, mirroring what an org-less
+        // `publishPackageDrafts` WRITES): a caller that resolves no
+        // organization reads exactly the env-wide rows an org-less write
+        // produces. Fail-closed, and symmetric with the write path.
+        const organizationId = request.organizationId ?? null;
         try {
             // Org-scoped lookup: include rows for the specific org AND
             // env-wide (organization_id IS NULL) rows so the editor
             // sees both tenant overlays and env-level package writes.
+            //
+            // The env-wide limb is LOAD-BEARING, not defensive garnish: the
+            // REST `PUT /meta/:type/:name` door passes no `organizationId` at
+            // all, so every row that door writes is stamped
+            // `organization_id: null` (`recordMetadataAudit` persists
+            // `entry.organizationId ?? null`). Drop the limb and this read
+            // returns nothing on a REST-authored deployment — "correctly
+            // scoped" and "hides everything" are different behaviours and the
+            // tests pin them apart.
             const where: Record<string, unknown> = {
                 type: singular,
                 name: request.name,
+                ...(organizationId === null
+                    ? { organization_id: null }
+                    : {
+                        $or: [
+                            { organization_id: organizationId },
+                            { organization_id: null },
+                        ],
+                    }),
             };
             // `order`, NOT `direction`: the QueryAST sort shape is
             // `SortNodeSchema` = `{ field, order }`, and both drivers normalize
