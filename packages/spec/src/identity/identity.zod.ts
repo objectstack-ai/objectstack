@@ -194,113 +194,30 @@ export const VerificationTokenSchema = lazySchema(() => z.object({
 
 export type VerificationToken = z.input<typeof VerificationTokenSchema>;
 
-/**
- * API Key Schema
+/*
+ * `ApiKey` / `ApiKeySchema` / `ApiKeyParsed` are NOT declared here (#8715,
+ * maintainer-ruled DELETE 2026-08-15; ADR-0049 enforce-or-remove).
  *
- * Aligns with better-auth's API key plugin capabilities.
- * Provides programmatic access to ObjectStack APIs (CI/CD, service-to-service, CLI).
+ * The schema that stood here documented better-auth's `apiKey` PLUGIN shape —
+ * a plugin this platform does not load: `start`, `lastRefetchAt`, `enabled`
+ * (the real column is `revoked`, opposite polarity), `rateLimitEnabled` /
+ * `rateLimitTimeWindow` / `rateLimitMax` / `remaining` (no per-key rate-limit
+ * surface exists anywhere), `permissions`, `metadata`, camelCase
+ * `organizationId`. It had ZERO consumers in framework, cloud or objectui
+ * outside its own unit test, and one table ended up with two declarations of
+ * which the published one was fiction — the AGENTS.md PD #10 shape.
  *
- * @see https://www.better-auth.com/docs/plugins/api-key
+ * The single declaration of the `sys_api_key` table is the ObjectSchema in
+ * `@objectstack/platform-objects` (`identity/sys-api-key.object.ts`): columns
+ * `name, prefix, user_id, active_organization_id, scopes, expires_at,
+ * last_used_at, revoked, key, id, created_at, updated_at` (snake_case — this
+ * is persisted-record vocabulary, not a wire DTO). Rows are minted by
+ * `POST /api/v1/keys` (`runtime/src/domains/keys.ts`) and verified by
+ * `core/src/security/api-key.ts`; neither ever read the deleted schema.
+ *
+ * Need the persisted record? Read the `sys_api_key` object. Need the mint/
+ * verify behaviour? It lives behind the endpoints above, keyed by the `osk_`
+ * prefix. Per-key rate limiting returns only via the ENFORCE route of
+ * ADR-0049 — the executor first, the vocabulary second.
  */
-export const ApiKeySchema = lazySchema(() => z.object({
-  /**
-   * Unique API key identifier
-   */
-  id: z.string().describe('API key identifier'),
 
-  /**
-   * Human-readable name for the key
-   */
-  name: z.string().describe('API key display name'),
-
-  /**
-   * Key prefix (visible portion for identification, e.g., "os_pk_ab")
-   */
-  start: z.string().optional().describe('Key prefix for identification'),
-
-  /**
-   * Custom prefix for the key (e.g., "os_pk_")
-   */
-  prefix: z.string().optional().describe('Custom key prefix'),
-
-  /**
-   * User ID of the key owner
-   */
-  userId: z.string().describe('Owner user ID'),
-
-  /**
-   * Organization ID the key is scoped to (optional)
-   */
-  organizationId: z.string().optional().describe('Scoped organization ID'),
-
-  /**
-   * Key expiration timestamp (null = never expires)
-   */
-  expiresAt: z.string().datetime().optional().describe('Expiration timestamp'),
-
-  /**
-   * Creation timestamp
-   */
-  createdAt: z.string().datetime().describe('Creation timestamp'),
-
-  /**
-   * Last update timestamp
-   */
-  updatedAt: z.string().datetime().describe('Last update timestamp'),
-
-  /**
-   * Last used timestamp
-   */
-  lastUsedAt: z.string().datetime().optional().describe('Last used timestamp'),
-
-  /**
-   * Last refetch timestamp (for cached permission checks)
-   */
-  lastRefetchAt: z.string().datetime().optional().describe('Last refetch timestamp'),
-
-  /**
-   * Whether this key is enabled
-   */
-  enabled: z.boolean().default(true).describe('Whether the key is active'),
-
-  /**
-   * Rate limiting: enabled flag
-   */
-  rateLimitEnabled: z.boolean().optional().describe('Whether rate limiting is enabled'),
-
-  /**
-   * Rate limiting: time window in milliseconds
-   */
-  rateLimitTimeWindow: z.number().int().min(0).optional().describe('Rate limit window (ms)'),
-
-  /**
-   * Rate limiting: max requests per window
-   */
-  rateLimitMax: z.number().int().min(0).optional().describe('Max requests per window'),
-
-  /**
-   * Rate limiting: remaining requests in current window
-   */
-  remaining: z.number().int().min(0).optional().describe('Remaining requests'),
-
-  /**
-   * Permissions assigned to this key (granular access control)
-   */
-  permissions: z.record(z.string(), z.boolean()).optional()
-    .describe('Granular permission flags'),
-
-  /**
-   * Scopes assigned to this key (high-level access categories)
-   */
-  scopes: z.array(z.string()).optional()
-    .describe('High-level access scopes'),
-
-  /**
-   * Custom metadata
-   */
-  metadata: z.record(z.string(), z.unknown()).optional().describe('Custom metadata'),
-}));
-
-export type ApiKey = z.input<typeof ApiKeySchema>;
-/** Post-parse shape of {@link ApiKey} — defaults applied, transforms run (ADR-0122). */
-export type ApiKeyParsed = z.infer<typeof ApiKeySchema>;

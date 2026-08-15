@@ -24,9 +24,15 @@ import { PublisherVerificationSchema } from './marketplace.zod';
  * better-auth specification. This module only defines marketplace-specific
  * extensions on top of the shared identity layer:
  *
- * - **User & Session** → `Identity.UserSchema`, `Identity.SessionSchema`
+ * - **User** → `Identity.UserSchema`; the session wire shape is `Session` from
+ *   `@objectstack/spec/api` (the identity module deliberately declares no bare
+ *   `SessionSchema` — #4641)
  * - **Organization & Members** → `Identity.OrganizationSchema`, `Identity.MemberSchema`
- * - **API Keys** → `Identity.ApiKeySchema` (with marketplace scopes)
+ * - **API Keys** → the `sys_api_key` ObjectSchema in
+ *   `@objectstack/platform-objects` (`identity/sys-api-key.object.ts`), minted via
+ *   `POST /api/v1/keys`; its `scopes` column is the marketplace-scope carrier.
+ *   There is no `Identity.ApiKeySchema` — #8715 retired it (it documented
+ *   better-auth's apiKey plugin, which this platform does not load)
  *
  * ## Key Concepts
  * - **Publisher Profile**: Links an Identity Organization to a marketplace publisher

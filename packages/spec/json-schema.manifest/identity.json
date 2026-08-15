@@ -3,7 +3,6 @@
   "category": "identity",
   "schemas": [
     "identity/Account",
-    "identity/ApiKey",
     "identity/EvalUser",
     "identity/Invitation",
     "identity/InvitationStatus",

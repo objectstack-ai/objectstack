@@ -20,8 +20,8 @@ defines "how to login".
 ## TypeScript Usage
 
 ```typescript
-import { AccountSchema, ApiKeySchema, UserSchema, VerificationTokenSchema } from '@objectstack/spec/identity';
-import type { Account, ApiKey, User, VerificationToken } from '@objectstack/spec/identity';
+import { AccountSchema, UserSchema, VerificationTokenSchema } from '@objectstack/spec/identity';
+import type { Account, User, VerificationToken } from '@objectstack/spec/identity';
 
 // Validate data
 const result = AccountSchema.parse(data);
@@ -49,35 +49,6 @@ const result = AccountSchema.parse(data);
 | **sessionState** | `string` | optional | Session state |
 | **createdAt** | `string` | ✅ | Account creation timestamp |
 | **updatedAt** | `string` | ✅ | Last update timestamp |
-
-
----
-
-## ApiKey
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | API key identifier |
-| **name** | `string` | ✅ | API key display name |
-| **start** | `string` | optional | Key prefix for identification |
-| **prefix** | `string` | optional | Custom key prefix |
-| **userId** | `string` | ✅ | Owner user ID |
-| **organizationId** | `string` | optional | Scoped organization ID |
-| **expiresAt** | `string` | optional | Expiration timestamp |
-| **createdAt** | `string` | ✅ | Creation timestamp |
-| **updatedAt** | `string` | ✅ | Last update timestamp |
-| **lastUsedAt** | `string` | optional | Last used timestamp |
-| **lastRefetchAt** | `string` | optional | Last refetch timestamp |
-| **enabled** | `boolean` | ✅ | Whether the key is active |
-| **rateLimitEnabled** | `boolean` | optional | Whether rate limiting is enabled |
-| **rateLimitTimeWindow** | `integer` | optional | Rate limit window (ms) |
-| **rateLimitMax** | `integer` | optional | Max requests per window |
-| **remaining** | `integer` | optional | Remaining requests |
-| **permissions** | `Record<string, boolean>` | optional | Granular permission flags |
-| **scopes** | `string[]` | optional | High-level access scopes |
-| **metadata** | `Record<string, any>` | optional | Custom metadata |
 
 
 ---

@@ -2,7 +2,6 @@
   "description": "Ratchet of the DEFAULT VALUE of every authorable key in one category that has one (#4666) — what a metadata author gets when they omit the key, which for AI-authored metadata is most of the time. Sharded by category like authorable-surface/; the gate reads the whole authorable-defaults/ directory as ONE set. Each line is \"<def>:<key> = <canonical JSON>\". Additions (a NEW key that ships with a default) are auto-recorded — commit the change. CHANGING, ADDING or REMOVING the default of a key that already existed is NOT auto-recorded: it silently alters the behaviour of already-deployed metadata, so it fails check:authorable-surface until it is declared in DEFAULT_CHANGES_BY_MAJOR (scripts/lib/default-changes.ts). Constraints are deliberately NOT recorded here — a tightened bound REJECTS a document loudly, which is a different and self-announcing class (maintainer ruling on #4666, direction B). See #4666, #4661.",
   "category": "identity",
   "defaults": [
-    "identity/ApiKey:enabled = true",
     "identity/EvalUser:positions = []",
     "identity/Invitation:status = \"pending\"",
     "identity/Position:delegatable = false",

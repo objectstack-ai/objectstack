@@ -261,7 +261,7 @@ directory rather than per file.
 | `ai/` | 77 |
 | `api/` | 399 |
 | `cloud/` | 83 |
-| `identity/` | 33 |
+| `identity/` | 32 |
 | `integration/` | 10 |
 | `kernel/` | 296 |
 | `qa/` | 6 |
