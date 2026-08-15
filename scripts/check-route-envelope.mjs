@@ -275,6 +275,39 @@ const MODULES = {
     // either dialect, having no `error` key at all.
     siblingCode: 69,
   },
+
+  // [#8850] The ADR-0112 error/fault-classification prologue, extracted from
+  // `rest-server.ts` above. A MOVE — no wire answer changed — but the two response
+  // write sites it took with it (`sendError`, `handleRouteError`) left an audited
+  // file for a brand-new one, and a new module outside the `*-routes.ts` convention
+  // is invisible until it is named (see OFF_CONVENTION_MODULES). Declared in the
+  // same PR that created it so the gap never exists.
+  //
+  // `responses: 2` is the first non-zero write-site count in this table, and it is
+  // pinned rather than waived because this module is the OPPOSITE of `rest-server.ts`
+  // on the one axis that made that file `dialectOnly`: its write sites are the two
+  // doors themselves, so the count is structurally stable — it moves only if a THIRD
+  // door is added, which is precisely what deserves a review.
+  //
+  // The `0 / 0` on both dialects is a real statement and not a formality, but read
+  // it for what it is: both sites write `resolved.body`, an IDENTIFIER, and the
+  // dialect counters only see object literals. So the flat `{ error, code }` shapes
+  // that `mapDataError` builds are not counted here — nor were they counted in
+  // `rest-server.ts` before the move, for the same reason. What these zeros pin is
+  // that no NEW literal body gets written at this boundary without a reviewer
+  // seeing the number change. Measured at extraction, not chosen.
+  //
+  // `ratchet` for the same reason `rest-server.ts` carries one: `responses: 2` IS
+  // outstanding drift by this table's own definition (the conformant state is 0 —
+  // every body through the shared pair), and #7035 option 1 is its end state. When
+  // that lands, this entry becomes `{ responses: 0, ok: 0, err: 0 }` like the seven
+  // above and the ratchet goes.
+  'packages/rest/src/error-response.ts': {
+    responses: 2,
+    ok: 0,
+    err: 0,
+    ratchet: '#7035 (option 1: convert onto the shared sendOk/sendError)',
+  },
 };
 
 /** Identifiers whose `.json()` READS a request rather than writing a response. */
@@ -568,6 +601,12 @@ const OFF_CONVENTION_MODULES = new Set([
   'i18n-service-plugin.ts',
   // The dispatcher's own server. Audited `dialectOnly` — see the header.
   'rest-server.ts',
+  // [#8850] `rest-server.ts`'s ADR-0112 error/fault-classification prologue, moved
+  // to its own module. It answers no route itself, but it owns the two doors every
+  // route catch exits through (`sendError` / `handleRouteError`), so it emits REST
+  // bodies and belongs in the audit. Named here the same day the module was created
+  // — the extraction is exactly the event this list exists to survive.
+  'error-response.ts',
 ]);
 
 /** Recursively collect candidate route-module paths under `packages/`. */
