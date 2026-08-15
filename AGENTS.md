@@ -78,6 +78,43 @@ Three principles the ratchet's invariants encode, worth knowing before you fight
   missing its `.js` extension does not resolve and every symbol it names becomes
   `any`. Fix the extension first and re-measure.
 
+### A test that reads outside its own package must be spelled so the gate can see it
+
+`pnpm check:cross-package-test-inputs` keeps CI's idea of a test's inputs equal to its
+real inputs. A test whose reads escape its package is invisible to **both**
+`turbo ls --affected` and the `test` task's input hashing, so a pin written to catch
+cross-package drift sits green through exactly the drift it exists to catch — on `main`,
+with every PR reporting green. The gate finds those tests by **scanning source text**,
+deliberately: a detector with no dependencies cannot itself fail to resolve in CI.
+
+The price of a source scan is that it sees only the spellings it knows, and an
+unrecognised one produces no flag — which means no declaration, **silently**. So the
+recognised list is published rather than left inside the implementation. Seed from
+`import.meta.url` or `__dirname`, and write the escaping path as one of:
+
+```ts
+const HERE = dirname(fileURLToPath(import.meta.url));   // seed (ESM)
+const HERE = __dirname;                                 // seed (CJS)
+const HERE = import.meta.dirname;                       // and dirname(import.meta.filename)
+const P = resolve(HERE, '<rel>');                       // join() and path.* too
+const P = fileURLToPath(new URL('<rel>', import.meta.url));
+const P = new URL('<rel>', import.meta.url);
+readFileSync(resolve(HERE, '<rel>'))                    // the same expressions
+readFileSync(new URL('<rel>', import.meta.url))         // in argument position
+```
+
+The gate prints this list in its failure text too, and `--self-test` pins every entry.
+Reaching for a spelling that is not here? **Extend the detector and add a `--self-test`
+case in the same edit** — never route around it. An unseen read is the defect above, not
+a style question, and a newly recognised shape with no pin is the next silent regression.
+
+Two things it deliberately does not flag: a path that climbs out and lands in
+`node_modules` (an installed dependency is not a repo source input, and no turbo glob can
+name it), and a path that climbs out and comes straight back in. What it *does* flag is
+judged on the **shallowest** point a path reaches, not where it ends — a literal that
+climbs past the package root and then descends into a sibling ends at a positive depth
+while addressing another package entirely.
+
 ### Running the dev server
 
 | Scenario | Command | Notes |
