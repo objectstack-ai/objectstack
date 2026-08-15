@@ -541,7 +541,31 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                             `publish one app directly via PUT /meta/app/<name> with \`{"_unpublished": false}\`. Cause: ` +
                             `${e?.message ?? String(e)}`,
                         );
-                        (result as any).unhideError = e?.message ?? 'visibility flip failed';
+                        // [#8516] ADR-0112, the PAYLOAD half — the `logger.error`
+                        // above is the other half and is left exactly as it is.
+                        // `unhideError` rides the same **200** publish body as
+                        // `seedApplied` (#8443), as DATA, so no HTTP boundary's
+                        // 5xx message withhold can reach it: the disclosure has
+                        // to be closed here, at the producer.
+                        //
+                        // Measured on `origin/main` before the change, through
+                        // this door with a `sys_metadata` outage under
+                        // `getMetaItems`: `"unhideError": "SQLITE_ERROR: no such
+                        // table: sys_metadata"` on a 200. Same text from a
+                        // mid-loop `saveMetaItem` failure, there alongside the
+                        // `unhiddenApps: ["crm"]` half-flip report.
+                        //
+                        // The rule is IMPORTED, never re-spelled: quote the
+                        // caught sentence only when the error declared itself a
+                        // 4xx client refusal. The authored population this catch
+                        // receives is NOT blanked by that — `saveMetaItem`'s
+                        // refusals all declare 4xx (`NOT_OVERRIDABLE`/403,
+                        // `ITEM_LOCKED`/403, `OBJECT_OVERLAY_PACKAGE_MISMATCH`/422,
+                        // the org and destructive-change refusals), so a locked
+                        // or non-overridable app still tells its publisher which
+                        // app and why, verbatim. That was measured too, not
+                        // assumed.
+                        (result as any).unhideError = clientFacingFailureText(e, 'visibility flip failed');
                     }
                     // Assigned on BOTH paths — clean completion and mid-loop
                     // failure alike. On the failure path it rides ALONGSIDE
@@ -572,7 +596,49 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                             await deps.announceKernelEvent(_context, 'metadata:reloaded', { changed });
                         }
                     } catch (e: any) {
-                        (result as any).rebindError = e?.message ?? 'metadata:reloaded announce failed';
+                        // [#8516] The same ADR-0112 rule as the visibility flip
+                        // above, on the same 200 body — but this site owed BOTH
+                        // halves, because it had no log at all. Withholding the
+                        // text without adding one would have converted an
+                        // over-disclosure into a silent failure: strictly worse.
+                        //
+                        // `context.trigger` dispatch is PROPAGATING (#5170 /
+                        // #5282) — "reporting a propagated failure is the
+                        // caller's job" — so whatever a subscriber throws
+                        // arrives here unwrapped, and every subscriber of this
+                        // event is PLATFORM code doing internal re-sync work
+                        // (`resyncFlowsFromProtocol`, `resyncAuthoredHooks` /
+                        // `…Actions`, `ingestReloadedObjects`, the authored
+                        // translation sync). Measured on `origin/main` before the
+                        // change: `"rebindError": "TypeError: Cannot read
+                        // properties of undefined (reading 'triggers') at
+                        // AutomationPlugin.rebind (/srv/objectstack/packages/
+                        // services/service-automation/dist/index.js:412:31)"` on
+                        // a 200 — an internal stack frame and a server
+                        // filesystem path, quoted to whoever pressed Publish.
+                        // Nothing an author can act on, so nothing that is worth
+                        // the disclosure; a subscriber that DOES declare a 4xx
+                        // refusal still reaches them, by the same positive list.
+                        //
+                        // `warn`, not `error`, and deliberately: nothing here
+                        // claimed to persist and did not — the drafts are
+                        // published, the flip is stored. What is lost is an
+                        // in-memory re-sync, which is AGENTS.md's own worked
+                        // example of a FUNCTIONAL degradation ("a trigger is not
+                        // armed"), and the sibling announce of this very event
+                        // (`MetadataPlugin._reloadAndAnnounce`) already logs it
+                        // at `warn`. Escalating it would be the over-application
+                        // that trains everyone to skim `error`.
+                        (deps.logger ?? console).warn(
+                            `[Packages] publish-drafts: the 'metadata:reloaded' announce FAILED for package '${id}' — the drafts ARE ` +
+                            `published and stored, but boot-cached consumers keep the PRE-publish view until this process restarts: a ` +
+                            `newly published record-triggered flow does not bind its trigger (it will not fire), an edited ` +
+                            `schedule-triggered flow keeps running its old definition, newly declared connectors stay undispatchable, ` +
+                            `and authored hooks, actions and translations are not re-synced. Nothing retries this announce. Re-run ` +
+                            `POST /packages/${id}/publish-drafts once the cause below is resolved (it is idempotent), or restart the ` +
+                            `process to rebuild every subscriber from storage. Cause: ${e?.message ?? String(e)}`,
+                        );
+                        (result as any).rebindError = clientFacingFailureText(e, 'metadata:reloaded announce failed');
                     }
                     return { handled: true, response: deps.success(result) };
                 } catch (e: any) {

@@ -16,6 +16,11 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 // two spellings of platform authority the ruling names; see
 // {@link SharingRuleService.assertCanDeletePlatformGlobalRule}.
 import { BUILTIN_IDENTITY_PLATFORM_ADMIN } from '@objectstack/spec/identity';
+// [#8710] The ONE predicate for `sys_position.active` / `sys_permission_set.active`
+// (#8613). Reused rather than re-spelled: two notions of "is this row active"
+// — one honouring the 1/0 and 'false' storage shapes, one not — is how the
+// enforcement hole this closes gets re-opened one seam over.
+import { isRowActive } from '@objectstack/core';
 import type { SharingEngine } from './sharing-service.js';
 import type { SharingService } from './sharing-service.js';
 import { normalizeAccessLevel, normalizeStoredAccessLevel } from './access-level.js';
@@ -70,6 +75,23 @@ export interface SharingRuleServiceOptions {
   sharing: SharingService;
   logger?: { info?: Function; warn?: Function; error?: Function; debug?: Function };
 }
+
+/**
+ * [#8710] Memo for the catalogue reads a recipient expansion adds, scoped to
+ * ONE evaluator pass.
+ *
+ * The lifetime is the whole design. It is the same lifetime the graph services
+ * already document for their own `cache` option ("shared cache across one
+ * evaluator pass"), and it is deliberately NOT a field on the service: this
+ * service instance lives as long as the plugin, so a memo hung there would
+ * outlive the pass and make a deactivation take effect late — a second defect
+ * in the shape of a fix for the first. Created at the public entry, threaded
+ * down, discarded with the pass.
+ */
+type RuleEvaluationPass = {
+  /** `sys_position.active` verdicts, keyed `${organization}::${name}`. */
+  positionActive?: Map<string, boolean>;
+};
 
 /**
  * Default {@link ISharingRuleService} implementation.
@@ -711,10 +733,14 @@ export class SharingRuleService implements ISharingRuleService {
     const rules = await this.listRules({ object }, context);
     if (rules.length === 0) return [];
     const results: SharingRuleEvaluationResult[] = [];
+    // [#8710] ONE pass, so N rules naming the same position pay ONE catalogue
+    // read — and the memo dies with this call, so the next pass re-reads and a
+    // deactivation is honoured immediately.
+    const pass: RuleEvaluationPass = {};
     for (const rule of rules) {
       // An inactive rule desires nothing; skip the criteria query entirely.
       const match = rule.active ? await this.recordMatches(rule, recordId) : false;
-      const users = match ? await this.expandRecipient(rule) : [];
+      const users = match ? await this.expandRecipient(rule, pass) : [];
       results.push(await this.reconcileForRecord(rule, recordId, match, users));
     }
     return results;
@@ -952,7 +978,7 @@ export class SharingRuleService implements ISharingRuleService {
     }
   }
 
-  private async expandRecipient(rule: SharingRuleRow): Promise<string[]> {
+  private async expandRecipient(rule: SharingRuleRow, pass: RuleEvaluationPass = {}): Promise<string[]> {
     const team = new TeamGraphService({
       engine: this.engine,
       organizationId: rule.organization_id ?? null,
@@ -980,6 +1006,13 @@ export class SharingRuleService implements ISharingRuleService {
       return dept.expandUnitMembers(rule.recipient_id);
     }
     if (rule.recipient_type === 'position') {
+      // [#8710] A DEACTIVATED position confers NOTHING — checked before the
+      // expansion, not after it, so the rule's desired grant set is empty and
+      // the reconcilers' existing revoke-the-remainder branches retract what it
+      // already materialised. See {@link positionConfersAccess}.
+      if (!(await this.positionConfersAccess(rule.recipient_id, rule.organization_id ?? null, pass))) {
+        return [];
+      }
       // ADR-0090 D3 — positions are flat; expand holders via the platform
       // assignment table (source of truth, ADR-0057 D4) ∪ the better-auth
       // membership string (transition window).
@@ -1007,6 +1040,111 @@ export class SharingRuleService implements ISharingRuleService {
     }
     // queue — v1 stores literal; treat as no-op until queue impl lands.
     return [];
+  }
+
+  /**
+   * [#8710] Does `positionName` still CONFER access in this rule's
+   * organization? Memoised for the pass; the extra read is accepted.
+   *
+   * Maintainer ruling, 2026-08-15, verbatim:
+   *
+   * > Access-conferring paths filter deactivated positions; addressing paths
+   * > do not.
+   *
+   * A sharing rule is an access-conferring path. The grant is authored on the
+   * RULE, which is why the position here reads like a directory selector — but
+   * what the rule produces is a `sys_record_share`, and a record share is
+   * access. The `deactivate_position` dialog promises, unqualified, that "users
+   * keep their assignment but the position stops granting permissions until
+   * re-activated"; #8613 made that true at the authorization DERIVATION seam
+   * (`resolveAuthzContext`), and a sharing rule reaches users by a second road
+   * that never passes it.
+   *
+   * ⛔ The filter lives HERE, at the call site, and must never move down into
+   * `PositionGraphService.expandPositionUsers`. That helper answers "who holds
+   * position P" — an ADDRESSING question, whose other consumers the same ruling
+   * deliberately leaves unfiltered: approval ROUTING, where dropping the
+   * holders is fail-OPEN (a step routing to nobody), and plugin-security's
+   * write gates / blast-radius reads, where dropping a deactivated row makes a
+   * refused binding permitted and narrows a delegate's boundary — access
+   * WIDENING, the opposite of this change. Both are #8613 carve-outs.
+   */
+  private async positionConfersAccess(
+    positionName: string,
+    organizationId: string | null,
+    pass: RuleEvaluationPass,
+  ): Promise<boolean> {
+    if (!positionName) return true; // nothing to read; the expansion answers [] anyway
+    const memo = (pass.positionActive ??= new Map<string, boolean>());
+    const key = `${organizationId ?? '*'}::${positionName}`;
+    const seen = memo.get(key);
+    if (seen !== undefined) return seen;
+    const verdict = await this.readPositionActive(positionName, organizationId);
+    memo.set(key, verdict);
+    return verdict;
+  }
+
+  /**
+   * [#8710] The catalogue verdict for one position name. Three fallbacks, each
+   * of them a way this could otherwise have become a silent mass revocation:
+   *
+   *  1. **A name with no `sys_position` row is untouched.** Position names
+   *     reach a rule through `sys_member.role` too (ADR-0057 D4's transition
+   *     source), and those have no catalogue row at all — the same names #8613
+   *     leaves alone, because a name with no row has no flag to read. Note
+   *     `isRowActive(undefined)` is `false`, so "no row" must never be handed
+   *     to the predicate: only a row that really reads deactivated revokes.
+   *  2. **The row is chosen per ORGANIZATION.** `sys_position.name` is unique
+   *     per organization (#8468), so a same-named row in another tenant is a
+   *     DIFFERENT position; reading the flag off it would export one admin's
+   *     deactivation into every other tenant. Platform-seeded built-ins
+   *     (`bootstrapBuiltinRoles`, `organization_id` null) are the fallback for
+   *     an organization that has no row of its own.
+   *  3. **A failed read still grants.** On a minimal stack `sys_position` may
+   *     not exist, and a query failure is indistinguishable from that here.
+   *     Revoking every position share because a read threw is exactly the mass
+   *     revocation `isRowActive`'s "absent means active" rule exists to avoid.
+   *
+   * Within one scope the verdict is fail-CLOSED (any row that reads
+   * deactivated wins), matching `resolveAuthzContext`'s treatment of duplicate
+   * rows; the unique index means that case is legacy data only.
+   */
+  private async readPositionActive(positionName: string, organizationId: string | null): Promise<boolean> {
+    if (organizationId) {
+      const own = await this.readPositionRows({ name: positionName, organization_id: organizationId });
+      if (own === null) return true;
+      if (own.length > 0) return !own.some((r) => !isRowActive(r));
+    }
+    const all = await this.readPositionRows({ name: positionName });
+    if (all === null) return true;
+    const platformSeeded = all.filter((r) => (r as any).organization_id == null);
+    if (platformSeeded.length === 0) return true;
+    return !platformSeeded.some((r) => !isRowActive(r));
+  }
+
+  /**
+   * `sys_position` rows for one filter, or `null` when the read itself failed
+   * (see {@link readPositionActive} fallback 3). The `active` flag is judged in
+   * MEMORY, never pushed into a driver `where`: SQLite stores booleans as 1/0,
+   * a JSON column can hand back `'false'`, and a predicate `where` would also
+   * drop the NULL rows that mean "active" (row-active.ts).
+   */
+  private async readPositionRows(filter: Record<string, unknown>): Promise<any[] | null> {
+    try {
+      const rows = await this.engine.find('sys_position', {
+        filter,
+        fields: ['id', 'name', 'active', 'organization_id'],
+        limit: 200,
+        context: SYSTEM_CTX,
+      });
+      return Array.isArray(rows) ? rows : [];
+    } catch (err: any) {
+      this.logger?.warn?.(
+        '[sharing-rule] sys_position read failed — position treated as ACTIVE for this pass',
+        { position: filter.name, error: err?.message },
+      );
+      return null;
+    }
   }
 
   private async reconcile(

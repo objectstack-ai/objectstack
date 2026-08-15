@@ -11,8 +11,8 @@ import type { TranslationData } from '@objectstack/spec/system';
 export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_position: {
     label: "Puesto",
-    pluralLabel: "Puestoes",
-    description: "Definiciones de puesto para el contpuesto de acceso RBAC",
+    pluralLabel: "Puestos",
+    description: "Definiciones de puesto para el control de acceso RBAC",
     fields: {
       label: {
         label: "Nombre visible"
@@ -49,7 +49,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         }
       },
       id: {
-        label: "ID de rol"
+        label: "ID de puesto"
       },
       created_at: {
         label: "Creado el"
@@ -74,12 +74,12 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     },
     _actions: {
       activate_position: {
-        label: "Activar rol",
+        label: "Activar puesto",
         successMessage: "Puesto activado"
       },
       deactivate_position: {
-        label: "Desactivar rol",
-        confirmText: "¿Desactivar este rol? Los usuarios con el puesto conservan su asignación, pero el puesto deja de otorgar permisos hasta que se vuelva a activar.",
+        label: "Desactivar puesto",
+        confirmText: "¿Desactivar este puesto? Los usuarios con el puesto conservan su asignación, pero el puesto deja de otorgar permisos hasta que se vuelva a activar.",
         successMessage: "Puesto desactivado"
       },
       set_default_position: {
@@ -88,7 +88,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Puesto predeterminado actualizado"
       },
       clone_position: {
-        label: "Clonar rol",
+        label: "Clonar puesto",
         successMessage: "Puesto clonado",
         params: {
           label: {
@@ -338,13 +338,13 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     }
   },
   sys_position_permission_set: {
-    label: "Conjunto de permisos de rol",
-    pluralLabel: "Conjuntos de permisos de rol",
-    description: "Vincula un conjunto de permisos a un rol.",
+    label: "Conjunto de permisos de puesto",
+    pluralLabel: "Conjuntos de permisos de puesto",
+    description: "Vincula un conjunto de permisos a un puesto.",
     fields: {
       id: {
         label: "ID de vinculación",
-        help: "UUID de la vinculación rol-conjunto de permisos."
+        help: "UUID de la vinculación puesto-conjunto de permisos."
       },
       position_id: {
         label: "Puesto",

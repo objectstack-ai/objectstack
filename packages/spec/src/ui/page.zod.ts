@@ -55,7 +55,12 @@ export const PageComponentType = z.enum([
   // Structure
   'page:header', 'page:footer', 'page:sidebar', 'page:tabs', 'page:accordion', 'page:card', 'page:section',
   // Record Context
-  'record:details', 'record:highlights', 'record:related_list', 'record:activity', 'record:chatter', 'record:path', 'record:alert', 'record:quick_actions', 'record:reference_rail', 'record:history',
+  // `record:discussion` is `record:chatter`'s registration-preferred twin
+  // (#8744): same renderer, same inputs, same `ComponentPropsMap` row, and the
+  // default-page synthesizer emits it — it was authorable only through the
+  // open string arm below, which is what let its props bag dodge the #5068
+  // gate's dispatch.
+  'record:details', 'record:highlights', 'record:related_list', 'record:activity', 'record:chatter', 'record:discussion', 'record:path', 'record:alert', 'record:quick_actions', 'record:reference_rail', 'record:history',
   // Navigation
   'app:launcher', 'nav:menu', 'nav:breadcrumb',
   // Utility

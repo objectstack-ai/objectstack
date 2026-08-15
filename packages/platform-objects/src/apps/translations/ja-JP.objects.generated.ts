@@ -1804,11 +1804,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
             helpText: "任意。スペースまたはカンマ区切りの OAuth スコープ。既定値は「openid email profile」。",
             placeholder: "openid email profile"
           },
-          mapId: {
-            label: "マッピング: ユーザー ID クレーム",
-            helpText: "任意。ユーザー ID にマッピングする ID トークンのクレーム。既定値は「sub」。",
-            placeholder: "sub"
-          },
           mapEmail: {
             label: "マッピング: メールクレーム",
             helpText: "任意。メールにマッピングするクレーム。既定値は「email」。",
@@ -2323,7 +2318,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "ジョブ名",
-        help: "一意のジョブ識別子（snake_case）"
+        help: "一意のジョブ識別子（snake_case）。インストール全体で一意です — ジョブカタログは組織ではなくデプロイメントに属する情報です"
       },
       schedule_type: {
         label: "スケジュールタイプ",

@@ -514,8 +514,8 @@ interface MetadataIssueEntry {
 }
 
 /**
- * How many levels of nested `invalid_union` are expanded below a top-level
- * issue, and how many equally-informative branches are emitted at one level.
+ * How many levels of nested issues are expanded below a top-level issue, and
+ * how many equally-informative branches are emitted at one level.
  *
  * Both bounds — and the whole selection policy below — are the ones
  * `formatZodError` landed for the CLI/spec side of this defect (#4971,
@@ -527,9 +527,54 @@ interface MetadataIssueEntry {
  * same, or one mistake gets three different prescriptions depending on whether
  * the author published from the terminal, POSTed to the data API, or saved from
  * Studio (#5364).
+ *
+ * [#8783] The depth bound is named for what it bounds — nesting — and not for
+ * `invalid_union`, because it now bounds the container descent below as well.
+ * The spec pair renamed the same constant for the same reason when #8318
+ * extracted it (`NESTED_EXPANSION_DEPTH_LIMIT` in
+ * `spec/src/shared/union-branch-policy.ts`); the value is the same 3, and it
+ * has to be, for the reason in the paragraph above.
  */
-const UNION_EXPANSION_DEPTH_LIMIT = 3;
+const NESTED_EXPANSION_DEPTH_LIMIT = 3;
 const UNION_BRANCH_EMIT_LIMIT = 3;
+
+/**
+ * [#5389/#8783] The issue codes that hang their real diagnosis on
+ * `issue.issues` rather than on `invalid_union`'s `issue.errors`.
+ *
+ * Zod raises these when a CONTAINER's inner schema rejects a key or an element
+ * that cannot be addressed by a path segment:
+ *
+ * - `invalid_key` — `z.record(K, V)`'s **key** schema rejected a key, and
+ *   `z.map(K, V)`'s key schema rejected a non-`PropertyKey` key;
+ * - `invalid_element` — `z.map(K, V)`'s **value** schema rejected the value
+ *   under a non-`PropertyKey` key.
+ *
+ * In both cases the issue's own `message` is a bare wrapper (`"Invalid key in
+ * record"`) and everything the author needs sits one level down, exactly as
+ * `invalid_union` hides a branch's prescription in `errors` (#4971). Without
+ * the descent this envelope stopped at the wrapper while the other two walks
+ * descended, so the single most-authored metadata type's commonest authoring
+ * mistake — `ObjectSchema.fields` is a record whose KEY schema carries the
+ * snake_case rule (`spec/src/data/object.zod.ts`) — reached Studio as
+ * `{path: 'fields.firstName', code: 'invalid_key', message: 'Invalid key in
+ * record'}` with the sentence naming the rule dropped (#8783).
+ *
+ * ⚠️ These issues are NOT ranked, and that is the one structural difference
+ * from the union descent below. A union's branches are competing *candidates*,
+ * so they are selected between; a container has one inner schema, so every
+ * issue it produced is a true statement about the value and dropping any would
+ * be dropping a real diagnosis. Hence the plain loop rather than
+ * {@link selectUnionBranches}.
+ *
+ * ⛔ Deliberately a local declaration, not an import. `spec`'s
+ * `CONTAINER_ISSUE_CODES` is package-internal by decision (the #4001 export
+ * pitfall) and reaching for it would be #8660's option 2 — a public-surface
+ * decision this change does not make. `union-branch-policy.cross-package-parity.test.ts`
+ * §1 is the tripwire that keeps that decision explicit, and §5 there pins this
+ * set's *behaviour* against both spec walks.
+ */
+const CONTAINER_ISSUE_CODES: ReadonlySet<string> = new Set(['invalid_key', 'invalid_element']);
 
 /**
  * A zod issue, as much of it as the expansion reads.
@@ -538,12 +583,20 @@ const UNION_BRANCH_EMIT_LIMIT = 3;
  * with each branch's paths RELATIVE to the union issue's own path. Zod raises a
  * single `invalid_union` issue whose own `message` is the literal
  * `"Invalid input"`, so everything a failing branch has to say lives down there.
+ *
+ * `issues` is the container equivalent (#8783), carried by the
+ * {@link CONTAINER_ISSUE_CODES}: the one issue list the failing key/element
+ * schema produced, with paths relative to this issue's own — the same
+ * relationship `errors` has, spelled with a different property name and without
+ * the per-branch nesting, because a container has one inner schema rather than
+ * N alternatives.
  */
 interface ZodIssueLike {
     path?: unknown;
     message?: unknown;
     code?: unknown;
     errors?: unknown;
+    issues?: unknown;
 }
 
 /** A zod issue path, normalised to the array zod always produces. */
@@ -631,16 +684,28 @@ function selectUnionBranches(
  * to it, which is the trap #5014 paid for: a branch issue's `path` names a slot
  * inside the union member, not inside the document.
  *
- * The union's entry is kept rather than replaced: it is the only entry naming
- * the slot the client sent, existing consumers already read it, and when every
- * branch is uninformative it is still the whole answer. So the expansion is
- * strictly ADDITIVE — no entry that shipped before this changed is gone or
- * renumbered, only newly accompanied.
+ * [#8783] A {@link CONTAINER_ISSUE_CODES} issue descends the same way and for
+ * the same reason, into `issue.issues` instead of `issue.errors`, with two
+ * differences: nothing is ranked (a container has one inner schema, so every
+ * issue it raised is true — see the note on the code set), and the descent is
+ * only taken when the issue's own code says the payload is a container's. That
+ * second half is what keeps this targeted: an `issues` array hanging off any
+ * other code is left alone, so the walk did not become "descend whatever
+ * nests".
+ *
+ * The wrapper's entry is kept rather than replaced — for the union and the
+ * container alike: it is the only entry naming the slot the client sent,
+ * existing consumers already read it, and when nothing below is informative it
+ * is still the whole answer. So the expansion is strictly ADDITIVE — no entry
+ * that shipped before this changed is gone or renumbered, only newly
+ * accompanied. Both spec walks were measured to do the same before #8783 copied
+ * them (`formatZodIssue` prints the wrapper line then the indented detail;
+ * `zodIssuesToFields` emits the `invalid_shape` wrapper then the detail entry).
  *
  * `seen` de-duplicates entries *within one top-level issue*: two branches that
- * reject the same key with the same words say it once. Union entries themselves
- * are exempt, since two same-path `"Invalid input"` entries can head genuinely
- * different sub-trees.
+ * reject the same key with the same words say it once. Expanded entries — union
+ * and container heads alike — are exempt, since two same-path wrapper entries
+ * can head genuinely different sub-trees.
  *
  * Deliberate divergence from the spec-side renderer: where it prints a trailing
  * "… and N more branches rejected this value", this emits nothing. That line is
@@ -662,7 +727,13 @@ function collectMetadataIssues(
                 (branch): branch is ZodIssueLike[] => Array.isArray(branch),
             )
             : [];
-    const expandable = branches.length > 0 && depth < UNION_EXPANSION_DEPTH_LIMIT;
+    const contained: readonly ZodIssueLike[] =
+        typeof issue?.code === 'string' && CONTAINER_ISSUE_CODES.has(issue.code)
+            && Array.isArray(issue?.issues)
+            ? (issue.issues as ZodIssueLike[])
+            : [];
+    const expandable = (branches.length > 0 || contained.length > 0)
+        && depth < NESTED_EXPANSION_DEPTH_LIMIT;
 
     const entry: MetadataIssueEntry = {
         path: path.join('.'),
@@ -678,10 +749,18 @@ function collectMetadataIssues(
     out.push(entry);
     if (!expandable) return;
 
-    for (const branch of selectUnionBranches(branches)) {
-        for (const nested of branch) {
-            collectMetadataIssues(nested, path, depth + 1, seen, out);
+    if (branches.length > 0) {
+        for (const branch of selectUnionBranches(branches)) {
+            for (const nested of branch) {
+                collectMetadataIssues(nested, path, depth + 1, seen, out);
+            }
         }
+        return;
+    }
+
+    // Unranked, and every one of them: see {@link CONTAINER_ISSUE_CODES}.
+    for (const nested of contained) {
+        collectMetadataIssues(nested, path, depth + 1, seen, out);
     }
 }
 
@@ -703,8 +782,19 @@ function collectMetadataIssues(
  * `formatZodErrors` (#5341) — lost prescriptions; this one lost field
  * localisation itself.
  *
+ * A rejection inside a CONTAINER is expanded for the same reason (#8783): zod
+ * hangs a `z.record`/`z.map` key or element rejection on
+ * {@link CONTAINER_ISSUE_CODES} with the bare wrapper `"Invalid key in record"`
+ * as its own message and the real rule one level down in `issue.issues`. Both
+ * spec walks have descended those since #5389 while this one stopped at the
+ * wrapper, so an author who typed `firstName` for a field key was told a key
+ * was invalid and never told what a valid one looks like — the declared
+ * snake_case prescription exists, is correct, and simply did not reach the
+ * author.
+ *
  * Branch selection is described on {@link selectUnionBranches} and is identical
- * to the other copies by construction.
+ * to the other copies by construction; the container descent is described on
+ * {@link CONTAINER_ISSUE_CODES}.
  */
 export function zodIssuesToMetadataIssues(issues: unknown): MetadataIssueEntry[] {
     if (!Array.isArray(issues)) return [];
@@ -6098,6 +6188,12 @@ export class ObjectStackProtocolImplementation implements
      * environment has not yet provisioned the table (legacy install
      * prior to ADR-0010) the call returns `{ events: [] }` instead of
      * raising, keeping the Studio tab harmless.
+     *
+     * `organizationId` SCOPES the read and is enforced in the query below:
+     * rows for that organization plus env-wide (`organization_id IS NULL`)
+     * rows, and nothing else. Omitted (or `null`) reads the env-wide rows
+     * only. It is never a hint — a caller that does not supply it does not
+     * get another tenant's rows.
      */
     async auditMetaItem(request: {
         type: string;
@@ -6124,13 +6220,58 @@ export class ObjectStackProtocolImplementation implements
             Math.max(1, request.limit ?? 100),
             500,
         );
+        // [#8747] `request.organizationId` is READ here. It was declared and
+        // never used, while the comment below described the filter it would
+        // have built — a live cross-tenant disclosure, measured rather than
+        // argued: three saves of one view name under `org_alpha`, `org_beta`
+        // and env-wide, then one `auditMetaItem({ type, name })`, returned all
+        // three orgs' rows (`actor`, `note`, `lock_state` with them).
+        //
+        // ⚠️ Nothing below this method compensates, and all three candidates
+        // were eliminated by measurement, not by reading:
+        //  - the driver's tenant wall never engages — `buildDriverOptions`
+        //    sets `DriverOptions.tenantId` only from `execCtx.tenantId`
+        //    (`objectql/engine.ts`), and this read passes no context;
+        //  - plugin-security's Layer 0 never engages — the middleware takes
+        //    its principal-less `return next()` thousands of lines before the
+        //    `objectFields.has('organization_id')` gate that would have
+        //    carried it;
+        //  - no posture would save it anyway: `computeTenantLayer0Filter`
+        //    yields `null` under `single` and the deny sentinel under
+        //    `isolated` with no tenantId.
+        // So the scope has to be BUILT here. It is unconditional — it does not
+        // depend on a posture, a principal, or a layer below choosing to act.
+        //
+        // `?? null` is the same normalization the sibling `/published` door
+        // applies (`request.organizationId ?? null`, mirroring what an org-less
+        // `publishPackageDrafts` WRITES): a caller that resolves no
+        // organization reads exactly the env-wide rows an org-less write
+        // produces. Fail-closed, and symmetric with the write path.
+        const organizationId = request.organizationId ?? null;
         try {
             // Org-scoped lookup: include rows for the specific org AND
             // env-wide (organization_id IS NULL) rows so the editor
             // sees both tenant overlays and env-level package writes.
+            //
+            // The env-wide limb is LOAD-BEARING, not defensive garnish: the
+            // REST `PUT /meta/:type/:name` door passes no `organizationId` at
+            // all, so every row that door writes is stamped
+            // `organization_id: null` (`recordMetadataAudit` persists
+            // `entry.organizationId ?? null`). Drop the limb and this read
+            // returns nothing on a REST-authored deployment — "correctly
+            // scoped" and "hides everything" are different behaviours and the
+            // tests pin them apart.
             const where: Record<string, unknown> = {
                 type: singular,
                 name: request.name,
+                ...(organizationId === null
+                    ? { organization_id: null }
+                    : {
+                        $or: [
+                            { organization_id: organizationId },
+                            { organization_id: null },
+                        ],
+                    }),
             };
             // `order`, NOT `direction`: the QueryAST sort shape is
             // `SortNodeSchema` = `{ field, order }`, and both drivers normalize
@@ -8517,16 +8658,48 @@ export class ObjectStackProtocolImplementation implements
     // Global Search (M10.5)
     // ==========================================
     /**
-     * Cross-object substring search across all registered objects that opt in
-     * via `enable.searchable !== false` and `enable.apiEnabled !== false`.
-     * Searches text-like fields (text/textarea/email/url/phone/markdown/html/string)
-     * whose `searchable: true` flag is set, falling back to the object's
-     * `displayNameField` (or `name`) when no fields are explicitly searchable.
+     * Cross-object search across all registered objects that opt in via
+     * `enable.searchable !== false` and `enable.apiEnabled !== false`.
      *
-     * The query is split into whitespace-separated terms; each term must match
-     * (case-insensitive LIKE) at least one searchable field. RBAC/RLS is
-     * enforced by forwarding the caller's `context` to `engine.find` so users
-     * only see records they are entitled to read.
+     * ## [#7643] WHICH columns are searched is not decided here
+     *
+     * The per-object query is handed `search: <q>` and the ENGINE resolves the
+     * fields and compiles the clause (`expandSearchOnAst` →
+     * `objectql/src/search-filter.ts` `expandSearchToFilter`, ADR-0061) — the
+     * same one expansion that serves the record picker and the list
+     * quick-search. This method used to resolve its own set (text-typed fields
+     * carrying the field-level `searchable: true` flag, falling back to the
+     * title field) and build its own AND-of-OR, which made the ⌘K palette's
+     * recall a STRICT SUBSET of the executor's on two axes at once:
+     *
+     *  - it never ORed the hidden `__search` companion column, so full-pinyin
+     *    (`huaningkeji`) and initials (`hnkj`) matched the seeded CJK row
+     *    through `POST /data/:object/query {search}` and returned NOTHING from
+     *    `GET /api/v1/search` — #2486 recall, absent on this door only; and
+     *  - it read the field-level `searchable` flag, which `$search` has never
+     *    read, instead of the object's `searchableFields` — whose own declared
+     *    contract already names global search as one of its three consumers
+     *    ("the record picker, list quick-search and global search",
+     *    `object.zod.ts`). So the palette was a SECOND, narrower definition of
+     *    a recall rule the spec says is one rule.
+     *
+     * Only the CROSS-OBJECT half is this method's own: which objects are swept,
+     * the per-object cap, hit ranking and title/snippet rendering. Everything
+     * inside one object's query now has a single producer.
+     *
+     * ## Matching
+     *
+     * Whitespace-separated terms are AND-ed, fields OR-ed, and matching folds
+     * case via `$icontains`. All three are the engine expansion's decisions and
+     * this paragraph only DESCRIBES them — it is never a second declaration.
+     * [#7850] It previously read "case-insensitive LIKE": `LIKE` names no
+     * operator in this vocabulary (and since #6518's LIKE→GLOB change, not even
+     * the SQL the compilers emit), while the sentence one screen down named
+     * `$contains`, which #4706 Q2 = A defines as case-SENSITIVE. Both halves of
+     * that contradiction are gone; `$icontains` is the operator that folds.
+     *
+     * RBAC/RLS is enforced by forwarding the caller's `context` to
+     * `engine.find` so users only see records they are entitled to read.
      */
     async searchAll(request: {
         q: string;
@@ -8558,7 +8731,12 @@ export class ObjectStackProtocolImplementation implements
             ? new Set(request.objects)
             : null;
 
-        // Tokenise: each token must match (LIKE %term%) at least one searchable field
+        // [#7643] SNIPPET tokens only. The engine does its own tokenisation
+        // inside the `$search` expansion (same split, same AND-of-terms rule),
+        // so these no longer decide what MATCHES — they decide where the
+        // excerpt is cut. Kept as a separate local rather than fed to the
+        // engine: the query text is what the contract carries, and a second
+        // pre-tokenised channel is exactly the divergence this card closed.
         const terms = q.split(/\s+/).filter(Boolean).slice(0, 8);
 
         const allObjects = (this.engine as any).registry?.getAllObjects?.() ?? [];
@@ -8591,13 +8769,13 @@ export class ObjectStackProtocolImplementation implements
                     : (fieldsRaw && typeof fieldsRaw === 'object'
                         ? Object.entries(fieldsRaw).map(([name, f]: [string, any]) => ({ name, ...(f || {}) }))
                         : []);
-            const TEXT_TYPES = new Set(['text', 'textarea', 'string', 'email', 'url', 'phone', 'markdown', 'html']);
             const fieldByName = new Map(fields.map(f => [f.name, f]));
             const hasField = (n: string) => fieldByName.has(n);
-            // Resolve title for a record using titleFormat → displayNameField →
-            // common conventional fields → id. titleFormat supports simple
-            // `{field}` placeholders (the `template` dialect); unresolved
-            // placeholders fall through to the next strategy.
+            // Resolve title for a record using titleFormat → the declared
+            // primary-title pointer → common conventional fields → id.
+            // titleFormat supports simple `{field}` placeholders (the
+            // `template` dialect); unresolved placeholders fall through to the
+            // next strategy.
             const titleFormatSource = (obj.titleFormat && (obj.titleFormat.source || obj.titleFormat))
                 || undefined;
             const renderTitle = (row: any): string => {
@@ -8612,7 +8790,21 @@ export class ObjectStackProtocolImplementation implements
                     if (rendered) return rendered.replace(/\s+-\s+$/, '').replace(/^\s+-\s+/, '').trim() || row.id;
                 }
                 const candidates = [
-                    obj.displayNameField,
+                    // [ADR-0079] `nameField` is the canonical primary-title
+                    // pointer; `displayNameField` is the deprecated alias
+                    // (still honored). Reading the alias ALONE made this the
+                    // one consumer a canonical designation could not reach:
+                    // `provisionPrimary` — the designation seat the registry
+                    // runs on every object at registration — stamps
+                    // `nameField` only (`spec/src/data/display-name.ts`), so
+                    // an object that declares its title canonically and does
+                    // not also carry the alias fell through this list to
+                    // `String(row.id)` and the palette showed a raw id. Same
+                    // precedence as `resolveDisplayField`, the #4254 ingress
+                    // gate, and this function's own search-field resolution 44
+                    // lines below — a fourth spelling here would re-split what
+                    // those merged.
+                    obj.nameField ?? obj.displayNameField,
                     'name', 'full_name', 'title', 'subject', 'label', 'company',
                 ].filter((c): c is string => typeof c === 'string' && hasField(c));
                 for (const c of candidates) {
@@ -8624,36 +8816,43 @@ export class ObjectStackProtocolImplementation implements
                 return String(row.id);
             };
 
-            const titleFieldName = obj.displayNameField
-                || (hasField('name') ? 'name' : undefined)
-                || (hasField('title') ? 'title' : undefined)
-                || fields.find(f => TEXT_TYPES.has(f.type))?.name;
-
-            let searchableFields = fields
-                .filter(f => f && TEXT_TYPES.has(f.type) && f.searchable === true)
-                .map(f => f.name as string);
-
-            // Fallback: if no field is explicitly searchable, scan the title field
-            if (searchableFields.length === 0 && titleFieldName) {
-                searchableFields = [titleFieldName];
-            }
+            // [#7643] The SAME resolution the engine's `$search` expansion will
+            // apply to this object one call down — `@objectstack/spec/data` owns
+            // it precisely so the layers that must agree read one function
+            // instead of each carrying a copy (#4254 moved it there for the
+            // ingress gate; this is the third face). It is consulted here for
+            // two things, and NEITHER of them is building the filter:
+            //
+            //  1. the SKIP below — an object with nothing to scan is passed
+            //     over. This is load-bearing, not tidiness: `expandSearchToFilter`
+            //     answers an empty field set with `null`, `expandSearchOnAst`
+            //     then leaves `where` unset, and a `find` with no `where` returns
+            //     the object's FIRST `perObject` rows — a global palette
+            //     answering every query with unrelated records. The old code's
+            //     equivalent `continue` guarded the same cliff one layer up.
+            //  2. the snippet source fields further down, so the excerpt is cut
+            //     from a column the search actually scanned.
+            //
+            // `expandSearchToFilter` itself is deliberately NOT imported: it
+            // lives in `@objectstack/objectql`, which DEPENDS on this package,
+            // so importing it would close a package cycle. Handing the engine
+            // `search` instead of a pre-built `where` routes through it anyway —
+            // and leaves ONE producer of search clauses rather than two callers
+            // of one helper, which is the stronger form of the same fix.
+            const fieldMetaByName: Record<string, any> = {};
+            for (const f of fields) if (f?.name) fieldMetaByName[f.name] = f;
+            const { allowed: searchableFields } = resolveSearchFieldResolution({
+                fields: fieldMetaByName,
+                searchableFields: obj.searchableFields,
+                // [ADR-0079] `nameField` is the canonical primary-title pointer;
+                // `displayNameField` is the deprecated alias (still honored).
+                // Same precedence as `expandSearchOnAst` and the #4254 gate —
+                // a third spelling here would re-split what this card merged.
+                displayField: obj.nameField ?? obj.displayNameField,
+            });
             if (searchableFields.length === 0) continue;
 
             objectsScanned++;
-
-            // Build AND-of-OR filter: every term must hit at least one field.
-            // [#7641] Case-insensitive substring matching is `$icontains`, NOT
-            // `$contains` — the comment this replaced asserted the opposite and
-            // was the same declared≠enforced defect as `search-filter.ts`'s
-            // (`$contains` is contractually case-SENSITIVE, #4706 Q2 = A). The
-            // global-search palette is a SECOND producer of search clauses and
-            // was wrong the same way; `search.global-search`'s knownGaps already
-            // recorded it as this issue's to fix. Neither operator's semantics
-            // changed — only which one the palette compiles to.
-            const andClauses = terms.map(term => ({
-                $or: searchableFields.map(f => ({ [f]: { $icontains: term } })),
-            }));
-            const where = andClauses.length === 1 ? andClauses[0] : { $and: andClauses };
 
             try {
                 // `order`, NOT `direction` — see the audit-history query above.
@@ -8662,7 +8861,16 @@ export class ObjectStackProtocolImplementation implements
                 // likely to want (#4674). Typed rather than `any` so the
                 // contract rejects the wrong key at the call site.
                 const opts: EngineQueryOptionsParsed = {
-                    where,
+                    // [#7643] The bare string IS the ADR-0061 Tier-1 contract
+                    // ("the client sends only the query text; the server
+                    // resolves which fields to search from object metadata"),
+                    // and `search` is a declared `find` option
+                    // (`EngineQueryOptionsSchema`, `ENGINE_FIND_OPTION_KEYS`) —
+                    // so this is the engine's published door, not a private one.
+                    // No `searchFields`: that key only ever NARROWS the resolved
+                    // set (ADR-0061), and the palette wants the object's full
+                    // default reach.
+                    search: q,
                     limit: perObject,
                     orderBy: [{ field: 'updated_at', order: 'desc' }],
                 };
@@ -8672,7 +8880,14 @@ export class ObjectStackProtocolImplementation implements
                 for (const row of rows || []) {
                     if (hits.length >= overallLimit) break;
                     const title = renderTitle(row);
-                    // Build snippet from first searchable field that contains a term
+                    // Build snippet from first searchable field that contains a
+                    // term. [#7643] `undefined` is a CORRECT answer here, not a
+                    // miss: a companion (pinyin) hit matches the normalized
+                    // `__search` blob, so no source column literally contains
+                    // `hnkj` — the row is a real hit with nothing to excerpt.
+                    // The companion is never a snippet source itself; it is
+                    // stripped from rows on the way out (#7642) and its content
+                    // is machine-normalized text no user typed.
                     let snippet: string | undefined;
                     for (const f of searchableFields) {
                         const v = row[f];
@@ -12668,6 +12883,50 @@ export class ObjectStackProtocolImplementation implements
          */
         projectionApplied?: MutationProjectionOutcome;
     }> {
+        // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. This is the
+        // SEVENTH `/meta` entry point, and until #8769 it was the only one that
+        // did not funnel through the boundary fold — so the URL family
+        // `/meta/:type/:name/publish` accepted a spelling that `PUT` folds and
+        // `publish` did not resolve. Two dialects of one contract, decided by
+        // which verb you used (Prime Directive #12).
+        //
+        // What the fold reaches here that `promoteDraftForPublish`'s own
+        // `PLURAL_TO_SINGULAR` line does NOT — measured, not assumed:
+        //
+        //  • the four types the MANIFEST map legitimately omits (`field`,
+        //    `seed`, `external_catalog`, `translation` — they are not stack
+        //    collections). Unfolded, they arrive at the draftability check as
+        //    unrecognised and take the permissive PLUGIN branch of
+        //    `isRuntimeCreateAllowed` instead of their real registry entry: a
+        //    publish addressed `/meta/fields/...` passed a gate that
+        //    `/meta/field/...` answers 403 NOT_OVERRIDABLE. The #7894 shape,
+        //    one verb over.
+        //  • `getEffectiveLock`'s OVERLAY limb, which queries `sys_metadata`
+        //    with the raw `type`. Its artifact limb folds; the overlay limb
+        //    does not, so an ADR-0010 `_lock` carried by the stored active row
+        //    was not found when the publish was addressed with a plural — while
+        //    the promotion below DID find the row, because it reads the folded
+        //    `singularType`. That asymmetry is the one thing here that was not
+        //    fail-closed.
+        //  • the ADR-0010 audit row and the receipt sentence, which both read
+        //    `request.type` and so recorded the CALLER's spelling for a row
+        //    written under the canonical one — a compliance query on
+        //    `type = 'view'` missed a publish addressed `/meta/views/…`.
+        //
+        // ⚠️ `ensureObjectStorage` is NOT in that list, though it also reads
+        // `request.type`: it opens `if (type !== 'object' && type !== 'objects')`
+        // and so answered both spellings identically before this fold and after
+        // it. Its `'objects'` limb is now unreachable — both of its call sites
+        // stand behind a fold — but it is a spelling-tolerant lookup one layer
+        // down, which is the shape {@link canonicalMetaType}'s header rejects,
+        // so it is recorded rather than quietly deleted here (out of region).
+        //
+        // ⛔ This does NOT make `promoteDraftForPublish`'s fold redundant — that
+        // helper's other caller is `publishPackageDrafts`, which feeds it stored
+        // row types (data at rest, where a legacy plural row is real and nothing
+        // rewrites it on upgrade). Different input class, different map; see
+        // {@link canonicalMetaType}'s header for why the two are not one fold.
+        request = canonicalizeMetaRequestType(request);
         // [#8594] The refusal's own row is written HERE, by the route that owns
         // the (absent) transaction — see `promoteDraftForPublish`'s header. This
         // site has no transaction of its own, so recording it in the `catch` is
@@ -15504,14 +15763,51 @@ export class ObjectStackProtocolImplementation implements
                 fromBody = byVersion.get(fromVersion) ?? null;
             }
         }
-        const diff = diffShallow(fromBody ?? {}, toBody ?? {});
+        // [#8671] Diff RAW, then redact the EMITTED values — maintainer ruling
+        // (comment 5299845282), Option B. The comparison runs on the stored
+        // bodies untouched, so a credential ROTATION still registers as a
+        // changed path; only the values leaving this function are taken from
+        // the type's redacted projection of those same bodies.
+        //
+        // ⛔ Redacting the bodies BEFORE `diffShallow` (Option A) was ruled out
+        // and must not be reintroduced as a simplification: two redacted bodies
+        // are equal at a redacted path, so the rotation would vanish into a
+        // no-diff — destroying the one fact this endpoint exists to serve.
+        //
+        // WHY SUBSTITUTION RATHER THAN PATH-MATCHING against `redactedKeys`:
+        // the two namings live on different planes. `diffShallow` is TOP-LEVEL
+        // (a nested change collapses to one entry at the top-level key, whose
+        // value is the whole sub-object), while `redactedKeys` is nested and
+        // dotted (`config.password`). So `redactedKeys.includes(entry.path)`
+        // would match NOTHING on the real leak — the leaking entry's path is
+        // `config`. Reading each emitted value out of the already-redacted body
+        // gets the nested case right for free and mints no second rule set:
+        // the redactor stays the single source of what a credential is.
+        const rawFrom = fromBody ?? {};
+        const rawTo = toBody ?? {};
+        const diff = diffShallow(rawFrom, rawTo);
+        let served = diff;
+        // Skipped entirely for the overwhelming majority of types, which register
+        // no redactor — `hasMetadataRedactor` is the seam that answers that
+        // without this call site having to know which types hold a secret.
+        if (hasMetadataRedactor(singularType)) {
+            const servedFrom = redactMetadataItem(singularType, rawFrom) as Record<string, unknown>;
+            const servedTo = redactMetadataItem(singularType, rawTo) as Record<string, unknown>;
+            // Both sides, and all three buckets: leaking either the old or the
+            // new value defeats the point (the ruling's second binding note).
+            served = {
+                added: diff.added.map((e) => ({ path: e.path, value: servedTo[e.path] })),
+                removed: diff.removed.map((e) => ({ path: e.path, value: servedFrom[e.path] })),
+                changed: diff.changed.map((e) => ({ path: e.path, from: servedFrom[e.path], to: servedTo[e.path] })),
+            };
+        }
         const _used = versions; void _used;
         return {
             type: request.type,
             name: request.name,
             fromVersion,
             toVersion,
-            ...diff,
+            ...served,
         };
     }
 

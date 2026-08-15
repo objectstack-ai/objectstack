@@ -440,6 +440,21 @@ describe('Security explain & global search (#3587 gap closure)', () => {
         expect(JSON.parse(init.body)).toEqual({ object: 'lead', operation: 'update', userId: 'u1', recordId: 'r1' });
     });
 
+    it('security.explain accepts the recordIds batch spelling and forwards it verbatim (#8480)', async () => {
+        // [#8480] Typed-client completion of #8326's batch spelling. The
+        // client does NOT validate the cap or the recordId/recordIds
+        // mutual exclusion — that stays the server's job
+        // (`ExplainRequestSchema`); this pins that the body goes over the
+        // wire exactly as given, unmodified, whether or not it would pass
+        // server-side validation.
+        const { client, fetchMock } = createMockClient({ allowed: true });
+        await client.security.explain({ object: 'lead', operation: 'read', recordIds: ['r1', 'r2'] });
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(String(url)).toBe('http://localhost:3000/api/v1/security/explain');
+        expect(init.method).toBe('POST');
+        expect(JSON.parse(init.body)).toEqual({ object: 'lead', operation: 'read', recordIds: ['r1', 'r2'] });
+    });
+
     it('search pins GET /search with q/objects/limit/perObject', async () => {
         const { client, fetchMock } = createMockClient({ results: [] });
         await client.search('acme', { objects: ['lead', 'account'], limit: 20, perObject: 5 });

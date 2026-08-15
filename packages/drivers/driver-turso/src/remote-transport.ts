@@ -3461,12 +3461,33 @@ export class RemoteTransport {
           `literal, or select both columns and compare after retrieval.`,
       );
     }
-    return invalidFilterError(
+    // [#8197, maintainer ruling 2026-08-15] The non-reference half of this
+    // refusal joins the withhold too, for the reason the `$field` half already
+    // did one branch up: `${target}` is `'object.field'`, and on a read-scope
+    // predicate that column is the administrator's. `driver-sql`'s twin
+    // (`unbindableComparandError`) redacts the same three things — the target,
+    // the operator and the comparand preview — so the guard does not disagree
+    // with itself across the two compilers of ONE driver, which is what
+    // `TursoDriver` would otherwise make a property of the connection string.
+    //
+    // `value` is the comparand the throw site holds; a non-object one cannot
+    // carry a mark and resolves to `null`, i.e. withheld.
+    const diagnostic =
       `[RemoteTransport] Filter comparand ${target} ${shown} is ${describeValue(value)}, which this ` +
-        `transport cannot bind. A comparison value must be ` +
-        `${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE}. Refusing rather than binding its JSON text ` +
-        `— that compiles to valid SQL matching zero rows, which is indistinguishable from ` +
-        `"no rows matched" (#1004, #1058).`,
+      `transport cannot bind. A comparison value must be ` +
+      `${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE}. Refusing rather than binding its JSON text ` +
+      `— that compiles to valid SQL matching zero rows, which is indistinguishable from ` +
+      `"no rows matched" (#1004, #1058).`;
+    this.diagnosticSink?.(diagnostic);
+    return withheldInvalidFilterError(
+      `[RemoteTransport] A filter comparand in this query is a value this transport cannot bind. ` +
+        `A comparison value must be ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE}. Refusing rather ` +
+        `than binding its JSON text — that compiles to valid SQL matching zero rows, which is ` +
+        `indistinguishable from "no rows matched" (#1004, #1058). The field, the operator and the ` +
+        `value this filter used are withheld from the message (#8197); the full diagnostic is in ` +
+        `the server log.`,
+      diagnostic,
+      value,
     );
   }
 

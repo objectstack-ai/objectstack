@@ -40,6 +40,7 @@ import {
 // both verbs enforce one definition; the engine raises, the contract decides.
 import { MAX_BULK_PER_ROW_HOOK_ROWS, resolveBulkPerRowHookBudget } from '@objectstack/spec/data';
 import { assertListComparandShapes, assertFilterIsMaterializable } from './filter-comparand-shape.js';
+import { assertTemporalComparandsInterpretable } from './temporal-comparand-door.js';
 // Seek pagination for the walks that must read EVERY row — the autonumber seed
 // scan is one (#6249). Shared with `summary-backfill` rather than re-rolled:
 // the cursor merge is the part that is easy to get subtly wrong.
@@ -658,6 +659,15 @@ function lowerWhereFilterArray<T extends object | undefined>(
     // run it against" — and because this seam is the one place EVERY
     // caller-supplied `where` passes through, whichever verb it arrived by.
     assertFilterIsMaterializable(object, operation, schema, where);
+    // [#8690] The TEMPORAL-comparand door, third on the same seam and third
+    // question about the same predicate: the shape gate asks "can this
+    // comparand run", the materializable gate asks "is there a column to run it
+    // against", and this asks "can that column's storage rule READ this value".
+    // It must run BEFORE `resolveWhereTokens` (which is downstream of every
+    // caller of this function) because the refusal has to precede the driver —
+    // hence the door steps around `{placeholder}` strings rather than judging
+    // them; the token resolver refuses the unknown ones a moment later, loudly.
+    assertTemporalComparandsInterpretable(object, operation, schema, where);
     // [#7872] The comparand-type door, on the OBJECT form. `parseFilterAST`
     // runs the same walk on everything it lowers or passes through, but
     // NEITHER door routes an object-form filter through it — Door 1 gates on
@@ -718,6 +728,11 @@ function lowerWhereFilterArray<T extends object | undefined>(
   // the array sugar (`[['is_open','=',true]]`) names fields too, and a gate on
   // one branch would answer one mistake two ways depending on the spelling.
   assertFilterIsMaterializable(object, operation, schema, condition);
+  // [#8690] Same door as the object branch, on the LOWERED condition — the
+  // array sugar (`[['at','>=','last_30_days']]`) names temporal fields too, and
+  // a gate on one branch would answer one mistake two ways depending on the
+  // spelling.
+  assertTemporalComparandsInterpretable(object, operation, schema, condition);
   lowered.where = condition;
   return lowered as T;
 }
@@ -994,9 +1009,16 @@ function assertProjectionHasNoDottedPaths(
 }
 
 /**
- * [#8682] The DECLARED-FIELD DOOR on the insert path: a key the object does not
- * declare is refused by the SCHEMA, before anything is produced for a request
- * that is about to be refused anyway.
+ * [#8682 / #8738] The DECLARED-FIELD DOOR on the WRITE paths — `insert()` and,
+ * since #8738, `update()`: a key the object does not declare is refused by the
+ * SCHEMA, before anything is produced for a request that is about to be refused
+ * anyway.
+ *
+ * ONE condition, ONE implementation, deliberately — the two verbs sit in the
+ * same file and share the shape of the problem, so #8738 gave this function its
+ * second caller rather than a second predicate to drift against. The verdict is
+ * a question about a payload and an object's field map; neither term knows
+ * which verb asked.
  *
  * ## What ran before this door existed
  *
@@ -1022,6 +1044,25 @@ function assertProjectionHasNoDottedPaths(
  * so "it ran and we threw the result away" is not a no-op, it is a side effect
  * of a request the server had already decided to refuse.
  *
+ * ## The UPDATE path had the same hole (#8738), measured the same way
+ *
+ * #8738 filed the update half as INFERRED, not measured, and asked for it to be
+ * reproduced before anyone implemented against it. It was, on `origin/main` @
+ * `e5eeb499c`, with a real engine and a recording driver — and it reproduces on
+ * BOTH branches of the verb:
+ *
+ *   - by-id   `driver.update`     received `zzz_nonexistent_field` and refused it;
+ *   - multi   `driver.updateMany` received it and refused it likewise;
+ *   - `beforeUpdate` RAN first on both, and its derived value reached the
+ *     statement — the recorded payload was `{ name, zzz_nonexistent_field,
+ *     description: 'derived-for-bad' }`, where `description` is the hook's, not
+ *     the caller's. The card's `period_label = 'Q3 2026'` shape, one verb over.
+ *
+ * What it does NOT have is the insert path's durable damage: no autonumber is
+ * issued on update, so nothing user-visible is consumed by the refused request.
+ * The hook side effect and `declared = enforced` (PD #10) are the whole case —
+ * which is why the pin here is the HOOK, not a sequence gap.
+ *
  * ## Why HERE and not one step later
  *
  * This runs as the first act inside the middleware body: after middleware (a
@@ -1033,6 +1074,17 @@ function assertProjectionHasNoDottedPaths(
  * `enforceTransactionOrigin` one level up: a refusal this early costs nothing.
  * Like those two it throws without logging — the caller is told exactly what is
  * wrong, and a client typo is not a server fault to record at ERROR.
+ *
+ * `update()` places it by the same rule, which lands it one step EARLIER in
+ * that verb's body than a naive reading suggests: first act inside the
+ * middleware body, so ahead of the prior-record read as well as the hooks and
+ * both strips. Ahead of the read is not incidental — a refused write should not
+ * cost a driver round-trip either, and the read exists to serve `previous`, the
+ * `readonlyWhen` gate and the not-found gate, none of which a refused payload
+ * reaches. It is also ahead of the dispatch ladder's own `reject` verdict, so a
+ * call that is BOTH mis-keyed and missing its `id`/`multi` is answered on the
+ * payload: the ladder's message is about how to address rows and would send an
+ * author hunting for the wrong defect, while `INVALID_FIELD` names the typo.
  *
  * ## The verdict is the SCHEMA's field map, and the wire answer is unchanged
  *
@@ -1075,7 +1127,7 @@ function assertProjectionHasNoDottedPaths(
  */
 const PLATFORM_PROVISIONED_COLUMNS = ['id', 'created_at', 'updated_at'] as const;
 
-function undeclaredInsertFieldErrors(
+function undeclaredWriteFieldErrors(
   object: string,
   schema: { fields?: unknown } | undefined,
   rows: readonly unknown[],
@@ -8084,14 +8136,14 @@ export class ObjectQL implements IObjectQLEngine {
       // untouched, hooks run after and may override.
       const nowSnap = new Date();
       const isBatch = Array.isArray(opCtx.data);
-      // [#8682] The declared-field door — see `undeclaredInsertFieldErrors` for
+      // [#8682] The declared-field door — see `undeclaredWriteFieldErrors` for
       // what used to run below it for a request that was already refused.
       // FIRST, so nothing downstream (defaults, summary seeding, the hooks, the
       // secret writes, validation, the autonumber) happens for a row the schema
       // rejects. Non-partial callers get the refusal thrown here; the
       // partial-success path (`insertMany`) carries it per row into `rowErrors`
       // below, where the culled rows also skip the hooks and every producer.
-      const undeclaredPerRow = undeclaredInsertFieldErrors(
+      const undeclaredPerRow = undeclaredWriteFieldErrors(
         object,
         this._registry.getObject(object) as { fields?: unknown } | undefined,
         isBatch ? (opCtx.data as unknown[]) : [opCtx.data],
@@ -8817,6 +8869,28 @@ export class ObjectQL implements IObjectQLEngine {
      };
 
      await this.executeWithMiddleware(opCtx, async () => {
+       // [#8738] The declared-field door, the insert path's (#8682) applied to
+       // the second write verb — same function, not a second predicate. First
+       // act inside the middleware body: after middleware (which may rewrite
+       // `data`), and before the prior-record read, the `beforeUpdate` hooks,
+       // both readonly strips, validation and the statement.
+       //
+       // Measured on `origin/main` before it existed — the update half of the
+       // card was filed as INFERRED and this is what the reproduction found:
+       // `zzz_nonexistent_field` reached `driver.update` (and `updateMany` on
+       // the multi branch) and was refused THERE, after `beforeUpdate` had run
+       // and stamped a derived value onto the payload the driver then rejected.
+       //
+       // Single-row by construction: `update()` takes one payload, so there is
+       // no partial-row mode to carry the verdict into — unlike `insert()`, the
+       // refusal is simply thrown. One element in, one verdict out.
+       const undeclared = undeclaredWriteFieldErrors(
+         object,
+         this._registry.getObject(object) as { fields?: unknown } | undefined,
+         [opCtx.data],
+       )[0];
+       if (undeclared) throw undeclared;
+
        const hookContext: HookContext = {
           object,
           event: 'beforeUpdate',

@@ -73,6 +73,34 @@ export type {
     EnsureSysSettingIndexStatus,
     EnsureSysSettingIndexResult,
 } from './migrations/sys-setting-identity-index.js';
+// #8686 — the seed/API tenancy split. Unlike its two siblings above this
+// migration moves stored ROWS rather than tightening an index, so it is
+// single-tenant-guarded and reports (never renumbers) identifiers already minted
+// twice (maintainer ruling 2026-08-15: contract option 1, stored data shape 2).
+export {
+    backfillSeedTenancy,
+    resolveSeedTenancyExec,
+    normalizeRows,
+    buildSequencesPresenceSql,
+    buildSplitProbeSql,
+    buildOrganizationProbeSql,
+    buildCollisionProbeSql,
+    buildStampSql,
+    buildCounterMergeSql,
+    buildGlobalCounterDeleteSql,
+    SEQUENCES_TABLE,
+    GLOBAL_TENANT,
+    ORGANIZATION_FIELD,
+    ORGANIZATION_TABLE,
+} from './migrations/seed-tenancy-backfill.js';
+export type {
+    SeedTenancyExec,
+    SeedTenancyLogger,
+    SeedTenancyBackfillStatus,
+    SeedTenancyBackfillResult,
+    SeedTenancySplit,
+    SeedTenancyCollision,
+} from './migrations/seed-tenancy-backfill.js';
 export type { UninstallCleanup, UninstallCleanupOutcome } from './protocol.js';
 export type { MetadataMutationEvent, MetadataMutationProjector, MutationProjectionOutcome } from './protocol.js';
 export type { MetadataAuthoringGate, MetadataAuthoringGateContext } from './protocol.js';

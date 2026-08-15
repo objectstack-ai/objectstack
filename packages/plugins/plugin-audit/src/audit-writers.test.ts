@@ -1171,3 +1171,276 @@ describe('audit writers — a lost audit row is reported at error (#5226)', () =
     await expect(fire('afterInsert', aWrite('l-1'))).resolves.toBeUndefined();
   });
 });
+
+/**
+ * [#8707] Which organization an audit row is stamped with — the RECORD'S own,
+ * honouring the maintainer's ruling on #8287.
+ *
+ * The precedence these cases pin is `recordOrgId ?? sess.tenantId`. Read the
+ * pair together: the first four cases are the flip itself, the next three are
+ * the RLS fallback the flip must not weaken (it is why the fallback exists at
+ * all — an audit row with a NULL organization is hidden from everyone forever),
+ * and the last three are the column-resolution rules, including the one
+ * derivation that is deliberately NOT used.
+ */
+describe('audit writers — the record\'s own organization stamps the row (#8707, #8287)', () => {
+  /** `sys_audit_log` / `sys_activity` with the tenant column, + one audited object. */
+  const withObject = (fields: string[], defs: Record<string, any> = {}) => ({
+    schemas: {
+      ...MULTI_TENANT,
+      crm_lead: ['id', 'name', ...fields],
+    },
+    defs,
+  });
+
+  const stampOf = (created: CapturedRow[]) => ({
+    audit: created.find((c) => c.object === 'sys_audit_log')?.row,
+    activity: created.find((c) => c.object === 'sys_activity')?.row,
+  });
+
+  it('stamps the record\'s organization, NOT the actor\'s active one', async () => {
+    const { schemas } = withObject(['organization_id']);
+    const { engine, fire, created } = makeEngine(schemas);
+    installAuditWriters(engine as any, 'test.audit');
+
+    // The geometry the card names: the actor is acting from org-B while the
+    // record belongs to org-A. Before this change the row was stamped `org-B`,
+    // so the tenant admin of org-A — the only party the row concerns — could
+    // not read it, while org-B, which has no claim to the record, could.
+    await fire('afterInsert', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      result: { id: 'lead-1', name: 'Acme', organization_id: 'org-A' },
+      session: { tenantId: 'org-B', userId: 'user-1' },
+    });
+
+    const { audit, activity } = stampOf(created);
+    expect(audit?.organization_id).toBe('org-A');
+    expect(audit?.tenant_id).toBe('org-A');
+    // The activity mirror is read through the same wall and must agree.
+    expect(activity?.organization_id).toBe('org-A');
+  });
+
+  it('takes the record\'s organization from the pre-image on delete', async () => {
+    const { schemas } = withObject(['organization_id']);
+    const { engine, fire, created } = makeEngine(schemas);
+    installAuditWriters(engine as any, 'test.audit');
+
+    // A delete has no `result` row to read, so the org must come off the bound
+    // pre-image — the side that carries the record's last known organization.
+    await fire('afterDelete', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      result: true,
+      previous: { id: 'lead-1', name: 'Acme', organization_id: 'org-A' },
+      session: { tenantId: 'org-B', userId: 'user-1' },
+    });
+
+    expect(stampOf(created).audit?.organization_id).toBe('org-A');
+  });
+
+  it('stamps the record\'s organization on update too', async () => {
+    const { schemas } = withObject(['organization_id']);
+    const { engine, fire, created } = makeEngine(schemas);
+    installAuditWriters(engine as any, 'test.audit');
+
+    await fire('afterUpdate', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      previous: { id: 'lead-1', name: 'Acme', organization_id: 'org-A' },
+      result: { id: 'lead-1', name: 'Acme Corp', organization_id: 'org-A' },
+      session: { tenantId: 'org-B', userId: 'user-1' },
+    });
+
+    expect(stampOf(created).audit?.organization_id).toBe('org-A');
+  });
+
+  it('agrees with the session on the ordinary write, where both name one org', async () => {
+    const { schemas } = withObject(['organization_id']);
+    const { engine, fire, created } = makeEngine(schemas);
+    installAuditWriters(engine as any, 'test.audit');
+
+    // The overwhelming majority of writes, and the case the `isolated` posture
+    // makes structural: Layer 0 (`organization_id = activeOrganizationId`)
+    // cannot be satisfied by a cross-org write, so the two sides agree by
+    // construction and the flip is a no-op.
+    await fire('afterInsert', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      result: { id: 'lead-1', name: 'Acme', organization_id: 'org-A' },
+      session: { tenantId: 'org-A', userId: 'user-1' },
+    });
+
+    expect(stampOf(created).audit?.organization_id).toBe('org-A');
+  });
+
+  // ── the RLS fallback the flip must not weaken ──────────────────────────
+
+  it('falls back to the session tenant when the record carries no organization', async () => {
+    const { schemas } = withObject(['organization_id']);
+    const { engine, fire, created } = makeEngine(schemas);
+    installAuditWriters(engine as any, 'test.audit');
+
+    // A NULL organization column must never reach the row: the SecurityPlugin's
+    // RLS predicate then hides the audit row from everyone, permanently.
+    await fire('afterInsert', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      result: { id: 'lead-1', name: 'Acme', organization_id: null },
+      session: { tenantId: 'org-B', userId: 'user-1' },
+    });
+
+    expect(stampOf(created).audit?.organization_id).toBe('org-B');
+  });
+
+  it('falls back to the session tenant when the object has no organization column', async () => {
+    const { schemas } = withObject([]);
+    const { engine, fire, created } = makeEngine(schemas);
+    installAuditWriters(engine as any, 'test.audit');
+
+    await fire('afterInsert', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      result: { id: 'lead-1', name: 'Acme' },
+      session: { tenantId: 'org-B', userId: 'user-1' },
+    });
+
+    expect(stampOf(created).audit?.organization_id).toBe('org-B');
+  });
+
+  it('still uses the record\'s organization when the session carries no tenant', async () => {
+    const { schemas } = withObject(['organization_id']);
+    const { engine, fire, created } = makeEngine(schemas);
+    installAuditWriters(engine as any, 'test.audit');
+
+    // The two cases the fallback was originally written for — a background job
+    // or sudo path with no `tenantId`, and better-auth's `activeOrganizationId`
+    // cache miss right after sign-in. Behaviour here is byte-identical to
+    // before the flip: those sessions carry no tenant either way.
+    await fire('afterInsert', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      result: { id: 'lead-1', name: 'Acme', organization_id: 'org-A' },
+      session: {},
+    });
+
+    expect(stampOf(created).audit?.organization_id).toBe('org-A');
+  });
+
+  // ── which column carries the organization ──────────────────────────────
+
+  it('leaves an ADR-0066 platform-global object on the actor\'s organization', async () => {
+    const { schemas } = withObject(['organization_id'], {});
+    const { engine, fire, created } = makeEngine(schemas, {
+      crm_lead: { tenancy: { enabled: false } },
+    });
+    installAuditWriters(engine as any, 'test.audit');
+
+    // `tenancy.enabled: false` (e.g. `sys_sso_provider`) keeps an optional org
+    // FK while explicitly NOT being tenant-scoped. Stamping the audit row from
+    // that FK would scope a global object's trail into one organization and
+    // hide it from the platform admin who acted — strictly LESS visible than
+    // before the flip, which is the one outcome the flip must not produce.
+    await fire('afterInsert', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      result: { id: 'lead-1', name: 'Acme', organization_id: 'org-A' },
+      session: { tenantId: 'org-B', userId: 'user-1' },
+    });
+
+    expect(stampOf(created).audit?.organization_id).toBe('org-B');
+  });
+
+  it('honours a declared `tenancy.tenantField`, and only when the field exists', async () => {
+    const { schemas } = withObject(['workspace_id']);
+    const { engine, fire, created } = makeEngine(schemas, {
+      crm_lead: { tenancy: { enabled: true, tenantField: 'workspace_id' } },
+    });
+    installAuditWriters(engine as any, 'test.audit');
+
+    await fire('afterInsert', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      result: { id: 'lead-1', name: 'Acme', workspace_id: 'ws-1' },
+      session: { tenantId: 'org-B', userId: 'user-1' },
+    });
+    expect(stampOf(created).audit?.organization_id).toBe('ws-1');
+
+    // A declared name pointing at a column the object does not have falls
+    // through to the canonical one — the same guard `computeTenantField`
+    // applies (#5315), rather than resolving to nothing.
+    const missing = makeEngine(
+      { ...MULTI_TENANT, crm_lead: ['id', 'name', 'organization_id'] },
+      { crm_lead: { tenancy: { enabled: true, tenantField: 'workspace_id' } } },
+    );
+    installAuditWriters(missing.engine as any, 'test.audit');
+    await missing.fire('afterInsert', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      result: { id: 'lead-1', name: 'Acme', organization_id: 'org-A' },
+      session: { tenantId: 'org-B', userId: 'user-1' },
+    });
+    expect(stampOf(missing.created).audit?.organization_id).toBe('org-A');
+  });
+
+  it('⛔ never reads a `sys_organization` lookup that is not the tenant column', async () => {
+    const { engine, fire, created } = makeEngine({
+      ...MULTI_TENANT,
+      // `sys_organization` as it really ships: no `organization_id` of its own,
+      // and exactly ONE lookup to `sys_organization` — `parent_organization_id`.
+      sys_organization: ['id', 'name', 'parent_organization_id'],
+    });
+    installAuditWriters(engine as any, 'test.audit');
+
+    // This is why the writer resolves the column from the tenancy declaration
+    // instead of scanning for "a lookup whose reference is sys_organization":
+    // that scan would stamp every organization's audit rows with its PARENT's
+    // id, hiding them from the very tenant they concern. It would also read
+    // `parent_organization_id` for a visibility decision — an ADR-0105 D6 red
+    // line that `validateOrgAxisRedLines` makes a build error for RLS policies,
+    // sharing rules and scopes.
+    await fire('afterUpdate', {
+      object: 'sys_organization',
+      input: { id: 'org-self' },
+      previous: { id: 'org-self', name: 'Sub', parent_organization_id: 'org-parent' },
+      result: { id: 'org-self', name: 'Subsidiary', parent_organization_id: 'org-parent' },
+      session: { tenantId: 'org-self', userId: 'user-1' },
+    });
+
+    expect(stampOf(created).audit?.organization_id).toBe('org-self');
+    expect(stampOf(created).audit?.organization_id).not.toBe('org-parent');
+  });
+
+  it('⛔ KNOWN GAP — `sys_api_key.active_organization_id` is still unreachable', async () => {
+    const { engine, fire, created } = makeEngine({
+      ...MULTI_TENANT,
+      // As it really ships since #8287: no `organization_id` (better-auth
+      // managed tables get no injected system columns), and the org the key
+      // authenticates into under a deliberately different name.
+      sys_api_key: ['id', 'name', 'user_id', 'active_organization_id', 'revoked'],
+    });
+    installAuditWriters(engine as any, 'test.audit');
+
+    // The card's repro: revoking a key whose organization differs from the
+    // revoker's active one. The precedence above is now correct, but the column
+    // is not resolvable — `active_organization_id` is NOT this object's
+    // tenant-scope column and must not be declared as one (`tenancy.tenantField`
+    // feeds `applyTenantScope` / `injectTenantOnInsert`, so declaring it would
+    // wall the credential table on an equality that excludes NULL and make
+    // pre-#8287 keys vanish from their own owner's list — the defect #8287
+    // exists to have removed).
+    //
+    // ⚠️ This case pins the REMAINING HALF of #8707, not a decision. It must go
+    // red — and be rewritten to expect `org-key` — on the day a read-neutral,
+    // stamp-only organization declaration lands in `packages/spec`.
+    await fire('afterUpdate', {
+      object: 'sys_api_key',
+      input: { id: 'key-1' },
+      previous: { id: 'key-1', name: 'ci', active_organization_id: 'org-key', revoked: false },
+      result: { id: 'key-1', name: 'ci', active_organization_id: 'org-key', revoked: true },
+      session: { tenantId: 'org-actor', userId: 'user-1' },
+    });
+
+    expect(stampOf(created).audit?.organization_id).toBe('org-actor');
+  });
+});

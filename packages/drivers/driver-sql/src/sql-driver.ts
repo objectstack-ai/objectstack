@@ -575,7 +575,14 @@ const SQLITE_TIME_EXPR_REFS = 8;
  * caller can act on" is detail the caller never wrote: policy column names, and
  * the identity of the tenant-isolation column. Those refusals therefore keep
  * `code` and `status` and lose their operands; the full text goes to the server
- * log. The paragraph above still describes every other refusal in this file.
+ * log.
+ *
+ * [#8197, maintainer ruling 2026-08-15] The exception is no longer only the
+ * cross-field family. The same argument reaches one step out: on a read-scope
+ * predicate the refused constraint's TARGET column is as administrator-authored
+ * as its referent, so the five refusals named in {@link refusalSubtree} join the
+ * same seam. The paragraph above still describes every refusal in this file that
+ * neither family covers.
  */
 function unsupportedFilterError(message: string): Error {
   const err = new Error(message) as Error & { code?: string; status?: number };
@@ -701,6 +708,58 @@ export function withheldFilterDiagnosticOf(err: unknown): string | null {
   if (err === null || (typeof err !== 'object' && typeof err !== 'function')) return null;
   const text = (err as Record<symbol, unknown>)[WITHHELD_FILTER_DIAGNOSTIC];
   return typeof text === 'string' ? text : null;
+}
+
+/**
+ * [#8197, maintainer ruling 2026-08-15] The node a TARGET-FIELD refusal hands
+ * {@link SqlDriver.resolveWithheldFilterRefusal} — and the one place this
+ * family's shape is written down.
+ *
+ * # The family, and why it is exactly these five
+ *
+ * #7929/B withheld the cross-field operands; this card measured what B did not
+ * reach. Five refusals in this file name the constraint's TARGET column, and
+ * every one of them is raised by a predicate an RLS rule can plausibly produce:
+ * {@link jsonColumnOperatorError} (the #7398 gate — a CEL permission rule over a
+ * `multiple: true` field lowers to a membership test on a JSON-stored column,
+ * the most reachable of the five), {@link emptyFieldConstraintError},
+ * {@link unbindableComparandError} (which also answers a MALFORMED `{ $field }`
+ * — one that is not a `FieldReferenceSchema`, so the cross-field arm does not
+ * recognise it) and {@link betweenArityError}. On such a predicate the target
+ * column is as administrator-authored as the referent B already withholds, which
+ * is the argument the ruling accepted.
+ *
+ * # What redaction takes, and why it is more than the field name
+ *
+ * Everything DERIVED FROM THE PREDICATE: the target field, the operator, the
+ * comparand's contents, the filter path and any list index. What stays is the
+ * refusal's IDENTITY (`INVALID_FILTER` / 400), WHICH class fired, and the
+ * capability statement and prescription — none of which is derived from what the
+ * caller or the administrator wrote. That is #7929's own line, applied
+ * unchanged: it withheld both operands because "echoing the target would leave
+ * half the disclosure live", and a comparand preview (`received an object
+ * ({"a":1})`) is the administrator's literal just as surely as a column name is.
+ * ⛔ Do not soften this into "field name only" — one file must not carry two
+ * redaction disciplines.
+ *
+ * # Which node, and why the fallback is safe
+ *
+ * The DEEPEST resolvable node wins, because
+ * `resolveFilterSubtreeProvenance` reads the innermost mark on the ancestor
+ * chain: handing it an ancestor when a nearer node exists would drop a mark set
+ * closer to the leaf. `comparand` is that node when it is an object — the
+ * reference the throw site holds, findable under the query's `where` root by
+ * IDENTITY — and `enclosing` (the field-spec map, or the condition node) takes
+ * over when it is not.
+ *
+ * The fallback cannot widen disclosure, and the reason is structural rather than
+ * empirical: `markFilterSubtreeProvenance` silently no-ops on a non-object, so a
+ * primitive comparand can never carry a mark of its own, and its effective
+ * provenance IS its enclosing node's. The two candidates therefore differ only
+ * where the deeper one has nothing to say.
+ */
+function refusalSubtree(comparand: unknown, enclosing: unknown): unknown {
+  return comparand !== null && typeof comparand === 'object' ? comparand : enclosing;
 }
 
 /**
@@ -1065,6 +1124,104 @@ function refuseUnbackedConflictTarget(object: string, mergeKeys: string[], cause
   err.code = StandardErrorCode.enum.VALIDATION_ERROR;
   err.status = 400;
   err.cause = cause;
+  return err;
+}
+
+/**
+ * [#8755] A `conflictKeys` upsert whose target IS backed, on a MySQL table that
+ * carries another UNIQUE key — the one that key can absorb the conflict instead.
+ *
+ * # A different condition from the one above, so a different sentence
+ *
+ * #5240 is "one condition, one wording", not "one function, one wording".
+ * {@link refuseUnbackedConflictTarget} answers *no index backs your target*, and
+ * every remedy it names is about creating that index. Here the index exists and
+ * the target is perfectly well formed; what cannot be honoured is the TARGETING,
+ * because `ON DUPLICATE KEY UPDATE` carries no target and MySQL merges on
+ * whichever unique key the row collides with first. Reusing the unbacked wording
+ * would tell an author to declare a `unique: true` they already declared, and
+ * send them to re-run a schema sync that would change nothing.
+ *
+ * Measured on live MySQL 8.0.46, `email` and `tax_id` both `unique: true`, the
+ * caller naming `email` — reproduced for this card through the same knex +
+ * `mysql2` path `upsert` takes:
+ *
+ * ```
+ * upsert({email:'a@b.com',     tax_id:'T-1', title:'first'},  ['email']) -> seeded
+ * upsert({email:'other@b.com', tax_id:'T-1', title:'second'}, ['email'])
+ *   -> RESOLVED, ONE row: merged on `tax_id`, across two different `email` values.
+ * ```
+ *
+ * # Why `VALIDATION_ERROR` / 400 and not `NOT_IMPLEMENTED` / 501
+ *
+ * The #5907 classifier this file already applies twice
+ * ({@link uncompilableAggregateFunctionError}, {@link refuseDateBucketedGroupBy})
+ * sorts a refusal by *what the caller would have to change*: a CAPABILITY gap in
+ * the backend — the request is spelled correctly and no schema anywhere makes it
+ * work — is 501, and a request that does not validate against the target it was
+ * given is 400. This one is the second: it is conditional on the TABLE, not on
+ * the dialect. The identical statement against the identical MySQL server is
+ * honoured the moment the table carries a single unique key, which is why the
+ * remedy in the message is a schema change and not "wait for the backend to
+ * implement it". 400 also keeps it off the retry-inviting 5xx band (nothing here
+ * is transient — the next attempt fails identically) and keeps the sentence
+ * itself on the wire: `@objectstack/rest` withholds the message body of any 5xx,
+ * and this message is the deliverable — the ruling requires it to name the
+ * colliding key and the way out.
+ *
+ * # What is NOT refused, and why the PRIMARY KEY never counts as a rival
+ *
+ * The primary key is excluded from the keys that trigger this refusal, in both
+ * directions, and neither is an oversight:
+ *
+ *  - **As a rival** — every table this driver creates carries an `id` PRIMARY
+ *    KEY, so counting it would refuse *every* `conflictKeys` upsert on MySQL.
+ *    The ruling's "the single-key fast path stays untouched" would then describe
+ *    nothing, and the remedy this message states ("drop or rename the extra
+ *    key") is not available for a primary key — a refusal whose only stated way
+ *    out is impossible is worse than no refusal.
+ *  - **As the named target** — `upsert(…, ['id'])` is the driver's own identity
+ *    path, byte-identical in compilation to the default `conflictKeys`-less
+ *    call, which this pre-flight deliberately never probes. Refusing the
+ *    explicit spelling while merging the implicit one would make the accept set
+ *    a property of how the caller typed the same statement. It is also the only
+ *    `conflictKeys` shape the platform itself issues (the lifecycle archiver's
+ *    hot→cold copy), whose remedy would read "drop the unique constraint you
+ *    declared on your own business column".
+ *
+ * Both residues are real and are documented as the dialect limit in
+ * `content/docs/data-modeling/drivers.mdx` rather than left for a reader to
+ * discover: on MySQL a merge can still land on an unnamed unique key whenever no
+ * target was named at all, or when the named target is the primary key.
+ */
+function refuseAmbiguousConflictTarget(
+  object: string,
+  mergeKeys: string[],
+  tableName: string,
+  rivals: PhysicalIndex[],
+): Error {
+  const keys = mergeKeys.map((k) => `"${k}"`).join(', ');
+  const named = rivals.map((i) => `${i.name}(${i.columns.join(', ')})`).join(', ');
+  const err = new Error(
+    `Cannot upsert into "${object}" on conflict keys (${keys}): a UNIQUE key other than the ` +
+      `conflict target exists on "${tableName}" — ${named} — and this backend is MySQL, whose only ` +
+      `merge statement is ON DUPLICATE KEY UPDATE. That statement carries no conflict target, so ` +
+      `the merge lands on whichever UNIQUE key the row collides with FIRST: the conflict target is ` +
+      `backed, but a collision on ${named} would silently merge a row the caller never targeted, ` +
+      `across two different values of the named key. Fix by dropping or renaming the extra UNIQUE ` +
+      `key(s) so the conflict target is the only one on the table, or by running this object on a ` +
+      `dialect that honours the target — SQLite and PostgreSQL compile ON CONFLICT (...), which ` +
+      `merges on the named key alone. Upserting on the primary key is unaffected: supply "id" and ` +
+      `omit conflictKeys.`,
+  ) as Error & { code?: string; status?: number; cause?: unknown };
+  err.code = StandardErrorCode.enum.VALIDATION_ERROR;
+  err.status = 400;
+  // The introspected keys, exactly as the unbacked refusal attaches them: schema
+  // identifiers are the ground truth an operator acts on, and row values are not.
+  err.cause = new Error(
+    `conflict target (${mergeKeys.join(', ')}) on "${tableName}" is backed, but these UNIQUE keys ` +
+      `can absorb the conflict instead: ${named}`,
+  );
   return err;
 }
 
@@ -1612,7 +1769,15 @@ function isRenderableTextComparand(value: unknown): boolean {
  *    `null` reading deliberately. Primitives are therefore untouched; only
  *    objects — for which `String()` has no faithful answer — are refused.
  */
-function assertCompilableComparand(field: string, op: string, value: unknown): void {
+function assertCompilableComparand(
+  field: string,
+  op: string,
+  value: unknown,
+  // [#8197] The node ENCLOSING this comparand — the field-spec map, or the
+  // filter node for the bare `{ field: value }` spelling. Used only when the
+  // comparand itself cannot carry a mark; see {@link refusalSubtree}.
+  enclosing?: unknown,
+): void {
   const ref = fieldReferenceOf(value);
   if (ref !== null) throw crossFieldComparisonError(field, op, ref, value);
 
@@ -1641,11 +1806,66 @@ function assertCompilableComparand(field: string, op: string, value: unknown): v
 
   if (!SCALAR_COMPARAND_OPERATORS.has(op) || isBindableComparand(value)) return;
 
-  throw unsupportedFilterError(
+  throw unbindableComparandError(field, op, value, refusalSubtree(value, enclosing));
+}
+
+/**
+ * [#5041] A scalar operator's comparand that cannot become a bind parameter.
+ *
+ * [#8197] Extracted from {@link assertCompilableComparand}'s body — where it was
+ * an inline `unsupportedFilterError` — for one reason: it is a member of
+ * {@link refusalSubtree}'s family and needed somewhere to compose its redacted
+ * and restored wordings side by side, which is the arrangement every other
+ * withheld refusal in this file already uses.
+ *
+ * It also answers the MALFORMED cross-field spelling. `{ "$gt": { "$field": 42 } }`
+ * is not a `FieldReferenceSchema` (the referent must be a string), so
+ * {@link fieldReferenceOf} does not recognise it and the cross-field arm never
+ * sees it — it arrives here as an ordinary unbindable object. Its comparand
+ * preview used to print `{"$field":42}` beside the target column; both halves
+ * are predicate-derived and both are now redacted.
+ */
+function unbindableComparandError(
+  field: string,
+  op: string,
+  value: unknown,
+  subtree?: unknown,
+): Error {
+  return withheldFilterError(
+    `A comparison in this filter requires a single comparable value, but received a value that ` +
+      `cannot be bound as a SQL parameter. Use ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE} (or a ` +
+      `binary value); for a list use $in/$nin, and for a range use $between. The field, the ` +
+      `operator and the value this filter used are withheld from the message (#8197); the full ` +
+      `diagnostic is in the server log.`,
     `Operator "${op}" on field "${field}" requires a single comparable value, but received ` +
       `${Array.isArray(value) ? 'an array' : `an object (${safeShapePreview(value)})`}, which cannot be ` +
       `bound as a SQL parameter. Use ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE} (or a binary ` +
       `value); for a list use $in/$nin, and for a range use $between.`,
+    subtree,
+  );
+}
+
+/**
+ * `$between` handed something that is not a two-element range.
+ *
+ * [#8197] The operator is NAMED in the redacted half, and it is the one thing in
+ * this family that is: `$between` here is the refusal's CLASS, not a variable of
+ * it — the same "which class fired" {@link crossFieldComparisonError} keeps. The
+ * three refusals whose operator varies within one class (the JSON-column gate,
+ * the bind gate) withhold theirs, because there the operator says WHICH
+ * constraint of the predicate failed rather than which rule refused it.
+ *
+ * The target field is the whole disclosure, so redacting it leaves a sentence
+ * that is still the complete repair: a `$between` takes `[min, max]`, and an
+ * author who wrote one malformed range in one filter has no second candidate to
+ * confuse it with.
+ */
+function betweenArityError(field: string, subtree?: unknown): Error {
+  return withheldFilterError(
+    `Operator "$between" in this filter requires a [min, max] value array. The field it was ` +
+      `aimed at is withheld from the message (#8197); the full diagnostic is in the server log.`,
+    `Operator "$between" on field "${field}" requires a [min, max] value array.`,
+    subtree,
   );
 }
 
@@ -1774,13 +1994,28 @@ const JSON_COLUMN_INCOMPATIBLE_OPERATORS: ReadonlySet<string> = new Set([
  * rather than designed, which is the issue's ask 2 (`$overlaps` /
  * `$containsAny`); ask 2 is a closed-spec-set question and is deliberately not
  * answered here.
+ *
+ * [#8197] The most reachable member of {@link refusalSubtree}'s family, and the
+ * one the card led with: a CEL permission rule over a multi-select field lowers
+ * to exactly this membership test, so the column this gate names is the
+ * administrator's. The prescription survives redaction with PLACEHOLDER names —
+ * the SHAPE is the repair, and the shape names nothing.
  */
-function jsonColumnOperatorError(field: string, op: string, bare: boolean): Error {
+function jsonColumnOperatorError(field: string, op: string, bare: boolean, subtree?: unknown): Error {
   const spelling = bare
     ? `The bare equality spelling { "${field}": value }`
     : `Operator "${op}"`;
   const on = bare ? '' : ` on field "${field}"`;
-  return unsupportedFilterError(
+  return withheldFilterError(
+    `A constraint in this filter WAS NOT APPLIED: it aims a scalar comparison operator at a ` +
+      `field this driver stores as a JSON TEXT column (e.g. ["a","b"]), and such an operator ` +
+      `compares that whole serialized text against a single value — it can never equal one ` +
+      `member. Use "$contains" for membership ({ "FIELD": { "$contains": "a" } }), or an $or of ` +
+      `"$contains" for any-of ({ "$or": [{ "FIELD": { "$contains": "a" } }, ` +
+      `{ "FIELD": { "$contains": "b" } }] }). Refused rather than compiled because the answer ` +
+      `was silently wrong in BOTH directions: $in/$eq matched nothing, while $nin/$ne returned ` +
+      `the very rows they were asked to exclude (#7398). The field and the operator this filter ` +
+      `used are withheld from the message (#8197); the full diagnostic is in the server log.`,
     `${spelling}${on} WAS NOT APPLIED: "${field}" is a multi-value (or otherwise JSON-valued) ` +
       `field, stored by this driver as a JSON TEXT column (e.g. ["a","b"]), and "${op}" compares ` +
       `that whole serialized text against a single value — it can never equal one member. ` +
@@ -1789,6 +2024,7 @@ function jsonColumnOperatorError(field: string, op: string, bare: boolean): Erro
       `{ "${field}": { "$contains": "b" } }] }). Refused rather than compiled because the answer ` +
       `was silently wrong in BOTH directions: $in/$eq matched nothing, while $nin/$ne returned ` +
       `the very rows they were asked to exclude (#7398).`,
+    subtree,
   );
 }
 
@@ -2156,14 +2392,23 @@ function assertFilterNode(value: unknown, path: string): asserts value is Record
  * same reasoning #5041 applied one position over: a filter that cannot be given
  * one meaning is refused at the producer, loudly, at authoring time.
  */
-function emptyFieldConstraintError(field: string, path: string): Error {
-  return unsupportedFilterError(
+function emptyFieldConstraintError(field: string, path: string, subtree?: unknown): Error {
+  return withheldFilterError(
+    `A field constraint in this filter carries zero operators ({ "FIELD": {} }). A field ` +
+      `constraint must name at least one operator (e.g. { "FIELD": { "$eq": "value" } }) or be a ` +
+      `direct comparand (e.g. { "FIELD": "value" }). It is refused rather than ignored because ` +
+      `the backends disagreed on what it means — this driver dropped it inside $and/$or/$not ` +
+      `(matching EVERY row) while refusing it at the top level, and driver-memory / ` +
+      `@objectstack/formula answered "matches nothing". #5240. The field this filter named and ` +
+      `its position are withheld from the message (#8197); the full diagnostic is in the server ` +
+      `log.`,
     `Field constraint at ${path} carries zero operators ({ "${field}": {} }). A field constraint ` +
       `must name at least one operator (e.g. { "${field}": { "$eq": "value" } }) or be a direct ` +
       `comparand (e.g. { "${field}": "value" }). It is refused rather than ignored because the ` +
       `backends disagreed on what it means — this driver dropped it inside $and/$or/$not (matching ` +
       `EVERY row) while refusing it at the top level, and driver-memory / @objectstack/formula ` +
       `answered "matches nothing". #5240.`,
+    subtree,
   );
 }
 
@@ -2520,7 +2765,11 @@ function classifyFilterKey(key: string, value: unknown, here: string): FilterVer
   // contributes `'clause'`, exactly as #5134 classified it. This adds a refusal,
   // it does not reclassify a surviving shape, so every filter that compiled
   // before compiles byte-identically now.
-  if (isEmptyFieldConstraint(value)) throw emptyFieldConstraintError(key, here);
+  // [#8197] `value` IS the `{}` — an object, so it is markable and findable by
+  // identity under the query's `where` root. The reduction walks the same tree
+  // the merge boundaries marked, by reference, so nothing is copied between the
+  // mark and this throw.
+  if (isEmptyFieldConstraint(value)) throw emptyFieldConstraintError(key, here, value);
 
   // [#6050] `undefined` in a comparand position, refused on THIS walk for the
   // two reasons the walk exists — it is exhaustive and it runs FIRST.
@@ -3375,7 +3624,7 @@ export class SqlDriver implements IDataDriver {
 
   /**
    * [#8621] PHYSICAL key indexes per table (tableName → the PRIMARY KEY and
-   * UNIQUE indexes that actually exist), for {@link assertConflictTargetBacked}.
+   * UNIQUE indexes that actually exist), for {@link assertConflictTargetHonoured}.
    *
    * Deliberately not `managedObjectIndexes`, which records what metadata
    * DECLARES. The pre-flight answers "can this conflict target resolve to a key
@@ -5060,9 +5309,14 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * [#8621] Refuse an upsert whose `conflictKeys` no PRIMARY KEY or UNIQUE index
-   * backs — BEFORE the statement is compiled, on the dialect where the server
-   * will never say so itself.
+   * Refuse an upsert whose named `conflictKeys` this dialect will not honour as
+   * the merge target — BEFORE the statement is compiled, on the dialect where
+   * the server will never say so itself. Two conditions, one introspection:
+   *
+   *  - **[#8621] unbacked** — no PRIMARY KEY or UNIQUE index covers the named
+   *    target, so there is no merge target at all;
+   *  - **[#8755] ambiguous** — the target IS covered, but another UNIQUE key on
+   *    the table can absorb the conflict instead of it.
    *
    * # Why a pre-flight exists at all, when a refusal already did
    *
@@ -5108,13 +5362,16 @@ export class SqlDriver implements IDataDriver {
    * "the compiler drops the conflict target, so the server can never be asked",
    * and MySQL is the dialect that meets it.
    *
-   * # Why it refuses only what it can PROVE is unbacked
+   * # Why it refuses only what it can PROVE
    *
    * A false refusal breaks a working merge, which is the expensive direction —
    * the same asymmetry `isUnbackedConflictTargetError` records. So every
    * uncertain answer proceeds: a failed introspection, a table with no keys at
    * all (see {@link introspectKeyIndexes}), and a possibly stale cache, which is
-   * re-read from the database before any refusal is thrown.
+   * re-read from the database before any refusal is thrown. The stale-cache leg
+   * covers BOTH verdicts and in opposite directions — an index created since the
+   * read would make a backed target read as unbacked, and one DROPPED since the
+   * read would make a rival key exist that no longer does.
    *
    * The comparison is against the conflict target as EMITTED. `onConflict()`
    * receives `mergeKeys` verbatim — the write column map is applied to the row,
@@ -5124,11 +5381,12 @@ export class SqlDriver implements IDataDriver {
    * dialects infer an arbiter index, and the only reading under which a
    * composite key means anything).
    *
-   * ⚠️ **This closes the unbacked-target hole, and not the whole MySQL gap.**
+   * # [#8755] The SECOND condition this pre-flight answers, added later
+   *
    * `ON DUPLICATE KEY UPDATE` carries no target even when the target IS backed,
    * so a table with a second unique index can still merge on a key the caller
-   * never named. Measured here on live MySQL 8.0.46, both columns unique,
-   * caller naming `email`:
+   * never named. Measured on live MySQL 8.0.46, both columns unique, caller
+   * naming `email` — re-measured for #8755 before it was fixed:
    *
    * ```
    * upsert({email:'a@b.com',     tax_id:'T-1', title:'first'},  ['email']) -> seeded
@@ -5136,29 +5394,71 @@ export class SqlDriver implements IDataDriver {
    *   -> ONE row, merged on `tax_id`. The named target was backed the whole time.
    * ```
    *
-   * That is a different condition with a different fix and is filed separately
-   * (#8755); it is deliberately NOT smuggled in here, because refusing it would
-   * mean refusing every `conflictKeys` upsert on any MySQL table carrying more
-   * than one unique index — an accept-set change far past what this card rules.
+   * #8621 deliberately left that standing — it is a different condition, and
+   * refusing it narrows the accept set past what that card ruled. #8755's
+   * maintainer ruling then took it, choosing refusal (its option A) over
+   * emulating a target-honouring statement on MySQL (its option B, rejected:
+   * a SELECT-then-branch with a race window and an execution path unlike every
+   * other dialect — *"dressing 'the dialect can't' up as 'it did'"*).
+   *
+   * The two conditions share this method because they share the QUESTION —
+   * "what keys does this table physically carry?" — asked once, cached once
+   * ({@link physicalKeyIndexes}), invalidated in one place. They do NOT share an
+   * answer: see {@link refuseAmbiguousConflictTarget} for why the second gets
+   * its own sentence, and for why the PRIMARY KEY is never a rival key.
+   *
+   * ⚠️ **Renamed from `assertConflictTargetBacked` when the second condition
+   * landed.** "Backed" was the whole question while #8621 was the whole method;
+   * it is now one of two, and a name that describes half of what a guard refuses
+   * is how the other half gets deleted by someone tidying up.
    */
-  protected async assertConflictTargetBacked(object: string, mergeKeys: string[]): Promise<void> {
+  protected async assertConflictTargetHonoured(object: string, mergeKeys: string[]): Promise<void> {
     // The table the statement will actually hit — same resolution `getBuilder`
     // performs for the insert, rotation shard included.
     const target = this.rotationWriteTarget(object) ?? object;
     const tableName = this.physicalTableByObject[target] ?? target;
 
     const wanted = new Set(mergeKeys);
-    const backs = (keys: PhysicalIndex[]): boolean =>
-      keys.some((i) => i.columns.length === wanted.size && i.columns.every((c) => wanted.has(c)));
+    const covers = (i: PhysicalIndex): boolean =>
+      i.columns.length === wanted.size && i.columns.every((c) => wanted.has(c));
+
+    type Verdict =
+      | { kind: 'honoured' }
+      | { kind: 'unbacked' }
+      | { kind: 'ambiguous'; rivals: PhysicalIndex[] };
+
+    const judge = (keys: PhysicalIndex[]): Verdict => {
+      if (!keys.some(covers)) return { kind: 'unbacked' };
+      // [#8755] The named target is the PRIMARY KEY: the driver's own identity
+      // path, and the one shape whose refusal would differ from the
+      // byte-identical default call this pre-flight never probes. Left to merge
+      // — the residue is documented, not silent (see the refusal's docblock).
+      if (keys.some((i) => i.primary === true && covers(i))) return { kind: 'honoured' };
+      // A UNIQUE key that is neither the named target nor the primary key can
+      // absorb the conflict instead of it. An index over the SAME columns as the
+      // target is not a rival: colliding on it is colliding on the target.
+      const rivals = keys.filter((i) => i.primary !== true && !covers(i));
+      return rivals.length > 0 ? { kind: 'ambiguous', rivals } : { kind: 'honoured' };
+    };
 
     let keys = await this.introspectKeyIndexes(tableName);
-    if (keys !== null && keys.length > 0 && !backs(keys)) {
+    if (keys !== null && keys.length > 0 && judge(keys).kind !== 'honoured') {
       // A cache filled before the index was created is the only way a real key
-      // can be missing here, and it is cheaper to re-read once on the refusing
-      // path than to risk refusing a call the database would have merged.
+      // can be missing here, and a cache filled before one was DROPPED is the
+      // only way a rival key can be reported that no longer exists. Both are
+      // cheaper to re-read once on the refusing path than to risk refusing a
+      // call the database would have merged — the same asymmetry, now covering
+      // both verdicts.
       keys = await this.introspectKeyIndexes(tableName, { fresh: true });
     }
-    if (keys === null || keys.length === 0 || backs(keys)) return;
+    if (keys === null || keys.length === 0) return;
+
+    const verdict = judge(keys);
+    if (verdict.kind === 'honoured') return;
+
+    if (verdict.kind === 'ambiguous') {
+      throw refuseAmbiguousConflictTarget(object, mergeKeys, tableName, verdict.rivals);
+    }
 
     // The introspected keys stand where the server's sentence stands on the
     // other two dialects: the caller-visible message is the shared wording, and
@@ -5191,8 +5491,8 @@ export class SqlDriver implements IDataDriver {
 
     const mergeKeys = conflictKeys && conflictKeys.length > 0 ? conflictKeys : ['id'];
 
-    // [#8621] Pre-flight the conflict target — see
-    // {@link assertConflictTargetBacked} for the mechanism and why it is
+    // [#8621, #8755] Pre-flight the conflict target — see
+    // {@link assertConflictTargetHonoured} for the mechanism and why it is
     // MySQL-only. Two placement facts, both load-bearing:
     //
     //  - It runs only when the CALLER named a target. The default `['id']` is
@@ -5206,7 +5506,7 @@ export class SqlDriver implements IDataDriver {
     //    reservation for a statement that never executes — a visible gap in an
     //    externally meaningful sequence, handed out for a rejected call.
     if (conflictKeys && conflictKeys.length > 0 && this.isMysql) {
-      await this.assertConflictTargetBacked(object, mergeKeys);
+      await this.assertConflictTargetHonoured(object, mergeKeys);
     }
 
     // #6943. Measured: `upsert` does NOT share `bulkCreate`'s shape. It is
@@ -9218,10 +9518,16 @@ export class SqlDriver implements IDataDriver {
     column: string,
     op: string,
     bare = false,
+    // [#8197] The filter node this constraint was read from, so the refusal can
+    // be resolved against the query's `where` root like every other withheld
+    // one. Optional, and absent means WITHHELD — a subclass that overrides this
+    // method without threading it degrades onto the fail-closed branch rather
+    // than onto the disclosing one.
+    subtree?: unknown,
   ): void {
     if (!JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op)) return;
     if (!this.isJsonColumn(table, localField)) return;
-    throw jsonColumnOperatorError(column, op, bare);
+    throw jsonColumnOperatorError(column, op, bare, subtree);
   }
 
   /**
@@ -9234,7 +9540,11 @@ export class SqlDriver implements IDataDriver {
    * recurses only into itself. So one `catch` here sees every refusal the three
    * `{ $field }` builders raise ({@link crossFieldComparisonError},
    * {@link bareFieldReferenceError}, {@link uncompilableFieldReferenceError})
-   * without a per-throw-site call, and without a re-entrancy guard.
+   * without a per-throw-site call, and without a re-entrancy guard. [#8197] It
+   * sees the target-field family the same way, including the two members raised
+   * on the REDUCTION walk ({@link emptyFieldConstraintError}) rather than in the
+   * emitter — that walk runs at the top of `applyFilterCondition`, inside this
+   * frame.
    *
    * The log is `this.logger` — the sink this driver already owns, which a host
    * injects and a test spies on. ⛔ Not `console.warn` from the module-level
@@ -9263,6 +9573,12 @@ export class SqlDriver implements IDataDriver {
    * of their merge the caller wrote) is swapped for its full author-facing
    * text: both columns, the operator, the list index, the boundary reason.
    * Same identity — `INVALID_FILTER` / 400 — different words.
+   *
+   * [#8197] Unchanged by the second family joining it, which is the point: the
+   * target-field refusals ({@link refusalSubtree}) reach this method as the same
+   * carrier with the same three keys, so there is ONE place that decides what a
+   * redacted refusal may say and one default it can decide with. A second seam
+   * would have been a second chance to get the fail direction wrong.
    *
    * ⚠️ Everything else stays REDACTED and goes to the server log, exactly as
    * #7929/B left it: a `'policy'` verdict, an UNMARKED tree (no boundary ever
@@ -9310,9 +9626,16 @@ export class SqlDriver implements IDataDriver {
     const marked = err as Record<symbol, unknown>;
     if (marked[WITHHELD_FILTER_LOGGED] === true) return;
     Object.defineProperty(err as object, WITHHELD_FILTER_LOGGED, { value: true, enumerable: false });
+    // [#8197] The wording no longer says "cross-field reference refused": this
+    // seam now carries the target-field family too, and a log line that names
+    // the wrong refusal class sends the operator reading it to the wrong part
+    // of the filter. What it states instead is the fact that is true of every
+    // line it writes — the predicate was not positively marked author-written,
+    // so the naming half went here rather than to the caller.
     this.logger.warn(
-      `[sql-driver] INVALID_FILTER — cross-field reference refused; operands withheld from the ` +
-        `response (#7929). Full diagnostic: ${diagnostic}`,
+      `[sql-driver] INVALID_FILTER — refusal detail withheld from the response because the ` +
+        `predicate was not positively marked as author-written (#7929, #8220, #8197). ` +
+        `Full diagnostic: ${diagnostic}`,
     );
   }
 
@@ -9392,7 +9715,9 @@ export class SqlDriver implements IDataDriver {
         // wording wherever the author wrote it — this position used to answer
         // with #5041's generic "cannot be bound as a SQL parameter", which
         // describes a comparand and not a constraint with no operator at all.
-        if (isEmptyFieldConstraint(value)) throw emptyFieldConstraintError(key, `filter.${key}`);
+        if (isEmptyFieldConstraint(value)) {
+          throw emptyFieldConstraintError(key, `filter.${key}`, value);
+        }
         // #6050 — the same position as the `undefined` gate on the reduction
         // walk, reached the same way `{ field: {} }` above reaches its own: this
         // loop runs when NO key of the filter carries an operator, so the walk
@@ -9405,11 +9730,14 @@ export class SqlDriver implements IDataDriver {
         assertDefinedComparands(key, value, `filter.${key}`);
         // #5041 — the plain `{ field: value }` map compiles to an implicit `=`,
         // so it is a comparison emitter too and gets the same gate.
-        assertCompilableComparand(column, '=', value);
+        // [#8197] `filters` is both this loop's node and the query's `where`
+        // root — this branch runs only when NO key carries an operator, so
+        // there is no nearer enclosing node to hand over.
+        assertCompilableComparand(column, '=', value, filters);
         // #7398 — and the column-type question the comparand gate cannot ask.
         // This loop IS the bare `{ field: value }` spelling, one of the four
         // the issue measured as silently answering zero rows on an array column.
-        this.assertOperatorAppliesToColumn(table, key, column, '=', true);
+        this.assertOperatorAppliesToColumn(table, key, column, '=', true, refusalSubtree(value, filters));
         const coerced = this.coerceFilterValue(table, key, value);
         const expr = this.filterColumnExpr(table, key, column);
         if (expr && this.applyNormalizedComparison(builder, 'and', expr, '=', coerced)) continue;
@@ -9749,12 +10077,15 @@ export class SqlDriver implements IDataDriver {
           // #5041 — reject a comparand that cannot become a bind parameter
           // BEFORE any rewrite or coercion touches it, so the message names the
           // shape the caller actually sent.
-          assertCompilableComparand(field, rawOp, opValue);
+          // [#8197] `value` — this field's operator map — is the enclosing node
+          // for both gates below: the nearest node to the constraint that is
+          // guaranteed to be an object, and therefore markable.
+          assertCompilableComparand(field, rawOp, opValue, value);
           // #7398 — the column-type gate, on the operator AS WRITTEN and ahead
           // of every rewrite and both emitters, so a JSON column cannot reach
           // the plain `whereIn` arms below NOR the normalised `whereRaw` arms
           // an external multi-value datetime column is routed to.
-          this.assertOperatorAppliesToColumn(table, localField, field, rawOp);
+          this.assertOperatorAppliesToColumn(table, localField, field, rawOp, false, value);
           // Calendar-day upper bounds first (#3777): `$lte` on a bare
           // `YYYY-MM-DD` against a datetime column compiles half-open, and a
           // `$between` whose max is a bare day decomposes into the same pair —
@@ -9875,7 +10206,11 @@ export class SqlDriver implements IDataDriver {
             case '$between': {
               const arr = Array.isArray(coerced) ? coerced : [];
               if (arr.length !== 2) {
-                throw unsupportedFilterError(`Operator "$between" on field "${field}" requires a [min, max] value array.`);
+                // [#8197] `opValue`, never `coerced`: coercion can return a NEW
+                // array, and a node the resolver cannot find under the query's
+                // own `where` root resolves to `null` — withheld — for every
+                // caller including an author who really did write it.
+                throw betweenArityError(field, refusalSubtree(opValue, value));
               }
               (builder as any)[logicalOp === 'or' ? 'orWhereBetween' : 'whereBetween'](field, arr as [any, any]);
               break;
@@ -9925,7 +10260,11 @@ export class SqlDriver implements IDataDriver {
         // condition carries an operator SOMEWHERE (so `applyFilters` routed the
         // whole node here) but not on this key. Same compilation, same gate:
         // one condition must not have two verdicts depending on its siblings.
-        this.assertOperatorAppliesToColumn(table, localField, field, '=', true);
+        // [#8197] A bare comparand is usually a primitive, so `condition` — this
+        // node, an ARM of the merge when one happened — is what carries the mark.
+        this.assertOperatorAppliesToColumn(
+          table, localField, field, '=', true, refusalSubtree(value, condition),
+        );
         const coerced = this.coerceFilterValue(table, localField, value);
         const columnExpr = this.filterColumnExpr(table, localField, field);
         if (columnExpr && this.applyNormalizedComparison(builder, logicalOp, columnExpr, '=', coerced)) continue;

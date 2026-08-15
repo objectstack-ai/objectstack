@@ -37,6 +37,43 @@
 // From the repo root that is `pnpm check:app-nav-i18n` (which runs both).
 //
 // ---------------------------------------------------------------------------
+// The SECOND assertion: `pages.*` default-locale content parity (#8764)
+// ---------------------------------------------------------------------------
+// The platform bundle `packages/platform-objects/src/apps/translations/en.ts`
+// has three top-level sections. `apps.*` and `dashboards.*` are compared
+// against their sources verbatim by `app-nav-translation-parity.test.ts`
+// (#8721) — a static walk, sound because those sources live in that same
+// package. The third section, `pages.*`, was compared by NOTHING, in any
+// locale including `en`, because its three sources are authored in OTHER
+// packages:
+//
+//   pages.marketplace_installed      → @objectstack/cloud-connection
+//                                      src/marketplace-ui.ts
+//   pages.cloud_connection_settings  → @objectstack/cloud-connection
+//                                      src/cloud-connection-ui.ts
+//   pages.connect_agent              → @objectstack/mcp src/connect-ui.ts
+//
+// `platform-objects` does not depend on those packages and must not (they
+// depend on IT), so its own test cannot reach the literals — it says so and
+// defers here. This gate can: the two bundles are already in `CONTRIBUTORS`
+// below for their NAV contributions, and the same manifests carry `pages:`,
+// which `engine.registerApp` registers through `METADATA_ARRAY_KEYS`. So the
+// pages are in the composition this gate already boots — measured, not
+// assumed — and cost one extra read of the registry.
+//
+// Why `en` only, and why CONTENT rather than coverage: `en` is not a
+// translation, it is a COPY of the source literals (AGENTS.md's i18n row — the
+// extractor rewrites it from the source on every run). Comparing it to its
+// source is therefore meaningful, and comparing `zh-CN` to the source would be
+// backwards — those SHOULD differ. Per-locale key coverage is the first
+// assertion's job, one section over.
+//
+// The defect shape this closes is the one #8721 was filed for, one section
+// over: a widget was converted, its bundles kept the pre-conversion string, and
+// a fully green build served stale copy in all four locales. A page header
+// edited in `cloud-connection` or `mcp` would do exactly that here.
+//
+// ---------------------------------------------------------------------------
 // It lives in `packages/cli` on purpose
 // ---------------------------------------------------------------------------
 // "Who serves this path" is a question about the composed runtime, not about
@@ -115,6 +152,147 @@ export function missingLabels(ids, navTranslations) {
  */
 export function contributorsWithNoNavIds(contributions) {
   return contributions.filter((c) => c.ids.length === 0).map((c) => c.source);
+}
+
+// ---------------------------------------------------------------------------
+// `pages.*` default-locale parity (#8764) — pure helpers, same self-test
+// discipline as the nav ones above.
+// ---------------------------------------------------------------------------
+
+/**
+ * The default locale. The bundle is a plain locale-keyed record and declares no
+ * default of its own, so this is the repo-wide convention (AGENTS.md's i18n
+ * row): `en` is a COPY of the source literals, rewritten from the source by the
+ * extractor on every run — never a translation. Its absence is a failure rather
+ * than a skip, below: a gate that silently measures nothing is worse than no
+ * gate ("Absence must be loud").
+ */
+const DEFAULT_LOCALE = 'en';
+
+/** The component type whose `title` / `subtitle` the page bundle addresses. */
+const PAGE_HEADER_COMPONENT = 'page:header';
+
+/**
+ * The source literals a composed page offers, keyed the way the translation
+ * bundle addresses them. The mapping is not invented here — it is the one
+ * `translatePage` implements and `TranslationDataSchema.pages` documents:
+ *
+ *   pages.<name>.label       → the page document's own `label`
+ *   pages.<name>.description → the page document's own `description`
+ *   pages.<name>.title       → every `page:header`'s `properties.title`
+ *   pages.<name>.subtitle    → every `page:header`'s `properties.subtitle`
+ *
+ * `title`/`subtitle` are ARRAYS because the resolver overlays every `page:header`
+ * in the regions, not the first one — so parity has to hold for all of them or
+ * the bundle is right about one header and wrong about another.
+ */
+export function pageSourceCopy(page) {
+  const headers = [];
+  for (const region of page?.regions ?? []) {
+    for (const component of region?.components ?? []) {
+      if (component?.type === PAGE_HEADER_COMPONENT) headers.push(component?.properties ?? {});
+    }
+  }
+  const strings = (key) => headers.map((h) => h?.[key]).filter((v) => typeof v === 'string');
+  return {
+    label: typeof page?.label === 'string' ? page.label : undefined,
+    description: typeof page?.description === 'string' ? page.description : undefined,
+    title: strings('title'),
+    subtitle: strings('subtitle'),
+  };
+}
+
+/**
+ * Every way the default-locale `pages.*` section can disagree with the page
+ * metadata it copies. Three finding kinds, deliberately distinct because their
+ * REMEDIES differ:
+ *
+ *  - `drift`     the bundle serves a string the source no longer says. Fix the
+ *                bundle (and the other locales, which are now stale too).
+ *  - `orphan`    the bundle names a page this composition does not contain.
+ *                This is the ANTI-VACUITY half: without it, renaming a page
+ *                silently reduces this assertion to comparing nothing, and a
+ *                parity gate that cannot fail is the exact defect class #8764
+ *                is about.
+ *  - `no-source` the bundle declares a key the page has nothing to compare
+ *                against — a phantom key that translates nothing (ADR-0078's
+ *                shape). Delete the key or restore the source field.
+ *
+ * ⚠️ `title` implements the resolver's fallback: `pages.<name>.title` defaults
+ * to `pages.<name>.label` when omitted. That is not a detail — it is a real
+ * drift path. Today all three pages declare `label` only, so that ONE key is
+ * what serves the header title; a header `title` edited to differ from the page
+ * `label` would be silently overwritten by the label in every locale, `en`
+ * included, with nothing else in the repo comparing the two.
+ */
+export function defaultLocalePageDrift(pageTranslations, sourceByName) {
+  const findings = [];
+  const add = (kind, path, source, served) => findings.push({ kind, path, source, served });
+
+  for (const [name, entry] of Object.entries(pageTranslations ?? {})) {
+    const source = sourceByName?.get(name);
+    if (!source) {
+      add('orphan', `pages.${name}`, undefined, undefined);
+      continue;
+    }
+
+    // The page document's own fields.
+    for (const attr of ['label', 'description']) {
+      const served = entry?.[attr];
+      if (typeof served !== 'string') continue; // an undeclared key makes no claim
+      if (typeof source[attr] !== 'string') { add('no-source', `pages.${name}.${attr}`, undefined, served); continue; }
+      if (served !== source[attr]) add('drift', `pages.${name}.${attr}`, source[attr], served);
+    }
+
+    // The `page:header` copy.
+    const explicitTitle = typeof entry?.title === 'string' ? entry.title : undefined;
+    const servedTitle = explicitTitle ?? (typeof entry?.label === 'string' ? entry.label : undefined);
+    const titlePath = `pages.${name}.${explicitTitle !== undefined ? 'title' : 'label'}`;
+    if (servedTitle !== undefined) {
+      // An explicit `title` with no header to land on is a phantom key. The
+      // `label` FALLBACK is not — `label` has already been judged above against
+      // the page's own field, and a page with no header title is not a page the
+      // fallback makes a claim about.
+      if (source.title.length === 0) {
+        if (explicitTitle !== undefined) add('no-source', titlePath, undefined, explicitTitle);
+      } else {
+        for (const t of source.title) if (servedTitle !== t) add('drift', titlePath, t, servedTitle);
+      }
+    }
+    const servedSubtitle = entry?.subtitle;
+    if (typeof servedSubtitle === 'string') {
+      if (source.subtitle.length === 0) add('no-source', `pages.${name}.subtitle`, undefined, servedSubtitle);
+      else for (const s of source.subtitle) if (servedSubtitle !== s) add('drift', `pages.${name}.subtitle`, s, servedSubtitle);
+    }
+  }
+  return findings;
+}
+
+/** Render one `pages.*` finding with the package that authors the source. */
+function renderPageFinding(finding, authoredBy) {
+  const pageName = finding.path.split('.')[1];
+  const from = authoredBy.get(pageName);
+  const where = from ? ` (authored by ${from})` : '';
+  if (finding.kind === 'orphan') {
+    return (
+      `${finding.path} — the ${DEFAULT_LOCALE} bundle declares this page, but the booted composition ` +
+      `contains no page by that name. Nothing compared it, so every key under it is unverified: ` +
+      `either the page was renamed (rename the bundle entry with it, in all four locales) or it was ` +
+      `removed (delete the entry). Left as is, this section's parity assertion silently checks less.`
+    );
+  }
+  if (finding.kind === 'no-source') {
+    return (
+      `${finding.path}${where} — the ${DEFAULT_LOCALE} bundle declares this key, but the page metadata ` +
+      `has no corresponding field for it to overlay. It translates nothing: delete the key, or restore ` +
+      `the field at the source.`
+    );
+  }
+  return (
+    `${finding.path}${where} — the ${DEFAULT_LOCALE} bundle has drifted from the source literal.\n` +
+    `        source: ${JSON.stringify(finding.source)}\n` +
+    `        ${DEFAULT_LOCALE} bundle: ${JSON.stringify(finding.served)}`
+  );
 }
 
 /** Render one locale's shortfall with the source that declared each id. */
@@ -317,13 +495,100 @@ function selfTest() {
   expect('#5750 verdict names the fallback literal', rendered.includes('HTTP Deliveries'), rendered);
   expect('#5750 verdict names the locale', rendered.includes('zh-CN'), rendered);
 
+  // -------------------------------------------------------------------------
+  // `pages.*` default-locale parity (#8764). Recorded from the real
+  // `MarketplaceInstalledPage`, so the sample is the shape the gate meets.
+  // -------------------------------------------------------------------------
+  const PAGE_SAMPLE = {
+    name: 'marketplace_installed',
+    label: 'Installed Apps',
+    regions: [
+      {
+        name: 'header',
+        components: [
+          {
+            type: 'page:header',
+            properties: {
+              title: 'Installed Apps',
+              subtitle: "Marketplace packages currently installed into this runtime's kernel.",
+            },
+          },
+        ],
+      },
+      { name: 'main', components: [{ type: 'marketplace:installed-list', properties: {} }] },
+    ],
+  };
+  const SOURCES = new Map([[PAGE_SAMPLE.name, pageSourceCopy(PAGE_SAMPLE)]]);
+  const IN_PARITY = {
+    marketplace_installed: {
+      label: 'Installed Apps',
+      subtitle: "Marketplace packages currently installed into this runtime's kernel.",
+    },
+  };
+
+  const copy = pageSourceCopy(PAGE_SAMPLE);
+  expect('#8764 reads the page label', copy.label === 'Installed Apps', JSON.stringify(copy));
+  expect('#8764 reads header copy out of the regions', copy.title[0] === 'Installed Apps' && copy.subtitle.length === 1, JSON.stringify(copy));
+  expect('#8764 a page with no regions yields no header copy, never a crash', pageSourceCopy({ name: 'x' }).title.length === 0, 'a bare page must not throw');
+
+  expect('#8764 a bundle in parity reports nothing', defaultLocalePageDrift(IN_PARITY, SOURCES).length === 0, JSON.stringify(defaultLocalePageDrift(IN_PARITY, SOURCES)));
+
+  // The defect the card is about: a source string edited in another package,
+  // the hand-copied bundle left behind.
+  const subtitleDrift = defaultLocalePageDrift(
+    { marketplace_installed: { ...IN_PARITY.marketplace_installed, subtitle: 'Packages installed into this kernel.' } },
+    SOURCES,
+  );
+  expect('#8764 a drifted subtitle is reported', subtitleDrift.length === 1 && subtitleDrift[0].kind === 'drift', JSON.stringify(subtitleDrift));
+  expect('#8764 the drift verdict carries BOTH strings', subtitleDrift[0]?.source?.startsWith('Marketplace packages') && subtitleDrift[0]?.served?.startsWith('Packages installed'), JSON.stringify(subtitleDrift));
+
+  const labelDrift = defaultLocalePageDrift(
+    { marketplace_installed: { ...IN_PARITY.marketplace_installed, label: 'Installed Packages' } },
+    SOURCES,
+  );
+  // One edited `label` disagrees with the page label AND, through the
+  // resolver's title fallback, with the header title — two real served strings.
+  expect('#8764 a drifted label is reported', labelDrift.some((f) => f.kind === 'drift' && f.path === 'pages.marketplace_installed.label'), JSON.stringify(labelDrift));
+
+  // The title fallback: the bundle declares `label` only, so `label` is what
+  // serves the header title. A header title edited to differ from the page
+  // label is drift NOTHING else in the repo compares.
+  const headerOnlyEdit = new Map([[
+    'marketplace_installed',
+    pageSourceCopy({ ...PAGE_SAMPLE, regions: [{ name: 'header', components: [{ type: 'page:header', properties: { title: 'Installed Packages', subtitle: IN_PARITY.marketplace_installed.subtitle } }] }] }),
+  ]]);
+  const fallbackDrift = defaultLocalePageDrift(IN_PARITY, headerOnlyEdit);
+  expect('#8764 the title fallback catches a header edited away from the label', fallbackDrift.some((f) => f.kind === 'drift' && f.source === 'Installed Packages'), JSON.stringify(fallbackDrift));
+
+  // The anti-vacuity half. A renamed page must not silently reduce this
+  // assertion to comparing nothing.
+  const orphan = defaultLocalePageDrift(IN_PARITY, new Map());
+  expect('#8764 a bundle entry with no page in the composition is reported', orphan.length === 1 && orphan[0].kind === 'orphan', JSON.stringify(orphan));
+  expect('#8764 an empty composition does not read as parity', defaultLocalePageDrift(IN_PARITY, new Map()).length > 0, 'an empty source map must never be green');
+
+  // A key with nothing to overlay translates nothing.
+  const phantom = defaultLocalePageDrift(
+    { marketplace_installed: { ...IN_PARITY.marketplace_installed, description: 'Anything' } },
+    SOURCES,
+  );
+  expect('#8764 a key the page cannot carry is reported', phantom.some((f) => f.kind === 'no-source' && f.path.endsWith('.description')), JSON.stringify(phantom));
+  // …but the label FALLBACK is not a phantom claim about a header that has no
+  // title, or every headerless page would report a finding it cannot act on.
+  const headerless = defaultLocalePageDrift({ p: { label: 'P' } }, new Map([['p', pageSourceCopy({ name: 'p', label: 'P' })]]));
+  expect('#8764 a page with no header title raises nothing from the fallback', headerless.length === 0, JSON.stringify(headerless));
+
+  const renderedPage = renderPageFinding(subtitleDrift[0], new Map([['marketplace_installed', '@objectstack/cloud-connection']]));
+  expect('#8764 verdict names the key path', renderedPage.includes('pages.marketplace_installed.subtitle'), renderedPage);
+  expect('#8764 verdict names the authoring package', renderedPage.includes('@objectstack/cloud-connection'), renderedPage);
+
   if (failures.length) {
     console.error(`\ncheck-app-nav-i18n --self-test: ${failures.length} failure(s)\n`);
     for (const f of failures) console.error(`  ${f}`);
     process.exit(1);
   }
   console.log(
-    '✓ check:app-nav-i18n --self-test — the nav walk, the per-locale label verdict and the silent-contributor guard all go red on the shapes they exist to catch.',
+    '✓ check:app-nav-i18n --self-test — the nav walk, the per-locale label verdict, the silent-contributor guard, ' +
+      'and the `pages.*` default-locale parity verdict (drift, orphan, phantom key) all go red on the shapes they exist to catch.',
   );
 }
 
@@ -399,6 +664,8 @@ const ctx = {
 /** `{ source, ids }` per contributor, plus id → { source, label } for the verdict. */
 const contributions = [];
 const declaredBy = new Map();
+/** page name → the contributor whose manifest carried it (#8764 verdicts). */
+const pageAuthoredBy = new Map();
 
 for (const contributor of CONTRIBUTORS) {
   currentSink = [];
@@ -433,6 +700,12 @@ for (const contributor of CONTRIBUTORS) {
         declaredBy.set(item.id, { source: contributor.source, label: item.label });
       }
     }
+    // Pages this manifest carries (#8764). `engine.registerApp` registers them
+    // through `METADATA_ARRAY_KEYS`, so the registry is the read-back below;
+    // this map only records WHO authored each one, for the verdict.
+    for (const page of manifest?.pages ?? []) {
+      if (page?.name) pageAuthoredBy.set(page.name, contributor.source);
+    }
     // The app shell itself (group anchors) counts as this contributor's ids too.
     for (const app of manifest?.apps ?? []) {
       if (app?.name !== APP_NAME) continue;
@@ -454,6 +727,7 @@ const mergedIds = collectNavIds(mergedApp?.navigation);
 // diagnosis pointing somewhere innocent) rebuilt in this gate.
 const compositionErrors = [];
 const coverageErrors = [];
+const pageParityErrors = [];
 
 // 1. The composition is complete — checked BEFORE the coverage verdict, because
 //    an incomplete composition cannot give one.
@@ -478,24 +752,70 @@ if (compositionErrors.length === 0) {
   }
 }
 
-const errors = [...compositionErrors, ...coverageErrors];
+// 3. The default locale's `pages.*` section still says what its sources say
+//    (#8764). Same composition, one more read — the pages the contributing
+//    manifests carry are in the registry, so no second boot is needed.
+if (compositionErrors.length === 0) {
+  const defaultLocaleData = SetupAppTranslations[DEFAULT_LOCALE];
+  if (!defaultLocaleData) {
+    // Loud, never a skip: with no default locale there is nothing to compare,
+    // and a silent pass here would read as parity in every future audit.
+    pageParityErrors.push(
+      `the bundle declares no \`${DEFAULT_LOCALE}\` locale, so the default-locale parity assertion had ` +
+        `nothing to compare. Locales present: ${Object.keys(SetupAppTranslations).join(', ') || '(none)'}.`,
+    );
+  } else {
+    const sourceByName = new Map();
+    for (const page of engine.registry.listItems('page') ?? []) {
+      if (page?.name) sourceByName.set(page.name, pageSourceCopy(page));
+    }
+    for (const finding of defaultLocalePageDrift(defaultLocaleData.pages, sourceByName)) {
+      pageParityErrors.push(renderPageFinding(finding, pageAuthoredBy));
+    }
+  }
+}
+
+const errors = [...compositionErrors, ...coverageErrors, ...pageParityErrors];
 if (errors.length) {
   console.error(`\ncheck-app-nav-i18n: ${errors.length} problem(s)\n`);
   for (const e of errors) console.error('  • ' + e + '\n');
-  console.error(
-    compositionErrors.length
-      ? `  Nothing was compared: the coverage verdict is only meaningful over a COMPLETE\n` +
-          `  composition, so it was not attempted. This result says nothing about whether any\n` +
-          `  nav label went untranslated.`
-      : `  These ids exist only AFTER the runtime merge, so neither \`pnpm check:i18n\` nor\n` +
-          `  \`pnpm check:i18n-coverage\` can see them — that gap is what this gate closes (#5750).\n` +
-          `  Fix by adding the label to \`apps.${APP_NAME}.navigation\` in EVERY locale file under\n` +
-          `  packages/platform-objects/src/apps/translations/ (en, zh-CN, ja-JP, es-ES).`,
-  );
+  // One footer PER bucket that actually fired. The three remedies are
+  // different, and a footer prescribing one for another is a confident
+  // diagnosis pointing somewhere innocent — the #5862 defect this gate was
+  // careful not to rebuild when it had two buckets, and no less true with three.
+  if (compositionErrors.length) {
+    console.error(
+      `  Nothing was compared: the coverage verdict is only meaningful over a COMPLETE\n` +
+        `  composition, so it was not attempted. This result says nothing about whether any\n` +
+        `  nav label went untranslated.`,
+    );
+  }
+  if (coverageErrors.length) {
+    console.error(
+      `  These ids exist only AFTER the runtime merge, so neither \`pnpm check:i18n\` nor\n` +
+        `  \`pnpm check:i18n-coverage\` can see them — that gap is what this gate closes (#5750).\n` +
+        `  Fix by adding the label to \`apps.${APP_NAME}.navigation\` in EVERY locale file under\n` +
+        `  packages/platform-objects/src/apps/translations/ (en, zh-CN, ja-JP, es-ES).`,
+    );
+  }
+  if (pageParityErrors.length) {
+    console.error(
+      `  The \`pages.*\` findings above are about the DEFAULT locale only (#8764): \`${DEFAULT_LOCALE}\` is a\n` +
+        `  copy of the source literals, not a translation, so it must say exactly what the page\n` +
+        `  metadata says. The sources are authored in OTHER packages — @objectstack/cloud-connection\n` +
+        `  and @objectstack/mcp — which is why no static walk in platform-objects can see them.\n` +
+        `  Fix by re-copying the source literal into \`pages.*\` in\n` +
+        `  packages/platform-objects/src/apps/translations/${DEFAULT_LOCALE}.ts — and check whether the\n` +
+        `  three TRANSLATED locales (zh-CN, ja-JP, es-ES) are now stale against the same edit,\n` +
+        `  because nothing here can judge that for you.`,
+    );
+  }
   process.exit(1);
 }
 
+const judgedPages = Object.keys(SetupAppTranslations[DEFAULT_LOCALE]?.pages ?? {}).length;
 console.log(
   `check-app-nav-i18n: OK (${CONTRIBUTORS.length} contributor(s), ${mergedIds.length} merged \`${APP_NAME}\` nav id(s), ` +
-    `${Object.keys(SetupAppTranslations).length} locale(s), every id labelled in every locale).`,
+    `${Object.keys(SetupAppTranslations).length} locale(s), every id labelled in every locale; ` +
+    `${judgedPages} \`pages.*\` entr(ies) in verbatim parity with their source metadata in \`${DEFAULT_LOCALE}\`).`,
 );

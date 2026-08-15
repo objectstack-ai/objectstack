@@ -11,7 +11,7 @@ import {
   SQL_CONST_TRUE,
   type NormalizedFilterNode,
 } from './filter-normalizer.js';
-import { findCrossFieldComparand } from '../comparand-shape.js';
+import { findCrossFieldComparand, findUninterpretableTemporalMember } from '../comparand-shape.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
 import { datasetInvalidError, invalidMemberError } from '../dataset-refusal.js';
 import { likePattern, LIKE_ESCAPE_CHAR, asciiLowerSqlExpr, type LikeShape } from '../like-pattern.js';
@@ -170,8 +170,82 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // and envelope it has always had — so it is caught and read as "no
     // reference found".
     if (this.carriesCrossFieldComparison(query, ctx)) return false;
+    // ── [#8690] DECLINE an uninterpretable TEMPORAL comparand ───────────────
+    //
+    // ## The maintainer ruling this implements (2026-08-15, option B)
+    //
+    // > refuse the uninterpretable temporal comparand at the ObjectQL engine's
+    // > single filter collection point … Includes the measured gap:
+    // > `NativeSQLStrategy.canHandle` must **decline** an uninterpretable
+    // > temporal comparand so raw-SQL paths fall through to the engine door.
+    //
+    // The refusal itself is NOT here and must not be: judging "can this column
+    // read this comparand" needs the field's declared TYPE, which only the
+    // engine's filter collection point holds (this package depends on no
+    // driver and carries no field map). What is here is the ROUTING half —
+    // without it a raw-SQL deployment binds `WHERE col >= 'last_30_days'`
+    // directly, never reaches the door, and keeps answering 200 with zero rows.
+    //
+    // Same mechanism, same direction, as the two declines above and the #7598
+    // one below it: when this strategy cannot serve something CORRECTLY,
+    // routing to the lower-priority ObjectQL path beats compiling it anyway.
+    // Content-based rather than shape-based, which #7598's ruling already
+    // named as new-but-accepted behaviour for `canHandle`.
+    //
+    // ⚠️ Deliberately NO fail-closed backstop at the emitter, unlike #7598's.
+    // There the routing gate's failure mode was a NEW wrong answer (a bound
+    // `{"$field":…}` object); here a missed decline degrades to exactly
+    // today's behaviour, and a throw at the emitter would answer 500 for a
+    // filter the engine door answers 400 for — two envelopes for one mistake,
+    // which is the drift this card exists to remove.
+    if (this.carriesUninterpretableTemporalComparand(query, ctx)) return false;
     const caps = ctx.queryCapabilities(query.cube);
     return caps.nativeSql && typeof ctx.executeRawSql === 'function';
+  }
+
+  /**
+   * [#8690] Does the query's `where` compare a declared TIME dimension against
+   * a value no temporal storage rule can read? See the ruling at
+   * {@link canHandle}.
+   *
+   * The classification comes from the CUBE, the only metadata this package has:
+   * a dimension declares `type: 'time'` (compiled from the dataset dimension's
+   * `type: 'date'`), and {@link lookupMember} is the same resolution every other
+   * member lookup in this strategy uses, so "the member the gate classified"
+   * and "the member the compiler emits" cannot drift apart.
+   *
+   * A `time` dimension is read with the DATETIME rule — the permissive one of
+   * the three. That is the right direction because this is a routing decision,
+   * not a verdict: the engine door re-judges with the field's real declared
+   * type and has the final say, so under-classifying an exotic spelling merely
+   * leaves today's behaviour, while over-classifying would silently move a
+   * working dashboard off the fast path. The comparands this card measured
+   * (`last_30_days`, `not-a-date-at-all`) are unreadable under all three rules,
+   * so the decline fires for them whichever backing type the dimension has.
+   *
+   * `lowerAnalyticsWhere` rather than `query.where` raw, so the authored ARRAY
+   * sugar is seen after `parseFilterAST` has lowered it; a THROW from that
+   * lowering is not this gate's to answer — the filter is malformed either way
+   * and `normalizeAnalyticsFilterTree` refuses it a moment later with the
+   * message and envelope it has always had.
+   */
+  private carriesUninterpretableTemporalComparand(
+    query: AnalyticsQuery,
+    ctx: StrategyContext,
+  ): boolean {
+    const cube = query.cube ? ctx.getCube(query.cube) : undefined;
+    if (!cube) return false;
+    let where: unknown = null;
+    try {
+      where = lowerAnalyticsWhere(query);
+    } catch {
+      return false;
+    }
+    if (!where) return false;
+    return findUninterpretableTemporalMember(
+      where,
+      (member) => (this.lookupMember(cube, member, 'dimension')?.type === 'time' ? 'datetime' : null),
+    ) !== null;
   }
 
   /**

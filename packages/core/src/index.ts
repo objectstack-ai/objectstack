@@ -52,6 +52,12 @@ export * from './utils/migration-journal.js';
 // Export the runtime filter-placeholder resolver (framework#3582)
 export * from './utils/filter-tokens.js';
 
+// [#8690] Can a temporal column's storage rule read this comparand? The VALUE
+// half of the field-typed judgement behind the engine's temporal-comparand door
+// and the analytics raw-SQL decline — one rule, two packages that do not depend
+// on each other.
+export * from './utils/temporal-comparand.js';
+
 // Export the shared single-record 404 (#4435/#5138, moved down here in #7867) —
 // the one `RECORD_NOT_FOUND` envelope `protocol.updateData`/`deleteData`,
 // `callData`'s ObjectQL fallback and the engine's own by-id write gate answer

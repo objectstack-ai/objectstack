@@ -24,6 +24,21 @@ export interface CalendarParts {
 }
 
 /**
+ * A wall clock as a human writes it — calendar day plus an optional
+ * time-of-day, with **no zone attached**. `2026-08-01 06:00:00` is this shape:
+ * it names a reading on a clock, and only a reference timezone turns it into an
+ * instant. Omitted time components default to 0, so {@link CalendarParts} alone
+ * is midnight.
+ */
+export interface WallClockParts extends CalendarParts {
+  /** 0-23. */
+  hour?: number;
+  minute?: number;
+  second?: number;
+  millisecond?: number;
+}
+
+/**
  * The year/month/day an instant falls on in `tz`. Throws if `tz` is not a
  * valid IANA zone (callers treat that as a fall-through to UTC).
  */
@@ -71,15 +86,79 @@ export function calendarPartsInTzOrUtc(d: Date, tz?: string): CalendarParts {
  *
  * Used by date-bucket drill ranges (#1752): a `datetime` field buckets on the
  * reference-tz calendar, so its bucket boundary is that tz's midnight instant.
+ *
+ * Date-only by contract: a `YYYY-MM-DD HH:mm:ss` argument is still `NaN` here.
+ * Callers holding a wall clock with a time-of-day want
+ * {@link zonedWallClockToUtcMs}, which this delegates its zone arithmetic to.
  */
 export function zonedDateStartToUtcMs(ymd: string, tz?: string): number {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
-  const wallAsUtc = m ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : NaN;
+  if (!m) return NaN;
+  return zonedWallClockToUtcMs(
+    { year: Number(m[1]), month: Number(m[2]), day: Number(m[3]) },
+    tz,
+  );
+}
+
+/**
+ * The UTC instant (epoch ms) at which a **wall clock** reading happens in
+ * reference timezone `tz` — the general inverse of {@link calendarPartsInTz},
+ * of which {@link zonedDateStartToUtcMs} is the midnight special case.
+ *
+ * `2026-08-01 06:00:00` in `Asia/Shanghai` is `2026-07-31T22:00:00Z`: a
+ * different day, month and quarter. That gap is why this direction exists as a
+ * shared primitive at all — bulk import (#8485) reads offset-free spreadsheet
+ * cells, which are wall clocks and nothing more, and `new Date(cell)` resolves
+ * them against the **process** `TZ`, i.e. a host setting rather than the
+ * tenant's configured zone.
+ *
+ * DST-safe: the zone offset is read from the platform tz database via
+ * `Intl.DateTimeFormat` (never hand-computed), and a two-pass resolution settles
+ * the case where the offset differs side-to-side of the target instant. Two
+ * wall clocks are not a bijection with instants, and this function resolves
+ * both degenerate cases to the **earlier candidate instant** — in both, the
+ * final pass reads the offset on the DST side of the transition (measured, not
+ * merely intended — `datetime.test.ts` pins both):
+ *  - a clock reading the zone **skips** (spring forward: `02:30` on a US
+ *    spring-forward day) settles on the *post*-transition offset (EDT, −04),
+ *    which places the instant just **before** the gap: it reads `01:30` EST
+ *    locally, not `03:30` EDT. Note this is the opposite of Temporal's
+ *    `'compatible'` disambiguation, which pushes a gap reading forward;
+ *  - a clock reading that happens **twice** (fall back: `01:30` on a US
+ *    fall-back day) resolves to its first occurrence, the one still on the
+ *    pre-transition DST offset (EDT, −04).
+ *
+ * A spreadsheet cell naming a wall clock that its zone never had is ambiguous
+ * by construction; what matters for an import is that the answer is
+ * deterministic and host-independent, which both branches above are.
+ *
+ * FALLBACK — an unset, `'UTC'`, or invalid `tz` reads the wall clock **as UTC**,
+ * never as the process-local clock. Every caller of this family already degrades
+ * that way ({@link zonedDateStartToUtcMs}, and the export renderer's cell path),
+ * and a host `TZ` fallback would reintroduce exactly the deployment-dependent
+ * instant this primitive exists to remove. A parts object that produces an
+ * invalid date (`NaN` components) returns `NaN`, as `Date.UTC` does.
+ */
+export function zonedWallClockToUtcMs(parts: WallClockParts, tz?: string): number {
+  const wallAsUtc = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour ?? 0,
+    parts.minute ?? 0,
+    parts.second ?? 0,
+    parts.millisecond ?? 0,
+  );
   if (!tz || tz === 'UTC' || Number.isNaN(wallAsUtc)) return wallAsUtc;
   try {
     // The tz offset (local − UTC, in ms) at instant `t`: read t's wall clock in
-    // `tz`, re-interpret those parts as UTC, and subtract t.
+    // `tz`, re-interpret those parts as UTC, and subtract t. `formatToParts`
+    // resolves no finer than a second, so `t` is truncated to a whole second
+    // first — otherwise a sub-second wall clock leaks its milliseconds into the
+    // "offset" and shifts the answer by them (a real defect while generalising
+    // this from the date-only form, where ms was always 0).
     const offsetAt = (t: number): number => {
+      const whole = Math.floor(t / 1000) * 1000;
       const p = new Intl.DateTimeFormat('en-US', {
         timeZone: tz,
         hourCycle: 'h23',
@@ -89,16 +168,18 @@ export function zonedDateStartToUtcMs(ymd: string, tz?: string): number {
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
-      }).formatToParts(new Date(t));
+      }).formatToParts(new Date(whole));
       const g = (k: string) => Number(p.find((x) => x.type === k)?.value);
-      return Date.UTC(g('year'), g('month') - 1, g('day'), g('hour'), g('minute'), g('second')) - t;
+      return (
+        Date.UTC(g('year'), g('month') - 1, g('day'), g('hour'), g('minute'), g('second')) - whole
+      );
     };
-    // Want U such that localParts(U) == midnight, i.e. U = wallAsUtc − offset(U).
+    // Want U such that localParts(U) == the wall clock, i.e. U = wallAsUtc − offset(U).
     // Iterate from the zero-offset guess; converges in ≤2 steps off a DST edge.
     const off1 = offsetAt(wallAsUtc - offsetAt(wallAsUtc));
     return wallAsUtc - off1;
   } catch {
-    return wallAsUtc; // unknown zone → UTC midnight
+    return wallAsUtc; // unknown zone → the wall clock read as UTC
   }
 }
 

@@ -77,9 +77,14 @@ async function resolveActiveOrganizationId(
  * @param request the raw Web `Request` — its headers carry the caller's session
  *                cookie / bearer + Origin; its body carries the flat form
  *                fields ({ providerId, issuer, domain, clientId, clientSecret,
- *                discoveryEndpoint?, scopes?, mapId?, mapEmail?, mapName? }).
- *                `mapId` is accepted only as the (empty or `sub`) no-op it now
- *                is — see the mapping block below.
+ *                discoveryEndpoint?, scopes?, mapEmail?, mapName? }).
+ *                `mapId` is NOT among them any more: #8222 removed it from the
+ *                `register_sso_provider` action, so the admin form no longer
+ *                offers a user-ID claim mapping. The guard below is kept as
+ *                belt-and-braces for the callers the form does not cover — a
+ *                direct API client, a script, a stale cached console bundle —
+ *                which can still put `mapId` on the wire. It is accepted only as
+ *                the (empty or `sub`) no-op it now is; see the mapping block.
  */
 export async function runRegisterSsoProviderFromForm(
   handle: AuthRequestHandler,

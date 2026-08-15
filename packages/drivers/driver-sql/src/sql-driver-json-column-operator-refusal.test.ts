@@ -61,11 +61,29 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { SqlDriver } from '../src/index.js';
-import { FILTER_OPERATORS } from '@objectstack/spec/data';
+import { FILTER_OPERATORS, markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import type { FilterCondition } from '@objectstack/spec/data';
 
 const U1 = 'usr_1111';
 const U2 = 'usr_2222';
+
+/**
+ * [#8197] Every filter below is the TEST AUTHOR's own, so it is marked as one.
+ *
+ * This gate's message is now redacted for a predicate that is not positively
+ * marked author-written: on a read scope the refused column is the
+ * administrator's, and naming it hands a tenant the policy. The author
+ * population still receives the whole sentence — the operator, the column, the
+ * `$contains` prescription — and that sentence is what this file exists to pin,
+ * so the mark is what keeps these assertions asking their original question
+ * rather than a weaker one.
+ *
+ * The withhold itself, and the three-population discrimination that makes it
+ * mean something, are pinned in `sql-driver-target-field-provenance.test.ts`.
+ * ⛔ Do not "simplify" this file by dropping the mark and relaxing the content
+ * assertions to match: that would delete the coverage, not update it.
+ */
+const authored = <T>(where: T): T => markFilterSubtreeProvenance(where, 'author');
 
 /** The shape `mapDataError` / `sendError` read off a thrown driver error. */
 interface WireBearingError extends Error {
@@ -177,7 +195,8 @@ describe('[#7398] SqlDriver refuses scalar-comparison operators on JSON/multi-va
     await driver?.disconnect?.();
   });
 
-  const find = (where: unknown) => driver.find('team', { where: where as FilterCondition });
+  const find = (where: unknown) =>
+    driver.find('team', { where: authored(where) as FilterCondition });
 
   // ── The card's table, flipped ─────────────────────────────────────────────
 
@@ -332,13 +351,14 @@ describe('[#7398] SqlDriver refuses scalar-comparison operators on JSON/multi-va
       describe(faceName, () => {
         for (const [op, comparand] of REFUSED) {
           it(`refuses "${op}"`, async () => {
-            const err = await refusalOf(() => run({ members: { [op]: comparand } } as FilterCondition));
+            const err = await refusalOf(() =>
+              run(authored({ members: { [op]: comparand } }) as FilterCondition));
             expectJsonColumnRefusal(err, op, 'members');
           });
         }
 
         it('refuses bare equality', async () => {
-          const err = await refusalOf(() => run({ members: U1 } as FilterCondition));
+          const err = await refusalOf(() => run(authored({ members: U1 }) as FilterCondition));
           expectJsonColumnRefusal(err, '=', 'members');
         });
 
@@ -485,14 +505,17 @@ describe('[#7398] the second lowering family — normalised columns', () => {
   ] as ReadonlyArray<readonly [string, unknown]>) {
     it(`refuses "${op}" on the normalised JSON column`, async () => {
       const err = await refusalOf(() =>
-        driver.find('ext_sprint', { where: { milestones: { [op]: comparand } } as FilterCondition }),
+        driver.find('ext_sprint', {
+          where: authored({ milestones: { [op]: comparand } }) as FilterCondition,
+        }),
       );
       expectJsonColumnRefusal(err, op, 'milestones');
     });
   }
 
   it('refuses bare equality on the normalised JSON column', async () => {
-    const err = await refusalOf(() => driver.find('ext_sprint', { where: { milestones: WHEN } as FilterCondition }));
+    const err = await refusalOf(() =>
+      driver.find('ext_sprint', { where: authored({ milestones: WHEN }) as FilterCondition }));
     expectJsonColumnRefusal(err, '=', 'milestones');
   });
 

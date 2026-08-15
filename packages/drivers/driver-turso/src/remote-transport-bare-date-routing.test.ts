@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { RemoteTransport } from './remote-transport.js';
 import { TursoDriver } from './turso-driver.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 
 /**
  * Regression: the MIRROR of #1058 — a predicate that vanishes (#1066).
@@ -157,7 +158,12 @@ describe('RemoteTransport bare-Date comparand routing (#1066)', () => {
       const { t } = transportWithCapturingClient();
       // An array is the one object form the router still leaves alone, so it
       // reaches the comparand gate and is refused there by FORM (#1058).
-      await expect(t.find('deal', { where: { tags: ['a', 'b'] } })).rejects.toThrow(/is an array/);
+      // [#8197] Marked author-written: the gate's naming half is now withheld
+      // from a predicate no boundary vouched, and the FORM is what this case
+      // asks about.
+      await expect(
+        t.find('deal', { where: markFilterSubtreeProvenance({ tags: ['a', 'b'] }, 'author') }),
+      ).rejects.toThrow(/is an array/);
     });
 
     it('keeps a binary buffer refused — by whichever gate it reaches first', async () => {

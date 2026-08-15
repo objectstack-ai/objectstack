@@ -1,5 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import {
+  isUninterpretableTemporalComparand,
+  type TemporalComparandKind,
+} from '@objectstack/core';
+
 /**
  * Which comparand SHAPES this package's filter compilers can express (#5234).
  *
@@ -47,18 +52,32 @@
  * opposite case: an array comparand already answered two different ways inside
  * this one package, so refusing it closes a live split.
  *
- * ## Mirrored, not imported — and held by a test
+ * ## [#8186] The TYPE membership is IMPORTED; only the local extras are mirrored
  *
- * These predicates restate `driver-sql`'s `isBindableComparand` /
- * `isRenderableTextComparand` (`packages/drivers/driver-sql/src/sql-driver.ts`)
- * for the same reason `like-pattern.ts` restates its escape expression:
- * `service-analytics` depends on no driver (see its `package.json` — only
- * `@objectstack/core` and `@objectstack/spec`), and those are module-private
- * functions with no export to reach for. What stops the two from drifting is not
- * these comments but `__tests__/like-metacharacter-escape.test.ts`, which asserts
- * both predicates against a mirrored copy of the driver's expressions over a
- * shared value table. A THIRD hand-copy is the thing to refuse: import from one
- * of the two, or add a consumer to that test.
+ * These predicates used to restate `driver-sql`'s `isBindableComparand` /
+ * `isRenderableTextComparand` in full, because `service-analytics` depends on no
+ * driver (see its `package.json` — only `@objectstack/core`,
+ * `@objectstack/spec` and `@objectstack/types`) and those are module-private
+ * functions with no export to reach for. The set itself no longer needs
+ * reaching for: #7872 promoted it to the shared comparand-type door in
+ * `@objectstack/spec/data`, `driver-sql` and `driver-turso` consume it there,
+ * and since #8186 so does this file — `isAcceptedFilterComparand` for the six
+ * types, {@link ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE} for the sentence the
+ * refusals quote. The old comment's own prescription, applied: "a THIRD
+ * hand-copy is the thing to refuse: import from one of the two."
+ *
+ * What is still mirrored is the part the door deliberately does not carry —
+ * each face's LOCAL extras (this package's `undefined` and binary arms), which
+ * `driver-sql` records at its own use sites for the same reasons. Those stay
+ * held by `__tests__/like-metacharacter-escape.test.ts`, which asserts both
+ * predicates against the driver's post-#7872 expressions over a shared value
+ * table, and by `__tests__/comparand-door-single-source.test.ts`, which pins the
+ * end-to-end accept/refuse matrix this reconciliation had to leave untouched.
+ *
+ * ⛔ The ENVELOPES and the position logic below are this package's own and were
+ * deliberately NOT moved: a caller-authored `where` refuses with a 400
+ * `INVALID_FILTER`, a read scope fails closed with a 500 (ADR-0021 D-C), and
+ * only the type membership and the shared sentence come from the door.
  *
  * ## ⚠️ [#7598] What the mirror does NOT cover: a position no gate ever reached
  *
@@ -103,44 +122,79 @@
  * backend serves and which #7596 removed from the spec.
  */
 
+import {
+  isAcceptedFilterComparand,
+  ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE,
+} from '@objectstack/spec/data';
+
 /**
  * Can this value be handed to a driver as a bound parameter at all?
  *
- * Character for character the classification `driver-sql`'s
- * `isBindableComparand` applies. (`ArrayBuffer.isView` covers `Buffer`, which is
- * a `Uint8Array`.)
+ * [#8186] The TYPE membership is the shared comparand-type door's
+ * (`isAcceptedFilterComparand`, `@objectstack/spec/data`), not this file's. It
+ * used to be spelled out here, and identically again in
+ * {@link isRenderableTextComparand} — three copies of one six-type set counting
+ * the door itself, which is the drift risk #8186 was filed on rather than a
+ * defect: the copies AGREED with the door, cell for cell, right up to this
+ * change (`__tests__/comparand-door-single-source.test.ts` measured the whole
+ * matrix on `origin/main` first, then re-ran it unchanged after).
+ *
+ * `driver-sql`'s twin was reconciled the same way by #7872 and this mirrors its
+ * post-#7872 spelling, so the two are still a value-for-value mirror — see the
+ * "Mirrored, not imported" section above, whose subject is now the LOCAL EXTRAS
+ * rather than the set.
+ *
+ * ## The one package-local extra here: binary
+ *
+ * `ArrayBuffer.isView` (which covers `Buffer`, a `Uint8Array`) is a bindable the
+ * engine-level door does not admit, and it is deliberately kept: a blob column
+ * really is comparable on this driver family, and the read path measured it
+ * accepted in every bind position. It is `driver-sql`'s own recorded extra too.
  */
 export function isBindableComparand(value: unknown): boolean {
-  if (value === null || value === undefined) return true;
-  const kind = typeof value;
-  if (kind === 'string' || kind === 'number' || kind === 'bigint' || kind === 'boolean') return true;
-  return value instanceof Date || ArrayBuffer.isView(value);
+  // `undefined` — see {@link isRenderableTextComparand}'s note; it is admitted
+  // here for the same reason and is just as unreachable through either door.
+  if (value === undefined) return true;
+  return isAcceptedFilterComparand(value) || ArrayBuffer.isView(value);
 }
 
 /**
  * Does this value have a faithful rendering as the text of a `LIKE` pattern?
  *
- * The bindable set minus binary, which binds but renders to nothing a caller
- * meant. `undefined` is inside the fence because it is not authorable (JSON has
- * no `undefined`) and {@link comparand} already normalises it to `null` rather
- * than refusing it (#5526, #5332) — refusing it here would invent a
- * disagreement instead of closing one.
+ * [#8186] The bindable set minus binary — and, like its sibling, the six-type
+ * membership is now the shared door's (`isAcceptedFilterComparand`,
+ * `@objectstack/spec/data`) rather than a local re-spelling. Binary binds but
+ * renders to nothing a caller meant, which is why the two questions are two
+ * predicates rather than one with a flag.
  *
- * ⚠️ [#6125] `undefined` no longer REACHES either predicate from the read-scope
- * door: `read-scope-sql.ts` refuses a comparand-position `undefined` upstream of
- * both, per #6050's ruling B pushed down by #6125. The branch stays because
- * these two predicates are a value-for-value mirror of `driver-sql`'s twins
- * (held by `__tests__/like-metacharacter-escape.test.ts`), and those keep it for
- * exactly the same reason — refused upstream there too, since #6050. Narrowing
- * the fence here would break the mirror without removing a reachable answer.
- * The `where` door is unaffected either way: {@link comparand} still normalises
- * `undefined` to `null` before either predicate sees it.
+ * ## The package-local extra here: `undefined` — kept, and unreachable
+ *
+ * `undefined` is inside the fence because it is not authorable (JSON has no
+ * `undefined`) and `filter-normalizer.ts`'s `comparand()` normalises it to
+ * `null` rather than refusing it (#5526, #5332).
+ *
+ * ⚠️ It no longer REACHES either predicate from either door, and the two
+ * refusals arrived separately:
+ *
+ * | door | what refuses an `undefined` comparand first | envelope |
+ * |---|---|---|
+ * | read scope | `read-scope-sql.ts`, per #6050 ruling B pushed down by #6125 | `READ_SCOPE_COMPILE_FAILED` / 500 |
+ * | analytics `where` | `assertDefinedComparands` (#6386, same ruling) | `INVALID_FILTER` / 400 |
+ *
+ * So `comparand()`'s normalise-to-`null` is itself a deliberately-kept dead arm
+ * (its own TSDoc says so, and says reopening it is #5526's call, not a
+ * cleanup's) — and this branch is one too. ⛔ Neither is evidence that this
+ * package TOLERATES `undefined` where the shared door refuses it: measured
+ * through both doors, `undefined` is REFUSED here exactly as the door would
+ * refuse it (`__tests__/comparand-door-single-source.test.ts` pins that row at
+ * both doors, in all three comparand positions). The branch stays because these
+ * predicates are a value-for-value mirror of `driver-sql`'s twins, which keep
+ * theirs for the identical reason — refused upstream there too, since #6050.
+ * Narrowing the fence here would break the mirror without removing a reachable
+ * answer.
  */
 export function isRenderableTextComparand(value: unknown): boolean {
-  if (value === null || value === undefined) return true;
-  const kind = typeof value;
-  if (kind === 'string' || kind === 'number' || kind === 'bigint' || kind === 'boolean') return true;
-  return value instanceof Date;
+  return value === undefined || isAcceptedFilterComparand(value);
 }
 
 /**
@@ -269,6 +323,119 @@ function findIn(
 }
 
 /**
+ * [#8690, maintainer ruling 2026-08-15] The first comparand a declared TEMPORAL
+ * member's storage rule cannot read — or `null`.
+ *
+ * ## What it is FOR: the raw-SQL bypass named in the ruling
+ *
+ * The refusal itself lives at the ObjectQL engine's filter collection point
+ * (`@objectstack/objectql`, `temporal-comparand-door.ts`), which is the one
+ * seam that holds a comparand and the field's declared type at the same moment.
+ * `NativeSQLStrategy` never reaches it: it compiles its own
+ * `SELECT … WHERE col >= $N` and binds the comparand directly, so a raw-SQL
+ * deployment would keep answering the silent zero the engine door now refuses.
+ * The ruling closes that by name:
+ *
+ * > `NativeSQLStrategy.canHandle` must **decline** an uninterpretable temporal
+ * > comparand so raw-SQL paths fall through to the engine door.
+ *
+ * So this answers a ROUTING question, exactly as {@link findCrossFieldComparand}
+ * does one seam over: not "is this filter legal" but "does serving it correctly
+ * need the path that judges it". Declining sends the query to the ObjectQL
+ * strategy, whose `engine.aggregate` passes through that door — one refusal,
+ * one wording, one place, whichever strategy the deployment's driver selects.
+ *
+ * ## Why the KIND is supplied by the caller
+ *
+ * This package holds no field map — it depends on `core`, `spec` and `types`,
+ * and on no driver. The temporal fact therefore has to arrive with the query,
+ * and it already does: a cube DIMENSION declares `type: 'time'` (compiled from
+ * the dataset's `type: 'date'`), and `resolveStorageTarget`/`lookupMember`
+ * already map a filter member to it. `kindOf` is that lookup, passed in, so
+ * this walk stays a pure function of the filter and the caller's classification.
+ *
+ * ⚠️ Consequence, recorded rather than hidden: a temporal column filtered
+ * WITHOUT being declared as a time dimension on the cube is not classified
+ * here, so it is not declined and keeps today's behaviour on the raw-SQL path.
+ * That is a strictly smaller hole than "every raw-SQL query bypasses the door",
+ * it fails in the safe direction (a missed decline degrades to today's
+ * behaviour, never to a NEW wrong answer), and closing it fully would take a
+ * field map this package deliberately does not have.
+ *
+ * The walk is structural and total for the same reason its sibling's is: a
+ * comparand three combinators deep still needs the engine path.
+ */
+export function findUninterpretableTemporalMember(
+  filter: unknown,
+  kindOf: (member: string) => TemporalComparandKind | null,
+): { field: string; kind: TemporalComparandKind; value: string } | null {
+  return findUninterpretableIn(filter, '', kindOf);
+}
+
+function findUninterpretableIn(
+  node: unknown,
+  field: string,
+  kindOf: (member: string) => TemporalComparandKind | null,
+): { field: string; kind: TemporalComparandKind; value: string } | null {
+  if (!node || typeof node !== 'object') return null;
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const hit = findUninterpretableIn(child, field, kindOf);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (node instanceof Date || ArrayBuffer.isView(node)) return null;
+  // A reference is not a literal — the same position this file's sibling walk
+  // routes on, and never a value any storage rule reads.
+  if (isFieldReference(node)) return null;
+  for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+    // `$`-prefixed keys are operators and combinators: the field in scope does
+    // not change. Anything else names a member and becomes the new scope.
+    const scope = key.startsWith('$') ? field : key;
+    const kind = scope ? kindOf(scope) : null;
+    if (kind) {
+      const hit = judgeTemporalLiterals(value, scope, kind);
+      if (hit) return hit;
+      continue;
+    }
+    const hit = findUninterpretableIn(value, scope, kindOf);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/**
+ * Every literal reachable in one classified member's value position — the
+ * comparand itself, an operator bag's comparands, and each MEMBER of a list
+ * operator's array, which is a comparand in its own right.
+ */
+function judgeTemporalLiterals(
+  value: unknown,
+  field: string,
+  kind: TemporalComparandKind,
+): { field: string; kind: TemporalComparandKind; value: string } | null {
+  if (Array.isArray(value)) {
+    for (const member of value) {
+      const hit = judgeTemporalLiterals(member, field, kind);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (value && typeof value === 'object') {
+    if (value instanceof Date || ArrayBuffer.isView(value) || isFieldReference(value)) return null;
+    for (const nested of Object.values(value as Record<string, unknown>)) {
+      const hit = judgeTemporalLiterals(nested, field, kind);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  return isUninterpretableTemporalComparand(kind, value)
+    ? { field, kind, value: value as string }
+    : null;
+}
+
+/**
  * The Filter Protocol operators whose comparand becomes the text of a `LIKE`
  * pattern — the ones every compiler in this package routes through
  * {@link likePattern}.
@@ -325,7 +492,7 @@ export function unrenderableTextComparandMessage(op: string, field: string, valu
   return (
     `"${op}" on "${field}" matches against the TEXT of a pattern, but its comparand is ` +
     `${Array.isArray(value) ? 'an array' : 'an object'} (${shapePreview(value)}). filter.zod.ts ` +
-    `declares it a string (StringOperatorSchema); a string, number, boolean, null or Date is ` +
+    `declares it a string (StringOperatorSchema); ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE} is ` +
     `accepted. Refusing rather than stringifying it: String({}) is "[object Object]", so the ` +
     `pattern that ran would be one nobody wrote — and a row storing that literal text matches it.`
   );
@@ -443,6 +610,16 @@ export function fieldReferenceBetweenBoundMessage(
  * The sentence both doors say about a list member that cannot be bound. See
  * {@link unrenderableTextComparandMessage} for why the message is shared and the
  * envelope is not.
+ *
+ * [#8186] The accepted-set clause is {@link ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE},
+ * with binary kept as this package's own parenthetical extra — the exact shape
+ * `driver-sql`'s twin took when #7872 reconciled it, so the two faces describe
+ * one rule in one wording again. The hand-copy it replaces read "a string,
+ * number, boolean, null, Date or binary value", which had silently gone WRONG
+ * in the quieter direction: it omitted `bigint`, a type both predicates here
+ * have always accepted and both doors have always compiled. Quoting the door
+ * fixes the omission as a side effect of removing the copy — the accepted set
+ * itself does not move (`__tests__/comparand-door-single-source.test.ts`).
  */
 export function unbindableListMemberMessage(
   op: string,
@@ -453,8 +630,8 @@ export function unbindableListMemberMessage(
   return (
     `"${op}" on "${field}" has a value at index ${index} of its list that cannot be bound as a SQL ` +
     `parameter: ${shapePreview(value)}. Every member of an $in/$nin/$between list is a comparand ` +
-    `in its own right — use a string, number, boolean, null, Date or binary value. Refusing rather ` +
-    `than binding it: the member can equal no stored value, so the list silently loses that entry ` +
-    `(and a $nin loses the exclusion the caller wrote).`
+    `in its own right — use ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE} (or a binary value). ` +
+    `Refusing rather than binding it: the member can equal no stored value, so the list silently ` +
+    `loses that entry (and a $nin loses the exclusion the caller wrote).`
   );
 }

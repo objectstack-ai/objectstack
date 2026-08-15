@@ -38,7 +38,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       recipient_id: {
         label: "受信者",
-        help: "アクセスを受け取るユーザー/グループ/ロールの ID"
+        help: "アクセスを受け取るユーザー/グループ/ポジションの ID"
       },
       access_level: {
         label: "アクセスレベル",

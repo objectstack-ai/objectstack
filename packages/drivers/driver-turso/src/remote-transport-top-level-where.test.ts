@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { RemoteTransport } from './remote-transport.js';
 import { TursoDriver } from './turso-driver.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import type { QueryAST } from '@objectstack/spec/data';
 
 /**
@@ -263,9 +264,14 @@ describe('RemoteTransport top-level `where` refusal (#1075)', () => {
       // refused by the comparand gate, which names the field. The new gate must
       // not swallow that distinction.
       const { t } = transportWithCapturingClient();
-      await expect(t.find('deal', { where: { stage: ['won'] } } as unknown as QueryAST)).rejects.toThrow(
-        /Filter comparand 'deal\.stage'/,
-      );
+      // [#8197] Marked author-written: the comparand refusal's naming half is
+      // withheld from a predicate no merge boundary vouched, and it is exactly
+      // the NAMING this case is about.
+      await expect(
+        t.find('deal', {
+          where: markFilterSubtreeProvenance({ stage: ['won'] }, 'author'),
+        } as unknown as QueryAST),
+      ).rejects.toThrow(/Filter comparand 'deal\.stage'/);
     });
 
     it('leaves a non-node SUB-filter with its own message (#1073/#1076)', async () => {

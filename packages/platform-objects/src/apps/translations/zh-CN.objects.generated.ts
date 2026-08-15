@@ -1804,11 +1804,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
             helpText: "可选。以空格或逗号分隔的 OAuth 授权范围（scopes）。默认为 “openid email profile”。",
             placeholder: "openid email profile"
           },
-          mapId: {
-            label: "映射：用户 ID claim",
-            helpText: "可选。映射到用户 ID 的 ID-token claim。默认为 “sub”。",
-            placeholder: "sub"
-          },
           mapEmail: {
             label: "映射：邮箱 claim",
             helpText: "可选。映射到邮箱的 claim。默认为 “email”。",
@@ -2323,7 +2318,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "任务名称",
-        help: "唯一任务标识（snake_case）"
+        help: "唯一任务标识（snake_case），在整个安装范围内唯一——后台任务目录属于该部署本身，而非某个组织"
       },
       schedule_type: {
         label: "调度类型",
