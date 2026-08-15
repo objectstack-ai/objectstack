@@ -217,6 +217,30 @@ export function matchesAny(path, globs) {
 const FS_READ = /\b(readFileSync|readdirSync|statSync|existsSync|globSync|opendirSync|execFileSync)\b/;
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'coverage', '.turbo', '.next', '.git']);
 
+/**
+ * Reads whose FIRST argument is a path, for the argument-position scan below.
+ * `execFileSync` is deliberately absent from this list though it is in FS_READ:
+ * its first argument is a binary to run, not a file to read.
+ */
+const PATH_ARG_READS = ['readFileSync', 'readdirSync', 'statSync', 'lstatSync', 'existsSync', 'globSync', 'opendirSync'];
+
+/**
+ * The path spellings this gate can SEE, in the words an author would write them.
+ * Printed in the failure text and mirrored in AGENTS.md, because the detector is
+ * a source scan: a spelling that is not on this list yields no flag, so a read
+ * written that way goes undeclared silently. Anything added here needs a
+ * `--self-test` case in the same edit, or the next refactor drops it unnoticed.
+ */
+export const RECOGNISED_PATH_SPELLINGS = [
+  "const HERE = dirname(fileURLToPath(import.meta.url));   // seed (ESM)",
+  'const HERE = __dirname;                                  // seed (CJS)',
+  "const P = resolve(HERE, '<rel>');       // join() and the path.* forms too",
+  "const P = fileURLToPath(new URL('<rel>', import.meta.url));",
+  "const P = new URL('<rel>', import.meta.url);",
+  "readFileSync(resolve(HERE, '<rel>'))    // the same expressions in argument",
+  "readFileSync(new URL('<rel>', import.meta.url))              // position",
+];
+
 function walkTests(dir, out = []) {
   let entries;
   try {
@@ -243,52 +267,179 @@ function packageRootOf(file) {
 }
 
 /**
- * Depth, BELOW the package root, of every directory-valued binding in `src`.
- * A binding at depth < 0 addresses something outside the package — which, in a
+ * Walk a relative path literal from `base` (a depth below the package root),
+ * reporting where it ENDS, the SHALLOWEST point it passes through, and whether
+ * it steps into an installed dependency.
+ *
+ * `min` is the load-bearing number, and `end` alone is a trap: a literal that
+ * climbs past the package root and then descends into a SIBLING package ends at
+ * a perfectly positive depth while addressing another package entirely.
+ * `join(HERE, '..', '..', 'spec', 'src', 'rls.zod.ts')` from `<pkg>/src` ends at
+ * +4 and reads `packages/spec` — the exact #7802 shape, invisible to a test on
+ * the final depth. Final depth is only sound for a binding that STOPS at the top
+ * of its ascent, which is what a `REPO_ROOT` const happens to be and what the
+ * other spellings are not.
+ */
+function walkLiteral(base, literal) {
+  let end = base;
+  let min = base;
+  let vendored = false;
+  for (const seg of literal.split('/').filter(Boolean)) {
+    if (seg === '..') end -= 1;
+    else if (seg !== '.') {
+      end += 1;
+      // An installed dependency is not a repo source input: turbo cannot hash
+      // `node_modules/**` as a source glob, and the walk above skips it anyway.
+      // A read that lands there escapes the package but declares nothing.
+      if (seg === 'node_modules') vendored = true;
+    }
+    if (end < min) min = end;
+  }
+  return { end, min, vendored };
+}
+
+/** Split an argument list on its TOP-LEVEL commas — `new URL(x, import.meta.url)` has one of its own. */
+function splitTopLevel(text) {
+  const out = [];
+  let depth = 0;
+  let quote = null;
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote) {
+      if (c === '\\') i += 1;
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') quote = c;
+    else if (c === '(' || c === '[' || c === '{') depth += 1;
+    else if (c === ')' || c === ']' || c === '}') depth -= 1;
+    else if (c === ',' && depth === 0) {
+      out.push(text.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  out.push(text.slice(start).trim());
+  return out;
+}
+
+const PATH_LITERAL = /^(['"`])([^'"`]*)\1$/;
+const NEW_URL_LITERAL = /^new\s+URL\(\s*(['"`])([^'"`]*)\1\s*,\s*import\.meta\.url\s*\)$/;
+
+/**
+ * Resolve one path expression to `{ end, min, vendored }`, or `undefined` when
+ * the spelling is not one of RECOGNISED_PATH_SPELLINGS. Recursive so that every
+ * recognised form composes with every other: a `new URL` seed may sit under a
+ * `fileURLToPath`, inside a `resolve()`, in a read's argument — each layer is
+ * peeled by the same function rather than by a separate special case.
+ */
+function pathExpression(expr, hereDepth, known) {
+  expr = expr.trim();
+
+  // `fileURLToPath(x)` does not move the path, only its spelling.
+  const unwrapped = expr.match(/^(?:url\.)?fileURLToPath\(([\s\S]*)\)$/);
+  if (unwrapped) return pathExpression(unwrapped[1], hereDepth, known);
+
+  if (/^(?:path\.)?dirname\(\s*(?:url\.)?fileURLToPath\(\s*import\.meta\.url\s*\)\s*\)$/.test(expr)) {
+    return { end: hereDepth, min: hereDepth, vendored: false };
+  }
+  if (expr === '__dirname') return { end: hereDepth, min: hereDepth, vendored: false };
+
+  // A `new URL(rel, import.meta.url)` resolves against the importing FILE, so
+  // its base is the file's directory — the same base as the two seeds above.
+  const url = expr.match(NEW_URL_LITERAL);
+  if (url) return walkLiteral(hereDepth, url[2]);
+
+  if (/^[A-Za-z_$][\w$]*$/.test(expr)) return known.get(expr);
+
+  const call = expr.match(/^(?:path\.)?(?:resolve|join)\(([\s\S]*)\)$/);
+  if (!call) return undefined;
+  const args = splitTopLevel(call[1]);
+  const base = pathExpression(args[0], hereDepth, known);
+  if (!base) return undefined;
+  let { end, min, vendored } = base;
+  for (const a of args.slice(1)) {
+    const lit = a.match(PATH_LITERAL);
+    if (!lit) continue;
+    const step = walkLiteral(end, lit[2]);
+    end = step.end;
+    min = Math.min(min, step.min);
+    vendored = vendored || step.vendored;
+  }
+  return { end, min, vendored };
+}
+
+/** The argument list of every fs read whose first argument is a path, paren-balanced. */
+function* readArgumentLists(src) {
+  const re = new RegExp(String.raw`\b(?:${PATH_ARG_READS.join('|')})\s*\(`, 'g');
+  for (const m of src.matchAll(re)) {
+    const from = m.index + m[0].length;
+    let depth = 1;
+    let quote = null;
+    let i = from;
+    for (; i < src.length; i++) {
+      const c = src[i];
+      if (quote) {
+        if (c === '\\') i += 1;
+        else if (c === quote) quote = null;
+        continue;
+      }
+      if (c === "'" || c === '"' || c === '`') quote = c;
+      else if (c === '(') depth += 1;
+      else if (c === ')' && --depth === 0) break;
+    }
+    if (depth === 0) yield src.slice(from, i);
+  }
+}
+
+/**
+ * Every path in `src` that addresses something outside the package — which, in a
  * file that also reads the filesystem, is precisely the #7802 shape.
  *
- * Deliberately a source scan and not a real parse: the shape it looks for
- * (`dirname(fileURLToPath(import.meta.url))` seeds, `resolve`/`join` chains off
- * them) is how every one of the 20 files it finds today is written, and a
- * detector with no dependencies cannot itself fail to resolve in CI. It errs
- * toward flagging: an unrecognised spelling yields no binding and no flag, so
- * the accompanying `--self-test` pins the shapes that must keep flagging.
+ * Deliberately a source scan and not a real parse: a detector with no
+ * dependencies cannot itself fail to resolve in CI, which is what keeps this
+ * gate un-mutable. The price is that it only sees the spellings it knows, so the
+ * list it knows is published (RECOGNISED_PATH_SPELLINGS, printed in the failure
+ * text and mirrored in AGENTS.md) instead of being an implementation detail an
+ * author has to reverse-engineer from a silent pass.
+ *
+ * Two positions are scanned, because a path is as often nested straight into the
+ * read as it is bound to a name first:
+ *   const SRC = readFileSync(resolve(HERE, '../../other/src/x.ts'), 'utf8');
+ * binds `SRC` to file CONTENTS, never to a path, so a declaration-only scan sees
+ * no path at all in the line that does the escaping.
+ *
+ * `--self-test` pins the shapes that must keep flagging AND the shapes that must
+ * not; an added spelling without an added case is the next silent regression.
  */
 export function escapingBindings(src, hereDepth) {
-  const depth = new Map();
+  const known = new Map();
+  const found = [];
+  const report = (name, info) => {
+    // `vendored`: the read escapes the package but lands in an installed
+    // dependency, which no declaration can name. Not a cross-package input.
+    if (!info || info.vendored || info.min >= 0) return;
+    found.push({ name, depth: info.min });
+  };
+
   const DECL = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([^;\n]+(?:\n\s*[^;\n]*)??)\s*;/g;
   for (const m of src.matchAll(DECL)) {
-    const name = m[1];
-    const expr = m[2].trim();
-    if (/^(?:path\.)?dirname\(\s*fileURLToPath\(\s*import\.meta\.url\s*\)\s*\)$/.test(expr)) {
-      depth.set(name, hereDepth);
-      continue;
-    }
-    if (expr === '__dirname') {
-      depth.set(name, hereDepth);
-      continue;
-    }
-    const call = expr.match(/^(?:path\.)?(?:resolve|join)\(([\s\S]*)\)$/);
-    if (!call) continue;
-    const args = call[1].split(',').map((s) => s.trim());
-    const first = args[0];
-    let base;
-    if (/^(?:path\.)?dirname\(\s*fileURLToPath\(/.test(first)) base = hereDepth;
-    else if (first === '__dirname') base = hereDepth;
-    else if (/^[A-Za-z_$][\w$]*$/.test(first)) base = depth.get(first);
-    if (base === undefined) continue;
-    let d = base;
-    for (const a of args.slice(1)) {
-      const lit = a.match(/^(['"`])([^'"`]*)\1$/);
-      if (!lit) continue;
-      for (const seg of lit[2].split('/').filter(Boolean)) {
-        if (seg === '..') d -= 1;
-        else if (seg !== '.') d += 1;
-      }
-    }
-    depth.set(name, d);
+    const info = pathExpression(m[2].trim(), hereDepth, known);
+    if (!info) continue;
+    known.set(m[1], info);
+    report(m[1], info);
   }
-  return [...depth.entries()].filter(([, d]) => d < 0).map(([n, d]) => ({ name: n, depth: d }));
+
+  let n = 0;
+  for (const args of readArgumentLists(src)) {
+    n += 1;
+    const first = splitTopLevel(args)[0];
+    // A bare binding here was already judged at its declaration; reporting it a
+    // second time would only duplicate the finding under a less useful name.
+    if (known.has(first)) continue;
+    report(`read #${n} argument`, pathExpression(first, hereDepth, known));
+  }
+  return found;
 }
 
 /**
@@ -438,7 +589,16 @@ function verify() {
     console.error(
       'Why this gate exists: a test whose real inputs are wider than its package is\n' +
         'invisible to BOTH the affected-subset filter and the turbo cache, so it can go\n' +
-        'red on `main` while every PR reports green (#7802).',
+        'red on `main` while every PR reports green (#7802).\n',
+    );
+    console.error(
+      'How this gate SEES a read, and its limit: it is a source scan, so it recognises\n' +
+        'these spellings and only these. A path written any other way yields no flag —\n' +
+        'which means no declaration, silently. Write escaping reads as:\n' +
+        RECOGNISED_PATH_SPELLINGS.map((s) => `      ${s}`).join('\n') +
+        '\n    Reaching for a spelling that is not here? Add it to the detector (with a\n' +
+        '    --self-test case) rather than working around it — an unseen read is the\n' +
+        '    defect above, not a style question.',
     );
     process.exit(1);
   }
@@ -532,6 +692,58 @@ function selfTest() {
         "const SRC = join(ROOT, 'src', 'data');",
       2,
     ),
+  );
+
+  // The ascent-then-descent shape. Every case below ends at a NON-NEGATIVE
+  // depth while addressing a sibling package, so each one passes a test on the
+  // final depth and is caught only by the shallowest point reached.
+  ok(
+    'flags a one-literal climb into a sibling package (formula -> spec)',
+    at("const HERE = dirname(fileURLToPath(import.meta.url));\nconst Z = join(HERE, '..', '..', 'spec', 'src', 'rls.zod.ts');", 1),
+  );
+  ok(
+    'flags a fileURLToPath(new URL()) seed naming a sibling package',
+    at("const SRC = fileURLToPath(new URL('../../../other-pkg/src/x.ts', import.meta.url));", 2),
+  );
+  ok(
+    'flags a new URL() seed with no fileURLToPath around it',
+    at("const SRC = new URL('../../../other-pkg/src/x.ts', import.meta.url);", 2),
+  );
+  ok(
+    'flags a new URL() nested straight into a read (no path binding exists)',
+    at("const SRC = readFileSync(new URL('../../../scripts/gate.mjs', import.meta.url), 'utf8');", 1),
+  );
+  ok(
+    'flags a read whose argument is a multi-line new URL()',
+    at("const c = readFileSync(\n  new URL('../../../scripts/gate.mjs', import.meta.url),\n  'utf8',\n);", 1),
+  );
+  ok(
+    'flags a resolve() nested straight into a read',
+    at(
+      "const HERE = dirname(fileURLToPath(import.meta.url));\n" +
+        "const SRC = readFileSync(resolve(HERE, '../../../other-pkg/src/x.ts'), 'utf8');",
+      2,
+    ),
+  );
+  ok(
+    'flags a fileURLToPath(new URL()) chained through resolve()',
+    at("const P = resolve(fileURLToPath(new URL('..', import.meta.url)), '../../other-pkg/src');", 2),
+  );
+  ok(
+    'does NOT flag a new URL() that stays inside the package',
+    !at("const SRC = readFileSync(new URL('../sibling-dir/x.ts', import.meta.url), 'utf8');", 2),
+  );
+  ok(
+    'does NOT flag a new URL() naming the package root itself',
+    !at("const PKG = fileURLToPath(new URL('../../package.json', import.meta.url));", 2),
+  );
+  ok(
+    'does NOT flag a climb into node_modules (no glob can declare an installed dep)',
+    !at("const HERE = dirname(fileURLToPath(import.meta.url));\nconst L = resolve(HERE, '../../../node_modules/tsx/dist/loader.mjs');", 1),
+  );
+  ok(
+    'does NOT flag a read argument that is an unrecognised expression',
+    !at('const SRC = readFileSync(somewhereElse(x), \'utf8\');', 2),
   );
 
   const failed = cases.filter((c) => !c.cond);
