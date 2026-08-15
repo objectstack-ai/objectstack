@@ -25,6 +25,7 @@ import {
   META_URL_TO_SINGULAR,
   canonicalMetaUrlType,
   metaUrlSpellingRefusal,
+  unrecognisedMetaTypeRefusal,
 } from './metadata-url-spelling';
 
 /**
@@ -148,6 +149,15 @@ describe('#7894 — the refusal limb is narrow by construction', () => {
     // The `s`-final names are the sharp cases: a naive "looks plural" heuristic
     // would refuse all four, and they are ordinary English words a plugin might
     // well use for a kind.
+    //
+    // [#8421] Untouched — every assertion below is the one #7894 wrote, and it
+    // still passes for the reason it always did: THIS verdict is about
+    // misspellings of DECLARED types and none of these is one. Read it as a
+    // statement about `metaUrlSpellingRefusal`, not about the whole boundary:
+    // `saveMetaItem` now also consults `unrecognisedMetaTypeRefusal`, under
+    // which the six mapped kinds below stay writable and the six unmapped
+    // names no longer are. That narrowing is pinned, deliberately visible, in
+    // the `#8421` block at the bottom of this file.
     for (const kind of [
       'theme', 'sharing_rule', 'webhook', 'rag_pipeline', 'analytics_cube', 'connector',
       'my_plugin_kind', 'address', 'status', 'kudos', 'analysis', 'series',
@@ -157,12 +167,20 @@ describe('#7894 — the refusal limb is narrow by construction', () => {
     }
   });
 
-  it('documents its residue rather than pretending to be total', () => {
-    // A spelling that is not a plural of anything is indistinguishable from a
-    // plugin kind by static means, so it still takes the plugin path. Pinned so
-    // the limitation is a stated fact rather than an unnoticed gap; closing it
-    // needs the live registered-type set at the boundary.
+  it('hands its residue to the OTHER verdict rather than widening (#8421 flipped this)', () => {
+    // FLIPPED, not deleted (#8421 closed what #7894 left open, the way #7894
+    // flipped what #7743 left behind).
+    //
+    // This case used to assert the gap itself: `fieldz` is not a plural of
+    // anything, so nothing refused it and `PUT /meta/fieldz/x` answered 200
+    // and minted a namespace. The FIRST half still holds and must keep
+    // holding — `fieldz` reaches for no declared type, so this predicate has
+    // nothing to say about it, which is exactly what keeps the POSITIVE
+    // CONTROL above true by construction. What flipped is the second half:
+    // the residue is now closed next door, so the predicate's silence is no
+    // longer the whole story at the boundary.
     expect(metaUrlSpellingRefusal('fieldz')).toBeNull();
+    expect(unrecognisedMetaTypeRefusal('fieldz')).toEqual({ type: 'fieldz' });
   });
 
   it('refuses a wrong plural of EVERY declared type, naming that type (#8424)', () => {
@@ -182,6 +200,86 @@ describe('#7894 — the refusal limb is narrow by construction', () => {
     }
     // And the plugin-kind half of the retired pin: no plugin kind is declared,
     // which the POSITIVE CONTROL above already quantifies by behaviour.
+  });
+});
+
+describe('#8421 — the second verdict: not a metadata type AT ALL', () => {
+  it('accepts every declared type, canonical and REST-plural alike', () => {
+    for (const entry of DEFAULT_METADATA_TYPE_REGISTRY) {
+      expect(unrecognisedMetaTypeRefusal(entry.type), `${entry.type} is declared`).toBeNull();
+      expect(unrecognisedMetaTypeRefusal(expectedRestPlural(entry.type))).toBeNull();
+    }
+  });
+
+  it('accepts every manifest spelling AND the singular each one folds to', () => {
+    // The direction that matters most, and the one a registry-quantified
+    // refusal would get wrong: six of these singulars — `theme`, `webhook`,
+    // `connector`, `sharing_rule`, `analytics_cube`, `rag_pipeline` — are
+    // PLUGIN kinds with no static registry entry at all. Refusing them would
+    // break `PUT /meta/theme/dark`, the exact operation the plugin path exists
+    // to serve, which is the failure #8421's measurement disqualified option C
+    // for. Accepting the singular is not decoration: `themes` folds to `theme`,
+    // and a boundary that refused the fold's own output would be incoherent.
+    for (const [plural, singular] of Object.entries(PLURAL_TO_SINGULAR)) {
+      expect(unrecognisedMetaTypeRefusal(plural), `${plural} works today`).toBeNull();
+      expect(
+        unrecognisedMetaTypeRefusal(singular),
+        `${singular} is what ${plural} folds to`,
+      ).toBeNull();
+    }
+  });
+
+  it('carries the six plugin kinds by NAME, since quantification hides them', () => {
+    const declared = new Set<string>(DEFAULT_METADATA_TYPE_REGISTRY.map((e) => e.type));
+    for (const kind of [
+      'analytics_cube', 'connector', 'rag_pipeline', 'sharing_rule', 'theme', 'webhook',
+    ]) {
+      expect(declared.has(kind), `${kind} must NOT be in the static registry`).toBe(false);
+      expect(unrecognisedMetaTypeRefusal(kind), `${kind} must stay accepted anyway`).toBeNull();
+    }
+  });
+
+  it('refuses the card coordinates — a name the contract does not carry', () => {
+    for (const type of ['fieldz', 'objectt', 'viewz', 'nonsense_type']) {
+      expect(unrecognisedMetaTypeRefusal(type)).toEqual({ type });
+    }
+  });
+
+  it('CHANGED BEHAVIOUR — an unmapped plugin-kind NAME is no longer mintable', () => {
+    // Its own case rather than folded into the one above, because this is the
+    // accept-set narrowing the ruling bought and a reviewer must see it.
+    //
+    // The POSITIVE CONTROL further up is untouched and still green: none of
+    // these is a misspelling of a declared type, so `metaUrlSpellingRefusal`
+    // cannot refuse any of them, exactly as #7894 built it. What changed is
+    // that `saveMetaItem` consults BOTH verdicts, so a kind whose name is in
+    // neither half of the static contract can no longer be CREATED through
+    // `PUT /meta/:type/:name`.
+    //
+    // Safe by construction only because #8586 retired `additionalTypes`: with
+    // no declared-kind channel left, an unrecognised name cannot be a
+    // declaration this predicate never heard about. If a declared-kind channel
+    // is ever reintroduced, this case is the one that must be revisited FIRST.
+    for (const kind of ['my_plugin_kind', 'address', 'status', 'kudos', 'analysis', 'series']) {
+      expect(metaUrlSpellingRefusal(kind), `${kind} is still not a misspelling`).toBeNull();
+      expect(
+        unrecognisedMetaTypeRefusal(kind),
+        `${kind} is outside the static contract`,
+      ).toEqual({ type: kind });
+    }
+  });
+
+  it('never refuses a spelling the fold is prepared to canonicalize', () => {
+    // Composition guard over the whole map: refusing an input the boundary
+    // would happily fold, or refusing the fold's own output, is incoherent in
+    // a way no single fixture would catch.
+    for (const spelling of Object.keys(META_URL_TO_SINGULAR)) {
+      expect(unrecognisedMetaTypeRefusal(spelling), `${spelling} is mapped`).toBeNull();
+      expect(
+        unrecognisedMetaTypeRefusal(canonicalMetaUrlType(spelling)),
+        `${spelling} folds to a type the verdict must also accept`,
+      ).toBeNull();
+    }
   });
 });
 

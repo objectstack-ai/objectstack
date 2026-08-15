@@ -121,6 +121,7 @@
     "singularToPlural": "src/shared/metadata-collection.zod.ts#singularToPlural (function)",
     "strictUnknownKeyError": "src/shared/suggestions.zod.ts#strictUnknownKeyError (function)",
     "suggestFieldType": "src/shared/suggestions.zod.ts#suggestFieldType (function)",
-    "tmpl": "src/shared/expression.zod.ts#tmpl (function)"
+    "tmpl": "src/shared/expression.zod.ts#tmpl (function)",
+    "unrecognisedMetaTypeRefusal": "src/shared/metadata-url-spelling.ts#unrecognisedMetaTypeRefusal (function)"
   }
 }

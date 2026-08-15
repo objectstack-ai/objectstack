@@ -121,6 +121,7 @@
     "singularToPlural (function)",
     "strictUnknownKeyError (function)",
     "suggestFieldType (function)",
-    "tmpl (function)"
+    "tmpl (function)",
+    "unrecognisedMetaTypeRefusal (function)"
   ]
 }

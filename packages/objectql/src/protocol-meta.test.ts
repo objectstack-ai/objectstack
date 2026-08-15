@@ -1434,13 +1434,28 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         // `validation` used to ride along here; #4509 retired the kind
         // (ADR-0088), so `seed` — still registry-default allowRuntimeCreate —
         // stands in as the second case.
-        it('accepts brand-new trigger and seed (allowRuntimeCreate:true)', async () => {
+        //
+        // [#8421] …and `trigger` followed it out on 2026-08-15, for the same
+        // reason and by the same rule. ADR-0088 retired that kind too
+        // (`'trigger'` returns ZERO hits in `packages/spec/src/kernel/`), so it
+        // never had the registry entry this case's title claims for it: it was
+        // green through the "no static registry entry ⇒ assume plugin-declared
+        // ⇒ writable" fall-through, i.e. through the hole #8421 closed, while
+        // reading as a pin on the declared `allowRuntimeCreate` tier. Debt
+        // regardless of that card's ruling. REPLACED, not deleted — `mapping`
+        // really does declare `allowOrgOverride: false, allowRuntimeCreate:
+        // true` — so the tier keeps a live specimen.
+        it('accepts brand-new mapping and seed (allowRuntimeCreate:true)', async () => {
             mockEngine.findOne.mockResolvedValue(null);
 
-            const triggerResult = await scoped.saveMetaItem({
-                type: 'trigger',
-                name: 'my_trigger',
-                item: { name: 'my_trigger', object: 'case', event: 'beforeInsert' },
+            const mappingResult = await scoped.saveMetaItem({
+                type: 'mapping',
+                name: 'my_mapping',
+                item: {
+                    name: 'my_mapping',
+                    targetObject: 'case',
+                    fieldMapping: [{ source: 'Title', target: 'title' }],
+                },
             });
             const seedResult = await scoped.saveMetaItem({
                 type: 'seed',
@@ -1448,7 +1463,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 item: { object: 'case', records: [] },
             });
 
-            expect(triggerResult.success).toBe(true);
+            expect(mappingResult.success).toBe(true);
             expect(seedResult.success).toBe(true);
         });
 
@@ -1472,15 +1487,31 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         // ───────────────────────────────────────────────────────────────
         // Regression: plugin-registered types (no static registry entry)
         //
-        // `theme`, `connector`, `data`, `policy`, `sharing_rule`, `webhook`,
-        // `analytics_cube`, `package` are registered by plugins at runtime —
-        // not in DEFAULT_METADATA_TYPE_REGISTRY. `getMetaTypes()` synthesises
-        // descriptors with `allowRuntimeCreate: true` for them so the
-        // admin UI advertises them as writable. The write gate must
-        // agree, otherwise users see "writable" types 403 on save.
+        // `theme`, `connector`, `sharing_rule`, `webhook`, `analytics_cube`,
+        // `rag_pipeline` have no `DEFAULT_METADATA_TYPE_REGISTRY` entry at all
+        // — they reach `/meta` through the static URL-spelling contract's
+        // manifest limb instead. `getMetaTypes()` advertises them as writable
+        // and the write gate must agree, otherwise users see "writable" types
+        // 403 on save.
         //
         // Before fix: gate keyed off the static registry only, rejecting
         // these 10+ types with not_creatable / 403.
+        //
+        // [#8421, maintainer ruling 2026-08-15] ⚠️ THE SET SHRANK, and the two
+        // halves must not be conflated again. `data`, `package`, `kind` and
+        // `policy` used to ride this same "no static entry ⇒ writable"
+        // fall-through, but they are in NEITHER half of the static contract:
+        // they are live `SchemaRegistry` keys an ordinary `registerApp`
+        // produces (seed datasets, package rows, kind descriptors), and nothing
+        // ever honoured a runtime create on one. The ruling — verbatim,
+        // untranslated: 暂时不考虑让插件申明新的元数据类型 — retired the premise
+        // that an unrecognised name might be a kind some plugin declared, so
+        // both doors now read the same static contract: `GET /meta/types` stops
+        // advertising those four, and the mint door refuses them. The six above
+        // are unaffected, which is the discriminating fact this pair of cases
+        // exists to hold; `暂时` is a CURRENT posture, so see
+        // `getMetaTypes()`'s synthesis comment in `@objectstack/metadata-protocol`
+        // before concluding the possibility was never entertained.
         //
         // [#5271] `api` LEFT this list — it now has a static registry entry.
         // Its specimen was REPLACED rather than re-spelled: leaving it here
@@ -1511,15 +1542,51 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 item: { name: 'my_theme', label: 'Test', tokens: {} },
                 organizationId: 'org_alpha',
             });
-            const policyResult = await scoped.saveMetaItem({
-                type: 'policy',
-                name: 'my_policy',
-                item: { name: 'my_policy', label: 'Test' },
-                organizationId: 'org_alpha',
-            });
 
             expect(themeResult.success).toBe(true);
-            expect(policyResult.success).toBe(true);
+        });
+
+        it('[#8421] CHANGED BEHAVIOUR — `policy` is no longer one of them', async () => {
+            // The half of the old specimen pair that the 2026-08-15 ruling
+            // moved. `policy` is not in the static registry AND not in the URL
+            // spelling contract, so it was never a kind the platform carried —
+            // only a name the old fall-through could not tell apart from one.
+            // Its own case rather than an edit to the assertion above, so the
+            // narrowing is visible to a reviewer instead of inferred from a
+            // deleted line, and so the `theme` half above stays a pure control:
+            // if a future change breaks the six URL-map-only kinds, that case
+            // goes red on its own rather than being masked by this one.
+            mockEngine.findOne.mockResolvedValue(null);
+
+            // ADR-0112 — code AND status, never "it threw".
+            await expect(
+                scoped.saveMetaItem({
+                    type: 'policy',
+                    name: 'my_policy',
+                    item: { name: 'my_policy', label: 'Test' },
+                    organizationId: 'org_alpha',
+                }),
+            ).rejects.toMatchObject({
+                code: 'INVALID_REQUEST',
+                status: 400,
+            });
+
+            // …and the refusal is the one this card is about — it names the
+            // type and says the platform has none such — not the #7894 spelling
+            // verdict, which cannot fire here (`policy` is a misspelling of
+            // nothing) and offers no replacement spelling.
+            await expect(
+                scoped.saveMetaItem({
+                    type: 'policy',
+                    name: 'my_policy',
+                    item: { name: 'my_policy', label: 'Test' },
+                    organizationId: 'org_alpha',
+                }),
+            ).rejects.toThrow(/'policy' is not a metadata type/);
+
+            // Nothing is persisted — the whole point is that no namespace is
+            // minted under a type nothing reads.
+            expect(mockEngine.insert).not.toHaveBeenCalled();
         });
 
         // ───────────────────────────────────────────────────────────────

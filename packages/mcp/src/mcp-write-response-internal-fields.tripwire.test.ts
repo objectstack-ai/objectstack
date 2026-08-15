@@ -133,6 +133,11 @@ const RECIPES: Record<string, Recipe> = {
   // ── read / summary faces: no engine write result to strip. Enumerated so the
   //    map stays total and a rename is noticed. ─────────────────────────────
   listObjects: { invoke: (b) => b.listObjects(), writesRecords: false },
+  // [#6504] `listObjects` seen at its second width — the same object summaries
+  // plus the completeness verdict. A summary face like its twin: it echoes no
+  // engine write result, and the `{ name, label, fieldCount }` projection both
+  // share is what keeps a stored field off this response in the first place.
+  listObjectsDiagnosed: { invoke: (b) => b.listObjectsDiagnosed(), writesRecords: false },
   describeObject: { invoke: (b) => b.describeObject('vault'), writesRecords: false },
   query: { invoke: (b) => b.query('vault', {}), writesRecords: false },
   get: { invoke: (b) => b.get('vault', 'row-1'), writesRecords: false },

@@ -13,6 +13,10 @@ import type {
   RegisterObjectToolsOptions,
   RegisterActionToolsOptions,
 } from './mcp-http-tools.js';
+import {
+  METADATA_UNAVAILABLE_CODE,
+  metadataPartialListingSentence,
+} from './metadata-completeness.js';
 import { protocolStdout } from './protocol-stdout.js';
 import { renderSkillMarkdown, type RenderSkillOptions } from './skill-md.js';
 import {
@@ -72,21 +76,19 @@ const DESTRUCTIVE_TOOLS = new Set([
 // ── Metadata outage vs. metadata miss (#6055, ADR-0110 D3) ───────────────────
 
 /**
- * [#6055] The classification this file gives "the metadata read did not
- * happen", and the classification it gives "the read happened and found
- * nothing". Both are the standard catalog's own codes for their status
- * (`HttpStatusErrorCodeMap[503]` / `[404]`, ADR-0112) — the same spelling the
+ * [#6055] The classification this file gives "the read happened and found
+ * nothing", as opposed to {@link METADATA_UNAVAILABLE_CODE} for "the read did
+ * not happen". Both are the standard catalog's own codes for their status
+ * (`HttpStatusErrorCodeMap[404]` / `[503]`, ADR-0112) — the same spelling the
  * `sys_metadata` half of this family already emits (#5532 / #5843 / #5705), not
  * a vocabulary invented for MCP.
  *
- * There is no HTTP status on this surface: MCP answers `prompts/get` with a
- * `GetPromptResult` and `resources/read` with a `ReadResourceResult`, and
- * neither carries an error envelope (only `CallToolResult` has `isError`). So
- * the code travels in the payload the surface already had — text for a prompt,
- * the JSON body for a resource — and that is the strongest discriminator this
- * transport offers. See the PR body for why the channel was not changed.
+ * [#6504] Its 503 twin moved to `./metadata-completeness.js` when the
+ * `list_objects` TOOL joined the `objectstack://objects` RESOURCE in withholding
+ * the same claim: two surfaces answering one question must say it in one
+ * vocabulary, and this file cannot export to `mcp-http-tools.ts` (it imports
+ * from it).
  */
-const METADATA_UNAVAILABLE_CODE = 'SERVICE_UNAVAILABLE';
 const METADATA_MISS_CODE = 'RESOURCE_NOT_FOUND';
 
 /**
@@ -115,26 +117,15 @@ function metadataUnavailableSentence(subject: string, withheld: string): string 
 }
 
 /**
- * [#6504] The sentence for "a listing that is known to be SHORT" — the plural
- * counterpart of {@link metadataUnavailableSentence}, and deliberately not the
- * same sentence.
+ * [#6504] `metadataPartialListingSentence` — the plural counterpart of
+ * {@link metadataUnavailableSentence}, and deliberately not the same sentence:
+ * the singular one says nothing is being served, because on that surface
+ * nothing is, while the plural one serves the best-effort set and withholds
+ * only the completeness claim on top of it.
  *
- * The singular one says nothing is being served, because on that surface
- * nothing is. Here the best-effort set IS served: a partial listing is still
- * the most useful true thing this surface has, and withholding it would turn a
- * diagnosis fix into a functional regression. What is withheld is the
- * **completeness claim** on top of it — which is the entire defect — so the
- * sentence states the direction of the error (`at least`, never exactly) and
- * names the count as *served*, never as a total.
+ * It now lives in `./metadata-completeness.js` with the 503 code it travels
+ * with — see the note on {@link METADATA_MISS_CODE}.
  */
-function metadataPartialListingSentence(plural: string, served: number): string {
-  return (
-    `The metadata service could not be fully read, so this listing of ${plural} is known to be INCOMPLETE. `
-    + `${served} ${served === 1 ? 'is' : 'are'} being served and the total is withheld — `
-    + `this environment declares at least that many ${plural}, possibly more. `
-    + 'Retry once the metadata service is reachable.'
-  );
-}
 
 /** What {@link diagnosedGet} and {@link diagnoseEmptyRead} report. */
 interface DiagnosedRead {

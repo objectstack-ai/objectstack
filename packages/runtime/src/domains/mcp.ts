@@ -483,15 +483,57 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
     const callData = actionExec.callData.bind(null, deps, context);
     const getMeta = () => deps.resolveService(context, 'metadata', envId);
 
+    const listObjectSummaries = async (): Promise<any[]> => {
+        const meta: any = await getMeta();
+        const objs: any[] = (await meta?.listObjects?.()) ?? [];
+        return objs.map((o) => ({
+            name: o.name,
+            label: o.label ?? o.name,
+            fieldCount: o.fields ? Object.keys(o.fields).length : undefined,
+        }));
+    };
+
     return {
-        listObjects: async () => {
+        listObjects: listObjectSummaries,
+        /**
+         * [#6504] The HTTP transport's half of the `list_objects` completeness
+         * fix — the stdio bridge (`packages/mcp/src/stdio-data-bridge.ts`)
+         * carries the identical member, because the tool that renders
+         * `totalCount` is shared and a claim must not depend on which transport
+         * the client happened to connect over.
+         *
+         * `McpDataBridge` declares this member OPTIONAL, so implementing it here
+         * is what makes the tool's degraded branch reachable on this transport.
+         * The items come from the resolver directly above; only the verdict is
+         * asked of `listDiagnosed('object')`, the member declared to answer it
+         * — `listObjects` claims no equivalence to `list('object')`, and
+         * presuming one at a consumer is the private dialect Prime Directive #12
+         * forbids. A metadata service predating `listDiagnosed` reports nothing
+         * degraded, which is exactly what it could express, and the tool then
+         * renders precisely what it rendered before.
+         *
+         * ⚠️ The verdict probe must not fail a read whose items already
+         * succeeded: a throw here would trade a working `list_objects` for
+         * observability. It is swallowed into "not degraded" — the same
+         * direction `warnIfSkillListIncomplete` takes above, and the only one
+         * that cannot manufacture a claim.
+         */
+        listObjectsDiagnosed: async () => {
+            const objects = await listObjectSummaries();
             const meta: any = await getMeta();
-            const objs: any[] = (await meta?.listObjects?.()) ?? [];
-            return objs.map((o) => ({
-                name: o.name,
-                label: o.label ?? o.name,
-                fieldCount: o.fields ? Object.keys(o.fields).length : undefined,
-            }));
+            if (!meta || typeof meta.listDiagnosed !== 'function') {
+                return { objects, degraded: false, errors: [] };
+            }
+            try {
+                const diagnosed: any = await meta.listDiagnosed('object');
+                return {
+                    objects,
+                    degraded: diagnosed?.degraded === true,
+                    errors: Array.isArray(diagnosed?.errors) ? diagnosed.errors : [],
+                };
+            } catch {
+                return { objects, degraded: false, errors: [] };
+            }
         },
         describeObject: async (name: string) => {
             const meta: any = await getMeta();

@@ -61,7 +61,7 @@ import {
     type QueryAliasConflict, type QueryAliasSlot,
     type DroppedFieldsEvent, type QueryAST, type EngineQueryOptionsParsed,
 } from '@objectstack/spec/data';
-import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSpellingRefusal } from '@objectstack/spec/shared';
+import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSpellingRefusal, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
 import { applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
 import { type FormView, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
 import { METADATA_FORM_REGISTRY, CORE_SERVICE_PROVIDER, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
@@ -207,6 +207,17 @@ function canonicalMetaType(type: string): string {
  * function for why the rule is static rather than a live-registry lookup —
  * and (#8424) for why this boundary consumes the composed VERDICT rather than
  * the predicate parts: the spelling contract stays whole at its producer.
+ *
+ * ## [#8421] The SECOND verdict is not here
+ *
+ * This refusal is silent for a name that is not a plural of ANYTHING
+ * (`fieldz`), because such a name reaches for no declared type. That residue
+ * was closed by the maintainer's ruling of 2026-08-14 (「同意」), joint with
+ * #8586 — but not in this function, because the verdict that closes it cannot
+ * be answered from the request alone: it has to know whether the namespace it
+ * would create already exists. It lives on the mint door itself, as
+ * {@link ObjectStackProtocolImplementation.refuseUnmintableMetaType}, which
+ * carries the scoping argument and the measurements behind it.
  */
 function canonicalizeMetaRequestType<T extends { type: string }>(request: T): T {
     const refusal = metaUrlSpellingRefusal(request.type);
@@ -4586,6 +4597,54 @@ export class ObjectStackProtocolImplementation implements
             }
             // Runtime-registered type with no registry entry — synthesise a
             // minimal descriptor so the UI can still surface it.
+            //
+            // [#8421] `allowRuntimeCreate` is DERIVED FROM THE MINT DOOR'S OWN
+            // CONTRACT rather than synthesised as `true`. The two doors are the
+            // same sentence read twice — this endpoint says which types a
+            // caller may create, `refuseUnmintableMetaType` decides whether the
+            // create is honoured — so they consult ONE predicate
+            // ({@link unrecognisedMetaTypeRefusal}) instead of two
+            // independently-maintained rules that drifted apart.
+            //
+            // What this keeps, and it is the whole point: the six legitimate
+            // plugin kinds with no static registry entry — `theme`, `webhook`,
+            // `connector`, `sharing_rule`, `analytics_cube`, `rag_pipeline` —
+            // are IN the static spelling contract (limb 1 of the URL map), so
+            // the predicate accepts them and they stay advertised as creatable.
+            // `PUT /meta/theme/dark` is the operation the plugin path exists to
+            // serve and this change must not touch it.
+            //
+            // What this withdraws: `policy`, `data`, `package`, `kind` — live
+            // `SchemaRegistry` keys an ordinary `registerApp` produces, outside
+            // that contract. They were advertised `allowRuntimeCreate: true` by
+            // the blanket `true` below and nothing ever honoured a create on
+            // them; the door has refused them since this card's first cut. The
+            // read door now agrees at the honest value instead of promising a
+            // write the platform will not perform (the same remedy the
+            // 2026-08-07 ruling chose for `api`: withdraw the advertisement
+            // rather than converge the read path onto it).
+            //
+            // ## The premise, and why it is a CURRENT one (maintainer, 2026-08-15)
+            //
+            // The blanket `true` was not careless: while a plugin could DECLARE
+            // a metadata kind, a name with no registry entry might be a real
+            // kind this synthesis had not heard of, so "permissive by
+            // construction" was the safe reading. That premise is what expired.
+            // The ruling, verbatim and untranslated:
+            //
+            //     暂时不考虑让插件申明新的元数据类型
+            //
+            // ⚠️ `暂时` is load-bearing and is recorded as such: this is the
+            // platform's CURRENT posture, not a permanent architectural
+            // closure. Plugin-declared metadata kinds were considered, are
+            // understood, and are deferred — not ruled impossible. If they are
+            // ever wanted again, this derivation and its twin
+            // {@link isRuntimeCreateAllowed} are the two sites that encode the
+            // deferral, and `unrecognisedMetaTypeRefusal` in `@objectstack/spec`
+            // is the contract they both read; a declared-kind channel would
+            // have to feed that predicate before either door could widen. Start
+            // here rather than re-deriving the decision from the code's silence.
+            const mintableByContract = unrecognisedMetaTypeRefusal(singular) === null;
             return {
                 type: singular,
                 schemaId: singular, // API client expects schemaId field
@@ -4594,7 +4653,7 @@ export class ObjectStackProtocolImplementation implements
                 filePatterns: [],
                 supportsOverlay: false,
                 allowOrgOverride: writableOverrides.has(singular),
-                allowRuntimeCreate: true,
+                allowRuntimeCreate: mintableByContract,
                 supportsVersioning: false,
                 executionPinned: false,
                 loadOrder: 1000,
@@ -9908,10 +9967,17 @@ export class ObjectStackProtocolImplementation implements
      */
     /**
      * Set of type names that have a static entry in
-     * `DEFAULT_METADATA_TYPE_REGISTRY`. Anything outside this set is
-     * runtime-registered (plugin-provided types like `theme`, `api`,
-     * `connector`) — the listing endpoint at `getMetaTypes()` synthesises
-     * those with `allowRuntimeCreate: true`, so this gate must agree.
+     * `DEFAULT_METADATA_TYPE_REGISTRY`. Anything outside this set carries no
+     * declared two-tier flags of its own, so the predicates below have to
+     * decide what its absence means.
+     *
+     * ⚠️ [#8421] It used to mean "plugin-registered, therefore writable", and
+     * `getMetaTypes()` synthesised `allowRuntimeCreate: true` to match. It no
+     * longer does: the listing derives that flag from the static SPELLING
+     * contract (see {@link getMetaTypes}), which is a strictly larger set than
+     * this one — it also carries the six URL-map-only plugin kinds. Absence
+     * from THIS set is therefore not on its own an answer to "may it be
+     * created"; see {@link isRuntimeCreateAllowed} for what absence still buys.
      */
     private static readonly STATIC_REGISTRY_TYPES: ReadonlySet<string> = (() => {
         const out = new Set<string>();
@@ -9990,16 +10056,55 @@ export class ObjectStackProtocolImplementation implements
         return env.has(singular) || env.has(type);
     }
 
-    /** Does this type permit creating brand-new (artifact-free) items? */
+    /**
+     * Does this type permit creating brand-new (artifact-free) items?
+     *
+     * ## [#8421] What the second arm means now, and why it did NOT narrow
+     *
+     * The fall-through below used to be the write-side twin of a read-side
+     * rule: "no static registry entry ⇒ plugin-registered ⇒ writable", mirrored
+     * verbatim by `getMetaTypes()`'s synthesised `allowRuntimeCreate: true`.
+     * The maintainer ruling of 2026-08-15 retired that rule's premise —
+     * verbatim, untranslated:
+     *
+     *     暂时不考虑让插件申明新的元数据类型
+     *
+     * ⚠️ `暂时` is load-bearing: a CURRENT posture, deliberately not a
+     * permanent architectural closure (the full record, and what a future
+     * author reintroducing plugin-declared kinds must revisit, is in
+     * {@link getMetaTypes}'s synthesis comment — read that one first).
+     *
+     * The narrowing that ruling bought is enforced ONE layer up, at
+     * {@link refuseUnmintableMetaType}, which runs before this predicate on
+     * every `saveMetaItem` and refuses an out-of-contract type outright. This
+     * arm is therefore no longer an ADVERTISEMENT and must not be narrowed to
+     * match one: by the time it is consulted for such a type, the caller is in
+     * one of the residue paths the refusal deliberately exempts or does not
+     * guard at all —
+     *
+     *  - `deleteMetaItem` / {@link historyMetaItem} / `rollbackMetaItem` /
+     *    `promoteDraftForPublish`: rows minted under an unrecognised type
+     *    BEFORE the refusal shipped are real, and nothing rewrites them on
+     *    upgrade. Returning `false` here would route them off the repository
+     *    path and strand them — turning the accumulation this card was filed
+     *    about into an accumulation nobody can clear, which is the exact
+     *    reasoning that kept `deleteMetaItem` open in the first place;
+     *  - `saveMetaItem` behind the mint door's two exemptions (the compound
+     *    arity, and a namespace the store says already exists).
+     *
+     * So the doors agree where agreement is a claim about creating a NEW
+     * namespace — the listing and the mint door read one predicate for that —
+     * and this arm keeps the clearance path open underneath. Narrowing it would
+     * not close anything; it would only make residue unclearable.
+     */
     private static isRuntimeCreateAllowed(type: string): boolean {
         const singular = PLURAL_TO_SINGULAR[type] ?? type;
         if (this.RUNTIME_CREATE_ALLOWED_TYPES.has(singular)
             || this.RUNTIME_CREATE_ALLOWED_TYPES.has(type)) {
             return true;
         }
-        // Runtime-registered types (no static registry entry) are
-        // synthesised by getMetaTypes() with allowRuntimeCreate=true;
-        // mirror that here so /api/v1/meta and PUT /api/v1/meta agree.
+        // No static registry entry ⇒ no declared flags to consult. See the doc
+        // above: this is the residue/clearance arm, NOT the read door's twin.
         if (!this.STATIC_REGISTRY_TYPES.has(singular)
             && !this.STATIC_REGISTRY_TYPES.has(type)) {
             return true;
@@ -11457,6 +11562,126 @@ export class ObjectStackProtocolImplementation implements
         return true;
     }
 
+    /**
+     * [#8421] The SECOND `/meta` verdict: refuse a `:type` segment that is not
+     * a metadata type AT ALL, on the one entry point that MINTS a
+     * `sys_metadata` namespace.
+     *
+     * {@link metaUrlSpellingRefusal} (#7894) is silent for a name that is not a
+     * plural of anything — `fieldz` reaches for no declared type — so
+     * `PUT /api/v1/meta/fieldz/showcase_task.title` answered 200 and persisted
+     * a row under `type='fieldz'`. Maintainer ruling 2026-08-14 (「同意」), joint
+     * with #8586: retiring `additionalTypes` removed the last channel by which
+     * a plugin could DECLARE a metadata kind, so an unrecognised name can no
+     * longer be a declaration this boundary has not heard about.
+     * {@link unrecognisedMetaTypeRefusal} is that verdict.
+     *
+     * ## Why the verdict is not raised on all six `/meta` entry points
+     *
+     * Measured, not timid:
+     *
+     *  - **The live type set legitimately holds keys the static contract does
+     *    not.** An ordinary `registerApp` puts `data` (a manifest's seed
+     *    datasets), `kind` (`contributes.kinds`) and `package` into
+     *    `SchemaRegistry`, and {@link listLiveMetadataTypes} — hence `GET
+     *    /api/v1/meta/types` — enumerates exactly that set. Refusing
+     *    unrecognised names on the READ entries would answer 400 for types this
+     *    same service advertises, trading one declared-≠-served gap for another.
+     *  - **`deleteMetaItem` must stay open for the opposite reason.** Rows
+     *    minted under an unrecognised type BEFORE this refusal are real and
+     *    nothing rewrites them on upgrade; refusing delete would strand them
+     *    permanently — turning the accumulation this card was filed about into
+     *    an accumulation nobody can clear.
+     *
+     * ## …and why two shapes reaching THIS door are exempt (#8421 rework)
+     *
+     * Both were regressions in the first cut, both measured on the three
+     * consumer packages the first cut never ran:
+     *
+     *  1. **The COMPOUND arity puts an OBJECT name in the `:type` segment.**
+     *     `/metadata/lead/views/all_leads` is `type='lead'`,
+     *     `name='views/all_leads'` — one operation reaching one
+     *     `saveMetaItem`, documented verbatim in the runtime dispatcher's own
+     *     `/meta` branch and in `rest`'s `PUBLISHED_COMPOUND` route. `lead` is
+     *     an object, i.e. RUNTIME DATA, and no static contract can enumerate
+     *     the objects a deployment carries — so applying a static type verdict
+     *     to that segment refuses every object name that is not coincidentally
+     *     a metadata type. The maintainer's ruling is about metadata TYPE names
+     *     like `fieldz`; this was not a narrowing anyone approved.
+     *     ⚠️ Residue, stated rather than hidden: `PUT /meta/fieldz/a/b` is
+     *     therefore still accepted, because at that arity `fieldz` is a claim
+     *     about an object and the alternative is a live-registry check — option
+     *     C, ruled out on this very card.
+     *  2. **A namespace that ALREADY EXISTS is not being minted.** Two
+     *     production paths re-save a row taking its type from an existing
+     *     `sys_metadata` row: {@link migrateStoredMetadata} (`source:
+     *     'migrate-stored'`) and {@link duplicatePackage}'s copy/clone. Measured
+     *     on this branch: migrate never reaches this door for such a row
+     *     (`applyConversionsToStoredItem` returns it untouched — an unrecognised
+     *     type has no manifest collection, hence no conversion chain, hence no
+     *     notice, hence `outcome: 'canonical'`), while **`duplicatePackage`
+     *     DID** — a package holding one residue row answered
+     *     `{success: false, copiedCount: 0, failedCount: 1}`. That contradicts
+     *     the `deleteMetaItem` reasoning directly above, so the exemption is a
+     *     repair of this change rather than a new decision.
+     *
+     * The store — not the caller — is what says the namespace exists, so the
+     * exemption cannot be claimed by a request: the probe runs only once the
+     * static verdict has already fired, never on the ordinary save path. An
+     * unprovisioned store counts as "no rows" and the refusal stands; any other
+     * read failure propagates as a 503 rather than being invented into an
+     * existence claim (see {@link metaTypeNamespaceExists}).
+     */
+    private async refuseUnmintableMetaType(request: { type: string, name: string }): Promise<void> {
+        const unrecognised = unrecognisedMetaTypeRefusal(request.type);
+        if (!unrecognised) return;
+        // Exemption 1 — the compound arity. Cheap, and first: it is a statement
+        // about the REQUEST SHAPE and needs no store at all.
+        if (request.name.includes('/')) return;
+        // Exemption 2 — the namespace predates this write.
+        if (await this.metaTypeNamespaceExists(unrecognised.type)) return;
+        const err = new Error(
+            `[invalid_request] '${unrecognised.type}' is not a metadata type. The platform declares `
+            + `no such type, and since #8586 retired 'additionalTypes' a plugin cannot declare one `
+            + `either — so this write would mint a sys_metadata namespace under `
+            + `type='${unrecognised.type}' that nothing reads and nothing serves. Address a real `
+            + `metadata type; GET /api/v1/meta/types lists the ones this deployment carries.`,
+        );
+        (err as any).code = 'INVALID_REQUEST';
+        (err as any).status = 400;
+        throw err;
+    }
+
+    /**
+     * Does `sys_metadata` already carry a row under this type key?
+     *
+     * Reached ONLY from {@link refuseUnmintableMetaType} after the static
+     * verdict has fired, so it costs nothing on the ordinary save path. Not
+     * scoped by name, org or state on purpose: the question is whether the
+     * NAMESPACE exists, and a residue row is exactly as real in a draft or in
+     * another org's overlay as it is here.
+     *
+     * An UNPROVISIONED store counts as "no" and the refusal stands — a
+     * deployment whose `sys_metadata` table does not exist yet has no residue to
+     * protect, and is the state in which this card's own defect (minting the
+     * first row of a namespace nothing serves) is at its most reachable. Any
+     * OTHER read failure propagates as `503 SERVICE_UNAVAILABLE`
+     * ({@link rethrowUnlessMetadataStoreUnprovisioned}): inventing "no rows"
+     * from an outage would answer `400 '<type>' is not a metadata type` — an
+     * existence claim about the store, stated while the store was unreachable —
+     * for a write that may be perfectly legal (AGENTS.md "Absence must be loud",
+     * #5186).
+     */
+    private async metaTypeNamespaceExists(type: string): Promise<boolean> {
+        try {
+            const row = await this.engine.findOne('sys_metadata', { where: { type } });
+            return row != null;
+        } catch (error) {
+            this.rethrowUnlessMetadataStoreUnprovisioned(error);
+            return false;
+        }
+    }
+
     async saveMetaItem(request: { type: string, name: string, item?: any, organizationId?: string, parentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string }) {
         // [#8818] The ADR-0112 envelope this refusal always owed. Every OTHER
         // refusal in this method declares `code` AND `status`
@@ -11502,6 +11727,11 @@ export class ObjectStackProtocolImplementation implements
         }
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
         request = canonicalizeMetaRequestType(request);
+        // [#8421] …and the second verdict, on the door that MINTS. Kept here
+        // rather than inside the fold above because it is not answerable from
+        // the request alone — see {@link refuseUnmintableMetaType} for the
+        // scoping, its two exemptions, and the measurements behind both.
+        await this.refuseUnmintableMetaType(request);
         // What the history row, the audit row and the watch event record as the
         // origin of this write. Defaults to this method — the ordinary Studio /
         // REST / SDK save. The only caller that overrides it is

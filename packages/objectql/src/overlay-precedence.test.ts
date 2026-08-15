@@ -224,7 +224,27 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
     //    aware rejection is exercised in `protocol-meta.test.ts`.
     describe('runtime-creatable (allowOrgOverride:false, allowRuntimeCreate:true) — brand-new items succeed', () => {
         const runtimeCreatable: Array<{ type: string; item: any }> = [
-            { type: 'trigger', item: { name: 'on_insert', object: 'case', event: 'beforeInsert' } },
+            // [#8421] `trigger` left this list on 2026-08-15, and it was DEBT
+            // rather than a consequence of that card: ADR-0088 retired the kind
+            // outright — `'trigger'` returns zero hits in
+            // `packages/spec/src/kernel/`, and this very file asserts
+            // `allowedFromRegistry.has('trigger')` is false ~150 lines below.
+            // A retired kind cannot demonstrate "runtime-creatable"; it was
+            // passing only through the fall-through for names the static
+            // registry has never heard of, which is the arm #8421 closed. It is
+            // REPLACED rather than deleted, and replaced by a type that carries
+            // the flags in this describe's title for real — `mapping` declares
+            // `allowOrgOverride: false, allowRuntimeCreate: true` (#2611: the
+            // import wizard saves one at runtime) — so the case still measures
+            // the tier it is named for instead of the closed hole.
+            {
+                type: 'mapping',
+                item: {
+                    name: 'lead_import',
+                    targetObject: 'case',
+                    fieldMapping: [{ source: 'Title', target: 'title' }],
+                },
+            },
             // `validation` left this list with the kind (#4509, ADR-0088): it is
             // no longer registered, so "runtime-creatable" no longer describes
             // it. The reintroduction guard below is what holds the line now.
