@@ -51,20 +51,27 @@
  * (`lookupArtifactItem(type, name)` and `where: { type, … }`) must turn the
  * folding cases red and leave every control green:
  *
- *   plural, manifest-PRESENT (`views`)      full/overlay → 'none'      → RED
- *   plural, manifest-ABSENT  (`translations`) full/overlay → 'none'    → RED
- *   the overlay query's own `where.type`    'view' → 'views'           → RED
- *   write refusal envelope on a plural      403 → null (allowed)       → RED
- *   delete gate on a plural                 500 loud → null (allowed)  → RED
- *   canonical spelling, locked              unchanged                  → GREEN
- *   canonical spelling, genuine miss        unchanged                  → GREEN
- *   ARTIFACT lock under a plural            unchanged                  → GREEN
+ *   plural, manifest-PRESENT (`views`)        full/overlay → 'none'    → RED
+ *   the overlay query's own `where.type`      'view' → 'views'         → RED
+ *   plural, manifest-ABSENT (`translations`)  full/overlay → 'none'    → RED
+ *   write refusal envelope on a plural        403 → null (allowed)     → RED
+ *   delete gate on a plural                   500 loud → null (allowed)→ RED
+ *   canonical spelling, locked                unchanged                → GREEN
+ *   canonical spelling, genuine miss          unchanged                → GREEN
+ *   ARTIFACT lock under a plural              unchanged                → GREEN
+ *   canonical, locked delete                  unchanged                → GREEN
  *
- * The last green is the one that carries an argument rather than a count: the
+ * The third green is the one that carries an argument rather than a count: the
  * artifact limb already folded, so it was never the hole — and a "fix" that
  * changed its answer would be changing something that was already right.
- * Measured 5 red / 3 green, each red for its predicted reason; the numbers as
- * taken are quoted in the PR body.
+ *
+ * Predicted 5 red / 4 green; measured 5 red / 4 green, each red for its
+ * predicted reason rather than merely in the predicted count —
+ * `expected 'none' to be 'full'` twice (the two plural classes, one per map),
+ * `expected { type: 'views', … } to match object { type: 'view', … }` (the
+ * query itself), `expected null not to be null` (no refusal was produced at
+ * all) and `expected a rejection, but the call resolved with null` (the delete
+ * gate admitted it). Quoted in the PR body as taken.
  */
 
 import { describe, it, expect, vi } from 'vitest';
