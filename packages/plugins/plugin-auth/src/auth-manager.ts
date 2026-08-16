@@ -828,6 +828,59 @@ function isSmsQuotaRefusal(error: string | undefined): boolean {
 }
 
 /**
+ * #8195 — the locales the built-in auth email templates actually ship a row for.
+ *
+ * Spelled out rather than imported: `plugin-auth` does not depend on
+ * `@objectstack/plugin-email` (it reaches the mail service through the service
+ * registry), and these are also the four options the `localization.locale`
+ * setting offers, so the two ends agree by construction rather than by import.
+ */
+const AUTH_EMAIL_TEMPLATE_LOCALES = ['en-US', 'zh-CN', 'ja-JP', 'es-ES'] as const;
+
+/**
+ * #8195 — map a deployment-default locale onto the locale an auth email row is
+ * actually keyed by.
+ *
+ * ⚠️ This exists because the two ends genuinely disagree, and the disagreement
+ * is measured, not theoretical:
+ *
+ *  - `II18nService.getDefaultLocale()` — the ruled source — carries the message
+ *    **catalog** language, whose English spelling is the bare `en`
+ *    (`FileI18nAdapter`: `options.defaultLocale ?? 'en'`).
+ *  - `sys_email_template` rows are keyed by the regional tag `en-US`, and
+ *    `SendTemplateInput.locale` is documented as matched **exactly**, with "no
+ *    language-only prefix matching" stated in the contract.
+ *
+ * So handing `en` straight through would miss every row and lean on the
+ * ladder's en-US fallback for the single most common deployment — landing an
+ * `en-US` body while the render filters were told `en`, which is the row-locale
+ * vs. filter-locale split (#7801) reopened one notch narrower.
+ *
+ * The mapping is therefore deliberately narrow:
+ *
+ *  1. a tag we ship a row for is returned canonically (case-insensitively);
+ *  2. a **bare language subtag** is promoted to the regional row we ship for it
+ *     (`en` ⇒ `en-US`, `zh` ⇒ `zh-CN`, …);
+ *  3. anything else is passed through **unchanged** — `en-GB` or `fr-FR` may
+ *     well be a tenant's own overlay row, and swallowing it here would
+ *     re-create exactly the bug this card closes for the fifth locale onward.
+ */
+export function normalizeAuthEmailLocale(raw: string | undefined): string | undefined {
+  const value = raw?.trim();
+  if (!value) return undefined;
+  const lower = value.toLowerCase();
+  const exact = AUTH_EMAIL_TEMPLATE_LOCALES.find((l) => l.toLowerCase() === lower);
+  if (exact) return exact;
+  // Bare language subtag only — a regional tag we do not ship is a real
+  // request for that region, not a misspelling of one we do.
+  if (!/^[a-z]{2,3}$/.test(lower)) return value;
+  const byLanguage = AUTH_EMAIL_TEMPLATE_LOCALES.find(
+    (l) => l.slice(0, l.indexOf('-')).toLowerCase() === lower,
+  );
+  return byLanguage ?? value;
+}
+
+/**
  * #6039 — the 429 an SMS quota refusal must reach the caller as.
  *
  * better-call (better-auth's router) maps ONLY `APIError` to a real HTTP status:
@@ -1151,6 +1204,7 @@ export class AuthManager {
           const result = await email.sendTemplate({
             template: 'auth.password_reset',
             to: { address: user.email, ...(user.name ? { name: user.name } : {}) },
+            ...this.emailLocaleArg(),
             data: {
               user: { name: user.name || user.email, email: user.email, id: user.id },
               resetUrl: url,
@@ -1207,6 +1261,7 @@ export class AuthManager {
             const result = await email.sendTemplate({
               template: 'auth.verify_email',
               to: { address: user.email, ...(user.name ? { name: user.name } : {}) },
+              ...this.emailLocaleArg(),
               data: {
                 user: { name: user.name || user.email, email: user.email, id: user.id },
                 verificationUrl: url,
@@ -2438,6 +2493,7 @@ export class AuthManager {
             await emailService.sendTemplate({
               template: 'auth.invitation',
               to: recipientEmail,
+              ...this.emailLocaleArg(),
               data: {
                 inviter: {
                   name: inviter?.user?.name ?? inviter?.user?.email ?? 'A teammate',
@@ -2569,6 +2625,7 @@ export class AuthManager {
             await emailService.sendTemplate({
               template: 'auth.magic_link',
               to: recipientEmail,
+              ...this.emailLocaleArg(),
               data: {
                 magicLinkUrl: url,
                 token,
@@ -3112,13 +3169,16 @@ export class AuthManager {
    * ⛔ No undo/rollback link is passed, and the template declares no hole for
    * one: a one-click revert is a separate flow and a separate decision.
    *
-   * No `locale` is named, so `EmailService`'s ladder resolves the `en-US` row
-   * (`email-service.ts` — "no locale means the DOCUMENTED default"). The other
-   * three locale rows ship with it and are selected the moment a caller or a
-   * tenant overlay names a locale; the platform has no per-recipient locale to
-   * pass here yet (`sys_user` carries no locale column, and every other auth
-   * template is likewise en-US-only), so naming one would be inventing a
-   * preference rather than honouring one.
+   * The deployment-default locale IS named now (#8195), via
+   * {@link setDefaultEmailLocale} — so the three non-`en-US` rows this template
+   * has shipped since #8019 are finally selectable through the platform's own
+   * send path, instead of waiting on a caller or a tenant overlay. With nothing
+   * pushed, the argument is omitted entirely and `EmailService`'s ladder
+   * resolves its documented `en-US` default exactly as before.
+   *
+   * Still NOT a per-recipient preference: `sys_user` carries no locale column
+   * and the 2026-08-13 ruling defers one until there is measured pull. This is
+   * the deployment's language, not the reader's.
    */
   private async sendChangeEmailNotice(
     from: { email: string; name?: string; id?: string },
@@ -3136,6 +3196,7 @@ export class AuthManager {
       await email.sendTemplate({
         template: 'auth.email_change_notice',
         to: { address: from.email, ...(from.name ? { name: from.name } : {}) },
+        ...this.emailLocaleArg(),
         data: {
           user: { name: from.name || from.email, email: from.email, ...(from.id ? { id: from.id } : {}) },
           newEmail: target,
@@ -3330,6 +3391,41 @@ export class AuthManager {
     this.smsLocale = locale?.trim() || undefined;
   }
   private smsLocale?: string;
+
+  /**
+   * #8195 — the deployment-default locale named on every auth **email**, so the
+   * localized `sys_email_template` rows can be selected at all.
+   *
+   * Maintainer ruling 2026-08-13: the recipient locale is the **deployment
+   * default**, read from `II18nService.getDefaultLocale()` and resolved at the
+   * plugin layer; `Accept-Language` is rejected (auth mail is frequently sent
+   * outside the triggering request — invitations, admin-initiated resets — and
+   * a per-device header is the wrong authority for it). AuthPlugin pushes the
+   * value on `kernel:ready`, exactly as it pushes {@link setDefaultSmsLocale}.
+   *
+   * Unset ⇒ nothing is named and `EmailService`'s ladder resolves its
+   * documented `en-US` default, i.e. today's behaviour.
+   *
+   * Per-user locale is deliberately NOT resolved: the same ruling defers a
+   * `sys_user.locale` column until there is measured pull for it. When one
+   * arrives it layers on top of this as an override, so nothing here is wasted.
+   */
+  setDefaultEmailLocale(locale: string | undefined): void {
+    this.emailLocale = normalizeAuthEmailLocale(locale);
+  }
+  private emailLocale?: string;
+
+  /**
+   * The `locale` fragment spread into every auth `sendTemplate` call.
+   *
+   * Spread-when-set rather than always-passed: an explicit `locale: undefined`
+   * and an absent key travel the same path today, but only the absent key is
+   * what the ladder's "no locale means the DOCUMENTED default" contract is
+   * written against.
+   */
+  private emailLocaleArg(): { locale?: string } {
+    return this.emailLocale ? { locale: this.emailLocale } : {};
+  }
 
   /**
    * #2815 — resolve an auth SMS body: the tenant's
