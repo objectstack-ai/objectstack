@@ -9,7 +9,11 @@
 #
 # Job 1 (PRs touching the scaffolder / docker example) scaffolds with the
 # repo-built scaffolder and runs the generated project against the registry:
-# install → validate → build → boot → health probes → docker build/run.
+# install → validate → build → boot → health probes → docker build/run. That
+# run scaffolds with `--skip-install` and installs the project itself, so it
+# exercises the scaffolder's `--skip-install` shape; a second, throwaway
+# project is scaffolded WITHOUT it purely to assert the shape a real user
+# ships (the pinned Dockerfile — see that step for why the split exists).
 # Job 2 (nightly) does the same via the *published* `create-objectstack@latest`
 # across every template in the registry — the new-user canary.
 
@@ -196,6 +200,62 @@ jobs:
             exit 1
           fi
 
+      - name: 'Pinned shape: scaffold WITHOUT --skip-install, assert the pin ran'
+        # Everything above scaffolds with `--skip-install` and installs the
+        # project in a separate step, so the scaffolder's OWN post-install work
+        # never runs — and the Dockerfile runtime-image pin (#9017) lives
+        # exactly there. The shape those steps build and boot is therefore the
+        # UNPINNED one (`FROM ghcr.io/objectstack-ai/objectstack:latest`), while
+        # every real `npx create-objectstack` user ships the PINNED one, so the
+        # pin silently ceasing to happen was invisible to this job (#9117).
+        #
+        # A second, throwaway project closes that gap the cheap way: scaffold it
+        # the way a real user does — no `--skip-install` — and assert one thing,
+        # that the emitted Dockerfile names the @objectstack/cli version this
+        # project actually resolved. No docker build: the difference between the
+        # two shapes is exactly one FROM tag, and the leg above already proves
+        # the image builds and boots. runtime-image.test.ts covers the REWRITE
+        # on fabricated input; what only an end-to-end run can catch is the pin
+        # never RUNNING — a scaffolder that stops calling it, or an install path
+        # that no longer leaves a resolvable CLI behind.
+        #
+        # `--skip-skills` is kept: skills install after the pin, so dropping it
+        # would only add a network fetch, never coverage.
+        #
+        # The unpublished-version window is the one degradation, and it is
+        # evidenced rather than blanket. The install step above carries the
+        # fallback that rewrites unresolvable `@objectstack/*` ranges to
+        # `latest`; relocating that fallback into the scaffolder is a separate
+        # design (#9117), so this step cannot borrow it. When the scaffolder's
+        # install leaves no CLI behind, the registry is asked whether the
+        # emitted range was satisfiable at all: unsatisfiable ⇒ that known
+        # window, warn and skip; satisfiable ⇒ the scaffolder's install path is
+        # itself broken, which is a real defect and fails.
+        run: |
+          cd "$RUNNER_TEMP"
+          node "$GITHUB_WORKSPACE/packages/create-objectstack/bin/create-objectstack.js" pinned-probe --skip-skills
+          cd pinned-probe
+
+          if [ ! -f node_modules/@objectstack/cli/package.json ]; then
+            RANGE=$(node -p "require('./package.json').devDependencies['@objectstack/cli']")
+            if [ -z "$(npm view "@objectstack/cli@$RANGE" version 2>/dev/null)" ]; then
+              echo "::warning::no @objectstack/cli matching '$RANGE' is on the registry — the unpublished-version window the install step's fallback exists for; the pinned-shape assertion is SKIPPED for this run"
+              exit 0
+            fi
+            echo "::error::the scaffolder ran its own install but left no node_modules/@objectstack/cli behind, though the registry does satisfy '$RANGE' — its install path is broken, so the Dockerfile pin can never run for a real user"
+            exit 1
+          fi
+
+          RESOLVED=$(node -p "require('./node_modules/@objectstack/cli/package.json').version")
+          TAG=$(sed -n 's|^FROM ghcr\.io/objectstack-ai/objectstack:||p' Dockerfile)
+          echo "resolved @objectstack/cli   : $RESOLVED"
+          echo "emitted Dockerfile FROM tag : ${TAG:-<none>}"
+          if [ "$TAG" != "$RESOLVED" ]; then
+            echo "::error::the scaffolder did NOT pin the Dockerfile runtime image: the emitted FROM tag is '${TAG:-<none>}' but this project resolved @objectstack/cli@$RESOLVED. This is the file every real npx create-objectstack user ships (#9017); the --skip-install legs in this job cannot see it."
+            exit 1
+          fi
+          echo "pinned as expected: FROM tag == resolved CLI ($RESOLVED)"
+
       - name: Build official runtime image from this checkout
         # The scaffolded app's Dockerfile builds FROM
         # ghcr.io/objectstack-ai/objectstack. Build that base HERE from
@@ -243,9 +303,16 @@ jobs:
 
       - name: Docker build and run (scaffolded Dockerfile)
         # The blank template ships its own Dockerfile / docker-compose.yml /
-        # .dockerignore, so build the generated project as-is — this exercises
-        # the exact Docker path a real `npm create objectstack` user ships (the
-        # standalone examples/docker copy was removed in 6c28bac).
+        # .dockerignore, so build the generated project as-is rather than a
+        # hand-kept copy (the standalone examples/docker copy was removed in
+        # 6c28bac).
+        #
+        # Scope, precisely: this is the `--skip-install` shape of that path, so
+        # the Dockerfile built here still carries the floating tag. A real
+        # `npm create objectstack` user ships the PINNED shape, which differs by
+        # exactly one FROM tag — asserted by the pinned-shape step above rather
+        # than built a second time here, since the layers below the tag are the
+        # ones this build already proves (#9117).
         run: |
           cd "$RUNNER_TEMP/e2e-app"
           docker build --pull=false -t e2e-app .
