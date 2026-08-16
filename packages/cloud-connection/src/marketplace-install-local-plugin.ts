@@ -42,6 +42,7 @@
  */
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import { resolveAuthzContext } from '@objectstack/core';
 import {
     resolveTenancyPosture,
     collectGlobalUniques,
@@ -69,6 +70,35 @@ import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 import type { IHttpServer } from '@objectstack/spec/contracts';
 
 const ROUTE_BASE = '/api/v1/marketplace/install-local';
+
+/**
+ * [#8976] The capability every MUTATING install-local route demands.
+ *
+ * `manage_metadata` is ADR-0066 D1's authoring capability and the SAME key the
+ * platform's other metadata-write doors already require — `PUT`/`DELETE`
+ * `/api/v1/meta/:type/:name`, `POST /meta/_migrate-stored`, and since #8919 the
+ * publish/rollback promotion verbs. These four routes are a metadata-write door
+ * by every measure that matters: `POST` hot-registers an inline manifest's
+ * objects into the shared registry and then runs `syncSchemas()` against the
+ * shared database. Declaring them operator-grade while enforcing "anyone with a
+ * login" is the declared-≠-enforced gap this closes.
+ *
+ * ⛔ Not a new install-specific capability. Inventing one would leave every
+ * existing operator unable to install until an administrator granted a key that
+ * did not exist yesterday, and would split "may author metadata" from "may
+ * install metadata" — a product decision nobody has made. The shipped
+ * `admin_full_access` set carries `manage_metadata`
+ * (`PLATFORM_ADMIN_ONLY_CAPABILITIES`, plugin-security), so platform operators
+ * pass unchanged; `organization_admin` deliberately does NOT carry it, which is
+ * precisely the cross-tenant edge this closes on the walled multi-org shape.
+ *
+ * Service / operator tokens are exempt EXACTLY as elsewhere, with no special
+ * case here: an API key resolves through `resolveAuthzContext`'s key path to its
+ * owner's real grants, so a key whose owner holds `manage_metadata` passes this
+ * gate and one whose owner does not is refused — the same answer the `/meta`
+ * doors give the same credential.
+ */
+const INSTALL_LOCAL_CAPABILITY = 'manage_metadata';
 
 /**
  * A ledger read failure in the thrower's own words (#5413 / #5426).
@@ -451,10 +481,17 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     private handleInstall = async (c: any, ctx: PluginContext): Promise<Response> => {
-        const userId = await this.requireAuthenticatedUser(c, ctx);
-        if (!userId) {
-            return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Authentication required to install packages.' } }, 401);
-        }
+        // [#8976] The sharpest of the four: this door accepts an INLINE manifest
+        // and turns it into `syncSchemas()` against the shared database.
+        // `admission`, not `gate` — `gate` is taken further down by the ADR-0120
+        // D5e global-unique CEREMONY, which is a data-shape question the caller
+        // answers about their own manifest. Two different words for two
+        // different gates: one decides who may knock, the other what they may
+        // bring. Conflating them is how the ceremony came to look like an
+        // authorization test in the first place.
+        const admission = await this.requireInstallCapability(c, ctx, 'Installing a package');
+        if (!admission.ok) return admission.response;
+        const userId = admission.userId;
 
         let body: any = {};
         try { body = await c.req.json(); } catch { /* empty body */ }
@@ -777,10 +814,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     private handleUninstall = async (c: any, ctx: PluginContext): Promise<Response> => {
-        const userId = await this.requireAuthenticatedUser(c, ctx);
-        if (!userId) {
-            return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Authentication required.' } }, 401);
-        }
+        const admission = await this.requireInstallCapability(c, ctx, 'Uninstalling a package');
+        if (!admission.ok) return admission.response;
         const manifestId = String(c.req.param?.('manifestId') ?? c.req.params?.manifestId ?? '').trim();
         if (!manifestId) {
             return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'manifestId path param required.' } }, 400);
@@ -947,10 +982,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * rule as install seed path).
      */
     private handleReseed = async (c: any, ctx: PluginContext): Promise<Response> => {
-        const userId = await this.requireAuthenticatedUser(c, ctx);
-        if (!userId) {
-            return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Authentication required.' } }, 401);
-        }
+        const admission = await this.requireInstallCapability(c, ctx, 'Reseeding sample data');
+        if (!admission.ok) return admission.response;
         const manifestId = String(c.req.param?.('manifestId') ?? c.req.params?.manifestId ?? '').trim();
         if (!manifestId) {
             return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'manifestId path param required.' } }, 400);
@@ -1030,10 +1063,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * datasets are removed. Already-deleted rows count as `skipped`.
      */
     private handlePurge = async (c: any, ctx: PluginContext): Promise<Response> => {
-        const userId = await this.requireAuthenticatedUser(c, ctx);
-        if (!userId) {
-            return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Authentication required.' } }, 401);
-        }
+        const admission = await this.requireInstallCapability(c, ctx, 'Purging sample data');
+        if (!admission.ok) return admission.response;
         const manifestId = String(c.req.param?.('manifestId') ?? c.req.params?.manifestId ?? '').trim();
         if (!manifestId) {
             return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'manifestId path param required.' } }, 400);
@@ -1287,10 +1318,17 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
-     * Best-effort active-org resolution. Reads the better-auth session
-     * (same path as requireAuthenticatedUser) and returns
-     * `session.activeOrganizationId`, falling back to the user's first
-     * org membership.
+     * Best-effort active-org resolution. Reads the better-auth session directly
+     * and returns `session.activeOrganizationId`, falling back to the user's
+     * first org membership.
+     *
+     * ⚠️ [#8976] This is a SCOPING read, not an authorization one — which org's
+     * rows a seed lands in, asked only after {@link requireInstallCapability}
+     * has already admitted the caller. It deliberately does NOT go through
+     * `resolveAuthzContext`: the tenant a request is acting in is a different
+     * question from the grants it holds, and the resolver's `tenantId` is the
+     * session's active org with no membership fallback. Never promote this into
+     * an admission check — it answers `null` for perfectly authorized callers.
      */
     private resolveActiveOrgId = async (c: any, ctx: PluginContext): Promise<string | null> => {
         if (!c?.req?.raw?.headers) return null;
@@ -1317,27 +1355,149 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         return null;
     };
 
-    private requireAuthenticatedUser = async (c: any, ctx: PluginContext): Promise<string | null> => {
+    /**
+     * [#8976] The ONE authorization decision every mutating install-local route
+     * makes — identity AND capability, resolved together, in one place.
+     *
+     * ## What this replaced, and what was measured through it
+     *
+     * The predecessor (`requireAuthenticatedUser`) asked one question — "is
+     * there a session?" — and answered `yes` to two principals it should not
+     * have. Driven through the composed plugin to the point the state actually
+     * changes, all three shapes below returned `200` and were INDISTINGUISHABLE:
+     * `manifest.register()` ran, `objectql.syncSchemas()` ran against the shared
+     * database, the ledger file landed on disk, and the seed loader wrote rows.
+     *
+     *   principal                              install  reseed  purge  uninstall
+     *   bare `x-user-id` header, NO session      200      200    200      200
+     *   authenticated, no capability             200      200    200      200
+     *   authenticated, `manage_metadata`         200      200    200      200
+     *
+     * Nothing downstream refused any of it. That is the whole finding: these are
+     * not routes whose gate is weak, they are routes with no authorization at
+     * all beyond "you are somebody".
+     *
+     * ## Why `resolveAuthzContext`, not a second session read
+     *
+     * It is the platform's SINGLE source of truth for turning an inbound request
+     * into an authorization envelope (`@objectstack/core`, guarded by
+     * `check:single-authz-resolver`), and it resolves API key / session / OAuth
+     * and the whole `sys_member` → `sys_user_position` → permission-set
+     * aggregation that a hand-rolled `getSession` read cannot. Two sibling
+     * raw-route surfaces already made exactly this move for exactly this bug —
+     * `SettingsServicePlugin` and `SharingServicePlugin` both replaced spoofable
+     * header identity with this call — so this is the third instance of a
+     * settled pattern, not a new one. The `getSession` bridge below is the same
+     * shape `SettingsServicePlugin` passes.
+     *
+     * ## The `x-user-id` fallback is GONE, deliberately
+     *
+     * The old tail was `const xUserId = c?.req?.header?.('x-user-id'); if
+     * (xUserId) return String(xUserId);` — commented "for cases where auth is
+     * disabled (e.g. test stubs)". Measured (first row of the table above): with
+     * no session store consulted first, a caller who could reach the port sent
+     * one header and completed a full schema-mutating install, with `installedBy`
+     * recorded as whatever string they chose. A test-stub convenience that is
+     * also a production admission path is not a dev-mode feature, and there is
+     * no mode flag on it to gate. It was the LAST `x-user-id` trust left in
+     * `packages/**` source; the two surfaces that carried the same line had it
+     * removed rather than mode-gated (`plugin-sharing`, `service-settings`), and
+     * the one first-party caller of these routes — `os package install` — signs
+     * in for a real better-auth cookie and never sends the header.
+     *
+     * Fails CLOSED on every unresolvable input: no raw headers, no `objectql`,
+     * a throwing resolver — all yield `null`, i.e. 401. An `objectql`-less
+     * embedding could not have held a permission set to be judged on anyway, and
+     * could not have run `syncSchemas()` either.
+     */
+    private resolveInstallPrincipal = async (
+        c: any,
+        ctx: PluginContext,
+    ): Promise<{ userId: string; systemPermissions: string[] } | null> => {
+        const headers = c?.req?.raw?.headers;
+        if (!headers) return null;
         try {
-            // Mirror `hono-plugin.ts` resolveCtx: pull the better-auth `api`
-            // off the auth service and call `getSession({ headers })`. The
-            // earlier guess `c.get('auth').session` is wrong — AuthPlugin
-            // does not pre-populate the Hono context.
-            const authService: any = ctx.getService('auth');
-            let api: any = authService?.api;
-            if (!api && typeof authService?.getApi === 'function') {
-                api = await authService.getApi();
-            }
-            if (api?.getSession && c?.req?.raw?.headers) {
-                const session = await api.getSession({ headers: c.req.raw.headers });
-                const userId = session?.user?.id ?? null;
-                if (userId) return String(userId);
-            }
-        } catch { /* ignore — fall through */ }
-        // Header fallback for cases where auth is disabled (e.g. test stubs)
-        const xUserId = c?.req?.header?.('x-user-id');
-        if (xUserId) return String(xUserId);
-        return null;
+            let ql: any;
+            try { ql = ctx.getService('objectql'); } catch { /* no data engine */ }
+
+            // The better-auth session bridge — resolved lazily and defensively,
+            // exactly as the previous implementation did, then handed to the
+            // shared resolver instead of being trusted on its own.
+            const getSession = async (h: any) => {
+                try {
+                    const authService: any = ctx.getService('auth');
+                    let api: any = authService?.api;
+                    if (!api && typeof authService?.getApi === 'function') {
+                        api = await authService.getApi();
+                    }
+                    return await api?.getSession?.({ headers: h });
+                } catch {
+                    return undefined;
+                }
+            };
+
+            const authz = await resolveAuthzContext({ ql, headers, getSession });
+            if (!authz.userId) return null;
+            return {
+                userId: String(authz.userId),
+                systemPermissions: Array.isArray(authz.systemPermissions) ? authz.systemPermissions : [],
+            };
+        } catch {
+            return null;
+        }
+    };
+
+    /**
+     * [#8976] The shared refusal for the four mutating routes: 401 when nobody
+     * is authenticated, 403 when somebody is but holds no authoring capability,
+     * otherwise the acting `userId`.
+     *
+     * One helper rather than four inline copies, on purpose. The four doors are
+     * one class — install, uninstall, reseed, purge all mutate installed
+     * metadata or its data — and the failure this fixes is precisely a route
+     * family whose members drifted apart on authorization. A single seam means a
+     * fifth route added here cannot get a WEAKER answer by copying the wrong
+     * neighbour, and `install-local-capability-enumeration.test.ts` fails the
+     * build if one arrives that does not call this at all.
+     *
+     * `action` names the verb in the 403 so the operator learns which grant they
+     * need, not merely that they were refused. The refusal is issued BEFORE any
+     * work — before the manifest is parsed, before the ledger is read — so a
+     * refused caller cannot use timing or a downstream error to probe what is
+     * installed.
+     */
+    private requireInstallCapability = async (
+        c: any,
+        ctx: PluginContext,
+        action: string,
+    ): Promise<{ ok: true; userId: string } | { ok: false; response: Response }> => {
+        const principal = await this.resolveInstallPrincipal(c, ctx);
+        if (!principal) {
+            return {
+                ok: false,
+                response: c.json({
+                    success: false,
+                    error: { code: 'UNAUTHENTICATED', message: 'Authentication required.' },
+                }, 401),
+            };
+        }
+        if (!principal.systemPermissions.includes(INSTALL_LOCAL_CAPABILITY)) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] refused ${action} for ${principal.userId} — `
+                + `missing the \`${INSTALL_LOCAL_CAPABILITY}\` capability`,
+            );
+            return {
+                ok: false,
+                response: c.json({
+                    success: false,
+                    error: {
+                        code: 'FORBIDDEN',
+                        message: `${action} requires the \`${INSTALL_LOCAL_CAPABILITY}\` capability.`,
+                    },
+                }, 403),
+            };
+        }
+        return { ok: true, userId: principal.userId };
     };
 
     /**

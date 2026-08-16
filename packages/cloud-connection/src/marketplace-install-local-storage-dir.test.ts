@@ -28,6 +28,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
+import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 import { DEFAULT_INSTALLED_PACKAGES_DIR } from './local-manifest-source.js';
 
 type Handler = (c: any) => Promise<any>;
@@ -46,8 +47,8 @@ function makeCtx(rawApp: any) {
     const hooks = new Map<string, any>();
     const services: Record<string, any> = {
         manifest: { register: vi.fn() },
-        auth: { api: { getSession: async () => ({ user: { id: 'admin' } }) } },
-        objectql: { syncSchemas: async () => undefined },
+        auth: installerAuthService(),
+        objectql: withInstallerGrants({ syncSchemas: async () => undefined }),
     };
     return {
         ctx: {

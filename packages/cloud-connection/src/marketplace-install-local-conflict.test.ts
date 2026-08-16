@@ -15,6 +15,7 @@ import { mkdtempSync, rmSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
+import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 
 type Handler = (c: any) => Promise<any>;
 
@@ -37,8 +38,8 @@ function makeCtx(rawApp: any, registry: any[]) {
     const hooks = new Map<string, any>();
     const services: Record<string, any> = {
         manifest: { register: (m: any) => registry.push({ manifest: m }) },
-        auth: { api: { getSession: async () => ({ user: { id: 'admin' } }) } },
-        objectql: { syncSchemas: async () => undefined, registry: { getAllPackages: () => registry } },
+        auth: installerAuthService(),
+        objectql: withInstallerGrants({ syncSchemas: async () => undefined, registry: { getAllPackages: () => registry } }),
         metadata: {},
     };
     return {

@@ -39,6 +39,7 @@ vi.mock('@objectstack/spec/data', () => ({
 }));
 
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
+import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 import { LocalManifestSource } from './local-manifest-source.js';
 import { recordSeedOutcome } from '@objectstack/runtime';
 
@@ -100,11 +101,11 @@ const MANIFEST = {
 function makeServices(findRows: Record<string, any[]>) {
     return {
         manifest: { register: vi.fn() },
-        auth: { api: { getSession: async () => ({ user: { id: 'admin' } }) } },
-        objectql: {
+        auth: installerAuthService(),
+        objectql: withInstallerGrants({
             syncSchemas: async () => undefined,
             find: vi.fn(async (object: string) => findRows[object] ?? []),
-        },
+        }),
         metadata: {},
         driver: { delete: vi.fn(async () => true) },
     };
