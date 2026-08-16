@@ -61,7 +61,10 @@
         "!.turbo/**",
         "$TURBO_ROOT$/packages/verify/src/**",
         "$TURBO_ROOT$/packages/plugins/plugin-security/src/**",
-        "$TURBO_ROOT$/packages/services/service-cluster/src/**"
+        "$TURBO_ROOT$/packages/services/service-cluster/src/**",
+        "$TURBO_ROOT$/examples/app-showcase/src/ui/views/contact.view.ts",
+        "$TURBO_ROOT$/examples/app-showcase/src/data/objects/semantic-zoo.object.ts",
+        "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/task-triage.page.ts"
       ]
     },
     "@objectstack/lint#test": {
@@ -75,7 +78,10 @@
         "$TURBO_ROOT$/packages/cli/src/commands/**",
         "$TURBO_ROOT$/packages/metadata-protocol/src/**",
         "$TURBO_ROOT$/packages/objectql/src/validation/**",
-        "$TURBO_ROOT$/packages/services/service-automation/src/**"
+        "$TURBO_ROOT$/packages/services/service-automation/src/**",
+        "$TURBO_ROOT$/examples/app-showcase/src/data/objects/contact.object.ts",
+        "$TURBO_ROOT$/examples/app-showcase/src/system/translations/index.ts",
+        "$TURBO_ROOT$/examples/app-showcase/src/ui/views/contact.view.ts"
       ]
     },
     "@objectstack/platform-objects#test": {
