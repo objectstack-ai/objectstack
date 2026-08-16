@@ -58,11 +58,26 @@
 //                        wants to know these tests read it.
 //
 //   `inputs-declared` -- the coupling escapes by relative path, but the owning
-//                        package declares a matching `$TURBO_ROOT$/examples/**`
-//                        glob on its `#test` task in turbo.json (the mechanism
+//                        package declares a `$TURBO_ROOT$/examples/...` glob on
+//                        its `#test` task in turbo.json that COVERS THIS
+//                        COUPLING'S TARGET (the mechanism
 //                        `check-cross-package-test-inputs.mjs` maintains, whose
 //                        registry drives the affected-subset union too). Both of
 //                        CI's scoping layers move with the app. Not a gap.
+//
+//                        Coverage is judged per target, not per package, and
+//                        that distinction is load-bearing rather than pedantic
+//                        (#8946). A radius may legitimately name individual app
+//                        files instead of the whole app -- `@objectstack/cli`
+//                        declares three showcase modules by path. A package-
+//                        granular check would then read "cli declares something
+//                        under examples/" as "every cli coupling is visible",
+//                        so the next live import to a FOURTH app file would be
+//                        reported as covered while neither CI layer ran it:
+//                        the #8754 blind spot silently reopened inside the
+//                        registry built to close it. An uncovered target keeps
+//                        the file in `invisible`, where the ratchet demands it
+//                        be declared or the radius widened.
 //
 //   `invisible`       -- escapes by relative path (or by a filesystem read),
 //                        with NO declared dependency and NO declared input
@@ -110,42 +125,23 @@ const REPO_ROOT = resolve(HERE, '..');
  *
  * ⛔ An entry is a RECORD, not a verdict: nothing here says a coupling should
  * be removed, kept, or rewritten.
+ *
+ * ── Why this is empty, and why that is not dead code ─────────────────────────
+ *
+ * It is empty because the population is currently empty, not because the
+ * registry was abandoned. #8754 opened it holding the four cli/lint i18n tests;
+ * #8946 gave `@objectstack/cli` and `@objectstack/lint` the input radius those
+ * four reach, so all four moved to `inputs-declared` and the ratchet's stale
+ * direction required their entries be deleted. Zero invisible couplings is the
+ * goal state of this gate, not the absence of one.
+ *
+ * The empty object still does work: the undeclared direction of the ratchet
+ * measures against it, so the next live coupling CI cannot see fails here
+ * naming itself. Note that the `--self-test` case asserting every entry carries
+ * a substantive note now passes vacuously -- it re-arms the moment an entry
+ * comes back, but until then it proves nothing.
  */
-const INVISIBLE_COUPLINGS = {
-  'packages/cli/test/i18n-section-coverage.test.ts': {
-    note:
-      "Set-equality over what the app declares TODAY. Dynamically imports `contact.view` and " +
-      "`semantic-zoo.object`, runs `sectionKeys(...)` over them and asserts `toEqual` against an " +
-      "exhaustive hardcoded `_sections` key list. Any newly NAMED section in either module adds a " +
-      "key the list does not have and the assertion goes red -- this is the file PR #8742 broke in " +
-      "queue build 31825946401.",
-  },
-  'packages/cli/test/i18n-tab-coverage.test.ts': {
-    note:
-      "Set-equality over what the app declares TODAY, same shape as the file above but a DIFFERENT " +
-      "namespace. Dynamically imports `task-triage.page` and asserts `toEqual` over an exhaustive " +
-      "`_tabs` key list, so it moves with the page's filter-only presets and is untouched by " +
-      "`_sections` edits. The namespace split is why the #8231 edit flipped one cli file and not " +
-      "this one -- do not read the two as interchangeable.",
-  },
-  'packages/lint/src/validate-translatable-sections.test.ts': {
-    note:
-      "Asserts the shipped app is CLEAN, not that it has a fixed shape. Statically imports " +
-      "`Contact`, `ContactViews` and `ShowcaseTranslationBundle`. #8515 lifted the cases that pin a " +
-      "NAMELESS section onto the frozen `showcase-shape.fixtures.ts` snapshot, so the live imports " +
-      "survive only in the cases pinning what the app already gets right (findings resolve empty). " +
-      "An app edit that ADDS a correctly-named section does not move it; one that introduces a " +
-      "nameless section does.",
-  },
-  'packages/lint/src/validate-translation-references.test.ts': {
-    note:
-      "Same #8515 split as its sibling above, on the reference-resolution axis. Statically imports " +
-      "`Contact` and `ContactViews`; the frozen snapshot carries the pinned-shape cases, and the " +
-      "live symbols feed the cases asserting every translation key still RESOLVES against the " +
-      "shipped object/view pair. Renaming or removing a Contact field, view, section or action " +
-      "moves it; adding one generally does not.",
-  },
-};
+const INVISIBLE_COUPLINGS = {};
 
 /** Recognised coupling spellings. Printed in the failure text and pinned by --self-test. */
 const RECOGNISED_SPELLINGS = [
@@ -322,7 +318,11 @@ function owningPackage(fileAbs) {
   return null;
 }
 
-/** Packages whose `#test` task declares an `examples/**` input glob in turbo.json. */
+/**
+ * Packages whose `#test` task declares an `examples/...` input glob in
+ * turbo.json, mapped to those globs in repo-relative form (the `$TURBO_ROOT$/`
+ * prefix stripped) so they can be matched against a coupling target.
+ */
 function packagesWithExampleInputs() {
   const declared = new Map();
   let turbo;
@@ -334,12 +334,83 @@ function packagesWithExampleInputs() {
   const tasks = turbo.tasks ?? turbo.pipeline ?? {};
   for (const [taskId, cfg] of Object.entries(tasks)) {
     if (!taskId.endsWith('#test')) continue;
-    const globs = (cfg?.inputs ?? []).filter(
-      (g) => typeof g === 'string' && g.includes('examples/'),
-    );
+    const globs = (cfg?.inputs ?? [])
+      .filter((g) => typeof g === 'string' && g.includes('examples/'))
+      .map((g) => g.replace(/^\$TURBO_ROOT\$\//, ''));
     if (globs.length) declared.set(taskId.slice(0, -'#test'.length), globs);
   }
   return declared;
+}
+
+/**
+ * Turbo input-glob semantics: `**` spans whole segments, `*` stays inside one.
+ *
+ * Mirrored from `globToRegExp` in `check-cross-package-test-inputs.mjs` rather
+ * than imported, because that module runs its gate at load time -- importing it
+ * would execute a second gate as a side effect of classifying. The duplication
+ * is pinned by `--self-test` on both sides; the two must agree, since this is
+ * the check that decides whether a declared radius really covers a coupling.
+ */
+function globToRegExp(glob) {
+  let re = '';
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === '*') {
+      if (glob[i + 1] === '*') {
+        if (glob[i + 2] === '/') {
+          re += '(?:[^/]+/)*';
+          i += 2;
+        } else {
+          re += '.*';
+          i += 1;
+        }
+      } else {
+        re += '[^/]*';
+      }
+    } else if ('.+?^${}()|[]\\/'.includes(c)) {
+      re += `\\${c}`;
+    } else {
+      re += c;
+    }
+  }
+  return new RegExp(`^${re}$`);
+}
+
+/**
+ * Does one declared input glob cover this coupling target?
+ *
+ * A DIRECTORY target is read wholesale -- the dogfood shape chdirs into the app
+ * and compiles whatever is there -- so it is covered only by a glob whose
+ * subtree contains it, never by one naming a single file inside it. Matching a
+ * directory against the glob pattern directly would let `examples/app-*` report
+ * a whole app as covered on the strength of its own name.
+ */
+export function globCoversTarget(glob, target, isDir) {
+  if (!isDir && globToRegExp(glob).test(target)) return true;
+  if (!glob.endsWith('/**')) return false;
+  const prefix = glob.slice(0, -'/**'.length);
+  return target === prefix || target.startsWith(`${prefix}/`);
+}
+
+/**
+ * The declared globs that fail to cover a by-path coupling, as repo-relative
+ * target paths. Empty means every path this test reaches really is hashed onto
+ * the package's `#test` task and really does pull it into the affected subset.
+ */
+function uncoveredTargetsOf(byPathCouplings, fileAbs, globs) {
+  const uncovered = [];
+  for (const c of byPathCouplings) {
+    const abs = resolveExampleSource(resolve(dirname(fileAbs), c.spec));
+    const target = rel(abs);
+    let isDir = false;
+    try {
+      isDir = statSync(abs).isDirectory();
+    } catch {
+      isDir = false;
+    }
+    if (!globs.some((g) => globCoversTarget(g, target, isDir))) uncovered.push(target);
+  }
+  return [...new Set(uncovered)].sort();
 }
 
 /** Resolve a specifier to a repo-relative `examples/**` path, or null. */
@@ -404,16 +475,22 @@ function collect() {
       return app?.name && Object.hasOwn(deps, app.name);
     });
 
+    // Only the by-path couplings need an input glob: a by-package-name coupling
+    // on a declared edge is already reachable through the dependency graph.
+    const declaredGlobs = exampleInputs.get(pkgName) ?? [];
+    const uncoveredTargets = uncoveredTargetsOf(byPath, abs, declaredGlobs);
+
     let visibility;
     if (byPath.length === 0 && declaredEdge) visibility = 'graph-visible';
-    else if (exampleInputs.has(pkgName)) visibility = 'inputs-declared';
-    else if (byPath.length === 0 && byPackageName.length > 0) visibility = 'invisible';
+    else if (declaredGlobs.length > 0 && uncoveredTargets.length === 0) visibility = 'inputs-declared';
     else visibility = 'invisible';
 
     rows.push({
       file,
       package: pkgName,
       visibility,
+      declaresExampleInputs: declaredGlobs.length > 0,
+      uncoveredTargets,
       targets: [...new Set(couplings.map((c) => c.target))].sort(),
       refs: couplings
         .map((c) => ({ kind: c.kind, spec: c.spec }))
@@ -531,11 +608,22 @@ function verify() {
   for (const file of discovered) {
     if (!Object.hasOwn(INVISIBLE_COUPLINGS, file)) {
       const row = rows.find((r) => r.file === file);
+      // A package that declares SOME examples glob but not one covering this
+      // coupling is the more misleading case of the two, so it gets its own
+      // wording: the fix is usually to widen the radius, not to record the file.
+      const why = row.declaresExampleInputs
+        ? `package ${row.package} declares examples input globs, but none of them covers:\n` +
+          row.uncoveredTargets.map((t) => `      ${t}`).join('\n') +
+          `\n    so a diff touching those paths still does not re-run this test. Widen the\n` +
+          `    package's globs in scripts/check-cross-package-test-inputs.mjs (and mirror\n` +
+          `    them onto its #test task in turbo.json) -- or, if the coupling should stay\n` +
+          `    unscoped, record it:`
+        : `package ${row.package} reaches ${row.targets.join(', ')} with no declared\n` +
+          `    dependency and no examples/** input glob, so neither CI layer runs it on an\n` +
+          `    examples-only diff.`;
       problems.push(
         `UNDECLARED coupling: ${file}\n` +
-          `    package ${row.package} reaches ${row.targets.join(', ')} with no declared\n` +
-          `    dependency and no examples/** input glob, so neither CI layer runs it on an\n` +
-          `    examples-only diff.\n` +
+          `    ${why}\n` +
           `    Add an entry to INVISIBLE_COUPLINGS in ${rel(fileURLToPath(import.meta.url))}:\n` +
           `      '${file}': { note: 'what this test does with what it imports, and what kind of\n` +
           `                          example-app edit would move it' },\n` +
@@ -660,6 +748,52 @@ function selfTest() {
     [
       'every declared entry carries a substantive note',
       Object.values(INVISIBLE_COUPLINGS).every((e) => (e.note ?? '').trim().length >= 40),
+    ],
+
+    // ── input-glob coverage: the check that lets a radius be NARROW safely ──
+    //
+    // Pinned because a false positive here is silent and total: a coupling
+    // wrongly judged covered leaves `invisible`, so the ratchet stops asking
+    // for it and CI never runs it either.
+    [
+      'an exact-file glob covers that file',
+      globCoversTarget(
+        'examples/app-showcase/src/ui/views/contact.view.ts',
+        'examples/app-showcase/src/ui/views/contact.view.ts',
+        false,
+      ),
+    ],
+    [
+      'an exact-file glob does NOT cover a sibling file',
+      !globCoversTarget(
+        'examples/app-showcase/src/ui/views/contact.view.ts',
+        'examples/app-showcase/src/ui/pages/task-triage.page.ts',
+        false,
+      ),
+    ],
+    [
+      'a subtree glob covers a file beneath it',
+      globCoversTarget('examples/app-showcase/**', 'examples/app-showcase/src/data/objects/x.object.ts', false),
+    ],
+    [
+      'a subtree glob does NOT cover another app',
+      !globCoversTarget('examples/app-showcase/**', 'examples/app-crm/src/x.ts', false),
+    ],
+    [
+      'a subtree glob covers the directory it names (the chdir-and-compile shape)',
+      globCoversTarget('examples/app-showcase/**', 'examples/app-showcase', true),
+    ],
+    [
+      'an exact-file glob does NOT cover the directory containing it',
+      !globCoversTarget('examples/app-showcase/src/ui/views/contact.view.ts', 'examples/app-showcase', true),
+    ],
+    [
+      'a deeper subtree glob does NOT cover a directory above it',
+      !globCoversTarget('examples/app-showcase/src/**', 'examples/app-showcase', true),
+    ],
+    [
+      '* does not span segments',
+      !globCoversTarget('examples/app-showcase/src/*.ts', 'examples/app-showcase/src/ui/x.ts', false),
     ],
   ];
 

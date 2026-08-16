@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SeedLoaderService } from './seed-loader';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import type { SeedLoaderRequest, SeedLoaderConfig } from '@objectstack/spec/data';
-import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 // ==========================================================================
 // Mock Helpers
@@ -67,7 +67,10 @@ function createMockEngine(data: Record<string, any[]> = {}): IDataEngine {
       }
       return data;
     }),
-    delete: vi.fn(async () => ({ deleted: 1 })),
+    delete: vi.fn(async (_objectName: string, options?: any) => {
+      assertEngineDeleteDispatch(options);
+      return { deleted: 1 };
+    }),
     count: vi.fn(async (objectName: string) => (store[objectName] || []).length),
     aggregate: vi.fn(async () => []),
   };

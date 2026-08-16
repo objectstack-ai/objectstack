@@ -12,6 +12,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 const SCHEMA = {
   name: 'lead',
@@ -35,8 +36,14 @@ function makeEngine(verdict?: any) {
     }),
     // Every write the operation must never reach.
     insert: vi.fn(async () => { throw new Error('validateData must not write'); }),
-    update: vi.fn(async () => { throw new Error('validateData must not write'); }),
-    delete: vi.fn(async () => { throw new Error('validateData must not write'); }),
+    update: vi.fn(async (_o: string, data: any, options?: any) => {
+      assertEngineUpdateDispatch(data, options);
+      throw new Error('validateData must not write');
+    }),
+    delete: vi.fn(async (_o: string, options?: any) => {
+      assertEngineDeleteDispatch(options);
+      throw new Error('validateData must not write');
+    }),
   };
 }
 

@@ -22,7 +22,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from './registry.js';
-import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 /** One env-wide, active overlay row for `rc1_probe`, stored under the canonical type. */
 const OVERLAY_ROW = {
@@ -65,7 +65,10 @@ describe('#4432 — canonical `/meta` type segment', () => {
                 return found[0] ?? null;
             }),
             insert: vi.fn(async () => ({ id: 'new' })),
-            update: vi.fn(async () => ({ id: 'row_1' })),
+            update: vi.fn(async (_t: string, data: any, opts?: any) => {
+                assertEngineUpdateDispatch(data, opts);
+                return { id: 'row_1' };
+            }),
             delete: vi.fn(async (_t: string, opts: any) => {
                 assertEngineDeleteDispatch(opts);
                 const id = opts?.where?.id;

@@ -3,7 +3,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SeedLoaderService } from './seed-loader';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
-import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 /**
  * Reference-graph fallback to the ENGINE schema registry.
@@ -73,7 +73,10 @@ function createFaithfulEngine(schemas: Record<string, any>) {
       }
       return data;
     }),
-    delete: vi.fn(async () => ({ deleted: 1 })),
+    delete: vi.fn(async (_objectName: string, options?: any) => {
+      assertEngineDeleteDispatch(options);
+      return { deleted: 1 };
+    }),
     count: vi.fn(async (objectName: string) => (store[objectName] || []).length),
     aggregate: vi.fn(async () => []),
     getSchema: vi.fn((objectName: string) => schemas[objectName]),
