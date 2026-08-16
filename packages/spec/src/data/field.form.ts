@@ -102,6 +102,9 @@ export const fieldForm = defineForm({
         { field: 'hidden', colSpan: 1, helpText: 'Hide field from default UI views' },
         { field: 'searchable', colSpan: 1, helpText: 'Include in global search results' },
         { field: 'sortable', colSpan: 1, helpText: 'Allow sorting lists by this field' },
+        // Partial masking (#8993): a preset name or a {keepHead, keepTail} JSON
+        // object; the runtime FieldMasker enforces it on read AND export.
+        { field: 'maskingRule', colSpan: 2, helpText: "Partial masking: preset ('phone', 'id_card', 'bank_account', 'email', 'name') or {\"keepHead\": n, \"keepTail\": m}. Masked for callers not holding this field's requiredPermissions" },
       ],
     },
   ],

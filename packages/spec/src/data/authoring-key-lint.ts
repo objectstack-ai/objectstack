@@ -117,7 +117,13 @@ export const FIELD_KEY_GUIDANCE: Readonly<
   dataQuality: { why: 'pruned in 2026-06 as dead in both layers (#3726) — it enforced nothing.' },
   encrypted: { why: 'the `encryptionConfig` family was pruned in 2026-06: it implied at-rest protection that never happened. The real channel is `type: \'secret\'`.' },
   encryptionConfig: { why: 'pruned in 2026-06 — it implied at-rest protection that never happened. The real channel is `type: \'secret\'`.' },
-  maskingRule: { why: 'pruned in 2026-06 as dead in both layers — masking was never applied.' },
+  // NOTE: no entry for `maskingRule`. It sat here as a retirement ("pruned in
+  // 2026-06 as dead in both layers — masking was never applied") until the
+  // 2026-08-16 maintainer ruling on #8993 re-introduced the key WITH its
+  // runtime consumer (plugin-security's FieldMasker applies partial masking on
+  // the read/export path), so `FieldSchema` now declares it and an entry here
+  // would be advice to delete a live key — the "no guidance entry names a key
+  // the schema now declares" test enforces the absence.
   cached: { why: 'computed-field caching was pruned in 2026-06 (#3733); nothing read it.' },
 });
 

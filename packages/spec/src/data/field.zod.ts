@@ -495,6 +495,62 @@ export function isOrganizationUnique(unique: unknown): boolean {
 }
 
 /**
+ * Partial-masking presets (#8993, maintainer ruling 2026-08-16, Option A).
+ *
+ * A CLOSED enum, deliberately: free-form format strings are exactly where
+ * AI-authored metadata errors hide (an unparseable format silently degrades or
+ * silently over-reveals), so the vocabulary is named presets plus one
+ * keep-head/keep-tail escape hatch — no per-role rule matrices, no template
+ * strings. Each preset is a deterministic, length-preserving transform
+ * implemented by `@objectstack/plugin-security`'s `maskFieldValue`
+ * (`field-masker.ts` — the single enforcement channel):
+ *
+ * - `phone`        — keep first 3 + last 4 (`138****5678`)
+ * - `id_card`      — keep first 6 + last 4 (`110101********1234`)
+ * - `bank_account` — keep last 4 only (`************1234`)
+ * - `email`        — keep the local part's first character + the full domain
+ *                    (`j***@example.com`)
+ * - `name`         — keep the first character (`张**`)
+ */
+export const FIELD_MASKING_PRESETS = ['phone', 'id_card', 'bank_account', 'email', 'name'] as const;
+
+/** @see FIELD_MASKING_PRESETS */
+export type FieldMaskingPreset = (typeof FIELD_MASKING_PRESETS)[number];
+
+/**
+ * The keep-head/keep-tail escape hatch for the long tail of business formats
+ * the presets do not name (an employee id, a license plate, a policy number).
+ * Keeps the first `keepHead` and last `keepTail` characters and masks
+ * everything between with `*`; a value too short to keep both ends is masked
+ * entirely (the safe direction — degrade toward MORE masking, never less).
+ * `{ keepHead: 0, keepTail: 0 }` is legal and masks the whole value.
+ */
+export const FieldMaskingKeepSchema = lazySchema(() => strictObject({
+  surface: 'this masking rule',
+  history: FIELD_HISTORY,
+  aliases: { head: 'keepHead', prefix: 'keepHead', keepStart: 'keepHead', tail: 'keepTail', suffix: 'keepTail', keepEnd: 'keepTail' },
+}, {
+  keepHead: z.number().int().min(0).describe('Number of leading characters to leave readable'),
+  keepTail: z.number().int().min(0).describe('Number of trailing characters to leave readable'),
+}));
+
+/** @see FieldMaskingKeepSchema */
+export type FieldMaskingKeep = z.infer<typeof FieldMaskingKeepSchema>;
+
+/**
+ * A field's declared partial-masking rule — a named preset or the
+ * keep-head/keep-tail form. See the `maskingRule` key on {@link FieldSchema}
+ * for the enforcement contract.
+ */
+export const FieldMaskingRuleSchema = lazySchema(() => z.union([
+  z.enum(FIELD_MASKING_PRESETS),
+  FieldMaskingKeepSchema,
+]));
+
+/** @see FieldMaskingRuleSchema */
+export type FieldMaskingRule = FieldMaskingPreset | { keepHead: number; keepTail: number };
+
+/**
  * `FIELD_KEY_GUIDANCE`, re-expressed as `strictObject` options.
  *
  * That table is the curated list of near-misses and retirements on this exact
@@ -988,6 +1044,16 @@ export const FieldSchema = lazySchema(() => strictObject({
   // docs/audits/2026-06-dead-surface-disposition-plan.md (P0/P2 field prune):
   // encryptionConfig, maskingRule, auditTrail, cached, dataQuality.
   //
+  // Two of the five have since RETURNED, each with a runtime consumer landing in
+  // the same PR — the enforce side of ADR-0049, exactly as the paragraph below
+  // prescribes: `auditTrail`'s concept as `trackHistory` (ADR-0052 §5b,
+  // plugin-audit), and `maskingRule` itself (#8993, maintainer ruling
+  // 2026-08-16: partial masking enforced by plugin-security's FieldMasker —
+  // declared below, near `requiredPermissions`). The 2026-06 prune of the OLD
+  // `maskingRule` remains correct history: that key promised protection nothing
+  // delivered; the returned key is the runtime capability's authoring surface,
+  // not a resurrection of the dead one.
+  //
   // Two of the five value schemas outlived their keys by a release — `dataQuality`'s
   // (`DataQualityRulesSchema` + the `DataQualityRules` / `DataQualityRulesInput`
   // types, #3726) and `cached`'s (`ComputedFieldCacheSchema` + `ComputedFieldCache`,
@@ -1091,6 +1157,45 @@ export const FieldSchema = lazySchema(() => strictObject({
    * over permission-set field grants. Enforced by plugin-security's FieldMasker.
    */
   requiredPermissions: z.array(z.string()).optional().describe('[ADR-0066 D3] Capabilities required to read/edit this field (mask on read, deny on write; AND-gate).'),
+
+  /**
+   * [#8993] PARTIAL masking — masked-but-recognisable values (phone last-4,
+   * ID middle-8), the normal form of the control in PIPL practice: staff can
+   * still verify identity over the phone without seeing the full number.
+   *
+   * Re-introduces the key pruned 2026-06 (see the prune note above), this time
+   * WITH its runtime consumer landing in the same PR (ADR-0049 declare =
+   * enforce; the `trackHistory` / `auditTrail` precedent). Enforced by
+   * `@objectstack/plugin-security`'s `FieldMasker` — the ONE masking channel,
+   * so an API caller and a browser user are masked identically, the CSV/XLSX
+   * export path (which reads through the same engine middleware) serves the
+   * same masked values as the screen, and the enterprise AI-context
+   * interceptor inherits it for free. There is deliberately NO UI-side second
+   * channel.
+   *
+   * The contract, as the maintainer ruled it (2026-08-16, Option A):
+   *
+   * - **Who sees masked.** A field declaring `maskingRule` is served MASKED to
+   *   every non-system caller, UNLESS the field also declares
+   *   `requiredPermissions` and the caller holds ALL of them (then the
+   *   existing ADR-0066 D3 evaluation unmasks the full value — one permission
+   *   evaluation, no parallel rule matrix). On an on-behalf-of read both the
+   *   agent AND the delegator must hold them. A permission set that marks the
+   *   field non-readable still wins entirely: those callers get the key
+   *   DELETED, exactly as before — a masking rule never widens visibility a
+   *   permission set explicitly closed.
+   * - **Stable output.** Deterministic and length-preserving: the same stored
+   *   value always masks to the same string, so list rendering and grouping
+   *   stay stable.
+   * - **No oracle.** For a caller who sees the field masked, the field is also
+   *   non-filterable / non-sortable / non-groupable / non-aggregatable
+   *   (rejected loudly, like FLS-hidden fields) — otherwise equality probes
+   *   reconstruct the hidden span. And a write that round-trips a masked
+   *   placeholder (a value that is a fixed point of its own rule and carries
+   *   the mask character) is refused with `400 VALIDATION_ERROR` rather than
+   *   silently destroying the stored value.
+   */
+  maskingRule: FieldMaskingRuleSchema.optional().describe("[#8993] Partial masking rule enforced by the runtime FieldMasker (single channel — API, UI, export and AI context all see the same masked value). A named preset ('phone' 138****5678, 'id_card' keep 6+4, 'bank_account' keep last 4, 'email' j***@example.com, 'name' keep first char) or { keepHead, keepTail }. Masked for every non-system caller unless the field's `requiredPermissions` are ALL held (that evaluation is the unmask gate); a permission set marking the field non-readable still deletes it entirely. Deterministic, length-preserving output; masked callers cannot filter/sort/group/aggregate on the field."),
 
   /**
    * [ADR-0100] Author's explicit acknowledgment that a generic (non-auth)

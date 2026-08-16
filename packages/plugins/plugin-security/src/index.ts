@@ -10,7 +10,7 @@
 export { SecurityPlugin } from './security-plugin.js';
 export { PermissionEvaluator } from './permission-evaluator.js';
 export { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
-export { FieldMasker } from './field-masker.js';
+export { FieldMasker, maskFieldValue, MASK_CHAR } from './field-masker.js';
 export { assertReadableQueryFields, collectQueryFields, collectConditionFields } from './predicate-guard.js';
 export { PermissionDeniedError, isPermissionDeniedError } from './errors.js';
 export {

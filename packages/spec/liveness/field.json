@@ -122,6 +122,12 @@
       "evidence": "packages/plugins/plugin-security/src/security-plugin.ts",
       "note": "ADR-0066 D3 field-level capability gate. getObjectSecurityMeta reads field.requiredPermissions; foldFieldRequiredPermissions forces non-readable+non-editable when the caller's systemPermissions don't cover them, so FieldMasker masks on read + detectForbiddenWrites denies on write (AND-gate). Unit-proven in packages/plugins/plugin-security/src/security-plugin.test.ts."
     },
+    "maskingRule": {
+      "status": "live",
+      "verifiedAt": "2026-08-16",
+      "evidence": "packages/plugins/plugin-security/src/field-masker.ts (maskFieldValue — the preset + keepHead/keepTail transforms; maskResults replaces the value for partial-masked fields); packages/plugins/plugin-security/src/security-plugin.ts (getObjectSecurityMeta collects field.maskingRule; computePartialMaskRules decides per caller via the field's requiredPermissions; the read middleware masks results, the predicate/aggregate guards refuse masked-field probes, detectMaskedEchoWrites refuses masked round-trip writes)",
+      "note": "[#8993] Partial masking (maintainer ruling 2026-08-16, Option A): closed preset enum (phone/id_card/bank_account/email/name) + keepHead/keepTail escape hatch, enforced on the single runtime FieldMasker channel — API, UI, CSV/XLSX export (rest export streams through the same engine middleware) and the enterprise AI-context interceptor all see the same deterministic masked value. Re-introduces the key pruned 2026-06 WITH its consumer landing in the same PR (ADR-0049 declare = enforce; the trackHistory/auditTrail precedent). Proven in packages/plugins/plugin-security/src/field-masking-rule.test.ts and packages/rest/src/export-integration.test.ts."
+    },
     "ackPlaintextMasking": {
       "status": "live",
       "evidence": "packages/spec/src/data/object.zod.ts",

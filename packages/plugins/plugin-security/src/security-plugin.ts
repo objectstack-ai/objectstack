@@ -6,7 +6,7 @@ import { describeHighPrivilegeBits, describeAnchorForbiddenBits, PUBLIC_FORM_SER
 import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 // [#8220] The read-scope provenance mark: this middleware is one of the two
 // merge boundaries that stamp it (see the RLS injection below).
-import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
+import { markFilterSubtreeProvenance, FieldMaskingRuleSchema, type FieldMaskingRule } from '@objectstack/spec/data';
 // [#7414] The SHARED operation-message catalog #7307 built for the data path's
 // operation-level refusals. Second consumer, same mechanism — a second remedy
 // for one defect class is what that module exists to prevent.
@@ -84,6 +84,7 @@ import {
   MasterDetailRelationMissingError,
   DetailRecordNotFoundError,
   MasterReferenceMissingError,
+  MaskedValueWriteError,
 } from './errors.js';
 import { assertEngineOwnedWriteAllowed, type EngineOwnedSchemaLike } from './system-write-guard.js';
 import { bootstrapPlatformAdmin } from './bootstrap-platform-admin.js';
@@ -202,6 +203,14 @@ interface ObjectSecurityMeta {
   owdOpensRowWrites: boolean;
   requiredPermissions: NormalizedRequiredPermissions;
   fieldRequiredPermissions: Record<string, string[]>;
+  /**
+   * [#8993] Per-field partial-masking rules: { fieldName -> FieldMaskingRule }.
+   * Collected from `field.maskingRule` and VALIDATED against the spec schema at
+   * collection — an unparseable declared rule degrades to a full mask
+   * (`{keepHead: 0, keepTail: 0}`), never to the unmasked value (fail closed on
+   * an access-narrowing declaration, the #3545 stance one axis over).
+   */
+  fieldMaskingRules: Record<string, FieldMaskingRule>;
   /**
    * [#3545] The object's posture could NOT be resolved — neither the live
    * ObjectQL schema nor the metadata service returned it. Every other field is
@@ -1371,7 +1380,7 @@ export class SecurityPlugin implements Plugin {
       const secMeta =
         permissionSets.length > 0
           ? await this.getObjectSecurityMeta(opCtx.object)
-          : { isPrivate: false, tenancyDisabled: false, isBetterAuthManaged: false, requiredPermissions: EMPTY_REQUIRED_PERMISSIONS, fieldRequiredPermissions: {} as Record<string, string[]>, unresolved: false };
+          : { isPrivate: false, tenancyDisabled: false, isBetterAuthManaged: false, requiredPermissions: EMPTY_REQUIRED_PERMISSIONS, fieldRequiredPermissions: {} as Record<string, string[]>, fieldMaskingRules: {} as Record<string, FieldMaskingRule>, unresolved: false };
 
       // [#3545] Fail CLOSED when the object's own posture could not be resolved.
       // #3545 accepted the API-exposure gate's fail-open on unresolvable metadata
@@ -1915,6 +1924,32 @@ export class SecurityPlugin implements Plugin {
         }
       }
 
+      // 2.5a. [#8993] Masked-echo write refusal.
+      //
+      // A caller who reads a `maskingRule` field gets `138****5678`; a client
+      // that round-trips the whole record (the default shape of an AI-authored
+      // form save) would then WRITE that placeholder back, silently replacing
+      // the stored value with its mask. Detect the echo — a payload value that
+      // is a fixed point of its own field's rule and carries the mask
+      // character — and refuse loudly with 400 VALIDATION_ERROR (same stance
+      // as 2.5: silent drops hide the boundary from honest clients). Callers
+      // who hold the field's unmask capabilities are exempt by construction
+      // (computePartialMaskRules returns nothing for them), so a privileged
+      // import of literally-starred data stays possible.
+      if (
+        (opCtx.operation === 'insert' || opCtx.operation === 'update') &&
+        opCtx.data &&
+        permissionSets.length > 0
+      ) {
+        const echoRules = this.computePartialMaskRules(secMeta, permissionSets, delegatorSets);
+        if (Object.keys(echoRules).length > 0) {
+          const echoed = this.fieldMasker.detectMaskedEchoWrites(opCtx.data, echoRules);
+          if (echoed.length > 0) {
+            throw new MaskedValueWriteError(opCtx.object, opCtx.operation, echoed);
+          }
+        }
+      }
+
       // 2.5b. Field-Level Security READ enforcement for aggregate inputs.
       //
       // The read path relies on RESULT masking (step 4) to hide FLS-protected
@@ -1938,7 +1973,11 @@ export class SecurityPlugin implements Plugin {
           delFieldPerms = this.foldFieldRequiredPermissions(delFieldPerms, secMeta.fieldRequiredPermissions, delegatorSets);
           fieldPerms = intersectFieldMasks(fieldPerms, delFieldPerms);
         }
-        if (Object.keys(fieldPerms).length > 0) {
+        // [#8993] A partial-masked field's statistics leak the very span the
+        // mask hides (min/max reveal full values outright on a single-row
+        // group), so masked-for-this-caller fields join the forbidden set.
+        const aggMaskRules = this.computePartialMaskRules(secMeta, permissionSets, delegatorSets);
+        if (Object.keys(fieldPerms).length > 0 || Object.keys(aggMaskRules).length > 0) {
           const ast: any = opCtx.ast ?? {};
           const referenced = new Set<string>();
           for (const g of Array.isArray(ast.groupBy) ? ast.groupBy : []) {
@@ -1949,7 +1988,7 @@ export class SecurityPlugin implements Plugin {
             if (typeof a?.field === 'string' && a.field) referenced.add(a.field);
           }
           const forbidden = [...referenced].filter(
-            (f) => fieldPerms[f] && fieldPerms[f].readable === false,
+            (f) => (fieldPerms[f] && fieldPerms[f].readable === false) || aggMaskRules[f] !== undefined,
           );
           if (forbidden.length > 0) {
             throw new PermissionDeniedError(
@@ -2416,6 +2455,18 @@ export class SecurityPlugin implements Plugin {
           delGuard = this.foldFieldRequiredPermissions(delGuard, secMeta.fieldRequiredPermissions, delegatorSets);
           guardPerms = intersectFieldMasks(guardPerms, delGuard);
         }
+        // [#8993] A field this caller sees PARTIALLY MASKED is just as
+        // probe-able as a hidden one — an equality filter reconstructs the
+        // masked span digit by digit (row presence is the same oracle), and
+        // sorting orders by the very characters the mask hides. Fold every
+        // masked-for-this-caller field in as non-queryable; no explicit-deny
+        // exclusion here, because masked and hidden fields answer a predicate
+        // probe identically (reject).
+        for (const f of Object.keys(this.computePartialMaskRules(secMeta, permissionSets, delegatorSets))) {
+          if (guardPerms[f]?.readable !== false) {
+            guardPerms[f] = { readable: false, editable: guardPerms[f]?.editable ?? false };
+          }
+        }
         if (Object.keys(guardPerms).length > 0) {
           // [#2982 follow-up] For a bulk WRITE the caller's own predicate is
           // `opCtx.options.where` (untouched); `opCtx.ast.where` may ALREADY
@@ -2538,17 +2589,29 @@ export class SecurityPlugin implements Plugin {
       // Field WRITES are already blocked upstream (detectForbiddenWrites); this
       // closes the read leak on the response image.
       if (opCtx.result && ['find', 'findOne', 'insert', 'update'].includes(opCtx.operation)) {
-        let fieldPerms = this.permissionEvaluator.getFieldPermissions(opCtx.object, permissionSets);
+        const basePerms = this.permissionEvaluator.getFieldPermissions(opCtx.object, permissionSets);
         // [ADR-0066 D3] AND-gate field-level requiredPermissions into the mask.
-        fieldPerms = this.foldFieldRequiredPermissions(fieldPerms, secMeta.fieldRequiredPermissions, permissionSets);
+        let fieldPerms = this.foldFieldRequiredPermissions(basePerms, secMeta.fieldRequiredPermissions, permissionSets);
         // [ADR-0090 D10] Mask any field the delegator cannot read, too.
+        let delBasePerms: Record<string, { readable: boolean; editable: boolean }> | null = null;
         if (delegatorSets) {
-          let delFieldPerms = this.permissionEvaluator.getFieldPermissions(opCtx.object, delegatorSets);
-          delFieldPerms = this.foldFieldRequiredPermissions(delFieldPerms, secMeta.fieldRequiredPermissions, delegatorSets);
+          delBasePerms = this.permissionEvaluator.getFieldPermissions(opCtx.object, delegatorSets);
+          let delFieldPerms = this.foldFieldRequiredPermissions(delBasePerms, secMeta.fieldRequiredPermissions, delegatorSets);
           fieldPerms = intersectFieldMasks(fieldPerms, delFieldPerms);
         }
-        if (Object.keys(fieldPerms).length > 0) {
-          opCtx.result = this.fieldMasker.maskResults(opCtx.result, fieldPerms, opCtx.object);
+        // [#8993] Partial masking: fields whose declared rule applies to this
+        // caller are REPLACED with their masked value instead of deleted —
+        // EXCEPT where a permission set explicitly marks the field
+        // non-readable (strictest wins: a masking rule never widens an
+        // explicit deny, so those callers keep getting the key deleted).
+        const partialRules = this.computePartialMaskRules(secMeta, permissionSets, delegatorSets);
+        for (const f of Object.keys(partialRules)) {
+          if (basePerms[f]?.readable === false || delBasePerms?.[f]?.readable === false) {
+            delete partialRules[f];
+          }
+        }
+        if (Object.keys(fieldPerms).length > 0 || Object.keys(partialRules).length > 0) {
+          opCtx.result = this.fieldMasker.maskResults(opCtx.result, fieldPerms, opCtx.object, partialRules);
         }
       }
     });
@@ -3669,21 +3732,36 @@ export class SecurityPlugin implements Plugin {
     // per-field capability contract (`fieldRequiredPermissions`) would otherwise
     // default to empty and silently unmask every capability-gated column.
     if (secMeta.unresolved) return [];
-    let fieldPerms = this.permissionEvaluator.getFieldPermissions(objectName, permissionSets);
-    fieldPerms = this.foldFieldRequiredPermissions(fieldPerms, secMeta.fieldRequiredPermissions, permissionSets);
+    const basePerms = this.permissionEvaluator.getFieldPermissions(objectName, permissionSets);
+    let fieldPerms = this.foldFieldRequiredPermissions(basePerms, secMeta.fieldRequiredPermissions, permissionSets);
 
     // [ADR-0090 D10] On an on-behalf-of read the readable set must NOT widen
     // past what the DELEGATOR can read — intersect the delegator's field mask
     // too. A dangling delegator fails CLOSED (expose no columns), the same
     // fail-closed stance the CRUD middleware takes on a 'missing' delegator.
+    let delBasePerms: Record<string, { readable: boolean; editable: boolean }> | null = null;
+    let delegatorSets: PermissionSet[] | null = null;
     if (context?.onBehalfOf?.userId) {
       const del = await resolveDelegatorContext(this.ql, context);
       if (del.kind === 'missing') return [];
       if (del.kind === 'resolved') {
-        const delegatorSets = await this.resolvePermissionSetsForContext(del.context);
-        let delFieldPerms = this.permissionEvaluator.getFieldPermissions(objectName, delegatorSets);
-        delFieldPerms = this.foldFieldRequiredPermissions(delFieldPerms, secMeta.fieldRequiredPermissions, delegatorSets);
+        delegatorSets = await this.resolvePermissionSetsForContext(del.context);
+        delBasePerms = this.permissionEvaluator.getFieldPermissions(objectName, delegatorSets);
+        let delFieldPerms = this.foldFieldRequiredPermissions(delBasePerms, secMeta.fieldRequiredPermissions, delegatorSets);
         fieldPerms = intersectFieldMasks(fieldPerms, delFieldPerms);
+      }
+    }
+
+    // [#8993] A field this caller sees PARTIALLY MASKED is still a served
+    // column — the read path REPLACES its value rather than deleting the key —
+    // so it stays in the projection (an export header must include the column
+    // whose masked values the same caller's rows carry). Mirrors the step-4
+    // exclusion exactly: an explicit permission-set deny keeps the field
+    // deleted, hence out of the projection.
+    const partialRules = this.computePartialMaskRules(secMeta, permissionSets, delegatorSets);
+    for (const f of Object.keys(partialRules)) {
+      if (basePerms[f]?.readable === false || delBasePerms?.[f]?.readable === false) {
+        delete partialRules[f];
       }
     }
 
@@ -3691,7 +3769,7 @@ export class SecurityPlugin implements Plugin {
     // with no permission entry passes through (the field allow-list only
     // enumerates fields it names) — the exact complement of maskResults' delete
     // set, so the export header matches list's readable columns by construction.
-    return allFields.filter((f) => fieldPerms[f]?.readable !== false);
+    return allFields.filter((f) => fieldPerms[f]?.readable !== false || partialRules[f] !== undefined);
   }
 
   /**
@@ -5361,17 +5439,40 @@ export class SecurityPlugin implements Plugin {
     }
     // [ADR-0066 D3] Per-field capability requirements: { fieldName -> capability[] }.
     const fieldRequiredPermissions: Record<string, string[]> = {};
+    // [#8993] Per-field partial-masking rules: { fieldName -> FieldMaskingRule }.
+    const fieldMaskingRules: Record<string, FieldMaskingRule> = {};
+    const collectMaskingRule = (fname: string, fdef: any) => {
+      const raw = fdef?.maskingRule;
+      if (raw === undefined || raw === null) return;
+      const parsed = FieldMaskingRuleSchema.safeParse(raw);
+      if (parsed.success) {
+        fieldMaskingRules[fname] = parsed.data;
+      } else {
+        // Fail CLOSED: a declared-but-unparseable masking rule degrades to a
+        // FULL mask, never to the unmasked value. (The spec parse rejects such
+        // declarations at authoring; this covers rows that arrived around it.)
+        this.logger?.warn?.(
+          `[security/#8993] field '${object}.${fname}' declares an invalid maskingRule — ` +
+            `applying a full mask (fail-closed). Fix the declaration to a preset ` +
+            `('phone' | 'id_card' | 'bank_account' | 'email' | 'name') or {keepHead, keepTail}.`,
+          { object, field: fname },
+        );
+        fieldMaskingRules[fname] = { keepHead: 0, keepTail: 0 };
+      }
+    };
     const fields: any = (obj as any)?.fields;
     if (Array.isArray(fields)) {
       for (const f of fields) {
         if (f?.name && Array.isArray(f.requiredPermissions) && f.requiredPermissions.length > 0) {
           fieldRequiredPermissions[String(f.name)] = f.requiredPermissions.map(String);
         }
+        if (f?.name) collectMaskingRule(String(f.name), f);
       }
     } else if (fields && typeof fields === 'object') {
       for (const [fname, fdef] of Object.entries(fields)) {
         const rp = (fdef as any)?.requiredPermissions;
         if (Array.isArray(rp) && rp.length > 0) fieldRequiredPermissions[fname] = rp.map(String);
+        collectMaskingRule(fname, fdef);
       }
     }
     const meta = {
@@ -5396,6 +5497,7 @@ export class SecurityPlugin implements Plugin {
       owdOpensRowWrites: owdDeclaresOpenRowWrites(obj),
       requiredPermissions: normalizeRequiredPermissions((obj as any)?.requiredPermissions),
       fieldRequiredPermissions,
+      fieldMaskingRules,
       unresolved: !obj,
     };
     if (obj) this.objectSecurityMetaCache.set(object, meta);
@@ -5409,6 +5511,42 @@ export class SecurityPlugin implements Plugin {
    * field grants) so the existing FieldMasker masks it on read and denies it on
    * write. Returns the base map unchanged when no field declares requirements.
    */
+  /**
+   * [#8993] Which of the object's declared `maskingRule`s apply to THIS
+   * caller — the partial masks the FieldMasker must serve. One rule decides
+   * it, riding the SAME evaluation ADR-0066 D3 already performs: a field's
+   * rule applies unless the field also declares `requiredPermissions` and the
+   * caller holds ALL of them (on an on-behalf-of read, the delegator too —
+   * the D10 intersection: the tighter principal wins). A field with a rule
+   * and no `requiredPermissions` is masked for every non-system caller —
+   * declare = enforce from the first read; the unmask gate is opt-in.
+   *
+   * Deliberately NOT consulted here: permission-set field grants. A set that
+   * marks the field non-readable must keep DELETING it (a masking rule never
+   * widens an explicit deny) — call sites exclude those fields against the
+   * base evaluator map they already hold, where that map exists.
+   */
+  private computePartialMaskRules(
+    secMeta: { fieldMaskingRules: Record<string, FieldMaskingRule>; fieldRequiredPermissions: Record<string, string[]> },
+    permissionSets: PermissionSet[],
+    delegatorSets: PermissionSet[] | null,
+  ): Record<string, FieldMaskingRule> {
+    const entries = Object.entries(secMeta.fieldMaskingRules ?? {});
+    if (entries.length === 0) return {};
+    const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
+    const delHeld = delegatorSets ? this.permissionEvaluator.getSystemPermissions(delegatorSets) : null;
+    const out: Record<string, FieldMaskingRule> = {};
+    for (const [field, rule] of entries) {
+      const caps = secMeta.fieldRequiredPermissions[field] ?? [];
+      const unmasked =
+        caps.length > 0 &&
+        caps.every((c) => held.has(c)) &&
+        (!delHeld || caps.every((c) => delHeld.has(c)));
+      if (!unmasked) out[field] = rule;
+    }
+    return out;
+  }
+
   private foldFieldRequiredPermissions(
     baseFieldPerms: Record<string, { readable: boolean; editable: boolean }>,
     fieldRequiredPermissions: Record<string, string[]>,

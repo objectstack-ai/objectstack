@@ -1386,3 +1386,86 @@ describe('ADR-0113 — required is a write contract; storage.notNull is the colu
     expect(() => FieldSchema.parse({ type: 'text', storage: { collation: 'C' } })).toThrow();
   });
 });
+
+describe('FieldSchema — `maskingRule` is a DECLARED key (#8993, ruled Option A 2026-08-16)', () => {
+  // Re-introduction of the key pruned 2026-06 as dead-in-both-layers — this
+  // time landing in the same PR as its runtime consumer (plugin-security's
+  // FieldMasker partial masking), the enforce side of ADR-0049. These are the
+  // accept-side pins; the enforcement pins live in
+  // packages/plugins/plugin-security/src/field-masking-rule.test.ts.
+
+  it('parses every closed preset', () => {
+    for (const preset of ['phone', 'id_card', 'bank_account', 'email', 'name']) {
+      const f = FieldSchema.parse({ type: 'text', maskingRule: preset });
+      expect(f.maskingRule).toBe(preset);
+    }
+  });
+
+  it('parses the keepHead/keepTail escape hatch', () => {
+    const f = FieldSchema.parse({ type: 'text', maskingRule: { keepHead: 2, keepTail: 3 } });
+    expect(f.maskingRule).toEqual({ keepHead: 2, keepTail: 3 });
+  });
+
+  it('rejects a free-form format string — the enum is CLOSED (the ruling: no format strings)', () => {
+    expect(() => FieldSchema.parse({ type: 'text', maskingRule: 'ssn' })).toThrow();
+    expect(() => FieldSchema.parse({ type: 'text', maskingRule: '***-##' })).toThrow();
+  });
+
+  it('rejects a malformed keep form (negative, non-integer, missing or unknown keys)', () => {
+    expect(() => FieldSchema.parse({ type: 'text', maskingRule: { keepHead: -1, keepTail: 0 } })).toThrow();
+    expect(() => FieldSchema.parse({ type: 'text', maskingRule: { keepHead: 1.5, keepTail: 0 } })).toThrow();
+    expect(() => FieldSchema.parse({ type: 'text', maskingRule: { keepHead: 1 } })).toThrow();
+    expect(() => FieldSchema.parse({ type: 'text', maskingRule: { keepHead: 1, keepTail: 1, format: 'x' } })).toThrow();
+  });
+
+  it('accepts { keepHead: 0, keepTail: 0 } — an explicit full mask is legal', () => {
+    const f = FieldSchema.parse({ type: 'text', maskingRule: { keepHead: 0, keepTail: 0 } });
+    expect(f.maskingRule).toEqual({ keepHead: 0, keepTail: 0 });
+  });
+
+  it('is optional — absence stays absent', () => {
+    const f = FieldSchema.parse({ type: 'text' });
+    expect('maskingRule' in f).toBe(false);
+  });
+
+  it('coexists with requiredPermissions — the unmask gate is the SAME ADR-0066 D3 evaluation', () => {
+    const f = FieldSchema.parse({
+      type: 'text',
+      maskingRule: 'phone',
+      requiredPermissions: ['view_full_pii'],
+    });
+    expect(f.maskingRule).toBe('phone');
+    expect(f.requiredPermissions).toEqual(['view_full_pii']);
+  });
+
+  it('does not disturb FieldSchema unknown-key strictness (#4001)', () => {
+    expect(() => FieldSchema.parse({
+      type: 'text',
+      maskingRule: 'phone',
+      totallyBogusKey: true,
+    } as unknown as Field)).toThrow(/Unrecognized key/);
+  });
+
+  it('parses inside an object document — the PUT /meta authoring shape', () => {
+    const obj = ObjectSchema.parse({
+      name: 'crm_contact',
+      label: 'Contact',
+      fields: {
+        phone: { type: 'phone', label: 'Phone', maskingRule: 'phone', requiredPermissions: ['view_full_pii'] },
+      },
+    });
+    expect((obj.fields as Record<string, { maskingRule?: unknown }>).phone.maskingRule).toBe('phone');
+  });
+
+  it('the `.describe()` prose names the presets and the single-channel contract (feeds the reference page)', () => {
+    const js = z.toJSONSchema(FieldSchema as unknown as z.ZodType, {
+      unrepresentable: 'any',
+      io: 'input',
+    }) as { properties?: Record<string, { description?: string }> };
+    const prop = js.properties?.maskingRule;
+    expect(prop).toBeDefined();
+    expect(prop!.description).toMatch(/phone/);
+    expect(prop!.description).toMatch(/keepHead/);
+    expect(prop!.description).toMatch(/FieldMasker/);
+  });
+});

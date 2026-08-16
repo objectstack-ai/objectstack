@@ -210,6 +210,39 @@ export class MasterReferenceMissingError extends Error {
   }
 }
 
+/**
+ * [#8993] A write round-tripped a masked placeholder — the payload value for a
+ * `maskingRule` field is a fixed point of its own rule and carries the mask
+ * character, i.e. it is the string a partially-masked READ served this caller
+ * (`138****5678`), re-submitted. Writing it through would silently replace the
+ * real stored value with its mask; refusing loudly is the same stance the FLS
+ * write gate takes (silent drops hide the boundary from honest clients) →
+ * `400 VALIDATION_ERROR`.
+ *
+ * NOT a permission verdict: the caller may hold full edit rights on the field
+ * — the payload VALUE is what cannot be meant. Hence the standard-catalog
+ * validation code at 400, a message prefix outside the `[Security] Access
+ * denied` matcher (which would re-flatten it to 403 at the transports), and
+ * both `status` and `statusCode` (the two transports read different property
+ * names — see the classes above).
+ */
+export class MaskedValueWriteError extends Error {
+  readonly code = 'VALIDATION_ERROR';
+  readonly status = 400;
+  readonly statusCode = 400;
+  readonly fields: string[];
+  constructor(object: string, operation: string, fields: string[]) {
+    super(
+      `[Security] Masked value write refused: ${operation} on '${object}' supplies masked placeholder `
+      + `values for [${fields.join(', ')}]. These look like a round-trip of a partially masked read `
+      + `(field.maskingRule); writing them back would replace the stored values with their masks. `
+      + `Resubmit the real values, or omit these fields from the write.`,
+    );
+    this.name = 'MaskedValueWriteError';
+    this.fields = fields;
+  }
+}
+
 export function isPermissionDeniedError(e: unknown): e is PermissionDeniedError {
   if (!e || typeof e !== 'object') return false;
   const anyE = e as any;

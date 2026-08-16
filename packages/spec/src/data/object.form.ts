@@ -108,6 +108,9 @@ export const objectForm = defineForm({
             // `immutable` removed: never a FieldSchema key. The mechanism is the
             // `readonlyWhen` predicate below.
             { field: 'hidden', type: 'boolean', helpText: 'Hidden from default UI' },
+            // `maskingRule` declared 2026-08-16 (#8993, ruled Option A): partial
+            // masking enforced by plugin-security's FieldMasker on read + export.
+            { field: 'maskingRule', type: 'text', helpText: "Partial masking: preset ('phone', 'id_card', 'bank_account', 'email', 'name') or {\"keepHead\": n, \"keepTail\": m}. Masked unless the caller holds this field's requiredPermissions" },
             { field: 'searchable', type: 'boolean', helpText: 'Include in full-text search' },
             { field: 'sortable', type: 'boolean', helpText: 'Allow sorting on this column' },
             // `filterable` removed: never a FieldSchema key (only `sortable` and
