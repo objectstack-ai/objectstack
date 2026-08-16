@@ -195,6 +195,10 @@ const DURABILITY_CRITICAL_CALLEES = new Map([
         'deleteMetaItemFromLoader',
         'The metadata definition was never deleted from the authoritative store — `unregister()` still resolves and still announces `deleted`, the in-memory registry entry is gone, and the surviving row is read straight back out of storage by the very next `list()`/`get()`, so the "deleted" item reappears and survives every restart. Nothing retries it (#5259).',
     ],
+    [
+        'persistPackageCommitRow',
+        "The ADR-0067 commit row for a publish/revert turn was never written — the artifacts are LIVE and `publishPackageDrafts` answers `success: true` with `commitId` merely absent, so the API, the metadata and every counter read clean, while the only record of that turn's revert plan (`existedBefore`/`prevVersion` per artifact) does not exist: `revertCommit` and `rollbackToPackageCommit` have nothing to act on and the turn can never be undone. A commit store that is failing stays failing, so every later publish loses its plan the same way (#9066).",
+    ],
 ]);
 
 /**

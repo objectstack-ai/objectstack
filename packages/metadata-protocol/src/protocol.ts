@@ -15629,9 +15629,62 @@ export class ObjectStackProtocolImplementation implements
     // ─────────────────────────────────────────────────────────────────────
 
     /**
-     * Record one commit row (best-effort) grouping a turn's published
-     * artifacts. Returns the commit id, or null if the commit store is
-     * unavailable (e.g. unit-test stubs) — recording never blocks a publish.
+     * [#9066] Has the "commit store is not provisioned" note already been
+     * printed on this protocol instance?
+     *
+     * AGENTS.md's degradation rule says an operator-facing degradation is
+     * stated ONCE, at the first occurrence, not once per failed write: a
+     * deployment that never provisioned `sys_metadata_commit` would otherwise
+     * repeat the same sentence on every publish for the life of the process.
+     * Deliberately per-INSTANCE and not per-process (no module-level state):
+     * two protocols in one process are two deployments' worth of composition,
+     * and a module flag would silence the second one's first publish.
+     *
+     * The `error` branch below is NOT deduplicated, on purpose — each failed
+     * call is a DIFFERENT turn whose revert plan was lost, and the packageId /
+     * item count that identify it differ per line. Collapsing them would hide
+     * how many turns are unrevertible.
+     */
+    private commitStoreUnprovisionedNoted = false;
+
+    /**
+     * The `sys_metadata_commit` INSERT, on its own so it has a NAME.
+     *
+     * Extracted for `scripts/check-durability-degradation-log-level.mjs`, whose
+     * write rule matches declared callee names: `insert` is far too generic to
+     * declare repo-wide, so a durability write only becomes protectable once it
+     * has a wrapper of its own (the shape `persistAuditTrailRow` /
+     * `dropPromotedDraftRow` already take in that vocabulary). With
+     * `persistPackageCommitRow` declared there, the `catch` in
+     * {@link recordPackageCommit} can never silently regress to a quiet log
+     * again — which is precisely how the seam this repairs was born.
+     */
+    private async persistPackageCommitRow(row: Record<string, unknown>): Promise<void> {
+        await this.engine.insert('sys_metadata_commit', row);
+    }
+
+    /**
+     * Record one commit row grouping a turn's published artifacts. Returns the
+     * commit id, or null if the commit row could not be written — recording
+     * never blocks a publish (ADR-0067 D2's all-or-nothing rule is about the
+     * ARTIFACTS; the commit row is not allowed to fail one).
+     *
+     * [#9066] "Never blocks a publish" is not the same as "never says
+     * anything", and it used to be: the `catch` here returned `null` in
+     * silence, for every reason. The row is not a grouping label — it is the
+     * ONLY record of the turn's revert plan (`existedBefore` / `prevVersion`
+     * per artifact) that {@link revertCommit} and
+     * {@link rollbackToPackageCommit} can act on. Without it the artifacts are
+     * live, `publishPackageDrafts` answers `success: true` with `commitId`
+     * merely ABSENT, and the turn can never be reverted — the AGENTS.md
+     * durability-degradation shape exactly: nothing looks broken from the
+     * outside while something the system claims to persist did not land. A
+     * failing commit store also stays failing, so every later publish lost its
+     * plan the same silent way.
+     *
+     * The failure is now discriminated by error TYPE, the same way the read
+     * seams in this file ask (#5532 / #5980 / #8896), through the shared
+     * `isMissingTableError` predicate rather than a hand-rolled code test.
      */
     private async recordPackageCommit(args: {
         orgId: string | null;
@@ -15649,7 +15702,7 @@ export class ObjectStackProtocolImplementation implements
             const commitId = 'cmt_' + (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
                 ? crypto.randomUUID()
                 : `${args.eventSeqEnd ?? 0}-${args.items.length}-${args.packageId}`);
-            await this.engine.insert('sys_metadata_commit', {
+            await this.persistPackageCommitRow({
                 id: commitId,
                 package_id: args.packageId,
                 operation: args.operation,
@@ -15665,9 +15718,56 @@ export class ObjectStackProtocolImplementation implements
                 created_at: new Date().toISOString(),
             });
             return { commitId };
-        } catch {
-            // Commit store unavailable (or insert raced) — the publish itself
-            // already succeeded; grouping is a best-effort overlay on top.
+        } catch (error) {
+            // [#9066] The publish keeps its outcome — `null` still comes back
+            // and the caller still reports success — but the silence is over.
+            //
+            // BENIGN: `sys_metadata_commit` was never provisioned. That is a
+            // real deployment state (a first boot, or an env kernel composed
+            // without the commit log — the exact case
+            // `@objectstack/metadata`'s plugin note records), and it is a
+            // CONFIGURATION fact, not a store that broke: it is the same on
+            // every publish and it is fixed in one place. Stated once per
+            // instance, at `info`, per this card's ruling that an unprovisioned
+            // commit store stays silent or informational.
+            //
+            // EVERYTHING ELSE — a connection drop, a timeout, a permission
+            // denial, schema drift on that one table — is a write that was
+            // supposed to land and did not, while the publish it describes DID.
+            // `error`, per AGENTS.md "Degradation log levels", and the line
+            // owes the two things that rule requires: the CONSEQUENCE (this
+            // turn is not revertible, and the system will keep looking healthy)
+            // and the FIX (repair write access to the commit store).
+            //
+            // NOT rethrown, and not surfaced to the caller: the artifacts are
+            // already live and unwinding them over a missing history row would
+            // be strictly worse than losing the row. Telling the CALLER that
+            // the turn is unrevertible is a separate question (a response-field
+            // change the #8896 ruling forbids for this family) and deliberately
+            // NOT decided here.
+            if (isMissingTableError(error)) {
+                if (!this.commitStoreUnprovisionedNoted) {
+                    this.commitStoreUnprovisionedNoted = true;
+                    console.info(
+                        '[Protocol] sys_metadata_commit is not provisioned — publishes and reverts '
+                        + 'succeed but record no ADR-0067 commit row, so no turn can be reverted '
+                        + '(the revert plan of every turn is dropped). Fix: provision the commit '
+                        + 'store — it is registered alongside sys_metadata_history by '
+                        + "@objectstack/metadata's plugin; run schema sync. Said once per protocol instance.",
+                    );
+                }
+                return null;
+            }
+            const reason = (error as { message?: string } | undefined)?.message ?? String(error);
+            console.error(
+                `[Protocol] sys_metadata_commit write FAILED for package '${args.packageId}' `
+                + `(${args.operation}, ${args.items.length} item(s)): ${reason}. `
+                + 'The publish itself SUCCEEDED and reports success, so nothing looks broken — but '
+                + "this turn's revert plan was not persisted: the turn is absent from the package "
+                + 'commit timeline and can never be reverted, and every further publish loses its '
+                + 'own the same way until this is repaired. Fix: restore write access to '
+                + 'sys_metadata_commit (connectivity, permissions, or schema drift on that table).',
+            );
             return null;
         }
     }
