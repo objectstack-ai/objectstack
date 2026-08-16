@@ -457,7 +457,13 @@ function selfTest() {
       'only the anchored concrete pin moved: the rolling tags and the unanchored "spec 16.0.0" prose on the '
         + `SAME LINE are untouched — got ${JSON.stringify(readFileSync(join(dir, 'mixed/one-line.md'), 'utf8'))}`,
     );
-    assert(mixed.changed[0].rewrites.length === 1, 'exactly one rewrite on that line');
+    // Optional chaining, not indexing: an INERT rewriter leaves `changed` empty, and
+    // this assertion must NAME that failure rather than dying of a TypeError two limbs
+    // before the byte-identity control ever runs.
+    assert(
+      mixed.changed[0]?.rewrites.length === 1,
+      `exactly one rewrite on that line — got ${JSON.stringify(mixed.changed.map((c) => c.rewrites.length))}`,
+    );
 
     // ── Control D: two pins on ONE line, of DIFFERENT lengths ───────────────
     //
@@ -480,7 +486,10 @@ function selfTest() {
       'BOTH pins on one line are rewritten correctly when the replacement changes length — a left-to-right '
         + `splice using original columns would corrupt the second. Got ${JSON.stringify(readFileSync(join(dir, 'mixed/two-pins.md'), 'utf8'))}`,
     );
-    assert(twoPins.changed[0].rewrites.length === 2, 'both pins counted as rewrites');
+    assert(
+      twoPins.changed[0]?.rewrites.length === 2,
+      `both pins counted as rewrites — got ${JSON.stringify(twoPins.changed.map((c) => c.rewrites.length))}`,
+    );
 
     // ── Control E: the gate's verdicts the rewrite CANNOT fix ───────────────
     //
