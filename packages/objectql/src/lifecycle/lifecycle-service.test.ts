@@ -1095,6 +1095,220 @@ describe('LifecycleService.sweep — governance (P4)', () => {
   });
 });
 
+// #8906 — the governance row-count probe used to fail into `catch { continue }`,
+// which made "this object has nothing worth alerting on" and "the driver could
+// not answer" the same observable event. The damage outlived the sweep: no
+// `quota-exceeded`, no `growth`, AND the object dropped out of `nextCounts`, so
+// the next sweep had no baseline to diff against either.
+//
+// The repair discriminates by error TYPE through the declared
+// `isMissingTableError` predicate and surfaces everything else through the
+// channels that already exist — `report.errors` plus a `warn` — with no new
+// report field (the maintainer's 2026-08-15 disposition for this family:
+// unprovisioned is truthful emptiness, everything else must surface).
+//
+// Every expectation below is written as a LITERAL, never derived from the code
+// under test, and the benign case asserts that the injected throw really fired —
+// otherwise "the sweep carried on" would also be satisfied by a harness that
+// never probed at all.
+describe('LifecycleService.sweep — governance row-count probe failure (#8906)', () => {
+  const PROBED: LifecycleObjectLike = {
+    name: 'sys_job_run',
+    lifecycle: { class: 'telemetry', retention: { maxAge: '30d' } } as any,
+  };
+  /** A second declared object, so "one probe failed" can be told apart from
+   * "the governance leg stopped". */
+  const SIBLING: LifecycleObjectLike = {
+    name: 'sys_audit_log',
+    lifecycle: { class: 'telemetry', retention: { maxAge: '30d' } } as any,
+  };
+
+  function fakeSettings(values: Record<string, unknown>) {
+    return {
+      async get(_ns: string, key: string) {
+        if (key in values) return { value: values[key], source: 'global' };
+        return { value: undefined, source: 'default' };
+      },
+    };
+  }
+
+  /** A driver whose `count` answers per object — throwing for the objects named
+   * in `throwsFor`, and returning `rows` for every other one. */
+  function countingDriver(throwsFor: Record<string, unknown>, rows = 1_500) {
+    const count = vi.fn(async (object: string) => {
+      if (object in throwsFor) throw throwsFor[object];
+      return rows;
+    });
+    return { driver: { name: 'default', count }, count };
+  }
+
+  /** POSITIVE CONTROL — the same harness, nothing injected. Without this, every
+   * refusal below is also consistent with a fixture that never alerts at all. */
+  it('a healthy probe alerts on the quota and reports no error', async () => {
+    const warn = vi.fn();
+    const { driver, count } = countingDriver({});
+    const { engine } = captureEngine([PROBED], { driver });
+    const settings = fakeSettings({ quotas: { sys_job_run: 1_000 } });
+
+    const report = await service(engine, {
+      getSettings: () => settings,
+      logger: { ...silentLogger(), warn },
+      // Alerts go to the sink, so `warn` carries only degradation reports —
+      // an alert of its own logs at `warn` when no sink is registered.
+      onAlert: () => {},
+    }).sweep();
+
+    expect(count).toHaveBeenCalledWith('sys_job_run');
+    expect(report.alerts).toEqual([
+      { type: 'quota-exceeded', object: 'sys_job_run', rowCount: 1_500, quota: 1_000 },
+    ]);
+    expect(report.errors).toEqual([]);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('a non-benign probe failure is reported per object, at warn, naming the lost baseline', async () => {
+    const warn = vi.fn();
+    const error = vi.fn();
+    const { driver } = countingDriver({ sys_job_run: new Error('connection reset by peer') });
+    const { engine } = captureEngine([PROBED], { driver });
+    const settings = fakeSettings({ quotas: { sys_job_run: 1 } });
+
+    const report = await service(engine, {
+      getSettings: () => settings,
+      logger: { ...silentLogger(), warn, error },
+    }).sweep();
+
+    // The report carries the incomplete fact in the field it already has —
+    // `errors` is the sweep's declared per-object failure channel, and the
+    // sweep's own summary line counts it. No new field was added.
+    expect(report.errors).toEqual([
+      {
+        object: 'sys_job_run',
+        error:
+          'governance row-count probe failed (connection reset by peer) — quota and growth alerting ' +
+          'skipped for this object this sweep, and its growth baseline for the next sweep is lost',
+      },
+    ]);
+    // The damage is still real and still visible: quota 1 would have breached
+    // on any count at all, and no alert could be raised for an object nobody
+    // could count.
+    expect(report.alerts).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(
+      '[lifecycle] governance row-count probe on sys_job_run failed (connection reset by peer); ' +
+        'quota/growth alerting skipped this sweep and the next sweep has no growth baseline for it',
+    );
+    // Reduced ALERTING, not a write that claimed to persist and did not —
+    // `warn`, deliberately, per AGENTS.md "Degradation log levels".
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it('one failed probe never costs the other objects their governance', async () => {
+    const { driver } = countingDriver({ sys_job_run: new Error('connection reset by peer') }, 2_000);
+    const { engine } = captureEngine([PROBED, SIBLING], { driver });
+    const settings = fakeSettings({ quotas: { sys_job_run: 1, sys_audit_log: 1_000 } });
+
+    const report = await service(engine, { getSettings: () => settings }).sweep();
+
+    expect(report.alerts).toEqual([
+      { type: 'quota-exceeded', object: 'sys_audit_log', rowCount: 2_000, quota: 1_000 },
+    ]);
+    expect(report.errors).toEqual([
+      {
+        object: 'sys_job_run',
+        error:
+          'governance row-count probe failed (connection reset by peer) — quota and growth alerting ' +
+          'skipped for this object this sweep, and its growth baseline for the next sweep is lost',
+      },
+    ]);
+  });
+
+  // The report is where an operator learns that the degradation OUTLIVES the
+  // sweep it happened in. This pins that honestly: the fix makes the loss
+  // visible, it does not invent a baseline to replace it.
+  it('reports the lost baseline rather than repairing it — the next sweep still has no growth delta', async () => {
+    const outage = new Error('connection reset by peer');
+    const throwsFor: Record<string, unknown> = { sys_job_run: outage };
+    const { driver } = countingDriver(throwsFor, 5_000);
+    const { engine } = captureEngine([PROBED], { driver });
+    const settings = fakeSettings({ quotas: { sys_job_run: 100_000 }, growth_alert_rows: 100 });
+    const svc = service(engine, { getSettings: () => settings });
+
+    const first = await svc.sweep();
+    expect(first.errors).toHaveLength(1);
+    expect(first.errors[0].error).toContain('growth baseline for the next sweep is lost');
+
+    // The driver recovers. There is still no `last` to diff 5_000 against, so
+    // no growth alert can be raised — exactly what the first report said.
+    delete throwsFor.sys_job_run;
+    const second = await svc.sweep();
+    expect(second.errors).toEqual([]);
+    expect(second.alerts).toEqual([]);
+
+    // And the baseline is rebuilt from here: the sweep after that CAN alert.
+    const { driver: grown } = countingDriver({}, 6_000);
+    (engine as any).getDriverForObject = () => grown;
+    const third = await svc.sweep();
+    expect(third.alerts).toEqual([
+      { type: 'growth', object: 'sys_job_run', rowCount: 6_000, delta: 1_000 },
+    ]);
+  });
+
+  it('an unprovisioned table stays silent — truthful emptiness, not a swallowed outage', async () => {
+    const warn = vi.fn();
+    const missingTable = new Error('no such table: sys_job_run');
+    const { driver, count } = countingDriver({ sys_job_run: missingTable }, 2_000);
+    const { engine } = captureEngine([PROBED, SIBLING], { driver });
+    const settings = fakeSettings({ quotas: { sys_job_run: 1, sys_audit_log: 1_000 } });
+
+    const report = await service(engine, {
+      getSettings: () => settings,
+      logger: { ...silentLogger(), warn },
+      onAlert: () => {},
+    }).sweep();
+
+    // The injected throw ACTUALLY FIRED — without this, "the sweep continued"
+    // is also what a harness that never probed would produce.
+    expect(count).toHaveBeenCalledWith('sys_job_run');
+    await expect(count.mock.results[0]!.value).rejects.toThrow('no such table: sys_job_run');
+
+    // A table that does not exist holds no rows: no quota to breach, no growth
+    // to measure, nothing to report and nothing to log.
+    expect(report.errors).toEqual([]);
+    expect(warn).not.toHaveBeenCalled();
+    // …and the sweep carried on, proved by the sibling's alert.
+    expect(report.alerts).toEqual([
+      { type: 'quota-exceeded', object: 'sys_audit_log', rowCount: 2_000, quota: 1_000 },
+    ]);
+  });
+
+  // The benign verdict comes from the declared predicate, not from a substring
+  // guess: Postgres phrases a missing COLUMN on an existing relation as
+  // `column "x" of relation "y" does not exist`, which CONTAINS a legal
+  // missing-table phrase. The table is there and its rows were not counted, so
+  // this must surface.
+  it('a missing column on a provisioned table is not benign, though its message contains a table phrase', async () => {
+    const columnGone: Error & { code?: string } = new Error(
+      'column "status" of relation "sys_job_run" does not exist',
+    );
+    columnGone.code = '42703';
+    const { driver } = countingDriver({ sys_job_run: columnGone });
+    const { engine } = captureEngine([PROBED], { driver });
+    const settings = fakeSettings({ quotas: { sys_job_run: 1 } });
+
+    const report = await service(engine, { getSettings: () => settings }).sweep();
+
+    expect(report.errors).toEqual([
+      {
+        object: 'sys_job_run',
+        error:
+          'governance row-count probe failed (column "status" of relation "sys_job_run" does not exist) — ' +
+          'quota and growth alerting skipped for this object this sweep, and its growth baseline for the ' +
+          'next sweep is lost',
+      },
+    ]);
+  });
+});
+
 // #5195 — ADR-0057 P4 lets an operator override any object's window through the
 // `lifecycle` settings namespace, and until this the only validation on that
 // override was "does it parse". That is a side door around #5179's invariant:

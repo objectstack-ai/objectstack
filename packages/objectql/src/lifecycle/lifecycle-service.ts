@@ -2,6 +2,7 @@
 
 import type { Lifecycle } from '@objectstack/spec/data';
 import type { DriverQuery } from '@objectstack/spec/contracts';
+import { isMissingTableError } from '@objectstack/metadata/errors';
 import { parseLifecycleDuration } from './duration.js';
 import type {
   DanglingReferenceAuditOptions,
@@ -802,7 +803,64 @@ export class LifecycleService {
       let rowCount: number;
       try {
         rowCount = await driver.count(obj.name);
-      } catch {
+      } catch (error) {
+        // [#8906] A row-count probe that FAILED is not an object with nothing
+        // to say. The bare `catch { continue }` this replaces made the two
+        // indistinguishable, and the damage outlived the sweep it happened in:
+        // the object is skipped for `quota-exceeded` AND for `growth` alerting
+        // this sweep, and — because `nextCounts` is what becomes
+        // `this.lastCounts` below — it is also dropped from the BASELINE, so
+        // the next sweep has no `last` to diff against and cannot alert on
+        // growth either. A driver outage read exactly like a quiet, healthy
+        // object, twice over, with nothing logged and nothing in the report.
+        //
+        // Benign: the object is registered but its TABLE was never provisioned
+        // (schema sync not run yet). It holds no rows, so there is no quota to
+        // breach and no growth to measure — skipping it IS the truth. Asked
+        // through the shared `isMissingTableError` predicate
+        // (`@objectstack/metadata/errors`), never a hand-rolled code test, so
+        // one vocabulary of "benign driver error" serves every seam that needs
+        // one. It stays out of `nextCounts` deliberately: seeding a 0 baseline
+        // for a table that does not exist would fire a phantom `growth` alert
+        // on the first sweep after the table is provisioned and seeded.
+        //
+        // Everything else (connection drop, timeout, permission denial, a
+        // dialect error) means the rows may well exist and simply were not
+        // counted — the maintainer's 2026-08-15 disposition for this family:
+        // unprovisioned is truthful emptiness, everything else must surface.
+        //
+        // It surfaces through the channels that already exist — no new report
+        // field and no new error code. `report.errors` is this sweep's declared
+        // per-object failure channel (the object loop in `sweep()` fills it the
+        // same way) and the sweep's summary line already counts it; the `warn`
+        // matches that loop's level, because the consequence is reduced
+        // ALERTING, not a write that claimed to persist and did not
+        // (AGENTS.md "Degradation log levels"). Both messages name the baseline
+        // loss, since that is the half an operator cannot infer from a report
+        // that is otherwise identical to a healthy one.
+        //
+        // Rethrowing — the shape #8895 took at the `cascadeDeleteRelations`
+        // probe — is deliberately NOT the shape here, and not for uniformity's
+        // sake: there, the caller is a `delete()` that must fail. Here the only
+        // caller is `sweep()`, whose scheduler entry point is `void this.sweep()`
+        // — a throw would land as an unhandled rejection, abandon governance for
+        // every object still queued behind this one, skip `this.lastCounts =
+        // nextCounts` entirely (losing EVERY object's baseline, not just this
+        // one's), and break the documented invariant that a sweep failure is
+        // isolated and never thrown into the scheduler. That is strictly more
+        // damage than the defect being repaired.
+        if (isMissingTableError(error)) continue;
+        const msg = (error as Error)?.message ?? String(error);
+        report.errors.push({
+          object: obj.name,
+          error:
+            `governance row-count probe failed (${msg}) — quota and growth alerting skipped ` +
+            `for this object this sweep, and its growth baseline for the next sweep is lost`,
+        });
+        this.opts.logger.warn(
+          `[lifecycle] governance row-count probe on ${obj.name} failed (${msg}); ` +
+            'quota/growth alerting skipped this sweep and the next sweep has no growth baseline for it',
+        );
         continue;
       }
       nextCounts.set(obj.name, rowCount);

@@ -69,9 +69,22 @@
  * through the #3821 ladder instead of throwing (the widening — a query that
  * used to error returns rows, deliberately; see the direction pin in the
  * message-shape sweep).
+ *
+ * [#8931 question 3, maintainer authorisation 2026-08-16 「同意 a」] The card
+ * asked for one separable half — strip the caller's bound literal from the
+ * POSTGRES dotted route's message — and measuring it live disproved the
+ * premise: on Postgres there is no bound literal in that message to strip.
+ * No behaviour was changed here as a result. What was added is the axis that
+ * was missing, so the property stops being an unstated accident of the client
+ * library: see `DOTTED_STATUS_QUO.literalWithheldBy`, the disclosure pins in
+ * each cell's sweep, and the mechanism pin at the bottom of the file.
+ * ⛔ The dotted route's `code` and `status` are unchanged and stay recorded
+ * rather than asserted — questions 1 (can it be enveloped without judging the
+ * key) and 2 (which envelope) are unruled and are the maintainer's.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import knex from 'knex';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import { SqlDriver, isUnresolvableColumnError, unresolvableColumnNameOf } from './sql-driver.js';
 import { DIALECT_CELLS, declareDialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
@@ -148,11 +161,80 @@ const UNRESOLVABLE: ReadonlyArray<{ label: string; where: NonNullable<DriverQuer
  * the owner of the verdict. ⛔ Do not "fix" a cell here by teaching the
  * classifier `42P01`: that mints a dotted-path verdict at the driver and
  * pre-empts #8371, which owns the dotted-path axis on every dialect.
+ *
+ * ## [#8931 Q3] The third axis: what keeps the caller's bound literal off the wire
+ *
+ * `code`/`enveloped` record the SHAPE of the answer. They say nothing about
+ * its CONTENT, and #8931's separable half is a content question — so the two
+ * cells that agree on "no literal reaches the caller" reach that answer by
+ * mechanisms that are different in kind, and only one of them is a redaction:
+ *
+ * - **sqlite, mysql** — the dialect really does inline the bound literal
+ *   (knex leaves `?` in the SQL, so its error formatter substitutes the
+ *   value). The #8790 refusal is what removes it, keeping the full text to
+ *   the server log. A genuine redaction, and `POSITIVE CONTROL` below asserts
+ *   the literal is in that log — otherwise "the message has no literal" would
+ *   be a claim about a message nobody proved ever could have carried one.
+ * - **postgres** — nothing redacts anything, because there is nothing to
+ *   redact. knex positions pg bindings to `$1` BEFORE it formats the failing
+ *   statement into the message, and its formatter substitutes only `?`, so no
+ *   bound value is ever written into the text. Measured live on PostgreSQL
+ *   16.13 across seven filter shapes on both halves: the literal is absent
+ *   from `message`, from `stack` and from every own property of the pg error
+ *   object, and a `$n` placeholder stands where the value would be.
+ *
+ * ⭐ That measurement is why #8931's question 3 landed as a pin rather than a
+ * fix: its premise ("the bound literal inlined", carried from the card's dated
+ * `13d78642d` evidence) does not hold on Postgres. ⚠️ The property is real but
+ * INCIDENTAL — it belongs to knex's binding path, not to any rule this repo
+ * states — so it is asserted here, and the mechanism pin at the bottom fails
+ * the day that path changes. What remains genuinely open on the pg cell is the
+ * ENVELOPE (a raw `42P01` with no `status`, carrying the compiled statement's
+ * shape), and that is questions 1 and 2, unruled.
  */
-const DOTTED_STATUS_QUO: Readonly<Record<string, { code: string; enveloped: boolean }>> = {
-  sqlite: { code: 'INVALID_FILTER', enveloped: true },
-  pg: { code: '42P01', enveloped: false },
-  mysql: { code: 'INVALID_FILTER', enveloped: true },
+interface DottedCell {
+  /** The `code` the caller receives. ⛔ Recorded, not adjudicated (#8931 Q1/Q2). */
+  code: string;
+  /** Does the answer carry the ADR-0112 envelope (`status: 400`)? */
+  enveloped: boolean;
+  /** [#8931 Q3] Which of the two mechanisms above keeps the literal off the wire. */
+  literalWithheldBy: typeof REFUSAL_ENVELOPE | typeof NEVER_INLINED;
+  /**
+   * Substrings the caller-visible message MUST still carry.
+   *
+   * ⛔ Without this, "the message does not contain the literal" is trivially
+   * true of an empty string — a redaction that deleted everything would pass
+   * the disclosure assertion and leave the caller with nothing to act on.
+   */
+  identifies: readonly string[];
+}
+
+/** The dialect inlined the literal and the #8790 refusal took it back out. */
+const REFUSAL_ENVELOPE = 'the #8790 refusal envelope (a real redaction)';
+/** knex parameterised the value, so the message never carried it. */
+const NEVER_INLINED = 'knex parameterisation — the literal was never in the text';
+
+const DOTTED_STATUS_QUO: Readonly<Record<string, DottedCell>> = {
+  sqlite: {
+    code: 'INVALID_FILTER',
+    enveloped: true,
+    literalWithheldBy: REFUSAL_ENVELOPE,
+    identifies: ['title.x', TABLE],
+  },
+  pg: {
+    code: '42P01',
+    enveloped: false,
+    literalWithheldBy: NEVER_INLINED,
+    // The raw dialect text, which on this cell IS the caller-visible message:
+    // `select … where "title"."x" = $1 - missing FROM-clause entry for table "title"`.
+    identifies: ['missing FROM-clause entry for table', '"title"."x"', TABLE],
+  },
+  mysql: {
+    code: 'INVALID_FILTER',
+    enveloped: true,
+    literalWithheldBy: REFUSAL_ENVELOPE,
+    identifies: ['title.x', TABLE],
+  },
 };
 
 async function caught(run: () => Promise<unknown>): Promise<any> {
@@ -233,6 +315,78 @@ describe(`[#8790] driver-sql — unresolvable WHERE column refuses on BOTH halve
     const err = await caught(() => driver.find(TABLE, { where: { 'title.x': SECRET_LITERAL } }));
     expect(err.code).toBe(expected.code);
     expect(err.status).toBe(expected.enveloped ? 400 : undefined);
+  });
+
+  // ───────────────────────────────────────────────────────────────
+  // [#8931 Q3] THE DISCLOSURE AXIS — content, not shape
+  // ───────────────────────────────────────────────────────────────
+
+  // ⭐ True on every cell REGARDLESS of the envelope, which is exactly why it
+  // can be asserted while #8931's questions 1 and 2 stay unruled: the answer's
+  // shape is recorded above, its CONTENT is contracted here.
+  it('a dotted key never puts the caller\'s bound literal on the wire (#8931 Q3)', async () => {
+    const expected = DOTTED_STATUS_QUO[cell.id];
+    for (const [half, run] of [
+      ['find', () => driver.find(TABLE, { where: { 'title.x': SECRET_LITERAL } })],
+      ['count', () => driver.count(TABLE, { where: { 'title.x': SECRET_LITERAL } })],
+    ] as const) {
+      const err = await caught(run);
+      expect(err.message, `${half}: message`).not.toContain(SECRET_LITERAL);
+      expect(String(err.stack ?? ''), `${half}: stack`).not.toContain(SECRET_LITERAL);
+      // The message is not the only way out: an unenveloped pg error reaches
+      // the caller as the driver's own object, carrying a dozen own fields
+      // (`detail`, `hint`, `where`, `internalQuery`, …). Any of them would be
+      // a disclosure, so all of them are asserted rather than the one the
+      // card happened to name.
+      for (const key of Object.keys(err ?? {})) {
+        const value = (err as Record<string, unknown>)[key];
+        if (typeof value === 'string') {
+          expect(value, `${half}: error property '${key}'`).not.toContain(SECRET_LITERAL);
+        }
+      }
+      // ⛔ Non-triviality: an empty message satisfies every assertion above.
+      for (const needle of expected.identifies) {
+        expect(err.message, `${half}: the caller must still be told '${needle}'`).toContain(needle);
+      }
+    }
+  });
+
+  // The control that makes the assertion above mean something. Without it,
+  // "no literal in the message" is unfalsifiable — it would hold just as well
+  // for a dialect that never had one, a message that was emptied, and a fix
+  // that never ran. So each cell must show WHICH of the two mechanisms is
+  // keeping the literal off the wire, and that mechanism must be observable.
+  it('POSITIVE CONTROL — the literal is withheld by this cell\'s recorded mechanism (#8931 Q3)', async () => {
+    const expected = DOTTED_STATUS_QUO[cell.id];
+    const logged: string[] = [];
+    const sink = { warn: (m: string) => logged.push(String(m)), info: () => {}, error: () => {} };
+    const original = (driver as unknown as { logger: unknown }).logger;
+    (driver as unknown as { logger: unknown }).logger = sink;
+    let err: any;
+    try {
+      err = await caught(() => driver.find(TABLE, { where: { 'title.x': SECRET_LITERAL } }));
+    } finally {
+      (driver as unknown as { logger: unknown }).logger = original;
+    }
+
+    expect(err.message).not.toContain(SECRET_LITERAL);
+
+    if (expected.literalWithheldBy === REFUSAL_ENVELOPE) {
+      // A REAL redaction: the dialect text did carry the caller's value, and
+      // the refusal moved it to the server log (#7929's line, #8790's seam).
+      // This is the proof the message "would have carried the literal".
+      expect(
+        logged.some((line) => line.includes(SECRET_LITERAL)),
+        'the dialect text should have reached the server log with the literal intact',
+      ).toBe(true);
+    } else {
+      // Postgres: NOT a redaction. The value was parameterised, so a `$n`
+      // placeholder stands where it would have been — and nothing was logged,
+      // because nothing recognised the error in the first place. ⛔ Do not
+      // read this cell as "the redaction works here"; see `literalWithheldBy`.
+      expect(err.message, 'the value should stand as a placeholder, not a literal').toMatch(/\$\d/);
+      expect(logged.some((line) => line.includes(SECRET_LITERAL))).toBe(false);
+    }
   });
 
   // ⭐ The invariant half of the ruling — true under every branch it could have
@@ -474,5 +628,66 @@ describe('[#8790] dialect wording — what the refusal recognises and what it na
     expect(isUnresolvableColumnError(undefined)).toBe(false);
     expect(isUnresolvableColumnError('no such column: x')).toBe(false);
     expect(unresolvableColumnNameOf(null)).toBe(null);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// [#8931 Q3] WHY Postgres' message carries no bound literal — the mechanism
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * The load-bearing half of #8931's disproved premise, pinned on every runner.
+ *
+ * The card asserted the Postgres dotted route leaks "the bound literal
+ * inlined", on both halves. It does not, and the reason is one ordering
+ * decision inside knex rather than anything this repo does:
+ *
+ * 1. `enrichQueryObject` runs `client.positionBindings(sql)` — the pg dialect
+ *    rewrites every `?` to `$1`, `$2`, … Sqlite and mysql leave `?` alone.
+ * 2. Only THEN, in the failure path, does knex build
+ *    `err.message = formatQuery(sql, bindings) + ' - ' + nativeMessage`.
+ * 3. `formatQuery` substitutes `?` and nothing else, so on pg it finds no
+ *    placeholder it recognises and inlines ZERO bindings — while on sqlite and
+ *    mysql it inlines all of them, which is the disclosure #7929 and #8790
+ *    really did have to redact.
+ *
+ * So Postgres' immunity here is incidental, undocumented and entirely inside a
+ * dependency — the three properties that make something worth pinning. If a
+ * knex upgrade ever positions bindings after formatting (or teaches the
+ * formatter `$n`), this goes red and the pg cell becomes a genuine leak that
+ * question 3 would then have to fix for real.
+ *
+ * ⚠️ `positionBindings` is knex's own seam, not a public API contract. That is
+ * the point: a red here means "the assumption underneath the pg cell moved",
+ * which is exactly when a human should re-measure.
+ */
+describe('[#8931] the bound literal on the dotted route — mechanism, not luck', () => {
+  const BOUND = 'select * from "task" where "title"."x" = ?';
+
+  it('knex positions pg bindings to $n before the failing statement is formatted', () => {
+    const pg = knex({ client: 'pg' });
+    try {
+      // No `?` survives, so knex's error formatter has nothing to substitute
+      // and the caller's value cannot reach the message.
+      const positioned = pg.client.positionBindings(BOUND);
+      expect(positioned).toBe('select * from "task" where "title"."x" = $1');
+      expect(positioned).not.toContain('?');
+    } finally {
+      void pg.destroy();
+    }
+  });
+
+  it('sqlite and mysql leave `?` standing — which is why THEIR messages inline it', () => {
+    for (const client of ['better-sqlite3', 'mysql2'] as const) {
+      const k = knex({ client, useNullAsDefault: true });
+      try {
+        // The literal really does get substituted into these dialects'
+        // messages; the #8790 refusal is what keeps it off the wire, and the
+        // live cells' POSITIVE CONTROL measures that end to end.
+        expect(k.client.positionBindings(BOUND), client).toBe(BOUND);
+      } finally {
+        void k.destroy();
+      }
+    }
   });
 });

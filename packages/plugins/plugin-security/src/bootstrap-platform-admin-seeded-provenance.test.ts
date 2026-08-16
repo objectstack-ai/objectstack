@@ -20,26 +20,36 @@
  * better-sqlite3 `SqlDriver` — the same wiring `security-plugin.ts` and
  * `os meta resync` use, which hand the bare engine straight to the seeder.
  *
- * ## ⚠️ What these assertions ARE
+ * ## The ruling these assertions now pin (2026-08-15, Option A)
  *
- * A **recording of measured behaviour, pinned as-is and NOT endorsed.** The
- * measurement below shows the platform's own default sets taking the resync
- * SKIP branch — the opposite of what #2705 built the flag for. Whether that is
- * a defect or the intent is an OPEN PRODUCT QUESTION, stated in #8692 and not
- * decided here:
+ * The original version of this file recorded a MEASUREMENT and explicitly
+ * refused to endorse it: a seeded row stored `'admin'` (the declaration's
+ * `defaultValue`), so `os meta resync` returned `resynced 0 / resyncSkipped 8`
+ * and skipped every platform default set — the inverse of what #2705 built the
+ * flag for. It left the product question open:
  *
  *   > are the platform default permission sets meant to be platform-owned
  *   > (and therefore resyncable), or env-authored (and therefore deliberately
  *   > left alone)?
  *
- * The source argues both ways and the file that would settle it says both
- * things: the resync condition's `!row.managed_by ||` limb reads as though NULL
- * was expected for seeded rows, while the comment directly above the insert
- * calls the posture one that "keeps the platform defaults env-authored". Both
- * cannot be true. ⛔ So do NOT "fix" a failure here by editing these
- * assertions to taste — if one of them goes red, some deliberate change moved
- * the answer, and #8692 (or whatever superseded it) is where that change gets
- * recorded. The counterfactual in section 2 is what tells you WHICH link moved.
+ * ⛔ That question is CLOSED. The maintainer ruled **Option A** on 2026-08-15:
+ * the platform default sets are platform-owned and resyncable, and the seeder
+ * stamps `managed_by: 'platform'` on its insert. This file no longer records an
+ * undecided state — it pins the ruling, on BOTH sides of the line the ruling
+ * drew:
+ *
+ *  1. **Forward (section 1)** — a fresh install stores `'platform'` and a real
+ *     resync reconciles every default set.
+ *  2. **Legacy (section 2)** — a row from a PRE-ruling install still carries
+ *     `'admin'` and is still SKIPPED, forever and on purpose. The ruling
+ *     forbids a migration: a stored `'admin'` cannot be told apart from a
+ *     genuine Setup takeover, so restamping could silently overwrite a real
+ *     admin's edits on the next resync. Report, don't rewrite.
+ *
+ * Section 2 is the half that is easy to lose. Deleting it would leave the
+ * upgrade path — the one every existing deployment is actually on — with no
+ * coverage at all, and a later "cleanup" that restamps legacy rows would then
+ * go green.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -75,8 +85,8 @@ afterEach(async () => {
 
 /**
  * A fresh engine on its own `:memory:` database, carrying the permission-set
- * declaration passed in. `declaration` exists for section 2's counterfactual;
- * every case in section 1 boots the shipped declaration unmodified.
+ * declaration passed in. `declaration` exists for section 3's counterfactual;
+ * every case in sections 1 and 2 boots the shipped declaration unmodified.
  */
 async function boot(declaration: any = SysPermissionSet): Promise<ObjectQL> {
   const engine = new ObjectQL();
@@ -105,7 +115,7 @@ async function boot(declaration: any = SysPermissionSet): Promise<ObjectQL> {
 /**
  * The row as it is physically STORED, read at the driver past every engine-side
  * projection. The resync branch reads the engine's view, so both are asserted
- * where it matters — a default applied only on read and a default applied on
+ * where it matters — a default applied only on read and a value written on
  * insert are different facts about the database, and only one of them survives
  * a restart.
  */
@@ -125,6 +135,39 @@ async function rowViaEngine(engine: ObjectQL, name: string): Promise<any> {
   return rows[0];
 }
 
+/**
+ * A row exactly as a PRE-#8692 install holds it — written the way the old
+ * seeder wrote it, which is to say WITHOUT `managed_by`, so the value comes
+ * from the declaration's `defaultValue: 'admin'` by the very mechanism that
+ * produced it on every install created before the ruling.
+ *
+ * Reproducing the legacy pre-image through its original mechanism rather than
+ * hand-writing `'admin'` is deliberate: it keeps the case anchored to the real
+ * declaration, and each case asserts the resulting value before relying on it,
+ * so a moved default shows up as a failure here instead of quietly turning the
+ * legacy pin into a test of something else.
+ */
+async function seedLegacyRow(engine: ObjectQL, ps: any): Promise<void> {
+  await (engine as any).insert(
+    'sys_permission_set',
+    {
+      id: `ps_legacy_${ps.name}`,
+      name: ps.name,
+      label: ps.label ?? ps.name,
+      // A deliberately STALE payload: the resync would rewrite these if it ever
+      // touched the row, so section 2 can prove "left untouched" by content and
+      // not merely by a counter.
+      object_permissions: '{}',
+      field_permissions: '{}',
+      system_permissions: '[]',
+      row_level_security: '[]',
+      tab_permissions: '{}',
+      active: true,
+    },
+    { context: SYSTEM_CTX },
+  );
+}
+
 function collectingLogger() {
   const info: string[] = [];
   const warn: string[] = [];
@@ -140,12 +183,12 @@ function collectingLogger() {
 
 describe('#8692 — provenance of a seeder-created default permission set (measured, real engine)', () => {
   // ───────────────────────────────────────────────────────────────────────────
-  // 1. THE MEASUREMENT — recorded as it reads today, not as anyone wants it
+  // 1. FORWARD — a fresh install after the ruling
   // ───────────────────────────────────────────────────────────────────────────
 
   it('ANTI-VACUITY: the shipped defaults are non-empty and really get seeded', async () => {
     // Every count below is relative to this set. If it were empty, "resync
-    // skipped all of them" would be trivially true of nothing — the shape in
+    // reconciled all of them" would be trivially true of nothing — the shape in
     // which this whole file could pass while measuring air.
     expect(defaultPermissionSets.length).toBeGreaterThan(0);
 
@@ -154,100 +197,163 @@ describe('#8692 — provenance of a seeder-created default permission set (measu
     expect(out.seeded).toBe(defaultPermissionSets.length);
   });
 
-  it('a seeder-created row is stored `managed_by: "admin"` — the declared default, NOT null', async () => {
-    // ⚠️ MEASURED STATUS QUO, 2026-08-15. This is the single fact #8692 was
-    // filed to establish, and the card explicitly did not know it: the seeder's
-    // insert omits `managed_by` (`platformOwnedFields` returns label /
-    // description / the four permission blobs / admin_scope, and the identity
-    // and provenance columns are deliberately not among them), so the value
-    // comes from the object declaration's `defaultValue: 'admin'`.
-    //
-    // The consequence is the next case. It is NOT endorsed here — see the file
-    // header's open question.
+  it('a seeder-created row is stored `managed_by: "platform"` — stamped, not defaulted', async () => {
+    // THE RULING, pinned (Option A, 2026-08-15). Before it, this row stored
+    // `'admin'` — the declaration's `defaultValue` — because the insert omitted
+    // `managed_by` entirely. The seeder now stamps provenance explicitly, in
+    // line with `bootstrap-builtin-positions.ts` and
+    // `bootstrap-system-capabilities.ts`, which always have.
     const engine = await boot();
     await bootstrapPlatformAdmin(engine as any, defaultPermissionSets);
 
     // Physically stored, not merely projected on read: the value survives a
     // restart, so every later boot reads it too.
-    expect((await storedRow(engine, 'admin_full_access')).managed_by).toBe('admin');
+    expect((await storedRow(engine, 'admin_full_access')).managed_by).toBe('platform');
     // …and the same value is what the seeder's own read sees, which is the one
     // the resync condition branches on.
-    expect((await rowViaEngine(engine, 'admin_full_access')).managed_by).toBe('admin');
+    expect((await rowViaEngine(engine, 'admin_full_access')).managed_by).toBe('platform');
   });
 
-  it('so `os meta resync` reconciles NOTHING — every platform default set takes the skip branch', async () => {
-    // ⚠️ MEASURED STATUS QUO, 2026-08-15: resynced 0, resyncSkipped 8 (8 = the
-    // whole shipped set at the time of measurement; asserted against the live
-    // length so the pin stays true if a default set is added or removed).
-    //
-    // This is the exact inverse of what the `resync` flag was built for
-    // (#2705: "reconcile the row to the shipped dist so a dev source edit takes
-    // effect without `--fresh`"): the rows it exists to reconcile are the rows
-    // it refuses to touch.
+  it('so `os meta resync` now reconciles EVERY platform default set', async () => {
+    // The behaviour #2705 built the flag for, finally reachable: resynced == the
+    // whole shipped set, resyncSkipped 0. Asserted against the live length so
+    // the pin stays true if a default set is added or removed.
     const engine = await boot();
     await bootstrapPlatformAdmin(engine as any, defaultPermissionSets);
 
     const out = await bootstrapPlatformAdmin(engine as any, defaultPermissionSets, { resync: true });
 
-    expect(out.resynced).toBe(0);
-    expect(out.resyncSkipped).toBe(defaultPermissionSets.length);
+    expect(out.resynced).toBe(defaultPermissionSets.length);
+    expect(out.resyncSkipped).toBe(0);
   });
 
-  it('…and each skip is logged as an "intentional override" for a row no admin ever touched', async () => {
-    // The half that misleads an operator rather than merely doing nothing: the
-    // warn asserts a deliberate admin takeover, on rows whose only writer was
-    // the seeder one call earlier. Pinned because a reader of the log has no
-    // other signal — `resynced: 0` alone reads like "already up to date".
+  it('a resync of a fresh install warns about nothing', async () => {
+    // The counterpart to the old measurement, which emitted one bogus
+    // "intentional override" warn per shipped set. Nothing is skipped now, so
+    // nothing is warned about.
     const engine = await boot();
     await bootstrapPlatformAdmin(engine as any, defaultPermissionSets);
 
     const { warn, logger } = collectingLogger();
     await bootstrapPlatformAdmin(engine as any, defaultPermissionSets, { resync: true, logger });
 
-    expect(warn).toHaveLength(defaultPermissionSets.length);
-    expect(warn).toContain(
-      '[security] resync left admin_full_access untouched — row is admin-owned (intentional override)',
-    );
+    expect(warn).toEqual([]);
+  });
+
+  it('resync reconciles a STALE platform-owned row to the shipped declaration', async () => {
+    // Counts alone cannot show the reconcile actually landed. Blank the payload
+    // on a seeded row, resync, and read the declaration back out of storage.
+    const engine = await boot();
+    await bootstrapPlatformAdmin(engine as any, defaultPermissionSets);
+
+    const driver: any = (engine as any).getDriver('sys_permission_set');
+    await driver.knex('sys_permission_set')
+      .where({ name: 'admin_full_access' })
+      .update({ system_permissions: '[]' });
+    expect((await storedRow(engine, 'admin_full_access')).system_permissions).toBe('[]');
+
+    await bootstrapPlatformAdmin(engine as any, defaultPermissionSets, { resync: true });
+
+    const shipped = defaultPermissionSets.find((p) => p.name === 'admin_full_access')!;
+    expect(JSON.parse((await storedRow(engine, 'admin_full_access')).system_permissions))
+      .toEqual(shipped.systemPermissions ?? []);
+    // …and the reconcile did NOT touch provenance: `platformOwnedFields` carries
+    // no `managed_by`, which is what keeps a resync from restamping any row.
+    expect((await storedRow(engine, 'admin_full_access')).managed_by).toBe('platform');
   });
 
   // ───────────────────────────────────────────────────────────────────────────
-  // 2. ATTRIBUTION — which link actually supplies the value
+  // 2. LEGACY — a pre-ruling install, which keeps the skip forever
+  // ───────────────────────────────────────────────────────────────────────────
+
+  it('LEGACY: a pre-ruling `admin`-stamped row is still skipped, and its content survives', async () => {
+    // ⛔ The ruling's load-bearing half: forward-stamp only, NO migration. A
+    // stored `'admin'` is indistinguishable between "the old seeder's field
+    // default" and "an administrator took this set over in Setup", so it must
+    // never be reconciled on the strength of a guess.
+    const engine = await boot();
+    const legacy = defaultPermissionSets[0];
+    await seedLegacyRow(engine, legacy);
+
+    // The pre-image really is what a pre-ruling install holds — asserted, not
+    // assumed, so this case cannot pass by testing some other row shape.
+    expect((await storedRow(engine, legacy.name)).managed_by).toBe('admin');
+
+    // An upgraded install: the seeder runs, finds the legacy row and leaves it,
+    // and inserts the remaining sets freshly stamped `'platform'`.
+    await bootstrapPlatformAdmin(engine as any, defaultPermissionSets);
+    expect((await storedRow(engine, legacy.name)).managed_by).toBe('admin');
+
+    const out = await bootstrapPlatformAdmin(engine as any, defaultPermissionSets, { resync: true });
+
+    // The mixed shape an upgrade produces: everything the platform stamped is
+    // reconciled, the one legacy row is not.
+    expect(out.resyncSkipped).toBe(1);
+    expect(out.resynced).toBe(defaultPermissionSets.length - 1);
+
+    // "Left untouched" proven by CONTENT, not just by a counter: the stale
+    // payload seeded above is still stale, and provenance was not restamped.
+    const row = await storedRow(engine, legacy.name);
+    expect(row.system_permissions).toBe('[]');
+    expect(row.object_permissions).toBe('{}');
+    expect(row.managed_by).toBe('admin');
+  });
+
+  it('LEGACY: the skip is logged neutrally — no claim of intent', async () => {
+    // The warn used to end "(intentional override)", which is false for exactly
+    // these rows: on a pre-ruling install the only writer may have been the
+    // seeder itself one call earlier. The reworded line states the provenance
+    // and the action and asserts nothing about anybody's intent.
+    const engine = await boot();
+    const legacy = defaultPermissionSets[0];
+    await seedLegacyRow(engine, legacy);
+    await bootstrapPlatformAdmin(engine as any, defaultPermissionSets);
+
+    const { warn, logger } = collectingLogger();
+    await bootstrapPlatformAdmin(engine as any, defaultPermissionSets, { resync: true, logger });
+
+    expect(warn).toEqual([
+      `[security] resync left ${legacy.name} untouched — row is admin-owned`,
+    ]);
+    // Pinned as a substring too, so a future reword cannot quietly reintroduce
+    // the intent claim in some other sentence shape.
+    expect(warn.join('\n')).not.toContain('intentional override');
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 3. ATTRIBUTION — which link actually supplies the value
   // ───────────────────────────────────────────────────────────────────────────
 
   /**
-   * A counterfactual, NOT a proposed fix. It changes nothing shipped: it boots
-   * a second engine on a CLONE of the declaration whose `managed_by` default is
-   * respelled to `'platform'`, and runs the same unmodified seeder over the same
-   * unmodified sets.
+   * A counterfactual, and note it runs the OPPOSITE way round from the one this
+   * file carried before the ruling. Back then the seeder wrote no `managed_by`,
+   * so respelling the declared default flipped the stored value — which is what
+   * proved the default was the source. Now the seeder stamps explicitly, so the
+   * declared default must no longer be able to move the value at all.
    *
-   * Predicted direction, written down before it was run: if the declared default
-   * is the whole source of the value, the clone must store `'platform'` and
-   * resync must then reconcile every set — flipping BOTH counts. It does.
+   * Predicted direction, written down before running: boot a CLONE of the
+   * declaration whose `managed_by` default is respelled to `'package'`, seed
+   * with the same unmodified seeder, and the row must STILL store `'platform'`.
    *
-   * That single flip establishes all three links at once, which no assertion in
-   * section 1 can do on its own:
-   *   - the seeder writes no `managed_by` of its own (otherwise it would beat
-   *     the clone's default and the row would still read `'admin'`);
-   *   - the engine really does apply a declared `defaultValue` on INSERT (the
-   *     card's stated unknown);
-   *   - the `!row.managed_by || row.managed_by === 'platform'` limb is live and
-   *     working — the skip in section 1 is caused by the stored VALUE alone, not
-   *     by a broken condition.
-   *
-   * ⛔ The last point is why this case must not be read as a recommendation.
-   * That the shipped default COULD be respelled says nothing about whether it
-   * SHOULD be; that is the maintainer call #8692 escalates.
+   * That one reading establishes what section 1 cannot on its own: the value
+   * comes from the seeder's stamp and not from a declaration that merely
+   * happens to agree with it. Without this case, respelling
+   * `defaultValue: 'admin'` to `'platform'` in the object file would make every
+   * assertion in section 1 pass with the stamp deleted.
    */
-  it('ATTRIBUTION: respelling only the declared default to "platform" flips both counts', async () => {
+  it('ATTRIBUTION: the seed stamp beats the declared default, so the default cannot move it', async () => {
     const respelled = {
       ...SysPermissionSet,
       fields: {
         ...(SysPermissionSet as any).fields,
-        managed_by: { ...(SysPermissionSet as any).fields.managed_by, defaultValue: 'platform' },
+        managed_by: { ...(SysPermissionSet as any).fields.managed_by, defaultValue: 'package' },
       },
     };
     // Guard: the clone is a copy, and the shipped declaration is untouched by
     // building it. Without this the case could be measuring a mutation it made.
+    // The shipped default stays `'admin'` deliberately — it is the right default
+    // for a set an admin creates in Setup, and the ruling changed the SEEDER,
+    // not the declaration.
     expect((SysPermissionSet as any).fields.managed_by.defaultValue).toBe('admin');
 
     const engine = await boot(respelled);
@@ -255,6 +361,8 @@ describe('#8692 — provenance of a seeder-created default permission set (measu
 
     expect((await storedRow(engine, 'admin_full_access')).managed_by).toBe('platform');
 
+    // And the consequence still holds under a default that would otherwise have
+    // caused a skip: resync reconciles everything.
     const out = await bootstrapPlatformAdmin(engine as any, defaultPermissionSets, { resync: true });
     expect(out.resynced).toBe(defaultPermissionSets.length);
     expect(out.resyncSkipped).toBe(0);
