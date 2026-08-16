@@ -796,7 +796,17 @@ describe('ApprovalService (node era)', () => {
     ];
 
     const req = await svc.openNodeRequest(positionInput(), CTX);
-    expect(req.pending_approvers.sort()).toEqual(['u5', 'u6']);
+    // Narrowed off the `autoApproved` discriminant rather than read through the
+    // union: the neighbours' bare `req.pending_approvers` is what TEST_DEBT's
+    // frozen TS2339 pile is made of, and a new case may not add to a shrink-only
+    // ratchet. It reads as an assertion too — an auto-approve outcome here would
+    // mean the slate came back EMPTY, which is the failure this case is about.
+    if ('autoApproved' in req) throw new Error('expected a pending request, not an auto-approve outcome');
+    // `?.slice().sort()` and not the neighbours' in-place `.sort()`: the field is
+    // optional on the row, so the bare call is TS18048 under the TEST_DEBT
+    // re-measure, and an absent slate then reads as `undefined` here — red, which
+    // is the honest verdict — instead of throwing before any assertion runs.
+    expect(req.pending_approvers?.slice().sort()).toEqual(['u5', 'u6']);
   });
 
   it('position approver: the routing read never consults the sys_position catalogue', async () => {
@@ -820,6 +830,7 @@ describe('ApprovalService (node era)', () => {
     ];
 
     const req = await svc.openNodeRequest(positionInput(), CTX);
+    if ('autoApproved' in req) throw new Error('expected a pending request, not an auto-approve outcome');
     expect(req.pending_approvers).toEqual(['u5']);
     expect(engine._finds.map(f => f.object)).not.toContain('sys_position');
   });
