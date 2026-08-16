@@ -1,13 +1,16 @@
 ---
 title: Self-Hosted Deployment
-description: Run a compiled ObjectStack app on your own infrastructure — bare Node.js, systemd, Docker, and Docker Compose with Postgres, including health checks, reverse-proxy wiring, and the secrets you must pin.
+description: Run a compiled ObjectStack app on your own infrastructure with the official Docker image — plus Compose with Postgres, Kubernetes, and the bare Node.js fallback, including health checks, reverse-proxy wiring, and the secrets you must pin.
 ---
 
 # Self-Hosted Deployment
 
 This guide takes the artifact produced by `os build` / `os compile` and runs it
-on infrastructure **you** operate: a Linux host, a Docker container, or a
-compose stack with Postgres. It assumes you have read
+on infrastructure **you** operate. **Docker is the standard path** — the
+platform publishes an official runtime image on every release, and Compose and
+Kubernetes are shapes of that same path rather than alternatives to it. Bare
+Node.js under systemd is the minority path, kept for hosts where a container
+runtime is not available or not permitted. It assumes you have read
 [Deployment Modes](/docs/deployment).
 
 The deployment model is deliberately simple:
@@ -46,54 +49,17 @@ OS_SECRET_KEY=$(openssl rand -hex 32)
 The full catalog is in
 [Environment Variables](/docs/deployment/environment-variables).
 
-## Option 1 — Bare Node.js (systemd)
+## Docker (official image) — the standard path
 
-The simplest deployment: Node 22+ and the CLI on a Linux host.
-
-```bash
-# On the host — no repo clone, just the CLI and your artifact
-npm install -g @objectstack/cli
-scp dist/objectstack.json server:/opt/my-app/objectstack.json
-```
-
-```ini title="/etc/systemd/system/my-app.service"
-[Unit]
-Description=My ObjectStack App
-After=network.target postgresql.service
-
-[Service]
-Type=simple
-User=objectstack
-WorkingDirectory=/opt/my-app
-Environment=NODE_ENV=production
-Environment=OS_ARTIFACT_PATH=/opt/my-app/objectstack.json
-Environment=OS_PORT=8080
-EnvironmentFile=/opt/my-app/secrets.env   # OS_DATABASE_URL, OS_AUTH_SECRET, OS_SECRET_KEY
-ExecStart=/usr/bin/os start
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl enable --now my-app
-curl -fsS http://localhost:8080/api/v1/health
-```
-
-Upgrades are atomic: replace the artifact file and restart the service. Roll
-back by restoring the previous artifact.
-
-## Option 2 — Docker (official image)
-
-The artifact model maps cleanly onto containers, and ObjectStack ships an
-**official runtime image** for exactly this:
-`ghcr.io/objectstack-ai/objectstack` — Node 22 + `@objectstack/cli` +
-`os start`, running as a non-root user with a built-in health check and
-`OS_ARTIFACT_PATH` / `OS_PORT=8080` preset. Image tags mirror
-`@objectstack/cli` versions (`14.8.0`, `14.8`, `14`, `latest`) and the image
-is published multi-arch (amd64/arm64) on every framework release — **pin the
-exact version in production**, matching the CLI version in your
+The artifact model maps cleanly onto containers, and this is how the platform
+itself ships: ObjectStack builds and publishes an **official runtime image**
+on every framework release — `ghcr.io/objectstack-ai/objectstack`, Node 22 +
+`@objectstack/cli` + `os start`, running as a non-root user with a built-in
+health check and `OS_ARTIFACT_PATH` / `OS_PORT=8080` preset. Image tags mirror
+`@objectstack/cli` versions (`17.0.0`, `17.0`, `17`, `latest`) and the image is
+published multi-arch (amd64/arm64); the rolling `17.0` / `17` / `latest` tags
+move with every stable publish, while a prerelease gets only its exact tag.
+**Pin the exact version in production**, matching the CLI version in your
 `package.json`.
 
 The fastest path needs no image build at all — hand the official image your
@@ -107,7 +73,7 @@ docker run -p 8080:8080 \
   -e OS_DATABASE_URL="postgres://user:pass@db-host:5432/myapp" \
   -e OS_AUTH_SECRET \
   -e OS_SECRET_KEY \
-  ghcr.io/objectstack-ai/objectstack:14.8.0
+  ghcr.io/objectstack-ai/objectstack:17.0.0
 ```
 
 (`OS_ARTIFACT_PATH` also accepts an `https://` URL, so the artifact can come
@@ -125,7 +91,7 @@ docker run -p 8080:8080 \
   -e OS_ARTIFACT_URL="https://releases.example.com/hotcrm-2.2.2.json#sha256=<64 hex chars>" \
   -e OS_DATABASE_URL="postgres://user:pass@db-host:5432/myapp" \
   -e OS_AUTH_SECRET -e OS_SECRET_KEY \
-  ghcr.io/objectstack-ai/objectstack:14.8.0
+  ghcr.io/objectstack-ai/objectstack:17.0.0
 ```
 
 Both schemes work: `https://…` is fetched at boot, `file:///…` is read directly
@@ -176,7 +142,7 @@ COPY . .
 RUN npx os build              # → dist/objectstack.json
 
 # ── Runtime: the official ObjectStack runtime image ──────────────────
-FROM ghcr.io/objectstack-ai/objectstack:14.8.0
+FROM ghcr.io/objectstack-ai/objectstack:17.0.0
 COPY --from=build --chown=node:node /app/dist/objectstack.json /srv/app/objectstack.json
 ```
 
@@ -194,9 +160,12 @@ image)? The official image is nothing more than:
 
 ```dockerfile title="Dockerfile (self-built runtime, equivalent)"
 FROM node:22-slim
+RUN npm install -g @objectstack/cli@17.0.0
+
 WORKDIR /srv/app
-RUN npm install -g @objectstack/cli@14.8.0
-COPY dist/objectstack.json ./objectstack.json
+RUN chown node:node /srv/app
+USER node
+COPY --chown=node:node dist/objectstack.json ./objectstack.json
 
 ENV NODE_ENV=production \
     OS_ARTIFACT_PATH=/srv/app/objectstack.json \
@@ -204,7 +173,7 @@ ENV NODE_ENV=production \
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s \
-  CMD node -e "fetch('http://localhost:8080/api/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://localhost:'+(process.env.OS_PORT||8080)+'/api/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 
 CMD ["os", "start"]
 ```
@@ -216,9 +185,11 @@ auto-minted dev crypto key inside a container — it lives on the ephemeral
 filesystem and dies with it.
 </Callout>
 
-## Option 3 — Docker Compose with Postgres
+## Docker Compose with Postgres
 
-A complete single-host production stack:
+The same path with a database attached — `build: .` is the Dockerfile from the
+section above, so the app container is still the official runtime image with
+your artifact on top. A complete single-host production stack:
 
 ```yaml title="docker-compose.yml"
 services:
@@ -353,6 +324,48 @@ readiness probe drains the replica while the database is away and re-admits it
 afterwards. Restart only when the process is genuinely stuck, and note that a
 replica which *booted* without its database never re-runs its schema sync.
 </Callout>
+
+## Bare Node.js (systemd) — without containers
+
+The minority path, and a deliberate one: reach for it when the host has no
+container runtime available or permitted, when an existing systemd /
+configuration-management estate already owns process supervision, or when you
+are debugging directly on the box. It needs Node 22+ and the CLI on a Linux
+host, and nothing else.
+
+```bash
+# On the host — no repo clone, just the CLI and your artifact
+npm install -g @objectstack/cli
+scp dist/objectstack.json server:/opt/my-app/objectstack.json
+```
+
+```ini title="/etc/systemd/system/my-app.service"
+[Unit]
+Description=My ObjectStack App
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=objectstack
+WorkingDirectory=/opt/my-app
+Environment=NODE_ENV=production
+Environment=OS_ARTIFACT_PATH=/opt/my-app/objectstack.json
+Environment=OS_PORT=8080
+EnvironmentFile=/opt/my-app/secrets.env   # OS_DATABASE_URL, OS_AUTH_SECRET, OS_SECRET_KEY
+ExecStart=/usr/bin/os start
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now my-app
+curl -fsS http://localhost:8080/api/v1/health
+```
+
+Upgrades are atomic: replace the artifact file and restart the service. Roll
+back by restoring the previous artifact.
 
 ## Reverse proxy & TLS
 
