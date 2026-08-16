@@ -813,6 +813,27 @@ const NO_RIVAL = {
   },
 } as any;
 
+/**
+ * [#8807] The same hostile shape, TENANTED — an `organization_id` field, so
+ * `resolveTenantField` resolves and the identity read's tenant scope is live.
+ *
+ * The identity check issues a READ, and `check:tenant-chokepoint` requires every
+ * read door to route through `applyTenantScope`. That is not bookkeeping here:
+ * the scope decides which rows the probe can see, and the probe's answer is what
+ * refuses or permits a write. These pins fix the decision that was made — the
+ * read is scoped to the tenant the row was WRITTEN under, not to the caller's
+ * active org — and the third of them is the one that distinguishes the two.
+ */
+const TENANTED = {
+  name: 'os8807_tenanted',
+  fields: {
+    organization_id: { type: 'string' },
+    email: { type: 'string', unique: true },
+    tax_id: { type: 'string', unique: true },
+    title: { type: 'string' },
+  },
+} as any;
+
 declareDialectCell(
   MYSQL_CELL,
   'unbacked conflict-target refusal (pre-flight, MySQL)',
@@ -836,7 +857,8 @@ function declareMysqlPreflightRefusal(cell: DialectCell): void {
       await knexInstance.schema.dropTableIfExists(WRONG_KEY.name);
       await knexInstance.schema.dropTableIfExists(SINGLE_KEY.name);
       await knexInstance.schema.dropTableIfExists(NO_RIVAL.name);
-      await driver.initObjects([MISMATCHED, WRONG_KEY, SINGLE_KEY, NO_RIVAL]);
+      await knexInstance.schema.dropTableIfExists(TENANTED.name);
+      await driver.initObjects([MISMATCHED, WRONG_KEY, SINGLE_KEY, NO_RIVAL, TENANTED]);
     });
 
     afterAll(async () => {
@@ -844,6 +866,7 @@ function declareMysqlPreflightRefusal(cell: DialectCell): void {
       await knexInstance?.schema.dropTableIfExists(WRONG_KEY.name).catch(() => {});
       await knexInstance?.schema.dropTableIfExists(SINGLE_KEY.name).catch(() => {});
       await knexInstance?.schema.dropTableIfExists(NO_RIVAL.name).catch(() => {});
+      await knexInstance?.schema.dropTableIfExists(TENANTED.name).catch(() => {});
       await driver?.disconnect?.();
     });
 
@@ -854,6 +877,7 @@ function declareMysqlPreflightRefusal(cell: DialectCell): void {
       await knexInstance(WRONG_KEY.name).delete();
       await knexInstance(SINGLE_KEY.name).delete();
       await knexInstance(NO_RIVAL.name).delete();
+      await knexInstance(TENANTED.name).delete();
     });
 
     /**
@@ -1389,6 +1413,108 @@ function declareMysqlPreflightRefusal(cell: DialectCell): void {
      * This is the case that would go red if the enforcement had been the
      * pre-flight refusal instead, and it is why the post-hoc check was chosen.
      */
+    /**
+     * [#8807] **Tenanted, refusing branch.** The identity read is tenant-scoped
+     * (`check:tenant-chokepoint` requires every read door to be), so this pin
+     * exists to prove the scope did not BLIND the check: the caller's own rows,
+     * inside the caller's own org, still refuse the cross-row merge.
+     */
+    it('[#8807] still refuses the cross-row merge on a TENANTED object', async () => {
+      const seeded = await driver.upsert(
+        TENANTED.name,
+        { email: 't1@b.com', tax_id: 'T-T1', title: 'first' },
+        undefined,
+        { tenantId: 'org_a' } as any,
+      );
+
+      const err = await captureError(() =>
+        driver.upsert(
+          TENANTED.name,
+          { email: 't2@b.com', tax_id: 'T-T1', title: 'second' },
+          undefined,
+          { tenantId: 'org_a' } as any,
+        ),
+      );
+
+      expect(
+        err,
+        'the tenant scope blinded the identity probe — it can no longer see the row it must judge',
+      ).not.toBeNull();
+      expect(err!.code).toBe(StandardErrorCode.enum.VALIDATION_ERROR);
+      expect(err!.status).toBe(400);
+
+      const after = await driver.find(TENANTED.name, { where: { tax_id: 'T-T1' } });
+      expect(after).toHaveLength(1);
+      expect(after[0].id).toBe(seeded.id);
+      expect(after[0].email, 'the wrong write was not rolled back on the tenanted path').toBe('t1@b.com');
+    });
+
+    /**
+     * [#8807] **Tenanted, merging branch.** The ordinary tenanted upsert — the
+     * overwhelmingly common shape — must be untouched. `injectTenantOnInsert`
+     * stamps the caller's org on the row, so the scoped read finds it.
+     */
+    it('[#8807] a TENANTED supplied-identity merge is untouched', async () => {
+      const err = await captureError(() =>
+        driver.upsert(
+          TENANTED.name,
+          { id: 'os8807_t', email: 't3@b.com', tax_id: 'T-T3', title: 'first' },
+          undefined,
+          { tenantId: 'org_a' } as any,
+        ),
+      );
+      expect(err, 'the ordinary tenanted upsert must never be refused').toBeNull();
+
+      await driver.upsert(
+        TENANTED.name,
+        { id: 'os8807_t', email: 't3@b.com', tax_id: 'T-T3', title: 'second' },
+        undefined,
+        { tenantId: 'org_a' } as any,
+      );
+
+      const after = await driver.find(TENANTED.name, { where: { id: 'os8807_t' } });
+      expect(after).toHaveLength(1);
+      expect(after[0].title).toBe('second');
+      expect(after[0].organization_id).toBe('org_a');
+    });
+
+    /**
+     * ✅ **[#8807] THE pin that fixes the scoping DECISION**, and the one that
+     * separates the two readings of "tenant-scope the identity read".
+     *
+     * `injectTenantOnInsert` never overwrites an explicit value — "admins
+     * writing to a specific tenant via raw row data keep that authority". So a
+     * caller whose active org is `org_a` can deliberately land a row in
+     * `org_b`, and that write is CORRECT.
+     *
+     * Scoping the identity read to the caller's **active org** would then read
+     * `(organization_id = 'org_a' OR IS NULL)`, miss the row that was really
+     * written, and refuse a correct write — a false refusal, the expensive
+     * direction this file names throughout. Scoping to the tenant the row was
+     * **written under** does not. This pin goes RED under the first reading and
+     * green under the one implemented.
+     */
+    it('[#8807] does not falsely refuse an admin write that lands in another org', async () => {
+      const err = await captureError(() =>
+        driver.upsert(
+          TENANTED.name,
+          { organization_id: 'org_b', email: 't4@b.com', tax_id: 'T-T4', title: 'first' },
+          undefined,
+          { tenantId: 'org_a' } as any,
+        ),
+      );
+
+      expect(
+        err,
+        "the identity read is scoped to the CALLER's active org rather than the tenant the row " +
+          'was written under, so a deliberate cross-org admin write reads as a cross-row merge',
+      ).toBeNull();
+
+      const after = await driver.find(TENANTED.name, { where: { tax_id: 'T-T4' } });
+      expect(after).toHaveLength(1);
+      expect(after[0].organization_id).toBe('org_b');
+    });
+
     it("[#8807] the lifecycle archiver's hot->cold copy still lands, and re-runs idempotently", async () => {
       const row = { id: 'os8807_archived', email: 'arch@b.com', tax_id: 'T-ARCH', title: 'copied' };
 

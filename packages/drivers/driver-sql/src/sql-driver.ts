@@ -5779,25 +5779,80 @@ export class SqlDriver implements IDataDriver {
    * makes this check free of false refusals — the property the ruling's
    * excluded blanket option could not have.
    *
-   * # Two deliberate scoping choices
+   * # Why the PRIMARY KEY row wins a multi-key collision — measured, not assumed
    *
-   *  - **No tenant scope.** The probe asks whether the ROW EXISTS, not whether
-   *    it is visible to this caller. `id` is the primary key, so an unscoped
-   *    lookup by it is exact and cannot match another tenant's row; adding the
-   *    scope could only hide a row that really was written and turn a correct
-   *    write into a false refusal.
-   *  - **The write target, not the object.** A rotation-sharded write lands in
-   *    the current shard, so that is where the row must be looked for. Reading
-   *    the unsharded name would report every rotated write as a cross-row merge.
+   * The biconditional needs one more fact than #8622 to be exact: when the
+   * incoming row collides on the primary key AND on a rival UNIQUE key at the
+   * same time, the row carrying our id exists — so "row present" must still mean
+   * "the statement landed on it", or a pre-existing row with our id would mask a
+   * merge that went elsewhere. MySQL updates only the FIRST matched index, and
+   * *which* one that is decides the question. Measured on live MySQL 8.0.46,
+   * `PRIMARY KEY (id)` + `UNIQUE (email)` + `UNIQUE (tax_id)`, rows
+   * `R1(id=R1, tax_id=T-1)` and `R2(id=R2, tax_id=T-2)`, inserting
+   * `(id=R1, tax_id=T-2)` — which collides with R1 on the primary key and with
+   * R2 on `uniq_tax`:
+   *
+   * ```
+   * ROW_COUNT() = 2 (an update)
+   * R1 -> title='MERGED'   ← the PRIMARY KEY row won
+   * R2 -> untouched
+   * ```
+   *
+   * So the primary key is matched first and the masking case does not arise.
+   *
+   * # Tenant scope — applied, and scoped to the tenant the row was WRITTEN under
+   *
+   * The read routes through {@link applyTenantScope} like every other read door
+   * in this class (`check:tenant-chokepoint` asserts exactly that, on a bound
+   * builder). The subtlety is *which* tenant to scope to, and using the caller's
+   * active org would be wrong in one real case:
+   *
+   *  - **Ordinary tenanted call** — nothing supplied a tenant on the row, so
+   *    `injectTenantOnInsert` stamped `options.tenantId` on it. Scoping to the
+   *    written tenant IS scoping to the caller's org: identical to the wall
+   *    every sibling door applies.
+   *  - **Admin writing to a specific tenant via raw row data** — a documented
+   *    authority ({@link injectTenantOnInsert}: "explicit values are never
+   *    overwritten"). The row lands under the tenant the caller named, so a read
+   *    scoped to the caller's *active* org would miss a row that really was
+   *    written and refuse a correct write. Scoping to the written tenant does
+   *    not.
+   *  - **No tenancy field, or no tenant context at all** — `applyTenantScope`
+   *    returns the builder untouched when `tenantId` is empty, by its own
+   *    contract. That is what keeps the lifecycle archiver working: it calls
+   *    `cold.upsert(object, row, ['id'])` with NO options, so this read is
+   *    unscoped there, exactly as before.
+   *
+   * The verdict itself is tenant-independent regardless: `id` is the PRIMARY
+   * KEY, so at most one row in the table can carry it.
+   *
+   * # The write target, not the object
+   *
+   * A rotation-sharded write lands in the current shard, so that is where the
+   * row must be looked for. Reading the unsharded name would report every
+   * rotated write as a cross-row merge.
    */
   private async assertMergeLandedOnSuppliedIdentity(
     object: string,
     writeTable: string,
     id: string | number,
     rivals: PhysicalIndex[],
+    writtenTenant: unknown,
     options?: DriverOptions,
   ): Promise<void> {
-    const landed = await this.getBuilder(writeTable, options).where('id', id).first('id');
+    const builder = this.getBuilder(writeTable, options);
+    // Scoped to the tenant this row was written under (see the docblock): the
+    // caller's org on an ordinary call, the explicitly named one on an admin
+    // cross-tenant write, and a no-op when neither exists. `tenantIds` is
+    // dropped deliberately — the group-union posture widens a READ to a
+    // membership set, and this is an identity probe for ONE row, not a read.
+    const scopeOptions: DriverOptions = {
+      ...options,
+      tenantId: typeof writtenTenant === 'string' && writtenTenant !== '' ? writtenTenant : options?.tenantId,
+      tenantIds: undefined,
+    };
+    this.applyTenantScope(builder, object, scopeOptions);
+    const landed = await builder.where('id', id).first('id');
     if (landed) return;
     const tableName = this.physicalTableByObject[writeTable] ?? writeTable;
     throw refuseCrossRowIdentityMerge(object, tableName, id, rivals);
@@ -5955,14 +6010,27 @@ export class SqlDriver implements IDataDriver {
       // one opened just below, or none at all. The emitted INSERT is otherwise
       // unchanged.
       const runStatement = async (writeOptions?: DriverOptions): Promise<void> => {
-        const insertion = this.getBuilder(writeTable, writeOptions).insert(formatted).onConflict(mergeKeys);
+        // Bound in two steps, not chained: this is the INSERT door, and
+        // `check:tenant-chokepoint` classifies a builder as a write by seeing
+        // `.insert` used on the BINDING. Collapsing these into one expression
+        // hides that from the gate and the door reads as an unscoped read —
+        // measured when this closure was first extracted. Insert-side tenancy
+        // is `injectTenantOnInsert`'s job (called above), which is exactly why
+        // this one is deliberately not scoped.
+        const builder = this.getBuilder(writeTable, writeOptions);
+        const insertion = builder.insert(formatted).onConflict(mergeKeys);
         await (columnsToMerge.length > 0 ? insertion.merge(columnsToMerge) : insertion.merge());
         if (verifyIdentity) {
+          // The tenant the row was WRITTEN under, read off the payload after
+          // `injectTenantOnInsert` has run — the caller's org on an ordinary
+          // call, an explicitly supplied one on an admin cross-tenant write.
+          const tenantField = this.resolveTenantField(object);
           await this.assertMergeLandedOnSuppliedIdentity(
             object,
             writeTable,
             toUpsert.id,
             preflight.rivals ?? [],
+            tenantField ? toUpsert[tenantField] : undefined,
             writeOptions,
           );
         }
