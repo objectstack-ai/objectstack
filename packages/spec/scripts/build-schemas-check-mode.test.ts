@@ -143,7 +143,12 @@ const KNOWN_KEY = 'ui/View';
 /** A key no build can emit — the `missing` (disappearance) ratchet's input. */
 const PHANTOM_KEY = 'ui/ZzzNeverEmittedByAnyBuild';
 
+/** The fixture repo every module-level helper below currently operates on. The
+ *  three git-topology blocks mount their OWN for their duration (#9068). */
 let sandbox: string;
+/** The shared sandbox the rest of the file uses, kept so a block that mounted
+ *  its own can hand the module-level handles back. */
+let sharedSandbox: string;
 let script: string;
 let manifestDir: string;
 let surfaceDir: string;
@@ -157,18 +162,166 @@ let pristineDefaults: string[];
  *  a hand-rolled string would trip the anchor's own hand-edit check (#5235). */
 let surfaceBaseDescription: string;
 
-/** Run git in the sandbox repo; throws on failure so a broken fixture is loud. */
-function git(...args: string[]): string {
-  const r = spawnSync(
-    'git',
-    ['-c', 'user.name=build-schemas-test', '-c', 'user.email=test@example.invalid', ...args],
-    { cwd: sandbox, encoding: 'utf8' },
+// ── #9068 — a fixture repo inherits nothing from the machine it runs on ──────
+//
+// The defect this closes: a merge-queue full-suite run lost TEN of this file's
+// tests to one root error — `fatal: Not a valid commit name <sha>`, followed by
+// `unable to read tree (<the same sha>)` on `git checkout -f main`. The sha was
+// a commit of no real tree: a fixture commit one of these repos had made itself,
+// minutes earlier, whose object had left the fixture's own object store between
+// being created and being used.
+//
+// The reachable mechanism, reproduced rather than assumed. Three describe blocks
+// below deliberately write `.git/shallow` — that is the environment they model,
+// because CI checks out `--depth=1`. Inside that window every commit behind the
+// graft point is unreachable BY DEFINITION, so a `git gc` running there prunes
+// the fixture's own history and leaves the refs pointing at objects that are
+// gone. Measured directly, on a five-commit fixture in exactly that state:
+//
+//     $ git gc --quiet                      # ambient [gc] pruneExpire/reflogExpire = now
+//     $ git merge-base HEAD <commit made moments ago>
+//     fatal: Not a valid commit name bf57992dfc53…     ← the reported signature
+//
+// The same sequence with the repo-local config below in place keeps every
+// commit, because a repository's own config outranks the global one — so this
+// holds even for a gc that something OTHER than this file started.
+//
+// Two layers, because they fail differently:
+//
+//   * `HERMETIC_ENV` keeps ambient config and any leaked `GIT_*` pointer out of
+//     every git this file runs — including the ones `build-schemas.ts` itself
+//     spawns inside a fixture (it shells out to `merge-base`, `cat-file` and a
+//     `--depth=1` fetch), which is why `run()` carries it too. A leaked `GIT_DIR`
+//     or `GIT_OBJECT_DIRECTORY` is the OTHER way to get a sha that is real to the
+//     process that made it and phantom to the one that reads it.
+//   * `initFixtureRepo` writes the same discipline into the repo, where it binds
+//     git processes this file never launched.
+//
+// Neither layer changes what any test asserts: no fixture is built differently,
+// only insulated. What ISN'T here, deliberately: serializing these blocks. They
+// are already serial — vitest runs a file's tests one at a time, and every repo
+// here is an `fs.mkdtemp`, so no concurrently running test FILE can name one.
+
+/** `GIT_*` variables that would point a fixture's git at a different repository
+ *  (or a different index/object store) than the directory it was handed. */
+const LEAKED_GIT_ENV = [
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_COMMON_DIR',
+  'GIT_INDEX_FILE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_NAMESPACE',
+  'GIT_CEILING_DIRECTORIES',
+  'GIT_TEMPLATE_DIR',
+  'GIT_CONFIG',
+] as const;
+
+/** The environment every fixture git — and every generator run inside one — gets. */
+const HERMETIC_ENV: NodeJS.ProcessEnv = (() => {
+  const env = { ...process.env };
+  for (const key of LEAKED_GIT_ENV) delete env[key];
+  // git's own documented "read no config file" spellings. `/dev/null` parses as
+  // an empty config, which is what makes `init.templateDir`, `core.hooksPath`
+  // and any ambient `[gc]` block unable to reach a fixture.
+  env.GIT_CONFIG_GLOBAL = '/dev/null';
+  env.GIT_CONFIG_SYSTEM = '/dev/null';
+  env.GIT_CONFIG_NOSYSTEM = '1';
+  return env;
+})();
+
+/** Passed to every fixture git invocation — including the `init` that runs
+ *  before the repo-local config below exists. Identity first (with the global
+ *  config closed, there is no other source for it), then the maintenance switches. */
+const FIXTURE_GIT_ARGS = [
+  '-c', 'user.name=build-schemas-test',
+  '-c', 'user.email=test@example.invalid',
+  '-c', 'gc.auto=0',
+  '-c', 'maintenance.auto=false',
+  '-c', 'gc.pruneExpire=never',
+  '-c', 'gc.reflogExpire=never',
+  '-c', 'gc.reflogExpireUnreachable=never',
+];
+
+/**
+ * A one-line state read of a fixture repo, appended to whatever git said.
+ *
+ * The whole cost of #9068 was that its signature named a sha and nothing else:
+ * one triage lap went into establishing that the commit belonged to no tree of
+ * this repository. Failing loudly is what this helper's `throw` was already for;
+ * this is the half that says WHICH repo, and in what state.
+ */
+function describeFixtureRepo(cwd: string): string {
+  if (!fs.existsSync(path.join(cwd, '.git'))) {
+    return `\n  [fixture ${cwd}: no .git directory — the repo itself is gone]`;
+  }
+  const probe = (...args: string[]): string => {
+    const r = spawnSync('git', args, { cwd, encoding: 'utf8', env: HERMETIC_ENV });
+    return r.status === 0 ? (r.stdout ?? '').trim().replace(/\n/g, ' ') : `<exit ${r.status}>`;
+  };
+  return (
+    `\n  [fixture ${cwd}: HEAD=${probe('rev-parse', '--short', 'HEAD')}` +
+    ` main=${probe('rev-parse', '--short', 'main')}` +
+    ` origin/main=${probe('rev-parse', '--short', 'refs/remotes/origin/main')}` +
+    ` shallow=${probe('rev-parse', '--is-shallow-repository')}` +
+    // The fact #9068 turned on: does the object a ref names still EXIST. A ref
+    // file resolves to a sha whether or not the object behind it is still there.
+    ` main-object=${probe('cat-file', '-t', 'main')}]`
   );
+}
+
+/** Run git in `cwd`; throws on failure so a broken fixture is loud (and says
+ *  which fixture, and in what state — #9068). */
+function gitIn(cwd: string, ...args: string[]): string {
+  const r = spawnSync('git', [...FIXTURE_GIT_ARGS, ...args], {
+    cwd,
+    encoding: 'utf8',
+    env: HERMETIC_ENV,
+  });
   if (r.status !== 0) {
-    throw new Error(`git ${args.join(' ')} failed (${r.status}): ${r.stderr}`);
+    throw new Error(
+      `git ${args.join(' ')} failed (${r.status}): ${r.stderr}${describeFixtureRepo(cwd)}`,
+    );
   }
   return (r.stdout ?? '').trim();
 }
+
+/** git's exit status only — for the probes whose NEGATIVE answer is the fact
+ *  being read, which `gitIn` would throw on. */
+function gitStatusIn(cwd: string, ...args: string[]): number {
+  return (
+    spawnSync('git', [...FIXTURE_GIT_ARGS, ...args], { cwd, encoding: 'utf8', env: HERMETIC_ENV })
+      .status ?? -1
+  );
+}
+
+/**
+ * `git init` plus the repo-local half of the isolation above.
+ *
+ * Local config is the layer that survives a git process this file did not start:
+ * `gc.auto=0` stops our own commits from triggering one, and the `never` expiries
+ * mean that a gc arriving from anywhere else — an ambient maintenance schedule, a
+ * `[gc]` block in someone's global config — finds nothing it is allowed to drop.
+ */
+function initFixtureRepo(dir: string): void {
+  gitIn(dir, 'init', '-q', '-b', 'main', '.');
+  for (const [key, value] of [
+    ['gc.auto', '0'],
+    ['gc.autoDetach', 'false'],
+    ['maintenance.auto', 'false'],
+    ['gc.pruneExpire', 'never'],
+    ['gc.reflogExpire', 'never'],
+    ['gc.reflogExpireUnreachable', 'never'],
+    // Reflogs are the other thing standing between a fixture commit and a prune,
+    // and an ambient `core.logAllRefUpdates=false` would have taken them away.
+    ['core.logAllRefUpdates', 'true'],
+  ] as const) {
+    gitIn(dir, 'config', key, value);
+  }
+}
+
+/** Run git in the mounted sandbox repo; throws so a broken fixture is loud. */
+const git = (...args: string[]): string => gitIn(sandbox, ...args);
 
 /**
  * Write the in-tree anchor (#5235) in the generator's exact canonical form:
@@ -184,6 +337,74 @@ function seedSurfaceBase(baseRev: string, mutate: (keys: string[]) => string[]):
 }
 
 const readSurfaceBase = () => fs.readFileSync(surfaceBasePath, 'utf8');
+
+/**
+ * Point the module-level fixture handles at `dir`, so every helper in this file
+ * (`git`, `run`, `seedBase`, `seedSurface`, `seedSurfaceBase`, …) operates on
+ * that repo from the next call onwards.
+ *
+ * Safe because vitest runs one test at a time within a file: there is never a
+ * second case reading these handles while a block swaps them at its own
+ * `beforeAll`/`afterAll` boundary.
+ */
+function mountSandbox(dir: string): void {
+  sandbox = dir;
+  script = path.join(dir, 'scripts', 'build-schemas.ts');
+  manifestDir = path.join(dir, SCHEMA_MANIFEST_DIR_NAME);
+  surfaceDir = path.join(dir, AUTHORABLE_SURFACE_DIR_NAME);
+  defaultsDir = path.join(dir, AUTHORABLE_DEFAULTS_DIR_NAME);
+  surfaceBasePath = path.join(dir, 'authorable-surface.base.json');
+}
+
+/**
+ * Build a sandbox — a temp tree that COPIES `scripts/` (so `__dirname` lands
+ * there) and symlinks the read-only inputs — mount it, and seed it to the state
+ * every block starts from: canonical ratchets, a real git repo, and an
+ * `origin/main` holding the committed baseline.
+ *
+ * A factory rather than a one-off because the three git-topology blocks each
+ * take their own (#9068). They fork branches, reset them, abandon commits and
+ * mark the repo shallow; sharing ONE repo across them meant a single lost object
+ * surfaced as ten failures spread over three blocks, none of which had done
+ * anything wrong — and the block that HAD was invisible. A copy of `scripts/` is
+ * 1.8 MB and the generation cost is per RUN, not per sandbox, so the isolation
+ * costs a `cpSync` and a `git init` each.
+ */
+function createSandbox(prefix: string): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  fs.cpSync(path.join(PKG, 'scripts'), path.join(dir, 'scripts'), { recursive: true });
+  for (const entry of ['src', 'node_modules', 'package.json']) {
+    fs.symlinkSync(path.join(PKG, entry), path.join(dir, entry));
+  }
+  mountSandbox(dir);
+  // The authorable-surface ratchet runs after the manifest one; give it the
+  // committed snapshot so a check that gets that far judges the same contract.
+  writeSurfaceShards(surfaceDir, pristineSurface);
+  // Same for the default-value ratchet (#4666), which runs after both: without
+  // its committed record every fixture would fail on a missing artifact rather
+  // than on the thing it is testing.
+  writeDefaultsShards(defaultsDir, pristineDefaults);
+  // Anchor for the #4650 deletion check: a git repo whose origin/main holds the
+  // committed baseline. Only the baseline is tracked — src/node_modules stay
+  // symlinked, untracked reads the same as any dirty worktree.
+  initFixtureRepo(dir);
+  git('add', AUTHORABLE_SURFACE_DIR_NAME, AUTHORABLE_DEFAULTS_DIR_NAME);
+  git('commit', '-q', '-m', `baseline: committed ${AUTHORABLE_SURFACE_DIR_NAME}/`);
+  // The in-tree anchor (#5235), authentic by construction: it mirrors the
+  // baseline at the commit just made, which stays reachable from origin/main for
+  // every fixture below (this repo's history is linear).
+  seedSurfaceBase(git('rev-parse', 'HEAD'), (k) => k);
+  git('add', 'authorable-surface.base.json');
+  git('commit', '-q', '-m', 'baseline anchor: committed authorable-surface.base.json');
+  git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+  return dir;
+}
+
+/** Take a block's own sandbox down and hand the handles back to the shared one. */
+function releaseSandbox(dir: string): void {
+  mountSandbox(sharedSandbox);
+  fs.rmSync(dir, { recursive: true, force: true });
+}
 
 beforeAll(() => {
   pristine = readShardKeys(path.join(PKG, SCHEMA_MANIFEST_DIR_NAME), 'schemas');
@@ -204,40 +425,11 @@ beforeAll(() => {
   }
   surfaceBaseDescription = (JSON.parse(fs.readFileSync(realBase, 'utf8')) as { description: string })
     .description;
-  sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'build-schemas-check-'));
-  fs.cpSync(path.join(PKG, 'scripts'), path.join(sandbox, 'scripts'), { recursive: true });
-  for (const entry of ['src', 'node_modules', 'package.json']) {
-    fs.symlinkSync(path.join(PKG, entry), path.join(sandbox, entry));
-  }
-  script = path.join(sandbox, 'scripts', 'build-schemas.ts');
-  manifestDir = path.join(sandbox, SCHEMA_MANIFEST_DIR_NAME);
-  surfaceDir = path.join(sandbox, AUTHORABLE_SURFACE_DIR_NAME);
-  defaultsDir = path.join(sandbox, AUTHORABLE_DEFAULTS_DIR_NAME);
-  surfaceBasePath = path.join(sandbox, 'authorable-surface.base.json');
-  // The authorable-surface ratchet runs after the manifest one; give it the
-  // committed snapshot so a check that gets that far judges the same contract.
-  writeSurfaceShards(surfaceDir, pristineSurface);
-  // Same for the default-value ratchet (#4666), which runs after both: without
-  // its committed record every fixture would fail on a missing artifact rather
-  // than on the thing it is testing.
-  writeDefaultsShards(defaultsDir, pristineDefaults);
-  // Anchor for the #4650 deletion check: a git repo whose origin/main holds the
-  // committed baseline. Only the baseline is tracked — src/node_modules stay
-  // symlinked, untracked reads the same as any dirty worktree.
-  git('init', '-q', '-b', 'main', '.');
-  git('add', AUTHORABLE_SURFACE_DIR_NAME, AUTHORABLE_DEFAULTS_DIR_NAME);
-  git('commit', '-q', '-m', `baseline: committed ${AUTHORABLE_SURFACE_DIR_NAME}/`);
-  // The in-tree anchor (#5235), authentic by construction: it mirrors the
-  // baseline at the commit just made, which stays reachable from origin/main for
-  // every fixture below (this repo's history is linear).
-  seedSurfaceBase(git('rev-parse', 'HEAD'), (k) => k);
-  git('add', 'authorable-surface.base.json');
-  git('commit', '-q', '-m', 'baseline anchor: committed authorable-surface.base.json');
-  git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+  sharedSandbox = createSandbox('build-schemas-check-');
 });
 
 afterAll(() => {
-  if (sandbox) fs.rmSync(sandbox, { recursive: true, force: true });
+  if (sharedSandbox) fs.rmSync(sharedSandbox, { recursive: true, force: true });
 });
 
 function run(args: string[] = []): { status: number; output: string } {
@@ -246,6 +438,10 @@ function run(args: string[] = []): { status: number; output: string } {
     encoding: 'utf8',
     timeout: SPAWN_TIMEOUT_MS,
     stdio: ['ignore', 'pipe', 'pipe'],
+    // The generator shells out to git itself (`merge-base`, `cat-file`, a
+    // `--depth=1` fetch), so the fixture's isolation has to reach its children
+    // too — a `GIT_DIR` inherited here would point them at another repo (#9068).
+    env: HERMETIC_ENV,
   });
   return { status: r.status ?? -1, output: `${r.stdout ?? ''}${r.stderr ?? ''}` };
 }
@@ -1191,12 +1387,22 @@ describe('build-schemas.ts — --update-base moves the anchor forward or not at 
   const mergeHeadFile = (): string =>
     path.resolve(sandbox, git('rev-parse', '--git-path', 'MERGE_HEAD'));
 
+  /** This block's own fixture repo (#9068). */
+  let ownSandbox: string;
+
   beforeAll(() => {
     const keys = pristineSurface;
     for (const k of [FORKED_KEY, LANDED_KEY]) {
       expect(keys, `${k} is no longer in the baseline — pick another live key`).toContain(k);
     }
+    // Its own repo, because of what the cases below do to one: fork a branch,
+    // reset it every `beforeEach`, leave a merge uncommitted, and truncate
+    // history with a hand-written `.git/shallow`. In a shared repo that surgery
+    // is the neighbouring blocks' problem too (#9068).
+    ownSandbox = createSandbox('build-schemas-5370-');
   });
+
+  afterAll(() => releaseSandbox(ownSandbox));
 
   beforeEach(() => {
     seedManifest((s) => s);
@@ -1401,15 +1607,25 @@ describe('build-schemas.ts — the drift notice names the direction it measured 
   /** `git()` throws on a non-zero exit, which is exactly what a NEGATIVE ancestry
    *  probe returns — so fixture validation needs its own non-throwing runner. */
   const isAncestor = (a: string, b: string): boolean =>
-    spawnSync('git', ['merge-base', '--is-ancestor', a, b], { cwd: sandbox }).status === 0;
+    gitStatusIn(sandbox, 'merge-base', '--is-ancestor', a, b) === 0;
 
   const shallowFile = (): string => path.join(sandbox, '.git', 'shallow');
+
+  /** This block's own fixture repo (#9068). */
+  let ownSandbox: string;
 
   beforeAll(() => {
     for (const k of [AHEAD_KEY, LANDED_KEY, UI_KEY]) {
       expect(pristineSurface, `${k} is no longer in the baseline — pick another live key`).toContain(k);
     }
+    // Own repo: these cases fork, merge and truncate history the same way #5370
+    // does, and one of them leaves a `.git/shallow` behind for its `afterEach`
+    // to clear — a window in which a stray gc prunes everything behind the graft
+    // point. Containing that to this block is what #9068 bought.
+    ownSandbox = createSandbox('build-schemas-5847-');
   });
+
+  afterAll(() => releaseSandbox(ownSandbox));
 
   beforeEach(() => {
     seedManifest((s) => s);
@@ -1425,7 +1641,9 @@ describe('build-schemas.ts — the drift notice names the direction it measured 
     fs.rmSync(shallowFile(), { force: true });
     git('checkout', '-q', '-f', 'main');
     // Hand `main` back current and CLEAN: an anchor that mirrors main's own tip,
-    // so the describes after this one start from a tree with no drift of ours in it.
+    // so the NEXT CASE here starts from a tree with no drift of ours in it.
+    // (Since #9068 this repo is the block's own, so the hand-off it owes is to
+    // its own siblings — no describe after this one ever sees this tree.)
     seedSurface((s) => s);
     seedSurfaceBase(git('rev-parse', 'HEAD'), (k) => k);
     git('add', AUTHORABLE_SURFACE_DIR_NAME, 'authorable-surface.base.json');
@@ -1673,13 +1891,21 @@ describe('build-schemas.ts — a shallow checkout re-anchors the deletion gate, 
 
   /** `git()` throws on a non-zero exit, which is what the fixture guards expect. */
   const mergeBaseFails = (rev: string): boolean =>
-    spawnSync('git', ['merge-base', 'HEAD', rev], { cwd: sandbox }).status !== 0;
+    gitStatusIn(sandbox, 'merge-base', 'HEAD', rev) !== 0;
+
+  /** This block's own fixture repo (#9068). */
+  let ownSandbox: string;
 
   beforeAll(() => {
     expect(pristineSurface, `${SHED_KEY} is no longer in the baseline — pick another live key`).toContain(
       SHED_KEY,
     );
+    // Own repo: EVERY case here marks the repo shallow (`forkBranch` writes
+    // `.git/shallow`), which is the widest such window in the file (#9068).
+    ownSandbox = createSandbox('build-schemas-6452-');
   });
+
+  afterAll(() => releaseSandbox(ownSandbox));
 
   /**
    * The upstream ladder every case forks from: a fork point, main's own anchor
@@ -1720,8 +1946,9 @@ describe('build-schemas.ts — a shallow checkout re-anchors the deletion gate, 
   afterEach(() => {
     fs.rmSync(shallowFile(), { force: true });
     git('checkout', '-q', '-f', 'main');
-    // Hand `main` back current and CLEAN, so the describes after this one start
-    // from a tree with no fixture of ours in it — the surface first, then an
+    // Hand `main` back current and CLEAN, so the NEXT CASE here starts from a
+    // tree with no fixture of ours in it (since #9068 this repo is the block's
+    // own, so that hand-off is to its siblings) — the surface first, then an
     // anchor that names the commit just made, so what is left behind is authentic
     // by construction rather than by luck (one case here removes main's anchor
     // outright, and the next describe reads whatever this leaves).
@@ -2032,15 +2259,9 @@ describe('build-schemas.ts — check (b) matches the exact retired key, not its 
   let boxRegistry: string;
   let pristineRegistry: string;
 
-  const boxGit = (...args: string[]): string => {
-    const r = spawnSync(
-      'git',
-      ['-c', 'user.name=build-schemas-test', '-c', 'user.email=test@example.invalid', ...args],
-      { cwd: box, encoding: 'utf8' },
-    );
-    if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed (${r.status}): ${r.stderr}`);
-    return (r.stdout ?? '').trim();
-  };
+  /** Same hermetic invocation as the sandbox's `git` — this box is a fixture
+   *  repository too, and inherits nothing from the machine either (#9068). */
+  const boxGit = (...args: string[]): string => gitIn(box, ...args);
 
   const runBox = (args: string[] = []): { status: number; output: string } => {
     const r = spawnSync(TSX, [boxScript, ...args], {
@@ -2048,6 +2269,7 @@ describe('build-schemas.ts — check (b) matches the exact retired key, not its 
       encoding: 'utf8',
       timeout: SPAWN_TIMEOUT_MS,
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: HERMETIC_ENV,
     });
     return { status: r.status ?? -1, output: `${r.stdout ?? ''}${r.stderr ?? ''}` };
   };
@@ -2115,7 +2337,7 @@ describe('build-schemas.ts — check (b) matches the exact retired key, not its 
     boxRegistry = path.join(box, 'src', 'migrations', 'registry.ts');
     pristineRegistry = fs.readFileSync(boxRegistry, 'utf8');
 
-    boxGit('init', '-q', '-b', 'main', '.');
+    initFixtureRepo(box);
     boxGit('add', AUTHORABLE_SURFACE_DIR_NAME, AUTHORABLE_DEFAULTS_DIR_NAME);
     boxGit('commit', '-q', '-m', `baseline: committed ${AUTHORABLE_SURFACE_DIR_NAME}/`);
     fs.writeFileSync(
@@ -2323,15 +2545,9 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
   let pristineBarrel: string;
   let head: string;
 
-  const boxGit = (...args: string[]): string => {
-    const r = spawnSync(
-      'git',
-      ['-c', 'user.name=build-schemas-test', '-c', 'user.email=test@example.invalid', ...args],
-      { cwd: box, encoding: 'utf8' },
-    );
-    if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed (${r.status}): ${r.stderr}`);
-    return (r.stdout ?? '').trim();
-  };
+  /** Same hermetic invocation as the sandbox's `git` — this box is a fixture
+   *  repository too, and inherits nothing from the machine either (#9068). */
+  const boxGit = (...args: string[]): string => gitIn(box, ...args);
 
   const runBox = (args: string[] = []): { status: number; output: string } => {
     const r = spawnSync(TSX, [boxScript, ...args], {
@@ -2339,6 +2555,7 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
       encoding: 'utf8',
       timeout: SPAWN_TIMEOUT_MS,
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: HERMETIC_ENV,
     });
     return { status: r.status ?? -1, output: `${r.stdout ?? ''}${r.stderr ?? ''}` };
   };
@@ -2422,7 +2639,7 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
     writeManifestShards(boxManifestDir, pristine);
     writeSurfaceShards(boxSurfaceDir, pristineSurface);
     writeDefaultsShards(path.join(box, AUTHORABLE_DEFAULTS_DIR_NAME), pristineDefaults);
-    boxGit('init', '-q', '-b', 'main', '.');
+    initFixtureRepo(box);
     // BOTH artifacts tracked here: the merge-base manifest is what this gate
     // reads, and the surface baseline keeps the #4650 gate honest alongside it.
     boxGit('add', SCHEMA_MANIFEST_DIR_NAME, AUTHORABLE_SURFACE_DIR_NAME, AUTHORABLE_DEFAULTS_DIR_NAME);
@@ -2708,15 +2925,9 @@ describe('build-schemas.ts — check (c) dates a tombstone by its exact key (#58
   let boxRegistry: string;
   let pristineRegistry: string;
 
-  const boxGit = (...args: string[]): string => {
-    const r = spawnSync(
-      'git',
-      ['-c', 'user.name=build-schemas-test', '-c', 'user.email=test@example.invalid', ...args],
-      { cwd: box, encoding: 'utf8' },
-    );
-    if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed (${r.status}): ${r.stderr}`);
-    return (r.stdout ?? '').trim();
-  };
+  /** Same hermetic invocation as the sandbox's `git` — this box is a fixture
+   *  repository too, and inherits nothing from the machine either (#9068). */
+  const boxGit = (...args: string[]): string => gitIn(box, ...args);
 
   const runBox = (args: string[] = []): { status: number; output: string } => {
     const r = spawnSync(TSX, [boxScript, ...args], {
@@ -2724,6 +2935,7 @@ describe('build-schemas.ts — check (c) dates a tombstone by its exact key (#58
       encoding: 'utf8',
       timeout: SPAWN_TIMEOUT_MS,
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: HERMETIC_ENV,
     });
     return { status: r.status ?? -1, output: `${r.stdout ?? ''}${r.stderr ?? ''}` };
   };
@@ -2788,7 +3000,7 @@ describe('build-schemas.ts — check (c) dates a tombstone by its exact key (#58
     boxRegistry = path.join(box, 'src', 'migrations', 'registry.ts');
     pristineRegistry = fs.readFileSync(boxRegistry, 'utf8');
 
-    boxGit('init', '-q', '-b', 'main', '.');
+    initFixtureRepo(box);
     boxGit('add', AUTHORABLE_SURFACE_DIR_NAME, AUTHORABLE_DEFAULTS_DIR_NAME);
     boxGit('commit', '-q', '-m', `baseline: committed ${AUTHORABLE_SURFACE_DIR_NAME}/`);
     fs.writeFileSync(
