@@ -230,16 +230,15 @@ visible: 'status != "resolved"'
 ◆ Validate
 ────────────────────────────────────────
   → Validating against ObjectStack Protocol...
-  → Validating expressions (ADR-0032)...
+  → Running author-time rules (41)...
 
-  ✗ Expression validation failed (1 issue)
+  ✗ Author-time rules failed (1 issue)
   • stack · action 'resolve_ticket' visible: bare reference `status` — a
     formula/validation expression binds the record as the `record` namespace,
     not at top level, so `status` resolves to nothing and the expression
     silently evaluates to null. Write `record.status`.
       source: `status != "resolved"`
-
-  ✗ EEXIT: 1
+      rule: expression-invalid  at stack · action 'resolve_ticket' visible
 ```
 
 The message is **located** (which action, which predicate) and **corrective**
@@ -256,6 +255,7 @@ Once it's clean:
   ✓ Validation passed (37ms)
 
   Support Desk v0.1.0
+
   Data: 1 Objects  6 Fields
   UI: 1 Apps  1 Views  1 Actions
 ```
