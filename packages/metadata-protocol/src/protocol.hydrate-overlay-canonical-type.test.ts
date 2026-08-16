@@ -138,10 +138,16 @@ function makeUnscopedProtocol(rows: StoredRow[]) {
             }));
         },
         async findOne() { return null; },
-        async insert() { return { id: 'skip' }; },
-        async update() { return { id: null }; },
-        async delete() { return { deleted: 0 }; },
-        async syncObjectSchema() { return true; },
+        // ⛔ No `update` / `delete` / `insert` on this double, deliberately.
+        // Both paths under test are READ-then-register — `loadMetaFromDb`
+        // issues `find` only, and the direct helper calls touch nothing but
+        // `registry` — so declaring write verbs here would add a fake engine
+        // whose dispatch contract (`assertEngineUpdateDispatch` /
+        // `assertEngineDeleteDispatch`, `check:engine-double-contract`) nothing
+        // in this file exercises. An unexercised double is a pin that cannot
+        // fail; if a future case needs one, take the shape from
+        // `protocol.object-registry-write-through-spelling.test.ts`, which
+        // routes both verbs through the asserts.
         registry: {
             registerItem: (type: string, item: any) => {
                 registeredItems.push({ type, name: item?.name });
