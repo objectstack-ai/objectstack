@@ -60,10 +60,16 @@ mint a detail row with a null master FK, which the `controlled_by_parent` read
 filter (`fk IN (readable masters)`) can never match — readable by nobody, and
 answering `422` on every later by-id write.
 
-**So the envelope asymmetry is not gone, it is confined**, to precisely the
-shapes #8772's lint now refuses at publish time. An app that publishes cleanly
-sees one envelope; an app still carrying one of those declarations sees the old
-one until it is republished. One further residual, narrower still: a
+**So the envelope asymmetry is not gone, it is confined** — to precisely those
+three declarations, and no further. But confined is not unreachable: #8772
+*proposes* a publish-time lint that would refuse them, and that issue is open
+and unruled, so nothing refuses them at publish today. A `master_detail` with
+no `required` draws only a non-blocking `warning`; `required` + `readonly` and
+`required` + `system` draw nothing at all. An app can therefore newly declare
+any of the three, publish cleanly, and still see the old
+`422 MISSING_REQUIRED_FIELD` with no `fields[]` — so treat these shapes as a
+live surface to avoid authoring into, not as a legacy tail that is already
+closing. One further residual, narrower still: a
 `controlled_by_parent` object whose relation resolves through the required-*lookup*
 fallback also keeps the `422` — validation would cover it, but the ruling covers
 `master_detail`, and widening a ruling is not the implementer's call.
