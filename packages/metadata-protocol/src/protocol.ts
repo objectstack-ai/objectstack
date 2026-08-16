@@ -11395,12 +11395,105 @@ export class ObjectStackProtocolImplementation implements
      * Returns whether anything was registered (org-scoped rows, bodies
      * without a `name`, and registry doubles without `registerItem`, are
      * no-ops).
+     *
+     * ## [#9111] `type` is an ASSERTED input, not a silently-trusted one
+     *
+     * The spelling handed in is the spelling the registry entry is minted
+     * under — `registerItem(type, …)` below, and the same `type` again in
+     * {@link hydrateExpandedViewItems}. Until this assert the parameter was a
+     * bare `type: string` with a load-bearing "callers must fold" contract
+     * that lived in no type, no signature and no check. That family has cost
+     * four cards (#8820, #8862, #9009, #9111); this is the fifth rediscovery
+     * not happening.
+     *
+     * **Measured across every producer before asserting** (the card's phase 1
+     * — six routes, and the read side FIRST, because #9157 had just falsified
+     * "every `/meta` entry point folds" one function over):
+     *
+     *  1. `getMetaItems` (read-side hydration)   — `canonicalizeMetaRequestType`
+     *  2. `saveMetaItem` → write-through         — `canonicalizeMetaRequestType`
+     *  3. `rollbackMetaItem` → write-through     — `canonicalizeMetaRequestType`
+     *  4. `promoteDraftForPublish` → write-through — `PLURAL_TO_SINGULAR`, but
+     *     both its callers are covered: `publishMetaItem` folds at the
+     *     boundary, and `publishPackageDrafts` is pre-empted by #8908's
+     *     `STORED_TYPE_NOT_CANONICAL` pre-flight ({@link isNonCanonicalStoredType}).
+     *  5. `revertCommit` → write-through         — `PLURAL_TO_SINGULAR[it.type]`
+     *     over a STORED commit-item type. **Unguarded.**
+     *  6. `loadMetaFromDb` (boot)                — `PLURAL_TO_SINGULAR[record.type]`
+     *     over a STORED row type. **Unguarded.**
+     *
+     * Routes 5 and 6 fold through the MANIFEST-COLLECTION map, which is
+     * TOLERANT AND INCOMPLETE in exactly the way #9161 named one seam over: it
+     * resolves the plurals that were never the hazard and passes through the
+     * six spellings whose types are not stack collections (`fields`, `seeds`,
+     * `external_catalogs`, `externalCatalogs`, `translations`,
+     * `email_templates`). For those the fold is a NO-OP and the raw spelling
+     * reaches `registerItem` — a second registry namespace for an item that has
+     * a canonical home, invisible to every canonical read.
+     *
+     * DORMANT for live traffic, and that is a measurement, not an assumption:
+     * the only `sys_metadata` writer that stamps a caller-chosen `type`
+     * (`saveMetaItem`'s `repo.put`) folds at the boundary, so no live write can
+     * mint such a row. The population that reaches routes 5 and 6 is pre-#7894
+     * AT-REST residue, which is real and which nothing rewrites on upgrade.
+     *
+     * ⛔ The refusal is an ASSERT and deliberately NOT a fold. Folding here
+     * would be the tolerant lookup below a folding boundary that
+     * {@link canonicalMetaType}'s header has rejected since #4432 — and it
+     * would do something worse than dilute a contract: a pre-#7894 row exists
+     * BECAUSE `PUT /meta/fields/…` slipped past the lock that answers
+     * `PUT /meta/field/…` with 403 NOT_OVERRIDABLE. Quietly folding it into the
+     * canonical key at boot would honour, process-wide, precisely the override
+     * #7894 closed the door on. Refusing leaves the row exactly as unreachable
+     * as it is today and says so out loud instead.
+     *
+     * Loudness per route, since neither is a `/meta` request with a caller to
+     * answer to: at boot the throw is caught by `loadMetaFromDb`'s per-record
+     * handler, so the row is counted in `errors` and named in a warning
+     * (registering nothing was already the honest outcome — a `'fields'` entry
+     * serves no reader); on the write-through it degrades to
+     * {@link applyRegistryWriteThrough}'s best-effort `console.warn`, which is
+     * correct there and not a softened assert — the row is already persisted,
+     * and #4521's contract is that a registry hiccup must never fail a
+     * committed write.
+     *
+     * ⚠️ This assert touches NO audit row, NO commit record and NO repository
+     * key. It is scoped to the registry mint door, and no producer's spelling
+     * is changed by it — so #8908's `AUDIT_TYPE_NOT_CANONICAL` ruling (which
+     * requires the caller's spelling to reach the audit writer unfolded, and to
+     * fail loudly at 500 when it is wrong) is untouched in both directions.
+     *
+     * What it cannot refuse, by construction: a canonical type (no canonical
+     * spelling folds elsewhere), and a plugin-registered or otherwise
+     * unrecognised kind — {@link canonicalMetaType} is the identity for
+     * anything the static map does not carry, so a runtime kind the platform
+     * has never heard of can never trip this gate.
      */
     private hydrateOverlayIntoRegistry(
         type: string,
         data: unknown,
         options: { packageId?: string | null; organizationId: string | null },
     ): boolean {
+        // [#9111] See the header: the mint door asserts, the caller folds.
+        // Placed FIRST, ahead of every no-op return below, so the contract is
+        // judged on the spelling itself rather than on whether this particular
+        // row happened to be registrable — a caller that stops folding must not
+        // be able to hide behind an org-scoped or nameless body.
+        const canonicalType = canonicalMetaType(type);
+        if (canonicalType !== type) {
+            const err: any = new Error(
+                `[registry_type_not_canonical] Refusing to register a SchemaRegistry overlay entry under `
+                + `the non-canonical metadata type '${type}' (canonical: '${canonicalType}'). The registry `
+                + `holds exactly one plain key per (type, name) and every reader addresses it through the `
+                + `'/meta' boundary, which folds — an entry minted under '${type}' is a second namespace no `
+                + `canonical read, listing or declaration lookup can reach (#4432). Fold the type at the `
+                + `producer (canonicalMetaType), not here; see this method's header for why the mint door `
+                + `refuses instead of folding.`,
+            );
+            err.code = 'REGISTRY_TYPE_NOT_CANONICAL';
+            err.status = 500;
+            throw err;
+        }
         // [#6602] ADR-0005 — a per-org overlay is served on demand, never
         // grafted into the registry every org in this process shares.
         if (options.organizationId !== null && options.organizationId !== undefined) return false;
@@ -11554,15 +11647,23 @@ export class ObjectStackProtocolImplementation implements
         // passing `'objects'` no longer takes this branch — so it no longer
         // reaches `registerObject`, and the object is simply not registered:
         // `assertObjectRegistered` fails CLOSED, a loud recoverable error in
-        // place of a silent one. That is the win. It does NOT mean nothing is
-        // registered at all: on an unscoped kernel the value falls through to
+        // place of a silent one. That is the win.
+        //
+        // [#9111] The rest of this paragraph is now HISTORY, and is kept in the
+        // past tense because it is what the next card was filed about. It used
+        // to read: "It does NOT mean nothing is registered at all — on an
+        // unscoped kernel the value falls through to
         // {@link hydrateOverlayIntoRegistry}, which registers under the RAW
-        // type like every other overlay kind. So the plural is no longer an
-        // object-specific hazard minting a shadow OBJECT — it is merely the
-        // same general "producers must fold" contract every other metadata
-        // type already lives under. Folding at the producer stays the rule;
-        // this guard is not a second line of defence and must not be written
-        // as one.
+        // type like every other overlay kind." That was true, and it was the
+        // last unfolded seam of this family. It no longer holds: the hydrator
+        // now ASSERTS its type is canonical (`REGISTRY_TYPE_NOT_CANONICAL`),
+        // so an unfolded plural arriving here is refused at the mint door
+        // rather than minting a shadow entry under the raw spelling.
+        //
+        // ⛔ That is still not a second line of defence, and must not be
+        // written as one: folding at the producer stays the rule, and the
+        // assert exists to make a producer that stops folding FAIL LOUDLY
+        // instead of silently — not to repair its key.
         if (request.type === 'object') {
             // NOT org-gated, deliberately: an `object` is `allowOrgOverride:
             // false` (ADR-0005) and its physical TABLE is env-wide, so the
