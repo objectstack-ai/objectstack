@@ -211,6 +211,27 @@ export interface ISecurityService {
    * that cannot compute the delegator intersection, returns a DENY filter that
    * matches zero rows — never `undefined`. `undefined` means one thing only:
    * this caller has no row restriction on this object.
+   *
+   * **⚠️ Request-scoped: call it per request, and never memoise what it
+   * returns.** The documented use — `engine.find(object, { where: await
+   * security.getReadFilter(object, ctx) })` — puts a PLATFORM-authored
+   * predicate into the `options.where` slot, and that slot is exactly what the
+   * read-scope merge boundaries vouch as the CALLER's own predicate (the
+   * `'author'` mark of `../data/filter-subtree-provenance.js`). Two
+   * consequences, neither of which a host may design around:
+   *
+   *  - the vouch is consumed as *"safe to disclose to this caller"*, not as
+   *    *"this caller passed it"*. A policy predicate sitting in that slot can
+   *    therefore carry its own `{ $field }` operands into a refusal message
+   *    that the #7929 redaction exists to withhold;
+   *  - the mark is permanent — first mark wins, and it is non-writable — so a
+   *    filter cached across requests keeps the FIRST request's vouch, and no
+   *    later boundary can correct it. The invariant this rests on is that no
+   *    filter object which can be vouched `'author'` outlives the request that
+   *    vouched it (#8794 / #8836).
+   *
+   * A host that must scope repeated queries re-calls this method; it does not
+   * hold the returned object.
    */
   getReadFilter(object: string, context?: SecurityContext): Promise<FilterCondition | undefined>;
 

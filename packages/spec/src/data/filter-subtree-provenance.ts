@@ -120,9 +120,45 @@ export const FILTER_SUBTREE_PROVENANCE: symbol = Symbol.for(
  * unchanged: the actor closest to the subtree's creation is the one that knows
  * its provenance, and letting a later, more distant actor overwrite that would
  * let a generic boundary re-vouch a policy predicate as the caller's. Marking
- * is therefore idempotent, and safe on filter objects that are reused across
- * requests (view metadata, cached scopes): the classification of one subtree
- * does not change between requests.
+ * is therefore idempotent.
+ *
+ * ## ⚠️ Idempotent is NOT "safe to reuse across requests"
+ *
+ * This paragraph used to end by calling the mark *"safe on filter objects that
+ * are reused across requests (view metadata, cached scopes): the
+ * classification of one subtree does not change between requests"*. The
+ * #8794 survey measured that claim and it is true in ONE direction only; the
+ * correction is pinned by `filter-subtree-provenance.test.ts` (#8836). The
+ * claim holds where provenance is **intrinsic** to the subtree, and a caller's
+ * `where` is the half where it is not:
+ *
+ *  - a `'policy'` scope IS intrinsically policy — the platform's predicate in
+ *    every request — so a stale `'policy'` mark is still correct next request,
+ *    and first-mark-wins is what stops a distant boundary re-vouching it. This
+ *    is the direction the rule was written for, and it degrades toward
+ *    WITHHOLDING;
+ *  - a caller's `where` is **contextual** — the same object is the caller's own
+ *    predicate in one request and not in another. A stale `'author'` mark
+ *    degrades toward DISCLOSING, and because first-mark-wins is absolute the
+ *    corrective `'policy'` stamp a later boundary would apply is a silent
+ *    no-op — the already-marked guard below returns the subtree unchanged.
+ *    Nothing downstream can repair it either: the mark is non-writable and
+ *    non-configurable.
+ *
+ * So "the classification does not change between requests" is an assumption
+ * about the CALLER POPULATION, not a property of this mark. The invariant the
+ * design actually rests on is:
+ *
+ * > no filter object that can be vouched `'author'` may outlive the request
+ * > that vouched it.
+ *
+ * It holds across every in-repo caller today — enumerated with controls in
+ * #8794 — and it holds *incidentally*: every caller in a markable position
+ * (`options.where` itself, or an arm of a pure `$and` root) happens to build
+ * its filter fresh per request. This module does not and cannot enforce it,
+ * because "the request" is not a concept it can see. What is enforced is that
+ * the cost of breaking it stays visible: the pin test asserts the disclosure a
+ * reused vouchable object produces, and its fresh-object control.
  *
  * Fail-closed by silence: a non-object subtree, a frozen/sealed one, or any
  * `defineProperty` refusal leaves the subtree unmarked — and unmarked is
