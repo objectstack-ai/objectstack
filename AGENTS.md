@@ -96,6 +96,9 @@ recognised list is published rather than left inside the implementation. Seed fr
 const HERE = dirname(fileURLToPath(import.meta.url));   // seed (ESM)
 const HERE = __dirname;                                 // seed (CJS)
 const HERE = import.meta.dirname;                       // and dirname(import.meta.filename)
+const HERE = resolve(fileURLToPath(import.meta.url), '..');  // seed walked from the
+                                                        // FILE rather than named;
+                                                        // import.meta.filename too
 const P = resolve(HERE, '<rel>');                       // join() and path.* too
 const P = fileURLToPath(new URL('<rel>', import.meta.url));
 const P = new URL('<rel>', import.meta.url);
