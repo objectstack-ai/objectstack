@@ -27,6 +27,51 @@ const ownMajor = Number(ownPkg.version.split('.')[0]);
 const registryTemplates = Object.keys(TEMPLATES);
 const REGISTRY_SOURCE = fs.readFileSync(path.join(pkgRoot, 'src', 'index.ts'), 'utf8');
 
+// ── #9109 — the git reads below cannot be redirected off this checkout ───────
+//
+// The skills-catalog block asks git two questions whose answers ARE its verdict:
+// `ls-files *SKILL.md` (which skill files exist) and `git grep` (which surfaces
+// advertise a repo-root install). Both were spawned with `cwd: repoRoot` and
+// nothing else, so they inherited every `GIT_*` variable in the environment —
+// and `GIT_DIR`, `GIT_INDEX_FILE` or `GIT_OBJECT_DIRECTORY` pointing elsewhere
+// makes git answer for a DIFFERENT repository while the `cwd` still reads as
+// this one. That is the #9068 exposure class: not a flake, a test that silently
+// measures another repository. A leaked `GIT_CEILING_DIRECTORIES` covering
+// `repoRoot` is the other direction — git then refuses to find this repo at all.
+//
+// Scrubbing those pointers is the whole fix here, and it is deliberately where
+// this file stops. Unlike the fixture harnesses this pattern comes from, these
+// two commands read the REAL checkout rather than a repo the test just created:
+//
+//   * no `[gc]` hardening, because there is no fixture repo to write config
+//     into, and this file must not touch the developer's own repository config;
+//   * the global/system config is left OPEN on purpose. `GIT_CONFIG_GLOBAL=/dev/null`
+//     is right for a fixture the test owns, but here it would also discard
+//     `safe.directory` — which is global config, and is exactly what lets git
+//     read a checkout owned by another user inside a container. Closing it could
+//     turn a passing read into `detected dubious ownership`, which is a
+//     regression this file gets no isolation benefit in exchange for.
+const LEAKED_GIT_ENV = [
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_COMMON_DIR',
+  'GIT_INDEX_FILE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_NAMESPACE',
+  'GIT_CEILING_DIRECTORIES',
+  'GIT_TEMPLATE_DIR',
+  'GIT_CONFIG',
+] as const;
+
+/** The environment the repo-reading git calls below get: this process's, minus
+ *  every variable that could aim them at a different repository. */
+const REPO_READ_ENV: NodeJS.ProcessEnv = (() => {
+  const env = { ...process.env };
+  for (const key of LEAKED_GIT_ENV) delete env[key];
+  return env;
+})();
+
 describe('blank template package.json', () => {
   const templatePkg = JSON.parse(
     fs.readFileSync(
@@ -260,6 +305,7 @@ describe('skills catalog boundary', () => {
   const trackedSkillFiles = execFileSync('git', ['ls-files', '*SKILL.md'], {
     cwd: repoRoot,
     encoding: 'utf8',
+    env: REPO_READ_ENV,
   })
     .split('\n')
     .filter(Boolean);
@@ -326,7 +372,7 @@ describe('skills catalog boundary', () => {
       candidates = execFileSync(
         'git',
         ['grep', '-nF', 'skills add objectstack-ai/objectstack', '--', ...surfaces],
-        { cwd: repoRoot, encoding: 'utf8' },
+        { cwd: repoRoot, encoding: 'utf8', env: REPO_READ_ENV },
       );
     } catch {
       // git grep exits 1 on no matches — nothing to check then.
