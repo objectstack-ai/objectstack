@@ -14,6 +14,7 @@ export { SysBusinessUnit, SysBusinessUnitMember } from '@objectstack/platform-ob
 export {
   SharingService,
   effectiveSharingModel,
+  PHANTOM_ANCHOR_WRITE_DENY_NOTICE,
   type SharingEngine,
   type SharingServiceOptions,
   type OrphanShareSweepOptions,

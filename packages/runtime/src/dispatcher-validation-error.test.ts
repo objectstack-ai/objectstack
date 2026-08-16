@@ -173,16 +173,30 @@ describe('#3918 — HttpDispatcher.errorFromThrown maps VALIDATION_FAILED', () =
         // Anti-regression for the #3867 tier this sits next to: an ordinary
         // throw still takes the caller's 500 fallback and its `issues`/`code`
         // details shape.
+        // [#8087] The vehicle was `STORAGE_FAILURE`, which no producer in this
+        // repo emits — the fixture invented it — and which the ledger therefore
+        // does not register, so this pin asserted a body `ApiErrorSchema`
+        // rejects. Collapsed to `DATABASE_ERROR`, a StandardErrorCode: the
+        // producer here is `metadata-protocol`, whose vocabulary IS
+        // ledger-governed, so an unregistered string was a fixture bug rather
+        // than a wire value worth keeping.
+        //
+        // Deliberately NOT the status-derived code: 500 derives `INTERNAL_ERROR`
+        // (`standardErrorCodeForHttpStatus`), so using it would make the
+        // assertion below pass whether the code was promoted or merely derived
+        // — a green test over nothing. `DATABASE_ERROR` is registered AND
+        // distinct from the derived one, so the pin still proves what it was
+        // written to prove: the producer's own code wins.
         const err = Object.assign(new Error('publish backend unavailable'), {
-            code: 'STORAGE_FAILURE',
+            code: 'DATABASE_ERROR',
             issues: [{ path: 'a', message: 'b', code: 'c' }],
         });
         const res = await publishPackage(err);
 
         expect(res.status).toBe(500);
-        // [#3842] `STORAGE_FAILURE` is the error's own code and now reaches the
-        // declared field instead of `details`; `issues` stays context.
-        expect(res.body.error.code).toBe('STORAGE_FAILURE');
+        // [#3842] the error's own code reaches the declared field instead of
+        // `details`; `issues` stays context.
+        expect(res.body.error.code).toBe('DATABASE_ERROR');
         expect(res.body.error.details).toEqual({
             issues: [{ path: 'a', message: 'b', code: 'c' }],
         });

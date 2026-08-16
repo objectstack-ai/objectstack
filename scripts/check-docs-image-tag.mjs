@@ -115,11 +115,18 @@
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-/** The package whose `version` every concrete pin below must equal. */
-const VERSION_SOURCE = 'packages/cli/package.json';
+/**
+ * The package whose `version` every concrete pin below must equal.
+ *
+ * Exported for the same reason SURFACES and PATTERNS are (#9064): the version-time
+ * rewriter `sync-docs-image-tags.mjs` must resolve the SAME source of truth this gate
+ * compares against. A second literal in the rewriter would be a second contract, and
+ * the two drifting apart reproduces one layer up the very defect this gate exists for.
+ */
+export const VERSION_SOURCE = 'packages/cli/package.json';
 
 /**
  * The doc surfaces scanned, enumerated explicitly (#9018).
@@ -718,8 +725,21 @@ function main() {
   process.exit(report(findings, stats, expected));
 }
 
-if (process.argv.includes('--self-test')) {
-  await selfTest();
-} else {
-  main();
+// Entry-point guard (#9064). Without it, importing this module RUNS the check and
+// calls `process.exit()` as an import side effect -- measured: a probe importing
+// SURFACES never reached its own next line, because `main()` had already exited the
+// process for it. That makes the exports unusable by the one consumer they were added
+// for, and the failure is silent in the worst way: the exit code is the CORPUS's
+// verdict, so an importer looks fine while the corpus is green and dies with an
+// unrelated exit 1 the day a pin goes stale. The idiom is the repo's own, and the
+// sibling gates state the same rationale (check-adr-links, check-doc-anchors,
+// check-kernel-hook-pairs). Nothing about what this gate ASSERTS changes: both
+// `check:docs-image-tag` invocations run this file directly, where argv[1] is this
+// file and the branch is taken exactly as before.
+if (resolve(process.argv[1] ?? '') === resolve(fileURLToPath(import.meta.url))) {
+  if (process.argv.includes('--self-test')) {
+    await selfTest();
+  } else {
+    main();
+  }
 }

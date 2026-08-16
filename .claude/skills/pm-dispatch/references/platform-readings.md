@@ -39,26 +39,39 @@
 
 ## API 配额
 
-- GraphQL 配额(5000/时)极易打满,读与评论一律走 REST(core 15000/时,独立计);
-  只有无 REST 对应物的写才花 GraphQL。`issue_write` 连查找半边都吃 GraphQL —— 配
-  额红时认领类动作整体排队,评论(REST)先行把结论发出去。
-- 配额打满:待执行写操作**排成有序清单挂进巡逻词**(不靠记忆),轮询
-  `gh api rate_limit` 对应资源,恢复窗口按序连清;重试对齐整点(REST core 整点重
-  置)优于指数退避,⛔ 绝不忙轮询。search 与 core 是独立配额,一侧打满另一侧可作退
-  路;REST core 在共享身份下同样会打满 ——「走 REST」≠「不限量」。
-- **MCP 参数两陷阱**:`list_issues` 多标签过滤是 **OR** 不是 AND(要 AND 走 REST
-  search 的 `label:a label:b`,或本地求交);`issue_write` 的 `labels` 是**整组替
+- GraphQL 配额(5000/时)极易打满,**MCP list 家族(`list_issues` 等)整个走
+  GraphQL 池** —— 反复撞上的限流墙就是它;读与评论一律走 REST(core 15000/时,独
+  立计);只有无 REST 对应物的写才花 GraphQL,`issue_write` 连查找半边都吃 —— 配额
+  红时认领类动作整体排队,评论(REST)先行把结论发出去。
+- **git 先行**:能从本地检出 / `git log` / `ls-remote` 读到的状态不花配额;开轮先
+  读配额(免装 gh CLI:`curl -H "Authorization: Bearer $GH_TOKEN"
+  https://api.github.com/rate_limit`),graphql remaining < 1000 ⇒ 本轮降级为 git
+  先行 + 只做必要写。打满时:待执行写**排成有序清单挂进巡逻词**(不靠记忆),恢复
+  窗口按序连清;重试对齐整点(REST core 整点重置)优于指数退避,⛔ 绝不忙轮询;
+  search 与 core 独立计,一侧打满另一侧可作退路;REST core 共享身份下同样会打满
+  ——「走 REST」≠「不限量」。
+- **MCP 参数两陷阱**:`list_issues` 多标签过滤是 **OR(并集)**不是 AND —— 双标签
+  查询返回两标签持有者的并集(别车道的同状态卡、本车道的全状态卡混入),结果良
+  构、规模合理,失效全静默;正确读法 = **整车道单标签一次读全 + 本地对返回的
+  labels 求交**,这是正确性要求不是风格偏好。`issue_write` 的 `labels` 是**整组替
   换**不是追加 —— 不先读现值合并再写,会静默剥掉别的标签;真追加走 REST
   `POST /issues/{n}/labels`;写后照标签纪律回读。
 - **`list_issues` 永不返回 assignees**(`fields` 枚举无此成员;不传 `fields` 也没
   有)—— 已认领卡与空闲卡在响应里逐字节相同,车道清单因此回答不了「哪张能认领」,
   失效完全静默。清单只是**候选名单**:每一条在认领前必须过一次完整 `issue_read`
   (它才返回 `assignees`),⛔ 不把 `list_issues` 结果当候选集直接认领。
-- **MCP `issue_read` 的 body 是 HTML 实体转义过的**(撇号/引号/尖括号成实体),
-  comments 原样返回。⇒ MCP 座位做 body 往返(读 → 改 → 整体写回)不安全:写回转义
-  实体,或凭猜反转义。机器可 grep 的行(`Blocked-by:` 一类)可能因此落在评论首行
-  而非 body —— 解锁扫描必须连评论一起扫(`in:comments`);确要改写 body,先经
-  REST 取原始 body 对账再写。
+- **MCP `issue_read` 的 body 实体转义是纯读侧渲染伪影**(撇号/引号/尖括号成实体;
+  comments 原样)—— 存储体未变;**先解码实体再写回**的往返实测安全(持回滚底稿验
+  证,无双重转义),会腐蚀 body 的是把转义读数原样回写。写侧真损耗在别处:HTML 注
+  释写入时被**静默剥除** —— 要存活的内容一律写成可见 markdown。
+- **`Blocked-by:` 行归 BODY(单通道反向索引)**:追加按上条「解码后写回」执行;历
+  史上寄放在评论里的行按同程序**增量**回填(⛔ 不搞批量突击 —— 限流压力);解锁扫
+  描只 grep body,⛔ 不加常设评论读;旧「连评论一起扫(`in:comments`)」提示作废,
+  扫描走直读(`list_issues` + `issue_read` 读 body)。
+- **`list_issue_types` 对本集成 403,而 `issue_write type:` 正常**(读权限缺口):
+  ⛔ 不先探列表再定可用性 —— 直接写已知好值(`Bug`/`Feature`/`Task`),写侧报错才
+  是真信号,列表 403 不是「类型不可用」;边界未实测:非法值是响错还是静默丢弃不
+  明,写非已知值前先小样验证。
 
 ## 读数陷阱
 

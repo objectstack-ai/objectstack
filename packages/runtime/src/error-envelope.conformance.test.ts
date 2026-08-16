@@ -27,9 +27,22 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { ApiErrorSchema, BaseResponseSchema, DispatcherErrorCode, envelopeViolations } from '@objectstack/spec/api';
+import {
+    ApiErrorSchema,
+    BaseResponseSchema,
+    DispatcherErrorCode,
+    ErrorCode,
+    envelopeViolations,
+    standardErrorCodeForHttpStatus,
+} from '@objectstack/spec/api';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { buildApiError, splitSemanticCode } from './error-envelope.js';
+import {
+    PENDING_AT_DISPATCHER_DOOR,
+    PENDING_LEDGER_REGISTRATION,
+    SANDBOX_AUTHORED_LIMB,
+    UNREGISTERED_CODE_SITES,
+} from './dispatcher-error-vocabulary.js';
 
 /** Minimal kernel — these branches fail before any service is reached. */
 function makeDispatcher(kernel: any = { context: { getService: () => null } }) {
@@ -190,6 +203,131 @@ describe('#3842 — every dispatcher error exit answers in the declared envelope
         expect(result.response?.headers).toEqual({ Allow: 'GET' });
         const error = expectConformantError(result.response);
         expect(error.code).toBe('METHOD_NOT_ALLOWED');
+    });
+});
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * [#8087] Direction 3 — the vocabulary, not just the cases this file drives
+ *
+ * The suite above parses the bodies it DRIVES, which is how three suites came
+ * to pin bodies `ApiErrorSchema` rejects without anything noticing: a
+ * conformance suite can only ever cover the branches that existed the day it
+ * was written. `check:dispatcher-error-vocabulary` derives the whole set of
+ * codes this door can emit from source; this block drives every
+ * dispatcher-reachable member of that derivation through the REAL builder and
+ * parses the result.
+ *
+ * That is the "parse EVERY body it emits" half of the maintainer ruling
+ * (2026-08-12, option B as a gate) — the gate finds the set, and this asserts
+ * on it, so a producer added next month is driven here without anyone adding
+ * a case for it.
+ * ──────────────────────────────────────────────────────────────────────────── */
+describe('#8087 — every code the dispatcher door can emit is parsed against ApiErrorSchema', () => {
+    /** The real error path: a producer throw, resolved and built exactly as production does. */
+    const emitFor = (code: string, status: number) =>
+        (makeDispatcher() as any).errorFromThrown(
+            Object.assign(new Error('a producer refused'), { code, status }),
+            500,
+        );
+
+    it('drives a code from the derivation rather than a list written by hand', () => {
+        // Guards the wiring itself: if the derivation ever produced nothing,
+        // every per-code assertion below would vacuously pass and this suite
+        // would go quiet exactly when it had the most to say.
+        expect(PENDING_AT_DISPATCHER_DOOR.length).toBeGreaterThan(0);
+        // Spread: both lists are `readonly string[]`, and `arrayContaining`
+        // takes a mutable one — passing the frozen list straight in is a tsc
+        // error that only the TEST_DEBT ratchet would have caught.
+        expect(PENDING_LEDGER_REGISTRATION).toEqual(expect.arrayContaining([...PENDING_AT_DISPATCHER_DOOR]));
+    });
+
+    for (const code of PENDING_AT_DISPATCHER_DOOR) {
+        it(`'${code}' reaches the wire verbatim, and ApiErrorSchema rejects it on \`code\` alone`, () => {
+            const response = emitFor(code, 500);
+
+            // Verbatim — option B was ruled, so the door does NOT narrow. A
+            // failure here means someone quietly implemented option A.
+            expect(response.body.error.code).toBe(code);
+
+            // The body is STRUCTURALLY conformant — right envelope, status
+            // mirrored, `details` context only — so the one thing standing
+            // between it and its declared schema is the missing ledger row.
+            // That is precisely the claim handed to #8846.
+            expect(envelopeViolations(response.body)).toEqual([]);
+            expect(response.body.success).toBe(false);
+            expect(response.body.error.httpStatus).toBe(response.status);
+
+            const parsed = ApiErrorSchema.safeParse(response.body.error);
+            expect(parsed.success).toBe(false);
+            // Rejected on `code` and nothing else — an entry that failed for a
+            // second reason would be a different defect wearing this one's label.
+            expect([...new Set((parsed.error?.issues ?? []).map((i) => i.path.join('.')))]).toEqual(['code']);
+
+            // MEASURED while writing this: the damage is not confined to the
+            // nested error object. `BaseResponseSchema` embeds `ApiErrorSchema`,
+            // so the WHOLE response body fails to parse — one unregistered
+            // string invalidates the envelope every consumer validates against,
+            // for the same single reason and no other.
+            const envelope = BaseResponseSchema.safeParse(response.body);
+            expect(envelope.success).toBe(false);
+            expect([...new Set((envelope.error?.issues ?? []).map((i) => i.path.join('.')))]).toEqual(['error.code']);
+        });
+    }
+
+    it('the same drive with a REGISTERED code is fully conformant — the control', () => {
+        // Without this, "ApiErrorSchema rejects it" above would also be
+        // satisfied by a builder that emits a broken envelope for everything.
+        const error = expectConformantError(emitFor('DATABASE_ERROR', 500));
+        expect(error.code).toBe('DATABASE_ERROR');
+        // And not merely the status-derived answer — 500 derives INTERNAL_ERROR,
+        // so this proves the producer's code was carried, not invented.
+        expect(standardErrorCodeForHttpStatus(500)).not.toBe('DATABASE_ERROR');
+    });
+
+    it('every pending code is still unregistered — the row comes out when #8846 lands', () => {
+        // The ratchet's test-side half. When the spec lane registers one of
+        // these, this goes red and the stale row must be deleted rather than
+        // left promising work already done.
+        for (const code of PENDING_LEDGER_REGISTRATION) {
+            expect(ErrorCode.safeParse(code).success, `${code} is registered now — drop its row`).toBe(false);
+        }
+    });
+
+    it('the status-derived limb cannot produce an unregistered code, by construction', () => {
+        // The third limb of `buildApiError`'s precedence needs no ledger row and
+        // no gate: `standardErrorCodeForHttpStatus` returns a StandardErrorCode
+        // for every input, so a branch that spells no code of its own is always
+        // parseable. Asserted rather than assumed, across the bands the
+        // dispatcher actually answers with.
+        for (const status of [400, 401, 403, 404, 405, 409, 415, 422, 428, 429, 500, 501, 503, 504, 507]) {
+            const derived = standardErrorCodeForHttpStatus(status);
+            expect(ErrorCode.safeParse(derived).success, `${status} derived an unregistered ${derived}`).toBe(true);
+        }
+    });
+
+    it('records the sandbox limb as open rather than pretending the door is closed', () => {
+        // `SandboxError` carries a metadata app's OWN `.code` across the QuickJS
+        // boundary on purpose (#7867), and `domains/actions.ts` serves it through
+        // `errorFromThrown`. So this door's vocabulary has a limb authored by
+        // tenants at runtime, which no ledger can enumerate — the honest bound on
+        // what "closed" can mean here, and the reason the witness below is NOT
+        // re-spelled to a registered code.
+        const witness = SANDBOX_AUTHORED_LIMB.witness;
+        expect(ErrorCode.safeParse(witness).success).toBe(false);
+        expect(emitFor(witness, 400).body.error.code).toBe(witness);
+        // It is deliberately absent from the registration hand-off: registering
+        // it would close nothing, since the next app picks a different string.
+        expect(PENDING_LEDGER_REGISTRATION).not.toContain(witness);
+    });
+
+    it('classifies every derived site — no verdict is left to a default', () => {
+        for (const site of UNREGISTERED_CODE_SITES) {
+            expect(site.why.length, `${site.code} at ${site.file} carries no evidence`).toBeGreaterThan(40);
+            // A site that reaches a door must be on its way to a ledger row;
+            // anything else must say which non-wire vocabulary it belongs to.
+            if (site.door !== 'none') expect(site.verdict).toBe('pending-registration');
+            else expect(site.verdict).not.toBe('pending-registration');
+        }
     });
 });
 

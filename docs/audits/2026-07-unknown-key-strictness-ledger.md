@@ -1395,10 +1395,19 @@ rest at #5107.
      in the same change (`SortNodeSchema` + `normalizeSortNodes` in
      `metadata-protocol`), per finding 6's asymmetry.
 
-   - **`ui/app.zod.ts`'s `BaseNavItemSchema`** is the base that the strict
+   - ~~**`ui/app.zod.ts`'s `BaseNavItemSchema`** is the base that the strict
      discriminated-union members `.extend()`. Finding 16 is the warning: closing
      a base closes every extension of it, including any that is deliberately a
-     wire shape. **Still open.**
+     wire shape.~~ **SETTLED at #5249 (maintainer ruling 2026-08-06, option A) —
+     and the bullet's own premise was wrong**, which is why it is struck rather
+     than deleted. The members do **not** `.extend()` this base, they spread
+     `...BaseNavItemSchema.shape`, and that is the whole of finding 16: a spread
+     lands the keys in a fresh `z.object` whose posture is its own, so the base
+     is inert and closing it is a guaranteed no-op. The row got the ninth
+     verdict, `covered`, rather than being rounded onto `no door`, whose
+     prescribed ADR-0049 retirement would have deleted nine branches' shared
+     keys. Evidence and the mechanical spread-vs-extend test are in the
+     `app.zod.ts` row of the `ui/` remaining-strip map above.
 
 Done in the registered-types batch: `strictObject` (`shared/strict-object.ts`)
 replaced the four-part wiring recipe, and `seed` + `doc` became the first two
@@ -1485,6 +1494,226 @@ before: 43 platform objects + 3 apps + 1 dashboard + 3 pages, and both example
 apps (23 + 6 objects, 20 + 1 pages, 4 + 1 datasets, 3 + 1 dashboards) report
 **zero** unknown keys. No finding this time — worth recording precisely because
 the app step's `ACCOUNT_APP.defaultOpen` came from exactly this class of check.
+
+## Campaign closing record — the terminal re-measure (2026-08-16)
+
+This section is the **terminal state** of the #4001 campaign: the census re-run
+on the final tree, the confirmation of the three closing claims, the one entry
+left deliberately open, and what holds the posture once no batch is scheduled.
+
+Read it as the answer to *"is there authorable work left in this ledger?"* — no.
+Read it as *"is this ledger finished?"* — also no, and deliberately: the
+remaining-strip map still carries **22 file rows covering 123 strip sites, 122
+of them non-authorable**, and they are kept so the arithmetic is complete and so
+nobody re-triages them from scratch. The **forced scope** of the 2026-08-03
+ruling is what closed.
+
+### The measurement, and why the start column had to be re-taken
+
+**The campaign's opening numbers and its closing numbers were never comparable,
+because the instrument changed underneath them.** #4001's opening post recorded
+`.strict()=31 / .passthrough()=20 / 默认 strip=1885` — taken with the **textual**
+method, which `scripts/lib/strictness-ledger.ts` later documented as wrong in
+both directions at once (it counted `z.object(` inside JSDoc prose, and missed
+the prettier-wrapped `z\n.object(` call). Comparing that triple against today's
+AST reading would publish an instrument change as a campaign result, which is
+this file's own subject matter.
+
+So the terminal re-measure runs **today's AST instrument over the campaign's
+start tree as well** — `d6bfb3d0a`, `main`'s tip when #4001 was filed
+(2026-07-30) — and both columns below come from that one instrument.
+
+What that alone shows, before any campaign work is counted: on the start tree
+the AST reads **15 strict / 20 passthrough / 2 catchall / 1903 strip over 1940
+sites**, where the opening post recorded 31 / 20 / 1885. The headline "31
+strict" was an over-read of **16**, and the opening post's per-directory table
+(a strip-count table) under-read `ui/` 177→183, `data/` 149→157, `system/`
+383→389, `ai/` 72→74, `automation/` 80→81. The consequence worth recording:
+the campaign's forced scope was scoped in that post as **"≈453 authorable
+sites"**, and the AST says the five directories held **484**. The plan was
+drawn against a number that was never measured — the estimate was low by 31
+sites, which is more than the whole of `studio/`.
+
+### Start → final, the five triaged directories (one instrument)
+
+| | Sites | strict | passthrough | catchall | **strip** |
+|---|---|---|---|---|---|
+| **start** (`d6bfb3d0a`, 2026-07-30) | 484 | 12 | 4 | 0 | **468** |
+| **final** (2026-08-16) | 439 | 310 | 6 | 0 | **123** |
+
+Per directory:
+
+| Dir | Sites start → final | strict start → final | **strip start → final** |
+|---|---|---|---|
+| `ui/` | 193 → 174 | 7 → 163 | **183 → 6** |
+| `data/` | 163 → 153 | 5 → 71 | **157 → 81** |
+| `automation/` | 81 → 65 | 0 → 42 | **81 → 23** |
+| `security/` | 20 → 20 | 0 → 7 | **20 → 13** |
+| `studio/` | 27 → 27 | 0 → 27 | **27 → 0** |
+
+**Read the site totals, not only the strip column.** The five directories LOST
+45 sites over the campaign — surface that was retired under ADR-0049 rather than
+closed, because a batch's per-schema read kept coming back "nobody writes this"
+(`no door`) or "nothing parses it". `strip 468 → 123` is therefore two movements
+summed, and the ledger's rows say which is which per file. That is the campaign's
+least-expected result: **the single most common outcome of reading a shape
+carefully was not tightening it.**
+
+Whole-spec context (fourteen directories, out of the ruling's forced scope, same
+instrument): 1940 → 1722 sites, strict 15 → 361, strip 1903 → 1338. The untriaged
+directories are coarse-classified in the section above and are not this campaign's
+debt; `api/`, `system/`, `kernel/` and `cloud/` are wire surface by construction.
+
+### The three closing claims, confirmed
+
+1. **Global authorable strip = exactly 1.** The generated bucket split reads
+   `authorable 1 · unresolved 0 · wire/open 118 · no door 3 · no gate 0 ·
+   covered 1` — 123. Only `ui/` contributes to the authorable bucket; `data/`,
+   `automation/`, `security/` and `studio/` all read 0. The single site is
+   `ui/view.zod.ts`'s `FormFieldBaseSchema`, and the other five `ui/` strip
+   sites resolve elsewhere, per their rows:
+
+   | Site (line as of this record) | Schema | Class |
+   |---|---|---|
+   | `view.zod.ts:1888` | `FormFieldBaseSchema` | **authorable — the one parked entry** |
+   | `view.zod.ts:3011` / `:3015` | `ViewItemWireSchema` (both arms) | wire by design (#5074's authoring/wire split) |
+   | `app.zod.ts:295` | `BaseNavItemSchema` | covered (#5249) |
+   | `widget.zod.ts:89` | `FieldWidgetPropsSchema` | no door (#5055) |
+   | `action-params.zod.ts:321` | `ActionSessionSchema` | wire (#5697) |
+
+2. **`data/`'s forced scope is discharged.** The directory's authorable bucket
+   is 0. Its 81 remaining strip sites are all wire/open/no-door, each with a row
+   and a per-schema verdict; the last three `mixed (p)` rows were discharged at
+   batch D and the last firm authorable site (`IndexSchema`) closed at 批 20
+   site 14.
+
+3. **`data/object.zod.ts` is closed.** 批 20's unit was the file's **14 inner
+   blocks — 13 at 批 20 and the held 14th (`IndexSchema`) on 2026-08-16**; the
+   AST unit is the file's **20 object sites, all 20 strict, 0 strip**. Both
+   readings are in this record because the two counts are different units of the
+   same fact, and a future reader comparing "14/14" against a generated "20"
+   should not have to re-derive that.
+
+### The batches
+
+The campaign did not advance as one sweep and its waves are not a tidy numbered
+run — they are named for the surface each took, and the **evidence for every one
+of them is in the rows above, not here**. This list exists so the roll-call is
+readable in one place:
+
+- the **Tier-A slice** (`security/permission.zod.ts`, `automation/flow.zod.ts`,
+  `ui/action.zod.ts` re-homed onto the shared factory), the **registered-types
+  batch** (`strictObject` itself, `seed` + `doc`), then the **security**,
+  **app** (PR A tombstones, PR B strict) and **data** steps;
+- the `automation/` waves — 批 9 through 批 12 — each resolving a `(p)` by
+  finding a door the prose had missed;
+- the `ui/` waves — 批 13 through 批 19 — which produced the campaign's
+  vocabulary as much as its closures: `no door` (批 13), `no gate` (批 15),
+  the per-schema split (批 14), the largest single reclassification
+  (`component.zod.ts`, 批 17), the authoring/wire split (#5074), and `covered`
+  (#5249, ruled at 批 19's request rather than guessed);
+- the `data/` waves — batch A, batch B, batch D and 批 20 — ending with
+  `object.zod.ts` site 14 once its cross-repo hold (#5247 → objectui#4772) was
+  spent.
+
+**The method that survived all of them**: verify who writes the input *before*
+tightening, per schema and never per file, with a positive control in the same
+run. It changed the verdict often enough that it, and not the closure count, is
+what this campaign should be remembered for.
+
+### The one parked entry — `ui/view.zod.ts`'s `FormFieldBaseSchema`
+
+**Standing rationale.** It is a module-private base (`const`, not exported) with
+zero `.parse()` of its own. Its sole consumer is the door:
+`FormFieldSchema = FormFieldBaseSchema.extend({ fields }).strict().transform(…)`
+— so an undeclared form-field key is already **rejected**, with the ADR-0089
+visibility error map (`VISIBILITY_STRICT_OPTIONS` + `strictObjectError` since
+#6619) carrying the prescription. Closing the base changes no parse.
+
+**Why it is `authorable` and not `covered`.** The two verdicts are separated by
+one mechanical test, not by a judgement (#5249): `covered` requires the keys to
+reach consumers by a `...X.shape` **spread**, which lands them in a fresh
+`z.object` with its own posture and makes the base inert. This consumer uses
+`.extend()`, which **inherits** posture — so the base is a real door whose
+posture simply happens to be overridden downstream. Calling it `covered` would
+be recording the wrong mechanism, and the mechanism is what the next reader acts
+on.
+
+**Why it still counts as a strip site.** The site deliberately keeps its literal
+`z.object(` spelling so this instrument keeps counting it. A conversion would
+remove it from the map, and the map is what makes the parked state visible.
+
+**Restart condition — and it is mechanically gated, not remembered.** This entry
+becomes real work the moment either holds:
+
+- **the consumer stops applying its own `.strict()`** (relying on inheritance
+  from a strip base would open the door silently), or
+- **a second consumer of the base appears** that does not close its own clone.
+
+The first is pinned: `view-strictness-batch18.test.ts`'s
+*"`FormFieldBaseSchema` stays a bare `z.object`: its ONE consumer already
+`.strict()`s it"* asserts through the real door (`FormViewSchema`) that an
+undeclared field key is refused, and goes red if the `.strict()` is dropped. The
+sibling case pins that the ADR-0089 visibility pair still resolves through its
+own error map — the reason the base was not converted in the first place.
+`check:strictness-ledger` holds the second half: the site cannot leave the map
+quietly, and its row cannot be deleted while it is strip.
+
+### What now enforces the posture, with no batch scheduled
+
+The campaign ends without a standing worklist, so the posture has to be held by
+mechanism. Four, and each has been shown to go red:
+
+1. **The strictness-ledger gate** (`check:strictness-ledger`, wired into the
+   Spec Liveness Check workflow) — the generated counts must be byte-fresh
+   against the AST, every sited file in a triaged directory must have a row, and
+   every `Class` cell must parse. A new `*.zod.ts` in `ui/` / `data/` /
+   `automation/` / `security/` / `studio/` is **undeclared surface** and fails
+   the gate until someone classifies it. This is what makes the closing state
+   above a ratchet rather than a snapshot.
+2. **The reverse pin at zero** — a remaining-strip row whose file reaches zero
+   strip sites **fails**. A worklist that can outlive its work will, and this
+   ledger has the scar; it is why `object.zod.ts`, `analytics.zod.ts` and
+   `driver/memory.zod.ts` are absent from the map above rather than sitting in
+   it at 0.
+3. **The strict-template idiom** — `strictObject` (`shared/strict-object.ts`)
+   is one call, reads its key list from the shape at the call site, and carries
+   `surface` / `history` / `aliases` / `guidance`. The four-part hand-wiring it
+   replaced is what made each closure expensive enough to defer; the next
+   authorable schema is closed by writing `strictObject` instead of `z.object`,
+   which is the campaign's durable output.
+4. **The unknown-key warning layer** — `lintUnknownAuthoringKeys` /
+   `lintUnknownStackKeys`, wired into `defineStack()`, `os validate` and
+   `os compile`, descending nested objects/arrays/records with the same posture
+   rules. It reports what the ratchet has not reached, which is how a
+   still-strip authorable site would announce itself between campaigns.
+
+**The standing question in "Next steps" §1 is answered, as that step asks.** It
+was *"has `lintUnknownAuthoringKeys` reported an unknown key on any surface
+outside this repo yet?"*, with the honest third outcome flagged as the one to
+check for: *zero findings because nothing is reporting back*. That is still the
+answer — this remains a pre-1.0 product with no third-party authors, so no
+outside-repo report exists, and none is pending. The wait was discharged by the
+maintainer's decision to proceed on mechanical, self-prescribing rejections
+rather than by data arriving, and the campaign closed on that basis. **Recording
+"still nothing" is the point**: a wait nobody re-examines is indistinguishable
+from an abandoned one.
+
+### What this record does NOT close
+
+- **The anchor issue.** Closing #4001 is a maintainer/PM decision taken after
+  this record lands, not by it — #8687 carries a `Blocked-by:` on the anchor and
+  needs re-pricing at closure time. #8687's gate is strict propagation at the
+  **top-level stack surface** (`ObjectStackDefinitionSchema`'s 43 keys), which
+  no slice of this campaign delivered.
+- **The 122 non-authorable strip sites**, in the map's 22 file rows (the
+  `view.zod.ts` row is the one that spans both, `1 authorable, 2 wire`). Wire,
+  open, `no door` and `covered` rows stay in the map by design. The `no door`
+  ones carry the only follow-up in the set, and it is a different ratchet:
+  ADR-0049 removal, tracked at #8562 for `field.zod.ts`'s two.
+- **The nine untriaged directories.** They were never in the ruling's forced
+  scope and are classified coarsely; a future campaign that wants them starts by
+  giving them per-file rows, at which point this gate begins holding them too.
 
 ## This file is now machine-checked
 

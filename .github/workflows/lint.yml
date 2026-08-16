@@ -348,6 +348,29 @@ jobs:
       - name: Docs image tags track packages/cli's version
         run: pnpm check:docs-image-tag
 
+      # #9064 — the self-test of the VERSION-TIME REWRITER that keeps the gate
+      # above from ever having to fire. The gate alone could not: `changeset
+      # version` bumps packages/cli on a release PR that (per
+      # sync-template-versions.mjs's own header) gets NO CI because
+      # changesets/action opens it with the default GITHUB_TOKEN — so the bump
+      # merged green and the gate reddened on the NEXT ordinary PR, naming files
+      # that author never touched. scripts/sync-docs-image-tags.mjs runs in the
+      # root `version` script, alongside the two sync scripts already there.
+      #
+      # Only the --self-test runs here, and that is the whole point: the rewriter
+      # itself has nothing to do on a green corpus, so CI can never observe it
+      # working. The self-test is where a STALE fixture is observed going green
+      # through the gate's own checkSurfaces, and — the control that matters just
+      # as much — where a CLEAN fixture is observed left byte-identical and
+      # unwritten, because an over-eager rewriter would silently corrupt the
+      # documented tag scheme and historical version prose across three files.
+      #
+      # Same job as the gate deliberately: they share one SURFACES/PATTERNS list,
+      # so the change that breaks one breaks the other, and both reds should land
+      # in the same place on the same PR.
+      - name: Docs image-tag version-time rewriter self-test
+        run: pnpm check:docs-image-tag-sync
+
       # #4851: the docs-accuracy-audit workflow carries its default scope inline
       # (a workflow script runs in a vm with no filesystem, so it cannot enumerate
       # content/docs/ itself). Hand-kept, that list rotted in BOTH directions —
@@ -473,6 +496,25 @@ jobs:
       # on `packages/**` or on `content/**` would blind it to half its own subject.
       - name: Documented HTTP status matches the status the runtime emits
         run: pnpm check:error-status-conformance
+
+      # #8087: ADR-0112 closes `error.code`, and the dispatcher door did not
+      # enforce it — `errorFromThrown` puts the producer's string on the wire
+      # un-narrowed, and its conformance suite parsed only the cases it drove,
+      # so three suites pinned bodies `ApiErrorSchema` rejects with CI green.
+      # Maintainer ruling 2026-08-12: option B, delivered as a GATE rather than
+      # a sweep — a one-time sweep is a snapshot that decays, and "an unswept
+      # producer just re-opens the hole". The scan finds every site stamping a
+      # code the ledger does not know; the declared table
+      # (packages/runtime/src/dispatcher-error-vocabulary.ts) records the verdict
+      # WITH its evidence, because reachability is not decidable from source —
+      # a boot refusal and a live wire code are written identically. Reconciled
+      # in both directions, so a new producer fails AND a row whose code has
+      # since been registered fails (that is how the spec half, #8846, ratchets
+      # the list down). No `paths:` filter, deliberately: the producers live in
+      # any package, and the registered vocabulary lives in packages/spec.
+      # Runs its own --self-test first.
+      - name: Dispatcher error-code vocabulary guard
+        run: pnpm check:dispatcher-error-vocabulary
 
       # Namespace-wildcard fall-through guard (#4116). A handler mounted on
       # `<prefix>/*` claims the whole namespace, and Hono's first-registered

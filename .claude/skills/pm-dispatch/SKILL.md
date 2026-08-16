@@ -173,10 +173,9 @@ UI 创建并勾 GitHub 连接器、UI 钉模型(会话内 create_trigger 的Rout
 
 **Anchoring rule(全案压在这一句上):**
 
-> Every package belongs to exactly **one** domain; an issue's `domain:*`
-> label is the domain of **the package the fix lands in**, decided at triage
-> by reading the code — **never guessed from the issue's title vocabulary**.
-> 说不出修复碰哪个文件,就还没分诊完,就不可标。
+> Every package belongs to exactly **one** domain; an issue's `domain:*` label is the domain
+> of **the package the fix lands in**, decided at triage by reading the code — **never guessed
+> from the issue's title vocabulary**. 说不出修复碰哪个文件,就还没分诊完,就不可标。
 
 | 标签 | 包家族 |
 |:--|:--|
@@ -473,8 +472,9 @@ You are the reviewer of record —— **对 GitHub 核验,不对报告的自述�
 - **PR 形态与范围**:draft、目标 `main`、首行 **`Fixes #<n>` 仅当合并应当关卡** ——半实施必
   须 `Part of #<n>`,否则合并静默关掉决策箱里的卡(收件箱过滤只看 open);翻 ready 前亲核首行。
   **`Fixes` 卡随关单自动离开在飞视图,`Part of` 卡合并后仍开着**:MERGED 的同一动作里摘
-  `pm:dispatched` 换回 `pm:queue`(或按剩余物定级)+ 评论写明已交付/还剩/归谁。changed files
-  范围检查(⛔ 不看报告自述);tests/docs-only 走`skip-changeset` 标签;测试证据要真实命令与输出。
+  `pm:dispatched` 换回 `pm:queue`(或按剩余物定级)+ 评论写明已交付/还剩/归谁。changed files 范围
+  检查(⛔ 不看报告自述);tests/docs-only 按仓库分流:本仓库 `skip-changeset` 标签是真实机制;
+  objectui 无此标签,空 frontmatter changeset 即声明,⛔ 永不铸标签;测试证据要真实命令与输出。
 - **报告在草稿 PR 时点到达,CI 收敛读数只属于复核侧**(维护者 2026-08-10 裁定): gate
   `in_progress` 是诚实读数;翻 ready / 挂 auto-merge / 入队前亲核门禁 job 结论,⛔ 不因「本地
   绿」跳过;收敛期转红走补丁轮(续派原 dev,不是 REWORK);重量级卡可在派发令写「本单等 CI」。
