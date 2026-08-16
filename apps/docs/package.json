@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "pnpm --filter @objectstack/spec gen:schema && pnpm --filter @objectstack/spec gen:docs && NODE_OPTIONS='--max-old-space-size=4096' next build",
-    "site:start": "next start",
+    "start": "next start",
     "site:lint": "next lint",
     "types:check": "fumadocs-mdx && next typegen && tsc --noEmit",
     "postinstall": "fumadocs-mdx",
