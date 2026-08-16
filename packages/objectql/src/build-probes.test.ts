@@ -192,8 +192,16 @@ describe('publishPackageDrafts — probes ride the response (ADR-0038 L3)', () =
     vi.spyOn(protocol as any, 'runPublishSideEffects').mockResolvedValue({});
     vi.spyOn(protocol as any, 'applySeedBodies').mockResolvedValue({ success: false, inserted: 0, updated: 0, error: 'boom' });
     // Probe reads: active items + an engine whose table stayed empty.
+    //
+    // [#8896] `findOne` answers the ADR-0067 pre-publish capture, and it
+    // returns `null` EXPLICITLY: this package has never been published, so no
+    // artifact has an active row and `existedBefore: false` is the truth here.
+    // Before the capture was discriminated by error type, this fixture had no
+    // `findOne` at all — the resulting TypeError was swallowed and the same
+    // `false` was FABRICATED, so this test passed without the read ever
+    // running. The two are now distinguishable, and this is the truthful one.
     (protocol as any).getMetaItem = async ({ type, name }: any) => ({ item: ITEMS[`${type} ${name}`] });
-    (protocol as any).engine = { find: async () => [] };
+    (protocol as any).engine = { find: async () => [], findOne: async () => null };
 
     const res = await protocol.publishPackageDrafts({ packageId: 'app.exp' });
 
