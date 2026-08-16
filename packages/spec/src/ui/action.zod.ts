@@ -497,7 +497,7 @@ const TARGET_REQUIRED_TYPES: ReadonlySet<string> = new Set(
  * - `type: 'flow'`   — `target` is **required** (the flow name to invoke).
  * - `type: 'modal'`  — `target` is **required** (the modal/page name to open).
  * - `type: 'api'`    — `target` is **required** (the API endpoint to call).
- * - `type: 'form'`   — `target` is **required** (the FormView name to open, routed to `/console/forms/:name`).
+ * - `type: 'form'`   — `target` is **required** (the FormView name to open, routed to `/_console/forms/:name`).
  * 
  * The `execute` alias was **removed in protocol 17** (#3855). `target` is the
  * only handler slot, so no consumer has a second slot to disagree about. An
