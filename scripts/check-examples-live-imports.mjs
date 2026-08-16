@@ -489,6 +489,7 @@ function collect() {
       file,
       package: pkgName,
       visibility,
+      declaresExampleInputs: declaredGlobs.length > 0,
       uncoveredTargets,
       targets: [...new Set(couplings.map((c) => c.target))].sort(),
       refs: couplings
@@ -610,7 +611,7 @@ function verify() {
       // A package that declares SOME examples glob but not one covering this
       // coupling is the more misleading case of the two, so it gets its own
       // wording: the fix is usually to widen the radius, not to record the file.
-      const why = row.uncoveredTargets.length
+      const why = row.declaresExampleInputs
         ? `package ${row.package} declares examples input globs, but none of them covers:\n` +
           row.uncoveredTargets.map((t) => `      ${t}`).join('\n') +
           `\n    so a diff touching those paths still does not re-run this test. Widen the\n` +
