@@ -9924,20 +9924,26 @@ export class ObjectQL implements IObjectQLEngine {
    * recurses into each child's own cascade; it is bounded by
    * {@link ObjectQL.MAX_CASCADE_DEPTH}, the ceiling the recursion itself carries.
    *
-   * Fails toward `'split'` on anything it cannot resolve (an unregistered
-   * reference, a `getDriver` throw): the degrade is today's behaviour, while a
-   * wrong `'atomic'` would manufacture the refusal this verdict exists to
-   * avoid.
+   * Fails toward `'split'` on anything it cannot resolve WITHIN the walk (an
+   * unregistered reference, a `getDriver` throw): the degrade is today's
+   * behaviour, while a wrong `'atomic'` would manufacture the refusal this
+   * verdict exists to avoid.
+   *
+   * [#9002] That fail-toward rule is about resolving individual PARTICIPANTS.
+   * It never covered the registry read that produces the participant list in
+   * the first place, and the `catch → 'none'` that used to sit there was not an
+   * instance of it: `'none'` is the one verdict that asserts something positive
+   * about the schema — *nothing references this object* — and an unreadable
+   * registry cannot support that claim. The swallow's own comment argued the
+   * direction from `cascadeDeleteRelations` returning on the same failure, so
+   * that nothing was left un-cascaded to make atomic; once that seam propagates
+   * the premise is gone, and this one propagates with it. Note the ORDER makes
+   * this seam the first to speak: `delete()` calls this before it runs the
+   * cascade, so an unreadable registry now fails the delete before any row is
+   * touched.
    */
   private planCascadeAtomicity(object: string): 'none' | 'split' | 'atomic' {
-    let objects: ServiceObject[];
-    try {
-      objects = this._registry.getAllObjects();
-    } catch {
-      // Same swallow as `cascadeDeleteRelations` — an unreadable registry
-      // cascades nothing, so there is nothing to make atomic.
-      return 'none';
-    }
+    const objects: ServiceObject[] = this._registry.getAllObjects();
 
     // Which objects reference `name` via a relation the cascade would follow.
     // The `master_detail`/`lookup` + `reference` test is `cascadeDeleteRelations`'s
@@ -10037,12 +10043,26 @@ export class ObjectQL implements IObjectQLEngine {
     depth = 0,
   ): Promise<void> {
     if (id == null || depth >= ObjectQL.MAX_CASCADE_DEPTH) return;
-    let objects: ServiceObject[];
-    try {
-      objects = this._registry.getAllObjects();
-    } catch {
-      return;
-    }
+    // [#9002] The registry read is UNGUARDED, deliberately — and this is the
+    // statement that decides whether the cascade runs AT ALL.
+    //
+    // It used to sit behind a bare `catch { return; }`, which is the #8895
+    // shape one layer up: #8895's `catch` invented "no dependents" for ONE
+    // relation whose probe could not run; this one invented "no relations" for
+    // EVERY relation at once, before the per-relation probe was ever reached —
+    // no `restrict` refusal, no `set_null`, no `cascade`, nothing logged, and
+    // the caller told the delete succeeded.
+    //
+    // #8895 ruled the family *discriminate or propagate*. Discrimination needs
+    // a benign failure class — there it was the unprovisioned child TABLE,
+    // which genuinely cannot hold a referencing row. Here there is none: an
+    // unreadable registry is never truthfully "no relations", so `propagate`
+    // is the whole answer and the `catch` has nothing left to do.
+    //
+    // No new error code and no new response field: whatever the registry read
+    // raised reaches the caller with its envelope intact, exactly as #8895's
+    // probe failure does.
+    const objects: ServiceObject[] = this._registry.getAllObjects();
     for (const child of objects) {
       const childName = (child as any)?.name as string | undefined;
       const fields = (child as any)?.fields as Record<string, any> | undefined;
