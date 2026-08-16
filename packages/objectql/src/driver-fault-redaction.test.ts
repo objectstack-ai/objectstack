@@ -100,6 +100,107 @@ describe('redactStatementFromMessage', () => {
   });
 });
 
+// #8823 — the tail is kept because it names IDENTIFIERS, and on MySQL's
+// duplicate-entry family it does not: `ER_DUP_ENTRY` prints the conflicting
+// VALUE in the diagnostic itself. These cases pin both halves of the remedy —
+// the value goes, the index name stays — because a fix that blanked the tail
+// would trade away exactly the debuggability #8682 paid for.
+//
+// ⛔ Not a demonstrated deployment leak: no live MySQL server was measured.
+// The inputs are this repo's own recorded mysql2 phrasings
+// (`packages/types/src/unique-violation.ts`) in knex's documented shape.
+describe('#8823 — a caller value inlined in the diagnostic itself', () => {
+  const EMAIL = 'acme@example.com';
+  const BOUND_DUP_ENTRY =
+    'insert into `crm_account` (`email`, `name`) values '
+    + `('${EMAIL}', 'Acme')`
+    + ` - Duplicate entry '${EMAIL}' for key 'crm_account.email'`;
+
+  it('drops the conflicting value and keeps the index the operator needs', () => {
+    const out = redactStatementFromMessage(BOUND_DUP_ENTRY);
+
+    expect(out).not.toContain(EMAIL);
+    // The index name is the answer to "which constraint?" and survives whole.
+    expect(out).toContain("for key 'crm_account.email'");
+    // Still legibly MySQL's own diagnostic, not a blanked tail.
+    expect(out).toContain('Duplicate entry');
+    expect(out).toBe(
+      "Duplicate entry [value redacted] for key 'crm_account.email' [statement and bound values redacted]",
+    );
+  });
+
+  it('redacts a BARE diagnostic too — the shape that reaches us without a statement', () => {
+    // Before #9030 the shared leak predicate did not recognise this phrasing,
+    // so a bare `Duplicate entry …` was turned away at the door and kept its
+    // value. That limb landed for a different reason; the two compose here.
+    const out = redactStatementFromMessage(`Duplicate entry '${EMAIL}' for key 'crm_account.email'`);
+
+    expect(out).not.toContain(EMAIL);
+    expect(out).toBe("Duplicate entry [value redacted] for key 'crm_account.email'");
+    // No statement was present, so the entry must not claim one was removed.
+    expect(out).not.toContain('[statement and bound values redacted]');
+  });
+
+  it('leaves no fragment when the value itself contained " - "', () => {
+    // The statement cut takes the LAST separator, which lands INSIDE a value
+    // spelled like this — measured on the shipped function, it logged
+    // `Q3 plan' for key 't.label'`. The words are not reconstructed: an anchor
+    // is evidence about the value, not licence to assert the template.
+    const out = redactStatementFromMessage(
+      "insert into `t` (`label`) values ('2026 - Q3 plan')"
+      + " - Duplicate entry '2026 - Q3 plan' for key 't.label'",
+    );
+
+    expect(out).not.toContain('Q3 plan');
+    expect(out).not.toContain('2026');
+    expect(out).toContain("for key 't.label'");
+  });
+
+  it.each([
+    ["an unescaped quote in the value", "Duplicate entry 'O'Brien' for key 't.name'", 'Brien', "for key 't.name'"],
+    ['a composite key value', "Duplicate entry 'acme-x' for key 't.idx_a_b'", 'acme-x', "for key 't.idx_a_b'"],
+    ['the PRIMARY key', "Duplicate entry 'r1' for key 'PRIMARY'", "'r1'", "for key 'PRIMARY'"],
+    // Ambiguous: the value may itself contain the anchor. Resolving to the LAST
+    // anchor discards more, which is the only direction that cannot leak.
+    ['a value that mimics the anchor', "Duplicate entry 'a' for key 'b' for key 't.n'", "for key 'b'", "for key 't.n'"],
+  ])('%s', (_shape, diagnostic, gone, kept) => {
+    const out = redactStatementFromMessage(`insert into \`t\` (\`c\`) values ('v') - ${diagnostic}`);
+
+    expect(out).not.toContain(gone);
+    expect(out).toContain(kept);
+    expect(out).toContain('[value redacted]');
+  });
+
+  it('leaves every IDENTIFIER-bearing tail exactly as it was', () => {
+    // The other three dialect shapes the card measured, plus the MySQL family
+    // that names a column rather than a value. Redacting these would be the
+    // regression #8682's triage warned about, not a fix.
+    for (const [statement, diagnostic] of [
+      ["insert into `t` (`c`) values ('v')", "Unknown column 'zzz' in 'field list'"],
+      ["insert into `t` (`c`) values ('v')", 'UNIQUE constraint failed: crm_account.email'],
+      ['insert into "t" ("c") values (\'v\')', 'duplicate key value violates unique constraint "crm_account_email_key"'],
+      ["insert into `t` (`c`) values ('v')", 'NOT NULL constraint failed: sys_team.organization_id'],
+    ]) {
+      const out = redactStatementFromMessage(`${statement} - ${diagnostic}`);
+
+      expect(out).toBe(`${diagnostic} [statement and bound values redacted]`);
+      expect(out).not.toContain('[value redacted]');
+    }
+  });
+
+  it('does not reach into a bound value that merely looks like the template', () => {
+    // The templates are read only AFTER the cut, where nothing but the
+    // database's own words is left — so a caller storing this text in a column
+    // cannot steer what survives.
+    const out = redactStatementFromMessage(
+      "insert into `t` (`note`) values ('Duplicate entry \\'x\\' for key \\'k\\'')"
+      + ' - table t has no column named note',
+    );
+
+    expect(out).toBe('table t has no column named note [statement and bound values redacted]');
+  });
+});
+
 describe('redactBoundStatement', () => {
   it('redacts `stack` too — the statement opened it a second time', () => {
     const original = new Error(BOUND_INSERT);
@@ -167,7 +268,18 @@ describe('#8682 half B — the write-path loggers', () => {
     return logger;
   }
 
-  async function insertAgainstADriftedColumn() {
+  /**
+   * The one driver double in this file. #8823 needed a MySQL-shaped fault and
+   * the shape is a PARAMETER rather than a second double — one fake engine per
+   * file keeps the contract the double implements reviewable in one place.
+   */
+  const DRIFTED_COLUMN = {
+    name: 'SqliteError',
+    code: 'SQLITE_ERROR',
+    diagnostic: (object: string) => `table ${object} has no column named secret_note`,
+  };
+
+  async function insertAgainstADriftedColumn(fault = DRIFTED_COLUMN) {
     const logger = makeCapturingLogger();
     const engine = new ObjectQL({ logger });
     const driver: any = {
@@ -178,10 +290,11 @@ describe('#8682 half B — the write-path loggers', () => {
       async create(object: string, data: Record<string, unknown>) {
         const cols = Object.keys(data).sort();
         const stmt = `insert into \`${object}\` (${cols.map((c) => `\`${c}\``).join(', ')}) values (${cols.map((c) => `'${String(data[c])}'`).join(', ')}) returning *`;
-        const e: any = new Error(`${stmt} - table ${object} has no column named secret_note`);
-        e.name = 'SqliteError';
-        e.code = 'SQLITE_ERROR';
-        e.stack = `SqliteError: ${stmt} - table ${object} has no column named secret_note\n    at Database.prepare (/x/better-sqlite3.js:1:1)`;
+        const text = `${stmt} - ${fault.diagnostic(object)}`;
+        const e: any = new Error(text);
+        e.name = fault.name;
+        e.code = fault.code;
+        e.stack = `${fault.name}: ${text}\n    at Database.prepare (/x/better-sqlite3.js:1:1)`;
         throw e;
       },
       async update() { return {}; }, async updateMany() { return 0; },
@@ -247,5 +360,49 @@ describe('#8682 half B — the write-path loggers', () => {
 
     expect(String(thrown?.message)).toContain('insert into');
     expect(String(thrown?.message)).toContain(SECRET);
+  });
+
+  /**
+   * [#8823] The same write path, with the fault MySQL raises instead — where
+   * the caller's value is in the DIAGNOSTIC and not only in the statement, so
+   * the statement cut alone never reached it.
+   */
+  const MYSQL_DUPLICATE_ENTRY = {
+    name: 'Error',
+    code: 'ER_DUP_ENTRY',
+    diagnostic: (object: string) => `Duplicate entry '${SECRET}' for key '${object}.secret_note'`,
+  };
+
+  it('MySQL duplicate entry — the entry survives and still names the index', async () => {
+    const { line } = await insertAgainstADriftedColumn(MYSQL_DUPLICATE_ENTRY);
+
+    expect(line).toBeDefined();
+    expect(line!.level).toBe('error');
+    expect(line!.meta).toEqual({ object: 'crm_account' });
+    // The operator's answer to "which constraint?" is kept whole.
+    expect(String(line!.err?.message)).toContain("for key 'crm_account.secret_note'");
+    expect(String(line!.err?.stack)).toContain('at Database.prepare');
+  });
+
+  it('MySQL duplicate entry — neither `message` nor `stack` carries the value', async () => {
+    const { line } = await insertAgainstADriftedColumn(MYSQL_DUPLICATE_ENTRY);
+
+    for (const field of [String(line!.err?.message), String(line!.err?.stack)]) {
+      expect(field).not.toContain(SECRET);
+      expect(field).not.toContain(DESCRIPTION);
+      expect(field).not.toContain('insert into');
+    }
+  });
+
+  it('MySQL duplicate entry — the RETHROWN error is still untouched', async () => {
+    // Same boundary as above: the log narrows, the caller's answer does not
+    // move. `isUniqueViolationError` and `uniqueViolationColumn` read this
+    // message downstream and must keep seeing the driver's own text.
+    const { thrown } = await insertAgainstADriftedColumn(MYSQL_DUPLICATE_ENTRY);
+
+    expect(String(thrown?.message)).toContain('insert into');
+    expect(String(thrown?.message)).toContain(SECRET);
+    expect(String(thrown?.message)).toContain('Duplicate entry');
+    expect((thrown as any)?.code).toBe('ER_DUP_ENTRY');
   });
 });
