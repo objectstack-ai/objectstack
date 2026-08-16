@@ -100,6 +100,18 @@ vi.mock('./registry', () => {
   const instance: any = {
     getObject: vi.fn(),
     resolveObject: vi.fn((n: string) => instance.getObject(n)),
+    // [#9002] This double used to omit `getAllObjects`, and the suite passed
+    // anyway: `delete()`'s by-id branch reads it twice (`planCascadeAtomicity`,
+    // then `cascadeDeleteRelations`) and BOTH reads sat behind a `catch` that
+    // answered "no relations". The swallow absorbed the `TypeError` this
+    // omission raises just as silently as it would absorb a real read failure,
+    // so an incomplete double read as a registry with nothing in it. With the
+    // swallows gone the omission is a hard failure, which is the point — the
+    // double now has to model the method the engine actually calls. Empty is
+    // the right body here: this suite pins the middleware operation VOCABULARY
+    // and registers no relations, so "no object references the deleted one" is
+    // the truthful answer rather than an invented one.
+    getAllObjects: vi.fn(() => []),
     registerObject: vi.fn(),
     getObjectOwner: vi.fn(),
     registerNamespace: vi.fn(),
