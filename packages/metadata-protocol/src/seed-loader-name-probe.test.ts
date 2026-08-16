@@ -76,14 +76,25 @@ function createColumnStrictEngine(columns: Record<string, string[]>) {
     find: vi.fn(async (objectName: string, query?: any) => {
       const declared = columns[objectName];
       let records = store[objectName] || [];
+      // Column resolution happens BEFORE row matching, exactly as the driver
+      // does it: a filter naming an unresolvable column is refused whether or
+      // not the table holds rows (a `.filter()` callback over an empty table
+      // never runs, and "no rows to test" must not read as "column fine").
       for (const key of Object.keys(query?.where || {})) {
+        if (key.startsWith('$')) throw new Error(`fake driver: unsupported operator ${key}`);
         if (declared && !declared.includes(key) && !ALWAYS_PRESENT.includes(key)) {
           refuse(objectName, key);
         }
       }
       if (query?.where) {
         records = records.filter((r) =>
-          Object.entries(query.where).every(([k, v]) => r[k] === v),
+          Object.entries(query.where).every(([k, v]) => {
+            // A combinator this double does not implement is REFUSED, never
+            // read as a field name — a double looser than the producer it
+            // stands in for turns a green suite into no suite.
+            if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+            return r[k] === v;
+          }),
         );
       }
       if (typeof query?.limit === 'number') records = records.slice(0, query.limit);
