@@ -44,7 +44,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { RestServer } from './rest-server';
+import { RestServer } from './rest-server.js';
 
 const META = '/api/v1/meta';
 
