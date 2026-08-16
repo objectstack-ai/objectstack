@@ -437,6 +437,25 @@ jobs:
       - name: Documented HTTP status matches the status the runtime emits
         run: pnpm check:error-status-conformance
 
+      # #8087: ADR-0112 closes `error.code`, and the dispatcher door did not
+      # enforce it — `errorFromThrown` puts the producer's string on the wire
+      # un-narrowed, and its conformance suite parsed only the cases it drove,
+      # so three suites pinned bodies `ApiErrorSchema` rejects with CI green.
+      # Maintainer ruling 2026-08-12: option B, delivered as a GATE rather than
+      # a sweep — a one-time sweep is a snapshot that decays, and "an unswept
+      # producer just re-opens the hole". The scan finds every site stamping a
+      # code the ledger does not know; the declared table
+      # (packages/runtime/src/dispatcher-error-vocabulary.ts) records the verdict
+      # WITH its evidence, because reachability is not decidable from source —
+      # a boot refusal and a live wire code are written identically. Reconciled
+      # in both directions, so a new producer fails AND a row whose code has
+      # since been registered fails (that is how the spec half, #8846, ratchets
+      # the list down). No `paths:` filter, deliberately: the producers live in
+      # any package, and the registered vocabulary lives in packages/spec.
+      # Runs its own --self-test first.
+      - name: Dispatcher error-code vocabulary guard
+        run: pnpm check:dispatcher-error-vocabulary
+
       # Namespace-wildcard fall-through guard (#4116). A handler mounted on
       # `<prefix>/*` claims the whole namespace, and Hono's first-registered
       # handler that answers wins — so a TERMINAL wildcard makes every other

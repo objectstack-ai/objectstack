@@ -127,17 +127,29 @@ describe('#8016 — the dispatcher package door answers the shared mapping', () 
      * The one place the two doors' codes differ, pinned so it stays a stated
      * difference rather than a drift.
      *
-     * This door puts a producer's code on the wire verbatim — `STORAGE_FAILURE`,
-     * `FLOW_FAILED` and `DUPLICATE` are all outside
-     * `StandardErrorCode ∪ ERROR_CODE_LEDGER` and all pinned by existing suites
-     * here. The REST door cannot: `sendError` takes the closed `ErrorCode`, and
-     * that door's conformance suite parses its bodies against the ledger, so an
-     * unregistered code there is a failing test rather than a wire answer.
+     * This door puts a producer's code on the wire verbatim. The REST door
+     * cannot: `@objectstack/types`' `sendError` takes the closed `ErrorCode`,
+     * and that door's conformance suite parses its bodies against the ledger, so
+     * an unregistered code there is a failing test rather than a wire answer.
      *
-     * The STATUS agrees either way, which is what #8016 was about. Whether this
-     * door's `error.code` should be closed too is a live contract question
-     * (`ApiErrorSchema` would reject these bodies) and is filed separately — it
-     * is not a decision this fix took.
+     * The STATUS agrees either way, which is what #8016 was about.
+     *
+     * [#8087] The three codes this comment used to name are no longer one list.
+     * The maintainer ruled option B — keep the verbatim spelling, and make the
+     * set of unregistered producers a MEASURED, gated one instead of a
+     * hand-maintained sentence that goes stale (this one had):
+     *
+     *   - `FLOW_FAILED` has a real producer and is awaiting a ledger entry
+     *     (#8846); it stays verbatim, which is the whole point of option B.
+     *   - `STORAGE_FAILURE` had no producer anywhere — two fixtures invented it
+     *     — so it was collapsed to a registered code rather than registered.
+     *   - `DUPLICATE` is AUTHOR-thrown: it crosses the sandbox boundary from a
+     *     metadata app's own action code, so no ledger can enumerate it.
+     *
+     * `packages/runtime/src/dispatcher-error-vocabulary.ts` is the live list and
+     * `pnpm check:dispatcher-error-vocabulary` keeps it honest. The vehicle
+     * below stays a deliberately unregistered string, because what this case
+     * pins is the SPELLING DIFFERENCE, not any particular producer.
      */
     it('an unregistered code reaches this door verbatim, and the narrowed spelling differs', () => {
         const error = thrown('dialect', { status: 409, code: 'PACKAGE_IS_HAUNTED' });

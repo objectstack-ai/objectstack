@@ -106,16 +106,22 @@ describe('#3867 follow-up — HttpDispatcher.error() does not return raw driver 
         // The semantic code and the per-field `issues` the UI maps back to inputs
         // are never free-form driver prose, so the 5xx guard must not touch them
         // — it only ever replaces `message`.
+        // [#8087] Was `STORAGE_FAILURE` — a code the fixture invented, that no
+        // producer emits and the ledger does not register, so the pinned body
+        // could never satisfy `ApiErrorSchema`. `DATABASE_ERROR` is a
+        // StandardErrorCode and is NOT what 500 derives (`INTERNAL_ERROR`), so
+        // the assertion still distinguishes "promoted from the throw" from
+        // "derived from the status". See dispatcher-error-vocabulary.ts.
         const err = Object.assign(new Error(SQL_DUMP), {
             status: 500,
-            code: 'STORAGE_FAILURE',
+            code: 'DATABASE_ERROR',
             issues: [{ path: 'name', message: 'taken', code: 'duplicate' }],
         });
         const result: any = await putMeta(err);
 
         expect(result.response.body.error.message).toBe('Internal server error');
         // [#3842] The code is in the declared field; `details` keeps the issues.
-        expect(result.response.body.error.code).toBe('STORAGE_FAILURE');
+        expect(result.response.body.error.code).toBe('DATABASE_ERROR');
         expect(result.response.body.error.details).toMatchObject({
             issues: [{ path: 'name', message: 'taken', code: 'duplicate' }],
         });

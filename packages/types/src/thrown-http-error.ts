@@ -43,10 +43,16 @@
  *
  * {@link ThrownHttpError.declaredCode} is the producer's own string, verbatim
  * and un-narrowed, which is what the dispatcher door has always put on the
- * wire — `STORAGE_FAILURE`, `FLOW_FAILED` and `DUPLICATE` are all unregistered
- * and all pinned by existing dispatcher tests. Narrowing it here would rewrite
- * a behaviour three suites assert, which is a contract decision (should the
- * dispatcher's `error.code` be closed too?) and not this function's to take.
+ * wire.
+ *
+ * [#8087] That contract question — should the dispatcher's `error.code` be
+ * closed too? — has since been ruled: **option B**, keep the verbatim spelling
+ * and register the producers, delivered as a GATE rather than a one-time sweep
+ * (maintainer, 2026-08-12). So `declaredCode` stays exactly as it is; what
+ * changed is that the unregistered producers are now measured and classified
+ * (`packages/runtime/src/dispatcher-error-vocabulary.ts`,
+ * `pnpm check:dispatcher-error-vocabulary`) instead of being named in prose
+ * here. Narrowing this spelling would be option A, which was NOT ruled.
  *
  * So the doors agree on **status** unconditionally and on **code** for every
  * registered code, and differ only where a producer emits a code the ledger

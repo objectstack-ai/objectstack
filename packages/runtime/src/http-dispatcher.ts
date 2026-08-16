@@ -760,13 +760,20 @@ export class HttpDispatcher {
      */
     private errorFromThrown(e: any, fallbackStatus = 500) {
         const thrown = resolveThrownHttpError(e, fallbackStatus);
-        // `declaredCode`, NOT the narrowed `code`: this door's `error.code` is
-        // not closed in practice and three suites pin that — `STORAGE_FAILURE`,
-        // `FLOW_FAILED` and `DUPLICATE` are all unregistered and all expected on
-        // the wire verbatim. The REST door takes the narrowed spelling because
-        // its own conformance suite parses its bodies against the ledger. Both
-        // spellings come from the one resolver, so the difference is a stated
-        // one; see its module note.
+        // `declaredCode`, NOT the narrowed `code`: this door puts a producer's
+        // own string on the wire. The REST door takes the narrowed spelling
+        // because its own conformance suite parses its bodies against the
+        // ledger. Both spellings come from the one resolver, so the difference
+        // is a stated one; see its module note.
+        //
+        // [#8087] Ruled option B (maintainer, 2026-08-12): the verbatim spelling
+        // STAYS, and the set of producers emitting codes the ledger does not
+        // know is now measured and gated rather than named in a comment that
+        // rots — `./dispatcher-error-vocabulary.ts` carries the classified list
+        // and `pnpm check:dispatcher-error-vocabulary` fails on an unswept
+        // producer added later. `error-envelope.conformance.test.ts` drives
+        // every dispatcher-reachable member of that list through this method and
+        // parses the body, which is the "parse every body it emits" half.
         return this.error(thrown.message, thrown.status, thrown.details, thrown.declaredCode);
     }
 
