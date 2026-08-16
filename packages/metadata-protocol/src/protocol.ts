@@ -10718,6 +10718,55 @@ export class ObjectStackProtocolImplementation implements
      *         determined. The one non-throwing failure is an
      *         unprovisioned `sys_metadata`, where "no overlay row" is
      *         the truth rather than an unknown.
+     *
+     * ## [#9009] The type key is FOLDED HERE, not trusted from the caller
+     *
+     * This method used to hand `type` to its two limbs verbatim, and the two
+     * limbs do not read it the same way — which is the whole defect:
+     *
+     *  - the ARTIFACT limb folds. {@link lookupArtifactItem} resolves
+     *    `PLURAL_TO_SINGULAR[type] ?? type` and then tries the raw spelling as
+     *    a second lookup, so a plural found the packaged `_lock` anyway.
+     *  - the OVERLAY limb did not. It queried `sys_metadata` with the raw
+     *    `type`, and `SysMetadataRepository.whereFor` emits the canonical
+     *    spelling with no at-rest fallback — so the stored ACTIVE row exists
+     *    under a `type` the query never asks for. `findOne` misses, and the
+     *    method falls through to `'none'`: not a neutral value but the verdict
+     *    "the author declared no protection" (#5706), which
+     *    `evaluateLockForWrite` / `evaluateLockForDelete` turn into "allow".
+     *
+     * So an ADR-0010 `_lock` was addressable AROUND from the wire by spelling
+     * the type differently, and the gate answered "unlocked" with complete
+     * confidence. #8769 (publish) and #8819 (rollback) each closed that at ONE
+     * entry point by folding the request; this closes it at the producer of the
+     * verdict, so the class cannot be re-opened by the next caller that arrives
+     * without a fold. Contract-first (Prime Directive #12) — and the fold is
+     * the right shape HERE rather than an assert, because this is the one
+     * consumer whose silent wrong answer disarms a protection gate: folding can
+     * only ever find MORE locks, never fewer.
+     *
+     * {@link canonicalMetaType}, deliberately, and not `PLURAL_TO_SINGULAR` —
+     * the manifest-collection map omits `field`, `seed`, `external_catalog` and
+     * `translation`, which is exactly the "tolerant AND INCOMPLETE" fold
+     * {@link recordMetadataAudit}'s header rejects: it would canonicalize the
+     * types that never needed it and leave the four that do.
+     *
+     * ⛔ This changes NOTHING for any caller reachable today, and that was
+     * measured rather than assumed before it was written: every path into the
+     * gate — `saveMetaItem`, `deleteMetaItem`, `rollbackMetaItem`,
+     * `publishMetaItem` and `publishPackageDrafts` (via
+     * `promoteDraftForPublish`) — folds its own request first, so `canonical`
+     * is `type` at every live site and both limbs already agreed. What the fold
+     * removes is the unstated "callers must fold" invariant that had already
+     * cost this family several cards.
+     *
+     * ⚠️ It does NOT fold the type the REFUSAL and its audit row are reported
+     * under; those still carry the caller's spelling on purpose. An unfolded
+     * caller that now correctly finds a lock therefore meets
+     * {@link recordMetadataAudit}'s `AUDIT_TYPE_NOT_CANONICAL` assert (#8908)
+     * and fails LOUDLY at 500 instead of silently allowing the write. That is
+     * the fail-closed direction and the assert doing its job — not a hole to
+     * paper over here by folding the ledger key too.
      */
     private async getEffectiveLock(
         type: string,
@@ -10728,20 +10777,24 @@ export class ObjectStackProtocolImplementation implements
         lockReason: string | undefined;
         lockSource: 'artifact' | 'overlay' | undefined;
     }> {
+        // [#9009] ONE key for BOTH limbs — see this method's header.
+        const canonicalType = canonicalMetaType(type);
         // 1. Artifact wins. `lookupArtifactItem` is shadow-immune: a
         //    sys_metadata overlay row hydrated into the registry's plain
         //    key cannot mask the packaged artifact's `_lock` envelope.
-        const artifactItem = this.lookupArtifactItem(type, name) as any;
+        const artifactItem = this.lookupArtifactItem(canonicalType, name) as any;
         if (artifactItem) {
             const p = extractProtection(artifactItem);
             if (p.lock !== 'none') {
                 return { lock: p.lock, lockReason: p.lockReason, lockSource: 'artifact' };
             }
         }
-        // 2. Overlay row.
+        // 2. Overlay row — addressed by the SAME canonical key the repository
+        //    stores it under (`SysMetadataRepository.whereFor`), which is what
+        //    makes this limb read the row the artifact limb already folded to.
         try {
             const where: Record<string, unknown> = {
-                type,
+                type: canonicalType,
                 name,
                 state: 'active',
                 organization_id: organizationId ?? null,
@@ -13437,13 +13490,15 @@ export class ObjectStackProtocolImplementation implements
         //    publish addressed `/meta/fields/...` passed a gate that
         //    `/meta/field/...` answers 403 NOT_OVERRIDABLE. The #7894 shape,
         //    one verb over.
-        //  • `getEffectiveLock`'s OVERLAY limb, which queries `sys_metadata`
-        //    with the raw `type`. Its artifact limb folds; the overlay limb
-        //    does not, so an ADR-0010 `_lock` carried by the stored active row
+        //  • `getEffectiveLock`'s OVERLAY limb, which queried `sys_metadata`
+        //    with the raw `type`. Its artifact limb folded; the overlay limb
+        //    did not, so an ADR-0010 `_lock` carried by the stored active row
         //    was not found when the publish was addressed with a plural — while
         //    the promotion below DID find the row, because it reads the folded
         //    `singularType`. That asymmetry is the one thing here that was not
-        //    fail-closed.
+        //    fail-closed. [#9009] It is no longer this fold that covers it:
+        //    the gate folds its own key now, so this bullet records what the
+        //    boundary fold used to be the ONLY defence for.
         //  • the ADR-0010 audit row and the receipt sentence, which both read
         //    `request.type` and so recorded the CALLER's spelling for a row
         //    written under the canonical one — a compliance query on
@@ -16337,12 +16392,16 @@ export class ObjectStackProtocolImplementation implements
         //    four manifest-absent ones; folding here is what makes the audit
         //    trail agree with the write for BOTH classes.
         //
-        // ⛔ This does NOT close the class at its producer. `getEffectiveLock`'s
-        // overlay limb still queries the raw `type`, so a future caller that
-        // reaches the gate without folding first re-opens the same door. Folding
-        // there instead is the contract-first shape and is deliberately left
-        // open as its own card with its own blast-radius measurement — not
-        // answered here, and not a rider on this fix.
+        // [#9009] The first bullet is now HISTORY, and the residue this comment
+        // used to hold open is closed. It read: "⛔ This does NOT close the class
+        // at its producer … Folding there instead is the contract-first shape and
+        // is deliberately left open as its own card" — a card that was never
+        // filed, so the residue was invisible to the backlog for as long as the
+        // sentence claimed it was tracked. {@link getEffectiveLock} now folds its
+        // own type key, so this fold no longer carries the lock limb; the other
+        // three bullets are still exactly what it reaches. Kept rather than
+        // deleted because a reader arriving here still needs to know which of
+        // these effects belong to THIS boundary and which moved to the producer.
         request = canonicalizeMetaRequestType(request);
         // Canonical by construction from the fold above. NOT a second fold: the
         // `PLURAL_TO_SINGULAR` lookup that used to stand here is exactly what
