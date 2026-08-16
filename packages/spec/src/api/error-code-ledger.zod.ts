@@ -309,6 +309,7 @@ export const ERROR_CODE_LEDGER = {
     'WRONG_PASSWORD',
   ],
   '@objectstack/metadata-protocol': [
+    'AUDIT_TYPE_NOT_CANONICAL',   // [#8908] an ADR-0010 audit row was offered a non-canonical metadata `type` — the writer asserts, the caller folds
     'BATCH_ABORTED',              // sibling item in an all-or-nothing publish; it never ran
     'CLONE_DISABLED',
     'COMMIT_NOT_FOUND',
@@ -326,6 +327,7 @@ export const ERROR_CODE_LEDGER = {
     'OBJECT_OVERLAY_PACKAGE_MISMATCH',  // [ADR-0029 D9.9] object overlay row bound to a package that does not own the object
     'OBJECT_PACKAGE_DISABLED',    // [#7557] object is registered but its owning package is disabled — data plane refuses rather than serving rows
     'ROLLED_BACK',             // atomic data-batch row was written, then undone by the batch rollback (#4793)
+    'STORED_TYPE_NOT_CANONICAL',  // [#8908] a package draft is stored under a non-canonical metadata type (pre-#7894 second-namespace residue) — refused at the publish pre-flight, batch-atomic
     'TENANT_SCOPE_REQUIRED',      // [#7780] destructive call named neither an organization nor an explicit cross-tenant intent; needs an explicit opt-in
     'UNSUPPORTED_QUERY_PARAM',
     'VALIDATION_FAILED',

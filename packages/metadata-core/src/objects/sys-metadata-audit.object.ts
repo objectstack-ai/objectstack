@@ -79,7 +79,19 @@ export const SysMetadataAuditObject = ObjectSchema.create({
       maxLength: 128,
     }),
 
-    /** Metadata type (singular, e.g. `app`, `object`, `view`). */
+    /**
+     * Metadata type (singular, e.g. `app`, `object`, `view`).
+     *
+     * [#8908] "Singular" is now ENFORCED at the writer rather than repaired by
+     * it. `recordMetadataAudit` used to fold its caller's spelling through the
+     * manifest-collection map — which omits the types that are not stack
+     * collections, so the trail came out canonical for the 29 types that never
+     * needed it and non-canonical for the handful that did. It now REFUSES a
+     * non-canonical `type` (`AUDIT_TYPE_NOT_CANONICAL`) and each call site folds
+     * at its own boundary. This column is therefore readable through
+     * `GET /meta/:type/:name/audit`, whose `:type` segment is folded at the
+     * `/meta` door — which a row filed under a plural spelling was not.
+     */
     type: Field.text({
       label: 'Metadata Type',
       required: true,
@@ -123,8 +135,19 @@ export const SysMetadataAuditObject = ObjectSchema.create({
      *  - on `allowed`: `'ok'`
      *  - on `denied`: `'not_overridable'` | `'not_creatable'` |
      *    `'item_locked'` | `'invalid_metadata'` | `'destructive_change'` |
-     *    `'metadata_conflict'` | `'batch_aborted'` | `'namespace_prefix'`
+     *    `'metadata_conflict'` | `'batch_aborted'` | `'namespace_prefix'` |
+     *    `'stored_type_not_canonical'`
      *  - on `forced`: `'lock_override'` (Phase 3)
+     *
+     * `stored_type_not_canonical` (#8908) is the second PRE-FLIGHT refusal, and
+     * the reason this list is worth reading beside `type` below: a package draft
+     * stored under a non-canonical metadata type (`fields`, `seeds`,
+     * `external_catalogs`, `externalCatalogs`, `translations`,
+     * `email_templates` — pre-#7894 second-namespace residue) is refused before
+     * anything is promoted, because publishing it would mint an ACTIVE row in a
+     * namespace no registry read and no compliance query on the canonical type
+     * can see. ⚠️ The row it leaves here is keyed on the CANONICAL type, with
+     * the stored spelling in `note` — see `type` below.
      *
      * `namespace_prefix` (#8595) is a PRE-FLIGHT refusal of a package publish —
      * the ADR-0028 namespace rule rejecting an object draft's name before

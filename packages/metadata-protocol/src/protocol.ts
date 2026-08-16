@@ -3422,12 +3422,65 @@ function withPendingAudit<E extends Error>(err: E, audit: MetadataAuditEntry): E
  * land silently; a runtime fallback would have put an unreachable value in a
  * documented closed set. The compiler is the enforcement.
  */
-type PreflightViolationCode = 'NAMESPACE_PREFIX';
+type PreflightViolationCode = 'NAMESPACE_PREFIX' | 'STORED_TYPE_NOT_CANONICAL';
 
 const PREFLIGHT_AUDIT_CODE: Record<PreflightViolationCode, string> = {
     // adr0112-ok: D6b — persisted audit column, its own lowercase vocabulary
     NAMESPACE_PREFIX: 'namespace_prefix',
+    // adr0112-ok: D6b — persisted audit column, its own lowercase vocabulary
+    STORED_TYPE_NOT_CANONICAL: 'stored_type_not_canonical',
 };
+
+/**
+ * [#8908] Is this AT-REST `type` a spelling the batch publish must refuse?
+ *
+ * ## The class, stated as a predicate rather than a list of four
+ *
+ * `publishPackageDrafts` reads `sys_metadata` rows, so its input is a stored
+ * `type` — not a URL segment, which is why #7894's boundary fold
+ * ({@link canonicalizeMetaRequestType}) never reaches it. `promoteDraftForPublish`
+ * folds the stored spelling through `PLURAL_TO_SINGULAR`, the MANIFEST-collection
+ * map, and that map legitimately omits types which are not stack collections.
+ * For those, the fold is a NO-OP: the lookup key equals the stored spelling, the
+ * draft resolves, and the publish mints an ACTIVE row in the very namespace
+ * `PUT /meta/field/…` answers 403 NOT_OVERRIDABLE for — every registry read and
+ * every compliance query on `field` missing an item the platform just reported
+ * as published.
+ *
+ * The two limbs below are that sentence, mechanically:
+ *
+ *  1. `canonicalMetaType(type) !== type` — the platform's own URL/registry map
+ *     says this spelling names a DIFFERENT type than the one it is stored as, so
+ *     the row lives in a second namespace for an item that has a canonical home.
+ *     A canonical type fails this limb by construction (no canonical spelling
+ *     folds elsewhere — 33 of 33, measured), and so does a plugin-registered or
+ *     unrecognised kind (identity fold), which is what keeps the gate off
+ *     everything that is not this defect.
+ *  2. the MANIFEST fold leaves it unchanged — i.e. `promoteDraftForPublish`
+ *     would look the row up under its stored spelling and FIND it.
+ *
+ * ⛔ Limb 2 is not decoration and must not be dropped for "one simpler rule".
+ * A manifest-PRESENT plural (`objects`) is already fail-closed: the promote
+ * addresses the row by the folded singular, `whereFor` emits that spelling with
+ * no at-rest fallback, and the batch aborts on `NO_DRAFT` — pinned, with its
+ * reasoning, in `protocol.publish-side-effects-canonical-type.test.ts`. Widening
+ * this gate over that class would change a wire-visible `failed[].code` for rows
+ * that are NOT this defect. #8908's ruling names one class; this predicate is it.
+ *
+ * ## Why a predicate and not the four names the card lists
+ *
+ * The card names `fields`, `seeds`, `external_catalogs`, `translations`. Measured
+ * against the real maps, the class is SIX spellings: those four plus
+ * `externalCatalogs` (the camelCase limb of the same type) and `email_templates`
+ * (a registry type whose snake_case plural the manifest map also omits, while
+ * carrying `emailTemplates`). A hand-written list would have shipped with two
+ * members missing and no way to notice; this derivation cannot drift from the
+ * maps it reads, and a newly declared type that never reaches the manifest map
+ * is covered on the day it is declared.
+ */
+function isNonCanonicalStoredType(type: string): boolean {
+    return canonicalMetaType(type) !== type && (PLURAL_TO_SINGULAR[type] ?? type) === type;
+}
 
 /**
  * Implements the per-domain contracts this class ACTUALLY provides (ADR-0076
@@ -10624,14 +10677,69 @@ export class ObjectStackProtocolImplementation implements
      * ADR landed) still answers normal API calls, just without the
      * compliance trail. Phase 2 will make the audit table a hard
      * dependency.
+     *
+     * ## [#8908] `type` is an ASSERTED input, not a tolerated one
+     *
+     * This method used to open with
+     *
+     *     type: PLURAL_TO_SINGULAR[entry.type] ?? entry.type,
+     *
+     * — a silent fold that made every call site free to hand the compliance
+     * ledger whatever spelling it happened to hold. Two things were wrong with
+     * it, and the second is why it could not simply stay:
+     *
+     *  - **Lenient consumer.** Contract-first (Prime Directive #12) puts the
+     *    fold at the producer. A writer that repairs its callers' keys is the
+     *    same shape `canonicalMetaType`'s header has rejected since #4432, one
+     *    table over.
+     *  - **Tolerant AND INCOMPLETE.** The fold read the MANIFEST-collection map,
+     *    which omits the types that are not stack collections. So the trail was
+     *    canonicalized for the 29 types that never needed it and left
+     *    non-canonical for exactly the ones that did — the ledger recording a
+     *    second namespace for the items most likely to be in one.
+     *
+     * Ruled on #8908 (auto-adjudicated 2026-08-15, with the promote refusal, as
+     * ONE card): fold at the boundary, assert here. The four call sites that
+     * build a row out of an AT-REST `type` — all of them on
+     * `publishPackageDrafts` — now fold with {@link canonicalMetaType}; the
+     * `/meta` routes were already canonical by the time they got here
+     * ({@link canonicalizeMetaRequestType}, applied at every entry point).
+     *
+     * ⛔ The refusal is a THROW and is deliberately OUTSIDE the `try` below.
+     * Inside it, the method's own best-effort `catch` would swallow it into a
+     * `console.warn` — which is precisely the "soften the assert to a warn"
+     * the ruling forbids, reached by accident rather than by decision.
+     *
+     * What it does NOT refuse, by construction: a canonical type (no canonical
+     * spelling folds elsewhere), and a plugin-registered or otherwise
+     * unrecognised kind (`canonicalMetaType` is the identity for anything the
+     * static map does not carry, so a kind the platform has not heard of can
+     * never be refused by this gate — the same positive-control-by-construction
+     * `metaUrlSpellingRefusal` is built on).
      */
     private async recordMetadataAudit(entry: MetadataAuditEntry): Promise<void> {
+        const canonical = canonicalMetaType(entry.type);
+        if (canonical !== entry.type) {
+            const err: any = new Error(
+                `[audit_type_not_canonical] Refusing to write a sys_metadata_audit row under the `
+                + `non-canonical metadata type '${entry.type}' (canonical: '${canonical}') for `
+                + `'${entry.name}'. ADR-0010's trail is keyed on (type, name) and read back through `
+                + `the '/meta' boundary, which folds — a row filed under '${entry.type}' is a row no `
+                + `compliance query can reach. Fold the type at the call site (canonicalMetaType) `
+                + `rather than here; see this method's header for why the writer no longer does it.`,
+            );
+            err.code = 'AUDIT_TYPE_NOT_CANONICAL';
+            err.status = 500;
+            throw err;
+        }
         try {
             await this.engine.insert('sys_metadata_audit', {
                 occurred_at: new Date().toISOString(),
                 actor: entry.actor ?? 'system',
                 source: entry.source ?? 'protocol',
-                type: PLURAL_TO_SINGULAR[entry.type] ?? entry.type,
+                // [#8908] Verbatim — the assert above is what makes this
+                // canonical, and a fold here would make the assert unfalsifiable.
+                type: entry.type,
                 name: entry.name,
                 organization_id: entry.organizationId ?? null,
                 operation: entry.operation,
@@ -13751,6 +13859,56 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
+        // ═══ [#8908] The AT-REST spelling gate ════════════════════════════════
+        //
+        // The second pre-flight rule, and the one route by which the namespace
+        // #7894 retired could still mint ACTIVE rows. See
+        // {@link isNonCanonicalStoredType} for the class and for why the
+        // manifest-PRESENT plurals are deliberately NOT in it.
+        //
+        // Refused here, at the pre-flight, rather than by folding the stored
+        // spelling at the promote — that alternative was weighed and ruled
+        // against on #8908 (auto-adjudicated 2026-08-15, option (a)). Folding
+        // would make these rows behave like `objects`: unpromotable, batch
+        // aborted on `NO_DRAFT`, which is fail-closed but strands the operator
+        // with a verdict that describes a missing draft rather than the residue
+        // they actually have. The refusal below names the row, names the
+        // canonical spelling, and says what to do about it — the shape the
+        // namespace-prefix gate above already established, and batch-atomic for
+        // the same ADR-0067 D2 reason.
+        //
+        // ⛔ What this deliberately does NOT do: migrate the row. A
+        // `_migrate-stored` / boot-reconciliation conversion was the other
+        // option on the card and is explicitly NOT ruled — it stays available as
+        // a follow-up with its own appetite. Do not grow one here.
+        //
+        // ⚠️ Measured while writing this, and the reason the message does not
+        // just say "run the stored migration": `migrateStoredMetadata` scans
+        // with `PLURAL_TO_SINGULAR[rawType] ?? rawType` — the same manifest map
+        // — so for exactly these spellings it converts BODIES under the plural
+        // key, finds nothing to change, and reports the row `canonical`. The
+        // stored migration is a real, shipped door (`POST /meta/_migrate-stored`)
+        // that today reports "nothing to do" for this residue, so the actionable
+        // instruction is the re-author path, stated in full.
+        for (const d of drafts) {
+            if (!isNonCanonicalStoredType(d.type)) continue;
+            const canonical = canonicalMetaType(d.type);
+            preflightViolations.push({
+                type: d.type,
+                name: d.name,
+                error: `Draft '${d.type}/${d.name}' is stored under the non-canonical metadata type `
+                    + `'${d.type}'; the canonical type for this item is '${canonical}'. Publishing it would `
+                    + `mint an ACTIVE row in a second namespace that no registry read and no compliance `
+                    + `query on '${canonical}' can see (#7894 closed this namespace at the '/meta' URL door; `
+                    + `this row predates that). Re-author the item under '${canonical}' `
+                    + `(PUT /meta/${canonical}/${d.name}) and drop the '${d.type}' row. Note that `
+                    + `POST /meta/_migrate-stored does NOT rewrite a stored type spelling — it canonicalizes `
+                    + `bodies, and reports rows of this class as already canonical.`,
+                code: 'STORED_TYPE_NOT_CANONICAL',
+                organizationId: d.organizationId ?? null,
+            });
+        }
+
         // [#5488 — RETIRED GATE, recorded overturn of PR #5279]
         //
         // `gateApiDraftsForPublish` stood here (#5206 step 2, #5040 E7 /
@@ -13832,7 +13990,20 @@ export class ObjectStackProtocolImplementation implements
             // every site, and this one gets it by construction.
             for (const v of preflightViolations) {
                 await this.recordMetadataAudit({
-                    type: v.type,
+                    // [#8908] THE BOUNDARY FOLD, on the route that reads rows at
+                    // rest. `v.type` is the STORED spelling, which for a
+                    // `STORED_TYPE_NOT_CANONICAL` violation is by definition not
+                    // the canonical one — and `recordMetadataAudit` now refuses a
+                    // non-canonical `type` outright rather than folding it
+                    // silently (see its header). Folding here is not merely what
+                    // makes the writer's assert satisfiable: it is what makes the
+                    // row READABLE. `auditMetaItem` serves
+                    // `GET /meta/:type/:name/audit`, whose own `:type` segment is
+                    // folded at the `/meta` boundary, so a row filed under the
+                    // plural spelling is a row no operator can query for. The
+                    // stored spelling is not lost — it is named in `note` and in
+                    // `failed[].error`, where it is the actionable fact.
+                    type: canonicalMetaType(v.type),
                     name: v.name,
                     // The draft's OWN scope — see the violation type above.
                     organizationId: v.organizationId,
@@ -13978,7 +14149,28 @@ export class ObjectStackProtocolImplementation implements
                             if (draft?.body) seedBodies.push(draft.body);
                         }
                         const { singularType, result } = await this.promoteDraftForPublish({
-                            type: d.type,
+                            // [#8908] The stored spelling, FOLDED — this route's
+                            // boundary, the analogue of `canonicalizeMetaRequestType`
+                            // on the six `/meta` entry points. Every row that
+                            // reaches here has passed the at-rest spelling gate
+                            // above, so the only non-canonical spellings left are
+                            // the manifest-PRESENT plurals, for which this fold and
+                            // the manifest fold `promoteDraftForPublish` already
+                            // applies agree exactly — the promote resolves the same
+                            // row it always did, and `d.type` (unfolded) still
+                            // populates `failed[]` / `published[]`, which are wire
+                            // shapes reporting what the operator actually stored.
+                            //
+                            // What it changes for those rows is the two things
+                            // downstream of `request.type` that had NOT folded:
+                            // `getEffectiveLock`'s overlay limb (queried the plural,
+                            // found no row, answered `'none'` — "the author declared
+                            // no protection" — for an item whose canonical row may
+                            // carry `_lock`; the single-item twin of that hole is
+                            // #8769 group C), and the `type` on the pending audit
+                            // rows those two gates hand back, which the writer now
+                            // refuses if it is not canonical.
+                            type: canonicalMetaType(d.type),
                             name: d.name,
                             ...(draftOrgId ? { organizationId: draftOrgId } : {}),
                             // [#8907] Promote each draft under the PACKAGE
@@ -14125,7 +14317,11 @@ export class ObjectStackProtocolImplementation implements
             await this.recordPendingDenialAudit(e, { source: 'protocol.publishPackageDrafts' });
             if (causal) {
                 await this.recordMetadataAudit({
-                    type: causal.type,
+                    // [#8908] Folded for the same two reasons as the pre-flight
+                    // rows above — readability through `auditMetaItem`, and the
+                    // writer's assert. `causal` is the draft row itself
+                    // (`__batchItem`), so its `type` is the STORED spelling.
+                    type: canonicalMetaType(causal.type),
                     name: causal.name,
                     organizationId: causal.organizationId ?? null,
                     operation: 'publish',
@@ -14203,7 +14399,14 @@ export class ObjectStackProtocolImplementation implements
         // on whether a later item's DDL happened to throw.
         for (const p of promoted) {
             await this.recordMetadataAudit({
-                type: p.d.type,
+                // [#8908] Folded — the third and last site on this route that
+                // builds an audit row out of a stored `type`. Deliberately
+                // `canonicalMetaType(p.d.type)` and not `p.singularType`: the
+                // latter is the MANIFEST fold, which is a no-op for exactly the
+                // spellings this card is about, so it would have looked like a
+                // canonicalization while changing nothing (measured and closed on
+                // #8858 as a provable no-op).
+                type: canonicalMetaType(p.d.type),
                 name: p.d.name,
                 // The draft's OWN scope — see `PromotedDraft.draftOrgId`.
                 organizationId: p.draftOrgId,
