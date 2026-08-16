@@ -5266,6 +5266,47 @@ export class RestServer {
             handler: async (req: any, res: any) => {
                 try {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
+                    // [#8919] Authoring capability gate — the SAME four lines the
+                    // `PUT` / `DELETE` / `_migrate-stored` doors carry, deliberately
+                    // not a second way of demanding the same capability.
+                    //
+                    // Promotion is authoring. `promoteDraftForPublish` flips the
+                    // `sys_metadata` row `state: 'draft'` → `'active'`, and
+                    // ADR-0027 (E)(5) defines sealing a publish as exactly that
+                    // flip — so this door decides which body is LIVE. Measured
+                    // before the gate: an authenticated principal holding no
+                    // authoring capability at all reached `publishMetaItem` and
+                    // got 200, i.e. it could take a draft somebody else authored
+                    // and make it the live overlay. The `/meta` umbrella already
+                    // refused ANONYMOUS here (401, `registerMetadataEndpoints`),
+                    // so this closes the authenticated-but-uncapable cohort — the
+                    // one the four sibling doors close and these two did not.
+                    //
+                    // ⛔ Not a publish-specific capability: `manage_metadata` is
+                    // ADR-0066 D1's authoring capability and the same one the save
+                    // door demands, so no caller who can author a draft is newly
+                    // refused (measured: the save→publish loop's own first step is
+                    // already gated on it). Splitting author from publisher would
+                    // need a DIFFERENT declared capability and is a product call.
+                    //
+                    // Gate FIRST — before the protocol is resolved — so an
+                    // unauthorized caller cannot use the 501-vs-200 answer to probe
+                    // which kernels implement publishing, and so nothing is promoted
+                    // before the refusal. `isSystem` bypasses, matching every other
+                    // capability gate on the platform.
+                    const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
+                    const held = new Set<string>(
+                        Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
+                    );
+                    if (!ctx?.isSystem && !held.has('manage_metadata')) {
+                        res.status(403).json({
+                            error: {
+                                code: 'FORBIDDEN',
+                                message: 'Publishing a metadata item requires the `manage_metadata` capability.',
+                            },
+                        });
+                        return;
+                    }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!(p as any).publishMetaItem) {
                         res.status(501).json({
@@ -5289,13 +5330,13 @@ export class RestServer {
                     // save without scoping the publish is not a smaller change,
                     // it is a broken one.
                     //
-                    // Unlike the `PUT`/`DELETE` doors this route has no
-                    // capability gate, so it resolves no context of its own
-                    // today. `resolveExecCtx` is memoised per request and called
-                    // in 40+ handlers in this file — this is the existing
-                    // resolver, not new org plumbing (see the `/published`
-                    // comment's seam warning, which stands).
-                    const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
+                    // [#8919] The context is now the one the capability gate above
+                    // already resolved, so the caller a publish is SCOPED to can
+                    // never drift from the caller it was AUTHORIZED against — the
+                    // same single-resolution shape the `PUT` door carries.
+                    // `resolveExecCtx` is memoised per request and called in 40+
+                    // handlers in this file (see the `/published` comment's seam
+                    // warning, which stands).
                     const organizationId = organizationIdForMetaWrite(
                         req.params.type, ctx?.tenantId,
                     );
@@ -5326,6 +5367,40 @@ export class RestServer {
             handler: async (req: any, res: any) => {
                 try {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
+                    // [#8919] Authoring capability gate — the same four lines as
+                    // the sibling doors, and the sharper half of this pair.
+                    // `rollbackMetaItem` restores a CALLER-SUPPLIED `toVersion` as
+                    // the new live row, so without this gate it is a mechanism for
+                    // reverting security hardening: a permission set as it stood
+                    // before it was tightened, a validation rule from before it
+                    // existed, a layout from before field-level security. Measured
+                    // before the gate: an authenticated principal holding no
+                    // authoring capability reached `rollbackMetaItem` and got 200.
+                    //
+                    // It is also the door with the least behind it. Publish at
+                    // least re-runs `assertRuntimeAuthoringRules` on the promoted
+                    // draft (#4463 D1); rollback runs no content gate at all — its
+                    // only refusals are TYPE-level (`isOverlayAllowed` →
+                    // `NOT_OVERRIDABLE`) and the ADR-0010 lock. Neither reads the
+                    // caller, so nothing downstream was ever answering "may this
+                    // principal press this button".
+                    //
+                    // Gate FIRST — before the protocol is resolved — so 403-vs-501
+                    // leaks no kernel capability and nothing is restored before the
+                    // refusal. `isSystem` bypasses, as everywhere else.
+                    const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
+                    const held = new Set<string>(
+                        Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
+                    );
+                    if (!ctx?.isSystem && !held.has('manage_metadata')) {
+                        res.status(403).json({
+                            error: {
+                                code: 'FORBIDDEN',
+                                message: 'Rolling back a metadata item requires the `manage_metadata` capability.',
+                            },
+                        });
+                        return;
+                    }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!(p as any).rollbackMetaItem) {
                         res.status(501).json({
@@ -5359,7 +5434,9 @@ export class RestServer {
                     // of an org-scoped item restores the env-wide body over the
                     // env-wide row — a write to a partition the caller never
                     // named, audited as `null`. See the `PUT` door above.
-                    const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
+                    //
+                    // [#8919] `ctx` is the one the capability gate above resolved,
+                    // so scope and authorization read the same identity.
                     const organizationId = organizationIdForMetaWrite(
                         req.params.type, ctx?.tenantId,
                     );
