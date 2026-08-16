@@ -404,7 +404,15 @@ an environment scope (no `X-Environment-Id` header and no hostname mapping).
 
 ---
 
-## Server Errors (500)
+## Server Errors (5xx)
+
+The heading is `5xx`, not `500`, because these five codes are not all served with
+the same status: `TIMEOUT` is the code a `504` carries and `NOT_IMPLEMENTED` the
+code a `501` carries (`HttpStatusErrorCodeMap`, `packages/spec/src/api/errors.zod.ts`),
+and `SERVICE_UNAVAILABLE` is a `503`. The per-code status is in the
+[quick reference](#http-status-quick-reference) at the end of this page, and
+`pnpm check:error-status-conformance` reconciles every row there against what the
+runtime can actually emit.
 
 ### `INTERNAL_ERROR`
 **Cause:** An unexpected server-side error occurred.  
@@ -673,6 +681,8 @@ async function handleApiCall() {
 | 409 | `conflict` | `CONCURRENT_MODIFICATION`, `DUPLICATE_RECORD`, `DELETE_RESTRICTED` |
 | 422 | `validation` | `MISSING_REQUIRED_FIELD` on an absent `controlled_by_parent` master reference (see [above](#missing_required_field)) — this row is an exception to the 400 row, not a second home for the code |
 | 429 | `rate_limit` | `RATE_LIMIT_EXCEEDED`, `QUOTA_EXCEEDED` |
-| 500 | `server` | `INTERNAL_ERROR`, `DATABASE_ERROR`, `TIMEOUT` |
+| 500 | `server` | `INTERNAL_ERROR`, `DATABASE_ERROR` |
+| 501 | `server` | `NOT_IMPLEMENTED` — the storage routes answer it when the adapter cannot issue presigned URLs |
 | 502 | `external` | `EXTERNAL_SERVICE_ERROR`, `INTEGRATION_ERROR` |
 | 503 | `maintenance` | `SERVICE_UNAVAILABLE` |
+| 504 | `server` | `TIMEOUT` — the status this code names; no route answers `TIMEOUT` with `500` |

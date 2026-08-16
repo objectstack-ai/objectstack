@@ -13,6 +13,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
+import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 
 type Handler = (c: any) => Promise<any>;
 
@@ -58,8 +59,8 @@ describe('install-local compiled-bundle normalization', () => {
         const rawApp = makeRawApp();
         const { ctx, fire } = makeCtx(rawApp, {
             manifest: { register },
-            auth: { api: { getSession: async () => ({ user: { id: 'admin' } }) } },
-            objectql: { syncSchemas: async () => undefined },
+            auth: installerAuthService(),
+            objectql: withInstallerGrants({ syncSchemas: async () => undefined }),
         });
         const plugin = new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: dir });
         await plugin.start(ctx as any);
@@ -90,8 +91,8 @@ describe('install-local compiled-bundle normalization', () => {
         const rawApp = makeRawApp();
         const { ctx, fire } = makeCtx(rawApp, {
             manifest: { register },
-            auth: { api: { getSession: async () => ({ user: { id: 'admin' } }) } },
-            objectql: { syncSchemas: async () => undefined },
+            auth: installerAuthService(),
+            objectql: withInstallerGrants({ syncSchemas: async () => undefined }),
         });
         const plugin = new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: dir });
         await plugin.start(ctx as any);
