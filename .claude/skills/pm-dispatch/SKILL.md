@@ -20,11 +20,10 @@ metadata:
 :**select → claim → dispatch → collect → review → report → next batch**。维护者只在两个点进
 入循环:轮次报告,和 `needs-user-decision` 决策卡。
 
-本文只写**原则、状态机与查表数据**(维护者 2026-08-12 裁定:「现有的项目经理skills 应该大幅简
-化,只需要说原则,不需要写细节」;「处理 issue 时犯的错应该总结成经验,保留 issue id没有意义」)
-。每条经验自含失效模式与边界,⛔ 操作文本不引用issue 编号,不期待读者去翻原始 issue;裁决保留**
-日期 + 原话**;凡钩子/门禁/脚本已机械强制的只留一句原则,细节以脚本头为权威;按需查阅的事实表住
-在 `references/`。
+本文只写**原则、状态机与查表数据**(维护者 2026-08-12 裁定:「现有的项目经理skills 应该大幅简化,只需
+要说原则,不需要写细节」;「处理 issue 时犯的错应该总结成经验,保留 issue id没有意义」)。每条经验自含
+失效模式与边界,⛔ 操作文本不引用issue 编号,不期待读者去翻原始 issue;裁决保留**日期 + 原话**;凡钩子
+/门禁/脚本已机械强制的只留一句原则,细节以脚本头为权威;按需查阅的事实表住在 `references/`。
 
 ## 入口与角色
 
@@ -75,7 +74,7 @@ UI 创建并勾 GitHub 连接器、UI 钉模型(会话内 create_trigger 的Rout
 | **assignee 已设** | 已认领/在飞 —— 不是你的就永不碰 |
 | `pm:dispatched` | 已派发(派发评论记轮次);与摘 `pm:queue` **同一次标签写入**成对落地 |
 | `needs-user-decision` | 决定**待做** —— 永不派发、除已裁代裁通道外永不代答;维护者的收件箱 |
-| `pm:on-hold` | 决定**已做**且答案是「不是现在」—— 不派发也不催;hold 评论带**日期、理由、具名重启条件、出处**(维护者裁或座位定级 —— 出处住评论,⛔ 不设第二个标签区分) |
+| `pm:on-hold` | 决定**已做**且答案是「不是现在」—— 不派发也不催;**仅当正文带机器可读行 `Restart-when: closed <owner/repo>#N`(由 `Blocked-by:` 的同一遍解锁扫描点火、同一正文单通道)或 `Restart-when: <一行可执行判据>` 时才合法**;hold 评论带日期、理由、出处(维护者裁或座位定级,⛔ 不设第二个标签区分) |
 | `pm:blocked` + 正文行 `Blocked-by: #N` | 等上游 —— 选择期跳过,#N 关闭时由解锁扫描放回 |
 | `pm:blocking` | 有 open 下游依赖者(分诊 sweep 自 `Blocked-by:` 索引推导的缓存,⛔ 不手工挂);进选择优先级全序 |
 | `finding` | 观察类记录,恒 = **待首次定级**(定级即离标:晋级换 `pm:queue` / 关闭 / hold 换 `pm:on-hold`;裸标签数即健康读数)—— 不占队列不进收件箱 |
@@ -88,10 +87,14 @@ UI 创建并勾 GitHub 连接器、UI 钉模型(会话内 create_trigger 的Rout
 
 **标签纪律 —— 标签就是状态机,必须诚实:**
 
-- `needs-user-decision` vs `pm:on-hold` = **决定待做 vs 已做**,挂错招来重复升级或永久沉默
-  ;hold 没有重启条件 = 谁都无法合法退出的状态。**机会主义重启条件必须点名触发文件**(维护
-  者 2026-08-11 接受)——「下个碰这些文件的 PR 顺手带上」在命中那一刻没有读者;处方:hold 评论写
-  触发文件清单,车道座位贴设「派发前必查」段,派发卡文件面与清单相交时点名该单、顺手活列为申报过的增项。
+- `needs-user-decision` vs `pm:on-hold` = **决定待做 vs 已做**,挂错招来重复升级或永久沉默;hold 没
+  有可点火的出口 = 谁都无法合法退出的状态,`manual — <理由>` ⛔ 不是合法出口 —— 没有机制能唤醒的卡不
+  hold,按「暂时不准备开发 ⇒ 直接关闭」(维护者 2026-08-16 原话:「我建议有些暂时不准备开发的应该直接
+  关闭。」)关 not planned,理由与出处写进关单评论:卡即记录、重开免费、维护者可否决。**关闭默认不适用
+  `type:Bug` 的 hold**,三分支:可复现且用户可达 ⇒ 回 `pm:queue`(Bug 优先只作用于队列卡,held bug 就
+  是被藏起的缺陷);declared≠enforced 观察类 ⇒ 转 enforce-or-remove 通道(其真实解决路径,不 hold 不裸
+  关);真 won't-fix 候选 ⇒ 逐卡进决策箱 —— 座位永不自行关闭真实缺陷。**机会主义重启条件必须点名触发文
+  件**(维护者 2026-08-11 接受):hold 评论写触发文件清单,座位贴设「派发前必查」段,派发卡文件面与清单相交时点名该单、顺手活列为申报过的增项。
 - **`Blocked-by:` 行是机器可 grep 的反向索引**,一遍读喂三个职责:上游关单时放回被解锁的、按解
   锁扇出排序选择、**在合并后的 ref 上重验每张回队卡的文件面**(⛔ 只做第一件)。**一个标签存在
   ,当且仅当有具名读者**;2026-08-11 的「⛔ 不落存储标签」已被维护者 2026-08-13 意见取代(原话
@@ -141,16 +144,16 @@ UI 创建并勾 GitHub 连接器、UI 钉模型(会话内 create_trigger 的Rout
 产品横跨三仓,依赖方向固定:`objectstack`(后端;`packages/spec` 是唯一契约)→ `objectui`(前端,构
 建产物经 `pnpm objectui:refresh` 回流)与 `cloud`。
 
-1. **Issue 住在修复落地的仓**(维护者 2026-08-10 裁决)。两个例外:**维护者收件箱恒
-   为 objectstack**(分诊时转仓路由;transfer 不可用时重建:出处头 + 裸 `#N` 改全名 + 关源单
-   为 moved);**缝卡留在 objectstack** 带 `repo:objectui` / `repo:cloud` —— 判据:正文抽
-   掉 objectstack 还成立就 file-at-destination,不成立才是缝卡。在飞卡 ⛔ 不中途转仓。
-2. **Contract-first 拆分。** 跨仓 feature 永不是一次派发:父单 + 每仓一 sub-issue, spec/后端
-   先行,下游带 `Blocked-by: <owner/repo>#<n>`;凡 `Blocked-by` 未关闭/未合并的不派发(
-   对 GitHub 现验);被链接或同父的两单永不同批。**Pin 滞后是它的盲区**:本仓 pin 是否已覆盖那
-   个 commit 是第二个读数,派发前用 REST `compare` 核祖先关系(本地 `merge-base` 在浅检出上给
-   假「非祖先」);未覆盖 ⇒ 派发令要求 PR 正文留档分叉窗口,且 ⛔ pin bump 不做 rider(走专
-   用 bump 脚本连带 override 与 lockfile)。
+1. **Issue 住在修复落地的仓,分诊时按判据严格执行**(维护者 2026-08-10 裁决;2026-08-16 重申收紧)。判
+   据:正文抽掉 objectstack 还成立 ⇒ file-at-destination,分诊当场转仓 —— console/UI 缺陷即转 objectui
+   (transfer 不可用时重建:出处头 + 裸 `#N` 改全名 + 关源单为 moved);不成立才是缝卡。**缝卡收窄到真
+   协调卡**,留在 objectstack 带 `repo:objectui` / `repo:cloud`,且**正文必须具名读者**(哪个座位、哪一
+   步读它 —— 只有标签没有具名读者的队列没人扫);维护者收件箱恒为 objectstack。在飞卡 ⛔ 不中途转仓。
+2. **Contract-first 拆分。** 跨仓 feature 永不是一次派发:父单 + 每仓一 sub-issue, spec/后端先行,下
+   游带 `Blocked-by: <owner/repo>#<n>`;凡 `Blocked-by` 未关闭/未合并的不派发(对 GitHub 现验);被链接
+   或同父的两单永不同批。**Pin 滞后是它的盲区**:本仓 pin 是否已覆盖那个 commit 是第二个读数,派发前
+   用 REST `compare` 核祖先关系(本地 `merge-base` 在浅检出上给假「非祖先」);未覆盖 ⇒ 派发令要求 PR
+   正文留档分叉窗口,且 ⛔ pin bump 不做 rider(走专用 bump 脚本连带 override 与 lockfile)。
 3. **联动杂事立单,不靠记忆。** 已验收 PR 的产物流向另一仓时,由**接受那个 PR 的执行座位**立即
    在消费仓立后续单(带 `Blocked-by:`);`domain:*` 仍由分诊补。
 4. **纵向拆分:一个分诊 PM + N 个执行 PM,一人一车道双射**(维护者 2026-08-05 拍板)。分诊座位全
@@ -160,8 +163,7 @@ UI 创建并勾 GitHub 连接器、UI 钉模型(会话内 create_trigger 的Rout
    直派通道** (2026-08-10 常设授权):维护者当面指挥的 PM 会话直接路由,审计评论逐字引用授权指
    令,只对明示指挥的卡成立。分诊空缺时会话型执行 PM 可**代扫**(只做分诊动作,不跨车道认领,座
    位贴注明),座位有主立即停止 —— 两个分类生产者并存,单一生产者的保障当场归零。
-5. **One board, no second tracker。** pm 标签就是状态机;org Project 只是维护者的聚合视图,权
-   威层坚持 issue 正文 + REST。
+5. **One board, no second tracker。** pm 标签就是状态机;org Project 只是维护者的聚合视图,权威层坚持 issue 正文 + REST。
 
 **跨座位转移**:工作跨座位线,PM 永不跨(唯一豁免:简单阻塞项直接接手,见「候选与批次」)—— 落到
 对方队列(目标仓立单带 `pm:queue` +出处行),依赖走 `Blocked-by:`;后续杂事由消费侧座位立;凡触
@@ -189,9 +191,8 @@ UI 创建并勾 GitHub 连接器、UI 钉模型(会话内 create_trigger 的Rout
 | `domain:cli` | `packages/cli`、`runtime`、`verify`、`qa`、`types`、`packages/rest`、`packages/mcp`、`packages/observability`、`packages/client*`、`cloud-connection`、`create-objectstack`、`packages/adapters/*`、`plugin-hono-server`、`plugin-dev` |
 | (无固定归属,按落点分诊) | `packages/apps/*`、`packages/console`(dist 由脚本生成 ⛔ 手改;UI 缺陷走 `repo:objectui`,pin/刷新脚本归 `scripts/` 行)、`examples/*`(归它演练的子系统) |
 
-表未覆盖的包在首次分诊时归类并**走 PR 更新本表**;**新增或退役一个 `domain:*` 必须同批改本表
-**(在流通而不在表 = 无主车道)。座位在编情况以 `label:pm:seat` 索引为准,每
-个 `domain:*` 与 `repo:*` 恰一张座位贴。
+表未覆盖的包在首次分诊时归类并**走 PR 更新本表**;**新增或退役一个 `domain:*` 必须同批改本表**(在流
+通而不在表 = 无主车道)。座位在编情况以 `label:pm:seat` 索引为准,每个 `domain:*` 与 `repo:*` 恰一张座位贴。
 
 **spec 席内分派参考**(维护者 2026-08-16 裁定合并车道:原 `domain:spec-surface` / `domain:spec-tooling` 标签已退役,
 三面同归 `domain:spec` 一席,anchoring rule 双射恢复;以下判据降为席内分派与定价依据):语义/文本按
@@ -276,12 +277,14 @@ UI 创建并勾 GitHub 连接器、UI 钉模型(会话内 create_trigger 的Rout
 。**「生产者在哪?」是常设分诊问题**:declared ≠ enforced 形状的卡先问谁在写这个字段 —— 答案通
 常就是根因,并在派发前改变卡的范围与域标签。
 
-**发现分诊轮(队列的出水口)。** `finding` 恒 = 待首次定级、定级即离标(维护者 2026-08-13 意见;换标
-与 hold 评论纪律见 State model,hold 重验只在具名重启条件命中时发生,⛔ 不设逐卡豁免评论)。**首触定
-级每轮跑**:预算 3–5 张、优先于一切旧卡重验,先过时前提检查再三选一 —— 晋级 / 关闭 not planned(维
-护者可否决重开,PM 不等批准)/ hold;**判级发生在这里,不在立单时**。车道座位可附证据/前提重验,⛔
-不定级不改标(唯一例外:skills 车道 finding 由该席自分诊,全仓轮跳过)。**自动集中轮**(常设授权,维
-护者 2026-08-13):`finding` >15 ⇒ 下一 fire 跑域分批集中轮,sweep 打包晋级五条照用;原话、批量参数与五条细则见 `references/dispatch-runbook.md`。
+**发现分诊轮(队列的出水口)。** `finding` 恒 = 待首次定级、定级即离标(维护者 2026-08-13 意见;换标与
+hold 评论纪律见 State model,hold 重验只在 `Restart-when:` 命中时发生 —— closed 形态随每轮解锁扫描,可
+执行判据由分诊 Routine 每日一个低频子轮批量执行(十几条一行判据逐小时跑是浪费,每日即消化节奏),命中
+同 closed 命中一个待遇:回队前 ref 重验再回队;⛔ 不设逐卡豁免评论)。**首触定级每轮跑**:预算 3–5 张、
+优先于一切旧卡重验,先过时前提检查再三选一 —— 晋级 / 关闭 not planned(维护者可否决重开,PM 不等批准)
+/ hold;**判级发生在这里,不在立单时**。车道座位可附证据/前提重验,⛔ 不定级不改标(唯一例外:skills 车
+道 finding 由该席自分诊,全仓轮跳过)。**自动集中轮**(常设授权,维护者 2026-08-13):`finding` >15 ⇒ 下
+一 fire 跑域分批集中轮,sweep 打包晋级五条照用;原话、批量参数与五条细则见 `references/dispatch-runbook.md`。
 
 **发版板(`target:<major>`;运维细则见 `references/seat-post-protocol.md`)。** 判据二元(⛔ 不
 做优先级渐变 —— 渐变没人维护):「不修它,当前 RC 能不能发?」判阻塞四类:① 用户今天就撞的已发布
@@ -418,12 +421,11 @@ sonnet/opus;机器面默认 opus,门禁语义设计时升 fable;下游适配卡�
 - **Premise-first 写明**:issue 正文是线索不是规格;`premise_still_valid: false` +无 PR 是合法
   且常常有价值的交付 —— 派发词预设 issue 为真,就把好运行变成表面抗命。
 
-**资源与后端(维护者 2026-08-12 裁定:中级卡改子 agent、模型由 PM 按难度逐卡指定;覆盖
-2026-08-10 的「M 及以上默认云卡」)。** S 级机械 + M ⇒ `mode:subagent`(PM 容器内并行,档位按
-Model tiering 显式传参);S 级但不机械(判断面在设计不在门禁)按 M 待遇。`mode:cloud` 只保留给
-:L/XL、必须活过 PM 会话的工作、浏览器/dogfood 验证、逐卡判断的 build 重 M 卡(论证
-见 `references/dispatch-runbook.md`)。**归档义务只落在云卡**;OOM 死的单独重派;判定连同档位写
-进认领评论。
+**资源与后端(维护者 2026-08-12 裁定:中级卡改子 agent、模型由 PM 按难度逐卡指定;覆盖 2026-08-10 的
+「M 及以上默认云卡」)。** S 级机械 + M ⇒ `mode:subagent`(PM 容器内并行,档位按 Model tiering 显式传
+参);S 级但不机械(判断面在设计不在门禁)按 M 待遇。`mode:cloud` 只保留给:L/XL、必须活过 PM 会话的工
+作、浏览器/dogfood 验证、逐卡判断的 build 重 M 卡(论证见 `references/dispatch-runbook.md`)。**归档义
+务只落在云卡**;OOM 死的单独重派;判定连同档位写进认领评论。
 
 **云卡四课**(细则见 `references/dispatch-runbook.md`;一次性云卡用 `create_session`,⛔ 不用
 create_trigger+fire —— 维护者 2026-08-07 拍板,trigger 流只留给定时/重复型):① 授权面随
@@ -483,9 +485,8 @@ You are the reviewer of record —— **对 GitHub 核验,不对报告的自述�
 - **删除与二进制**:死代码删除在 `origin/main` 亲核引用面再 ACCEPT;`+0/-0` 先疑NUL。sweep 类
   交付的范围外产出在 ACCEPT 评论成组列出。
 
-**判决**:**ACCEPT**(issue 英文评论链接 PR 总结)→ 驱动落地;**REWORK**(逐项反馈,同认领重派;补
-丁轮优先 SendMessage 续派原 dev —— 上下文保留省掉全部重验;最多2 轮,第三次升级);**ESCALATE**(
-见「升级与决策」)。
+**判决**:**ACCEPT**(issue 英文评论链接 PR 总结)→ 驱动落地;**REWORK**(逐项反馈,同认领重派;补丁轮
+优先 SendMessage 续派原 dev —— 上下文保留省掉全部重验;最多2 轮,第三次升级);**ESCALATE**(见「升级与决策」)。
 
 **ACCEPT 之后的路径分叉(动手之前先分,不是事后对照)。** 翻 ready / 挂 auto-merge / 入队前,先
 取一次 PR 的路径面(`get_files`,⛔ 不看报告自述)。路径面**一条命中** `docs/adr/**`、
@@ -534,8 +535,8 @@ You are the reviewer of record —— **对 GitHub 核验,不对报告的自述�
 
 停:队列空或 `rounds` 用尽(**仅一次性调用适用**);一轮 ≥ 半数派发失败或升级(系统性问题,继续
 烧 backlog 是浪费);维护者打断。**常设座位队列清空 ≠ 退场**,是切换待命姿态:巡检放宽 60–70 分
-钟(有在飞收紧回 ≤45),待命五项 —— findings 配合(附证据/前提重验,⛔ 不定级不改标)、`pm:blocked` 解锁扫描(含回
-队前 ref 重验与扇出索引更新)、在飞/已入队 PR 跟到 MERGED、决策箱仅在报告中列出 ⛔ 不 nag、跨
+钟(有在飞收紧回 ≤45),待命五项 —— findings 配合(附证据/前提重验,⛔ 不定级不改标)、`pm:blocked`/`pm:on-hold` 解锁扫描(含回
+队前 ref 重验与扇出索引更新;hold 侧读 `Restart-when:`)、在飞/已入队 PR 跟到 MERGED、决策箱仅在报告中列出 ⛔ 不 nag、跨
 车道备忘跟进。退场只有两个入口:维护者交接令(走交接收尾清单),或被惰性回收。
 
 ## 队列管家职责
@@ -667,10 +668,9 @@ pull(今天谁撞上;零拉动默认 defer/ remove);③ AI-agent error-resistanc
 ```
 
 `premise_still_valid: false` + `pr: null` 是合法终报 —— 当再分诊输入复核,永不当失败派发。
-`status: needs_decision` 时 `open_questions` 必须非空。`out_of_scope_findings` 应已由 dev 立
-成无 assignee 的卡(查重先行、归挂判据、`finding` 标注,立在修复落地仓并带回链);PM 核验它们存
-在,**并把同轮并行报告互相对读** —— 两个 dev 同一小时审相邻代码会立出孪生卡,只有 PM 同时看得
-见两份报告。
+`status: needs_decision` 时 `open_questions` 必须非空。`out_of_scope_findings` 应已由 dev 立成无 assignee 的卡
+(查重先行、归挂判据、`finding` 标注,立在修复落地仓并带回链);PM 核验它们存在,**并把同轮并行报告互相
+对读** —— 两个 dev 同一小时审相邻代码会立出孪生卡,只有 PM 同时看得见两份报告。
 
 ## 机械守卫索引(原则在此,细节以脚本头为权威)
 

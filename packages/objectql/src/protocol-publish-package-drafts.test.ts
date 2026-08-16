@@ -13,11 +13,84 @@ import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';
  * metadata committed. These tests cover the orchestration contract; the
  * per-item guards live in `publishMetaItem`'s own suites.
  */
-function makeProtocol(drafts: Array<{ type: string; name: string }>) {
+/** An artifact that is already ACTIVE before the publish under test runs. */
+interface ActiveRow {
+  type: string;
+  name: string;
+  organizationId?: string | null;
+  version: number;
+}
+
+/**
+ * [#8896] A real double for the two engine calls `publishPackageDrafts` makes
+ * on its own — the ADR-0067 pre-publish CAPTURE read, and the commit write.
+ *
+ * ## Why this fixture had to grow a `findOne`
+ *
+ * It never had one, and until #8896 that was invisible: the capture sat behind
+ * a bare `catch` which swallowed the resulting `TypeError` and pushed a
+ * fabricated `{ existedBefore: false, prevVersion: null }` entry. So every test
+ * in this file was green on a path that never ran — including the ones whose
+ * names claim to cover the batch end to end. `existedBefore` was `false` for
+ * every item of every case here, not because the fixture said so but because
+ * the read crashed and the crash was hidden. Nothing in the repo exercised the
+ * real capture.
+ *
+ * Once the capture discriminates by error type (only an unprovisioned table is
+ * benign; a `TypeError` from an engine missing the method is not), the missing
+ * method surfaces as it should. The repair belongs HERE: the production
+ * behaviour is right and the fixture was lying.
+ *
+ * ## Two things it is careful about
+ *
+ * `null` is returned EXPLICITLY for "no active row exists" rather than falling
+ * out of an absent method, because those two are now distinguishable and only
+ * one of them is a truthful answer. And `insert` records the commit row, so the
+ * revert plan this fixture produces is observable instead of being swallowed a
+ * second time by `recordCommit`'s own catch.
+ */
+function makeCaptureEngine(activeRows: ActiveRow[] = []) {
+  const captureReads: Array<Record<string, unknown>> = [];
+  const commitRows: Array<Record<string, unknown>> = [];
+  const engine = {
+    findOne: async (table: string, opts?: { where?: Record<string, unknown> }) => {
+      if (table !== 'sys_metadata') return null;
+      const where = opts?.where ?? {};
+      if (where.state !== 'active') return null;
+      captureReads.push(where);
+      const hit = activeRows.find(
+        (r) => r.type === where.type
+          && r.name === where.name
+          && (r.organizationId ?? null) === (where.organization_id ?? null),
+      );
+      // Explicitly `null`, never `undefined`-by-omission — see the docblock.
+      return hit ? { version: hit.version } : null;
+    },
+    insert: async (table: string, data: Record<string, unknown>) => {
+      if (table === 'sys_metadata_commit') commitRows.push(data);
+      return { id: `${table}_${commitRows.length}` };
+    },
+  };
+  /** The revert plan as it was actually STORED, parsed from the commit row. */
+  const storedCommitItems = (): Array<Array<{
+    type: string; name: string; existedBefore: boolean; prevVersion: number | null;
+  }>> => commitRows.map((c) => JSON.parse(String(c.items)));
+  return { engine, captureReads, commitRows, storedCommitItems };
+}
+
+function makeProtocol(
+  drafts: Array<{ type: string; name: string }>,
+  activeRows: ActiveRow[] = [],
+) {
   const protocol = new ObjectStackProtocolImplementation({} as never);
   // Stub the bits that need a real engine/overlay so we can exercise the loop.
   (protocol as any).ensureOverlayIndex = async () => {};
   (protocol as any).getOverlayRepo = () => ({ listDrafts: async () => drafts });
+  // [#8896] The capture/commit double. Tests that need MORE engine surface
+  // spread this rather than replacing it — replacing it takes `findOne` away
+  // again and re-arms exactly the vacuity described above.
+  const capture = makeCaptureEngine(activeRows);
+  (protocol as any).engine = capture.engine;
   // Phase-1 / Phase-2 seams (ADR-0067 D2).
   const promote = vi.spyOn(protocol as any, 'promoteDraftForPublish');
   const sideEffects = vi
@@ -28,7 +101,15 @@ function makeProtocol(drafts: Array<{ type: string; name: string }>) {
     orgId: null,
     result: { version: 'h', seq: 1, item: { body: { name: req.name } }, packageId: null },
   });
-  return { protocol, promote, sideEffects, promoteOk };
+  return {
+    protocol,
+    promote,
+    sideEffects,
+    promoteOk,
+    baseEngine: capture.engine,
+    captureReads: capture.captureReads,
+    storedCommitItems: capture.storedCommitItems,
+  };
 }
 
 /** A fake engine whose transaction() tracks commit/rollback (ADR-0067 D2). */
@@ -57,11 +138,23 @@ describe('protocol.publishPackageDrafts (ADR-0033 / ADR-0067 D2)', () => {
       { type: 'object', name: 'student' },
       { type: 'view', name: 'course_list' },
     ];
-    const { protocol, promote, sideEffects, promoteOk } = makeProtocol(drafts);
+    const { protocol, promote, sideEffects, promoteOk, captureReads } = makeProtocol(drafts);
     promote.mockImplementation(async (req: any) => promoteOk(req));
 
     const res = await protocol.publishPackageDrafts({ packageId: 'app.edu' });
 
+    // [#8896] The ADR-0067 capture really RAN, once per draft. Until the
+    // capture was discriminated by error type this fixture had no `findOne` at
+    // all and the resulting TypeError was swallowed, so every assertion below
+    // held over a batch whose revert plan was fabricated rather than read.
+    // The capture pass runs BEFORE Phase 1, so its reads are the FIRST three —
+    // one per draft, in draft order, each in the draft's own scope. (Reads
+    // after these belong to the ADR-0038 L3 probes, which run post-commit.)
+    expect(captureReads.slice(0, 3)).toEqual([
+      { organization_id: null, type: 'object', name: 'course', state: 'active' },
+      { organization_id: null, type: 'object', name: 'student', state: 'active' },
+      { organization_id: null, type: 'view', name: 'course_list', state: 'active' },
+    ]);
     expect(promote).toHaveBeenCalledTimes(3);
     expect((promote.mock.calls[0][0] as any)).toMatchObject({ type: 'object', name: 'course' });
     // Side effects ran once per promoted item, AFTER promotion, in order.
@@ -78,13 +171,63 @@ describe('protocol.publishPackageDrafts (ADR-0033 / ADR-0067 D2)', () => {
     expect(res.published.map((p) => p.name)).toEqual(['course', 'student', 'course_list']);
   });
 
+  /**
+   * [#8896] The ADR-0067 revert plan, actually exercised.
+   *
+   * `existedBefore: false` means "revert = soft-remove"; `true` means "revert =
+   * restoreVersion(prevVersion)". Those are opposite operations, and until this
+   * card every test in this file recorded `false` for every item — not because
+   * the fixture had no active rows but because the capture read crashed on a
+   * missing `findOne` and a bare `catch` fabricated `false` over the crash. So
+   * the `true` branch had never once been reached from here, and a regression
+   * that made every revert a deletion would have kept this suite green.
+   *
+   * Both answers are asserted in ONE batch so neither can pass by the fixture
+   * simply having no active rows at all.
+   */
+  it('records the real pre-publish state per item: existedBefore true with prevVersion, false for a new artifact', async () => {
+    const { protocol, promote, promoteOk, captureReads, storedCommitItems } = makeProtocol(
+      [
+        { type: 'object', name: 'course' },   // already active at version 4
+        { type: 'object', name: 'student' },  // brand new
+      ],
+      [{ type: 'object', name: 'course', version: 4 }],
+    );
+    promote.mockImplementation(async (req: any) => promoteOk(req));
+
+    const res = await protocol.publishPackageDrafts({ packageId: 'app.edu' });
+
+    expect(res).toMatchObject({ success: true, publishedCount: 2 });
+    // The capture ran for both items, in their own scope — this is what makes
+    // the values below evidence rather than defaults.
+    expect(captureReads.slice(0, 2)).toEqual([
+      { organization_id: null, type: 'object', name: 'course', state: 'active' },
+      { organization_id: null, type: 'object', name: 'student', state: 'active' },
+    ]);
+    // One commit, carrying one entry per promoted item, each with the state
+    // that was actually READ.
+    expect(storedCommitItems()).toEqual([
+      [
+        { type: 'object', name: 'course', existedBefore: true, prevVersion: 4 },
+        { type: 'object', name: 'student', existedBefore: false, prevVersion: null },
+      ],
+    ]);
+    // And the commit was really recorded — `recordCommit` swallows its own
+    // write failure, so an unasserted `commitId` proves nothing (see #9066).
+    expect(res.commitId).toBeDefined();
+  });
+
   it('rejects an object draft missing the package namespace prefix — atomic, before promoting', async () => {
-    const { protocol, promote } = makeProtocol([
+    const { protocol, promote, baseEngine } = makeProtocol([
       { type: 'object', name: 'edu_course' },
       { type: 'object', name: 'ticket' }, // missing the 'edu_' prefix
     ]);
     // Package declares namespace 'edu' (derived+persisted at install time).
-    (protocol as any).engine = { registry: { getPackage: () => ({ manifest: { namespace: 'edu' } }) } };
+    // [#8896] Spread, never replace — see `makeCaptureEngine`.
+    (protocol as any).engine = {
+      ...baseEngine,
+      registry: { getPackage: () => ({ manifest: { namespace: 'edu' } }) },
+    };
 
     const res = await protocol.publishPackageDrafts({ packageId: 'app.edu' });
 
@@ -97,11 +240,15 @@ describe('protocol.publishPackageDrafts (ADR-0033 / ADR-0067 D2)', () => {
   });
 
   it('publishes compliant prefixed object drafts under a declared namespace', async () => {
-    const { protocol, promote, promoteOk } = makeProtocol([
+    const { protocol, promote, promoteOk, baseEngine } = makeProtocol([
       { type: 'object', name: 'edu_course' },
       { type: 'object', name: 'edu_student' },
     ]);
-    (protocol as any).engine = { registry: { getPackage: () => ({ manifest: { namespace: 'edu' } }) } };
+    // [#8896] Spread, never replace — see `makeCaptureEngine`.
+    (protocol as any).engine = {
+      ...baseEngine,
+      registry: { getPackage: () => ({ manifest: { namespace: 'edu' } }) },
+    };
     promote.mockImplementation(async (req: any) => promoteOk(req));
 
     const res = await protocol.publishPackageDrafts({ packageId: 'app.edu' });
@@ -161,12 +308,13 @@ describe('protocol.publishPackageDrafts (ADR-0033 / ADR-0067 D2)', () => {
   });
 
   it('wraps the batch in ONE engine transaction and rolls it back on failure', async () => {
-    const { protocol, promote, promoteOk } = makeProtocol([
+    const { protocol, promote, promoteOk, baseEngine } = makeProtocol([
       { type: 'object', name: 'course' },
       { type: 'object', name: 'student' },
     ]);
     const { engine, txn } = makeTxnEngine();
-    (protocol as any).engine = engine;
+    // [#8896] Spread, never replace — see `makeCaptureEngine`.
+    (protocol as any).engine = { ...baseEngine, ...engine };
     promote.mockImplementation(async (req: any) => {
       if (req.name === 'student') throw new Error('boom');
       return promoteOk(req);
@@ -181,11 +329,12 @@ describe('protocol.publishPackageDrafts (ADR-0033 / ADR-0067 D2)', () => {
   });
 
   it('commits the transaction once on a clean batch', async () => {
-    const { protocol, promote, promoteOk } = makeProtocol([
+    const { protocol, promote, promoteOk, baseEngine } = makeProtocol([
       { type: 'object', name: 'course' },
     ]);
     const { engine, txn } = makeTxnEngine();
-    (protocol as any).engine = engine;
+    // [#8896] Spread, never replace — see `makeCaptureEngine`.
+    (protocol as any).engine = { ...baseEngine, ...engine };
     promote.mockImplementation(async (req: any) => promoteOk(req));
 
     const res = await protocol.publishPackageDrafts({ packageId: 'app.edu' });
@@ -236,6 +385,12 @@ describe('protocol.publishPackageDrafts (ADR-0033 / ADR-0067 D2)', () => {
     ];
     const protocol = new ObjectStackProtocolImplementation({} as never);
     (protocol as any).ensureOverlayIndex = async () => {};
+    // [#8896] This case builds its own protocol rather than going through
+    // `makeProtocol`, so it needs the capture double explicitly — nothing here
+    // is published yet, so every artifact is new and `findOne` truthfully
+    // answers `null`.
+    const capture = makeCaptureEngine();
+    (protocol as any).engine = capture.engine;
     const seedBodyByName: Record<string, unknown> = {
       project_sample: { object: 'project', records: [{ name: 'Apollo' }] },
       task_sample: { object: 'task', records: [{ name: 'Design' }] },

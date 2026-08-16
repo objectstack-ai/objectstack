@@ -80,6 +80,35 @@
  *       accelerator, never an exhaustive audit: a delivery older than the
  *       window is invisible, and the finding clears when the paired write
  *       lands, not when the PR ages out.
+ *   H9  `pm:on-hold` without a machine-fireable `Restart-when:` body line —
+ *       the state model (post 2026-08-16 ruling) makes the hold state legal
+ *       ONLY with a machine-readable exit: `Restart-when: closed <owner/repo>#N`
+ *       (fired by the same unlock scan as `Blocked-by:`, same single body
+ *       channel) or a one-line executable predicate. A hold nothing can fire
+ *       is indistinguishable from an abandoned card. `Restart-when: manual — …`
+ *       counts as MISSING, deliberately: the protocol says a card no mechanism
+ *       can revive is closed `not planned` (reason + provenance in the closing
+ *       comment), so accepting a `manual` line here would hand every seat a
+ *       one-word spelling that defeats the invariant this item enforces.
+ *   H10 `priority:p0`, open, unassigned, and no activity past the threshold —
+ *       p0 is queue-jump priority (dispatched immediately, past batch and
+ *       round boundaries), so an unclaimed p0 holding still for longer than
+ *       any legal round latency almost always means NO seat's scan scope
+ *       covers the queue it sits in (the measured specimen: a correctly
+ *       triaged p0 that sat ~36h because the label queue it was routed to had
+ *       no named reader). Staleness is read from `updated_at` — an
+ *       unparseable timestamp reports as a finding, never as fresh (#4690:
+ *       "could not read the input" must not look like "input is clean").
+ *   H11 the important-parked inventory — a card carrying an importance signal
+ *       (native type `Bug`, or a `bug` / `security` / `priority:*` label)
+ *       sitting in `pm:blocked` or `pm:on-hold` and open past the threshold.
+ *       Maintainer concern, 2026-08-16, verbatim: 「我担心的优先的，重要的问
+ *       题，比如bug 被放进 blocked 或者 on-hold 没人理会」. Distinct from H10
+ *       (p0 + UNASSIGNED regardless of state): H11 is the broader
+ *       importance × parked-state cross, so every triage fire prints the
+ *       inventory of important cards that a parked state could otherwise
+ *       hide indefinitely. Report-only like everything here — the remedy is
+ *       the triage round re-checking the card's exit liveness, not a gate.
  *
  * ## The close mechanism, measured (#8293)
  *
@@ -464,6 +493,130 @@ export function h8MergedPrStillDispatched(issue, mergedPrs) {
 }
 
 // ---------------------------------------------------------------------------
+// H9 — `pm:on-hold` without a machine-fireable `Restart-when:` body line.
+//
+// Same shape as H4 (label's machine half is a body line), same single body
+// channel: the unlock scan greps issue bodies only, so a condition parked in a
+// comment does not exist to the machinery — which is exactly the population
+// this detector exists to surface.
+// ---------------------------------------------------------------------------
+
+/**
+ * H9 — null when clean, else the finding sentence.
+ *
+ * Legal iff SOME `Restart-when:` line carries a value that is not `manual…`.
+ * The spelling is case-sensitive and byte-stable like `Blocked-by:` (H4): the
+ * scan that fires these lines greps the literal, so a lowercase variant is a
+ * line the machinery cannot see and must be flagged, not tolerated.
+ */
+export function h9OnHoldNoRestartWhen(issue) {
+  if (!labelNames(issue).includes('pm:on-hold')) return null;
+  const values = [...(issue.body ?? '').matchAll(/^\s*Restart-when:[ \t]*(\S.*)$/gm)].map((m) =>
+    m[1].trim(),
+  );
+  if (values.some((v) => !/^manual\b/i.test(v))) return null;
+  const shape =
+    values.length === 0
+      ? 'no `Restart-when:` body line'
+      : 'its only `Restart-when:` is `manual`, which no mechanism can fire';
+  return (
+    `\`pm:on-hold\` with ${shape} — the hold state is legal only with a machine-fireable exit ` +
+    `(\`Restart-when: closed <owner/repo>#N\`, or a one-line executable predicate). Add the line, ` +
+    `or apply the protocol's default: a card no mechanism can revive is closed \`not planned\` ` +
+    `with reason + provenance in the closing comment (type:Bug holds re-route instead — see the ` +
+    `state model's Bug branch).`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H10 — stale unclaimed p0 (routing-gap backstop).
+// ---------------------------------------------------------------------------
+
+/**
+ * H10 threshold — p0 protocol latency is measured in minutes-to-hours (queue
+ * jump, dispatch past batch limits), so 24h of silence while unclaimed exceeds
+ * any legal round latency severalfold while still tolerating weekend lulls;
+ * the measured no-reader specimen sat ~36h and would have been caught a day
+ * earlier.
+ */
+export const P0_UNCLAIMED_STALE_HOURS = 24;
+
+/**
+ * H10 — null when clean, else the finding sentence.
+ *
+ * Deliberately the bare conjunction the protocol names (p0 + open + unassigned
+ * + stale): no carve-out for decision/blocked/hold states, because a p0 aging
+ * in ANY box is exactly what the triage brief should be showing the maintainer
+ * — the flag is report-only and p0 volume is tiny by construction.
+ */
+export function h10StaleUnclaimedP0(issue, nowMs = Date.now()) {
+  if (!labelNames(issue).includes('priority:p0')) return null;
+  if ((issue.assignees ?? []).length > 0) return null;
+  const updated = Date.parse(issue.updated_at ?? '');
+  const ageHours = Number.isFinite(updated) ? (nowMs - updated) / 3_600_000 : null;
+  if (ageHours !== null && ageHours <= P0_UNCLAIMED_STALE_HOURS) return null;
+  const reading =
+    ageHours === null
+      ? 'its `updated_at` is unreadable (an unreadable timestamp must not read as fresh)'
+      : `no activity for ~${Math.round(ageHours)}h (threshold ${P0_UNCLAIMED_STALE_HOURS}h)`;
+  return (
+    `\`priority:p0\`, open and unassigned, with ${reading} — p0 is queue-jump priority, so a ` +
+    `stale unclaimed one usually means no seat's declared scan scope covers the queue it sits ` +
+    `in. Put it in the triage round brief / decision box and name its reader.`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H11 — the important-parked inventory (maintainer concern, 2026-08-16).
+// ---------------------------------------------------------------------------
+
+/**
+ * H11 threshold — importance signals parked in `pm:blocked`/`pm:on-hold` are
+ * exactly the cards the maintainer fears go unwatched; 7 days is one full
+ * triage week — long enough that a legitimate short park has cleared, short
+ * enough that a real defect cannot age a release cycle out of sight.
+ */
+export const IMPORTANT_PARKED_STALE_DAYS = 7;
+
+/**
+ * H11 — null when clean, else the finding sentence.
+ *
+ * Importance is read from BOTH the native issue type (`Bug`, object or string
+ * shape — REST serializes it as an object) and the label vocabulary
+ * (`bug` / `security` / any `priority:*`), because the triage protocol only
+ * types new cards and deliberately does not backfill the stock — a label-only
+ * reading would hide exactly the older cards most at risk of being forgotten.
+ * Age is `created_at` ("open longer than", per the card); an unreadable
+ * timestamp flags rather than reading as fresh (#4690 direction, same as H10).
+ */
+export function h11ImportantParked(issue, nowMs = Date.now()) {
+  const labels = labelNames(issue);
+  const parked = labels.includes('pm:blocked') || labels.includes('pm:on-hold');
+  if (!parked) return null;
+  const typeName = typeof issue.type === 'string' ? issue.type : issue.type?.name;
+  const signals = [];
+  if (typeName === 'Bug') signals.push('type:Bug');
+  for (const l of labels) {
+    if (l === 'bug' || l === 'security' || l.startsWith('priority:')) signals.push(l);
+  }
+  if (signals.length === 0) return null;
+  const created = Date.parse(issue.created_at ?? '');
+  const ageDays = Number.isFinite(created) ? (nowMs - created) / 86_400_000 : null;
+  if (ageDays !== null && ageDays <= IMPORTANT_PARKED_STALE_DAYS) return null;
+  const state = labels.includes('pm:blocked') ? 'pm:blocked' : 'pm:on-hold';
+  const age =
+    ageDays === null
+      ? 'an unreadable `created_at` (which must not read as fresh)'
+      : `open ~${Math.round(ageDays)}d`;
+  return (
+    `important card parked: ${signals.join(' + ')} sitting in \`${state}\`, ${age} ` +
+    `(threshold ${IMPORTANT_PARKED_STALE_DAYS}d) — the important-parked inventory exists so a bug ` +
+    `or security card cannot age out of sight inside a parked state. Re-check the card's ` +
+    `\`Blocked-by:\` / \`Restart-when:\` liveness in the triage round.`
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Transport prerequisite — the classifier (pure) and the probe that feeds it.
 //
 // Modelled on `scripts/cli-build-prerequisite.mjs`: the knowledge lives in pure
@@ -759,7 +912,7 @@ function reportPrerequisiteNotMet(v, options = {}) {
   const nothing =
     swept === 0
       ? [
-          `  Nothing was swept: no issue was listed and no predicate (H1–H6) ran, so this`,
+          `  Nothing was swept: no issue was listed and no predicate (H1–H11) ran, so this`,
           `  result says NOTHING about whether the board carries half-states. It is not a`,
           `  clean board and it is not a dirty one — it is no reading at all.`,
         ]
@@ -838,7 +991,7 @@ async function sweep() {
     console.log(`  ${code} #${issue.number} ${msg}\n     ${issue.html_url}`);
   }
   console.log(
-    `check-half-states: swept ${seen.size} open pm-labeled issue(s), ${seenPrs.size} open PR(s) ` +
+    `check-half-states: swept ${seen.size} open pm-/p0-labeled issue(s), ${seenPrs.size} open PR(s) ` +
       `and ${seenMerged.size} recently-merged PR(s) in ${OWNER_REPO} — ${findings.length} half-state(s) found. ` +
       `Report-only: findings are patrol input, not a gate verdict.`,
   );
@@ -875,7 +1028,7 @@ async function listRecentlyMergedPullRequests() {
 }
 
 async function sweepInto(findings, seen, seenPrs, seenMerged) {
-  for (const label of ['pm:dispatched', 'pm:queue', 'pm:blocked', 'pm:seat']) {
+  for (const label of ['pm:dispatched', 'pm:queue', 'pm:blocked', 'pm:seat', 'pm:on-hold', 'priority:p0']) {
     for (const issue of await listIssues(label)) seen.set(issue.number, issue);
   }
 
@@ -890,6 +1043,12 @@ async function sweepInto(findings, seen, seenPrs, seenMerged) {
     if (h4BlockedNoBlockedBy(issue)) {
       findings.push([issue, 'H4', '`pm:blocked` without a `Blocked-by:` body line']);
     }
+    const restartless = h9OnHoldNoRestartWhen(issue);
+    if (restartless) findings.push([issue, 'H9', restartless]);
+    const staleP0 = h10StaleUnclaimedP0(issue);
+    if (staleP0) findings.push([issue, 'H10', staleP0]);
+    const parked = h11ImportantParked(issue);
+    if (parked) findings.push([issue, 'H11', parked]);
     if (labels.includes('pm:seat')) {
       const desync = h5SeatStickerDesync(issue);
       if (desync) findings.push([issue, 'H5', desync]);
@@ -897,11 +1056,13 @@ async function sweepInto(findings, seen, seenPrs, seenMerged) {
         const kb = (Buffer.byteLength(issue.body ?? '', 'utf8') / 1024).toFixed(1);
         findings.push([issue, 'H6', `seat body is ${kb} KB (soft bound ~10 KB) — compact to the six-section current-state template (#7583; edit history is the archive)`]);
       }
-    } else if ((issue.assignees ?? []).length > 0 && labels.some((l) => l.startsWith('pm:'))) {
-      // H2 needs the comment thread — fetched only for candidates, and only
-      // their first pages: a claim comment is posted at claim time, so on a
-      // healthy card it is early in the thread; a >100-comment card with a
-      // late claim shows up as a finding the patrol then reads by hand.
+    } else if ((issue.assignees ?? []).length > 0 && labels.some((l) => l === 'pm:queue' || l === 'pm:dispatched')) {
+      // H2 needs the comment thread — fetched only for candidates (exactly the
+      // pm-tracked set h2 judges; the on-hold/p0 listings above must not buy
+      // comment fetches h2 would discard), and only their first pages: a claim
+      // comment is posted at claim time, so on a healthy card it is early in
+      // the thread; a >100-comment card with a late claim shows up as a
+      // finding the patrol then reads by hand.
       const comments = await rest(`/repos/${OWNER_REPO}/issues/${issue.number}/comments?per_page=100`);
       if (h2AssigneeNoClaimComment(issue, comments.map((c) => c.body))) {
         findings.push([issue, 'H2', 'assignee set but no claim comment on the thread']);
@@ -1157,6 +1318,72 @@ function selfTest() {
   );
   t('H8: empty merged window -> clean', h8MergedPrStillDispatched(dispatched(4321), []), null);
   t('H8: missing merged window -> clean', h8MergedPrStillDispatched(dispatched(4321), undefined), null);
+
+  // -- H9: `pm:on-hold` without a machine-fireable `Restart-when:` ------------
+  const hold = (body) => issue(['pm:on-hold'], [], body);
+  t('H9: hold with no Restart-when line -> finding', typeof h9OnHoldNoRestartWhen(hold('parked until the train ships')), 'string');
+  t('H9: …and the finding prescribes the close default', h9OnHoldNoRestartWhen(hold('parked')).includes('not planned'), true);
+  t('H9: closed-upstream form -> clean', h9OnHoldNoRestartWhen(hold('Restart-when: closed acme/widgets#123')), null);
+  t('H9: executable-predicate form -> clean', h9OnHoldNoRestartWhen(hold('Restart-when: npm view create-objectstack dist-tags reports >= 17.0.0')), null);
+  t('H9: mid-body line -> clean', h9OnHoldNoRestartWhen(hold('Context first.\nRestart-when: closed acme/widgets#123\nMore prose.')), null);
+  // `manual` is a hold trying to opt out of having an exit — it counts as
+  // missing, or the one-word spelling defeats the invariant.
+  t('H9: manual form -> finding', typeof h9OnHoldNoRestartWhen(hold('Restart-when: manual — first EE customer asking')), 'string');
+  t('H9: …and the finding names the manual shape', h9OnHoldNoRestartWhen(hold('Restart-when: manual — reason')).includes('manual'), true);
+  t('H9: Manual case-insensitive as a VALUE -> finding', typeof h9OnHoldNoRestartWhen(hold('Restart-when: Manual — reason')), 'string');
+  t('H9: manual line + fireable line -> clean', h9OnHoldNoRestartWhen(hold('Restart-when: manual — x\nRestart-when: closed acme/widgets#9')), null);
+  // The KEY is byte-stable like `Blocked-by:` — a lowercase key is a line the
+  // unlock scan cannot see, so it must flag, not pass.
+  t('H9: lowercase key is invisible to the scan -> finding', typeof h9OnHoldNoRestartWhen(hold('restart-when: closed acme/widgets#123')), 'string');
+  t('H9: empty-valued line does not count', typeof h9OnHoldNoRestartWhen(hold('Restart-when:')), 'string');
+  t('H9: prose mentioning the literal inline does not count', typeof h9OnHoldNoRestartWhen(hold('add a Restart-when: line later')), 'string');
+  t('H9: card without pm:on-hold is out of scope', h9OnHoldNoRestartWhen(issue(['pm:queue'], [], 'no line at all')), null);
+  t('H9: missing body -> finding', typeof h9OnHoldNoRestartWhen(issue(['pm:on-hold'], [], undefined)), 'string');
+
+  // -- H10: stale unclaimed p0 (routing-gap backstop) -------------------------
+  const NOW = Date.parse('2026-08-16T12:00:00Z');
+  const hoursAgo = (h) => new Date(NOW - h * 3_600_000).toISOString();
+  const p0 = (assignees, updatedAt, extra = []) => ({
+    ...issue(['priority:p0', ...extra], assignees),
+    updated_at: updatedAt,
+  });
+  t('H10: unassigned p0 past the threshold -> finding', typeof h10StaleUnclaimedP0(p0([], hoursAgo(36), ['pm:queue']), NOW), 'string');
+  t('H10: …and the finding names the threshold', h10StaleUnclaimedP0(p0([], hoursAgo(36)), NOW).includes(`${P0_UNCLAIMED_STALE_HOURS}h`), true);
+  t('H10: fresh unassigned p0 -> clean', h10StaleUnclaimedP0(p0([], hoursAgo(1)), NOW), null);
+  t('H10: exactly at the threshold -> clean (strictly beyond fires)', h10StaleUnclaimedP0(p0([], hoursAgo(P0_UNCLAIMED_STALE_HOURS)), NOW), null);
+  t('H10: assigned p0 is out of scope however old', h10StaleUnclaimedP0(p0(['os-help'], hoursAgo(200)), NOW), null);
+  t('H10: non-p0 card is out of scope', h10StaleUnclaimedP0({ ...issue(['pm:queue']), updated_at: hoursAgo(200) }, NOW), null);
+  // #4690 in miniature: an unreadable timestamp must not read as fresh.
+  t('H10: unparseable updated_at -> finding, not fresh', typeof h10StaleUnclaimedP0(p0([], 'not-a-date'), NOW), 'string');
+  t('H10: absent updated_at -> finding, not fresh', typeof h10StaleUnclaimedP0(p0([], undefined), NOW), 'string');
+  // The bare conjunction, no state carve-outs: a p0 aging in the decision box
+  // is exactly what the brief should show (report-only, tiny population).
+  t('H10: p0 aging under needs-user-decision still flags', typeof h10StaleUnclaimedP0(p0([], hoursAgo(48), ['needs-user-decision']), NOW), 'string');
+
+  // -- H11: important-parked inventory (2026-08-16 maintainer concern) --------
+  const daysAgo = (d) => new Date(NOW - d * 86_400_000).toISOString();
+  const parkedCard = (labels, { assignees = [], type, created = daysAgo(10) } = {}) => ({
+    ...issue(labels, assignees),
+    type,
+    created_at: created,
+  });
+  t('H11: type Bug + on-hold past threshold -> finding', typeof h11ImportantParked(parkedCard(['pm:on-hold'], { type: { name: 'Bug' } }), NOW), 'string');
+  t('H11: type as plain string is read too', typeof h11ImportantParked(parkedCard(['pm:on-hold'], { type: 'Bug' }), NOW), 'string');
+  t('H11: bug label + blocked -> finding', typeof h11ImportantParked(parkedCard(['bug', 'pm:blocked']), NOW), 'string');
+  t('H11: security label + on-hold -> finding', typeof h11ImportantParked(parkedCard(['security', 'pm:on-hold']), NOW), 'string');
+  t('H11: priority:p1 + blocked -> finding', typeof h11ImportantParked(parkedCard(['priority:p1', 'pm:blocked']), NOW), 'string');
+  t('H11: …and the finding names the parked state', h11ImportantParked(parkedCard(['bug', 'pm:blocked']), NOW).includes('pm:blocked'), true);
+  t('H11: …and the threshold', h11ImportantParked(parkedCard(['bug', 'pm:blocked']), NOW).includes(`${IMPORTANT_PARKED_STALE_DAYS}d`), true);
+  t('H11: fresh park is clean', h11ImportantParked(parkedCard(['bug', 'pm:on-hold'], { created: daysAgo(2) }), NOW), null);
+  t('H11: exactly at the threshold is clean (strictly beyond fires)', h11ImportantParked(parkedCard(['bug', 'pm:on-hold'], { created: daysAgo(IMPORTANT_PARKED_STALE_DAYS) }), NOW), null);
+  t('H11: important but not parked is out of scope', h11ImportantParked(parkedCard(['bug', 'pm:queue']), NOW), null);
+  t('H11: parked but unimportant is out of scope', h11ImportantParked(parkedCard(['pm:on-hold'], { type: { name: 'Task' } }), NOW), null);
+  // Distinct from H10: an ASSIGNED old parked p0 is out of H10's scope
+  // (assignee set) but squarely in H11's — the cross is the point.
+  t('H11: assigned parked p0 still flags (H10 would not)', typeof h11ImportantParked(parkedCard(['priority:p0', 'pm:blocked'], { assignees: ['os-help'] }), NOW), 'string');
+  t('H11: …and that same card is H10-clean', h10StaleUnclaimedP0({ ...parkedCard(['priority:p0', 'pm:blocked'], { assignees: ['os-help'] }), updated_at: daysAgo(10) }, NOW), null);
+  // #4690 direction, same as H10: unreadable age must not read as fresh.
+  t('H11: unreadable created_at -> finding, not fresh', typeof h11ImportantParked(parkedCard(['bug', 'pm:on-hold'], { created: 'not-a-date' }), NOW), 'string');
 
   // -- transport prerequisite (#7412) ---------------------------------------
   // The three container classes are REAL measurements, not invented fixtures;

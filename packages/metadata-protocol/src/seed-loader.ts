@@ -21,6 +21,11 @@ import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteR
 // both dispatcher error exits use. Imported rather than re-spelled so the seed
 // channel and the HTTP boundaries cannot drift about what counts as one.
 import { validationFailureDetails } from '@objectstack/types';
+// [#8896] The platform's ONE answer to "did this READ fail because the table
+// has not been provisioned yet?" — the same predicate `DatabaseLoader` (#5108),
+// `SysMetadataRepository` (#4867) and `cascadeDeleteRelations` (#8895) ask, so
+// a driver quirk is taught to the platform once instead of per seam.
+import { isMissingTableError } from '@objectstack/metadata/errors';
 
 interface Logger {
   info(message: string, meta?: Record<string, any>): void;
@@ -2055,8 +2060,41 @@ export class SeedLoaderService implements ISeedLoaderService {
           map.set(key, record);
         }
       }
-    } catch {
-      // Object may not have records yet
+    } catch (error) {
+      // [#8896] Discriminate by error TYPE. This map is not a convenience —
+      // it IS the decision, in all three of its callers, and an empty map is
+      // the answer that means "write these rows":
+      //
+      //   1. the upsert/update/ignore pre-load above: an unmatched key is
+      //      written as a new row, so a failed read turns every update into an
+      //      INSERT — the duplicate-row outcome, against a table whose rows
+      //      were simply not seen;
+      //   2. `writeBatchPartial`'s `attempt > 1` recheck: `bulkWrite` is
+      //      at-least-once, so a batch may have COMMITTED before its response
+      //      was lost (framework#3149). The recheck is the only thing standing
+      //      between that retry and a duplicate of every row it already wrote,
+      //      and an empty map disarms it silently;
+      //   3. `writeOne`'s per-row form of the same recheck, on the degradation
+      //      path.
+      //
+      // The bare `catch {}` this replaces reached all three with "there are no
+      // existing rows" no matter WHY the read failed — a connection drop, a
+      // timeout, a permission denial, a query error — which is ADR-0110 D3's
+      // exact shape: "the read found nothing" and "the read could not run" are
+      // different facts, and here they have opposite consequences.
+      //
+      // Benign, unchanged: the object's TABLE has not been provisioned yet
+      // (schema sync has not run — the seed's own write provisions it). It can
+      // hold no rows, so an empty map IS the truth and every caller's "write
+      // it" verdict is correct. Note the swallowed comment named a case that
+      // cannot reach here at all: an object that merely "may not have records
+      // yet" answers `find` with `[]`, it does not throw.
+      //
+      // Everything else propagates: the loader stops rather than computing a
+      // write plan from data it never read. No new error code and no new
+      // result field — the caller receives the read's own failure, envelope
+      // intact, and the seed's existing error accounting reports it.
+      if (!isMissingTableError(error)) throw error;
     }
     return map;
   }

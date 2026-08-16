@@ -8941,6 +8941,16 @@ export class ObjectStackProtocolImplementation implements
      *
      * RBAC/RLS is enforced by forwarding the caller's `context` to
      * `engine.find` so users only see records they are entitled to read.
+     *
+     * ## [#8896] A swept object that could not be READ fails the search
+     *
+     * `totalObjects` / `totalHits` / `truncated` describe a COMPLETE sweep of
+     * the objects that were in scope, so an object whose read failed may not
+     * simply be dropped out of them — that hands the caller a partial scan
+     * wearing a whole one's numbers. The single benign failure is an object
+     * whose table was never provisioned (`isMissingTableError`): it can hold no
+     * rows, so "no hits from here" is the truth and it is skipped exactly as
+     * before. Every other read failure propagates. See the `catch` below.
      */
     async searchAll(request: {
         q: string;
@@ -9151,9 +9161,42 @@ export class ObjectStackProtocolImplementation implements
                         record: row,
                     });
                 }
-            } catch {
-                // RBAC denial or driver hiccup — skip silently per object
-                continue;
+            } catch (error) {
+                // [#8896] Discriminate by error TYPE. The bare `catch { continue }`
+                // this replaces skipped the object on ANY failure while the
+                // response below kept reporting `totalObjects`, `totalHits` and
+                // `truncated` as though the sweep had been complete — so a
+                // caller was handed a partial scan labelled as a whole one, and
+                // "not found" was invented for objects that were never read
+                // (ADR-0110 D3).
+                //
+                // Benign: the object is REGISTERED but its table was never
+                // provisioned (schema sync not run yet). It can hold no rows, so
+                // contributing no hits IS the truth and skipping it is correct —
+                // and this case is routine, since the registry lists every
+                // declared object whether or not a given deployment provisioned
+                // it. Asked through the shared `isMissingTableError` predicate
+                // (`@objectstack/metadata/errors`, #4825), never a hand-rolled
+                // code test.
+                //
+                // Everything else propagates: a connection drop, a timeout, a
+                // query error or a refused datasource all mean the object's rows
+                // may well match and simply were not seen.
+                //
+                // The comment this replaces named "RBAC denial" as a benign
+                // reason. Measured on this tree, that is not a failure mode of
+                // this seam: object-level authorization is enforced at the REST
+                // door (`enforceAuth`) BEFORE `searchAll` is reached, and
+                // row-level security narrows `find`'s result set rather than
+                // throwing. Nothing in-repo registers a `beforeFind` hook that
+                // denies by throwing. Were one added, the ruling for this family
+                // still applies: a read that could not run must not be answered
+                // "there are no matches here".
+                //
+                // No new response field and no new error code — the caller
+                // receives the read's own failure, envelope intact.
+                if (isMissingTableError(error)) continue;
+                throw error;
             }
         }
 
@@ -14261,8 +14304,32 @@ export class ObjectStackProtocolImplementation implements
         // ADR-0067 — capture each artifact's PRE-publish state so this turn can
         // be recorded as ONE revertible commit. existedBefore=false → the commit
         // creates it (revert = soft-remove); true → it edits an existing artifact
-        // (revert = restoreVersion(prevVersion)). Best-effort: a capture failure
-        // just omits that item from the revert plan, never blocks the publish.
+        // (revert = restoreVersion(prevVersion)).
+        //
+        // [#8896] This paragraph used to end "Best-effort: a capture failure
+        // just omits that item from the revert plan, never blocks the publish."
+        // Both halves were wrong, and they were wrong in different directions —
+        // the comment described the code inaccurately, AND the behaviour it
+        // described would not have been correct either:
+        //
+        //   * The code never omitted. It pushed a FABRICATED entry —
+        //     `existedBefore: false, prevVersion: null` — i.e. the literal
+        //     opposite of the healthy branch's `existedBefore: !!activeRow` for
+        //     any artifact that did exist. `existedBefore: false` means "revert
+        //     = soft-remove", so reverting this commit DELETES an artifact
+        //     whose previous version was supposed to be restored. A read that
+        //     failed was answered with a value, and the value chosen was the
+        //     destructive one.
+        //   * Omitting would not have been the fix. An item missing from the
+        //     plan is simply not reverted, so the revert silently leaves the
+        //     newly published version live while reporting the turn undone.
+        //
+        // Both are the same defect underneath: a revert plan derived from a
+        // read that did not happen. So the capture is discriminated by error
+        // TYPE instead, per the maintainer's ruling for this family —
+        // unprovisioned is truthful emptiness, everything else surfaces. See
+        // the `catch` below for why the benign branch keeps exactly the push
+        // that was wrong unconditionally.
         const commitItems: Array<{ type: string; name: string; existedBefore: boolean; prevVersion: number | null }> = [];
         for (const d of ordered) {
             try {
@@ -14279,7 +14346,28 @@ export class ObjectStackProtocolImplementation implements
                     existedBefore: !!activeRow,
                     prevVersion: activeRow && typeof activeRow.version === 'number' ? activeRow.version : null,
                 });
-            } catch {
+            } catch (error) {
+                // [#8896] Benign: `sys_metadata` has not been provisioned yet.
+                // There is then genuinely no active row for anything, so
+                // `existedBefore: false, prevVersion: null` IS this artifact's
+                // pre-publish state and the revert plan it produces (revert =
+                // soft-remove) is correct. That is the ONE case in which the
+                // unconditional push above was ever right, and it is kept
+                // byte-for-byte. Asked through the shared `isMissingTableError`
+                // predicate (`@objectstack/metadata/errors`, #4825).
+                //
+                // Everything else — a connection drop, a timeout, a query
+                // error — means an active row may well exist and simply was not
+                // seen, so no honest `existedBefore` can be computed. It
+                // propagates, and the position of this loop is what makes that
+                // safe: the capture pass runs BEFORE Phase 1's transaction, so
+                // nothing has been written yet and the publish fails having
+                // changed nothing. Refusing to publish beats publishing with a
+                // revert plan that would delete an artifact on the way back.
+                //
+                // No new error code and no new response field: the caller
+                // receives the read's own failure, envelope intact.
+                if (!isMissingTableError(error)) throw error;
                 commitItems.push({ type: d.type, name: d.name, existedBefore: false, prevVersion: null });
             }
         }
@@ -17532,8 +17620,16 @@ export class ObjectStackProtocolImplementation implements
      * type-narrowing).
      *
      * Coverage is driven by the hand-curated {@link REFERENCE_PATHS}
-     * registry. Types not present in the registry simply return no hits
-     * — the engine never throws.
+     * registry. A target type not present in the registry, and a SOURCE type
+     * this deployment does not declare, both simply produce no hits — neither
+     * is an error.
+     *
+     * [#8896] A source type that could not be READ is a different fact and is
+     * no longer answered the same way. This list is what an admin consults
+     * before a rename / delete / type-narrowing, so a silently short answer
+     * reads as "nothing depends on this" and licenses the destructive action.
+     * A `sys_metadata` outage therefore propagates as the 503 `getMetaItems`
+     * already raises for it, rather than being swallowed per matcher.
      */
     async findReferencesToMeta(request: {
         type: string;
@@ -17561,16 +17657,39 @@ export class ObjectStackProtocolImplementation implements
         // Walk distinct source types in parallel.
         await Promise.all(
             matchers.map(async (matcher) => {
-                let items: unknown[] = [];
-                try {
-                    const result = await this.getMetaItems({
-                        type: matcher.fromType,
-                        ...(request.organizationId ? { organizationId: request.organizationId } : {}),
-                    });
-                    items = (result?.items ?? []) as unknown[];
-                } catch {
-                    return;
-                }
+                // [#8896] NO `catch` here, deliberately — the discrimination
+                // this seam owes already happened one layer down, and the
+                // `catch { return; }` that used to sit here threw it away.
+                //
+                // `getMetaItems` classifies its own read failures through
+                // {@link rethrowUnlessMetadataStoreUnprovisioned}: the one
+                // benign reason (`sys_metadata` not provisioned yet) returns
+                // normally with whatever the registry holds, and every other
+                // failure becomes a 503 `SERVICE_UNAVAILABLE` carrying the
+                // driver error as `cause` (#5532). A source type absent from
+                // this deployment is not an error at all — `listItems` answers
+                // `[]`. So the only thing the old `catch` could swallow was the
+                // 503 raised on purpose immediately below it, and swallowing it
+                // silently shrank `out[]`.
+                //
+                // That is the worst place in this file to shrink an accumulator
+                // quietly: this answer drives "what would break if I delete
+                // this", rendered as the admin UI's "Used by" panel before a
+                // rename / delete / type-narrowing. An empty or short list is
+                // read as "nothing depends on it — safe to remove", so a source
+                // type whose read failed turned an unanswerable question into a
+                // green light for a destructive action (ADR-0110 D3).
+                //
+                // `Promise.all` is what makes propagation right-shaped here: the
+                // first rejection rejects the whole scan, so no half-scanned
+                // `references` array can reach a caller. No new response field
+                // and no new error code — the 503 the store read already raised
+                // is what surfaces.
+                const result = await this.getMetaItems({
+                    type: matcher.fromType,
+                    ...(request.organizationId ? { organizationId: request.organizationId } : {}),
+                });
+                const items = (result?.items ?? []) as unknown[];
                 for (const raw of items) {
                     if (!raw || typeof raw !== 'object') continue;
                     const sourceName = (raw as any).name as string | undefined;
