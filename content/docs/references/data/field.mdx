@@ -14,8 +14,8 @@ Field Type Enum
 ## TypeScript Usage
 
 ```typescript
-import { CurrencyConfigSchema, CurrencyValueSchema, FieldSchema, FieldType, LocationCoordinatesSchema, SelectOptionSchema, UniqueScopeSchema } from '@objectstack/spec/data';
-import type { CurrencyConfig, CurrencyValue, Field, FieldType, LocationCoordinates, SelectOption, UniqueScope } from '@objectstack/spec/data';
+import { CurrencyConfigSchema, CurrencyValueSchema, FieldSchema, FieldMaskingKeepSchema, FieldMaskingRuleSchema, FieldType, LocationCoordinatesSchema, SelectOptionSchema, UniqueScopeSchema } from '@objectstack/spec/data';
+import type { CurrencyConfig, CurrencyValue, Field, FieldMaskingKeep, FieldMaskingRule, FieldType, LocationCoordinates, SelectOption, UniqueScope } from '@objectstack/spec/data';
 
 // Validate data
 const result = CurrencyConfigSchema.parse(data);
@@ -110,6 +110,7 @@ const result = CurrencyConfigSchema.parse(data);
 | **internal** | `boolean` | optional | [#7728] Never return this field's value on the generic data path — the engine OMITS the key from `find`/`findOne` results, the 201 create body and the by-id update body, on the default projection AND when a client names the field in `?select=`. Storage, filtering and indexing are untouched, so a server-side verifier can still match on the column and a purpose-built mint route can still return the value once at creation. The read protection for ADR-0100's third credential channel (auth-subsystem one-way hashes on `text` columns). Omission, not masking: a mask signals 'a value is set', which carries no information on a `required` column. |
 | **readonly** | `boolean` | optional (default: `false`) | Read-only — never editable in forms, AND server-enforced on BOTH write paths: a non-system write to this field is silently dropped from the payload on UPDATE (#2948/#3003) and on INSERT (#3043; a create can no longer directly seed e.g. `approval_status: "approved"`), symmetric with `readonlyWhen`. A stripped INSERT field still falls back to its `defaultValue`. Exempt from the strip on BOTH paths: `isSystem` writes (seed replay, migration). Exempt on the UPDATE path ONLY: an opt-in "historical" import (`preserveAudit`, #3493) — which admits a whitelist (the audit/timestamp family plus author-declared business `readonly` fields). On INSERT the exemption does NOT apply (#6640): a non-system create that requests `preserveAudit` still has its readonly fields stripped, and is warned loudly that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. A normal (non-system) import is NOT system-context and still strips. |
 | **requiredPermissions** | `string[]` | optional | [ADR-0066 D3] Capabilities required to read/edit this field (mask on read, deny on write; AND-gate). |
+| **maskingRule** | `Enum<'phone' \| 'id_card' \| 'bank_account' \| 'email' \| 'name'> \| { keepHead: integer; keepTail: integer }` | optional | [#8993] Partial masking rule enforced by the runtime FieldMasker (single channel — API, UI, export and AI context all see the same masked value). A named preset ('phone' 138****5678, 'id_card' keep 6+4, 'bank_account' keep last 4, 'email' j***@example.com, 'name' keep first char) or `{ keepHead, keepTail }`. Masked for every non-system caller unless the field's `requiredPermissions` are ALL held (that evaluation is the unmask gate); a permission set marking the field non-readable still deletes it entirely. Deterministic, length-preserving output; masked callers cannot filter/sort/group/aggregate on the field. |
 | **ackPlaintextMasking** | `boolean` | optional | [ADR-0100] Affirm a generic `password` field's plaintext-at-rest / masked-on-read contract is intended, silencing the author-time warning (#3420). No effect on non-password fields. |
 | **system** | `boolean` | optional | Auto-injected system/audit field (e.g. created_at, updated_by, organization_id). Tools that surface system fields separately from author-declared business fields should branch on this flag. |
 | **sortable** | `boolean` | optional (default: `true`) | Whether field is sortable in list views |
@@ -176,6 +177,44 @@ const result = CurrencyConfigSchema.parse(data);
 * `progress`
 * `tags`
 * `vector`
+
+
+---
+
+## FieldMaskingKeep
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **keepHead** | `integer` | ✅ | Number of leading characters to leave readable |
+| **keepTail** | `integer` | ✅ | Number of trailing characters to leave readable |
+
+
+---
+
+## FieldMaskingRule
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+Allowed Values: `phone`, `id_card`, `bank_account`, `email`, `name`
+
+---
+
+#### Option 2
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **keepHead** | `integer` | ✅ | Number of leading characters to leave readable |
+| **keepTail** | `integer` | ✅ | Number of trailing characters to leave readable |
+
+---
 
 
 ---
