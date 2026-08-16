@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// #7823 + #7987 — the internal-field READBACK seam, unit-pinned from both
-// directions.
+// #7823 + #7987 + #8676 — the internal-field READBACK seams, unit-pinned from
+// both directions.
 //
 // The engine's `internal: true` read strip removes the flagged column from
 // every find/findOne result; better-auth reads those columns back OFF adapter
@@ -22,9 +22,18 @@
 //    accessor — that state is exactly what turns a security control into a
 //    silent no-op and an OAuth refresh into a 400, so it must never pass
 //    quietly.
+//
+// [#8676] The module now owns TWO seams and this file pins both. The adapter
+// seam above is reachable only from `objectql-adapter.ts`; plugin-auth's own
+// raw-engine readers (the ADR-0069 D1 password-reuse ring, the dev seed-admin
+// probe) bypass it entirely and are recovered by
+// `recoverInternalFieldsForSystemRead` — the last describe block below.
 
 import { describe, it, expect, vi } from 'vitest';
-import { reattachInternalFieldsOnRead } from './internal-field-readback.js';
+import {
+  reattachInternalFieldsOnRead,
+  recoverInternalFieldsForSystemRead,
+} from './internal-field-readback.js';
 
 const resolver = (map: Record<string, Record<string, unknown>>) =>
   vi.fn(async (_object: string, ids: readonly string[], field: string) => {
@@ -144,9 +153,10 @@ describe('#7987 reattachInternalFieldsOnRead — sys_account OAuth columns', () 
     expect(rows[0].refresh_token).toBe('rt-1');
     expect(rows[0].id_token).toBe('it-1');
     expect(rows[1].refresh_token).toBe('rt-2');
-    // Three columns, two rows ⇒ THREE reads, not six. The accessor resolves one
-    // field per call by contract (#8118); the batching that matters is per-page.
-    expect(resolveInternalField).toHaveBeenCalledTimes(3);
+    // FOUR columns (#8676 added `password`), two rows ⇒ FOUR reads, not eight.
+    // The accessor resolves one field per call by contract (#8118); the
+    // batching that matters is per-page.
+    expect(resolveInternalField).toHaveBeenCalledTimes(4);
     expect(resolveInternalField).toHaveBeenCalledWith('sys_account', ['a1', 'a2'], 'access_token');
     expect(resolveInternalField).toHaveBeenCalledWith('sys_account', ['a1', 'a2'], 'refresh_token');
     expect(resolveInternalField).toHaveBeenCalledWith('sys_account', ['a1', 'a2'], 'id_token');
@@ -200,23 +210,41 @@ describe('#7987 reattachInternalFieldsOnRead — sys_account OAuth columns', () 
     await reattachInternalFieldsOnRead({ resolveInternalField }, 'sys_account', row);
     expect(row.refresh_token).toBe('already-here');
     expect(row.access_token).toBe('at-1');
-    expect(resolveInternalField).toHaveBeenCalledTimes(2);
+    // `access_token`, `id_token` and `password` were missing; `refresh_token`
+    // was not, so it costs no privileged read.
+    expect(resolveInternalField).toHaveBeenCalledTimes(3);
+    expect(resolveInternalField.mock.calls.map((c: any[]) => c[2])).not.toContain('refresh_token');
   });
 
-  it('⛔ never re-attaches `password` or `previous_password_hashes`', async () => {
-    // The card's explicit scope guard: those are one-way hashes (ADR-0100's
-    // third channel), they are not flagged `internal`, and the accessor would
-    // refuse them anyway. Pinned here so a future widening of the table has to
-    // walk past a red test.
-    const resolveInternalField = resolver({ a1: { password: 'HASH' } });
+  it('[#8676] re-attaches `password` — better-auth\'s sign-in verifier reads it off the row', async () => {
+    // `internalAdapter.findCredentialAccount(userId)` returns the row whose
+    // `password` the verifier compares the submitted one against. Under the
+    // #8676 flag that row arrives stripped, so without this entry password
+    // sign-in fails for every user.
+    const resolveInternalField = resolver({ a1: { password: 'argon2:stored' } });
     const row: any = ACCOUNT_ROW();
     await reattachInternalFieldsOnRead({ resolveInternalField }, 'sys_account', row);
-    expect('password' in row).toBe(false);
+    expect(row.password).toBe('argon2:stored');
+  });
+
+  it('⛔ [#8676] never re-attaches `previous_password_hashes` — better-auth has ZERO readers', async () => {
+    // The bound on the table, and the half of the old scope guard that
+    // SURVIVES #8676. The reuse ring is an ObjectStack-only column read solely
+    // by `auth-manager.ts` off the RAW engine, which never passes through this
+    // adapter seam — so a row here would be dead code, and re-attaching it
+    // would hand better-auth a credential column nothing asked for. Pinned so a
+    // future widening of the table has to walk past a red test.
+    const resolveInternalField = resolver({ a1: { previous_password_hashes: '["h1"]' } });
+    const row: any = ACCOUNT_ROW();
+    await reattachInternalFieldsOnRead({ resolveInternalField }, 'sys_account', row);
     expect('previous_password_hashes' in row).toBe(false);
     for (const call of resolveInternalField.mock.calls) {
-      expect(call[2]).not.toBe('password');
       expect(call[2]).not.toBe('previous_password_hashes');
     }
+    // Discriminating positive control: the refusal above is SELECTIVE, not a
+    // seam that simply attaches nothing — `password` on the same row, in the
+    // same call, was resolved.
+    expect(resolveInternalField.mock.calls.map((c: any[]) => c[2])).toContain('password');
   });
 
   it('an engine with NO accessor is left alone — absence is ordinary on these columns', async () => {
@@ -252,5 +280,87 @@ describe('#7987 reattachInternalFieldsOnRead — sys_account OAuth columns', () 
     };
     await expect(reattachInternalFieldsOnRead({}, 'sys_account', row)).resolves.toBeUndefined();
     expect(row.access_token).toBe('at');
+  });
+});
+
+describe('#8676 recoverInternalFieldsForSystemRead — plugin-auth\'s own RAW-engine reads', () => {
+  // The second seam. `reattachInternalFieldsOnRead` above is imported by
+  // exactly one file (`objectql-adapter.ts`), so it only ever repairs rows
+  // better-auth asked the adapter for. plugin-auth's ADR-0069 D1 reuse ring and
+  // the dev seed-admin probe call the engine directly and are starved by the
+  // same flag — this is what recovers them.
+
+  it('recovers the exact columns the ADR-0069 D1 reuse ring reads', async () => {
+    const resolveInternalField = resolver({
+      a1: { password: 'hash:current', previous_password_hashes: '["hash:old1"]' },
+    });
+    const row: any = { id: 'a1' }; // what the real engine returns for the :5033 query
+    await recoverInternalFieldsForSystemRead({ resolveInternalField }, 'sys_account', row, [
+      'password',
+      'previous_password_hashes',
+    ]);
+    expect(row.password).toBe('hash:current');
+    expect(row.previous_password_hashes).toBe('["hash:old1"]');
+    // One batched privileged read per COLUMN — the accessor's per-field contract.
+    expect(resolveInternalField).toHaveBeenCalledTimes(2);
+    expect(resolveInternalField).toHaveBeenCalledWith('sys_account', ['a1'], 'password');
+  });
+
+  it('is bounded by the caller\'s list — it does NOT recover every flagged column', async () => {
+    // `recordPasswordHistory` reads only the ring. Pulling `password` too would
+    // be an unasked-for dereference of a credential column.
+    const resolveInternalField = resolver({
+      a1: { password: 'hash:current', previous_password_hashes: '["h"]' },
+    });
+    const row: any = { id: 'a1' };
+    await recoverInternalFieldsForSystemRead({ resolveInternalField }, 'sys_account', row, [
+      'previous_password_hashes',
+    ]);
+    expect(row.previous_password_hashes).toBe('["h"]');
+    expect('password' in row).toBe(false);
+    expect(resolveInternalField).toHaveBeenCalledTimes(1);
+    // Discriminating positive control: the omission is the BOUND, not a dead
+    // seam — the column that WAS asked for came back on the same call.
+    expect(resolveInternalField.mock.calls[0]![2]).toBe('previous_password_hashes');
+  });
+
+  it('handles the ql.find shape (an array) — the dev seed-admin probe', async () => {
+    const resolveInternalField = resolver({ a1: { password: 'argon2:seed' } });
+    const rows: any[] = [{ id: 'a1', provider_id: 'credential' }];
+    await recoverInternalFieldsForSystemRead({ resolveInternalField }, 'sys_account', rows, [
+      'password',
+    ]);
+    expect(rows[0].password).toBe('argon2:seed');
+  });
+
+  it('stays INERT against an engine with no accessor — it never stripped anything', async () => {
+    // Required posture, not a default. `previous_password_hashes` is genuinely
+    // absent on a credential account that has never changed its password, so
+    // "the key is missing ⇒ the strip ran" is false for it; a seam that threw
+    // on absence would break the FIRST password change of every user, and every
+    // unit test built on a strip-less fake engine.
+    const row: any = { id: 'a1' };
+    await expect(
+      recoverInternalFieldsForSystemRead({}, 'sys_account', row, ['previous_password_hashes']),
+    ).resolves.toBeUndefined();
+    expect('previous_password_hashes' in row).toBe(false);
+  });
+
+  it('leaves a row that already carries the column untouched, issuing no privileged read', async () => {
+    const resolveInternalField = resolver({ a1: { password: 'FROM-ACCESSOR' } });
+    const row: any = { id: 'a1', password: 'already-here' };
+    await recoverInternalFieldsForSystemRead({ resolveInternalField }, 'sys_account', row, [
+      'password',
+    ]);
+    expect(row.password).toBe('already-here');
+    expect(resolveInternalField).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op on a nullish row, so callers need no null check', async () => {
+    const resolveInternalField = resolver({});
+    await expect(
+      recoverInternalFieldsForSystemRead({ resolveInternalField }, 'sys_account', null, ['password']),
+    ).resolves.toBeUndefined();
+    expect(resolveInternalField).not.toHaveBeenCalled();
   });
 });

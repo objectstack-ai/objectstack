@@ -193,7 +193,17 @@ describe('#8049: /auth/change-password clears the force-change flag and enforces
         SYS,
       )
     )[0];
-    const raw = account?.previous_password_hashes;
+    // [#8676] `previous_password_hashes` is `internal: true`, so it is omitted
+    // from the row above — there is no `isSystem` carve-out on the strip. Read
+    // it through the engine's privileged accessor, which is the same channel
+    // the production reuse ring now uses. ⛔ Do NOT "fix" a `[]` here by
+    // un-flagging the column: an empty history is exactly what this file's
+    // `historyGrows` assertions exist to catch, so a silently-stripped read
+    // would turn this canary into a test that cannot fail.
+    const raw = account?.id
+      ? (await ql.resolveInternalField('sys_account', [String(account.id)], 'previous_password_hashes'))
+        .get(String(account.id))
+      : undefined;
     let history: string[] = [];
     if (typeof raw === 'string' && raw.trim()) {
       try {

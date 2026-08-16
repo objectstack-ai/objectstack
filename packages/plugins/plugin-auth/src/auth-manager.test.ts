@@ -3295,6 +3295,123 @@ describe('AuthManager', () => {
       const written = JSON.parse(engine.update.mock.calls[0][1].previous_password_hashes);
       expect(written).toEqual(['hash:current', 'hash:old1']); // prepend + trim to 2
     });
+
+    // ---- #8676: the same control, against an engine that actually STRIPS ----
+    //
+    // ⚠️ Every test above uses `makeEngine`, which hands back the stored object
+    // untouched. That is a faithful model of a strip-less engine — and it is
+    // precisely why those tests carry NO information about #8676: once
+    // `sys_account.password` and `previous_password_hashes` are `internal:
+    // true`, the REAL engine omits both from this read, with no `isSystem`
+    // carve-out and in spite of the explicit projection (#7728's design;
+    // measured against a real ObjectQL engine + stub driver on #8676, which
+    // returned `{"id":"a1"}` for the exact query at `assertPasswordNotReused`).
+    // `compareList` then empties, the loop never runs, `PASSWORD_REUSE` is
+    // never thrown, and the method's own `catch { return undefined }` means
+    // nothing announces it. The suite above stays GREEN through all of that.
+    //
+    // So the strip is modelled explicitly here, together with the privileged
+    // accessor that recovers it — this block is the canary that block is not.
+    describe('under the `internal: true` strip (#8676)', () => {
+      /** Mimics the real engine: omit the flagged columns, offer the accessor. */
+      const INTERNAL = ['password', 'previous_password_hashes'] as const;
+      const makeStrippingEngine = (account: any, opts: { accessor?: boolean } = {}) => {
+        const strip = (row: any) => {
+          if (!row) return row;
+          const out = { ...row };
+          for (const f of INTERNAL) delete out[f];
+          return out;
+        };
+        // What the engine handed back, snapshotted AT RETURN TIME — the seam
+        // repairs rows in place, so re-reading the row afterwards shows the
+        // recovered copy and could never witness the strip.
+        const returned: any[] = [];
+        const engine: any = {
+          returned,
+          findOne: vi.fn(async (_o: string, q: any) => {
+            const w = q?.where ?? {};
+            if (!account) return null;
+            const ok = Object.entries(w).every(([k, v]) => (account as any)[k] === v);
+            if (!ok) return null;
+            const row = strip(account);
+            returned.push({ ...row });
+            return row;
+          }),
+          update: vi.fn(async () => ({})),
+        };
+        if (opts.accessor !== false) {
+          engine.resolveInternalField = vi.fn(
+            async (_object: string, ids: readonly string[], field: string) => {
+              const out = new Map<string, unknown>();
+              for (const id of ids) if (account && account.id === id) out.set(id, account[field] ?? null);
+              return out;
+            },
+          );
+        }
+        return engine;
+      };
+
+      it('still rejects reuse of the CURRENT password — the row arrives without it', async () => {
+        const engine = makeStrippingEngine(acct());
+        const m = mgr(engine, { passwordHistoryCount: 5 });
+        await expect((m as any).assertPasswordNotReused('u1', 'current', stubVerify)).rejects.toMatchObject({
+          body: { code: 'PASSWORD_REUSE' },
+        });
+        // The row really did arrive stripped — this is not the un-stripped
+        // path in disguise, which would make the rejection above vacuous.
+        expect(engine.returned).toHaveLength(1);
+        expect('password' in engine.returned[0]).toBe(false);
+        expect('previous_password_hashes' in engine.returned[0]).toBe(false);
+        // …and the rest of the row survived, so it is a real row, not an empty one.
+        expect(engine.returned[0].id).toBe('a1');
+        expect(engine.returned[0].provider_id).toBe('credential');
+      });
+
+      it('still rejects reuse of a HISTORICAL password — the ring is recovered too', async () => {
+        const m = mgr(makeStrippingEngine(acct()), { passwordHistoryCount: 5 });
+        await expect((m as any).assertPasswordNotReused('u1', 'old2', stubVerify)).rejects.toMatchObject({
+          body: { code: 'PASSWORD_REUSE' },
+        });
+      });
+
+      it('still accepts a fresh password and returns the CURRENT hash for the after-hook', async () => {
+        // Discriminating positive control for the two refusals above: the
+        // recovery is selective, not a blanket throw — a genuinely new password
+        // passes, and the hash it returns is the recovered one (empty string
+        // here would be the silent-no-op signature, and would also make
+        // `recordPasswordHistory` return early on `!oldHash`).
+        const m = mgr(makeStrippingEngine(acct()), { passwordHistoryCount: 5 });
+        await expect((m as any).assertPasswordNotReused('u1', 'brandnew', stubVerify)).resolves.toBe('hash:current');
+      });
+
+      it('recordPasswordHistory still grows the ring — it is rebuilt from the recovered column', async () => {
+        const engine = makeStrippingEngine(acct({ previous_password_hashes: JSON.stringify(['hash:old1', 'hash:old2']) }));
+        const m = mgr(engine, { passwordHistoryCount: 2 });
+        await (m as any).recordPasswordHistory('u1', 'hash:current');
+        const written = JSON.parse(engine.update.mock.calls[0][1].previous_password_hashes);
+        // Without the recovery this would be `['hash:current']` — a ring that
+        // silently never grows past one entry, forgetting every older password.
+        expect(written).toEqual(['hash:current', 'hash:old1']);
+        expect(engine.resolveInternalField).toHaveBeenCalledWith('sys_account', ['a1'], 'previous_password_hashes');
+        // …and it does NOT dereference `password`, which this path never reads.
+        expect(engine.resolveInternalField.mock.calls.map((c: any[]) => c[2])).not.toContain('password');
+      });
+
+      it('⛔ the recovery is LOAD-BEARING: drop the accessor and the control provably dies', async () => {
+        // The falsification arm. This is the pre-#8676 shape — a stripping
+        // engine with no privileged accessor — and it is what every assertion
+        // in this block would look like if the recovery were removed. Pinned so
+        // the four tests above can never pass vacuously: if the strip stopped
+        // mattering, THIS test goes red first.
+        const engine = makeStrippingEngine(acct(), { accessor: false });
+        const m = mgr(engine, { passwordHistoryCount: 5 });
+        // Reusing the CURRENT password sails straight through — no throw at all.
+        await expect(
+          (m as any).assertPasswordNotReused('u1', 'current', stubVerify),
+        ).resolves.toBe('');
+        expect(engine.resolveInternalField).toBeUndefined();
+      });
+    });
   });
 
   // ADR-0069 D1: password expiry posture + stamping (the session-gate infra).

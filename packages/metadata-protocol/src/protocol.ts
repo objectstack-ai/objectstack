@@ -56,6 +56,7 @@ import {
     AggregationFunction, DateGranularity, resolveSearchFieldResolution,
     SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS,
     isVirtualSearchField,
+    classifyDottedFilterHead,
     RUNTIME_OWNED_FIELD_TYPES,
     RPC_QUERY_ALIAS_SLOTS, foldQueryAliasSlots,
     type QueryAliasConflict, type QueryAliasSlot,
@@ -6819,6 +6820,17 @@ export class ObjectStackProtocolImplementation implements
      * honour is refused at the latest checkpoint that can see the whole
      * picture, naming the offending key path, never answered 200.
      *
+     * [#8371] THREE now — third, "can a DOTTED key's head serve a path". A
+     * dotted key with a real head rode past the first verdict on its head
+     * segment while SORT (#4256) and PROJECTION (#7589) refused the same
+     * spelling; measured on all three drivers, a relation-, virtual- or
+     * scalar-headed dotted filter matches zero rows everywhere. Judged
+     * between the two verdicts above (`unknown` > `dotted` > type — the sort
+     * axis' ladder) by the classification both doors share
+     * (`classifyDottedFilterHead`, `@objectstack/spec/data`); the
+     * structured/JSON head (`address.city`) is DELIBERATELY unjudged — see the
+     * inline note.
+     *
      * SCOPE: this is an INGRESS gate, so it covers what reaches {@link
      * findData}. The half it cannot reach — a caller handing a `where` straight
      * to `engine.find` / `findOne` / `count` / `aggregate` / `update` /
@@ -6856,7 +6868,79 @@ export class ObjectStackProtocolImplementation implements
             throw err;
         }
 
-        // [#8296] The SECOND verdict on this axis: a name that is a REAL field
+        // [#8371] The DOTTED verdict — second in precedence, mirroring the
+        // sort axis' `unknown` > `dotted` > unmaterializable ladder exactly
+        // (identity errors first, then shape, then type). A dotted key with a
+        // REAL head cleared the check above precisely BECAUSE the head is
+        // declared, then reached a driver that answers it with zero rows —
+        // measured on ALL THREE drivers (the #8371 table): a relation head
+        // stores the related record's scalar id (Mongo's dotted paths traverse
+        // embedded documents, not references), a virtual head materialises no
+        // column anywhere, a scalar head has nothing beneath it. Every answer
+        // was a silent 200 + empty list — and the virtual case answered one
+        // unserviceable intent two ways by spelling ({ is_open: true } refused
+        // below since #8296, { 'is_open.x': true } rode through).
+        //
+        // Judged by the ONE classification both doors share
+        // ({@link classifyDottedFilterHead}, `@objectstack/spec/data`), never a
+        // ladder minted here — the same one-source move the #8296 verdict below
+        // makes with `isVirtualSearchField`. ⛔ A structured/JSON head
+        // (`address.city`) answers `null` there and stays DELIBERATELY
+        // unjudged: the drivers genuinely disagree on it (live on memory and
+        // mongodb, silently empty on sql), so a refusal would delete a working
+        // capability — the carve-out the #8371 ruling names. Array-valued,
+        // file and unknown heads answer `null` for the same fail-open reason
+        // the collector documents: a hole, never a false 400.
+        //
+        // The nested-relation OBJECT form `{ owner: { region: 'NA' } }` is NOT
+        // this shape and keeps working: the collector never descends into a
+        // field key's value, so only the head `owner` is judged — undotted,
+        // real, and passed. The refusal targets the DOTTED-STRING spelling
+        // alone.
+        const dotted = names.filter(
+            (f) => f.includes('.') && classifyDottedFilterHead(gate.fields[f.split('.')[0]]) !== null,
+        );
+        if (dotted.length > 0) {
+            const first = dotted[0];
+            const head = first.split('.')[0];
+            const headDef = gate.fields[head];
+            const headClass = classifyDottedFilterHead(headDef);
+            const headType = String(headDef?.type ?? '');
+            const body = headClass === 'relation'
+                ? `filters on '${first}', which follows the relationship '${head}' into another `
+                  + `object — a filter reaches only columns of '${object}' itself, and '${head}' `
+                  + 'stores the related record\'s id, not an embedded document'
+                : headClass === 'virtual'
+                    ? `filters on '${first}', a dotted path whose head '${head}' is a virtual `
+                      + `'${headType}' field on object '${object}' — its value is computed on read, `
+                      + 'so no driver materialises a column for the path to reach into'
+                    : `filters on '${first}', a dotted path into '${head}', a '${headType}' field `
+                      + `on object '${object}' that stores a single scalar value — there is nothing `
+                      + 'beneath it for a path to reach';
+            const err: any = new Error(
+                `Query parameter '${param}' ${body}`
+                + (dotted.length > 1 ? ` (also: ${dotted.slice(1).join(', ')})` : '')
+                + '. No backend serves the path, so the predicate can only match zero records: the '
+                + 'query was refused instead of answered with an empty list.'
+                // Deliberately the same remedy, in the same words, as this
+                // axis' #8296 virtual refusal below and the SORT axis' dotted
+                // refusal (#4256/#6924), with only the verb naming this axis.
+                // One vocabulary across the doors.
+                + ` Denormalise the value onto '${object}' (a stored field, written when the source`
+                + ' changes) and filter that.',
+            );
+            err.code = 'INVALID_FIELD';
+            err.status = 400;
+            err.field = first;
+            err.fields = dotted;
+            err.object = object;
+            err.param = param;
+            throw err;
+        }
+
+        // [#8296] The unmaterializable verdict — third in precedence since
+        // #8371 slotted the dotted verdict above it, exactly where the sort
+        // axis keeps its own third verdict. A name that is a REAL field
         // of this object and still cannot be filtered on, because its TYPE
         // materialises no column. It is the FILTER axis finally growing the
         // verdict its two neighbours already have — {@link
@@ -6891,13 +6975,13 @@ export class ObjectStackProtocolImplementation implements
         // correctly — a gate widened to the spec's `COMPUTED_VALUE_TYPES` (the
         // WRITE contract) would refuse two working types.
         //
-        // PRECEDENCE — `unknown` first, then this, mirroring the sort axis'
-        // `unknown` > `dotted` > unmaterializable: identity errors before type
-        // errors. DOTTED names are deliberately NOT judged here: a dotted
-        // filter path has no verdict on this axis at all (its head being a real
-        // field is what carries it through the check above), and inventing one
-        // for the formula-headed case alone would answer two spellings of one
-        // unjudged shape differently.
+        // PRECEDENCE — `unknown` > `dotted` (#8371) > this, the sort axis'
+        // ladder verdict for verdict: identity errors before shape errors
+        // before type errors. DOTTED names are excluded HERE because the
+        // dotted verdict above already judged them — a dotted path whose head
+        // is a formula field keeps the dotted answer, exactly as it does on
+        // the sort axis (it is wrong about the shape too, and the shape is
+        // what the caller wrote).
         const virtual = names.filter((f) => !f.includes('.') && isVirtualSearchField(gate.fields[f]));
         if (virtual.length === 0) return;
         const virtualFirst = virtual[0];

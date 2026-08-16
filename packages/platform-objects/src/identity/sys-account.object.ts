@@ -261,9 +261,32 @@ export const SysAccount = ObjectSchema.create({
       required: false,
     }),
     
+    // [#8676] `internal: true` — never returned on the generic data path.
+    // Both columns below are one-way password hashes (ADR-0100's third
+    // channel), and BOTH serialized on `/api/v1/data/sys_account` before this
+    // flag: to an admin for every user's row, and to a member for their own
+    // (the `sys_account_self` RLS policy grants `select` on `user_id ==
+    // current_user.id`). Neither credential collector catches them —
+    // `collectMaskedReadFields` keys on the field TYPE (`secret` / `password`)
+    // and additionally exempts `managedBy: 'better-auth'` objects, which this
+    // one is, while these are `text` / `textarea` columns. The flag is the
+    // third channel's answer, and it is the same disposition #7728 reached for
+    // `sys_api_key.key` — also a stored hash, also ruled unfit to serialize
+    // through the API face. Serving a password hash hands out an offline
+    // cracking target; the history ring multiplies it.
+    //
+    // ⚠️ Flagging a column STARVES every reader that takes it off a result
+    // row — with no `isSystem` carve-out, by #7728's design. Both columns have
+    // such readers, and each is recovered through the engine's privileged
+    // accessor (`Engine.resolveInternalField`, #8118) rather than by punching a
+    // hole in the strip: better-auth's adapter reads via the readback seam in
+    // `plugin-auth/src/internal-field-readback.ts`, and plugin-auth's own
+    // raw-engine readers (the ADR-0069 D1 reuse ring, the dev seed-admin
+    // probe) via `recoverInternalFieldsForSystemRead` in that same module.
     password: Field.text({
       label: 'Password Hash',
       required: false,
+      internal: true,
       description: 'Hashed password for email/password provider',
     }),
 
@@ -275,6 +298,7 @@ export const SysAccount = ObjectSchema.create({
       required: false,
       readonly: true,
       hidden: true,
+      internal: true,
       description: 'JSON array of prior password hashes (bounded by password_history_count); reuse-prevention only. System-managed.',
     }),
   },
