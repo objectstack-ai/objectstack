@@ -52,12 +52,24 @@
 //   1. Pre-flight gate removed (writer assert intact)   → the Zone A refusal
 //      cases go RED; every Zone B case stays GREEN.
 //      ⚠️ Predicted NOT as "the row publishes": with the boundary fold at the
-//      promote still in place the row would be looked up under `field` and miss,
-//      so the expected red is the WRONG REFUSAL (`NO_DRAFT` / `batch_aborted`),
-//      not a success. The assertions are written to tell those apart.
+//      promote still in place the row is looked up under `field` and misses, so
+//      the expected red is the WRONG REFUSAL, not a success.
+//      MEASURED: 4 red / 8 green, and the wrong verdict is a DIFFERENT one per
+//      type — `fields` dies at the draftability gate
+//      (`[not_overridable] Metadata type 'field' is not draftable`) while
+//      `email_templates` dies at the row lookup
+//      (`[no_draft] No pending draft exists for email_template/welcome`). Both
+//      fail-closed, neither naming the residue the operator actually has; and
+//      the batch case additionally reports the HEALTHY sibling in `failed[]`
+//      (`['ticket', 'legacy_field']`), because the abort now happens inside the
+//      transaction instead of above it. That spread is the argument for the
+//      pre-flight placement, measured rather than asserted.
 //   2. Writer assert removed, silent fold restored      → the Zone B refusal
-//      case goes RED; Zone A stays GREEN (its rows are folded at the call site,
+//      cases go RED; Zone A stays GREEN (its rows are folded at the call site,
 //      which the fold's return makes redundant but not wrong).
+//      MEASURED: 3 red / 9 green, each red as `promise resolved "undefined"
+//      instead of rejecting` — i.e. the writer silently accepting the spelling,
+//      which is the defect verbatim.
 //
 // Every "refused" case is paired with a positive control in the same describe:
 // a blanket rule here would break ordinary publishing, and a refusal pin with
@@ -351,6 +363,7 @@ describe('[#8908] publishPackageDrafts refuses a draft stored under a non-canoni
             name: 'legacy_field',
             operation: 'publish',
             outcome: 'denied',
+            // adr0112-ok: D6b — persisted audit column, its own lowercase vocabulary
             code: 'stored_type_not_canonical',
             source: 'protocol.publishPackageDrafts',
         });
