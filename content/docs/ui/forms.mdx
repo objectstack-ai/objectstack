@@ -9,8 +9,8 @@ ObjectStack Forms are Airtable-style **metadata-driven** forms with two render m
 
 | Mode | Route | Auth | Spec source | Submit target |
 |---|---|---|---|---|
-| **Public** | `/console/f/:slug` | anonymous | `GET /api/v1/forms/:slug` (resolved by `sharing.publicLink`) | `POST /api/v1/forms/:slug/submit` (field whitelist + declaration-derived `publicFormGrant`) |
-| **Internal** | `/console/forms/:name` | authed | `GET /api/v1/meta/view/:name` (+ `meta/object/:object`) | `POST /api/v1/data/:object` (full RBAC) |
+| **Public** | `/_console/f/:slug` | anonymous | `GET /api/v1/forms/:slug` (resolved by `sharing.publicLink`) | `POST /api/v1/forms/:slug/submit` (field whitelist + declaration-derived `publicFormGrant`) |
+| **Internal** | `/_console/forms/:name` | authed | `GET /api/v1/meta/view/:name` (+ `meta/object/:object`) | `POST /api/v1/data/:object` (full RBAC) |
 
 Both modes:
 
@@ -311,11 +311,11 @@ async function submit(slug: string, payload: Record<string, unknown>) {
 }
 ```
 
-The ObjectUI console (a separate package/repo) ships a unified `FormPage` renderer at `/console/f/:slug` (public) and `/console/forms/:name` (internal) that does exactly this.
+The ObjectUI console (a separate package/repo) ships a unified `FormPage` renderer at `/_console/f/:slug` (public) and `/_console/forms/:name` (internal) that does exactly this.
 
-## 6. Internal forms (`/console/forms/:name`)
+## 6. Internal forms (`/_console/forms/:name`)
 
-Sometimes you want the same FormView metadata to power an authed operator flow — "new lead", "new ticket", a queue triage screen. Set the FormView up normally (no `sharing.allowAnonymous`) and navigate to `/console/forms/<view_name>`:
+Sometimes you want the same FormView metadata to power an authed operator flow — "new lead", "new ticket", a queue triage screen. Set the FormView up normally (no `sharing.allowAnonymous`) and navigate to `/_console/forms/<view_name>`:
 
 ```ts
 // hotcrm/src/views/lead.view.ts (internal form variant)
@@ -342,7 +342,7 @@ export default defineView({
 });
 ```
 
-Operators hit `/console/forms/quick_create`. The renderer:
+Operators hit `/_console/forms/quick_create`. The renderer:
 
 - Loads metadata via `GET /api/v1/meta/view/quick_create`
 - Pulls the object schema via `GET /api/v1/meta/object/lead`
@@ -355,8 +355,8 @@ Permissions are enforced server-side just like every other authed write — no `
 Both modes accept `?prefill_<field_name>=<value>` query params. Use this to seed forms from email links, CRM segments, or campaign pages:
 
 ```
-/console/f/contact-us?prefill_company=Acme&prefill_email=ada@example.com
-/console/forms/quick_create?prefill_lead_source=event_booth_2026
+/_console/f/contact-us?prefill_company=Acme&prefill_email=ada@example.com
+/_console/forms/quick_create?prefill_lead_source=event_booth_2026
 ```
 
 The renderer maps each `prefill_<name>` param to the corresponding form field. Values are still subject to validation and (for public mode) the server-side whitelist — prefill is a UX shortcut, not a permissions bypass.
@@ -429,14 +429,14 @@ Widening this — an allowlist of absolute origins, say — waits for measured d
 
 | Mode | Default when `submitBehavior` is omitted | Why |
 |---|---|---|
-| **Public** (`/console/f/:slug`) | `{ kind: 'thank-you' }` — the confirmation panel | The anonymous submitter may not read the record back, so a receipt is all there is to show. |
-| **Internal** (`/console/forms/:name`) | Redirect to the **created record** | An operator who just created a record belongs on that record, not on a "submission received" receipt. |
+| **Public** (`/_console/f/:slug`) | `{ kind: 'thank-you' }` — the confirmation panel | The anonymous submitter may not read the record back, so a receipt is all there is to show. |
+| **Internal** (`/_console/forms/:name`) | Redirect to the **created record** | An operator who just created a record belongs on that record, not on a "submission received" receipt. |
 
 An explicit `submitBehavior` overrides the default in either mode, so nothing here removes an option — it only changes what an author gets for declaring nothing.
 
 ## 9. `type: 'form'` action — declarative form launchers
 
-App actions can declare `type: 'form'` to open a FormView without resorting to free-form URLs. The `target` is the FormView name; the runtime navigates to `/console/forms/:name` **inside the console shell** — the operator keeps the sidebar, navigation and breadcrumb, and a successful submit lands on the created record per the mode-aware default above. The full contract is stated on the [Action Protocol page](/docs/protocol/objectui/actions#what-type-form-promises).
+App actions can declare `type: 'form'` to open a FormView without resorting to free-form URLs. The `target` is the FormView name; the runtime navigates to `/_console/forms/:name` **inside the console shell** — the operator keeps the sidebar, navigation and breadcrumb, and a successful submit lands on the created record per the mode-aware default above. The full contract is stated on the [Action Protocol page](/docs/protocol/objectui/actions#what-type-form-promises).
 
 {/* os:check */}
 ```ts
@@ -451,7 +451,7 @@ export default Action.create({
 });
 ```
 
-Compared to `{ type: 'url', target: '/console/forms/quick_create' }`, the `'form'` variant is portable across runtimes — Studio/console/native shells can route it through their own form renderer instead of a raw navigation.
+Compared to `{ type: 'url', target: '/_console/forms/quick_create' }`, the `'form'` variant is portable across runtimes — Studio/console/native shells can route it through their own form renderer instead of a raw navigation.
 
 ## 10. Record detail is driven by semantic roles, not a form binding
 
