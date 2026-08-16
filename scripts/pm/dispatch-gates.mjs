@@ -1774,9 +1774,16 @@ function selfTest() {
   // stays green through a prefix-preserving rename, the one rot the STALE branch
   // exists to catch.
   const formHit = changeKindLines(['packages/spec/src/data/object.form.ts', 'packages/spec/src/data/field.form.ts'], resolved);
-  t('the measured incident paths now emit the metadata-form section', formHit.length === 2 && formHit[0].includes('metadata form module'));
+  // The `?? ''` is not defensive noise: reverse-verifying this block by making
+  // every config opt out emptied `formHit`, and the bare index CRASHED the whole
+  // self-test on a TypeError — one stack in place of 180-odd named verdicts. A
+  // case that stopped holding must fail BY NAME, with its reason, the way the
+  // i18n gate's own self-test says it (its `staleForDetail` fallback exists for
+  // exactly this). Ablating the entry now reddens these three and nothing else.
+  const formKindLine = formHit[0] ?? '';
+  t('the measured incident paths now emit the metadata-form section', formHit.length === 2 && formKindLine.includes('metadata form module'));
   t('that section names check:i18n exactly, runnably', formHit.some((l) => l.includes('- pnpm check:i18n   —')));
-  t('and it names both incident paths, not just the first', formHit[0].includes('object.form.ts') && formHit[0].includes('field.form.ts'));
+  t('and it names both incident paths, not just the first', formKindLine.includes('object.form.ts') && formKindLine.includes('field.form.ts'));
   // The over-trigger direction, which the card demanded in its own right: a spec
   // change that touches no form must NOT be pushed into this gate. Both a schema
   // beside a real form module and an unrelated package are pinned, because the
