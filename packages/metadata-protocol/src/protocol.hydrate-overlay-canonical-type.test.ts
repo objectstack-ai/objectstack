@@ -75,20 +75,36 @@
 // loudly at 500) is untouched in both directions.
 //
 // ---------------------------------------------------------------------------
-// Ablation directions, predicted BEFORE running (results in the PR body)
+// Ablation directions, predicted BEFORE running — and what actually happened
 // ---------------------------------------------------------------------------
-//   1. Ship state                                            -> GREEN
-//   2. Assert deleted from `hydrateOverlayIntoRegistry`       -> RED in §2, §3
-//      (this is the pre-fix measurement: the raw spelling reaches
-//       `registerItem` and boot reports `errors: 0`)
-//   3. Assert weakened to `isNonCanonicalStoredType`          -> RED in §2 only
-//      (the manifest-PRESENT plural `'objects'` — the #8862 residue this
-//       card was filed on — stops being refused, while the four
-//       manifest-ABSENT spellings still are; proves §2 is not a
-//       restatement of §3)
-//   4. `canonicalMetaType` neutered to the identity           -> RED in §1
-//      (non-vacuity: §1's hole is a real disagreement between two real
-//       maps, not an artifact of how the probe is written)
+//   1. Ship state                                  predicted GREEN -> GREEN (11/11)
+//   2. Assert deleted from
+//      `hydrateOverlayIntoRegistry`                predicted RED   -> RED, 6 failed
+//      This leg IS the pre-fix measurement, and it printed the defect rather
+//      than merely failing: `registerItem` received
+//      `[ { type: 'fields' } ]` and `[ 'view', 'translations', 'view' ]`
+//      — the raw stored spelling minting a shadow namespace — with boot
+//      reporting `errors: 0`.
+//   3. Assert weakened to
+//      `isNonCanonicalStoredType`                  predicted RED §2 -> RED, 1 failed
+//      Exactly the `'objects'` case, and nothing else: the manifest-PRESENT
+//      plural (the #8862 residue this card was filed on) stops being refused
+//      while the manifest-ABSENT six still are. This is what proves §2 is not
+//      a restatement of §3, and why the assert is the COMPLETE contract
+//      rather than the narrow at-rest predicate.
+//   4. `canonicalMetaUrlType` neutered to the
+//      identity, spec REBUILT                      predicted RED §1 -> RED, 7 failed
+//      ⚠️ BROADER than predicted, and the prediction was the wrong shape:
+//      §1 does go red first (its non-vacuity point stands — the hole is a
+//      real disagreement between two real maps), but §2/§3 go red with it,
+//      because `canonicalMetaType` DELEGATES to `canonicalMetaUrlType`, so
+//      neutering the map disables the assert as well. Recorded as observed
+//      rather than trimmed to the prediction.
+//      (Tests resolve `@objectstack/spec` from its BUILT `dist/`, so this leg
+//      required mutate -> rebuild -> prove-in-artifact; the marker comment was
+//      stripped by the bundler, so the artifact proof is behavioural:
+//      `canonicalMetaUrlType('objects')` returned `'objects'` from `dist/`
+//      under the ablation and `'object'` again after the restore.)
 
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
