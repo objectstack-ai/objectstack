@@ -92,7 +92,7 @@ export default defineStack({
 
 ## 2. Master-Detail Relationship
 
-Create a parent-child relationship between a master and its detail records. Note that `master_detail` defaults to `deleteBehavior: 'set_null'`; set `deleteBehavior: 'cascade'` explicitly if you want child records deleted with the parent.
+Create a parent-child relationship between a master and its detail records. A `master_detail` child has no independent existence, so `master_detail` fields **cascade deletes by default** — deleting the parent deletes its children too. Set `deleteBehavior: 'restrict'` explicitly if you want the parent delete blocked while children still exist.
 
 {/* os:check */}
 ```typescript
