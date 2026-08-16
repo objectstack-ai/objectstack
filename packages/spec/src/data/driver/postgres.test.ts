@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { DatasourceSchema } from '../datasource.zod';
+import { MongoConfigSchema } from './mongo.zod';
 import { PostgresConfigSchema } from './postgres.zod';
 
 describe('PostgresConfigSchema', () => {
@@ -190,5 +192,161 @@ describe('PostgresConfigSchema', () => {
       .toBe('safe');
     expect(() => PostgresConfigSchema.parse({ database: 'mydb', autoMigrate: 'destructive' }))
       .toThrow();
+  });
+});
+
+/**
+ * #9091 — a `url` that `pg` itself cannot parse is refused at publish.
+ *
+ * The describe text always documented the postgres URL grammar; until #9091
+ * the value was only string-scanned (credentials #8082/#8337, placeholders
+ * #8336) because the SHARED helper's refusal to parse is load-bearing for
+ * mongo's multi-host/`+srv` forms (#8696). The parse question is asked
+ * per-driver, of `pg`'s own parser (`pg-connection-string`).
+ *
+ * Envelope note (the standing minimum for rejection pins): the zod issue's
+ * `code` and its (re-pathed) location are the whole envelope at this layer —
+ * `status` does not exist here; the publish door wraps every schema refusal
+ * uniformly (metadata-protocol's `422 INVALID_METADATA`, whose `issues[]`
+ * carry these zod codes verbatim).
+ */
+describe('PostgresConfigSchema.url pg-grammar enforcement (#9091)', () => {
+  it("refuses libpq's multi-host DSN — the form `pg` measurably cannot open", () => {
+    // Measured on pg@8.22.0 / pg-connection-string@2.14.0: both `parse` and
+    // `ConnectionParameters` throw `TypeError [ERR_INVALID_URL]` on this exact
+    // value. It parsed green here until #9091.
+    const result = PostgresConfigSchema.safeParse({
+      url: 'postgresql://app@h1:5432,h2:5433/app',
+    });
+
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'url');
+    expect(issue, 'refusal must land at `url`').toBeDefined();
+    expect(issue!.code).toBe('custom');
+    expect(issue!.message).toContain('not a connection URL `pg` can open');
+    // The message names the common cause and its working replacements.
+    expect(issue!.message).toContain('multi-host');
+    // The runtime-DSN carve-out, stated rather than implied (family convention).
+    expect(issue!.message).toContain('OS_DATABASE_URL');
+  });
+
+  it('re-paths the refusal at `config.url` through the datasource door', () => {
+    const result = DatasourceSchema.safeParse({
+      name: 'warehouse',
+      driver: 'postgres',
+      config: { url: 'postgresql://app@h1:5432,h2:5433/app' },
+    });
+
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'config.url');
+    expect(issue, 'refusal must be re-pathed at `config.url`').toBeDefined();
+    expect(issue!.code).toBe('custom');
+    expect(issue!.message).toContain('not a connection URL `pg` can open');
+  });
+
+  it('refuses a non-numeric port — `pg` throws ERR_INVALID_URL on it', () => {
+    const result = PostgresConfigSchema.safeParse({
+      url: 'postgresql://db.example.com:notaport/app',
+    });
+
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'url');
+    expect(issue).toBeDefined();
+    expect(issue!.code).toBe('custom');
+    expect(issue!.message).toContain('not a connection URL `pg` can open');
+  });
+
+  it('refuses a scheme-less non-URL — `pg` would resolve it against a placeholder host', () => {
+    // `pg-connection-string` parses these via `new URL(str, 'postgres://base')`,
+    // so they do NOT throw: pg would connect to the literal host `base` with
+    // the authored text as the database name. Structurally unusable, refused.
+    for (const url of ['not a url at all', 'host=localhost dbname=app']) {
+      const result = PostgresConfigSchema.safeParse({ url });
+
+      expect(result.success, url).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'url');
+      expect(issue, `refusal for ${url} must land at \`url\``).toBeDefined();
+      expect(issue!.code).toBe('custom');
+      expect(issue!.message).toContain('no scheme');
+      expect(issue!.message).toContain('`base`');
+    }
+  });
+
+  it('refuses the fs-reading query parameters, pointing at the datasource-level `ssl` block', () => {
+    // `?sslcert=`/`?sslkey=`/`?sslrootcert=` make `parse` itself call
+    // `fs.readFileSync` — a publish verdict must not depend on the validating
+    // host's filesystem, and certificate material already has its declared
+    // home (the same prescription the config-level `ca`/`cert`/`key` keys
+    // carry).
+    const result = PostgresConfigSchema.safeParse({
+      url: 'postgresql://db.example.com/app?sslcert=/etc/ssl/client.pem',
+    });
+
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'url');
+    expect(issue).toBeDefined();
+    expect(issue!.code).toBe('custom');
+    expect(issue!.message).toContain('?sslcert=');
+    expect(issue!.message).toContain('datasource-level `ssl` block');
+  });
+
+  it('mirrors `pg` exactly on the fs-param boundary: exact-case, non-empty value', () => {
+    // Measured: `?SSLCERT=` is copied into the parsed config and read by
+    // nothing (no fs touch), and an empty `?sslcert=` is falsy at the
+    // parser's guard (no fs touch) — refusing either would narrow past what
+    // `pg` does. Both stay accepted.
+    for (const url of [
+      'postgresql://db.example.com/app?SSLCERT=/etc/ssl/client.pem',
+      'postgresql://db.example.com/app?sslcert=',
+    ]) {
+      const result = PostgresConfigSchema.safeParse({ url });
+      expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+    }
+  });
+
+  it('reports the parse refusal ALONGSIDE the credential refusal on a value violating both', () => {
+    // Composition pin: independent superRefines judge one value, each
+    // reporting its own finding (#8082 userinfo + #9091 grammar here).
+    const result = PostgresConfigSchema.safeParse({
+      url: 'postgresql://user:pass@h1:5432,h2:5433/app',
+    });
+
+    expect(result.success).toBe(false);
+    const messages = result.error!.issues
+      .filter((i) => i.path.join('.') === 'url')
+      .map((i) => i.message);
+    expect(messages.some((m) => m.includes('embeds a password'))).toBe(true);
+    expect(messages.some((m) => m.includes('not a connection URL `pg` can open'))).toBe(true);
+  });
+
+  it('accepts every measured shape `pg` genuinely opens', () => {
+    for (const url of [
+      // The documented single-host forms, credential-free ones included.
+      'postgresql://db.example.com/app',
+      'postgresql://user@db.example.com:5432/production',
+      'postgres://host/db',
+      // Empty-host libpq forms (default socket/localhost).
+      'postgresql:///dbname',
+      'postgresql://user@/mydb',
+      // Unix-socket spellings: leading-`/` path, `socket:`, encoded host.
+      '/var/run/postgresql',
+      'socket:/var/run/postgresql?db=app',
+      'postgresql://%2Fvar%2Frun%2Fpostgresql/mydb',
+      // IPv6 host and non-credential, non-fs query parameters.
+      'postgresql://user@[2001:db8::1]:5432/db',
+      'postgresql://db.example.com/app?application_name=objectstack',
+    ]) {
+      const result = PostgresConfigSchema.safeParse({ url, database: 'app' });
+      expect(result.success, `${url}: ${JSON.stringify(result.error?.issues)}`).toBe(true);
+    }
+  });
+
+  it("leaves mongo's multi-host form untouched — the shared helper's leniency it must keep (#8696)", () => {
+    // The #9091 parse check is per-driver BY DESIGN: for mongo the multi-host
+    // DSN is a real, working, documented shape. Pin that it still parses.
+    const result = MongoConfigSchema.safeParse({
+      url: 'mongodb://app@h1:27017,h2:27017/app',
+    });
+    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
   });
 });

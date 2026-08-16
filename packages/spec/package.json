@@ -246,6 +246,7 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
+    "pg-connection-string": "^2.14.0",
     "zod": "^4.4.3"
   },
   "peerDependencies": {

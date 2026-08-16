@@ -40,7 +40,7 @@ PostgreSQL connection configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **url** | `string` | optional | Connection URI (supersedes the discrete fields; must not embed a password — bind the secret instead) |
+| **url** | `string` | optional | Connection URI (supersedes the discrete fields; must be a URL `pg` can parse; must not embed a password — bind the secret instead) |
 | **host** | `string` | optional (default: `"localhost"`) | Host address |
 | **port** | `integer` | optional (default: `5432`) | Port number |
 | **database** | `string` | optional | Database name |
