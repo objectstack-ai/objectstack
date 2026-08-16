@@ -168,6 +168,59 @@ describe('CurrencyValueSchema', () => {
   });
 });
 
+// ===========================================================================
+// #8163 — field-level `currency` is rejected with no pointer to the
+// declarable nested form (`currencyConfig.defaultCurrency`). Same
+// `unrecognized_keys`-probing pattern as
+// `shared/visible-when-alias-guidance.test.ts`: this is prose (`guidance`),
+// not a rename (`aliases`) — the target is a NESTED key a flat rename cannot
+// express — and acceptance is byte-identical: `currency` was rejected before
+// this card and stays rejected after it.
+// ===========================================================================
+
+/** The `unrecognized_keys` message for `value`, or a loud test failure. */
+function unrecognizedKeyMessage(value: unknown): string {
+  const r = FieldSchema.safeParse(value);
+  expect(r.success, `expected REJECTION, got a successful parse of ${JSON.stringify(value)}`).toBe(false);
+  const issues = (r as { success: false; error: { issues: Array<{ code?: string; message?: string }> } }).error.issues;
+  const hit = issues.find((i) => i.code === 'unrecognized_keys');
+  expect(hit, `no \`unrecognized_keys\` issue in ${JSON.stringify(issues)}`).toBeDefined();
+  return hit?.message ?? '';
+}
+
+describe('FieldSchema — field-level `currency` key guidance (#8163)', () => {
+  const FIELD = { name: 'amount', label: 'Amount', type: 'currency' } as const;
+
+  it('`currency` stays rejected — a prescription is not an acceptance', () => {
+    expect(FieldSchema.safeParse({ ...FIELD, currency: 'JPY' }).success).toBe(false);
+  });
+
+  it('names the declarable nested form, `currencyConfig` / `defaultCurrency`', () => {
+    const m = unrecognizedKeyMessage({ ...FIELD, currency: 'JPY' });
+    expect(m).toContain('`currency` is not a field key');
+    expect(m).toContain('currencyConfig');
+    expect(m).toContain('defaultCurrency');
+    // The claim the prose makes is real — the nested form it names really parses.
+    expect(
+      FieldSchema.safeParse({
+        ...FIELD,
+        currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'JPY' },
+      }).success,
+    ).toBe(true);
+  });
+
+  it('is prose, not a rename — no `Did you mean` for `currency` (the target is a nested key)', () => {
+    const m = unrecognizedKeyMessage({ ...FIELD, currency: 'JPY' });
+    expect(m).not.toContain('Did you mean');
+  });
+
+  it('a sibling unknown key does NOT get the currency prescription (anti-vacuity)', () => {
+    const m = unrecognizedKeyMessage({ ...FIELD, totallyBogusKey: true });
+    expect(m).not.toContain('currencyConfig');
+    expect(m).not.toContain('defaultCurrency');
+  });
+});
+
 describe('FieldSchema', () => {
   describe('Basic Field Properties', () => {
     it('should accept valid field with minimal properties', () => {
