@@ -709,7 +709,7 @@ const TEST_DEBT = {
       + "so none of the -33 is this PR's doing.",
   },
   '@objectstack/lint': {
-    errors: 20,
+    errors: 19,
     note: 'TS7006 x22, TS2835 x6, TS6059 x4. Measured 26 -> 30 (5ab08428, the +4 being TS6059, a file '
       + 'outside rootDir, a class the pre-#5278 note did not list) -> 32 (e8db1a230). The latest +2 are '
       + 'both TS7006 and both in files that already existed; three lint test files changed in this window '
