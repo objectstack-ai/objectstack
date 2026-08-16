@@ -109,6 +109,13 @@
  *       inventory of important cards that a parked state could otherwise
  *       hide indefinitely. Report-only like everything here — the remedy is
  *       the triage round re-checking the card's exit liveness, not a gate.
+ *   H12 an OPEN, non-draft PR with auto-merge unarmed and no activity past
+ *       the threshold — the orphan-landing detector (queue-steward
+ *       retirement, maintainer-ruled 2026-08-16: the retired seat's one
+ *       genuine gap). In this protocol a dev PR is flipped ready only at
+ *       review ACCEPT, so ready = reviewed by construction; a reviewed PR
+ *       that left the merge queue (or never entered it) with nobody handling
+ *       it would otherwise wait silently forever. Patrol input, not a gate.
  *
  * ## The close mechanism, measured (#8293)
  *
@@ -617,6 +624,61 @@ export function h11ImportantParked(issue, nowMs = Date.now()) {
 }
 
 // ---------------------------------------------------------------------------
+// H12 — orphan landing: a reviewed-and-ready PR out of the queue, unhandled
+// (queue-steward retirement, maintainer-ruled 2026-08-16).
+// ---------------------------------------------------------------------------
+
+/**
+ * H12 threshold — the landing cycle whose absence this flags is measured in
+ * minutes (flip → queue → merge ≈ 15–30 min per PR; a queue kick draws the
+ * merge-queue-triage workflow's comment within minutes of the red run).
+ * Every handling act — a re-queue, a triage or audit comment, a push, a
+ * label — bumps the PR's `updated_at`, so hours of TOTAL silence on a ready
+ * PR exceeds the whole cycle severalfold; 6h still tolerates a congested
+ * queue day and the longest measured landing latencies.
+ */
+export const ORPHAN_LANDING_STALE_HOURS = 6;
+
+/**
+ * H12 — null when clean, else the finding sentence.
+ *
+ * "Reviewed" is read from `draft === false`: this protocol flips a dev PR
+ * ready only at review ACCEPT (the ready → queue path), and parks everything
+ * else — un-reviewed work, ADR-class human-merge deliverables, dependency-red
+ * stashes — as DRAFTS, so ready = reviewed by construction and drafts are out
+ * of scope however old. A row without a real `draft` field is out of scope
+ * too: this predicate must not flag shapes it cannot read.
+ *
+ * `auto_merge` is read ONLY in the finding-reducing direction (armed = the
+ * queue machinery holds the PR = someone is handling it). The platform notes
+ * forbid that field as a landing VERDICT (timeline events are the authority);
+ * here a stale field costs at most a missed report-only flag, never a wrong
+ * landing decision. `changeset-release/*` heads are excluded by name: the
+ * Version Packages PR is born ready by the release bot and is the
+ * maintainer's alone to merge (Guardrails), so it would flag on every sweep
+ * by design. An unreadable `updated_at` flags rather than reads as fresh
+ * (#4690 direction, same as H10/H11).
+ */
+export function h12OrphanLanding(pr, nowMs = Date.now()) {
+  if (!pr || pr.draft !== false || pr.merged_at) return null;
+  if (pr.auto_merge) return null;
+  if ((pr.head?.ref ?? '').startsWith('changeset-release/')) return null;
+  const updated = Date.parse(pr.updated_at ?? '');
+  const ageHours = Number.isFinite(updated) ? (nowMs - updated) / 3_600_000 : null;
+  if (ageHours !== null && ageHours <= ORPHAN_LANDING_STALE_HOURS) return null;
+  const reading =
+    ageHours === null
+      ? 'an unreadable `updated_at` (which must not read as fresh)'
+      : `no activity for ~${Math.round(ageHours)}h (threshold ${ORPHAN_LANDING_STALE_HOURS}h)`;
+  return (
+    `ready (= reviewed, in this protocol) with auto-merge unarmed and ${reading} — an orphan ` +
+    `landing: the PR left the merge queue (or never entered it) and no one is handling it. ` +
+    `The owning lane PM's landing window should re-read the queue-triage comment and gate-job ` +
+    `conclusions, then re-queue, fix, or park it as a draft with a stated reason.`
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Transport prerequisite — the classifier (pure) and the probe that feeds it.
 //
 // Modelled on `scripts/cli-build-prerequisite.mjs`: the knowledge lives in pure
@@ -912,7 +974,7 @@ function reportPrerequisiteNotMet(v, options = {}) {
   const nothing =
     swept === 0
       ? [
-          `  Nothing was swept: no issue was listed and no predicate (H1–H11) ran, so this`,
+          `  Nothing was swept: no issue was listed and no predicate (H1–H12) ran, so this`,
           `  result says NOTHING about whether the board carries half-states. It is not a`,
           `  clean board and it is not a dirty one — it is no reading at all.`,
         ]
@@ -1070,14 +1132,17 @@ async function sweepInto(findings, seen, seenPrs, seenMerged) {
     }
   }
 
-  // H7 — the PR side. Listed straight from `/pulls` rather than filtered out of
-  // the label pages above: PRs carry no `pm:*` label, so the issue sweep cannot
-  // see them (it discards them explicitly). Drafts are INCLUDED — a draft is
-  // exactly where this is still cheap to fix.
+  // H7 + H12 — the PR side. Listed straight from `/pulls` rather than filtered
+  // out of the label pages above: PRs carry no `pm:*` label, so the issue sweep
+  // cannot see them (it discards them explicitly). Drafts are INCLUDED for H7 —
+  // a draft is exactly where that is still cheap to fix — and excluded by
+  // H12's own predicate (drafts are parked deliberately).
   for (const pr of await listOpenPullRequests()) {
     seenPrs.set(pr.number, pr);
     const contradiction = h7PartOfWithClosingKeyword(pr);
     if (contradiction) findings.push([pr, 'H7', contradiction]);
+    const orphan = h12OrphanLanding(pr);
+    if (orphan) findings.push([pr, 'H12', orphan]);
   }
 
   // H8 — one bounded merged-PR listing (window note at the helper), matched
@@ -1384,6 +1449,30 @@ function selfTest() {
   t('H11: …and that same card is H10-clean', h10StaleUnclaimedP0({ ...parkedCard(['priority:p0', 'pm:blocked'], { assignees: ['os-help'] }), updated_at: daysAgo(10) }, NOW), null);
   // #4690 direction, same as H10: unreadable age must not read as fresh.
   t('H11: unreadable created_at -> finding, not fresh', typeof h11ImportantParked(parkedCard(['bug', 'pm:on-hold'], { created: 'not-a-date' }), NOW), 'string');
+
+  // -- H12: orphan landing (queue-steward retirement, 2026-08-16) -------------
+  const openPr = ({ draft = false, auto_merge = null, head = { ref: 'claude/issue-1-x' }, updated = hoursAgo(12) } = {}) => ({
+    draft,
+    auto_merge,
+    head,
+    updated_at: updated,
+    merged_at: null,
+  });
+  t('H12: ready + unarmed + stale -> finding', typeof h12OrphanLanding(openPr(), NOW), 'string');
+  t('H12: …and the finding names the threshold', h12OrphanLanding(openPr(), NOW).includes(`${ORPHAN_LANDING_STALE_HOURS}h`), true);
+  t('H12: …and prescribes the landing-window re-read, not just the fact', h12OrphanLanding(openPr(), NOW).includes('landing window'), true);
+  t('H12: draft is out of scope however old (parked deliberately)', h12OrphanLanding(openPr({ draft: true, updated: hoursAgo(200) }), NOW), null);
+  t('H12: armed auto-merge -> clean (queue machinery holds it)', h12OrphanLanding(openPr({ auto_merge: { merge_method: 'squash' } }), NOW), null);
+  t('H12: fresh ready PR -> clean', h12OrphanLanding(openPr({ updated: hoursAgo(1) }), NOW), null);
+  t('H12: exactly at the threshold -> clean (strictly beyond fires)', h12OrphanLanding(openPr({ updated: hoursAgo(ORPHAN_LANDING_STALE_HOURS) }), NOW), null);
+  t('H12: changeset-release head is the release bot\'s -> out of scope', h12OrphanLanding(openPr({ head: { ref: 'changeset-release/main' }, updated: hoursAgo(200) }), NOW), null);
+  t('H12: missing head ref does not crash and still flags', typeof h12OrphanLanding(openPr({ head: undefined, updated: hoursAgo(50) }), NOW), 'string');
+  // #4690 in miniature, same as H10/H11: unreadable must not read as fresh.
+  t('H12: unreadable updated_at -> finding, not fresh', typeof h12OrphanLanding(openPr({ updated: 'not-a-date' }), NOW), 'string');
+  // A row this predicate cannot read is out of scope, not a finding: `draft`
+  // must be a real false, so an issue-shaped or partial row never flags.
+  t('H12: missing draft field is out of scope', h12OrphanLanding({ auto_merge: null, updated_at: hoursAgo(50) }, NOW), null);
+  t('H12: merged row is out of scope', h12OrphanLanding({ ...openPr({ updated: hoursAgo(50) }), merged_at: '2026-08-13T10:00:00Z' }, NOW), null);
 
   // -- transport prerequisite (#7412) ---------------------------------------
   // The three container classes are REAL measurements, not invented fixtures;

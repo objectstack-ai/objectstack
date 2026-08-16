@@ -50,7 +50,7 @@ const REPO_ROOT = new URL('../../', import.meta.url);
 // value). Shrink-only: lower freely, raise only with a maintainer ruling
 // quoted in the raising PR (see header).
 export const CEILINGS = new Map([
-  ['.claude/skills/pm-dispatch/SKILL.md', 686],
+  ['.claude/skills/pm-dispatch/SKILL.md', 682],
   ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 223],
   ['.claude/skills/pm-dispatch/references/platform-readings.md', 134],
   ['.claude/skills/pm-dispatch/references/review-checklist.md', 82],
