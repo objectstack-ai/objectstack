@@ -32,7 +32,7 @@ const result = CronScheduleSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **type** | `'cron'` | ✅ |  |
 | **expression** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Cron expression — cron`0 0 * * *` for daily at midnight. Build emits `{dialect:"cron",source}` envelope. |
-| **timezone** | `string` | optional | Timezone for cron execution (e.g., "America/New_York") |
+| **timezone** | `string` | optional (default: `"UTC"`) | Timezone for cron execution (e.g., "America/New_York") |
 
 
 ---
@@ -62,7 +62,7 @@ const result = CronScheduleSchema.parse(data);
 | **handler** | `string` | ✅ | Handler function name (must match a key in `defineStack({ functions })`) |
 | **retryPolicy** | `{ maxRetries?: integer; backoffMs?: integer; backoffMultiplier?: number; maxRetryDelayMs?: integer; … }` | optional | Retry policy: failed runs (including timeouts) are retried with exponential backoff (delay = min(backoffMs * backoffMultiplier^(retry-1), maxRetryDelayMs), optionally jittered) up to maxRetries retries after the initial attempt (#3494). Omit the block for a single attempt; declaring it without `maxRetries` also means no retry since 17.0.0 (#4661) — state a count to opt in. |
 | **timeout** | `integer` | optional | Per-attempt time limit in milliseconds; an over-limit run is recorded with execution status "timeout" (#3494). The in-flight handler is abandoned, not forcibly cancelled. Omit for no time limit. |
-| **enabled** | `boolean` | optional | Whether the job is enabled |
+| **enabled** | `boolean` | optional (default: `true`) | Whether the job is enabled |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
@@ -121,11 +121,11 @@ const result = CronScheduleSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **maxRetries** | `integer` | ✅ | Retry attempts after the initial one. 0 (the default) means no retry — state a count to opt in. |
-| **backoffMs** | `integer` | ✅ | Base delay before the first retry (ms); subsequent delays multiply by backoffMultiplier |
-| **backoffMultiplier** | `number` | ✅ | Exponential backoff multiplier; 1 (the default) keeps the delay flat |
-| **maxRetryDelayMs** | `integer` | ✅ | Ceiling for a single backoff delay (ms) |
-| **jitter** | `boolean` | ✅ | Randomize each delay within [50%, 100%] of its computed value — spreads a thundering herd of simultaneous retries |
+| **maxRetries** | `integer` | optional (default: `0`) | Retry attempts after the initial one. 0 (the default) means no retry — state a count to opt in. |
+| **backoffMs** | `integer` | optional (default: `1000`) | Base delay before the first retry (ms); subsequent delays multiply by backoffMultiplier |
+| **backoffMultiplier** | `number` | optional (default: `1`) | Exponential backoff multiplier; 1 (the default) keeps the delay flat |
+| **maxRetryDelayMs** | `integer` | optional (default: `30000`) | Ceiling for a single backoff delay (ms) |
+| **jitter** | `boolean` | optional (default: `false`) | Randomize each delay within [50%, 100%] of its computed value — spreads a thundering herd of simultaneous retries |
 | **retryDelayMs** | `never` | optional | [REMOVED] `retryDelayMs` was removed in @objectstack/spec 17.0.0 (#4661, #4964) — the retry policy now has ONE spelling for its base delay across every surface that carries it: `job.retryPolicy`, a `try_catch` node's `retry` and `flow.errorHandling`. Rename the key to `backoffMs`; the value (milliseconds before the first retry) is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 
 
@@ -147,7 +147,7 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **type** | `'cron'` | ✅ |  |
 | **expression** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Cron expression — cron`0 0 * * *` for daily at midnight. Build emits `{dialect:"cron",source}` envelope. |
-| **timezone** | `string` | optional | Timezone for cron execution (e.g., "America/New_York") |
+| **timezone** | `string` | optional (default: `"UTC"`) | Timezone for cron execution (e.g., "America/New_York") |
 
 ---
 

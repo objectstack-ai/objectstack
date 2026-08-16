@@ -42,11 +42,11 @@ Deploy bundle containing all metadata for deployment
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **manifest** | `{ version: string; checksum?: string; objects: string[]; views: string[]; … }` | ✅ | Deployment manifest |
-| **objects** | `Record<string, any>[]` | ✅ | Object definitions |
-| **views** | `Record<string, any>[]` | ✅ | View definitions |
-| **flows** | `Record<string, any>[]` | ✅ | Flow definitions |
-| **permissions** | `Record<string, any>[]` | ✅ | Permission definitions |
-| **seedData** | `Record<string, any>[]` | ✅ | Seed data records |
+| **objects** | `Record<string, any>[]` | optional (default: `[]`) | Object definitions |
+| **views** | `Record<string, any>[]` | optional (default: `[]`) | View definitions |
+| **flows** | `Record<string, any>[]` | optional (default: `[]`) | Flow definitions |
+| **permissions** | `Record<string, any>[]` | optional (default: `[]`) | Permission definitions |
+| **seedData** | `Record<string, any>[]` | optional (default: `[]`) | Seed data records |
 
 
 ---
@@ -59,9 +59,9 @@ Schema diff between current and desired state
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **changes** | `{ entityType: Enum<'object' \| 'field' \| 'index' \| 'view' \| 'flow' \| 'permission'>; entityName: string; parentEntity?: string; changeType: Enum<'added' \| 'modified' \| 'removed'>; … }[]` | ✅ | List of schema changes |
+| **changes** | `{ entityType: Enum<'object' \| 'field' \| 'index' \| 'view' \| 'flow' \| 'permission'>; entityName: string; parentEntity?: string; changeType: Enum<'added' \| 'modified' \| 'removed'>; … }[]` | optional (default: `[]`) | List of schema changes |
 | **summary** | `{ added: integer; modified: integer; removed: integer }` | ✅ | Change summary counts |
-| **hasBreakingChanges** | `boolean` | ✅ | Whether diff contains breaking changes |
+| **hasBreakingChanges** | `boolean` | optional (default: `false`) | Whether diff contains breaking changes |
 
 
 ---
@@ -76,10 +76,10 @@ Deployment manifest
 | :--- | :--- | :--- | :--- |
 | **version** | `string` | ✅ | Deployment version |
 | **checksum** | `string` | optional | SHA256 checksum |
-| **objects** | `string[]` | ✅ | Object names included |
-| **views** | `string[]` | ✅ | View names included |
-| **flows** | `string[]` | ✅ | Flow names included |
-| **permissions** | `string[]` | ✅ | Permission names included |
+| **objects** | `string[]` | optional (default: `[]`) | Object names included |
+| **views** | `string[]` | optional (default: `[]`) | View names included |
+| **flows** | `string[]` | optional (default: `[]`) | Flow names included |
+| **permissions** | `string[]` | optional (default: `[]`) | Permission names included |
 | **createdAt** | `string` | optional | Bundle creation time |
 
 
@@ -127,9 +127,9 @@ Bundle validation result
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **valid** | `boolean` | ✅ | Whether the bundle is valid |
-| **issues** | `{ severity: Enum<'error' \| 'warning' \| 'info'>; path: string; message: string; code?: string }[]` | ✅ | Validation issues |
-| **errorCount** | `integer` | ✅ | Number of errors |
-| **warningCount** | `integer` | ✅ | Number of warnings |
+| **issues** | `{ severity: Enum<'error' \| 'warning' \| 'info'>; path: string; message: string; code?: string }[]` | optional (default: `[]`) | Validation issues |
+| **errorCount** | `integer` | optional (default: `0`) | Number of errors |
+| **warningCount** | `integer` | optional (default: `0`) | Number of warnings |
 
 
 ---
@@ -142,9 +142,9 @@ Ordered migration plan
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **statements** | `{ sql: string; reversible: boolean; rollbackSql?: string; order: integer }[]` | ✅ | Ordered DDL statements |
+| **statements** | `{ sql: string; reversible: boolean; rollbackSql?: string; order: integer }[]` | optional (default: `[]`) | Ordered DDL statements |
 | **dialect** | `string` | ✅ | Target SQL dialect |
-| **reversible** | `boolean` | ✅ | Whether the plan can be fully rolled back |
+| **reversible** | `boolean` | optional (default: `true`) | Whether the plan can be fully rolled back |
 | **estimatedDurationMs** | `integer` | optional | Estimated execution time |
 
 
@@ -159,7 +159,7 @@ Single DDL migration statement
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **sql** | `string` | ✅ | SQL DDL statement |
-| **reversible** | `boolean` | ✅ | Whether the statement can be reversed |
+| **reversible** | `boolean` | optional (default: `true`) | Whether the statement can be reversed |
 | **rollbackSql** | `string` | optional | Reverse SQL for rollback |
 | **order** | `integer` | ✅ | Execution order |
 

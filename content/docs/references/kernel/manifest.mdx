@@ -29,10 +29,10 @@ const result = ManifestSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
 | **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
-| **defaultDatasource** | `string` | optional | Default datasource for all objects in this package |
+| **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
 | **version** | `string` | ✅ | Package version (semantic versioning) |
 | **type** | `Enum<'plugin' \| 'ui' \| 'driver' \| 'server' \| 'app' \| 'theme' \| 'agent' \| 'objectql' \| 'module' \| 'gateway' \| 'adapter'>` | ✅ | Type of package |
-| **scope** | `Enum<'cloud' \| 'system' \| 'project'>` | optional | Deployment scope: cloud \| system \| project |
+| **scope** | `Enum<'cloud' \| 'system' \| 'project'>` | optional (default: `"project"`) | Deployment scope: cloud \| system \| project |
 | **name** | `string` | ✅ | Human-readable package name |
 | **description** | `string` | optional | Package description |
 | **permissions** | `string[] \| { services?: string[]; hooks?: string[]; network?: string[]; fs?: string[] }` | optional | Required permissions: legacy string[] or structured plugin block (ADR-0025 §3.2) |

@@ -139,7 +139,7 @@ const result = CreateRecordConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **collection** | `string \| any[]` | ✅ | Template/variable resolving to the array to process (an inline array is accepted) |
 | **flowName** | `string` | ✅ | Subflow run for each item — it may pause (e.g. an approval) |
-| **iteratorVariable** | `string` | ✅ | Variable holding the current item |
+| **iteratorVariable** | `string` | optional (default: `"item"`) | Variable holding the current item |
 | **indexVariable** | `string` | optional | Optional variable holding the current index |
 | **itemObject** | `string` | optional | When items are records, the object they belong to (exposes each item as the child's record) |
 | **input** | `Record<string, any>` | optional | Params passed to each item's subflow (interpolated per item) |

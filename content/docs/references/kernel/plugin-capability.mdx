@@ -56,7 +56,7 @@ Level of protocol conformance
 | **description** | `string` | optional |  |
 | **type** | `Enum<'action' \| 'hook' \| 'widget' \| 'provider' \| 'transformer' \| 'validator' \| 'decorator'>` | ✅ |  |
 | **contract** | `{ input?: string; output?: string; signature?: string }` | optional |  |
-| **cardinality** | `Enum<'single' \| 'multiple'>` | ✅ | Whether multiple extensions can register to this point |
+| **cardinality** | `Enum<'single' \| 'multiple'>` | optional (default: `"multiple"`) | Whether multiple extensions can register to this point |
 
 
 ---
@@ -68,11 +68,11 @@ Level of protocol conformance
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **protocol** | `{ id: string; label: string; version: object; specification?: string; … }` | ✅ |  |
-| **conformance** | `Enum<'full' \| 'partial' \| 'experimental' \| 'deprecated'>` | ✅ | Level of protocol conformance |
+| **conformance** | `Enum<'full' \| 'partial' \| 'experimental' \| 'deprecated'>` | optional (default: `"full"`) | Level of protocol conformance |
 | **implementedFeatures** | `string[]` | optional | List of implemented feature names |
 | **features** | `{ name: string; enabled: boolean; description?: string; sinceVersion?: string; … }[]` | optional |  |
 | **metadata** | `Record<string, any>` | optional |  |
-| **certified** | `boolean` | ✅ | Has passed official conformance tests |
+| **certified** | `boolean` | optional (default: `false`) | Has passed official conformance tests |
 | **certificationDate** | `string` | optional |  |
 
 
@@ -101,7 +101,7 @@ Level of protocol conformance
 | :--- | :--- | :--- | :--- |
 | **pluginId** | `string` | ✅ | Required plugin identifier |
 | **version** | `string` | ✅ | Semantic version constraint |
-| **optional** | `boolean` | ✅ |  |
+| **optional** | `boolean` | optional (default: `false`) |  |
 | **reason** | `string` | optional |  |
 | **requiredCapabilities** | `string[]` | optional | Protocol IDs the dependency must support |
 
@@ -120,7 +120,7 @@ Level of protocol conformance
 | **version** | `{ major: integer; minor: integer; patch: integer }` | ✅ | Semantic version of the protocol |
 | **methods** | `{ name: string; description?: string; parameters?: object[]; returnType?: string; … }[]` | ✅ |  |
 | **events** | `{ name: string; description?: string; payload?: string }[]` | optional |  |
-| **stability** | `Enum<'stable' \| 'beta' \| 'alpha' \| 'experimental'>` | ✅ |  |
+| **stability** | `Enum<'stable' \| 'beta' \| 'alpha' \| 'experimental'>` | optional (default: `"stable"`) |  |
 
 
 ---
@@ -132,7 +132,7 @@ Level of protocol conformance
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Feature identifier within the protocol |
-| **enabled** | `boolean` | ✅ |  |
+| **enabled** | `boolean` | optional (default: `true`) |  |
 | **description** | `string` | optional |  |
 | **sinceVersion** | `string` | optional | Version when this feature was added |
 | **deprecatedSince** | `string` | optional | Version when deprecated |

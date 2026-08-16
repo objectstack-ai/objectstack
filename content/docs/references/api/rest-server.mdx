@@ -44,10 +44,10 @@ const result = BatchEndpointsConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **maxBatchSize** | `integer` | ✅ | Maximum records per batch operation |
-| **enableBatchEndpoint** | `boolean` | ✅ | Enable POST /data/:object/batch endpoint |
+| **maxBatchSize** | `integer` | optional (default: `200`) | Maximum records per batch operation |
+| **enableBatchEndpoint** | `boolean` | optional (default: `true`) | Enable POST /data/:object/batch endpoint |
 | **operations** | `{ createMany: boolean; updateMany: boolean; deleteMany: boolean; upsertMany: boolean }` | optional | Enable/disable specific batch operations |
-| **defaultAtomic** | `boolean` | ✅ | Default atomic/transaction mode for batch operations |
+| **defaultAtomic** | `boolean` | optional (default: `true`) | Default atomic/transaction mode for batch operations |
 
 
 ---
@@ -74,8 +74,8 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **operations** | `{ create: boolean; read: boolean; update: boolean; delete: boolean; … }` | optional | Enable/disable operations |
 | **patterns** | `Record<string, { method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; path: string; summary?: string; description?: string }>` | optional | Custom URL patterns for operations |
-| **dataPrefix** | `string` | ✅ | URL prefix for data endpoints |
-| **objectParamStyle** | `Enum<'path' \| 'query'>` | ✅ | How object name is passed (path param or query param) |
+| **dataPrefix** | `string` | optional (default: `"/data"`) | URL prefix for data endpoints |
+| **objectParamStyle** | `Enum<'path' \| 'query'>` | optional (default: `"path"`) | How object name is passed (path param or query param) |
 
 
 ---
@@ -130,10 +130,10 @@ const result = BatchEndpointsConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **prefix** | `string` | ✅ | URL prefix for metadata endpoints |
-| **enableCache** | `boolean` | ✅ | Enable HTTP cache headers (ETag, Last-Modified) |
-| **cacheTtl** | `integer` | ✅ | Cache TTL in seconds |
-| **maskObjectFields** | `boolean` | ✅ | [ADR-0106 D8] Mask served object schemas to the caller's readable fields |
+| **prefix** | `string` | optional (default: `"/meta"`) | URL prefix for metadata endpoints |
+| **enableCache** | `boolean` | optional (default: `true`) | Enable HTTP cache headers (ETag, Last-Modified) |
+| **cacheTtl** | `integer` | optional (default: `3600`) | Cache TTL in seconds |
+| **maskObjectFields** | `boolean` | optional (default: `true`) | [ADR-0106 D8] Mask served object schemas to the caller's readable fields |
 | **endpoints** | `{ types: boolean; items: boolean; item: boolean; schema: boolean }` | optional | Enable/disable specific endpoints |
 
 
@@ -145,17 +145,17 @@ const result = BatchEndpointsConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **version** | `string` | ✅ | API version (e.g., v1, v2, 2024-01) |
-| **basePath** | `string` | ✅ | Base URL path for API |
+| **version** | `string` | optional (default: `"v1"`) | API version (e.g., v1, v2, 2024-01) |
+| **basePath** | `string` | optional (default: `"/api"`) | Base URL path for API |
 | **apiPath** | `string` | optional | Full API path (defaults to `{basePath}`/`{version}`) |
-| **enableCrud** | `boolean` | ✅ | Enable automatic CRUD endpoint generation |
-| **enableMetadata** | `boolean` | ✅ | Enable metadata API endpoints |
-| **enableUi** | `boolean` | ✅ | Enable UI API endpoints (Views, Menus, Layouts) |
-| **enableBatch** | `boolean` | ✅ | Enable batch operation endpoints |
-| **enableDiscovery** | `boolean` | ✅ | Enable API discovery endpoint |
-| **enableOpenApi** | `boolean` | ✅ | Enable OpenAPI 3.1 spec & docs viewer endpoints |
-| **enableProjectScoping** | `boolean` | ✅ | Enable project-scoped routing for data/meta/AI APIs |
-| **projectResolution** | `Enum<'required' \| 'optional' \| 'auto'>` | ✅ | Project ID resolution strategy |
+| **enableCrud** | `boolean` | optional (default: `true`) | Enable automatic CRUD endpoint generation |
+| **enableMetadata** | `boolean` | optional (default: `true`) | Enable metadata API endpoints |
+| **enableUi** | `boolean` | optional (default: `true`) | Enable UI API endpoints (Views, Menus, Layouts) |
+| **enableBatch** | `boolean` | optional (default: `true`) | Enable batch operation endpoints |
+| **enableDiscovery** | `boolean` | optional (default: `true`) | Enable API discovery endpoint |
+| **enableOpenApi** | `boolean` | optional (default: `true`) | Enable OpenAPI 3.1 spec & docs viewer endpoints |
+| **enableProjectScoping** | `boolean` | optional (default: `false`) | Enable project-scoped routing for data/meta/AI APIs |
+| **projectResolution** | `Enum<'required' \| 'optional' \| 'auto'>` | optional (default: `"auto"`) | Project ID resolution strategy |
 | **requireAuth** | `never` | optional | [REMOVED] `api.requireAuth` was removed in @objectstack/spec 17 (#3963). Anonymous access to object data is now always denied — auth is a kernel concern, not a deployment posture. Delete the key. To publish something publicly, declare it: a public form view (`sharing.allowAnonymous`), a share link, or `book.audience: 'public'` — each derives its own narrow authorization instead of opening the whole data plane. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **documentation** | `{ enabled: boolean; title: string; description?: string; version?: string; … }` | optional | OpenAPI/Swagger documentation config |
 | **responseFormat** | `{ envelope: boolean; includeMetadata: boolean; includePagination: boolean }` | optional | Response format options |
@@ -187,7 +187,7 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **includeObjects** | `string[]` | optional | Specific objects to generate routes for (empty = all) |
 | **excludeObjects** | `string[]` | optional | Objects to exclude from route generation |
-| **nameTransform** | `Enum<'none' \| 'plural' \| 'kebab-case' \| 'camelCase'>` | ✅ | Transform object names in URLs |
+| **nameTransform** | `Enum<'none' \| 'plural' \| 'kebab-case' \| 'camelCase'>` | optional (default: `"none"`) | Transform object names in URLs |
 | **overrides** | `Record<string, { enabled?: boolean; basePath?: string; operations?: Record<string, boolean> }>` | optional | Per-object route customization |
 
 

@@ -54,9 +54,9 @@ const result = CheckpointSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **maxConcurrent** | `integer` | ✅ | Maximum number of concurrent executions allowed |
-| **onConflict** | `Enum<'queue' \| 'reject' \| 'cancel_existing'>` | ✅ | queue = enqueue for later, reject = fail immediately, cancel_existing = stop running instance |
-| **lockScope** | `Enum<'global' \| 'per_record' \| 'per_user'>` | ✅ | Scope of the concurrency lock |
+| **maxConcurrent** | `integer` | optional (default: `1`) | Maximum number of concurrent executions allowed |
+| **onConflict** | `Enum<'queue' \| 'reject' \| 'cancel_existing'>` | optional (default: `"queue"`) | queue = enqueue for later, reject = fail immediately, cancel_existing = stop running instance |
+| **lockScope** | `Enum<'global' \| 'per_record' \| 'per_user'>` | optional (default: `"global"`) | Scope of the concurrency lock |
 | **queueTimeoutMs** | `integer` | optional | Maximum time to wait in queue before timing out (ms) |
 
 
@@ -77,7 +77,7 @@ const result = CheckpointSchema.parse(data);
 | **stack** | `string` | optional | Stack trace for debugging |
 | **context** | `Record<string, any>` | optional | Additional diagnostic context (input data, config snapshot) |
 | **timestamp** | `string` | ✅ | When the error occurred |
-| **retryable** | `boolean` | ✅ | Whether this error can be retried |
+| **retryable** | `boolean` | optional (default: `false`) | Whether this error can be retried |
 | **resolvedAt** | `string` | optional | When the error was resolved (e.g., after successful retry) |
 
 
@@ -246,14 +246,14 @@ const result = CheckpointSchema.parse(data);
 | **id** | `string` | ✅ | Schedule instance ID |
 | **flowName** | `string` | ✅ | Flow machine name |
 | **cronExpression** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Cron expression — cron`0 9 * * MON-FRI` |
-| **timezone** | `string` | optional | IANA timezone for cron evaluation |
-| **status** | `Enum<'active' \| 'paused' \| 'disabled' \| 'expired'>` | optional | Current schedule status |
+| **timezone** | `string` | optional (default: `"UTC"`) | IANA timezone for cron evaluation |
+| **status** | `Enum<'active' \| 'paused' \| 'disabled' \| 'expired'>` | optional (default: `"active"`) | Current schedule status |
 | **nextRunAt** | `string` | optional | Next scheduled execution timestamp |
 | **lastRunAt** | `string` | optional | Last execution timestamp |
 | **lastExecutionId** | `string` | optional | Execution ID of the last run |
 | **lastRunStatus** | `Enum<'pending' \| 'running' \| 'paused' \| 'completed' \| 'failed' \| 'cancelled' \| 'timed_out' \| 'retrying'>` | optional | Status of the last run |
-| **totalRuns** | `integer` | optional | Total number of executions |
-| **consecutiveFailures** | `integer` | optional | Consecutive failed executions |
+| **totalRuns** | `integer` | optional (default: `0`) | Total number of executions |
+| **consecutiveFailures** | `integer` | optional (default: `0`) | Consecutive failed executions |
 | **startDate** | `string` | optional | Schedule effective start date |
 | **endDate** | `string` | optional | Schedule expiration date |
 | **maxRuns** | `integer` | optional | Maximum total executions before auto-disable |

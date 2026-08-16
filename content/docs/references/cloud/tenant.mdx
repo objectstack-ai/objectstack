@@ -42,7 +42,7 @@ const result = PackageInstallationSchema.parse(data);
 | **tenantId** | `string` | ✅ | Tenant database ID |
 | **packageId** | `string` | ✅ | Package identifier |
 | **version** | `string` | ✅ | Installed package version |
-| **status** | `Enum<'installing' \| 'active' \| 'disabled' \| 'uninstalling' \| 'failed'>` | ✅ | Installation status |
+| **status** | `Enum<'installing' \| 'active' \| 'disabled' \| 'uninstalling' \| 'failed'>` | optional (default: `"installing"`) | Installation status |
 | **installedAt** | `string` | ✅ | Installation timestamp |
 | **installedBy** | `string` | ✅ | User ID who installed the package |
 | **config** | `Record<string, any>` | optional | Package-specific configuration |
@@ -72,7 +72,7 @@ const result = PackageInstallationSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **organizationId** | `string` | ✅ | Organization ID |
 | **region** | `string` | optional | Deployment region preference |
-| **plan** | `string` | ✅ | Tenant plan tier |
+| **plan** | `string` | optional (default: `"free"`) | Tenant plan tier |
 | **storageLimitMb** | `integer` | optional | Storage limit in megabytes |
 | **metadata** | `Record<string, any>` | optional | Custom tenant metadata |
 
@@ -119,9 +119,9 @@ const result = PackageInstallationSchema.parse(data);
 | **databaseName** | `string` | ✅ | Database name (UUID-based) |
 | **databaseUrl** | `string` | ✅ | Full database URL |
 | **authToken** | `string` | ✅ | Encrypted tenant-specific auth token |
-| **status** | `Enum<'provisioning' \| 'active' \| 'suspended' \| 'archived' \| 'failed'>` | ✅ | Database status |
+| **status** | `Enum<'provisioning' \| 'active' \| 'suspended' \| 'archived' \| 'failed'>` | optional (default: `"provisioning"`) | Database status |
 | **region** | `string` | ✅ | Deployment region |
-| **plan** | `string` | ✅ | Tenant plan tier |
+| **plan** | `string` | optional (default: `"free"`) | Tenant plan tier |
 | **storageLimitMb** | `integer` | ✅ | Storage limit in megabytes |
 | **createdAt** | `string` | ✅ | Database creation timestamp |
 | **updatedAt** | `string` | ✅ | Last update timestamp |
@@ -173,13 +173,13 @@ Opaque plan/tier identifier. The vocabulary is control-plane config owned by the
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable multi-tenant mode |
-| **identificationSources** | `Enum<'subdomain' \| 'custom_domain' \| 'header' \| 'jwt_claim' \| 'session' \| 'default'>[]` | ✅ | Tenant identification strategy (in order of precedence) |
+| **enabled** | `boolean` | optional (default: `false`) | Enable multi-tenant mode |
+| **identificationSources** | `Enum<'subdomain' \| 'custom_domain' \| 'header' \| 'jwt_claim' \| 'session' \| 'default'>[]` | optional (default: `["subdomain","header","jwt_claim"]`) | Tenant identification strategy (in order of precedence) |
 | **defaultTenantId** | `string` | optional | Default tenant ID |
 | **subdomainPattern** | `string` | optional | Subdomain pattern for tenant extraction |
 | **customDomainMapping** | `Record<string, string>` | optional | Custom domain to tenant ID mapping |
-| **tenantHeaderName** | `string` | ✅ | Header name for tenant ID |
-| **jwtOrganizationClaim** | `string` | ✅ | JWT claim name for organization ID |
+| **tenantHeaderName** | `string` | optional (default: `"X-Tenant-ID"`) | Header name for tenant ID |
+| **jwtOrganizationClaim** | `string` | optional (default: `"organizationId"`) | JWT claim name for organization ID |
 
 
 ---

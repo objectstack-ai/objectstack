@@ -62,7 +62,7 @@ const result = MCPApprovalPolicySchema.parse(data);
 | **transport** | `Enum<'stdio' \| 'http' \| 'websocket'>` | ✅ |  |
 | **endpoint** | `string` | ✅ | Command (stdio) or URL (http/websocket) |
 | **secretRef** | `string` | optional |  |
-| **active** | `boolean` | ✅ |  |
+| **active** | `boolean` | optional (default: `true`) |  |
 
 
 ---
@@ -76,7 +76,7 @@ const result = MCPApprovalPolicySchema.parse(data);
 | **server** | `string` | ✅ |  |
 | **toolName** | `string` | ✅ |  |
 | **aliasAs** | `string` | optional |  |
-| **approval** | `Enum<'always' \| 'never' \| 'first_call'>` | ✅ |  |
+| **approval** | `Enum<'always' \| 'never' \| 'first_call'>` | optional (default: `"never"`) |  |
 
 
 ---

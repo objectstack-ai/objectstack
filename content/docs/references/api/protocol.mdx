@@ -695,7 +695,7 @@ Enable package response
 | **etag** | `{ value: string; weak: boolean }` | optional | ETag for this resource version |
 | **lastModified** | `string` | optional | Last modification timestamp |
 | **cacheControl** | `{ directives: Enum<'public' \| 'private' \| 'no-cache' \| 'no-store' \| 'must-revalidate' \| 'max-age'>[]; maxAge?: number; staleWhileRevalidate?: number; staleIfError?: number }` | optional | Cache control directives |
-| **notModified** | `boolean` | ✅ | True if resource has not been modified (304 response) |
+| **notModified** | `boolean` | optional (default: `false`) | True if resource has not been modified (304 response) |
 | **version** | `string` | optional | Metadata version identifier |
 
 
@@ -995,7 +995,7 @@ Install package request
 | :--- | :--- | :--- | :--- |
 | **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest to install |
 | **settings** | `Record<string, any>` | optional | User-provided settings at install time |
-| **enableOnInstall** | `boolean` | optional | Whether to enable immediately after install |
+| **enableOnInstall** | `boolean` | optional (default: `true`) | Whether to enable immediately after install |
 | **platformVersion** | `string` | optional | Current platform version for compatibility verification |
 
 
@@ -1176,7 +1176,7 @@ List packages response
 | **type** | `string` | ✅ | Notification type |
 | **title** | `string` | ✅ | Notification title |
 | **body** | `string` | ✅ | Notification body text |
-| **read** | `boolean` | ✅ | Whether notification has been read |
+| **read** | `boolean` | optional (default: `false`) | Whether notification has been read |
 | **data** | `Record<string, any>` | optional | Additional notification data |
 | **actionUrl** | `string` | optional | URL to navigate to when clicked |
 | **createdAt** | `string` | ✅ | When notification was created |
@@ -1190,10 +1190,10 @@ List packages response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **email** | `boolean` | ✅ | Receive email notifications |
-| **push** | `boolean` | ✅ | Receive push notifications |
-| **inApp** | `boolean` | ✅ | Receive in-app notifications |
-| **digest** | `Enum<'none' \| 'daily' \| 'weekly'>` | ✅ | Email digest frequency |
+| **email** | `boolean` | optional (default: `true`) | Receive email notifications |
+| **push** | `boolean` | optional (default: `true`) | Receive push notifications |
+| **inApp** | `boolean` | optional (default: `true`) | Receive in-app notifications |
+| **digest** | `Enum<'none' \| 'daily' \| 'weekly'>` | optional (default: `"none"`) | Email digest frequency |
 | **channels** | `Record<string, { enabled: boolean; email?: boolean; push?: boolean }>` | optional | Per-channel notification preferences |
 
 

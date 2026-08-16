@@ -100,11 +100,11 @@ const result = ConditionalValidationSchema.parse(data);
 | **name** | `string` | ✅ | Unique rule name (snake_case) |
 | **label** | `string` | optional | Human-readable label for the rule listing |
 | **description** | `string` | optional | Administrative notes explaining the business reason |
-| **active** | `boolean` | optional |  |
-| **events** | `Enum<'insert' \| 'update'>[]` | optional | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
-| **priority** | `integer` | optional | Execution priority (lower runs first, default: 100) |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **events** | `Enum<'insert' \| 'update'>[]` | optional (default: `["insert","update"]`) | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
+| **priority** | `integer` | optional (default: `100`) | Execution priority (lower runs first, default: 100) |
 | **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
-| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional |  |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional (default: `"error"`) |  |
 | **message** | `string` | ✅ | Error message to display to the user |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -130,11 +130,11 @@ const result = ConditionalValidationSchema.parse(data);
 | **name** | `string` | ✅ | Unique rule name (snake_case) |
 | **label** | `string` | optional | Human-readable label for the rule listing |
 | **description** | `string` | optional | Administrative notes explaining the business reason |
-| **active** | `boolean` | optional |  |
-| **events** | `Enum<'insert' \| 'update'>[]` | optional | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
-| **priority** | `integer` | optional | Execution priority (lower runs first, default: 100) |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **events** | `Enum<'insert' \| 'update'>[]` | optional (default: `["insert","update"]`) | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
+| **priority** | `integer` | optional (default: `100`) | Execution priority (lower runs first, default: 100) |
 | **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
-| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional |  |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional (default: `"error"`) |  |
 | **message** | `string` | ✅ | Error message to display to the user |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -159,11 +159,11 @@ const result = ConditionalValidationSchema.parse(data);
 | **name** | `string` | ✅ | Unique rule name (snake_case) |
 | **label** | `string` | optional | Human-readable label for the rule listing |
 | **description** | `string` | optional | Administrative notes explaining the business reason |
-| **active** | `boolean` | ✅ |  |
-| **events** | `Enum<'insert' \| 'update'>[]` | ✅ | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
-| **priority** | `integer` | ✅ | Execution priority (lower runs first, default: 100) |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **events** | `Enum<'insert' \| 'update'>[]` | optional (default: `["insert","update"]`) | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
+| **priority** | `integer` | optional (default: `100`) | Execution priority (lower runs first, default: 100) |
 | **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
-| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | ✅ |  |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional (default: `"error"`) |  |
 | **message** | `string` | ✅ | Error message to display to the user |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -189,11 +189,11 @@ const result = ConditionalValidationSchema.parse(data);
 | **name** | `string` | ✅ | Unique rule name (snake_case) |
 | **label** | `string` | optional | Human-readable label for the rule listing |
 | **description** | `string` | optional | Administrative notes explaining the business reason |
-| **active** | `boolean` | ✅ |  |
-| **events** | `Enum<'insert' \| 'update'>[]` | ✅ | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
-| **priority** | `integer` | ✅ | Execution priority (lower runs first, default: 100) |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **events** | `Enum<'insert' \| 'update'>[]` | optional (default: `["insert","update"]`) | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
+| **priority** | `integer` | optional (default: `100`) | Execution priority (lower runs first, default: 100) |
 | **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
-| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | ✅ |  |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional (default: `"error"`) |  |
 | **message** | `string` | ✅ | Error message to display to the user |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -218,11 +218,11 @@ const result = ConditionalValidationSchema.parse(data);
 | **name** | `string` | ✅ | Unique rule name (snake_case) |
 | **label** | `string` | optional | Human-readable label for the rule listing |
 | **description** | `string` | optional | Administrative notes explaining the business reason |
-| **active** | `boolean` | optional |  |
-| **events** | `Enum<'insert' \| 'update'>[]` | optional | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
-| **priority** | `integer` | optional | Execution priority (lower runs first, default: 100) |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **events** | `Enum<'insert' \| 'update'>[]` | optional (default: `["insert","update"]`) | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
+| **priority** | `integer` | optional (default: `100`) | Execution priority (lower runs first, default: 100) |
 | **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
-| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional |  |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional (default: `"error"`) |  |
 | **message** | `string` | ✅ | Error message to display to the user |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -246,11 +246,11 @@ const result = ConditionalValidationSchema.parse(data);
 | **name** | `string` | ✅ | Unique rule name (snake_case) |
 | **label** | `string` | optional | Human-readable label for the rule listing |
 | **description** | `string` | optional | Administrative notes explaining the business reason |
-| **active** | `boolean` | ✅ |  |
-| **events** | `Enum<'insert' \| 'update'>[]` | ✅ | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
-| **priority** | `integer` | ✅ | Execution priority (lower runs first, default: 100) |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **events** | `Enum<'insert' \| 'update'>[]` | optional (default: `["insert","update"]`) | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
+| **priority** | `integer` | optional (default: `100`) | Execution priority (lower runs first, default: 100) |
 | **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
-| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | ✅ |  |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional (default: `"error"`) |  |
 | **message** | `string` | ✅ | Error message to display to the user |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -284,11 +284,11 @@ This schema accepts one of the following structures:
 | **name** | `string` | ✅ | Unique rule name (snake_case) |
 | **label** | `string` | optional | Human-readable label for the rule listing |
 | **description** | `string` | optional | Administrative notes explaining the business reason |
-| **active** | `boolean` | optional |  |
-| **events** | `Enum<'insert' \| 'update'>[]` | optional | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
-| **priority** | `integer` | optional | Execution priority (lower runs first, default: 100) |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **events** | `Enum<'insert' \| 'update'>[]` | optional (default: `["insert","update"]`) | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
+| **priority** | `integer` | optional (default: `100`) | Execution priority (lower runs first, default: 100) |
 | **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
-| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional |  |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional (default: `"error"`) |  |
 | **message** | `string` | ✅ | Error message to display to the user |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -313,11 +313,11 @@ This schema accepts one of the following structures:
 | **name** | `string` | ✅ | Unique rule name (snake_case) |
 | **label** | `string` | optional | Human-readable label for the rule listing |
 | **description** | `string` | optional | Administrative notes explaining the business reason |
-| **active** | `boolean` | optional |  |
-| **events** | `Enum<'insert' \| 'update'>[]` | optional | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
-| **priority** | `integer` | optional | Execution priority (lower runs first, default: 100) |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **events** | `Enum<'insert' \| 'update'>[]` | optional (default: `["insert","update"]`) | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
+| **priority** | `integer` | optional (default: `100`) | Execution priority (lower runs first, default: 100) |
 | **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
-| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional |  |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional (default: `"error"`) |  |
 | **message** | `string` | ✅ | Error message to display to the user |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -344,11 +344,11 @@ This schema accepts one of the following structures:
 | **name** | `string` | ✅ | Unique rule name (snake_case) |
 | **label** | `string` | optional | Human-readable label for the rule listing |
 | **description** | `string` | optional | Administrative notes explaining the business reason |
-| **active** | `boolean` | optional |  |
-| **events** | `Enum<'insert' \| 'update'>[]` | optional | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
-| **priority** | `integer` | optional | Execution priority (lower runs first, default: 100) |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **events** | `Enum<'insert' \| 'update'>[]` | optional (default: `["insert","update"]`) | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
+| **priority** | `integer` | optional (default: `100`) | Execution priority (lower runs first, default: 100) |
 | **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
-| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional |  |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional (default: `"error"`) |  |
 | **message** | `string` | ✅ | Error message to display to the user |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -375,11 +375,11 @@ This schema accepts one of the following structures:
 | **name** | `string` | ✅ | Unique rule name (snake_case) |
 | **label** | `string` | optional | Human-readable label for the rule listing |
 | **description** | `string` | optional | Administrative notes explaining the business reason |
-| **active** | `boolean` | optional |  |
-| **events** | `Enum<'insert' \| 'update'>[]` | optional | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
-| **priority** | `integer` | optional | Execution priority (lower runs first, default: 100) |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **events** | `Enum<'insert' \| 'update'>[]` | optional (default: `["insert","update"]`) | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
+| **priority** | `integer` | optional (default: `100`) | Execution priority (lower runs first, default: 100) |
 | **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
-| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional |  |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional (default: `"error"`) |  |
 | **message** | `string` | ✅ | Error message to display to the user |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -405,11 +405,11 @@ This schema accepts one of the following structures:
 | **name** | `string` | ✅ | Unique rule name (snake_case) |
 | **label** | `string` | optional | Human-readable label for the rule listing |
 | **description** | `string` | optional | Administrative notes explaining the business reason |
-| **active** | `boolean` | optional |  |
-| **events** | `Enum<'insert' \| 'update'>[]` | optional | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
-| **priority** | `integer` | optional | Execution priority (lower runs first, default: 100) |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **events** | `Enum<'insert' \| 'update'>[]` | optional (default: `["insert","update"]`) | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
+| **priority** | `integer` | optional (default: `100`) | Execution priority (lower runs first, default: 100) |
 | **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
-| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional |  |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional (default: `"error"`) |  |
 | **message** | `string` | ✅ | Error message to display to the user |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -435,11 +435,11 @@ This schema accepts one of the following structures:
 | **name** | `string` | ✅ | Unique rule name (snake_case) |
 | **label** | `string` | optional | Human-readable label for the rule listing |
 | **description** | `string` | optional | Administrative notes explaining the business reason |
-| **active** | `boolean` | optional |  |
-| **events** | `Enum<'insert' \| 'update'>[]` | optional | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
-| **priority** | `integer` | optional | Execution priority (lower runs first, default: 100) |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **events** | `Enum<'insert' \| 'update'>[]` | optional (default: `["insert","update"]`) | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
+| **priority** | `integer` | optional (default: `100`) | Execution priority (lower runs first, default: 100) |
 | **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
-| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional |  |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional (default: `"error"`) |  |
 | **message** | `string` | ✅ | Error message to display to the user |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |

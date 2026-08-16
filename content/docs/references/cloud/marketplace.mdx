@@ -83,7 +83,7 @@ Reference to a downloadable package artifact
 | **url** | `string` | ✅ | Artifact download URL |
 | **sha256** | `string` | ✅ | SHA256 checksum |
 | **size** | `integer` | ✅ | Artifact size in bytes |
-| **format** | `Enum<'tgz' \| 'zip'>` | ✅ | Artifact format |
+| **format** | `Enum<'tgz' \| 'zip'>` | optional (default: `"tgz"`) | Artifact format |
 | **uploadedAt** | `string` | ✅ | Upload timestamp |
 
 
@@ -145,7 +145,7 @@ Install from marketplace request
 | **version** | `string` | optional | Version to install |
 | **licenseKey** | `string` | optional | License key for paid packages |
 | **settings** | `Record<string, any>` | optional | User-provided settings at install time |
-| **enableOnInstall** | `boolean` | ✅ | Whether to enable immediately after install |
+| **enableOnInstall** | `boolean` | optional (default: `true`) | Whether to enable immediately after install |
 | **artifactRef** | `{ url: string; sha256: string; size: integer; format: Enum<'tgz' \| 'zip'>; … }` | optional | Artifact reference for direct installation |
 | **tenantId** | `string` | optional | Tenant identifier |
 
@@ -178,9 +178,9 @@ Public-facing package listing on the marketplace
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Listing ID (matches package manifest ID) |
 | **packageId** | `string` | ✅ | Package identifier |
-| **packageType** | `Enum<'app'>` | ✅ | Consumer-installable package type (ADR-0019: only `app` is listable) |
+| **packageType** | `Enum<'app'>` | optional (default: `"app"`) | Consumer-installable package type (ADR-0019: only `app` is listable) |
 | **publisherId** | `string` | ✅ | Publisher ID |
-| **status** | `Enum<'draft' \| 'submitted' \| 'in-review' \| 'approved' \| 'published' \| 'rejected' \| 'suspended' \| 'deprecated' \| 'unlisted'>` | ✅ | Publication state: draft, published, under-review, suspended, deprecated, or unlisted |
+| **status** | `Enum<'draft' \| 'submitted' \| 'in-review' \| 'approved' \| 'published' \| 'rejected' \| 'suspended' \| 'deprecated' \| 'unlisted'>` | optional (default: `"draft"`) | Publication state: draft, published, under-review, suspended, deprecated, or unlisted |
 | **name** | `string` | ✅ | Display name |
 | **tagline** | `string` | optional | Short tagline (max 120 chars) |
 | **description** | `string` | optional | Full description (Markdown) |
@@ -191,7 +191,7 @@ Public-facing package listing on the marketplace
 | **documentationUrl** | `string` | optional | Documentation URL |
 | **supportUrl** | `string` | optional | Support URL |
 | **repositoryUrl** | `string` | optional | Source repository URL |
-| **pricing** | `Enum<'free' \| 'freemium' \| 'paid' \| 'subscription' \| 'usage-based' \| 'contact-sales'>` | ✅ | Pricing model |
+| **pricing** | `Enum<'free' \| 'freemium' \| 'paid' \| 'subscription' \| 'usage-based' \| 'contact-sales'>` | optional (default: `"free"`) | Pricing model |
 | **priceInCents** | `integer` | optional | Price in cents (e.g. 999 = $9.99) |
 | **latestVersion** | `string` | ✅ | Latest published version |
 | **minPlatformVersion** | `string` | optional | Minimum ObjectStack platform version |
@@ -217,10 +217,10 @@ Marketplace search request
 | **tags** | `string[]` | optional | Filter by tags |
 | **pricing** | `Enum<'free' \| 'freemium' \| 'paid' \| 'subscription' \| 'usage-based' \| 'contact-sales'>` | optional | Filter by pricing model |
 | **publisherVerification** | `Enum<'unverified' \| 'pending' \| 'verified' \| 'trusted' \| 'partner'>` | optional | Filter by publisher verification level |
-| **sortBy** | `Enum<'relevance' \| 'popularity' \| 'rating' \| 'newest' \| 'updated' \| 'name'>` | ✅ | Sort field |
-| **sortDirection** | `Enum<'asc' \| 'desc'>` | ✅ | Sort direction |
-| **page** | `integer` | ✅ | Page number |
-| **pageSize** | `integer` | ✅ | Items per page |
+| **sortBy** | `Enum<'relevance' \| 'popularity' \| 'rating' \| 'newest' \| 'updated' \| 'name'>` | optional (default: `"relevance"`) | Sort field |
+| **sortDirection** | `Enum<'asc' \| 'desc'>` | optional (default: `"desc"`) | Sort direction |
+| **page** | `integer` | optional (default: `1`) | Page number |
+| **pageSize** | `integer` | optional (default: `20`) | Items per page |
 | **platformVersion** | `string` | optional | Filter by platform version compatibility |
 
 
@@ -255,10 +255,10 @@ Developer submission of a package version for review
 | **packageId** | `string` | ✅ | Package identifier |
 | **version** | `string` | ✅ | Version being submitted |
 | **publisherId** | `string` | ✅ | Publisher submitting |
-| **status** | `Enum<'pending' \| 'scanning' \| 'in-review' \| 'changes-requested' \| 'approved' \| 'rejected'>` | ✅ | Review status |
+| **status** | `Enum<'pending' \| 'scanning' \| 'in-review' \| 'changes-requested' \| 'approved' \| 'rejected'>` | optional (default: `"pending"`) | Review status |
 | **artifactUrl** | `string` | ✅ | Package artifact URL for review |
 | **releaseNotes** | `string` | optional | Release notes for this version |
-| **isNewListing** | `boolean` | ✅ | Whether this is a new listing submission |
+| **isNewListing** | `boolean` | optional (default: `false`) | Whether this is a new listing submission |
 | **scanResults** | `{ passed: boolean; securityScore?: number; compatibilityCheck?: boolean; issues?: object[] }` | optional | Automated scan results |
 | **reviewerNotes** | `string` | optional | Notes from the platform reviewer |
 | **submittedAt** | `string` | optional | Submission timestamp |
@@ -294,7 +294,7 @@ Developer or organization that publishes packages
 | **id** | `string` | ✅ | Publisher ID |
 | **name** | `string` | ✅ | Publisher display name |
 | **type** | `Enum<'individual' \| 'organization'>` | ✅ | Publisher type |
-| **verification** | `Enum<'unverified' \| 'pending' \| 'verified' \| 'trusted' \| 'partner'>` | ✅ | Publisher verification status |
+| **verification** | `Enum<'unverified' \| 'pending' \| 'verified' \| 'trusted' \| 'partner'>` | optional (default: `"unverified"`) | Publisher verification status |
 | **email** | `string` | optional | Contact email |
 | **website** | `string` | optional | Publisher website |
 | **logoUrl** | `string` | optional | Publisher logo URL |

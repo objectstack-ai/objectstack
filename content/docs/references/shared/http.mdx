@@ -32,10 +32,10 @@ const result = CorsConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable CORS |
-| **origins** | `string \| string[]` | ✅ | Allowed origins (* for all) |
+| **enabled** | `boolean` | optional (default: `true`) | Enable CORS |
+| **origins** | `string \| string[]` | optional (default: `"*"`) | Allowed origins (* for all) |
 | **methods** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>[]` | optional | Allowed HTTP methods |
-| **credentials** | `boolean` | ✅ | Allow credentials (cookies, authorization headers) |
+| **credentials** | `boolean` | optional (default: `false`) | Allow credentials (cookies, authorization headers) |
 | **maxAge** | `integer` | optional | Preflight cache duration in seconds |
 
 
@@ -80,7 +80,7 @@ HTTP methods a view data source may request — the subset of `HttpMethod` witho
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **url** | `string` | ✅ | API endpoint URL |
-| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>` | ✅ | HTTP method |
+| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>` | optional (default: `"GET"`) | HTTP method |
 | **headers** | `Record<string, string>` | optional | Custom HTTP headers |
 | **params** | `Record<string, any>` | optional | Query parameters |
 | **body** | `any` | optional | Request body for POST/PUT/PATCH |
@@ -94,9 +94,9 @@ HTTP methods a view data source may request — the subset of `HttpMethod` witho
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable rate limiting |
-| **windowMs** | `integer` | ✅ | Time window in milliseconds |
-| **maxRequests** | `integer` | ✅ | Max requests per window |
+| **enabled** | `boolean` | optional (default: `false`) | Enable rate limiting |
+| **windowMs** | `integer` | optional (default: `60000`) | Time window in milliseconds |
+| **maxRequests** | `integer` | optional (default: `100`) | Max requests per window |
 
 
 ---

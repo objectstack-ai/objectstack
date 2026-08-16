@@ -86,15 +86,15 @@ const result = VersionDefinitionSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **strategy** | `Enum<'urlPath' \| 'header' \| 'queryParam' \| 'dateBased'>` | ✅ | How the API version is specified by clients |
+| **strategy** | `Enum<'urlPath' \| 'header' \| 'queryParam' \| 'dateBased'>` | optional (default: `"urlPath"`) | How the API version is specified by clients |
 | **current** | `string` | ✅ | The current/recommended API version identifier |
 | **default** | `string` | ✅ | Fallback version when client does not specify one |
 | **versions** | `{ version: string; status: Enum<'preview' \| 'current' \| 'supported' \| 'deprecated' \| 'retired'>; releasedAt: string; deprecatedAt?: string; … }[]` | ✅ | All available API versions with lifecycle metadata |
-| **headerName** | `string` | ✅ | HTTP header name for version negotiation (header/dateBased strategies) |
-| **queryParamName** | `string` | ✅ | Query parameter name for version specification (queryParam strategy) |
-| **urlPrefix** | `string` | ✅ | URL prefix before version segment (urlPath strategy) |
+| **headerName** | `string` | optional (default: `"ObjectStack-Version"`) | HTTP header name for version negotiation (header/dateBased strategies) |
+| **queryParamName** | `string` | optional (default: `"version"`) | Query parameter name for version specification (queryParam strategy) |
+| **urlPrefix** | `string` | optional (default: `"/api"`) | URL prefix before version segment (urlPath strategy) |
 | **deprecation** | `{ warnHeader: boolean; sunsetHeader: boolean; linkHeader: boolean; rejectRetired: boolean; … }` | optional | Deprecation lifecycle behavior |
-| **includeInDiscovery** | `boolean` | ✅ | Include version information in the API discovery endpoint |
+| **includeInDiscovery** | `boolean` | optional (default: `true`) | Include version information in the API discovery endpoint |
 
 
 ---

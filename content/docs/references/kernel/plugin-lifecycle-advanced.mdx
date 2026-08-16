@@ -71,8 +71,8 @@ const result = AdvancedPluginLifecycleConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ |  |
-| **fallbackMode** | `Enum<'minimal' \| 'cached' \| 'readonly' \| 'offline' \| 'disabled'>` | ✅ |  |
+| **enabled** | `boolean` | optional (default: `true`) |  |
+| **fallbackMode** | `Enum<'minimal' \| 'cached' \| 'readonly' \| 'offline' \| 'disabled'>` | optional (default: `"minimal"`) |  |
 | **criticalDependencies** | `string[]` | optional | Plugin IDs that are required for operation |
 | **optionalDependencies** | `string[]` | optional | Plugin IDs that are nice to have but not required |
 | **degradedFeatures** | `{ feature: string; enabled: boolean; reason?: string }[]` | optional |  |
@@ -87,13 +87,13 @@ const result = AdvancedPluginLifecycleConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ |  |
+| **enabled** | `boolean` | optional (default: `false`) |  |
 | **watchPatterns** | `string[]` | optional | Glob patterns to watch for changes |
-| **debounceDelay** | `integer` | ✅ | Wait time after change detection before reload |
-| **preserveState** | `boolean` | ✅ | Keep plugin state across reloads |
-| **stateStrategy** | `Enum<'memory' \| 'disk' \| 'distributed' \| 'none'>` | ✅ | How to preserve state during reload |
+| **debounceDelay** | `integer` | optional (default: `1000`) | Wait time after change detection before reload |
+| **preserveState** | `boolean` | optional (default: `true`) | Keep plugin state across reloads |
+| **stateStrategy** | `Enum<'memory' \| 'disk' \| 'distributed' \| 'none'>` | optional (default: `"memory"`) | How to preserve state during reload |
 | **distributedConfig** | `{ provider: Enum<'redis' \| 'etcd' \| 'custom'>; endpoints?: string[]; keyPrefix?: string; ttl?: integer; … }` | optional | Configuration for distributed state management |
-| **shutdownTimeout** | `integer` | ✅ | Maximum time to wait for graceful shutdown |
+| **shutdownTimeout** | `integer` | optional (default: `30000`) | Maximum time to wait for graceful shutdown |
 | **beforeReload** | `string[]` | optional | Hook names to call before reload |
 | **afterReload** | `string[]` | optional | Hook names to call after reload |
 
@@ -106,14 +106,14 @@ const result = AdvancedPluginLifecycleConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **interval** | `integer` | ✅ | How often to perform health checks (default: 30s) |
-| **timeout** | `integer` | ✅ | Maximum time to wait for health check response |
-| **failureThreshold** | `integer` | ✅ | Consecutive failures needed to mark unhealthy |
-| **successThreshold** | `integer` | ✅ | Consecutive successes needed to mark healthy |
+| **interval** | `integer` | optional (default: `30000`) | How often to perform health checks (default: 30s) |
+| **timeout** | `integer` | optional (default: `5000`) | Maximum time to wait for health check response |
+| **failureThreshold** | `integer` | optional (default: `3`) | Consecutive failures needed to mark unhealthy |
+| **successThreshold** | `integer` | optional (default: `1`) | Consecutive successes needed to mark healthy |
 | **checkMethod** | `string` | optional | Method name to call for health check |
-| **autoRestart** | `boolean` | ✅ | Automatically restart plugin on health check failure |
-| **maxRestartAttempts** | `integer` | ✅ | Maximum restart attempts before giving up |
-| **restartBackoff** | `Enum<'fixed' \| 'linear' \| 'exponential'>` | ✅ | Backoff strategy for restart delays |
+| **autoRestart** | `boolean` | optional (default: `false`) | Automatically restart plugin on health check failure |
+| **maxRestartAttempts** | `integer` | optional (default: `3`) | Maximum restart attempts before giving up |
+| **restartBackoff** | `Enum<'fixed' \| 'linear' \| 'exponential'>` | optional (default: `"exponential"`) | Backoff strategy for restart delays |
 
 
 ---
@@ -171,7 +171,7 @@ Current health status of the plugin
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **mode** | `Enum<'manual' \| 'automatic' \| 'scheduled' \| 'rolling'>` | ✅ |  |
+| **mode** | `Enum<'manual' \| 'automatic' \| 'scheduled' \| 'rolling'>` | optional (default: `"manual"`) |  |
 | **autoUpdateConstraints** | `{ major: boolean; minor: boolean; patch: boolean }` | optional |  |
 | **schedule** | `{ cron?: string; timezone: string; maintenanceWindow: integer }` | optional |  |
 | **rollback** | `{ enabled: boolean; automatic: boolean; keepVersions: integer; timeout: integer }` | optional |  |

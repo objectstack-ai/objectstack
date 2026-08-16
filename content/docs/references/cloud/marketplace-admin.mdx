@@ -48,8 +48,8 @@ const result = CuratedCollectionSchema.parse(data);
 | **description** | `string` | optional |  |
 | **coverImageUrl** | `string` | optional |  |
 | **listingIds** | `string[]` | ✅ | Ordered listing IDs |
-| **published** | `boolean` | ✅ |  |
-| **sortOrder** | `integer` | ✅ |  |
+| **published** | `boolean` | optional (default: `false`) |  |
+| **sortOrder** | `integer` | optional (default: `0`) |  |
 | **createdBy** | `string` | optional |  |
 | **createdAt** | `string` | optional |  |
 | **updatedAt** | `string` | optional |  |
@@ -64,12 +64,12 @@ const result = CuratedCollectionSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **listingId** | `string` | ✅ | Featured listing ID |
-| **priority** | `integer` | ✅ |  |
+| **priority** | `integer` | optional (default: `0`) |  |
 | **bannerUrl** | `string` | optional |  |
 | **editorialNote** | `string` | optional |  |
 | **startDate** | `string` | ✅ |  |
 | **endDate** | `string` | optional |  |
-| **active** | `boolean` | ✅ |  |
+| **active** | `boolean` | optional (default: `true`) |  |
 
 
 ---
@@ -108,7 +108,7 @@ const result = CuratedCollectionSchema.parse(data);
 | **actionBy** | `string` | ✅ | Admin user ID |
 | **actionAt** | `string` | ✅ |  |
 | **resolution** | `string` | optional |  |
-| **resolved** | `boolean` | ✅ |  |
+| **resolved** | `boolean` | optional (default: `false`) |  |
 
 
 ---
@@ -154,7 +154,7 @@ const result = CuratedCollectionSchema.parse(data);
 | **id** | `string` | ✅ | Criterion ID |
 | **category** | `Enum<'security' \| 'performance' \| 'quality' \| 'ux' \| 'documentation' \| 'policy' \| 'compatibility'>` | ✅ |  |
 | **description** | `string` | ✅ |  |
-| **required** | `boolean` | ✅ |  |
+| **required** | `boolean` | optional (default: `true`) |  |
 | **passed** | `boolean` | optional |  |
 | **notes** | `string` | optional |  |
 

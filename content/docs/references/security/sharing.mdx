@@ -34,8 +34,8 @@ const result = CriteriaSharingRuleSchema.parse(data);
 | **label** | `string` | optional | Human-readable label |
 | **description** | `string` | optional | Administrative notes |
 | **object** | `string` | ✅ | Target Object Name |
-| **active** | `boolean` | optional |  |
-| **accessLevel** | `Enum<'read' \| 'edit'>` | optional |  |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **accessLevel** | `Enum<'read' \| 'edit'>` | optional (default: `"read"`) |  |
 | **sharedWith** | `{ type: Enum<'user' \| 'team' \| 'position' \| 'unit_and_subordinates' \| 'business_unit'>; value: string }` | ✅ | The recipient of the shared access |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -95,8 +95,8 @@ const result = CriteriaSharingRuleSchema.parse(data);
 | **label** | `string` | optional | Human-readable label |
 | **description** | `string` | optional | Administrative notes |
 | **object** | `string` | ✅ | Target Object Name |
-| **active** | `boolean` | optional |  |
-| **accessLevel** | `Enum<'read' \| 'edit'>` | optional |  |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **accessLevel** | `Enum<'read' \| 'edit'>` | optional (default: `"read"`) |  |
 | **sharedWith** | `{ type: Enum<'user' \| 'team' \| 'position' \| 'unit_and_subordinates' \| 'business_unit'>; value: string }` | ✅ | The recipient of the shared access |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |

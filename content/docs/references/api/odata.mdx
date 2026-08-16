@@ -89,8 +89,8 @@ const result = ODataConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable OData API |
-| **path** | `string` | ✅ | OData endpoint path |
+| **enabled** | `boolean` | optional (default: `true`) | Enable OData API |
+| **path** | `string` | optional (default: `"/odata"`) | OData endpoint path |
 | **metadata** | `{ namespace: string; entityTypes: object[]; entitySets: object[] }` | optional | OData metadata configuration |
 
 

@@ -45,7 +45,7 @@ const result = EvalUserSchema.parse(data);
 | **id** | `string` | ✅ | User ID |
 | **name** | `string` | optional | Display name |
 | **email** | `string` | optional | Email address |
-| **positions** | `string[]` | ✅ | Canonical position/identity names assigned to the user (scope-resolved) |
+| **positions** | `string[]` | optional (default: `[]`) | Canonical position/identity names assigned to the user (scope-resolved) |
 | **isPlatformAdmin** | `boolean` | optional | DERIVED alias of 'platform_admin' in positions. Deprecated. |
 | **organizationId** | `string \| null` | optional | Active organization ID (null = platform/unscoped) |
 

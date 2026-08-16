@@ -29,7 +29,7 @@ const result = AIChatWindowProps.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **mode** | `Enum<'float' \| 'sidebar' \| 'inline'>` | ✅ | Display mode for the chat window |
+| **mode** | `Enum<'float' \| 'sidebar' \| 'inline'>` | optional (default: `"float"`) | Display mode for the chat window |
 | **agentId** | `string` | optional | Specific AI agent to use |
 | **context** | `Record<string, any>` | optional | Contextual data to pass to the AI |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
@@ -44,11 +44,11 @@ const result = AIChatWindowProps.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string \| Record<string, string>` | ✅ | Button display label |
-| **variant** | `Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'link'>` | optional | Button visual variant |
-| **size** | `Enum<'small' \| 'medium' \| 'large'>` | optional | Button size |
+| **variant** | `Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'link'>` | optional (default: `"primary"`) | Button visual variant |
+| **size** | `Enum<'small' \| 'medium' \| 'large'>` | optional (default: `"medium"`) | Button size |
 | **icon** | `string` | optional | Icon name (Lucide icon) |
-| **iconPosition** | `Enum<'left' \| 'right'>` | optional | Icon position relative to label |
-| **disabled** | `boolean` | optional | Disable the button |
+| **iconPosition** | `Enum<'left' \| 'right'>` | optional (default: `"left"`) | Icon position relative to label |
+| **disabled** | `boolean` | optional (default: `false`) | Disable the button |
 | **action** | `{ type?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>; name?: string; label?: string \| Record<string, string>; target?: string; … }` | optional | Inline action executed on click |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
@@ -64,8 +64,8 @@ const result = AIChatWindowProps.parse(data);
 | **object** | `string` | ✅ | Object to filter |
 | **fields** | `string[]` | ✅ | Filterable field names |
 | **targetVariable** | `string` | optional | Page variable to store filter state |
-| **layout** | `Enum<'inline' \| 'dropdown' \| 'sidebar'>` | ✅ | Filter display layout |
-| **showSearch** | `boolean` | ✅ | Show search input |
+| **layout** | `Enum<'inline' \| 'dropdown' \| 'sidebar'>` | optional (default: `"inline"`) | Filter display layout |
+| **showSearch** | `boolean` | optional (default: `true`) | Show search input |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
@@ -79,7 +79,7 @@ const result = AIChatWindowProps.parse(data);
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object for the form |
 | **fields** | `string[]` | optional | Fields to display (defaults to all editable fields) |
-| **mode** | `Enum<'create' \| 'edit'>` | optional | Form mode |
+| **mode** | `Enum<'create' \| 'edit'>` | optional (default: `"create"`) | Form mode |
 | **submitLabel** | `string \| Record<string, string>` | optional | Submit button label |
 | **onSubmit** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Action expression on form submit (CEL) |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
@@ -95,7 +95,7 @@ const result = AIChatWindowProps.parse(data);
 | :--- | :--- | :--- | :--- |
 | **src** | `string` | ✅ | Image URL or attachment field |
 | **alt** | `string` | optional | Alt text for accessibility |
-| **fit** | `Enum<'cover' \| 'contain' \| 'fill'>` | ✅ | Image object-fit mode |
+| **fit** | `Enum<'cover' \| 'contain' \| 'fill'>` | optional (default: `"cover"`) | Image object-fit mode |
 | **height** | `number` | optional | Fixed height in pixels |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
@@ -112,7 +112,7 @@ const result = AIChatWindowProps.parse(data);
 | **name** | `string` | ✅ | Target metadata item name; resolved package-scoped (ADR-0048), then dependencies (ADR-0046 §3.3) |
 | **object** | `string` | optional | Owning object — required for object-scoped kinds: state_machine is a rule ON an object (ADR-0020), permission renders a matrix FOR one; omit for top-level flow |
 | **mode** | `Enum<'diagram' \| 'matrix' \| 'summary'>` | optional | Render form; defaults per type (diagram for flow/state_machine, matrix for permission) |
-| **detail** | `Enum<'business' \| 'technical'>` | ✅ | Authoring altitude (ADR-0051 §3.4): business collapses technical flow nodes to business steps + approvals. NOT access (cf. book.audience); permission projection is automatic and render-time, never set here |
+| **detail** | `Enum<'business' \| 'technical'>` | optional (default: `"business"`) | Authoring altitude (ADR-0051 §3.4): business collapses technical flow nodes to business steps + approvals. NOT access (cf. book.audience); permission projection is automatic and render-time, never set here |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
@@ -166,12 +166,12 @@ const result = AIChatWindowProps.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **inputType** | `Enum<'text' \| 'email' \| 'number' \| 'tel' \| 'url' \| 'password'>` | ✅ | Native input type — drives keyboard/validation affordance and how the bound value is coerced (number → numeric). |
+| **inputType** | `Enum<'text' \| 'email' \| 'number' \| 'tel' \| 'url' \| 'password'>` | optional (default: `"text"`) | Native input type — drives keyboard/validation affordance and how the bound value is coerced (number → numeric). |
 | **label** | `string \| Record<string, string>` | optional | Field label shown above the input |
 | **placeholder** | `string \| Record<string, string>` | optional | Placeholder text shown when empty |
 | **defaultValue** | `string \| number` | optional | Initial value; seeds the bound page variable on mount |
-| **required** | `boolean` | ✅ | Mark the field as required |
-| **disabled** | `boolean` | ✅ | Disable the input |
+| **required** | `boolean` | optional (default: `false`) | Mark the field as required |
+| **disabled** | `boolean` | optional (default: `false`) | Disable the input |
 | **description** | `string \| Record<string, string>` | optional | Helper text shown below the input |
 | **targetVariable** | `string` | optional | Page variable this input writes to. Declarative hint; the live binding resolves via the variable whose `source` equals this component id (see PageVariableSchema). |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
@@ -186,8 +186,8 @@ const result = AIChatWindowProps.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **content** | `string \| Record<string, string>` | ✅ | Text or Markdown content — a plain string, or an inline locale map |
-| **variant** | `Enum<'heading' \| 'subheading' \| 'body' \| 'caption'>` | ✅ | Text style variant |
-| **align** | `Enum<'left' \| 'center' \| 'right'>` | ✅ | Text alignment |
+| **variant** | `Enum<'heading' \| 'subheading' \| 'body' \| 'caption'>` | optional (default: `"body"`) | Text style variant |
+| **align** | `Enum<'left' \| 'center' \| 'right'>` | optional (default: `"left"`) | Text alignment |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
@@ -390,8 +390,8 @@ const result = AIChatWindowProps.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **items** | `{ label: string \| Record<string, string>; icon?: string; collapsed: boolean; children: any[] }[]` | ✅ |  |
-| **allowMultiple** | `boolean` | ✅ | Allow multiple panels to be expanded simultaneously |
-| **variant** | `Enum<'flush' \| 'card'>` | ✅ | Panel framing: 'flush' draws a divider under each panel; 'card' leaves the border to each panel's own content |
+| **allowMultiple** | `boolean` | optional (default: `false`) | Allow multiple panels to be expanded simultaneously |
+| **variant** | `Enum<'flush' \| 'card'>` | optional (default: `"flush"`) | Panel framing: 'flush' draws a divider under each panel; 'card' leaves the border to each panel's own content |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
@@ -404,7 +404,7 @@ const result = AIChatWindowProps.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **title** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
-| **bordered** | `boolean` | ✅ |  |
+| **bordered** | `boolean` | optional (default: `true`) |  |
 | **actions** | `never` | optional | [REMOVED] `page:card` property `actions` was removed in @objectstack/spec 17.0.0 (#6946, ADR-0087 D2) — no renderer ever read it: objectui's card renderer builds its `<Card>` from `title`, `bordered`, `children` and `footer` only, has no actions area, and the component registry never published it as an input, so an authored value was accepted and dropped. Delete the key and author the buttons as components in the card's `children` or `footer` (`element:button`, `record:quick_actions`), which is what actually renders. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **children** | `any[]` | optional | Card content components, in order (the card body slot) |
 | **body** | `never` | optional | [REMOVED] `page:card` property `body` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0087 D2) — it was a second spelling of the composition slot every other container calls `children`, and the renderer reads both. Rename the key to `children`; the value (an array of child components) is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
@@ -434,11 +434,11 @@ const result = AIChatWindowProps.parse(data);
 | **title** | `string \| Record<string, string>` | optional | Page title. Omit to let the renderer derive the heading from the record (the default for record pages) — set explicitly on non-record pages (dashboard, landing) with no record to derive from. |
 | **subtitle** | `string \| Record<string, string>` | optional | Page subtitle |
 | **icon** | `never` | optional | [REMOVED] `page:header` property `icon` was removed in @objectstack/spec 17.0.0 (#6946, ADR-0087 D2) — no renderer ever read it: objectui resolves `icon` only per header action (`action.icon`), never off the header's own props bag, and the component registry never published it as an input, so an authored value was accepted and dropped. Delete the key. The header's own identity is drawn by the record chrome (`recordChrome`, on by default) and each action carries its own `icon`. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
-| **breadcrumb** | `boolean` | ✅ | Show breadcrumb |
+| **breadcrumb** | `boolean` | optional (default: `true`) | Show breadcrumb |
 | **actions** | `string[]` | optional | Action IDs to show in header |
-| **recordChrome** | `boolean` | ✅ | Render the record chrome — the title as a record chip with its follow star and copy-id button. Set false on a non-record page (dashboard, landing) to fall back to the bare heading layout. |
-| **showStar** | `boolean` | ✅ | Show the follow (favourite) star beside the record title. Part of the record chrome — no effect when `recordChrome` is false. |
-| **showCopyId** | `boolean` | ✅ | Show the copy-record-id button beside the record title. Part of the record chrome — no effect when `recordChrome` is false. |
+| **recordChrome** | `boolean` | optional (default: `true`) | Render the record chrome — the title as a record chip with its follow star and copy-id button. Set false on a non-record page (dashboard, landing) to fall back to the bare heading layout. |
+| **showStar** | `boolean` | optional (default: `true`) | Show the follow (favourite) star beside the record title. Part of the record chrome — no effect when `recordChrome` is false. |
+| **showCopyId** | `boolean` | optional (default: `true`) | Show the copy-record-id button beside the record title. Part of the record chrome — no effect when `recordChrome` is false. |
 | **maxVisible** | `integer` | optional | How many header actions render as inline buttons before the rest fold into the overflow menu (renderer default 3). |
 | **mobileMaxVisible** | `integer` | optional | The `maxVisible` budget on mobile viewports (renderer default 1). |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
@@ -452,9 +452,9 @@ const result = AIChatWindowProps.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **tabStyle** | `Enum<'line' \| 'card' \| 'pill'>` | optional | Tab-strip visual style: 'line' underlines the active tab, 'card' frames each tab, 'pill' renders rounded pills |
+| **tabStyle** | `Enum<'line' \| 'card' \| 'pill'>` | optional (default: `"line"`) | Tab-strip visual style: 'line' underlines the active tab, 'card' frames each tab, 'pill' renders rounded pills |
 | **type** | `never` | optional | [REMOVED] `page:tabs` property `type` was removed in @objectstack/spec 17.0.0 (#6776, ADR-0087 D2) — a props key named `type` collides with the page component's own dispatch key, so it is unauthorable in the flat and JSX carriers and was never validated in them. Rename the key to `tabStyle`; the value (`line` \| `card` \| `pill`) is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
-| **position** | `Enum<'top' \| 'left'>` | optional |  |
+| **position** | `Enum<'top' \| 'left'>` | optional (default: `"top"`) |  |
 | **alwaysShowStrip** | `boolean` | optional | Render the tab strip even when only one tab is visible (renderer default: a one-tab strip is hidden). |
 | **items** | `{ label: string \| Record<string, string>; icon?: string; visibleWhen?: string \| object; value?: string; … }[]` | ✅ |  |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
@@ -469,16 +469,16 @@ const result = AIChatWindowProps.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **types** | `Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| 'file' \| 'record_create' \| 'record_delete' \| 'approval' \| 'sharing' \| 'system'>[]` | optional | Feed item types to show (default: all) |
-| **filterMode** | `Enum<'all' \| 'comments_only' \| 'changes_only' \| 'tasks_only'>` | ✅ | Default activity filter |
-| **showFilterToggle** | `boolean` | ✅ | Show filter dropdown in panel header |
-| **limit** | `integer` | ✅ | Number of items to load per page |
-| **showCompleted** | `boolean` | ✅ | Include completed activities |
-| **unifiedTimeline** | `boolean` | ✅ | Mix field changes and comments in one timeline (Airtable style) |
-| **showCommentInput** | `boolean` | ✅ | Show "Leave a comment" input at the bottom |
-| **enableMentions** | `boolean` | ✅ | Enable @mentions in comments |
-| **enableReactions** | `boolean` | ✅ | Enable emoji reactions on feed items |
-| **enableThreading** | `boolean` | ✅ | Enable threaded replies on comments |
-| **showSubscriptionToggle** | `boolean` | ✅ | Show bell icon for record-level notification subscription |
+| **filterMode** | `Enum<'all' \| 'comments_only' \| 'changes_only' \| 'tasks_only'>` | optional (default: `"all"`) | Default activity filter |
+| **showFilterToggle** | `boolean` | optional (default: `true`) | Show filter dropdown in panel header |
+| **limit** | `integer` | optional (default: `20`) | Number of items to load per page |
+| **showCompleted** | `boolean` | optional (default: `false`) | Include completed activities |
+| **unifiedTimeline** | `boolean` | optional (default: `true`) | Mix field changes and comments in one timeline (Airtable style) |
+| **showCommentInput** | `boolean` | optional (default: `true`) | Show "Leave a comment" input at the bottom |
+| **enableMentions** | `boolean` | optional (default: `true`) | Enable @mentions in comments |
+| **enableReactions** | `boolean` | optional (default: `false`) | Enable emoji reactions on feed items |
+| **enableThreading** | `boolean` | optional (default: `false`) | Enable threaded replies on comments |
+| **showSubscriptionToggle** | `boolean` | optional (default: `true`) | Show bell icon for record-level notification subscription |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
@@ -537,7 +537,7 @@ const result = AIChatWindowProps.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **columns** | `Enum<'1' \| '2' \| '3' \| '4'>` | ✅ | Number of columns for field layout (1-4) |
+| **columns** | `Enum<'1' \| '2' \| '3' \| '4'>` | optional (default: `"2"`) | Number of columns for field layout (1-4) |
 | **layout** | `never` | optional | [REMOVED] `record:details` property `layout` was removed in @objectstack/spec 17.0.0 (#6946, ADR-0087 D2) — its declared `auto` \| `custom` semantics were never implemented: the renderer tests `layout` only against `inline` \| `compact`, two values the schema never permitted, so both legal values took the same branch and the key selected nothing. Delete the key — the body is already chosen by what you author: `sections` renders the explicit groups (the old `custom`), and omitting it falls back to the object's `highlightFields` (the old `auto`). Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **sections** | `{ name?: string; label?: string \| Record<string, string>; columns?: integer; fields: string[] }[]` | optional | Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields }`. |
 | **fields** | `string[]` | optional | Explicit field list to display (optional, overrides highlightFields) |
@@ -587,7 +587,7 @@ Type: `string`
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **fields** | `(string \| { name: string; label?: string; icon?: string; type?: string; … })[]` | ✅ | Key fields to highlight (1-7 fields max, typically displayed as prominent cards). Each item may be a bare field name or `{name, label?, icon?, type?, readonly?}` for inline overrides. |
-| **layout** | `Enum<'horizontal' \| 'vertical'>` | ✅ | Layout orientation for highlight fields |
+| **layout** | `Enum<'horizontal' \| 'vertical'>` | optional (default: `"horizontal"`) | Layout orientation for highlight fields |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
@@ -656,13 +656,13 @@ Type: `string`
 | :--- | :--- | :--- | :--- |
 | **objectName** | `string` | ✅ | Related object name (e.g., "task", "opportunity") |
 | **relationshipField** | `string` | ✅ | Field on related object that points to this record (e.g., "account_id") |
-| **relationshipValueField** | `string` | ✅ | Parent-record field whose value relationshipField stores (default 'id'; e.g. 'name' for name-keyed junctions). |
+| **relationshipValueField** | `string` | optional (default: `"id"`) | Parent-record field whose value relationshipField stores (default 'id'; e.g. 'name' for name-keyed junctions). |
 | **columns** | `string[]` | optional | Fields to display in the related list. Optional: when omitted, columns derive from the related object's highlightFields / default list columns (a related list is just another surface that lists that object). Override chain: child highlightFields → field-level relatedListColumns → this inline list. |
 | **sort** | `string \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sort order for related records |
-| **limit** | `integer` | ✅ | Number of records to display initially |
+| **limit** | `integer` | optional (default: `5`) | Number of records to display initially |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'starts_with' \| … +14 more>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Additional filter criteria for related records |
 | **title** | `string \| Record<string, string>` | optional | Custom title for the related list |
-| **showViewAll** | `boolean` | ✅ | Show "View All" link to see all related records |
+| **showViewAll** | `boolean` | optional (default: `true`) | Show "View All" link to see all related records |
 | **actions** | `string[]` | optional | Action IDs available for related records |
 | **add** | `{ picker: object; linkField?: string; label?: string \| Record<string, string> }` | optional | Add-existing-via-picker config (generic m2m/junction assignment). |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |

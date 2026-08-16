@@ -103,8 +103,8 @@ Incident notification matrix with escalation policies
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **rules** | `{ severity: Enum<'critical' \| 'high' \| 'medium' \| 'low'>; channels: Enum<'email' \| 'sms' \| 'slack' \| 'pagerduty' \| 'webhook'>[]; recipients: string[]; withinMinutes: number; … }[]` | ✅ | Notification rules by severity level |
-| **escalationTimeoutMinutes** | `number` | ✅ | Auto-escalation timeout in minutes |
-| **escalationChain** | `string[]` | ✅ | Ordered escalation chain of roles |
+| **escalationTimeoutMinutes** | `number` | optional (default: `30`) | Auto-escalation timeout in minutes |
+| **escalationChain** | `string[]` | optional (default: `[]`) | Ordered escalation chain of roles |
 
 
 ---
@@ -121,7 +121,7 @@ Incident notification rule per severity level
 | **channels** | `Enum<'email' \| 'sms' \| 'slack' \| 'pagerduty' \| 'webhook'>[]` | ✅ | Notification channels |
 | **recipients** | `string[]` | ✅ | Roles or teams to notify |
 | **withinMinutes** | `number` | ✅ | Notification deadline in minutes from detection |
-| **notifyRegulators** | `boolean` | ✅ | Whether to notify regulatory authorities |
+| **notifyRegulators** | `boolean` | optional (default: `false`) | Whether to notify regulatory authorities |
 | **regulatorDeadlineHours** | `number` | optional | Regulatory notification deadline in hours |
 
 
@@ -153,13 +153,13 @@ Organization-level incident response policy per ISO 27001:2022
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable incident response management |
+| **enabled** | `boolean` | optional (default: `true`) | Enable incident response management |
 | **notificationMatrix** | `{ rules: object[]; escalationTimeoutMinutes: number; escalationChain: string[] }` | ✅ | Notification and escalation matrix |
 | **defaultResponseTeam** | `string` | ✅ | Default incident response team or role |
-| **triageDeadlineHours** | `number` | ✅ | Maximum hours to begin triage after detection |
-| **requirePostIncidentReview** | `boolean` | ✅ | Require post-incident review for all incidents |
-| **regulatoryNotificationThreshold** | `Enum<'critical' \| 'high' \| 'medium' \| 'low'>` | ✅ | Minimum severity requiring regulatory notification |
-| **retentionDays** | `number` | ✅ | Incident record retention period in days (default ~7 years) |
+| **triageDeadlineHours** | `number` | optional (default: `1`) | Maximum hours to begin triage after detection |
+| **requirePostIncidentReview** | `boolean` | optional (default: `true`) | Require post-incident review for all incidents |
+| **regulatoryNotificationThreshold** | `Enum<'critical' \| 'high' \| 'medium' \| 'low'>` | optional (default: `"high"`) | Minimum severity requiring regulatory notification |
+| **retentionDays** | `number` | optional (default: `2555`) | Incident record retention period in days (default ~7 years) |
 
 
 ---

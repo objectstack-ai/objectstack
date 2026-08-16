@@ -82,12 +82,12 @@ const result = AggregationFunction.parse(data);
 | :--- | :--- | :--- | :--- |
 | **query** | `string` | ✅ | Search query text |
 | **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) |
-| **fuzzy** | `boolean` | ✅ | [EXPERIMENTAL — not enforced] Fuzzy matching (tolerate typos). The ADR-0061 expansion reads only `query` + `fields`; no executor receives this flag (#4286). |
-| **operator** | `Enum<'and' \| 'or'>` | ✅ | [EXPERIMENTAL — not enforced] Logical operator between terms. The ADR-0061 expansion applies its own term semantics; no executor receives this flag (#4286). |
+| **fuzzy** | `boolean` | optional (default: `false`) | [EXPERIMENTAL — not enforced] Fuzzy matching (tolerate typos). The ADR-0061 expansion reads only `query` + `fields`; no executor receives this flag (#4286). |
+| **operator** | `Enum<'and' \| 'or'>` | optional (default: `"or"`) | [EXPERIMENTAL — not enforced] Logical operator between terms. The ADR-0061 expansion applies its own term semantics; no executor receives this flag (#4286). |
 | **boost** | `Record<string, number>` | optional | [EXPERIMENTAL — not enforced] Field-specific relevance boosting (field name -> boost factor). No executor scores results (#4286). |
 | **minScore** | `number` | optional | [EXPERIMENTAL — not enforced] Minimum relevance score threshold. No executor scores results (#4286). |
 | **language** | `string` | optional | [EXPERIMENTAL — not enforced] Language for text analysis (e.g., "en", "zh", "es"). No executor selects an analyzer (#4286). |
-| **highlight** | `boolean` | ✅ | [EXPERIMENTAL — not enforced] Search result highlighting. No executor emits highlights (#4286). |
+| **highlight** | `boolean` | optional (default: `false`) | [EXPERIMENTAL — not enforced] Search result highlighting. No executor emits highlights (#4286). |
 
 
 ---
@@ -153,7 +153,7 @@ Type: `string`
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ |  |
-| **order** | `Enum<'asc' \| 'desc'>` | ✅ |  |
+| **order** | `Enum<'asc' \| 'desc'>` | optional (default: `"asc"`) |  |
 
 
 ---

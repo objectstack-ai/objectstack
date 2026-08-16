@@ -31,13 +31,13 @@ const result = KernelContextSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **instanceId** | `string` | ✅ | Unique UUID for this running kernel process |
-| **mode** | `Enum<'development' \| 'production' \| 'test' \| 'provisioning' \| 'preview'>` | ✅ | Kernel operating mode |
+| **mode** | `Enum<'development' \| 'production' \| 'test' \| 'provisioning' \| 'preview'>` | optional (default: `"production"`) | Kernel operating mode |
 | **version** | `string` | ✅ | Kernel version |
 | **appName** | `string` | optional | Host application name |
 | **cwd** | `string` | ✅ | Current working directory |
 | **workspaceRoot** | `string` | optional | Workspace root if different from cwd |
 | **startTime** | `integer` | ✅ | Boot timestamp (ms) |
-| **features** | `Record<string, boolean>` | ✅ | Global feature toggles |
+| **features** | `Record<string, boolean>` | optional (default: `{}`) | Global feature toggles |
 | **previewMode** | `{ autoLogin: boolean; simulatedRole: Enum<'admin' \| 'user' \| 'viewer'>; simulatedUserName: string; readOnly: boolean; … }` | optional | Preview/demo mode configuration (used when mode is "preview") |
 
 
@@ -49,11 +49,11 @@ const result = KernelContextSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **autoLogin** | `boolean` | ✅ | Auto-login as simulated user, skipping login/registration pages |
-| **simulatedRole** | `Enum<'admin' \| 'user' \| 'viewer'>` | ✅ | Permission role for the simulated preview user |
-| **simulatedUserName** | `string` | ✅ | Display name for the simulated preview user |
-| **readOnly** | `boolean` | ✅ | Restrict the preview session to read-only operations |
-| **expiresInSeconds** | `integer` | ✅ | Preview session duration in seconds (0 = no expiration) |
+| **autoLogin** | `boolean` | optional (default: `true`) | Auto-login as simulated user, skipping login/registration pages |
+| **simulatedRole** | `Enum<'admin' \| 'user' \| 'viewer'>` | optional (default: `"admin"`) | Permission role for the simulated preview user |
+| **simulatedUserName** | `string` | optional (default: `"Preview User"`) | Display name for the simulated preview user |
+| **readOnly** | `boolean` | optional (default: `false`) | Restrict the preview session to read-only operations |
+| **expiresInSeconds** | `integer` | optional (default: `0`) | Preview session duration in seconds (0 = no expiration) |
 | **bannerMessage** | `string` | optional | Banner message displayed in the UI during preview mode |
 
 
@@ -83,13 +83,13 @@ Tenant-aware kernel runtime context
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **instanceId** | `string` | ✅ | Unique UUID for this running kernel process |
-| **mode** | `Enum<'development' \| 'production' \| 'test' \| 'provisioning' \| 'preview'>` | ✅ | Kernel operating mode |
+| **mode** | `Enum<'development' \| 'production' \| 'test' \| 'provisioning' \| 'preview'>` | optional (default: `"production"`) | Kernel operating mode |
 | **version** | `string` | ✅ | Kernel version |
 | **appName** | `string` | optional | Host application name |
 | **cwd** | `string` | ✅ | Current working directory |
 | **workspaceRoot** | `string` | optional | Workspace root if different from cwd |
 | **startTime** | `integer` | ✅ | Boot timestamp (ms) |
-| **features** | `Record<string, boolean>` | ✅ | Global feature toggles |
+| **features** | `Record<string, boolean>` | optional (default: `{}`) | Global feature toggles |
 | **previewMode** | `{ autoLogin: boolean; simulatedRole: Enum<'admin' \| 'user' \| 'viewer'>; simulatedUserName: string; readOnly: boolean; … }` | optional | Preview/demo mode configuration (used when mode is "preview") |
 | **tenantId** | `string` | ✅ | Resolved tenant identifier |
 | **tenantPlan** | `Enum<'free' \| 'pro' \| 'enterprise'>` | ✅ | Tenant subscription plan |

@@ -39,9 +39,9 @@ Console destination configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **stream** | `Enum<'stdout' \| 'stderr'>` | ✅ |  |
-| **colors** | `boolean` | ✅ |  |
-| **prettyPrint** | `boolean` | ✅ |  |
+| **stream** | `Enum<'stdout' \| 'stderr'>` | optional (default: `"stdout"`) |  |
+| **colors** | `boolean` | optional (default: `true`) |  |
+| **prettyPrint** | `boolean` | optional (default: `false`) |  |
 
 
 ---
@@ -91,8 +91,8 @@ File destination configuration
 | :--- | :--- | :--- | :--- |
 | **path** | `string` | ✅ | Log file path |
 | **rotation** | `{ maxSize: string; maxFiles: integer; compress: boolean; interval?: Enum<'hourly' \| 'daily' \| 'weekly' \| 'monthly'> }` | optional |  |
-| **encoding** | `string` | ✅ |  |
-| **append** | `boolean` | ✅ |  |
+| **encoding** | `string` | optional (default: `"utf8"`) |  |
+| **append** | `boolean` | optional (default: `true`) |  |
 
 
 ---
@@ -106,12 +106,12 @@ HTTP destination configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **url** | `string` | ✅ | HTTP endpoint URL |
-| **method** | `Enum<'POST' \| 'PUT'>` | ✅ |  |
+| **method** | `Enum<'POST' \| 'PUT'>` | optional (default: `"POST"`) |  |
 | **headers** | `Record<string, string>` | optional |  |
 | **auth** | `{ type: Enum<'basic' \| 'bearer' \| 'api_key'>; username?: string; password?: string; token?: string; … }` | optional |  |
 | **batch** | `{ maxSize: integer; flushInterval: integer }` | optional |  |
 | **retry** | `{ maxAttempts: integer; initialDelay: integer; backoffMultiplier: number }` | optional |  |
-| **timeout** | `integer` | ✅ |  |
+| **timeout** | `integer` | optional (default: `30000`) |  |
 
 
 ---
@@ -126,13 +126,13 @@ Log destination configuration
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Destination name (snake_case) |
 | **type** | `Enum<'console' \| 'file' \| 'syslog' \| 'elasticsearch' \| 'cloudwatch' \| 'stackdriver' \| 'azure_monitor' \| 'datadog' \| 'splunk' \| 'loki' \| 'http' \| 'kafka' \| 'redis' \| 'custom'>` | ✅ | Destination type |
-| **level** | `Enum<'trace' \| 'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal'>` | ✅ | Extended log severity level |
-| **enabled** | `boolean` | ✅ |  |
+| **level** | `Enum<'trace' \| 'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal'>` | optional (default: `"info"`) | Extended log severity level |
+| **enabled** | `boolean` | optional (default: `true`) |  |
 | **console** | `{ stream: Enum<'stdout' \| 'stderr'>; colors: boolean; prettyPrint: boolean }` | optional | Console destination configuration |
 | **file** | `{ path: string; rotation?: object; encoding: string; append: boolean }` | optional | File destination configuration |
 | **http** | `{ url: string; method: Enum<'POST' \| 'PUT'>; headers?: Record<string, string>; auth?: object; … }` | optional | HTTP destination configuration |
 | **externalService** | `{ endpoint?: string; region?: string; credentials?: object; logGroup?: string; … }` | optional | External service destination configuration |
-| **format** | `Enum<'json' \| 'text' \| 'pretty'>` | ✅ |  |
+| **format** | `Enum<'json' \| 'text' \| 'pretty'>` | optional (default: `"json"`) |  |
 | **filterId** | `string` | optional | Filter function identifier |
 
 
@@ -172,12 +172,12 @@ Log enrichment configuration
 | :--- | :--- | :--- | :--- |
 | **staticFields** | `Record<string, any>` | optional | Static fields added to every log |
 | **dynamicEnrichers** | `string[]` | optional | Dynamic enricher function IDs |
-| **addHostname** | `boolean` | ✅ |  |
-| **addProcessId** | `boolean` | ✅ |  |
-| **addEnvironment** | `boolean` | ✅ |  |
+| **addHostname** | `boolean` | optional (default: `true`) |  |
+| **addProcessId** | `boolean` | optional (default: `true`) |  |
+| **addEnvironment** | `boolean` | optional (default: `true`) |  |
 | **addTimestampFormats** | `{ unix: boolean; iso: boolean }` | optional |  |
-| **addCaller** | `boolean` | ✅ |  |
-| **addCorrelationIds** | `boolean` | ✅ |  |
+| **addCaller** | `boolean` | optional (default: `false`) |  |
+| **addCorrelationIds** | `boolean` | optional (default: `true`) |  |
 
 
 ---
@@ -237,10 +237,10 @@ Log severity level
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | optional | Logger name identifier |
-| **level** | `Enum<'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal' \| 'silent'>` | ✅ | Log severity level |
-| **format** | `Enum<'json' \| 'text' \| 'pretty'>` | ✅ | Log output format |
-| **redact** | `string[]` | ✅ | Keys to redact from log context |
-| **sourceLocation** | `boolean` | ✅ | Include file and line number |
+| **level** | `Enum<'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal' \| 'silent'>` | optional (default: `"info"`) | Log severity level |
+| **format** | `Enum<'json' \| 'text' \| 'pretty'>` | optional (default: `"json"`) | Log output format |
+| **redact** | `string[]` | optional (default: `["password","token","secret","key"]`) | Keys to redact from log context |
+| **sourceLocation** | `boolean` | optional (default: `false`) | Include file and line number |
 | **file** | `string` | optional | Path to log file |
 | **rotation** | `{ maxSize: string; maxFiles: number }` | optional |  |
 
@@ -257,13 +257,13 @@ Logging configuration
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Configuration name (snake_case, max 64 chars) |
 | **label** | `string` | ✅ | Display label |
-| **enabled** | `boolean` | ✅ |  |
-| **level** | `Enum<'trace' \| 'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal'>` | ✅ | Extended log severity level |
+| **enabled** | `boolean` | optional (default: `true`) |  |
+| **level** | `Enum<'trace' \| 'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal'>` | optional (default: `"info"`) | Extended log severity level |
 | **default** | `{ name?: string; level: Enum<'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal' \| 'silent'>; format: Enum<'json' \| 'text' \| 'pretty'>; redact: string[]; … }` | optional | Default logger configuration |
 | **loggers** | `Record<string, { name?: string; level: Enum<'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal' \| 'silent'>; format: Enum<'json' \| 'text' \| 'pretty'>; redact: string[]; … }>` | optional | Named logger configurations |
 | **destinations** | `{ name: string; type: Enum<'console' \| 'file' \| 'syslog' \| 'elasticsearch' \| 'cloudwatch' \| 'stackdriver' \| … +8 more>; level: Enum<'trace' \| 'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal'>; enabled: boolean; … }[]` | ✅ | Log destinations |
 | **enrichment** | `{ staticFields?: Record<string, any>; dynamicEnrichers?: string[]; addHostname: boolean; addProcessId: boolean; … }` | optional | Log enrichment configuration |
-| **redact** | `string[]` | ✅ | Fields to redact |
+| **redact** | `string[]` | optional (has default) | Fields to redact |
 | **sampling** | `{ enabled: boolean; rate: number; rateByLevel?: Record<string, number> }` | optional |  |
 | **buffer** | `{ enabled: boolean; size: integer; flushInterval: integer; flushOnShutdown: boolean }` | optional |  |
 | **performance** | `{ async: boolean; workers: integer }` | optional |  |

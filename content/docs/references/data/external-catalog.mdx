@@ -54,7 +54,7 @@ const result = ExternalCatalogSchema.parse(data);
 | **name** | `string` | ✅ | Remote column name |
 | **sqlType** | `string` | ✅ | Raw remote SQL type (e.g. "numeric(10,2)") |
 | **nullable** | `boolean` | ✅ | Whether the remote column is nullable |
-| **primaryKey** | `boolean` | ✅ | Part of the remote primary key |
+| **primaryKey** | `boolean` | optional (default: `false`) | Part of the remote primary key |
 | **suggestedFieldType** | `string` | optional | ObjectStack field type suggested by the type-compat matrix |
 
 

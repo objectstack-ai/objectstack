@@ -87,7 +87,7 @@ const result = AnalyticsTimeRangeSchema.parse(data);
 | **documentationUrl** | `string` | optional |  |
 | **supportUrl** | `string` | optional |  |
 | **repositoryUrl** | `string` | optional |  |
-| **pricing** | `Enum<'free' \| 'freemium' \| 'paid' \| 'subscription' \| 'usage-based' \| 'contact-sales'>` | ✅ |  |
+| **pricing** | `Enum<'free' \| 'freemium' \| 'paid' \| 'subscription' \| 'usage-based' \| 'contact-sales'>` | optional (default: `"free"`) |  |
 | **priceInCents** | `integer` | optional |  |
 
 
@@ -114,7 +114,7 @@ const result = AnalyticsTimeRangeSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **organizationId** | `string` | ✅ | Identity Organization ID |
 | **publisherId** | `string` | ✅ | Marketplace publisher ID |
-| **verification** | `Enum<'unverified' \| 'pending' \| 'verified' \| 'trusted' \| 'partner'>` | ✅ | Publisher verification status |
+| **verification** | `Enum<'unverified' \| 'pending' \| 'verified' \| 'trusted' \| 'partner'>` | optional (default: `"unverified"`) | Publisher verification status |
 | **agreementVersion** | `string` | optional | Accepted developer agreement version |
 | **website** | `string` | optional | Publisher website |
 | **supportEmail** | `string` | optional | Publisher support email |
@@ -130,7 +130,7 @@ const result = AnalyticsTimeRangeSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **listingId** | `string` | ✅ | Listing to get analytics for |
-| **timeRange** | `Enum<'last_7d' \| 'last_30d' \| 'last_90d' \| 'last_365d' \| 'all_time'>` | ✅ |  |
+| **timeRange** | `Enum<'last_7d' \| 'last_30d' \| 'last_90d' \| 'last_365d' \| 'all_time'>` | optional (default: `"last_30d"`) |  |
 | **metrics** | `Enum<'installs' \| 'uninstalls' \| 'active_installs' \| 'ratings' \| 'revenue' \| 'page_views'>[]` | optional | Metrics to include (default: all) |
 
 
@@ -205,13 +205,13 @@ const result = AnalyticsTimeRangeSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **version** | `string` | ✅ | Semver version (e.g., 2.1.0-beta.1) |
-| **channel** | `Enum<'alpha' \| 'beta' \| 'rc' \| 'stable'>` | ✅ |  |
+| **channel** | `Enum<'alpha' \| 'beta' \| 'rc' \| 'stable'>` | optional (default: `"stable"`) |  |
 | **releaseNotes** | `string` | optional | Release notes (Markdown) |
 | **changelog** | `{ type: Enum<'added' \| 'changed' \| 'fixed' \| 'removed' \| 'deprecated' \| 'security'>; description: string }[]` | optional | Structured changelog entries |
 | **minPlatformVersion** | `string` | optional |  |
 | **artifactUrl** | `string` | optional | Built package artifact URL |
 | **artifactChecksum** | `string` | optional | SHA-256 checksum |
-| **deprecated** | `boolean` | ✅ |  |
+| **deprecated** | `boolean` | optional (default: `false`) |  |
 | **deprecationMessage** | `string` | optional |  |
 | **releasedAt** | `string` | optional |  |
 

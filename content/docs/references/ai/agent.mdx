@@ -29,9 +29,9 @@ const result = AIModelConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'local'>` | ✅ |  |
+| **provider** | `Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'local'>` | optional (default: `"openai"`) |  |
 | **model** | `string` | ✅ | Model name (e.g. gpt-4, claude-3-opus) |
-| **temperature** | `number` | ✅ |  |
+| **temperature** | `number` | optional (default: `0.7`) |  |
 | **maxTokens** | `number` | optional |  |
 | **topP** | `number` | optional |  |
 
@@ -51,11 +51,11 @@ const result = AIModelConfigSchema.parse(data);
 | **instructions** | `string` | ✅ | System Prompt / Prime Directives |
 | **model** | `{ provider: Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'local'>; model: string; temperature: number; maxTokens?: number; … }` | optional |  |
 | **lifecycle** | `{ id: string; description?: string; contextSchema?: Record<string, any>; initial: string; … }` | optional | [EXPERIMENTAL — not enforced] State machine defining the agent conversation flow and constraints. Parsed but no runtime consumer yet (liveness #1878/#1893). |
-| **surface** | `Enum<'ask' \| 'build'>` | ✅ | Product surface this agent binds ('ask' \| 'build') — ADR-0063 §1 |
+| **surface** | `Enum<'ask' \| 'build'>` | optional (default: `"ask"`) | Product surface this agent binds ('ask' \| 'build') — ADR-0063 §1 |
 | **skills** | `string[]` | optional | Skill names to attach (Agent→Skill→Tool architecture) |
 | **tools** | `never` | optional | [REMOVED] `agent.tools` was removed in @objectstack/spec 17 (#3894) — use `skills`. An agent reaches exactly the tools its surface-compatible skills declare (ADR-0064), so move each reference into a skill: a platform tool by its registered name, or `action_<name>` for one of your own AI-exposed Actions. This is NOT a rename — there is no key the value moves to: the migration DELETES the key and emits a notice naming each tool that was listed, and you re-declare each one in a skill by hand. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **knowledge** | `never` | optional | [REMOVED] `agent.knowledge` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — declaring knowledge sources/indexes on an agent never scoped retrieval: the `search_knowledge` tool takes `sourceIds` from the LLM's tool-call arguments, not from the agent record. Delete the block. Restrict retrieval at the knowledge-service / source level (per-source permissions), and describe intended grounding in `instructions` so the model asks for the right sources. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
-| **active** | `boolean` | ✅ |  |
+| **active** | `boolean` | optional (default: `true`) |  |
 | **access** | `string[]` | optional | Who can chat with this agent |
 | **permissions** | `string[]` | optional | Required permission-set capabilities |
 | **planning** | `{ maxIterations: integer }` | optional | Autonomous reasoning and planning configuration |
@@ -84,9 +84,9 @@ Structured output configuration for agent responses
 | :--- | :--- | :--- | :--- |
 | **format** | `Enum<'json_object' \| 'json_schema' \| 'regex' \| 'grammar' \| 'xml'>` | ✅ | Expected output format |
 | **schema** | `Record<string, any>` | optional | JSON Schema definition for output |
-| **strict** | `boolean` | ✅ | Enforce exact schema compliance |
-| **retryOnValidationFailure** | `boolean` | ✅ | Retry generation when output fails validation |
-| **maxRetries** | `integer` | ✅ | Maximum retries on validation failure |
+| **strict** | `boolean` | optional (default: `false`) | Enforce exact schema compliance |
+| **retryOnValidationFailure** | `boolean` | optional (default: `true`) | Retry generation when output fails validation |
+| **maxRetries** | `integer` | optional (default: `3`) | Maximum retries on validation failure |
 | **fallbackFormat** | `Enum<'json_object' \| 'json_schema' \| 'regex' \| 'grammar' \| 'xml'>` | optional | Fallback format if primary format fails |
 | **transformPipeline** | `Enum<'trim' \| 'parse_json' \| 'validate' \| 'coerce_types'>[]` | optional | Post-processing steps applied to output |
 

@@ -43,8 +43,8 @@ MongoDB Connection Configuration
 | :--- | :--- | :--- | :--- |
 | **url** | `string` | optional | Connection URI (supersedes the discrete fields; must not embed a password — bind the secret instead) |
 | **database** | `string` | optional | Database name |
-| **host** | `string` | ✅ | Host address |
-| **port** | `integer` | ✅ | Port number |
+| **host** | `string` | optional (default: `"localhost"`) | Host address |
+| **port** | `integer` | optional (default: `27017`) | Port number |
 | **username** | `string` | optional | Authentication user |
 | **password** | `never` | optional | Set through the connection form's secret field or `external.credentialsRef` — encrypted into `sys_secret`, never stored in `config` (#7990) |
 | **authSource** | `string` | optional | Authentication database |

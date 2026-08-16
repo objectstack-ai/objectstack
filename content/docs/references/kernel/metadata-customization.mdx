@@ -69,11 +69,11 @@ const result = CustomizationOriginSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **metadataType** | `string` | ✅ | Metadata type (e.g. "object", "view") |
-| **allowCustomization** | `boolean` | ✅ |  |
+| **allowCustomization** | `boolean` | optional (default: `true`) |  |
 | **lockedFields** | `string[]` | optional | Field paths that cannot be customized |
 | **customizableFields** | `string[]` | optional | Field paths that can be customized (whitelist) |
-| **allowAddFields** | `boolean` | ✅ | Whether admins can add new fields to package objects |
-| **allowDeleteFields** | `boolean` | ✅ | Whether admins can delete package-delivered fields |
+| **allowAddFields** | `boolean` | optional (default: `true`) | Whether admins can add new fields to package objects |
+| **allowDeleteFields** | `boolean` | optional (default: `false`) | Whether admins can delete package-delivered fields |
 
 
 ---
@@ -131,10 +131,10 @@ const result = CustomizationOriginSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **defaultStrategy** | `Enum<'keep-custom' \| 'accept-incoming' \| 'three-way-merge'>` | ✅ | Default merge strategy |
+| **defaultStrategy** | `Enum<'keep-custom' \| 'accept-incoming' \| 'three-way-merge'>` | optional (default: `"three-way-merge"`) | Default merge strategy |
 | **alwaysAcceptIncoming** | `string[]` | optional | Field paths that always accept package updates |
 | **alwaysKeepCustom** | `string[]` | optional | Field paths where customer customizations always win |
-| **autoResolveNonConflicting** | `boolean` | ✅ | Auto-resolve changes that do not conflict |
+| **autoResolveNonConflicting** | `boolean` | optional (default: `true`) | Auto-resolve changes that do not conflict |
 
 
 ---
@@ -150,12 +150,12 @@ const result = CustomizationOriginSchema.parse(data);
 | **baseName** | `string` | ✅ | Metadata name being customized |
 | **packageId** | `string` | optional | Package ID that delivered the base metadata |
 | **packageVersion** | `string` | optional | Package version when overlay was created |
-| **scope** | `Enum<'platform' \| 'user'>` | ✅ | Customization scope (platform=admin, user=personal) |
+| **scope** | `Enum<'platform' \| 'user'>` | optional (default: `"platform"`) | Customization scope (platform=admin, user=personal) |
 | **tenantId** | `string` | optional | Tenant identifier |
 | **owner** | `string` | optional | Owner user ID for user-scope overlays |
 | **patch** | `Record<string, any>` | ✅ | JSON Merge Patch payload (changed fields only) |
 | **changes** | `{ path: string; originalValue?: any; currentValue: any; changedBy?: string; … }[]` | optional | Field-level change tracking for conflict detection |
-| **active** | `boolean` | ✅ | Whether this overlay is active |
+| **active** | `boolean` | optional (default: `true`) | Whether this overlay is active |
 | **createdAt** | `string` | optional |  |
 | **createdBy** | `string` | optional |  |
 | **updatedAt** | `string` | optional |  |

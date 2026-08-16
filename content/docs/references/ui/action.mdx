@@ -67,7 +67,7 @@ const result = ActionSchema.parse(data);
 | **icon** | `string` | optional | Icon name |
 | **locations** | `Enum<'list_toolbar' \| 'list_item' \| 'record_header' \| 'record_more' \| 'record_related' \| 'record_section'>[]` | optional | Locations where this action is visible |
 | **component** | `Enum<'action:button' \| 'action:icon' \| 'action:menu' \| 'action:group'>` | optional | Visual component override |
-| **type** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional | Action functionality type |
+| **type** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional (default: `"script"`) | Action functionality type |
 | **target** | `string` | optional | URL, Script Name, Flow ID, or API Endpoint. Supports $`{param.X}` and $`{ctx.X}` interpolation. |
 | **openIn** | `Enum<'self' \| 'new-tab'>` | optional | For type:'url' — where to open `target`. 'new-tab' opens a new browser tab; 'self' navigates in place. When omitted, external/absolute URLs open in a new tab and relative URLs navigate in place. Static execution option — keep it OUT of `params` (which is user-input-collection only). |
 | **body** | `{ language: 'expression'; source: string } \| { language: 'js'; source: string; capabilities?: Enum<'api.read' \| 'api.write' \| 'api.transaction' \| 'crypto.uuid' \| 'log'>[]; timeoutMs?: integer; … }` | optional | Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`. |
@@ -78,7 +78,7 @@ const result = ActionSchema.parse(data);
 | **confirmText** | `string \| Record<string, string>` | optional | Confirmation message before execution. On a registered action, pairing this with a non-empty `params` is refused (#7428) — that opens a second dialog for one decision; put the question on `description` instead. Correct on a param-LESS action, where the confirm is the only dialog there is. |
 | **successMessage** | `string \| Record<string, string>` | optional | Success message to show after execution |
 | **errorMessage** | `string \| Record<string, string>` | optional | Error message to show when the action fails (overrides the raw error). |
-| **refreshAfter** | `boolean` | optional | Refresh view after execution |
+| **refreshAfter** | `boolean` | optional (default: `false`) | Refresh view after execution |
 | **undoable** | `boolean` | optional | Offer an Undo affordance after this single-record update action succeeds. |
 | **resultDialog** | `{ title?: string \| Record<string, string>; description?: string \| Record<string, string>; acknowledge?: string \| Record<string, string>; format?: Enum<'qrcode' \| 'code-list' \| 'secret' \| 'text' \| 'json'>; … }` | optional | Render API response in a one-shot reveal dialog (suppresses successMessage when set). |
 | **visible** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate — `true`/`false` literal, CEL string, or `{dialect, source}` envelope. The action is offered when it evaluates TRUE. Omit = always visible. |
@@ -114,7 +114,7 @@ const result = ActionSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **exposed** | `boolean` | ✅ | Expose this action to AI agents. Requires `description` when true. |
+| **exposed** | `boolean` | optional (default: `false`) | Expose this action to AI agents. Requires `description` when true. |
 | **description** | `string` | optional | LLM-facing description (≥40 chars). Required when exposed. |
 | **category** | `Enum<'data' \| 'action' \| 'flow' \| 'integration' \| 'vector_search' \| 'analytics' \| 'utility'>` | optional | Tool category override (defaults to "action"). |
 | **paramHints** | `Record<string, { description?: string; enum?: (string \| number)[]; examples?: any[] }>` | optional | Per-parameter AI hints keyed by param name. |
@@ -149,7 +149,7 @@ const result = ActionSchema.parse(data);
 | **objectOverride** | `string` | optional | Snake case identifier (lowercase with underscores only) |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| … +35 more>` | optional |  |
-| **required** | `boolean` | optional |  |
+| **required** | `boolean` | optional (default: `false`) |  |
 | **options** | `{ label: string \| Record<string, string>; value: string; visibleWhen?: string \| object }[]` | optional |  |
 | **placeholder** | `string` | optional |  |
 | **helpText** | `string` | optional |  |
@@ -237,7 +237,7 @@ const result = ActionSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional | Action functionality type |
+| **type** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional (default: `"script"`) | Action functionality type |
 | **name** | `string` | optional | Machine name (lowercase snake_case) |
 | **label** | `string \| Record<string, string>` | optional | Display label |
 | **target** | `string` | optional | URL, Script Name, Flow ID, or API Endpoint. Supports $`{param.X}` and $`{ctx.X}` interpolation. |
@@ -248,7 +248,7 @@ const result = ActionSchema.parse(data);
 | **confirmText** | `string \| Record<string, string>` | optional | Confirmation message before execution. On a registered action, pairing this with a non-empty `params` is refused (#7428) — that opens a second dialog for one decision; put the question on `description` instead. Correct on a param-LESS action, where the confirm is the only dialog there is. |
 | **successMessage** | `string \| Record<string, string>` | optional | Success message to show after execution |
 | **errorMessage** | `string \| Record<string, string>` | optional | Error message to show when the action fails (overrides the raw error). |
-| **refreshAfter** | `boolean` | optional | Refresh view after execution |
+| **refreshAfter** | `boolean` | optional (default: `false`) | Refresh view after execution |
 | **opensInNewTab** | `boolean` | optional | Open the action result in a new tab. The renderer pre-opens the tab synchronously on click (popup-blocker-safe) and navigates it to the handler's redirectUrl. |
 
 

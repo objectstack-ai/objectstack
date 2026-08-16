@@ -86,9 +86,9 @@ const result = ServerRateLimitConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable rate limiting |
-| **windowMs** | `integer` | ✅ | Time window in milliseconds |
-| **maxRequests** | `integer` | ✅ | Max requests per window |
+| **enabled** | `boolean` | optional (default: `false`) | Enable rate limiting |
+| **windowMs** | `integer` | optional (default: `60000`) | Time window in milliseconds |
+| **maxRequests** | `integer` | optional (default: `100`) | Max requests per window |
 
 
 ---
@@ -100,7 +100,7 @@ const result = ServerRateLimitConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **security** | `{ rateLimit?: object }` | optional | Server-level security configuration. Today: the global inbound rate limit. |
-| **trustProxy** | `boolean` | ✅ | Believe `X-Forwarded-For` / `X-Real-IP` when identifying a caller. Declare `true` ONLY when a reverse proxy you control overwrites those headers on every inbound request. Left `false` (the default) the caller IP is the transport's own peer address, which a client cannot forge. Consumed by the inbound rate limiter when `server.security.rateLimit.enabled` is set. |
+| **trustProxy** | `boolean` | optional (default: `false`) | Believe `X-Forwarded-For` / `X-Real-IP` when identifying a caller. Declare `true` ONLY when a reverse proxy you control overwrites those headers on every inbound request. Left `false` (the default) the caller IP is the transport's own peer address, which a client cannot forge. Consumed by the inbound rate limiter when `server.security.rateLimit.enabled` is set. |
 
 
 ---

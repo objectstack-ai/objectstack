@@ -61,8 +61,8 @@ Dashboard header configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **showTitle** | `boolean` | ✅ | Show dashboard title in header |
-| **showDescription** | `boolean` | ✅ | Show dashboard description in header |
+| **showTitle** | `boolean` | optional (default: `true`) | Show dashboard title in header |
+| **showDescription** | `boolean` | optional (default: `true`) | Show dashboard description in header |
 | **actions** | `{ label: string \| Record<string, string>; actionUrl: string; actionType?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>; icon?: string }[]` | optional | Header action buttons |
 
 
@@ -93,7 +93,7 @@ Dashboard header action
 | **id** | `string` | ✅ | Unique widget identifier (snake_case) |
 | **title** | `string \| Record<string, string>` | optional | Widget title |
 | **description** | `string \| Record<string, string>` | optional | Widget description text below the header |
-| **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'combo' \| 'gauge' \| 'solid-gauge' \| … +6 more>` | ✅ | Visualization type |
+| **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'combo' \| 'gauge' \| 'solid-gauge' \| … +6 more>` | optional (default: `"metric"`) | Visualization type |
 | **chartConfig** | `{ type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| … +13 more>; title?: string \| Record<string, string>; subtitle?: string \| Record<string, string>; description?: string \| Record<string, string>; … }` | optional | Chart visualization configuration |
 | **colorVariant** | `Enum<'default' \| 'blue' \| 'teal' \| 'orange' \| 'purple' \| 'success' \| 'warning' \| 'danger'>` | optional | Widget color variant for theming |
 | **requiresObject** | `string` | optional | Hide the widget unless the named object is registered |
@@ -170,7 +170,7 @@ Widget configuration — declared query keys + open renderer extras
 | **options** | `{ value: string \| number \| boolean; label: string \| Record<string, string> }[]` | optional | Static filter options |
 | **optionsFrom** | `{ object: string; valueField: string; labelField: string; filter?: any }` | optional | Dynamic filter options from object |
 | **defaultValue** | `string \| number \| boolean` | optional | Default filter value |
-| **scope** | `Enum<'dashboard' \| 'widget'>` | ✅ | Filter application scope |
+| **scope** | `Enum<'dashboard' \| 'widget'>` | optional (default: `"dashboard"`) | Filter application scope |
 | **targetWidgets** | `string[]` | optional | Widget IDs to apply this filter to |
 
 

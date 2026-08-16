@@ -62,7 +62,7 @@ Checksum manifest for artifact integrity verification
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **algorithm** | `Enum<'sha256' \| 'sha384' \| 'sha512'>` | ✅ | Hash algorithm used for checksums |
+| **algorithm** | `Enum<'sha256' \| 'sha384' \| 'sha512'>` | optional (default: `"sha256"`) | Hash algorithm used for checksums |
 | **files** | `Record<string, string>` | ✅ | File path to hash value mapping |
 
 
@@ -109,7 +109,7 @@ Digital signature for artifact authenticity verification
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **algorithm** | `Enum<'RSA-SHA256' \| 'RSA-SHA384' \| 'RSA-SHA512' \| 'ECDSA-SHA256'>` | ✅ | Signing algorithm used |
+| **algorithm** | `Enum<'RSA-SHA256' \| 'RSA-SHA384' \| 'RSA-SHA512' \| 'ECDSA-SHA256'>` | optional (default: `"RSA-SHA256"`) | Signing algorithm used |
 | **publicKeyRef** | `string` | ✅ | Public key reference (URL or fingerprint) for signature verification |
 | **signature** | `string` | ✅ | Base64-encoded digital signature |
 | **signedAt** | `string` | optional | ISO 8601 timestamp of when the artifact was signed |
@@ -151,10 +151,10 @@ Package artifact structure and metadata
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **formatVersion** | `string` | ✅ | Artifact format version (e.g. "1.0") |
+| **formatVersion** | `string` | optional (default: `"1.0"`) | Artifact format version (e.g. "1.0") |
 | **packageId** | `string` | ✅ | Package identifier from manifest |
 | **version** | `string` | ✅ | Package version from manifest |
-| **format** | `Enum<'tgz' \| 'zip'>` | ✅ | Archive format of the artifact |
+| **format** | `Enum<'tgz' \| 'zip'>` | optional (default: `"tgz"`) | Archive format of the artifact |
 | **size** | `integer` | optional | Total artifact file size in bytes |
 | **builtAt** | `string` | ✅ | ISO 8601 timestamp of when the artifact was built |
 | **builtWith** | `string` | optional | Build tool identifier (e.g. "os-cli@3.2.0") |

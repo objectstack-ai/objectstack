@@ -63,19 +63,19 @@ Canonical cross-paradigm action/node descriptor (ADR-0018)
 | **name** | `string` | ✅ | Display label (or i18n key) |
 | **description** | `string` | optional | Action description |
 | **icon** | `string` | optional | Icon id resolved by the designer |
-| **category** | `Enum<'logic' \| 'data' \| 'io' \| 'human' \| 'control' \| 'custom'>` | ✅ | Palette category |
-| **paradigms** | `Enum<'flow' \| 'approval'>[]` | ✅ | Authoring surfaces that may offer this action |
+| **category** | `Enum<'logic' \| 'data' \| 'io' \| 'human' \| 'control' \| 'custom'>` | optional (default: `"custom"`) | Palette category |
+| **paradigms** | `Enum<'flow' \| 'approval'>[]` | optional (default: `["flow"]`) | Authoring surfaces that may offer this action |
 | **configSchema** | `any` | optional | JSON Schema for the node config (drives the designer form; undeclared keys are rejected at registration) |
-| **supportsPause** | `boolean` | ✅ | Supports async pause/resume |
-| **supportsCancellation** | `boolean` | ✅ | Supports cancellation |
-| **supportsRetry** | `boolean` | ✅ | Supports retry on failure |
-| **needsOutbox** | `boolean` | ✅ | Dispatch via service-messaging outbox (retry/idempotency/dead-letter) |
+| **supportsPause** | `boolean` | optional (default: `false`) | Supports async pause/resume |
+| **supportsCancellation** | `boolean` | optional (default: `false`) | Supports cancellation |
+| **supportsRetry** | `boolean` | optional (default: `true`) | Supports retry on failure |
+| **needsOutbox** | `boolean` | optional (default: `false`) | Dispatch via service-messaging outbox (retry/idempotency/dead-letter) |
 | **isAsync** | `never` | optional | [REMOVED] `ActionDescriptor.isAsync` was removed in @objectstack/spec 17 (#6748, ADR-0049) — no execution path ever read it, so declaring it never made a node suspend and omitting it never stopped one. Delete the key. The live mechanism is two-part: an executor suspends by RETURNING `suspend: true` from `execute()`, and its descriptor must declare `supportsPause: true` (plus the `resumeAuthority` its pauses need) or the engine refuses that suspension (#6667). Declaring `isAsync: true` alongside `supportsPause: true` was always redundant; declaring it alone was always inert. |
-| **handlerContract** | `Enum<'none' \| 'pure'>` | ✅ | Effect contract for author-supplied code this action invokes: 'none' (invokes none) or 'pure' (must not write — it returns a value and the flow graph persists it) |
+| **handlerContract** | `Enum<'none' \| 'pure'>` | optional (default: `"none"`) | Effect contract for author-supplied code this action invokes: 'none' (invokes none) or 'pure' (must not write — it returns a value and the flow graph persists it) |
 | **resumeAuthority** | `Enum<'any' \| 'service'>` | optional | Who may resume a run this node suspended: 'any' (the generic resume route) or 'service' (only the owning service, e.g. approvals). Carries no schema default so an omission stays observable — and an omission is fail-CLOSED at run time, equivalent to 'service': a pausing node whose pause is open to the generic route must declare 'any' explicitly (#5561) |
-| **maturity** | `Enum<'ga' \| 'beta' \| 'reserved'>` | ✅ | Runtime maturity: ga (shipped), beta, or reserved (contract only — designers grey this out) |
-| **source** | `Enum<'builtin' \| 'plugin'>` | ✅ | builtin = platform baseline; plugin = third-party contributed |
-| **deprecated** | `boolean` | ✅ | Deprecated alias kept for back-compat |
+| **maturity** | `Enum<'ga' \| 'beta' \| 'reserved'>` | optional (default: `"ga"`) | Runtime maturity: ga (shipped), beta, or reserved (contract only — designers grey this out) |
+| **source** | `Enum<'builtin' \| 'plugin'>` | optional (default: `"plugin"`) | builtin = platform baseline; plugin = third-party contributed |
+| **deprecated** | `boolean` | optional (default: `false`) | Deprecated alias kept for back-compat |
 | **aliasOf** | `string` | optional | Canonical type this alias forwards to |
 
 
@@ -106,9 +106,9 @@ Node executor plugin descriptor
 | **nodeTypes** | `string[]` | ✅ | FlowNodeAction types this executor handles |
 | **version** | `string` | ✅ | Plugin version (semver) |
 | **description** | `string` | optional | Executor description |
-| **supportsPause** | `boolean` | ✅ | Whether the executor supports async pause/resume |
-| **supportsCancellation** | `boolean` | ✅ | Whether the executor supports mid-execution cancellation |
-| **supportsRetry** | `boolean` | ✅ | Whether the executor supports retry on failure |
+| **supportsPause** | `boolean` | optional (default: `false`) | Whether the executor supports async pause/resume |
+| **supportsCancellation** | `boolean` | optional (default: `false`) | Whether the executor supports mid-execution cancellation |
+| **supportsRetry** | `boolean` | optional (default: `true`) | Whether the executor supports retry on failure |
 | **configSchemaRef** | `string` | optional | JSON Schema $ref for executor-specific config |
 
 
@@ -137,13 +137,13 @@ Wait node executor plugin configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **defaultTimeoutMs** | `integer` | ✅ | Default timeout in ms (default: 24 hours) |
-| **defaultTimeoutBehavior** | `Enum<'fail' \| 'continue' \| 'fallback'>` | ✅ | Default behavior when wait timeout is exceeded |
-| **conditionPollIntervalMs** | `integer` | ✅ | Polling interval for condition waits in ms (default: 30s) |
-| **conditionMaxPolls** | `integer` | ✅ | Max polling attempts for condition waits (0 = unlimited) |
-| **webhookUrlPattern** | `string` | ✅ | URL pattern for webhook resume endpoints |
-| **persistCheckpoints** | `boolean` | ✅ | Persist wait checkpoints to durable storage |
-| **maxPausedExecutions** | `integer` | ✅ | Max concurrent paused executions (0 = unlimited) |
+| **defaultTimeoutMs** | `integer` | optional (default: `86400000`) | Default timeout in ms (default: 24 hours) |
+| **defaultTimeoutBehavior** | `Enum<'fail' \| 'continue' \| 'fallback'>` | optional (default: `"fail"`) | Default behavior when wait timeout is exceeded |
+| **conditionPollIntervalMs** | `integer` | optional (default: `30000`) | Polling interval for condition waits in ms (default: 30s) |
+| **conditionMaxPolls** | `integer` | optional (default: `0`) | Max polling attempts for condition waits (0 = unlimited) |
+| **webhookUrlPattern** | `string` | optional (default: `"/api/v1/automation/resume/{executionId}/{nodeId}"`) | URL pattern for webhook resume endpoints |
+| **persistCheckpoints** | `boolean` | optional (default: `true`) | Persist wait checkpoints to durable storage |
+| **maxPausedExecutions** | `integer` | optional (default: `0`) | Max concurrent paused executions (0 = unlimited) |
 
 
 ---

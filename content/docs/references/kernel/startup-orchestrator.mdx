@@ -64,10 +64,10 @@ const result = HealthStatusSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **timeout** | `integer` | ✅ | Maximum time in milliseconds to wait for each plugin to start |
-| **rollbackOnFailure** | `boolean` | ✅ | Whether to rollback already-started plugins if any plugin fails |
-| **healthCheck** | `boolean` | ✅ | Whether to run health checks after plugin startup |
-| **parallel** | `boolean` | ✅ | Whether to start plugins in parallel when dependencies allow |
+| **timeout** | `integer` | optional (default: `30000`) | Maximum time in milliseconds to wait for each plugin to start |
+| **rollbackOnFailure** | `boolean` | optional (default: `true`) | Whether to rollback already-started plugins if any plugin fails |
+| **healthCheck** | `boolean` | optional (default: `false`) | Whether to run health checks after plugin startup |
+| **parallel** | `boolean` | optional (default: `false`) | Whether to start plugins in parallel when dependencies allow |
 | **context** | `any` | optional | Custom context object to pass to plugin lifecycle methods |
 
 

@@ -55,10 +55,10 @@ const result = EnvironmentSchema.parse(data);
 | **id** | `string` | ✅ | UUID of the environment (stable, never reused) |
 | **organizationId** | `string` | ✅ | Organization that owns this environment |
 | **displayName** | `string` | ✅ | Display name shown in Studio and APIs |
-| **isDefault** | `boolean` | ✅ | Whether this is the default environment for the organization |
-| **isSystem** | `boolean` | ✅ | Whether this is a system environment (platform infrastructure, not user data) |
-| **plan** | `string` | ✅ | Plan tier for this environment |
-| **status** | `Enum<'provisioning' \| 'active' \| 'suspended' \| 'archived' \| 'failed' \| 'migrating'>` | ✅ | Environment lifecycle status |
+| **isDefault** | `boolean` | optional (default: `false`) | Whether this is the default environment for the organization |
+| **isSystem** | `boolean` | optional (default: `false`) | Whether this is a system environment (platform infrastructure, not user data) |
+| **plan** | `string` | optional (default: `"free"`) | Plan tier for this environment |
+| **status** | `Enum<'provisioning' \| 'active' \| 'suspended' \| 'archived' \| 'failed' \| 'migrating'>` | optional (default: `"provisioning"`) | Environment lifecycle status |
 | **createdBy** | `string` | ✅ | User ID that created the environment |
 | **createdAt** | `string` | ✅ | Creation timestamp (ISO-8601) |
 | **updatedAt** | `string` | ✅ | Last update timestamp (ISO-8601) |
@@ -70,7 +70,7 @@ const result = EnvironmentSchema.parse(data);
 | **hostname** | `string` | optional | Canonical hostname for this environment. UNIQUE. Auto-set on creation; can be overridden for custom domains. |
 | **consoleUrl** | `string` | optional | Pre-computed admin Console URL for this environment |
 | **apiBaseUrl** | `string` | optional | Pre-computed REST API base URL for this environment |
-| **visibility** | `Enum<'private' \| 'unlisted' \| 'public'>` | ✅ | Public exposure of this environment artifacts (private \| unlisted \| public). |
+| **visibility** | `Enum<'private' \| 'unlisted' \| 'public'>` | optional (default: `"private"`) | Public exposure of this environment artifacts (private \| unlisted \| public). |
 
 
 ---
@@ -85,8 +85,8 @@ const result = EnvironmentSchema.parse(data);
 | **environmentId** | `string` | ✅ | Environment this credential authorizes |
 | **secretCiphertext** | `string` | ✅ | Encrypted auth token or secret (ciphertext) |
 | **encryptionKeyId** | `string` | ✅ | Encryption key ID used to encrypt the secret |
-| **authorization** | `Enum<'full_access' \| 'read_only'>` | ✅ | Authorization scope for this credential |
-| **status** | `Enum<'active' \| 'rotating' \| 'revoked'>` | ✅ | Credential lifecycle status |
+| **authorization** | `Enum<'full_access' \| 'read_only'>` | optional (default: `"full_access"`) | Authorization scope for this credential |
+| **status** | `Enum<'active' \| 'rotating' \| 'revoked'>` | optional (default: `"active"`) | Credential lifecycle status |
 | **createdAt** | `string` | ✅ | Creation timestamp (ISO-8601) |
 | **expiresAt** | `string` | optional | Optional expiry timestamp |
 | **revokedAt** | `string` | optional | Revocation timestamp (if revoked) |
@@ -210,7 +210,7 @@ Public exposure of this environment artifacts (private | unlisted | public).
 | **metadata** | `Record<string, any>` | optional | Free-form metadata |
 | **hostname** | `string` | optional | Canonical hostname (auto-generated if omitted) |
 | **templateId** | `string` | optional | Starter package to seed into the new environment on first provisioning (e.g. "crm", "todo"). Defaults to "blank". |
-| **visibility** | `Enum<'private' \| 'unlisted' \| 'public'>` | ✅ | Public exposure of this environment artifacts. private = auth required for every read (default); unlisted = downloadable when commit id is known; public = listed and freely downloadable via /pub/v1/environments/:id/*. |
+| **visibility** | `Enum<'private' \| 'unlisted' \| 'public'>` | optional (default: `"private"`) | Public exposure of this environment artifacts. private = auth required for every read (default); unlisted = downloadable when commit id is known; public = listed and freely downloadable via /pub/v1/environments/:id/*. |
 
 
 ---
@@ -237,7 +237,7 @@ Public exposure of this environment artifacts (private | unlisted | public).
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **organizationId** | `string` | ✅ | Organization being bootstrapped |
-| **defaultEnvironmentDisplayName** | `string` | ✅ | Display name for the default environment |
+| **defaultEnvironmentDisplayName** | `string` | optional (default: `"Production"`) | Display name for the default environment |
 | **driver** | `string` | optional | Driver key |
 | **plan** | `string` | optional | Plan tier |
 | **storageLimitMb** | `integer` | optional | Storage quota in megabytes |

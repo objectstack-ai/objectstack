@@ -83,7 +83,7 @@ const result = ActionContributionSchema.parse(data);
 | **label** | `string` | ✅ | Action display label |
 | **icon** | `string` | optional | Lucide icon name |
 | **location** | `Enum<'toolbar' \| 'contextMenu' \| 'commandPalette'>` | ✅ | UI location |
-| **metadataTypes** | `string[]` | ✅ | Applicable metadata types |
+| **metadataTypes** | `string[]` | optional (default: `[]`) | Applicable metadata types |
 
 
 ---
@@ -135,8 +135,8 @@ const result = ActionContributionSchema.parse(data);
 | **id** | `string` | ✅ | Unique viewer identifier |
 | **metadataTypes** | `string[]` | ✅ | Metadata types this viewer can handle |
 | **label** | `string` | ✅ | Viewer display label |
-| **priority** | `number` | ✅ | Viewer priority (higher wins) |
-| **modes** | `Enum<'preview' \| 'design' \| 'code' \| 'data' \| 'history'>[]` | ✅ | Supported view modes |
+| **priority** | `number` | optional (default: `0`) | Viewer priority (higher wins) |
+| **modes** | `Enum<'preview' \| 'design' \| 'code' \| 'data' \| 'history'>[]` | optional (default: `["preview"]`) | Supported view modes |
 
 
 ---
@@ -150,7 +150,7 @@ const result = ActionContributionSchema.parse(data);
 | **id** | `string` | ✅ | Unique panel identifier |
 | **label** | `string` | ✅ | Panel display label |
 | **icon** | `string` | optional | Lucide icon name |
-| **location** | `Enum<'bottom' \| 'right' \| 'modal'>` | ✅ | Panel location |
+| **location** | `Enum<'bottom' \| 'right' \| 'modal'>` | optional (default: `"bottom"`) | Panel location |
 
 
 ---
@@ -176,7 +176,7 @@ const result = ActionContributionSchema.parse(data);
 | **label** | `string` | ✅ | Group display label |
 | **icon** | `string` | optional | Lucide icon name |
 | **metadataTypes** | `string[]` | ✅ | Metadata types in this group |
-| **order** | `number` | ✅ | Sort order (lower = higher) |
+| **order** | `number` | optional (default: `100`) | Sort order (lower = higher) |
 
 
 ---
@@ -187,12 +187,12 @@ const result = ActionContributionSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **metadataViewers** | `{ id: string; metadataTypes: string[]; label: string; priority: number; … }[]` | ✅ |  |
-| **sidebarGroups** | `{ key: string; label: string; icon?: string; metadataTypes: string[]; … }[]` | ✅ |  |
-| **actions** | `{ id: string; label: string; icon?: string; location: Enum<'toolbar' \| 'contextMenu' \| 'commandPalette'>; … }[]` | ✅ |  |
-| **metadataIcons** | `{ metadataType: string; label: string; icon: string }[]` | ✅ |  |
-| **panels** | `{ id: string; label: string; icon?: string; location: Enum<'bottom' \| 'right' \| 'modal'> }[]` | ✅ |  |
-| **commands** | `{ id: string; label: string; shortcut?: string; icon?: string }[]` | ✅ |  |
+| **metadataViewers** | `{ id: string; metadataTypes: string[]; label: string; priority: number; … }[]` | optional (default: `[]`) |  |
+| **sidebarGroups** | `{ key: string; label: string; icon?: string; metadataTypes: string[]; … }[]` | optional (default: `[]`) |  |
+| **actions** | `{ id: string; label: string; icon?: string; location: Enum<'toolbar' \| 'contextMenu' \| 'commandPalette'>; … }[]` | optional (default: `[]`) |  |
+| **metadataIcons** | `{ metadataType: string; label: string; icon: string }[]` | optional (default: `[]`) |  |
+| **panels** | `{ id: string; label: string; icon?: string; location: Enum<'bottom' \| 'right' \| 'modal'> }[]` | optional (default: `[]`) |  |
+| **commands** | `{ id: string; label: string; shortcut?: string; icon?: string }[]` | optional (default: `[]`) |  |
 
 
 ---
@@ -205,10 +205,10 @@ const result = ActionContributionSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Plugin ID (dot-separated lowercase) |
 | **name** | `string` | ✅ | Plugin display name |
-| **version** | `string` | ✅ | Plugin version |
+| **version** | `string` | optional (default: `"0.0.1"`) | Plugin version |
 | **description** | `string` | optional | Plugin description |
 | **author** | `string` | optional | Author |
-| **contributes** | `{ metadataViewers: object[]; sidebarGroups: object[]; actions: object[]; metadataIcons: object[]; … }` | ✅ |  |
+| **contributes** | `{ metadataViewers: object[]; sidebarGroups: object[]; actions: object[]; metadataIcons: object[]; … }` | optional (has default) |  |
 
 
 ---

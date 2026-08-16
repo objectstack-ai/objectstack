@@ -106,7 +106,7 @@ const result = FlowRegionSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **collection** | `string \| any[]` | ✅ | Template/variable resolving to the array to iterate (an inline array is accepted) |
-| **iteratorVariable** | `string` | optional | Loop variable holding the current item |
+| **iteratorVariable** | `string` | optional (default: `"item"`) | Loop variable holding the current item |
 | **indexVariable** | `string` | optional | Optional loop variable holding the current index |
 | **maxIterations** | `integer` | optional | Hard cap on iterations (clamped to the engine ceiling) |
 | **body** | `{ nodes: object[]; edges?: object[] }` | optional | Loop body region (omit for legacy flat-graph loops) |
@@ -144,11 +144,11 @@ const result = FlowRegionSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **maxRetries** | `integer` | ✅ | Retry attempts after the initial one. 0 (the default) means no retry — state a count to opt in. |
-| **backoffMs** | `integer` | ✅ | Base delay before the first retry (ms); subsequent delays multiply by backoffMultiplier |
-| **backoffMultiplier** | `number` | ✅ | Exponential backoff multiplier; 1 (the default) keeps the delay flat |
-| **maxRetryDelayMs** | `integer` | ✅ | Ceiling for a single backoff delay (ms) |
-| **jitter** | `boolean` | ✅ | Randomize each delay within [50%, 100%] of its computed value — spreads a thundering herd of simultaneous retries |
+| **maxRetries** | `integer` | optional (default: `0`) | Retry attempts after the initial one. 0 (the default) means no retry — state a count to opt in. |
+| **backoffMs** | `integer` | optional (default: `1000`) | Base delay before the first retry (ms); subsequent delays multiply by backoffMultiplier |
+| **backoffMultiplier** | `number` | optional (default: `1`) | Exponential backoff multiplier; 1 (the default) keeps the delay flat |
+| **maxRetryDelayMs** | `integer` | optional (default: `30000`) | Ceiling for a single backoff delay (ms) |
+| **jitter** | `boolean` | optional (default: `false`) | Randomize each delay within [50%, 100%] of its computed value — spreads a thundering herd of simultaneous retries |
 | **retryDelayMs** | `never` | optional | [REMOVED] `retryDelayMs` was removed in @objectstack/spec 17.0.0 (#4661, #4964) — the retry policy now has ONE spelling for its base delay across every surface that carries it: `job.retryPolicy`, a `try_catch` node's `retry` and `flow.errorHandling`. Rename the key to `backoffMs`; the value (milliseconds before the first retry) is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 
 
@@ -162,7 +162,7 @@ const result = FlowRegionSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **try** | `{ nodes: object[]; edges?: object[] }` | ✅ | Protected region |
 | **catch** | `{ nodes: object[]; edges?: object[] }` | optional | Handler region run when the try region fails |
-| **errorVariable** | `string` | optional | Variable holding the caught error in the catch region |
+| **errorVariable** | `string` | optional (default: `"$error"`) | Variable holding the caught error in the catch region |
 | **retry** | `{ maxRetries?: integer; backoffMs?: integer; backoffMultiplier?: number; maxRetryDelayMs?: integer; … }` | optional | Optional retry policy for the try region |
 
 

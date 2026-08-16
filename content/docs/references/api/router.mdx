@@ -72,11 +72,11 @@ HTTP method — the full routing vocabulary (`api/*` endpoints, router and REST-
 | :--- | :--- | :--- | :--- |
 | **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>` | ✅ | HTTP method — the full routing vocabulary (`api/*` endpoints, router and REST-server routes). The narrower `HttpMethodSubset` is what view data sources may request. |
 | **path** | `string` | ✅ | URL Path pattern |
-| **category** | `Enum<'system' \| 'api' \| 'auth' \| 'static' \| 'webhook' \| 'plugin'>` | ✅ |  |
+| **category** | `Enum<'system' \| 'api' \| 'auth' \| 'static' \| 'webhook' \| 'plugin'>` | optional (default: `"api"`) |  |
 | **handler** | `string` | ✅ | Unique handler identifier |
 | **summary** | `string` | optional | OpenAPI summary |
 | **description** | `string` | optional | OpenAPI description |
-| **public** | `boolean` | ✅ | Is publicly accessible |
+| **public** | `boolean` | optional (default: `false`) | Is publicly accessible |
 | **permissions** | `string[]` | optional | Required permissions |
 | **timeout** | `integer` | optional | Execution timeout in ms |
 | **rateLimit** | `string` | optional | Rate limit policy name |
@@ -90,8 +90,8 @@ HTTP method — the full routing vocabulary (`api/*` endpoints, router and REST-
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **basePath** | `string` | ✅ | Global API prefix |
-| **mounts** | `{ data: string; metadata: string; auth: string; automation: string; … }` | ✅ |  |
+| **basePath** | `string` | optional (default: `"/api"`) | Global API prefix |
+| **mounts** | `{ data: string; metadata: string; auth: string; automation: string; … }` | optional (has default) |  |
 | **cors** | `{ enabled: boolean; origins: string \| string[]; methods?: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>[]; credentials: boolean; … }` | optional |  |
 | **staticMounts** | `{ path: string; directory: string; cacheControl?: string }[]` | optional |  |
 

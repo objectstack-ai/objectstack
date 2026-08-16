@@ -137,7 +137,7 @@ const result = BlueprintAppSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'object' \| 'dashboard'>` | ✅ | What this nav entry opens |
+| **type** | `Enum<'object' \| 'dashboard'>` | optional (default: `"object"`) | What this nav entry opens |
 | **target** | `string` | ✅ | Object or dashboard machine name to surface (snake_case) |
 | **label** | `string` | optional | Nav entry label (defaults to the target label/name) |
 | **icon** | `string` | optional | Lucide icon name for the nav entry |
@@ -197,7 +197,7 @@ const result = BlueprintAppSchema.parse(data);
 | **object** | `string` | ✅ | Object this view displays (snake_case) |
 | **name** | `string` | ✅ | View machine name (snake_case) |
 | **label** | `string` | optional | Human-readable view label |
-| **type** | `Enum<'list' \| 'form' \| 'kanban' \| 'calendar' \| 'gallery' \| 'gantt'>` | ✅ | View kind. Pick the surface that fits the data: "gallery" for a visual card/cover browse when the user asks for a 画廊/相册/卡片墙/封面/海报/图集 (a gallery / card wall / cover / poster grid) or the object has an image/avatar/file field worth showing as a card cover; "gantt" for a 甘特图/时间线/排期 (timeline / schedule) when the object has BOTH a start and an end date field; "kanban" for a board grouped by a status/select field; "calendar" for a single-date schedule; "form" for a record editor; else "list". |
+| **type** | `Enum<'list' \| 'form' \| 'kanban' \| 'calendar' \| 'gallery' \| 'gantt'>` | optional (default: `"list"`) | View kind. Pick the surface that fits the data: "gallery" for a visual card/cover browse when the user asks for a 画廊/相册/卡片墙/封面/海报/图集 (a gallery / card wall / cover / poster grid) or the object has an image/avatar/file field worth showing as a card cover; "gantt" for a 甘特图/时间线/排期 (timeline / schedule) when the object has BOTH a start and an end date field; "kanban" for a board grouped by a status/select field; "calendar" for a single-date schedule; "form" for a record editor; else "list". |
 | **columns** | `string[]` | optional | Field names shown as columns (in order). For a gallery, INCLUDE the image/avatar/file field (it becomes the card cover); for a gantt, INCLUDE the start date column before the end date column. |
 | **groupBy** | `string` | optional | REQUIRED for kanban views: the select/status field whose options become the board columns (e.g. "stage", "status"). Without it a kanban renders as a plain list. Optional for gantt (groups leaf tasks into summary rows). |
 
@@ -224,7 +224,7 @@ const result = BlueprintAppSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **summary** | `string` | optional | One-line description of the proposed solution |
-| **assumptions** | `string[]` | ✅ | Design assumptions made from the underspecified goal |
+| **assumptions** | `string[]` | optional (default: `[]`) | Design assumptions made from the underspecified goal |
 | **questions** | `string[]` | optional | At most 1-2 structure-deciding questions to confirm before building |
 | **objects** | `{ name: string; label?: string; description?: string; fields: object[]; … }[]` | ✅ | Objects (tables) to create |
 | **views** | `{ object: string; name: string; label?: string; type: Enum<'list' \| 'form' \| 'kanban' \| 'calendar' \| 'gallery' \| 'gantt'>; … }[]` | optional | Views to create |

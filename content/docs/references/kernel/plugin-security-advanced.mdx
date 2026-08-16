@@ -84,8 +84,8 @@ const result = KernelSecurityPolicySchema.parse(data);
 | **affectedVersions** | `string[]` | ✅ |  |
 | **fixedIn** | `string[]` | optional |  |
 | **cvssScore** | `number` | optional |  |
-| **exploitAvailable** | `boolean` | ✅ |  |
-| **patchAvailable** | `boolean` | ✅ |  |
+| **exploitAvailable** | `boolean` | optional (default: `false`) |  |
+| **patchAvailable** | `boolean` | optional (default: `false`) |  |
 | **workaround** | `string` | optional |  |
 | **references** | `string[]` | optional |  |
 | **discoveredDate** | `string` | optional |  |
@@ -139,10 +139,10 @@ Scope of permission application
 | **id** | `string` | ✅ | Unique permission identifier |
 | **resource** | `Enum<'data.object' \| 'data.record' \| 'data.field' \| 'ui.view' \| 'ui.dashboard' \| 'ui.report' \| 'system.config' \| 'system.plugin' \| 'system.api' \| 'system.service' \| … +6 more>` | ✅ | Type of resource being accessed |
 | **actions** | `Enum<'create' \| 'read' \| 'update' \| 'delete' \| 'execute' \| 'manage' \| 'configure' \| 'share' \| 'export' \| 'import' \| 'admin'>[]` | ✅ |  |
-| **scope** | `Enum<'global' \| 'tenant' \| 'user' \| 'resource' \| 'plugin'>` | optional | Scope of permission application |
+| **scope** | `Enum<'global' \| 'tenant' \| 'user' \| 'resource' \| 'plugin'>` | optional (default: `"plugin"`) | Scope of permission application |
 | **filter** | `{ resourceIds?: string[]; condition?: string \| object; fields?: string[] }` | optional |  |
 | **description** | `string` | ✅ |  |
-| **required** | `boolean` | optional |  |
+| **required** | `boolean` | optional (default: `true`) |  |
 | **justification** | `string` | optional | Why this permission is needed |
 
 ### Allowed Values: `PluginPermission.resource`
@@ -175,7 +175,7 @@ Scope of permission application
 | :--- | :--- | :--- | :--- |
 | **permissions** | `{ id: string; resource: Enum<'data.object' \| 'data.record' \| 'data.field' \| 'ui.view' \| 'ui.dashboard' \| … +11 more>; actions: Enum<'create' \| 'read' \| 'update' \| 'delete' \| 'execute' \| 'manage' \| 'configure' \| … +4 more>[]; scope?: Enum<'global' \| 'tenant' \| 'user' \| 'resource' \| 'plugin'>; … }[]` | ✅ |  |
 | **groups** | `{ name: string; description: string; permissions: string[] }[]` | optional |  |
-| **defaultGrant** | `Enum<'prompt' \| 'allow' \| 'deny' \| 'inherit'>` | optional |  |
+| **defaultGrant** | `Enum<'prompt' \| 'allow' \| 'deny' \| 'inherit'>` | optional (default: `"prompt"`) |  |
 
 
 ---
@@ -248,7 +248,7 @@ Type of resource being accessed
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **engine** | `Enum<'v8-isolate' \| 'wasm' \| 'container' \| 'process'>` | ✅ | Execution environment engine |
+| **engine** | `Enum<'v8-isolate' \| 'wasm' \| 'container' \| 'process'>` | optional (default: `"v8-isolate"`) | Execution environment engine |
 | **engineConfig** | `{ wasm?: object; container?: object; v8Isolate?: object }` | optional |  |
 | **resourceLimits** | `{ maxMemory?: integer; maxCpu?: number; timeout?: integer }` | optional |  |
 
@@ -261,8 +261,8 @@ Type of resource being accessed
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ |  |
-| **level** | `Enum<'none' \| 'minimal' \| 'standard' \| 'strict' \| 'paranoid'>` | ✅ |  |
+| **enabled** | `boolean` | optional (default: `true`) |  |
+| **level** | `Enum<'none' \| 'minimal' \| 'standard' \| 'strict' \| 'paranoid'>` | optional (default: `"standard"`) |  |
 | **runtime** | `{ engine: Enum<'v8-isolate' \| 'wasm' \| 'container' \| 'process'>; engineConfig?: object; resourceLimits?: object }` | optional | Execution environment and isolation settings |
 | **filesystem** | `{ mode: Enum<'none' \| 'readonly' \| 'restricted' \| 'full'>; allowedPaths?: string[]; deniedPaths?: string[]; maxFileSize?: integer }` | optional |  |
 | **network** | `{ mode: Enum<'none' \| 'local' \| 'restricted' \| 'full'>; allowedHosts?: string[]; deniedHosts?: string[]; allowedPorts?: number[]; … }` | optional |  |

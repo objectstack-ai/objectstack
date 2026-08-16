@@ -40,8 +40,8 @@ const result = BatchConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable batch operations |
-| **maxRecordsPerBatch** | `integer` | ✅ | Maximum records per batch |
+| **enabled** | `boolean` | optional (default: `true`) | Enable batch operations |
+| **maxRecordsPerBatch** | `integer` | optional (default: `200`) | Maximum records per batch |
 | **defaultOptions** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean }` | optional | Default batch options |
 
 
@@ -81,9 +81,9 @@ const result = BatchConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **atomic** | `boolean` | ✅ | Opt-in all-or-nothing. When explicitly true the whole batch runs inside ONE engine transaction: the first failure rolls back every prior write, and the response reports zero successes — each row carries `errors[0].code` ROLLED_BACK (written, then undone), the causal row its own error, and rows never reached NOT_ATTEMPTED. A runtime that cannot roll back REFUSES the request (501 NOT_IMPLEMENTED) rather than silently degrading to best-effort — probe `capabilities.transactionalBatch` on /discovery first. Takes precedence over continueOnError. Default false: sequential best-effort. |
-| **returnRecords** | `boolean` | ✅ | If true, return full record data in response |
-| **continueOnError** | `boolean` | ✅ | If true (and atomic=false), continue processing remaining records after errors. Default false: the first failure ENDS the run — records before it stay written (nothing is rolled back on this arm), and every record after it is reported `errors[0].code` NOT_ATTEMPTED rather than omitted, so `results` always covers all `total` records and `succeeded + failed === total` (#7539). |
+| **atomic** | `boolean` | optional (default: `false`) | Opt-in all-or-nothing. When explicitly true the whole batch runs inside ONE engine transaction: the first failure rolls back every prior write, and the response reports zero successes — each row carries `errors[0].code` ROLLED_BACK (written, then undone), the causal row its own error, and rows never reached NOT_ATTEMPTED. A runtime that cannot roll back REFUSES the request (501 NOT_IMPLEMENTED) rather than silently degrading to best-effort — probe `capabilities.transactionalBatch` on /discovery first. Takes precedence over continueOnError. Default false: sequential best-effort. |
+| **returnRecords** | `boolean` | optional (default: `false`) | If true, return full record data in response |
+| **continueOnError** | `boolean` | optional (default: `false`) | If true (and atomic=false), continue processing remaining records after errors. Default false: the first failure ENDS the run — records before it stay written (nothing is rolled back on this arm), and every record after it is reported `errors[0].code` NOT_ATTEMPTED rather than omitted, so `results` always covers all `total` records and `succeeded + failed === total` (#7539). |
 | **validateOnly** | `never` | optional | [REMOVED] `options.validateOnly` was removed from BatchOptions in @objectstack/spec (#4052). It was never implemented: the batch surfaces persisted regardless, so a "dry-run" would have silently executed. There is no dry-run today — drop the key. If you need to preview a batch without writing, open an issue so it can be designed (no-commit cascade / constraint semantics) and reintroduced as a flag that actually holds. |
 
 
@@ -156,7 +156,7 @@ A cross-object batch strip event: dropped fields plus the operation index
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Target object (table) name |
-| **action** | `Enum<'create' \| 'update' \| 'delete'>` | ✅ | Operation to perform (default: create) |
+| **action** | `Enum<'create' \| 'update' \| 'delete'>` | optional (default: `"create"`) | Operation to perform (default: create) |
 | **id** | `string` | optional | Target record id — required for update and delete |
 | **data** | `Record<string, any>` | optional | Record payload for create/update; a value may be `{ $ref: <opIndex> }` to reference an earlier op's created id |
 
@@ -170,7 +170,7 @@ A cross-object batch strip event: dropped fields plus the operation index
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **operations** | `{ object: string; action: Enum<'create' \| 'update' \| 'delete'>; id?: string; data?: Record<string, any> }[]` | ✅ | Ordered operations executed in one transaction |
-| **atomic** | `boolean` | ✅ | Always true — the cross-object batch is all-or-nothing |
+| **atomic** | `boolean` | optional (default: `true`) | Always true — the cross-object batch is all-or-nothing |
 
 
 ---

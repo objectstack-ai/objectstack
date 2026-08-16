@@ -63,11 +63,11 @@ const result = WebhookSchema.parse(data);
 | **object** | `string` | optional | Object whose record events (create/update/delete, bulk_update/bulk_delete) trigger this webhook |
 | **triggers** | `Enum<'create' \| 'update' \| 'delete' \| 'bulk_update' \| 'bulk_delete'>[]` | optional | Events that trigger execution |
 | **url** | `string` | ✅ | External webhook endpoint URL |
-| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>` | ✅ | HTTP method |
+| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>` | optional (default: `"POST"`) | HTTP method |
 | **headers** | `Record<string, string>` | optional | Custom HTTP headers |
-| **timeoutMs** | `integer` | ✅ | Request timeout in milliseconds |
+| **timeoutMs** | `integer` | optional (default: `30000`) | Request timeout in milliseconds |
 | **secret** | `string` | optional | Signing secret for HMAC signature verification |
-| **isActive** | `boolean` | ✅ | Whether webhook is active |
+| **isActive** | `boolean` | optional (default: `true`) | Whether webhook is active |
 | **description** | `string` | optional | Webhook description |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this webhook. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |

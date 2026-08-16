@@ -74,7 +74,7 @@ List installed packages request
 | :--- | :--- | :--- | :--- |
 | **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional | Filter by package status |
 | **enabled** | `boolean` | optional | Filter by enabled state |
-| **limit** | `integer` | ✅ | Maximum number of packages to return |
+| **limit** | `integer` | optional (default: `50`) | Maximum number of packages to return |
 | **cursor** | `string` | optional | Cursor for pagination |
 
 
@@ -127,7 +127,7 @@ Install package request
 | :--- | :--- | :--- | :--- |
 | **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest to install |
 | **settings** | `Record<string, any>` | optional | User-provided settings at install time |
-| **enableOnInstall** | `boolean` | optional | Whether to enable immediately after install |
+| **enableOnInstall** | `boolean` | optional (default: `true`) | Whether to enable immediately after install |
 | **platformVersion** | `string` | optional | Current platform version for compatibility verification |
 | **artifactRef** | `{ url: string; sha256: string; size: integer; format?: Enum<'tgz' \| 'zip'>; … }` | optional | Artifact reference for marketplace installation |
 
@@ -171,7 +171,7 @@ Rollback package request
 | :--- | :--- | :--- | :--- |
 | **packageId** | `string` | ✅ | Package identifier |
 | **snapshotId** | `string` | ✅ | Snapshot ID to restore from |
-| **rollbackCustomizations** | `boolean` | ✅ | Whether to restore pre-upgrade customizations |
+| **rollbackCustomizations** | `boolean` | optional (default: `true`) | Whether to restore pre-upgrade customizations |
 
 
 ---
@@ -203,10 +203,10 @@ Upgrade package request
 | **packageId** | `string` | ✅ | Package ID to upgrade |
 | **targetVersion** | `string` | optional | Target version (defaults to latest) |
 | **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | optional | New manifest for the target version |
-| **createSnapshot** | `boolean` | optional | Whether to create a pre-upgrade backup snapshot |
-| **mergeStrategy** | `Enum<'keep-custom' \| 'accept-incoming' \| 'three-way-merge'>` | optional | How to handle customer customizations |
-| **dryRun** | `boolean` | optional | Preview upgrade without making changes |
-| **skipValidation** | `boolean` | optional | Skip pre-upgrade compatibility checks |
+| **createSnapshot** | `boolean` | optional (default: `true`) | Whether to create a pre-upgrade backup snapshot |
+| **mergeStrategy** | `Enum<'keep-custom' \| 'accept-incoming' \| 'three-way-merge'>` | optional (default: `"three-way-merge"`) | How to handle customer customizations |
+| **dryRun** | `boolean` | optional (default: `false`) | Preview upgrade without making changes |
+| **skipValidation** | `boolean` | optional (default: `false`) | Skip pre-upgrade compatibility checks |
 
 
 ---

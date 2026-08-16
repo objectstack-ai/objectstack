@@ -246,13 +246,13 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **mode** | `Enum<'ot' \| 'crdt' \| 'lock' \| 'hybrid'>` | ✅ | Collaboration mode to use |
-| **enableCursorSharing** | `boolean` | ✅ | Enable cursor sharing |
-| **enablePresence** | `boolean` | ✅ | Enable presence tracking |
-| **enableAwareness** | `boolean` | ✅ | Enable awareness state |
+| **enableCursorSharing** | `boolean` | optional (default: `true`) | Enable cursor sharing |
+| **enablePresence** | `boolean` | optional (default: `true`) | Enable presence tracking |
+| **enableAwareness** | `boolean` | optional (default: `true`) | Enable awareness state |
 | **maxUsers** | `integer` | optional | Maximum concurrent users |
-| **idleTimeout** | `integer` | ✅ | Idle timeout in milliseconds |
-| **conflictResolution** | `Enum<'ot' \| 'crdt' \| 'manual'>` | ✅ | Conflict resolution strategy |
-| **persistence** | `boolean` | ✅ | Enable operation persistence |
+| **idleTimeout** | `integer` | optional (default: `300000`) | Idle timeout in milliseconds |
+| **conflictResolution** | `Enum<'ot' \| 'crdt' \| 'manual'>` | optional (default: `"ot"`) | Conflict resolution strategy |
+| **persistence** | `boolean` | optional (default: `true`) | Enable operation persistence |
 | **snapshot** | `{ enabled: boolean; interval: integer }` | optional | Snapshot configuration |
 
 
@@ -271,7 +271,7 @@ This schema accepts one of the following structures:
 | **position** | `{ line: integer; column: integer }` | ✅ | Current cursor position |
 | **selection** | `{ anchor: object; focus: object; direction?: Enum<'forward' \| 'backward'> }` | optional | Current text selection |
 | **style** | `{ color: Enum<'blue' \| 'green' \| 'red' \| 'yellow' \| 'purple' \| 'orange' \| 'pink' \| 'teal' \| 'indigo' \| 'cyan'> \| string; opacity: number; label?: string; showLabel: boolean; … }` | ✅ | Visual style for this cursor |
-| **isTyping** | `boolean` | ✅ | Whether user is currently typing |
+| **isTyping** | `boolean` | optional (default: `false`) | Whether user is currently typing |
 | **lastUpdate** | `string` | ✅ | ISO 8601 datetime of last cursor update |
 | **metadata** | `Record<string, any>` | optional | Additional cursor metadata |
 
@@ -329,10 +329,10 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **color** | `Enum<'blue' \| 'green' \| 'red' \| 'yellow' \| 'purple' \| 'orange' \| 'pink' \| 'teal' \| 'indigo' \| 'cyan'> \| string` | ✅ | Cursor color (preset or custom hex) |
-| **opacity** | `number` | ✅ | Cursor opacity (0-1) |
+| **opacity** | `number` | optional (default: `1`) | Cursor opacity (0-1) |
 | **label** | `string` | optional | Label to display with cursor (usually username) |
-| **showLabel** | `boolean` | ✅ | Whether to show label |
-| **pulseOnUpdate** | `boolean` | ✅ | Whether to pulse when cursor moves |
+| **showLabel** | `boolean` | optional (default: `true`) | Whether to show label |
+| **pulseOnUpdate** | `boolean` | optional (default: `true`) | Whether to pulse when cursor moves |
 
 
 ---
@@ -400,7 +400,7 @@ This schema accepts one of the following structures:
 | **timestamp** | `string` | ✅ | Addition timestamp |
 | **replicaId** | `string` | ✅ | Replica that added the element |
 | **uid** | `string` | ✅ | Unique identifier for this addition |
-| **removed** | `boolean` | ✅ | Whether element has been removed |
+| **removed** | `boolean` | optional (default: `false`) | Whether element has been removed |
 
 
 ---

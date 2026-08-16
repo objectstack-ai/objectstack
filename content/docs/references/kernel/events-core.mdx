@@ -51,7 +51,7 @@ const result = EventSchema.parse(data);
 | **tenantId** | `string` | optional | Tenant identifier for multi-tenant systems |
 | **correlationId** | `string` | optional | Correlation ID for event tracing |
 | **causationId** | `string` | optional | ID of the event that caused this event |
-| **priority** | `Enum<'critical' \| 'high' \| 'normal' \| 'low' \| 'background'>` | ✅ | Event priority |
+| **priority** | `Enum<'critical' \| 'high' \| 'normal' \| 'low' \| 'background'>` | optional (default: `"normal"`) | Event priority |
 | **cluster** | `{ scope: Enum<'local' \| 'cluster' \| 'tenant'>; deliverySemantics?: Enum<'best-effort' \| 'at-least-once' \| 'exactly-once'>; partitionKey?: string }` | optional | Per-emit cluster routing & delivery options. See cluster-semantics.mdx §4. |
 
 
@@ -77,10 +77,10 @@ const result = EventSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Event type name (lowercase with dots) |
-| **version** | `string` | ✅ | Event schema version |
+| **version** | `string` | optional (default: `"1.0.0"`) | Event schema version |
 | **schema** | `any` | optional | JSON Schema for event payload validation |
 | **description** | `string` | optional | Event type description |
-| **deprecated** | `boolean` | ✅ | Whether this event type is deprecated |
+| **deprecated** | `boolean` | optional (default: `false`) | Whether this event type is deprecated |
 | **tags** | `string[]` | optional | Event type tags |
 
 

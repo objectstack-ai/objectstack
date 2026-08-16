@@ -40,7 +40,7 @@ const result = FileKnowledgeSourceSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **kind** | `'file'` | ✅ |  |
 | **prefix** | `string` | ✅ | Storage prefix |
-| **mimeTypes** | `string[]` | optional |  |
+| **mimeTypes** | `string[]` | optional (default: `[]`) |  |
 
 
 ---
@@ -64,7 +64,7 @@ const result = FileKnowledgeSourceSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **onRecordChange** | `boolean` | optional |  |
+| **onRecordChange** | `boolean` | optional (default: `true`) |  |
 | **cron** | `string` | optional |  |
 
 
@@ -80,12 +80,12 @@ const result = FileKnowledgeSourceSchema.parse(data);
 | **label** | `string` | ✅ |  |
 | **description** | `string` | optional |  |
 | **adapter** | `string` | ✅ | Adapter id |
-| **adapterConfig** | `Record<string, any>` | optional |  |
+| **adapterConfig** | `Record<string, any>` | optional (default: `{}`) |  |
 | **source** | `{ kind: 'object'; object: string; contentFields: string[]; metadataFields?: string[]; … } \| { kind: 'file'; prefix: string; mimeTypes?: string[] } \| { kind: 'http'; urls: string[]; userAgent?: string }` | ✅ |  |
 | **embedding** | `{ provider: Enum<'openai' \| 'cohere' \| 'azure_openai' \| 'huggingface' \| 'local' \| 'custom'>; model: string; dimensions: integer; endpoint?: string; … }` | optional |  |
 | **vectorStore** | `{ provider: Enum<'pgvector' \| 'chroma' \| 'qdrant' \| 'pinecone' \| 'weaviate' \| 'milvus' \| 'redis' \| … +3 more>; collection: string; endpoint?: string; secretRef?: string; … }` | optional |  |
-| **refresh** | `{ onRecordChange?: boolean; cron?: string }` | optional |  |
-| **aiExposed** | `boolean` | optional |  |
+| **refresh** | `{ onRecordChange?: boolean; cron?: string }` | optional (default: `{}`) |  |
+| **aiExposed** | `boolean` | optional (default: `true`) |  |
 
 
 ---
@@ -105,7 +105,7 @@ This schema accepts one of the following structures:
 | **kind** | `'object'` | ✅ |  |
 | **object** | `string` | ✅ | Short object name to index |
 | **contentFields** | `string[]` | ✅ | Fields contributing to document content |
-| **metadataFields** | `string[]` | optional |  |
+| **metadataFields** | `string[]` | optional (default: `[]`) |  |
 | **where** | `Record<string, any>` | optional |  |
 
 ---
@@ -118,7 +118,7 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **kind** | `'file'` | ✅ |  |
 | **prefix** | `string` | ✅ | Storage prefix |
-| **mimeTypes** | `string[]` | optional |  |
+| **mimeTypes** | `string[]` | optional (default: `[]`) |  |
 
 ---
 
@@ -146,7 +146,7 @@ This schema accepts one of the following structures:
 | **kind** | `'object'` | ✅ |  |
 | **object** | `string` | ✅ | Short object name to index |
 | **contentFields** | `string[]` | ✅ | Fields contributing to document content |
-| **metadataFields** | `string[]` | optional |  |
+| **metadataFields** | `string[]` | optional (default: `[]`) |  |
 | **where** | `Record<string, any>` | optional |  |
 
 

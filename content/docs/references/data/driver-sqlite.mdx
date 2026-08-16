@@ -44,7 +44,7 @@ SQLite connection configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **filename** | `string` | ✅ | Database file path, or ":memory:" for an ephemeral database |
+| **filename** | `string` | optional (default: `":memory:"`) | Database file path, or ":memory:" for an ephemeral database |
 | **autoMigrate** | `Enum<'off' \| 'safe'>` | optional | Dev-only non-destructive schema self-heal (#2186) |
 
 
@@ -58,7 +58,7 @@ SQLite (WASM) connection configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **filename** | `string` | ✅ | Database file path, or ":memory:" for an ephemeral database |
+| **filename** | `string` | optional (default: `":memory:"`) | Database file path, or ":memory:" for an ephemeral database |
 | **persist** | `'on-disconnect' \| 'on-write' \| string` | optional | When to flush a file-backed wasm database to disk |
 
 

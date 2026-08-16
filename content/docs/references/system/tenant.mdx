@@ -235,12 +235,12 @@ Current tenant resource usage
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **currentObjectCount** | `integer` | ✅ | Current number of custom objects |
-| **currentRecordCount** | `integer` | ✅ | Total records across all objects |
-| **currentStorageBytes** | `integer` | ✅ | Current storage usage in bytes |
-| **deploymentsToday** | `integer` | ✅ | Deployments executed today |
-| **currentUsers** | `integer` | ✅ | Current number of active users |
-| **apiRequestsThisMinute** | `integer` | ✅ | API requests in the current minute |
+| **currentObjectCount** | `integer` | optional (default: `0`) | Current number of custom objects |
+| **currentRecordCount** | `integer` | optional (default: `0`) | Total records across all objects |
+| **currentStorageBytes** | `integer` | optional (default: `0`) | Current storage usage in bytes |
+| **deploymentsToday** | `integer` | optional (default: `0`) | Deployments executed today |
+| **currentUsers** | `integer` | optional (default: `0`) | Current number of active users |
+| **apiRequestsThisMinute** | `integer` | optional (default: `0`) | API requests in the current minute |
 | **lastUpdatedAt** | `string` | optional | Last usage update time |
 
 

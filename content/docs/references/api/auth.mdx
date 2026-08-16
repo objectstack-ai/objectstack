@@ -46,7 +46,7 @@ const result = AuthProvider.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'email' \| 'username' \| 'phone' \| 'magic-link' \| 'social'>` | ✅ | Login method |
+| **type** | `Enum<'email' \| 'username' \| 'phone' \| 'magic-link' \| 'social'>` | optional (default: `"email"`) | Login method |
 | **email** | `string` | optional | Required for email/magic-link |
 | **username** | `string` | optional | Required for username login |
 | **password** | `string` | optional | Required for password login |
@@ -132,13 +132,13 @@ const result = AuthProvider.parse(data);
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | User ID |
 | **email** | `string` | ✅ | Email address |
-| **emailVerified** | `boolean` | ✅ | Is email verified? |
+| **emailVerified** | `boolean` | optional (default: `false`) | Is email verified? |
 | **name** | `string` | ✅ | Display name |
 | **image** | `string` | optional | Avatar URL |
 | **username** | `string` | optional | Username (optional) |
-| **roles** | `string[]` | ✅ | Assigned role IDs |
+| **roles** | `string[]` | optional (default: `[]`) | Assigned role IDs |
 | **tenantId** | `string` | optional | Current tenant ID |
-| **language** | `string` | ✅ | Preferred language |
+| **language** | `string` | optional (default: `"en"`) | Preferred language |
 | **timezone** | `string` | optional | Preferred timezone |
 | **createdAt** | `string` | optional |  |
 | **updatedAt** | `string` | optional |  |

@@ -117,7 +117,7 @@ const result = CompleteChunkedUploadRequestSchema.parse(data);
 | **filename** | `string` | ✅ | Original filename |
 | **mimeType** | `string` | ✅ | File MIME type |
 | **size** | `number` | ✅ | File size in bytes |
-| **scope** | `string` | ✅ | Target storage scope (e.g. user, private, public) |
+| **scope** | `string` | optional (default: `"user"`) | Target storage scope (e.g. user, private, public) |
 | **bucket** | `string` | optional | Specific bucket override (admin only) |
 
 
@@ -132,8 +132,8 @@ const result = CompleteChunkedUploadRequestSchema.parse(data);
 | **filename** | `string` | ✅ | Original filename |
 | **mimeType** | `string` | ✅ | File MIME type |
 | **totalSize** | `integer` | ✅ | Total file size in bytes |
-| **chunkSize** | `integer` | ✅ | Size of each chunk in bytes (minimum 5MB per S3 spec) |
-| **scope** | `string` | ✅ | Target storage scope |
+| **chunkSize** | `integer` | optional (default: `5242880`) | Size of each chunk in bytes (minimum 5MB per S3 spec) |
+| **scope** | `string` | optional (default: `"user"`) | Target storage scope |
 | **bucket** | `string` | optional | Specific bucket override (admin only) |
 | **metadata** | `Record<string, string>` | optional | Custom metadata key-value pairs |
 

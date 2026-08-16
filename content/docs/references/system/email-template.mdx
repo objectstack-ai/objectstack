@@ -43,16 +43,16 @@ const result = EmailTemplateDefinitionSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Template identifier (dotted snake_case) |
 | **label** | `string` | ✅ | Display label |
-| **category** | `Enum<'auth' \| 'notification' \| 'workflow' \| 'marketing' \| 'custom'>` | ✅ |  |
-| **locale** | `string` | ✅ | BCP-47 locale (e.g. en-US, zh-CN) |
+| **category** | `Enum<'auth' \| 'notification' \| 'workflow' \| 'marketing' \| 'custom'>` | optional (default: `"custom"`) |  |
+| **locale** | `string` | optional (default: `"en-US"`) | BCP-47 locale (e.g. en-US, zh-CN) |
 | **subject** | `string` | ✅ | Subject template |
 | **bodyHtml** | `string` | ✅ | HTML body template |
 | **bodyText** | `string` | optional | Plain-text body template (auto-derived from HTML when omitted) |
-| **variables** | `{ name: string; type: Enum<'string' \| 'number' \| 'boolean' \| 'date' \| 'url' \| 'user' \| 'record'>; required: boolean; description?: string }[]` | ✅ |  |
+| **variables** | `{ name: string; type: Enum<'string' \| 'number' \| 'boolean' \| 'date' \| 'url' \| 'user' \| 'record'>; required: boolean; description?: string }[]` | optional (default: `[]`) |  |
 | **fromOverride** | `{ name?: string; address: string }` | optional |  |
 | **replyTo** | `string` | optional |  |
-| **active** | `boolean` | ✅ |  |
-| **isSystem** | `boolean` | ✅ |  |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **isSystem** | `boolean` | optional (default: `false`) |  |
 | **description** | `string` | optional |  |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this email template. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
@@ -86,8 +86,8 @@ const result = EmailTemplateDefinitionSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Variable name as referenced in placeholders (snake_case or dotted path) |
-| **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'date' \| 'url' \| 'user' \| 'record'>` | ✅ |  |
-| **required** | `boolean` | ✅ |  |
+| **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'date' \| 'url' \| 'user' \| 'record'>` | optional (default: `"string"`) |  |
+| **required** | `boolean` | optional (default: `false`) |  |
 | **description** | `string` | optional | Author hint shown in Studio |
 
 

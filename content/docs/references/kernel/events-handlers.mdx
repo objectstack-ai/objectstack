@@ -33,8 +33,8 @@ const result = EventHandlerSchema.parse(data);
 | **id** | `string` | optional | Unique handler identifier |
 | **eventName** | `string` | ✅ | Name of event to handle (supports wildcards like user.*) |
 | **handler** | `any` | ✅ | Handler function |
-| **priority** | `integer` | ✅ | Execution priority (lower numbers execute first) |
-| **async** | `boolean` | ✅ | Execute in background (true) or block (false) |
+| **priority** | `integer` | optional (default: `0`) | Execution priority (lower numbers execute first) |
+| **async** | `boolean` | optional (default: `true`) | Execute in background (true) or block (false) |
 | **retry** | `{ maxRetries: integer; backoffMs: integer; backoffMultiplier: number }` | optional | Retry policy for failed handlers |
 | **timeoutMs** | `integer` | optional | Handler timeout in milliseconds |
 | **filter** | `any` | optional | Optional filter to determine if handler should execute |
@@ -48,10 +48,10 @@ const result = EventHandlerSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable event persistence |
+| **enabled** | `boolean` | optional (default: `false`) | Enable event persistence |
 | **retention** | `integer` | ✅ | Days to retain persisted events |
 | **filter** | `any` | optional | Optional filter function to select which events to persist |
-| **storage** | `Enum<'database' \| 'file' \| 's3' \| 'custom'>` | ✅ | Storage backend for persisted events |
+| **storage** | `Enum<'database' \| 'file' \| 's3' \| 'custom'>` | optional (default: `"database"`) | Storage backend for persisted events |
 
 
 ---

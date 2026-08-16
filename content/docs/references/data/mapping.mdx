@@ -29,7 +29,7 @@ const result = ImportFieldMappingSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **source** | `string \| string[]` | ✅ | Source column header(s) |
 | **target** | `string \| string[]` | ✅ | Target object field(s) |
-| **transform** | `Enum<'none' \| 'constant' \| 'lookup' \| 'split' \| 'join' \| 'javascript' \| 'map'>` | ✅ |  |
+| **transform** | `Enum<'none' \| 'constant' \| 'lookup' \| 'split' \| 'join' \| 'javascript' \| 'map'>` | optional (default: `"none"`) |  |
 | **params** | `{ value?: any; object?: string; fromField?: string; toField?: string; … }` | optional |  |
 
 
@@ -43,10 +43,10 @@ const result = ImportFieldMappingSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Mapping unique name (lowercase snake_case) |
 | **label** | `string` | optional |  |
-| **sourceFormat** | `Enum<'csv' \| 'json' \| 'xml' \| 'sql'>` | ✅ |  |
+| **sourceFormat** | `Enum<'csv' \| 'json' \| 'xml' \| 'sql'>` | optional (default: `"csv"`) |  |
 | **targetObject** | `string` | ✅ | Target Object Name |
 | **fieldMapping** | `{ source: string \| string[]; target: string \| string[]; transform: Enum<'none' \| 'constant' \| 'lookup' \| 'split' \| 'join' \| 'javascript' \| 'map'>; params?: object }[]` | ✅ |  |
-| **mode** | `Enum<'insert' \| 'update' \| 'upsert'>` | ✅ |  |
+| **mode** | `Enum<'insert' \| 'update' \| 'upsert'>` | optional (default: `"insert"`) |  |
 | **upsertKey** | `string[]` | optional | Fields to match for upsert (e.g. email) |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |

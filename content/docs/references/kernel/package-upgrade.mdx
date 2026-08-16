@@ -68,7 +68,7 @@ Single metadata change between package versions
 | **type** | `string` | ✅ | Metadata type |
 | **name** | `string` | ✅ | Metadata name |
 | **changeType** | `Enum<'added' \| 'modified' \| 'removed' \| 'renamed'>` | ✅ | Category of metadata modification (added, modified, removed, or renamed) |
-| **hasConflict** | `boolean` | ✅ | Whether this change may conflict with customizations |
+| **hasConflict** | `boolean` | optional (default: `false`) | Whether this change may conflict with customizations |
 | **summary** | `string` | optional | Human-readable change summary |
 | **previousName** | `string` | optional | Previous name if renamed |
 
@@ -85,7 +85,7 @@ Rollback package request
 | :--- | :--- | :--- | :--- |
 | **packageId** | `string` | ✅ | Package ID to rollback |
 | **snapshotId** | `string` | ✅ | Snapshot ID to restore from |
-| **rollbackCustomizations** | `boolean` | ✅ | Whether to restore pre-upgrade customizations |
+| **rollbackCustomizations** | `boolean` | optional (default: `true`) | Whether to restore pre-upgrade customizations |
 
 
 ---
@@ -131,10 +131,10 @@ Upgrade package request
 | **packageId** | `string` | ✅ | Package ID to upgrade |
 | **targetVersion** | `string` | optional | Target version (defaults to latest) |
 | **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | optional | New manifest (if installing from local) |
-| **createSnapshot** | `boolean` | optional | Whether to create a pre-upgrade backup snapshot |
-| **mergeStrategy** | `Enum<'keep-custom' \| 'accept-incoming' \| 'three-way-merge'>` | optional | How to handle customer customizations |
-| **dryRun** | `boolean` | optional | Preview upgrade without making changes |
-| **skipValidation** | `boolean` | optional | Skip pre-upgrade compatibility checks |
+| **createSnapshot** | `boolean` | optional (default: `true`) | Whether to create a pre-upgrade backup snapshot |
+| **mergeStrategy** | `Enum<'keep-custom' \| 'accept-incoming' \| 'three-way-merge'>` | optional (default: `"three-way-merge"`) | How to handle customer customizations |
+| **dryRun** | `boolean` | optional (default: `false`) | Preview upgrade without making changes |
+| **skipValidation** | `boolean` | optional (default: `false`) | Skip pre-upgrade compatibility checks |
 
 
 ---
@@ -191,8 +191,8 @@ Upgrade analysis plan generated before execution
 | **toVersion** | `string` | ✅ | Target upgrade version |
 | **impactLevel** | `Enum<'none' \| 'low' \| 'medium' \| 'high' \| 'critical'>` | ✅ | Severity assessment from none (seamless) to critical (breaking changes) |
 | **changes** | `{ type: string; name: string; changeType: Enum<'added' \| 'modified' \| 'removed' \| 'renamed'>; hasConflict: boolean; … }[]` | ✅ | All metadata changes |
-| **affectedCustomizations** | `integer` | ✅ | Count of customizations that may be affected |
-| **requiresMigration** | `boolean` | ✅ | Whether data migration scripts are needed |
+| **affectedCustomizations** | `integer` | optional (default: `0`) | Count of customizations that may be affected |
+| **requiresMigration** | `boolean` | optional (default: `false`) | Whether data migration scripts are needed |
 | **migrationScripts** | `string[]` | optional | Paths to migration scripts |
 | **dependencyUpgrades** | `{ packageId: string; fromVersion: string; toVersion: string }[]` | optional | Dependent packages that also need upgrading |
 | **estimatedDuration** | `integer` | optional | Estimated upgrade duration in seconds |

@@ -34,7 +34,7 @@ const result = CodeContentSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **type** | `'code'` | ✅ |  |
 | **text** | `string` | ✅ | Code snippet |
-| **language** | `string` | ✅ |  |
+| **language** | `string` | optional (default: `"text"`) |  |
 | **metadata** | `Record<string, any>` | optional |  |
 
 
@@ -54,10 +54,10 @@ const result = CodeContentSchema.parse(data);
 | **totalTokens** | `integer` | ✅ |  |
 | **averageTokensPerMessage** | `number` | ✅ |  |
 | **peakTokenUsage** | `integer` | ✅ |  |
-| **pruningEvents** | `integer` | ✅ |  |
-| **summarizationEvents** | `integer` | ✅ |  |
-| **tokensSavedByPruning** | `integer` | ✅ |  |
-| **tokensSavedBySummarization** | `integer` | ✅ |  |
+| **pruningEvents** | `integer` | optional (default: `0`) |  |
+| **summarizationEvents** | `integer` | optional (default: `0`) |  |
+| **tokensSavedByPruning** | `integer` | optional (default: `0`) |  |
+| **tokensSavedBySummarization** | `integer` | optional (default: `0`) |  |
 | **duration** | `number` | optional | Session duration in seconds |
 | **firstMessageAt** | `string` | optional | ISO 8601 timestamp |
 | **lastMessageAt** | `string` | optional | ISO 8601 timestamp |
@@ -99,7 +99,7 @@ const result = CodeContentSchema.parse(data);
 | **name** | `string` | optional | Name of the function/user |
 | **tokens** | `{ promptTokens: integer; completionTokens: integer; totalTokens: integer }` | optional | Token usage for this message |
 | **cost** | `number` | optional | Cost for this message in USD |
-| **pinned** | `boolean` | ✅ | Prevent removal during pruning |
+| **pinned** | `boolean` | optional (default: `false`) | Prevent removal during pruning |
 | **importance** | `number` | optional | Importance score for pruning |
 | **embedding** | `number[]` | optional | Vector embedding for semantic search |
 | **metadata** | `Record<string, any>` | optional |  |
@@ -118,11 +118,11 @@ const result = CodeContentSchema.parse(data);
 | **context** | `{ sessionId: string; userId?: string; agentId?: string; object?: string; … }` | ✅ |  |
 | **modelId** | `string` | optional | AI model ID |
 | **tokenBudget** | `{ maxTokens: integer; maxPromptTokens?: integer; maxCompletionTokens?: integer; reserveTokens: integer; … }` | ✅ |  |
-| **messages** | `{ id: string; timestamp: string; role: Enum<'system' \| 'user' \| 'assistant' \| 'function' \| 'tool'>; content: (object \| … +3 more)[]; … }[]` | ✅ |  |
+| **messages** | `{ id: string; timestamp: string; role: Enum<'system' \| 'user' \| 'assistant' \| 'function' \| 'tool'>; content: (object \| … +3 more)[]; … }[]` | optional (default: `[]`) |  |
 | **tokens** | `{ promptTokens: integer; completionTokens: integer; totalTokens: integer; budgetLimit: integer; … }` | optional |  |
 | **totalTokens** | `{ promptTokens: integer; completionTokens: integer; totalTokens: integer }` | optional | Total tokens across all messages |
 | **totalCost** | `number` | optional | Total cost for this session in USD |
-| **status** | `Enum<'active' \| 'paused' \| 'completed' \| 'archived'>` | ✅ |  |
+| **status** | `Enum<'active' \| 'paused' \| 'completed' \| 'archived'>` | optional (default: `"active"`) |  |
 | **createdAt** | `string` | ✅ | ISO 8601 timestamp |
 | **updatedAt** | `string` | ✅ | ISO 8601 timestamp |
 | **expiresAt** | `string` | optional | ISO 8601 timestamp |
@@ -185,7 +185,7 @@ const result = CodeContentSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **type** | `'image'` | ✅ |  |
 | **imageUrl** | `string` | ✅ | Image URL |
-| **detail** | `Enum<'low' \| 'high' \| 'auto'>` | ✅ |  |
+| **detail** | `Enum<'low' \| 'high' \| 'auto'>` | optional (default: `"auto"`) |  |
 | **metadata** | `Record<string, any>` | optional |  |
 
 
@@ -221,7 +221,7 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **type** | `'image'` | ✅ |  |
 | **imageUrl** | `string` | ✅ | Image URL |
-| **detail** | `Enum<'low' \| 'high' \| 'auto'>` | ✅ |  |
+| **detail** | `Enum<'low' \| 'high' \| 'auto'>` | optional (default: `"auto"`) |  |
 | **metadata** | `Record<string, any>` | optional |  |
 
 ---
@@ -252,7 +252,7 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **type** | `'code'` | ✅ |  |
 | **text** | `string` | ✅ | Code snippet |
-| **language** | `string` | ✅ |  |
+| **language** | `string` | optional (default: `"text"`) |  |
 | **metadata** | `Record<string, any>` | optional |  |
 
 ---
@@ -324,16 +324,16 @@ This schema accepts one of the following structures:
 | **maxTokens** | `integer` | ✅ | Maximum total tokens |
 | **maxPromptTokens** | `integer` | optional | Max tokens for prompt |
 | **maxCompletionTokens** | `integer` | optional | Max tokens for completion |
-| **reserveTokens** | `integer` | ✅ | Reserve tokens for system messages |
-| **bufferPercentage** | `number` | ✅ | Buffer percentage (0.1 = 10%) |
-| **strategy** | `Enum<'fifo' \| 'importance' \| 'semantic' \| 'sliding_window' \| 'summary'>` | ✅ |  |
+| **reserveTokens** | `integer` | optional (default: `500`) | Reserve tokens for system messages |
+| **bufferPercentage** | `number` | optional (default: `0.1`) | Buffer percentage (0.1 = 10%) |
+| **strategy** | `Enum<'fifo' \| 'importance' \| 'semantic' \| 'sliding_window' \| 'summary'>` | optional (default: `"sliding_window"`) |  |
 | **slidingWindowSize** | `integer` | optional | Number of recent messages to keep |
 | **minImportanceScore** | `number` | optional | Minimum importance to keep |
 | **semanticThreshold** | `number` | optional | Semantic similarity threshold |
-| **enableSummarization** | `boolean` | ✅ | Enable context summarization |
+| **enableSummarization** | `boolean` | optional (default: `false`) | Enable context summarization |
 | **summarizationThreshold** | `integer` | optional | Trigger summarization at N tokens |
 | **summaryModel** | `string` | optional | Model ID for summarization |
-| **warnThreshold** | `number` | ✅ | Warn at % of budget (0.8 = 80%) |
+| **warnThreshold** | `number` | optional (default: `0.8`) | Warn at % of budget (0.8 = 80%) |
 
 
 ---
@@ -357,16 +357,16 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **promptTokens** | `integer` | ✅ |  |
-| **completionTokens** | `integer` | ✅ |  |
-| **totalTokens** | `integer` | ✅ |  |
+| **promptTokens** | `integer` | optional (default: `0`) |  |
+| **completionTokens** | `integer` | optional (default: `0`) |  |
+| **totalTokens** | `integer` | optional (default: `0`) |  |
 | **budgetLimit** | `integer` | ✅ |  |
-| **budgetUsed** | `integer` | ✅ |  |
+| **budgetUsed** | `integer` | optional (default: `0`) |  |
 | **budgetRemaining** | `integer` | ✅ |  |
 | **budgetPercentage** | `number` | ✅ | Usage as percentage of budget |
-| **messageCount** | `integer` | ✅ |  |
-| **prunedMessageCount** | `integer` | ✅ |  |
-| **summarizedMessageCount** | `integer` | ✅ |  |
+| **messageCount** | `integer` | optional (default: `0`) |  |
+| **prunedMessageCount** | `integer` | optional (default: `0`) |  |
+| **summarizedMessageCount** | `integer` | optional (default: `0`) |  |
 
 
 ---
@@ -378,7 +378,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Tool call ID |
-| **type** | `Enum<'function'>` | ✅ |  |
+| **type** | `Enum<'function'>` | optional (default: `"function"`) |  |
 | **function** | `{ name: string; arguments: string; result?: string }` | ✅ |  |
 
 

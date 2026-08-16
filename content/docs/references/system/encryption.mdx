@@ -45,12 +45,12 @@ Field-level encryption configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable field-level encryption |
-| **algorithm** | `Enum<'aes-256-gcm' \| 'aes-256-cbc' \| 'chacha20-poly1305'>` | ✅ | Encryption algorithm |
+| **enabled** | `boolean` | optional (default: `false`) | Enable field-level encryption |
+| **algorithm** | `Enum<'aes-256-gcm' \| 'aes-256-cbc' \| 'chacha20-poly1305'>` | optional (default: `"aes-256-gcm"`) | Encryption algorithm |
 | **keyManagement** | `{ provider: Enum<'local' \| 'aws-kms' \| 'azure-key-vault' \| 'gcp-kms' \| 'hashicorp-vault'>; keyId?: string; rotationPolicy?: object }` | ✅ | Key management configuration |
 | **scope** | `Enum<'field' \| 'record' \| 'table' \| 'database'>` | ✅ | Encryption scope level |
-| **deterministicEncryption** | `boolean` | ✅ | Allows equality queries on encrypted data |
-| **searchableEncryption** | `boolean` | ✅ | Allows search on encrypted data |
+| **deterministicEncryption** | `boolean` | optional (default: `false`) | Allows equality queries on encrypted data |
+| **searchableEncryption** | `boolean` | optional (default: `false`) | Allows search on encrypted data |
 
 
 ---
@@ -65,7 +65,7 @@ Per-field encryption assignment
 | :--- | :--- | :--- | :--- |
 | **fieldName** | `string` | ✅ | Name of the field to encrypt |
 | **encryptionConfig** | `{ enabled: boolean; algorithm: Enum<'aes-256-gcm' \| 'aes-256-cbc' \| 'chacha20-poly1305'>; keyManagement: object; scope: Enum<'field' \| 'record' \| 'table' \| 'database'>; … }` | ✅ | Encryption settings for this field |
-| **indexable** | `boolean` | ✅ | Allow indexing on encrypted field |
+| **indexable** | `boolean` | optional (default: `false`) | Allow indexing on encrypted field |
 
 
 ---
@@ -93,10 +93,10 @@ Policy for automatic encryption key rotation
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable automatic key rotation |
-| **frequencyDays** | `number` | ✅ | Rotation frequency in days |
-| **retainOldVersions** | `number` | ✅ | Number of old key versions to retain |
-| **autoRotate** | `boolean` | ✅ | Automatically rotate without manual approval |
+| **enabled** | `boolean` | optional (default: `false`) | Enable automatic key rotation |
+| **frequencyDays** | `number` | optional (default: `90`) | Rotation frequency in days |
+| **retainOldVersions** | `number` | optional (default: `3`) | Number of old key versions to retain |
+| **autoRotate** | `boolean` | optional (default: `true`) | Automatically rotate without manual approval |
 
 
 ---

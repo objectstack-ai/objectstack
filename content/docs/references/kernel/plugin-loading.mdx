@@ -77,11 +77,11 @@ Plugin loading state
 | :--- | :--- | :--- | :--- |
 | **pluginId** | `string` | ✅ |  |
 | **state** | `Enum<'pending' \| 'loading' \| 'loaded' \| 'initializing' \| 'ready' \| 'failed' \| 'reloading' \| 'unloading' \| 'unloaded'>` | ✅ |  |
-| **progress** | `number` | ✅ |  |
+| **progress** | `number` | optional (default: `0`) |  |
 | **startedAt** | `integer` | optional |  |
 | **completedAt** | `integer` | optional |  |
 | **lastError** | `string` | optional |  |
-| **retryCount** | `integer` | ✅ |  |
+| **retryCount** | `integer` | optional (default: `0`) |  |
 
 
 ---

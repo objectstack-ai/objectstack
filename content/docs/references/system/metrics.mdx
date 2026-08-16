@@ -117,10 +117,10 @@ Metric definition
 | **type** | `Enum<'counter' \| 'gauge' \| 'histogram' \| 'summary'>` | ✅ | Metric type |
 | **unit** | `Enum<'nanoseconds' \| 'microseconds' \| 'milliseconds' \| 'seconds' \| 'minutes' \| 'hours' \| 'days' \| 'bytes' \| 'kilobytes' \| 'megabytes' \| 'gigabytes' \| 'terabytes' \| … +8 more>` | optional | Metric unit |
 | **description** | `string` | optional | Metric description |
-| **labelNames** | `string[]` | ✅ | Label names |
+| **labelNames** | `string[]` | optional (default: `[]`) | Label names |
 | **histogram** | `{ type: Enum<'linear' \| 'exponential' \| 'explicit'>; linear?: object; exponential?: object; explicit?: object }` | optional | Histogram bucket configuration |
 | **summary** | `{ quantiles: number[]; maxAge: integer; ageBuckets: integer }` | optional |  |
-| **enabled** | `boolean` | ✅ |  |
+| **enabled** | `boolean` | optional (default: `true`) |  |
 
 ### Allowed Values: `MetricDefinition.unit`
 
@@ -158,7 +158,7 @@ Metric export configuration
 | :--- | :--- | :--- | :--- |
 | **type** | `Enum<'prometheus' \| 'openmetrics' \| 'graphite' \| 'statsd' \| 'influxdb' \| 'datadog' \| 'cloudwatch' \| 'stackdriver' \| 'azure_monitor' \| 'http' \| 'custom'>` | ✅ | Export type |
 | **endpoint** | `string` | optional | Export endpoint |
-| **interval** | `integer` | ✅ |  |
+| **interval** | `integer` | optional (default: `60`) |  |
 | **batch** | `{ enabled: boolean; size: integer }` | optional |  |
 | **auth** | `{ type: Enum<'none' \| 'basic' \| 'bearer' \| 'api_key'>; username?: string; password?: string; token?: string; … }` | optional |  |
 | **config** | `Record<string, any>` | optional | Additional configuration |
@@ -229,14 +229,14 @@ Metrics configuration
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Configuration name (snake_case, max 64 chars) |
 | **label** | `string` | ✅ | Display label |
-| **enabled** | `boolean` | optional |  |
-| **metrics** | `{ name: string; label?: string; type: Enum<'counter' \| 'gauge' \| 'histogram' \| 'summary'>; unit?: Enum<'nanoseconds' \| 'microseconds' \| 'milliseconds' \| 'seconds' \| 'minutes' \| … +15 more>; … }[]` | optional |  |
-| **defaultLabels** | `Record<string, string>` | optional | Metric labels |
-| **aggregations** | `{ type: Enum<'sum' \| 'avg' \| 'min' \| 'max' \| 'count' \| 'p50' \| 'p75' \| 'p90' \| 'p95' \| 'p99' \| … +3 more>; window?: object; groupBy?: string[]; filters?: Record<string, any> }[]` | optional |  |
+| **enabled** | `boolean` | optional (default: `true`) |  |
+| **metrics** | `{ name: string; label?: string; type: Enum<'counter' \| 'gauge' \| 'histogram' \| 'summary'>; unit?: Enum<'nanoseconds' \| 'microseconds' \| 'milliseconds' \| 'seconds' \| 'minutes' \| … +15 more>; … }[]` | optional (default: `[]`) |  |
+| **defaultLabels** | `Record<string, string>` | optional (default: `{}`) | Metric labels |
+| **aggregations** | `{ type: Enum<'sum' \| 'avg' \| 'min' \| 'max' \| 'count' \| 'p50' \| 'p75' \| 'p90' \| 'p95' \| 'p99' \| … +3 more>; window?: object; groupBy?: string[]; filters?: Record<string, any> }[]` | optional (default: `[]`) |  |
 | **slis** | `{ name: string; label: string; description?: string; metric: string; … }[]` | optional |  |
-| **slos** | `{ name: string; label: string; description?: string; sli: string; … }[]` | optional |  |
-| **exports** | `{ type: Enum<'prometheus' \| 'openmetrics' \| 'graphite' \| 'statsd' \| 'influxdb' \| 'datadog' \| … +5 more>; endpoint?: string; interval?: integer; batch?: object; … }[]` | optional |  |
-| **collectionInterval** | `integer` | optional |  |
+| **slos** | `{ name: string; label: string; description?: string; sli: string; … }[]` | optional (default: `[]`) |  |
+| **exports** | `{ type: Enum<'prometheus' \| 'openmetrics' \| 'graphite' \| 'statsd' \| 'influxdb' \| 'datadog' \| … +5 more>; endpoint?: string; interval?: integer; batch?: object; … }[]` | optional (default: `[]`) |  |
+| **collectionInterval** | `integer` | optional (default: `15`) |  |
 | **retention** | `{ period?: integer; downsampling?: object[] }` | optional |  |
 | **cardinalityLimits** | `{ maxLabelCombinations?: integer; onLimitExceeded?: Enum<'drop' \| 'sample' \| 'alert'> }` | optional |  |
 
@@ -258,7 +258,7 @@ Service Level Indicator
 | **type** | `Enum<'availability' \| 'latency' \| 'throughput' \| 'error_rate' \| 'saturation' \| 'custom'>` | ✅ | SLI type |
 | **successCriteria** | `{ threshold: number; operator: Enum<'lt' \| 'lte' \| 'gt' \| 'gte' \| 'eq'>; percentile?: number } \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Success criteria — structured or CEL predicate |
 | **window** | `{ size: integer; rolling?: boolean }` | ✅ | Measurement window |
-| **enabled** | `boolean` | optional |  |
+| **enabled** | `boolean` | optional (default: `true`) |  |
 
 
 ---
@@ -278,8 +278,8 @@ Service Level Objective
 | **target** | `number` | ✅ | Target percentage |
 | **period** | `{ type: Enum<'rolling' \| 'calendar'>; duration?: integer; calendar?: Enum<'daily' \| 'weekly' \| 'monthly' \| 'quarterly' \| 'yearly'> }` | ✅ | Time period |
 | **errorBudget** | `{ enabled: boolean; alertThreshold: number; burnRateWindows?: object[] }` | optional |  |
-| **alerts** | `{ name: string; severity: Enum<'info' \| 'warning' \| 'critical'>; condition: object }[]` | ✅ |  |
-| **enabled** | `boolean` | ✅ |  |
+| **alerts** | `{ name: string; severity: Enum<'info' \| 'warning' \| 'critical'>; condition: object }[]` | optional (default: `[]`) |  |
+| **enabled** | `boolean` | optional (default: `true`) |  |
 
 
 ---

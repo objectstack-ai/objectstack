@@ -51,7 +51,7 @@ const result = AppDiscoveryRequestSchema.parse(data);
 | **tenantId** | `string` | optional |  |
 | **categories** | `Enum<'crm' \| 'erp' \| 'hr' \| 'finance' \| 'project' \| 'collaboration' \| 'analytics' \| 'integration' \| 'automation' \| 'ai' \| 'security' \| 'developer-tools' \| 'ui-theme' \| 'storage' \| 'other'>[]` | optional |  |
 | **platformVersion** | `string` | optional |  |
-| **limit** | `integer` | ✅ |  |
+| **limit** | `integer` | optional (default: `10`) |  |
 
 
 ---
@@ -88,7 +88,7 @@ const result = AppDiscoveryRequestSchema.parse(data);
 | **currentPeriodStart** | `string` | optional |  |
 | **currentPeriodEnd** | `string` | optional |  |
 | **trialEndDate** | `string` | optional |  |
-| **autoRenew** | `boolean` | ✅ |  |
+| **autoRenew** | `boolean` | optional (default: `true`) |  |
 | **createdAt** | `string` | ✅ |  |
 
 
@@ -106,8 +106,8 @@ const result = AppDiscoveryRequestSchema.parse(data);
 | **iconUrl** | `string` | optional |  |
 | **installedVersion** | `string` | ✅ |  |
 | **latestVersion** | `string` | optional |  |
-| **updateAvailable** | `boolean` | ✅ |  |
-| **enabled** | `boolean` | ✅ |  |
+| **updateAvailable** | `boolean` | optional (default: `false`) |  |
+| **enabled** | `boolean` | optional (default: `true`) |  |
 | **subscriptionStatus** | `Enum<'active' \| 'trialing' \| 'past-due' \| 'cancelled' \| 'expired'>` | optional |  |
 | **installedAt** | `string` | ✅ |  |
 
@@ -123,9 +123,9 @@ const result = AppDiscoveryRequestSchema.parse(data);
 | **tenantId** | `string` | optional |  |
 | **enabled** | `boolean` | optional |  |
 | **updateAvailable** | `boolean` | optional |  |
-| **sortBy** | `Enum<'name' \| 'installed-date' \| 'updated-date'>` | ✅ |  |
-| **page** | `integer` | ✅ |  |
-| **pageSize** | `integer` | ✅ |  |
+| **sortBy** | `Enum<'name' \| 'installed-date' \| 'updated-date'>` | optional (default: `"name"`) |  |
+| **page** | `integer` | optional (default: `1`) |  |
+| **pageSize** | `integer` | optional (default: `20`) |  |
 
 
 ---
@@ -151,10 +151,10 @@ const result = AppDiscoveryRequestSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **listingId** | `string` | ✅ | Listing to get reviews for |
-| **sortBy** | `Enum<'newest' \| 'oldest' \| 'highest' \| 'lowest' \| 'most-helpful'>` | ✅ |  |
+| **sortBy** | `Enum<'newest' \| 'oldest' \| 'highest' \| 'lowest' \| 'most-helpful'>` | optional (default: `"newest"`) |  |
 | **rating** | `integer` | optional |  |
-| **page** | `integer` | ✅ |  |
-| **pageSize** | `integer` | ✅ |  |
+| **page** | `integer` | optional (default: `1`) |  |
+| **pageSize** | `integer` | optional (default: `10`) |  |
 
 
 ---
@@ -260,8 +260,8 @@ const result = AppDiscoveryRequestSchema.parse(data);
 | **title** | `string` | optional | Review title |
 | **body** | `string` | optional | Review text |
 | **appVersion** | `string` | optional | App version being reviewed |
-| **moderationStatus** | `Enum<'pending' \| 'approved' \| 'flagged' \| 'rejected'>` | ✅ |  |
-| **helpfulCount** | `integer` | ✅ |  |
+| **moderationStatus** | `Enum<'pending' \| 'approved' \| 'flagged' \| 'rejected'>` | optional (default: `"pending"`) |  |
+| **helpfulCount** | `integer` | optional (default: `0`) |  |
 | **publisherResponse** | `{ body: string; respondedAt: string }` | optional | Publisher response to review |
 | **submittedAt** | `string` | ✅ |  |
 | **updatedAt** | `string` | optional |  |

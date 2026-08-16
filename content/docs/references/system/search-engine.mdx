@@ -49,8 +49,8 @@ Faceted search configuration for a single field
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field name to generate facets from |
-| **maxValues** | `number` | ✅ | Maximum number of facet values to return |
-| **sort** | `Enum<'count' \| 'alpha'>` | ✅ | Facet value sort order |
+| **maxValues** | `number` | optional (default: `10`) | Maximum number of facet values to return |
+| **sort** | `Enum<'count' \| 'alpha'>` | optional (default: `"count"`) | Facet value sort order |
 
 
 ---
@@ -67,7 +67,7 @@ Top-level full-text search engine configuration
 | **indexes** | `{ indexName: string; objectName: string; fields: object[]; replicas: number; … }[]` | ✅ | Search index definitions |
 | **analyzers** | `Record<string, { type: Enum<'standard' \| 'simple' \| 'whitespace' \| 'keyword' \| 'pattern' \| 'language'>; language?: string; stopwords?: string[]; customFilters?: string[] }>` | optional | Named text analyzer configurations |
 | **facets** | `{ field: string; maxValues: number; sort: Enum<'count' \| 'alpha'> }[]` | optional | Faceted search configurations |
-| **typoTolerance** | `boolean` | ✅ | Enable typo-tolerant search |
+| **typoTolerance** | `boolean` | optional (default: `true`) | Enable typo-tolerant search |
 | **synonyms** | `Record<string, string[]>` | optional | Synonym mappings for search expansion |
 | **ranking** | `Enum<'typo' \| 'geo' \| 'words' \| 'filters' \| 'proximity' \| 'attribute' \| 'exact' \| 'custom'>[]` | optional | Custom ranking rule order |
 
@@ -85,8 +85,8 @@ Search index definition mapping an ObjectQL object to a search engine index
 | **indexName** | `string` | ✅ | Name of the search index |
 | **objectName** | `string` | ✅ | Source ObjectQL object |
 | **fields** | `{ name: string; type: Enum<'text' \| 'keyword' \| 'number' \| 'date' \| 'boolean' \| 'geo'>; analyzer?: string; searchable: boolean; … }[]` | ✅ | Fields to include in the search index |
-| **replicas** | `number` | ✅ | Number of index replicas for availability |
-| **shards** | `number` | ✅ | Number of index shards for distribution |
+| **replicas** | `number` | optional (default: `1`) | Number of index replicas for availability |
+| **shards** | `number` | optional (default: `1`) | Number of index shards for distribution |
 
 
 ---

@@ -29,9 +29,9 @@ const result = CurrencyConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **precision** | `integer` | optional | Decimal precision (default: 2) |
-| **currencyMode** | `Enum<'dynamic' \| 'fixed'>` | ✅ | Currency mode: dynamic (user selectable) or fixed (single currency) |
-| **defaultCurrency** | `string` | ✅ | Default or fixed currency code (ISO 4217, e.g., USD, CNY, EUR) |
+| **precision** | `integer` | optional (default: `2`) | Decimal precision (default: 2) |
+| **currencyMode** | `Enum<'dynamic' \| 'fixed'>` | optional (default: `"dynamic"`) | Currency mode: dynamic (user selectable) or fixed (single currency) |
+| **defaultCurrency** | `string` | optional (default: `"CNY"`) | Default or fixed currency code (ISO 4217, e.g., USD, CNY, EUR) |
 
 
 ---
@@ -59,11 +59,11 @@ const result = CurrencyConfigSchema.parse(data);
 | **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| … +35 more>` | ✅ | Field Data Type |
 | **description** | `string` | optional | Tooltip/Help text |
 | **format** | `string` | optional | Format string (e.g. email, phone) |
-| **required** | `boolean` | optional | Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field. |
+| **required** | `boolean` | optional (default: `false`) | Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field. |
 | **storage** | `{ notNull?: boolean }` | optional | Physical storage constraints (ADR-0113). Owns the DDL the write contract deliberately does not imply. Absent = no storage-level constraint requested. |
-| **searchable** | `boolean` | optional | Is searchable |
-| **multiple** | `boolean` | optional | Allow multiple values (Stores as Array/JSON). Applicable for select, lookup, file, image. |
-| **unique** | `boolean \| 'global' \| 'organization'` | optional | Unique constraint and its scope (ADR-0120). 'organization' = one holder per organization (NULL-safe composite with the organization key part on organization-scoped objects) — prefer this explicit spelling in new code; true = same per-organization scope (positional synonym, stays valid); 'global' = one holder across the whole installation. 'tenant'/'org' are rejected — the word is 'organization' |
+| **searchable** | `boolean` | optional (default: `false`) | Is searchable |
+| **multiple** | `boolean` | optional (default: `false`) | Allow multiple values (Stores as Array/JSON). Applicable for select, lookup, file, image. |
+| **unique** | `boolean \| 'global' \| 'organization'` | optional (default: `false`) | Unique constraint and its scope (ADR-0120). 'organization' = one holder per organization (NULL-safe composite with the organization key part on organization-scoped objects) — prefer this explicit spelling in new code; true = same per-organization scope (positional synonym, stays valid); 'global' = one holder across the whole installation. 'tenant'/'org' are rejected — the word is 'organization' |
 | **defaultValue** | `any` | optional | Default applied on INSERT when the field is omitted or null (`''` is a real value, not absence). Three legal shapes (#7127), discriminated in the engine's own order: a CEL Expression envelope `{ dialect: 'cel', source: 'today()' }` (accepted structurally; result type is a runtime concern); a runtime TOKEN — `NOW()` on `datetime`/`date`/`time` only, `current_user` on `user` or `lookup` with `reference: 'sys_user'` only, neither on a multi-value field; or a LITERAL, which must satisfy this field's own stored value contract (ADR-0104 D1 `valueSchemaFor`). Anything else is refused at parse time with a prescriptive message. |
 | **maxLength** | `number` | optional | Max character length |
 | **minLength** | `number` | optional | Min character length |
@@ -76,7 +76,7 @@ const result = CurrencyConfigSchema.parse(data);
 | **maxSize** | `integer` | optional | Maximum permitted file size in BYTES for media fields. Enforced on write against the stored file size, not just checked in the browser. |
 | **options** | `{ label: string; value: string; color?: string; default?: boolean; … }[]` | optional | Static options for select/multiselect |
 | **reference** | `string` | optional | Target object name (snake_case) for lookup/master_detail fields. Required for relationship types. Used by $expand to resolve foreign key IDs into full objects. |
-| **deleteBehavior** | `Enum<'set_null' \| 'cascade' \| 'restrict'>` | optional | What happens if referenced record is deleted |
+| **deleteBehavior** | `Enum<'set_null' \| 'cascade' \| 'restrict'>` | optional (default: `"set_null"`) | What happens if referenced record is deleted |
 | **inlineEdit** | `boolean \| Enum<'grid' \| 'form'>` | optional | Edit these child records inline within the parent's form (atomic master-detail). true = auto-pick grid/form by child shape; 'grid' = editable line-item grid; 'form' = list + per-row full form. |
 | **inlineTitle** | `string` | optional | Title for the inline master-detail grid |
 | **inlineColumns** | `any[]` | optional | Explicit columns for the inline grid (derived from the child object when omitted) |
@@ -106,16 +106,16 @@ const result = CurrencyConfigSchema.parse(data);
 | **requiredWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — field is required when TRUE. The only slot; the `conditionalRequired` alias was removed in protocol 17 (#3855). |
 | **conditionalRequired** | `never` | optional | [REMOVED] `conditionalRequired` was removed in @objectstack/spec 17 (#3855) — use `requiredWhen`. Rename the key; the value (a CEL predicate) is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **widget** | `string` | optional | Form widget override — names a registered field component (resolved as `field:<widget>`) to render this field instead of the `type` default. Degrades to the `type` renderer when unregistered. e.g. "object-ref", "filter-condition", "recipient-picker". |
-| **hidden** | `boolean` | optional | Hidden from default UI |
+| **hidden** | `boolean` | optional (default: `false`) | Hidden from default UI |
 | **internal** | `boolean` | optional | [#7728] Never return this field's value on the generic data path — the engine OMITS the key from `find`/`findOne` results, the 201 create body and the by-id update body, on the default projection AND when a client names the field in `?select=`. Storage, filtering and indexing are untouched, so a server-side verifier can still match on the column and a purpose-built mint route can still return the value once at creation. The read protection for ADR-0100's third credential channel (auth-subsystem one-way hashes on `text` columns). Omission, not masking: a mask signals 'a value is set', which carries no information on a `required` column. |
-| **readonly** | `boolean` | optional | Read-only — never editable in forms, AND server-enforced on BOTH write paths: a non-system write to this field is silently dropped from the payload on UPDATE (#2948/#3003) and on INSERT (#3043; a create can no longer directly seed e.g. `approval_status: "approved"`), symmetric with `readonlyWhen`. A stripped INSERT field still falls back to its `defaultValue`. Exempt from the strip on BOTH paths: `isSystem` writes (seed replay, migration). Exempt on the UPDATE path ONLY: an opt-in "historical" import (`preserveAudit`, #3493) — which admits a whitelist (the audit/timestamp family plus author-declared business `readonly` fields). On INSERT the exemption does NOT apply (#6640): a non-system create that requests `preserveAudit` still has its readonly fields stripped, and is warned loudly that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. A normal (non-system) import is NOT system-context and still strips. |
+| **readonly** | `boolean` | optional (default: `false`) | Read-only — never editable in forms, AND server-enforced on BOTH write paths: a non-system write to this field is silently dropped from the payload on UPDATE (#2948/#3003) and on INSERT (#3043; a create can no longer directly seed e.g. `approval_status: "approved"`), symmetric with `readonlyWhen`. A stripped INSERT field still falls back to its `defaultValue`. Exempt from the strip on BOTH paths: `isSystem` writes (seed replay, migration). Exempt on the UPDATE path ONLY: an opt-in "historical" import (`preserveAudit`, #3493) — which admits a whitelist (the audit/timestamp family plus author-declared business `readonly` fields). On INSERT the exemption does NOT apply (#6640): a non-system create that requests `preserveAudit` still has its readonly fields stripped, and is warned loudly that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. A normal (non-system) import is NOT system-context and still strips. |
 | **requiredPermissions** | `string[]` | optional | [ADR-0066 D3] Capabilities required to read/edit this field (mask on read, deny on write; AND-gate). |
 | **ackPlaintextMasking** | `boolean` | optional | [ADR-0100] Affirm a generic `password` field's plaintext-at-rest / masked-on-read contract is intended, silencing the author-time warning (#3420). No effect on non-password fields. |
 | **system** | `boolean` | optional | Auto-injected system/audit field (e.g. created_at, updated_by, organization_id). Tools that surface system fields separately from author-declared business fields should branch on this flag. |
-| **sortable** | `boolean` | optional | Whether field is sortable in list views |
+| **sortable** | `boolean` | optional (default: `true`) | Whether field is sortable in list views |
 | **inlineHelpText** | `string` | optional | Help text displayed below the field in forms |
-| **autonumberFormat** | `string` | optional | Auto-number format: literal text + `{0000}` counter, `{YYYY}`/`{MM}`/`{DD}`/`{YYYYMMDD}` date tokens (business tz), and `{field_name}` interpolation. Counter resets per rendered prefix (e.g. AD`{YYYYMMDD}``{0000}` resets daily). Omitted on an `autonumber` field ⇒ the contract default `{0000}` (#6555). |
-| **externalId** | `boolean` | optional | Is external ID for upsert operations |
+| **autonumberFormat** | `string` | optional (default: `"{0000}"`) | Auto-number format: literal text + `{0000}` counter, `{YYYY}`/`{MM}`/`{DD}`/`{YYYYMMDD}` date tokens (business tz), and `{field_name}` interpolation. Counter resets per rendered prefix (e.g. AD`{YYYYMMDD}``{0000}` resets daily). Omitted on an `autonumber` field ⇒ the contract default `{0000}` (#6555). |
+| **externalId** | `boolean` | optional (default: `false`) | Is external ID for upsert operations |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |

@@ -40,7 +40,7 @@ const result = ApiEndpointSchema.parse(data);
 | **objectParams** | `{ object?: string; operation?: Enum<'find' \| 'get' \| 'create' \| 'update' \| 'delete'> }` | optional | For object_operation type |
 | **inputMapping** | `{ source: string; target: string; transform?: string }[]` | optional | Map Request Body to Internal Params |
 | **outputMapping** | `{ source: string; target: string; transform?: string }[]` | optional | Map Internal Result to Response Body |
-| **authRequired** | `boolean` | ✅ | Require authentication |
+| **authRequired** | `boolean` | optional (default: `true`) | Require authentication |
 | **rateLimit** | `{ enabled: boolean; windowMs: integer; maxRequests: integer }` | optional | Rate limiting policy |
 | **cacheTtl** | `number` | optional | Response cache TTL in seconds |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |

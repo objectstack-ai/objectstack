@@ -76,14 +76,14 @@ const result = ResolvedSettingValueSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **namespace** | `string` | ✅ | Namespace (snake_case, globally unique) |
-| **version** | `integer` | optional | Manifest schema version |
+| **version** | `integer` | optional (default: `1`) | Manifest schema version |
 | **label** | `string \| Record<string, string>` | ✅ | Display label |
 | **icon** | `string` | optional | Icon (Lucide) |
 | **description** | `string` | optional | Short description |
 | **helpText** | `string` | optional | Markdown help text shown above specifiers |
-| **scope** | `Enum<'global' \| 'tenant' \| 'user'>` | optional | Default scope for specifiers |
-| **readPermission** | `string` | optional | Permission required to read |
-| **writePermission** | `string` | optional | Permission required to write |
+| **scope** | `Enum<'global' \| 'tenant' \| 'user'>` | optional (default: `"tenant"`) | Default scope for specifiers |
+| **readPermission** | `string` | optional (default: `"setup.access"`) | Permission required to read |
+| **writePermission** | `string` | optional (default: `"setup.write"`) | Permission required to write |
 | **category** | `string` | optional | Settings hub category |
 | **order** | `number` | optional | Display order |
 | **specifiers** | `{ type: Enum<'group' \| 'child_pane' \| 'info_banner' \| 'title_value' \| 'text' \| 'textarea' \| … +13 more>; id?: string; key?: string; label: string \| Record<string, string>; … }[]` | ✅ | Page contents (ordered) |
@@ -120,7 +120,7 @@ const result = ResolvedSettingValueSchema.parse(data);
 | **icon** | `string` | optional | Icon name (Lucide) |
 | **default** | `any` | optional | Default value |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility expression evaluated against the namespace value map, e.g. `${data.provider === 'smtp'}`. Hidden specifiers are not rendered and their values are not validated. Grammar is NOT CEL: root `data` with one-level member access, `\|\|` `&&` `!`, `===` `!==` `==` `!=` `>=` `<=` `>` `<`, parentheses and string/number/bool/null literals, optionally wrapped in `${...}`; bare string or `{ dialect, source }` envelope. |
-| **required** | `boolean` | optional | Required field |
+| **required** | `boolean` | optional (default: `false`) | Required field |
 | **encrypted** | `boolean` | optional | Encrypt value at rest (forced true for password) |
 | **scope** | `Enum<'global' \| 'tenant' \| 'user'>` | optional | Override manifest scope for this key |
 | **availableScopes** | `Enum<'global' \| 'tenant' \| 'user'>[]` | optional | Scopes allowed to override this specifier |
@@ -181,7 +181,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **kind** | `'http'` | ✅ |  |
-| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH'>` | ✅ |  |
+| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH'>` | optional (default: `"POST"`) |  |
 | **url** | `string` | ✅ | Endpoint URL; supports $`{...}` interpolation |
 | **body** | `Record<string, any>` | optional | Optional JSON body; supports $`{...}` interpolation |
 | **confirmText** | `string \| Record<string, string>` | optional | Confirm dialog text before invoking (omit = no confirm) |
@@ -209,7 +209,7 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **kind** | `'navigate'` | ✅ |  |
 | **url** | `string` | ✅ | Target URL or in-app route |
-| **target** | `Enum<'_self' \| '_blank'>` | ✅ |  |
+| **target** | `Enum<'_self' \| '_blank'>` | optional (default: `"_self"`) |  |
 
 ---
 

@@ -88,7 +88,7 @@ const result = CacheControlSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **target** | `Enum<'all' \| 'object' \| 'field' \| 'permission' \| 'layout' \| 'custom'>` | ✅ | What to invalidate |
 | **identifiers** | `string[]` | optional | Specific resources to invalidate (e.g., object names) |
-| **cascade** | `boolean` | ✅ | If true, invalidate dependent resources |
+| **cascade** | `boolean` | optional (default: `false`) | If true, invalidate dependent resources |
 | **pattern** | `string` | optional | Pattern for custom invalidation (supports wildcards) |
 
 
@@ -128,7 +128,7 @@ const result = CacheControlSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **value** | `string` | ✅ | ETag value (hash or version identifier) |
-| **weak** | `boolean` | ✅ | Whether this is a weak ETag |
+| **weak** | `boolean` | optional (default: `false`) | Whether this is a weak ETag |
 
 
 ---
@@ -156,7 +156,7 @@ const result = CacheControlSchema.parse(data);
 | **etag** | `{ value: string; weak: boolean }` | optional | ETag for this resource version |
 | **lastModified** | `string` | optional | Last modification timestamp |
 | **cacheControl** | `{ directives: Enum<'public' \| 'private' \| 'no-cache' \| 'no-store' \| 'must-revalidate' \| 'max-age'>[]; maxAge?: number; staleWhileRevalidate?: number; staleIfError?: number }` | optional | Cache control directives |
-| **notModified** | `boolean` | ✅ | True if resource has not been modified (304 response) |
+| **notModified** | `boolean` | optional (default: `false`) | True if resource has not been modified (304 response) |
 | **version** | `string` | optional | Metadata version identifier |
 
 

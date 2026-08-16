@@ -56,9 +56,9 @@ const result = BatchProgressSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **batchId** | `string` | ✅ | Batch job identifier |
 | **total** | `integer` | ✅ | Total number of items |
-| **processed** | `integer` | ✅ | Items processed |
-| **succeeded** | `integer` | ✅ | Items succeeded |
-| **failed** | `integer` | ✅ | Items failed |
+| **processed** | `integer` | optional (default: `0`) | Items processed |
+| **succeeded** | `integer` | optional (default: `0`) | Items succeeded |
+| **failed** | `integer` | optional (default: `0`) | Items failed |
 | **percentage** | `number` | ✅ | Progress percentage |
 | **status** | `Enum<'pending' \| 'running' \| 'completed' \| 'failed' \| 'cancelled'>` | ✅ | Batch status |
 | **startedAt** | `string` | optional | When batch started |
@@ -74,11 +74,11 @@ const result = BatchProgressSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Queue name (snake_case) |
-| **concurrency** | `integer` | ✅ | Max concurrent task executions |
+| **concurrency** | `integer` | optional (default: `5`) | Max concurrent task executions |
 | **rateLimit** | `{ max: integer; duration: integer }` | optional | Rate limit configuration |
 | **defaultRetryPolicy** | `{ maxRetries: integer; backoffStrategy: Enum<'fixed' \| 'linear' \| 'exponential'>; initialDelayMs: integer; maxDelayMs: integer; … }` | optional | Default retry policy for tasks |
 | **deadLetterQueue** | `string` | optional | Dead letter queue name |
-| **priority** | `integer` | ✅ | Queue priority (lower = higher priority) |
+| **priority** | `integer` | optional (default: `0`) | Queue priority (lower = higher priority) |
 | **autoScale** | `{ enabled: boolean; minWorkers: integer; maxWorkers: integer; scaleUpThreshold: integer; … }` | optional | Auto-scaling configuration |
 
 
@@ -93,13 +93,13 @@ const result = BatchProgressSchema.parse(data);
 | **id** | `string` | ✅ | Unique task identifier |
 | **type** | `string` | ✅ | Task type (snake_case) |
 | **payload** | `any` | ✅ | Task payload data |
-| **queue** | `string` | ✅ | Queue name |
-| **priority** | `Enum<'critical' \| 'high' \| 'normal' \| 'low' \| 'background'>` | ✅ | Task priority level |
+| **queue** | `string` | optional (default: `"default"`) | Queue name |
+| **priority** | `Enum<'critical' \| 'high' \| 'normal' \| 'low' \| 'background'>` | optional (default: `"normal"`) | Task priority level |
 | **retryPolicy** | `{ maxRetries: integer; backoffStrategy: Enum<'fixed' \| 'linear' \| 'exponential'>; initialDelayMs: integer; maxDelayMs: integer; … }` | optional | Retry policy configuration |
 | **timeoutMs** | `integer` | optional | Task timeout in milliseconds |
 | **scheduledAt** | `string` | optional | ISO 8601 datetime to execute task |
-| **attempts** | `integer` | ✅ | Number of execution attempts |
-| **status** | `Enum<'pending' \| 'queued' \| 'processing' \| 'completed' \| 'failed' \| 'cancelled' \| 'timeout' \| 'dead'>` | ✅ | Current task status |
+| **attempts** | `integer` | optional (default: `0`) | Number of execution attempts |
+| **status** | `Enum<'pending' \| 'queued' \| 'processing' \| 'completed' \| 'failed' \| 'cancelled' \| 'timeout' \| 'dead'>` | optional (default: `"pending"`) | Current task status |
 | **metadata** | `{ createdAt?: string; updatedAt?: string; createdBy?: string; tags?: string[] }` | optional | Task metadata |
 
 
@@ -143,11 +143,11 @@ const result = BatchProgressSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **maxRetries** | `integer` | ✅ | Maximum retry attempts |
-| **backoffStrategy** | `Enum<'fixed' \| 'linear' \| 'exponential'>` | ✅ | Backoff strategy between retries |
-| **initialDelayMs** | `integer` | ✅ | Initial retry delay in milliseconds |
-| **maxDelayMs** | `integer` | ✅ | Maximum retry delay in milliseconds |
-| **backoffMultiplier** | `number` | ✅ | Multiplier for exponential backoff |
+| **maxRetries** | `integer` | optional (default: `3`) | Maximum retry attempts |
+| **backoffStrategy** | `Enum<'fixed' \| 'linear' \| 'exponential'>` | optional (default: `"exponential"`) | Backoff strategy between retries |
+| **initialDelayMs** | `integer` | optional (default: `1000`) | Initial retry delay in milliseconds |
+| **maxDelayMs** | `integer` | optional (default: `60000`) | Maximum retry delay in milliseconds |
+| **backoffMultiplier** | `number` | optional (default: `2`) | Multiplier for exponential backoff |
 
 
 ---

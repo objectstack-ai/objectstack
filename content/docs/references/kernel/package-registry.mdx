@@ -133,7 +133,7 @@ Install package request
 | :--- | :--- | :--- | :--- |
 | **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest to install |
 | **settings** | `Record<string, any>` | optional | User-provided settings at install time |
-| **enableOnInstall** | `boolean` | optional | Whether to enable immediately after install |
+| **enableOnInstall** | `boolean` | optional (default: `true`) | Whether to enable immediately after install |
 | **platformVersion** | `string` | optional | Current platform version for compatibility verification |
 
 
@@ -163,8 +163,8 @@ Installed package with runtime lifecycle state
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Full package manifest |
-| **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
-| **enabled** | `boolean` | optional | Whether the package is currently enabled |
+| **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
+| **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
 | **installedAt** | `string` | optional | Installation timestamp |
 | **updatedAt** | `string` | optional | Last update timestamp |
 | **installedVersion** | `string` | optional | Currently installed version for quick access |

@@ -92,7 +92,7 @@ Metadata file format
 | **since** | `string` | optional | Only return history after this timestamp |
 | **until** | `string` | optional | Only return history before this timestamp |
 | **operationType** | `Enum<'create' \| 'update' \| 'publish' \| 'revert' \| 'delete'>` | optional | Filter by operation type |
-| **includeMetadata** | `boolean` | ✅ | Include full metadata payload |
+| **includeMetadata** | `boolean` | optional (default: `true`) | Include full metadata payload |
 
 
 ---
@@ -141,8 +141,8 @@ Metadata file format
 | :--- | :--- | :--- | :--- |
 | **maxVersions** | `integer` | optional | Maximum number of versions to retain |
 | **maxAgeDays** | `integer` | optional | Maximum age of history records in days |
-| **autoCleanup** | `boolean` | ✅ | Enable automatic cleanup of old history |
-| **cleanupIntervalHours** | `integer` | ✅ | How often to run cleanup (in hours) |
+| **autoCleanup** | `boolean` | optional (default: `false`) | Enable automatic cleanup of old history |
+| **cleanupIntervalHours** | `integer` | optional (default: `24`) | How often to run cleanup (in hours) |
 
 
 ---
@@ -211,12 +211,12 @@ Metadata file format
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **datasource** | `string` | optional | Datasource name reference for database persistence |
-| **tableName** | `string` | ✅ | Database table name for metadata storage |
-| **fallback** | `Enum<'filesystem' \| 'memory' \| 'none'>` | ✅ | Fallback strategy when datasource is unavailable |
+| **tableName** | `string` | optional (default: `"sys_metadata"`) | Database table name for metadata storage |
+| **fallback** | `Enum<'filesystem' \| 'memory' \| 'none'>` | optional (default: `"none"`) | Fallback strategy when datasource is unavailable |
 | **rootDir** | `string` | optional | Root directory path |
-| **formats** | `Enum<'yaml' \| 'json' \| 'typescript' \| 'javascript'>[]` | ✅ | Enabled formats |
+| **formats** | `Enum<'yaml' \| 'json' \| 'typescript' \| 'javascript'>[]` | optional (default: `["typescript","json","yaml"]`) | Enabled formats |
 | **cache** | `{ enabled: boolean; ttl: integer; maxSize?: integer; databaseLoader?: object }` | optional | Cache settings |
-| **watch** | `boolean` | ✅ | Enable file watching |
+| **watch** | `boolean` | optional (default: `false`) | Enable file watching |
 | **watchOptions** | `{ ignored?: string[]; persistent: boolean; ignoreInitial: boolean }` | optional | File watcher options |
 | **validation** | `{ strict: boolean; throwOnError: boolean }` | optional | Validation settings |
 | **loaderOptions** | `Record<string, any>` | optional | Loader-specific configuration |
@@ -234,19 +234,19 @@ Metadata file format
 | **id** | `string` | ✅ |  |
 | **name** | `string` | ✅ |  |
 | **type** | `string` | ✅ |  |
-| **namespace** | `string` | ✅ |  |
+| **namespace** | `string` | optional (default: `"default"`) |  |
 | **packageId** | `string` | optional | Package ID that owns/delivered this metadata |
 | **managedBy** | `Enum<'package' \| 'platform' \| 'user'>` | optional | Who manages this metadata record lifecycle |
-| **scope** | `Enum<'system' \| 'platform' \| 'user'>` | ✅ |  |
+| **scope** | `Enum<'system' \| 'platform' \| 'user'>` | optional (default: `"platform"`) |  |
 | **metadata** | `Record<string, any>` | ✅ |  |
 | **extends** | `string` | optional | Name of the parent metadata to extend/override |
-| **strategy** | `Enum<'merge' \| 'replace'>` | ✅ |  |
+| **strategy** | `Enum<'merge' \| 'replace'>` | optional (default: `"merge"`) |  |
 | **owner** | `string` | optional |  |
-| **state** | `Enum<'draft' \| 'active' \| 'archived' \| 'deprecated'>` | ✅ |  |
+| **state** | `Enum<'draft' \| 'active' \| 'archived' \| 'deprecated'>` | optional (default: `"active"`) |  |
 | **organizationId** | `string` | optional | Organization identifier for multi-tenant isolation |
 | **tenantId** | `string` | optional | Tenant identifier for multi-tenant isolation |
 | **environmentId** | `string` | optional | Deprecated (ADR-0006 v4): legacy environment_id column. New code must use organization_id only. |
-| **version** | `number` | ✅ | Record version for optimistic concurrency control |
+| **version** | `number` | optional (default: `1`) | Record version for optimistic concurrency control |
 | **checksum** | `string` | optional | Content checksum for change detection |
 | **source** | `Enum<'filesystem' \| 'database' \| 'api' \| 'migration'>` | optional | Origin of this metadata record |
 | **tags** | `string[]` | optional | Classification tags for filtering and grouping |
@@ -268,8 +268,8 @@ Metadata file format
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **format** | `Enum<'yaml' \| 'json' \| 'typescript' \| 'javascript'>` | optional | Metadata file format |
-| **create** | `boolean` | ✅ |  |
-| **overwrite** | `boolean` | ✅ |  |
+| **create** | `boolean` | optional (default: `true`) |  |
+| **overwrite** | `boolean` | optional (default: `true`) |  |
 | **path** | `string` | optional |  |
 | **prettify** | `boolean` | optional |  |
 | **indent** | `number` | optional |  |

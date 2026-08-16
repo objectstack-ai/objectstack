@@ -52,12 +52,12 @@ const result = SharingConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable public sharing |
+| **enabled** | `boolean` | optional (default: `false`) | Enable public sharing |
 | **publicLink** | `string` | optional | Generated public share URL |
 | **password** | `string` | optional | Password required to access shared link |
 | **allowedDomains** | `string[]` | optional | Restrict access to specific email domains (e.g. ["example.com"]) |
 | **expiresAt** | `string` | optional | Expiration date/time in ISO 8601 format |
-| **allowAnonymous** | `boolean` | ✅ | Allow access without authentication |
+| **allowAnonymous** | `boolean` | optional (default: `false`) | Allow access without authentication |
 
 
 ---

@@ -35,12 +35,12 @@ const result = SkillSchema.parse(data);
 | **name** | `string` | ✅ | Skill unique identifier (snake_case) |
 | **label** | `string` | ✅ | Skill display name |
 | **description** | `string` | optional | Skill description |
-| **surface** | `Enum<'ask' \| 'build' \| 'both'>` | ✅ | Agent surface this skill binds to ('ask' \| 'build' \| 'both') — ADR-0063 §3; read by the cloud agent runtime only |
+| **surface** | `Enum<'ask' \| 'build' \| 'both'>` | optional (default: `"ask"`) | Agent surface this skill binds to ('ask' \| 'build' \| 'both') — ADR-0063 §3; read by the cloud agent runtime only |
 | **instructions** | `string` | optional | LLM instructions when skill is active — also served as an MCP prompt (#3905) |
 | **tools** | `string[]` | ✅ | Tool names belonging to this skill (supports trailing wildcard, e.g. `action_*`) — bound by the cloud agent runtime only |
 | **triggerPhrases** | `never` | optional | [REMOVED] `skill.triggerPhrases` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — phrases were never matched against the user's message; skill activation is `triggerConditions` (AND of context field/operator/value) intersected with the agent's `skills[]`, plus explicit /skill-name pinning. Delete the key. Put routing intent in `triggerConditions`; describe intent in `description`/`instructions` for the LLM. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **triggerConditions** | `{ field: string; operator: Enum<'eq' \| 'neq' \| 'in' \| 'not_in' \| 'contains'>; value: string \| string[] }[]` | optional | Programmatic activation conditions — evaluated by the cloud agent runtime only |
-| **active** | `boolean` | ✅ | Whether the skill is enabled |
+| **active** | `boolean` | optional (default: `true`) | Whether the skill is enabled |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this skill. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |

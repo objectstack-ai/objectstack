@@ -37,11 +37,11 @@ const result = DatasourceSchema.parse(data);
 | **pool** | `{ min: number; max: number; idleTimeoutMillis: number; connectionTimeoutMillis: number }` | optional | Connection pool settings |
 | **ssl** | `{ enabled: boolean; rejectUnauthorized: boolean; ca?: string; cert?: string; … }` | optional | SSL/TLS configuration for secure database connections |
 | **description** | `string` | optional | Internal description |
-| **active** | `boolean` | ✅ | Is datasource enabled |
-| **autoConnect** | `boolean` | ✅ | Force a live driver connection at boot even when managed + unrouted (ADR-0062 D2). |
-| **schemaMode** | `Enum<'managed' \| 'external' \| 'validate-only'>` | ✅ | Schema ownership mode |
+| **active** | `boolean` | optional (default: `true`) | Is datasource enabled |
+| **autoConnect** | `boolean` | optional (default: `false`) | Force a live driver connection at boot even when managed + unrouted (ADR-0062 D2). |
+| **schemaMode** | `Enum<'managed' \| 'external' \| 'validate-only'>` | optional (default: `"managed"`) | Schema ownership mode |
 | **external** | `{ allowedSchemas?: string[]; allowWrites: boolean; validation: object; credentialsRef?: string; … }` | optional | External datasource settings: federation policy (schemaMode != "managed") plus the secrets-store credentials reference (valid in every schemaMode) |
-| **origin** | `Enum<'code' \| 'runtime'>` | ✅ | Datasource provenance (server-managed, read-only) |
+| **origin** | `Enum<'code' \| 'runtime'>` | optional (default: `"code"`) | Datasource provenance (server-managed, read-only) |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
@@ -86,10 +86,10 @@ External datasource settings: federation policy (schemaMode != "managed") plus t
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **allowedSchemas** | `string[]` | optional | Whitelist of remote schemas/databases that may be exposed. |
-| **allowWrites** | `boolean` | ✅ | Global write gate. Individual objects must also opt in via object.external.writable. |
-| **validation** | `{ onMismatch: Enum<'fail' \| 'warn' \| 'ignore'>; checkOnBoot: boolean; checkIntervalMs?: number }` | ✅ | Boot/drift validation policy |
+| **allowWrites** | `boolean` | optional (default: `false`) | Global write gate. Individual objects must also opt in via object.external.writable. |
+| **validation** | `{ onMismatch: Enum<'fail' \| 'warn' \| 'ignore'>; checkOnBoot: boolean; checkIntervalMs?: number }` | optional (default: `{"onMismatch":"fail","checkOnBoot":true}`) | Boot/drift validation policy |
 | **credentialsRef** | `string` | optional | Reference into the secrets store; never inline credentials. Valid in every schemaMode — the one `external` key a managed datasource may carry (#8153). |
-| **queryTimeoutMs** | `number` | ✅ | Hard cap on per-query execution time. |
+| **queryTimeoutMs** | `number` | optional (default: `30000`) | Hard cap on per-query execution time. |
 
 
 ---

@@ -36,11 +36,11 @@ const result = AdminScopeSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **businessUnit** | `string` | ✅ | [ADR-0090 D12] Delegation boundary: sys_business_unit.name of the subtree root |
-| **includeSubtree** | `boolean` | ✅ | Cover descendant business units too (default true) |
-| **manageAssignments** | `boolean` | ✅ | Manage user↔position assignments within the subtree |
-| **manageBindings** | `boolean` | ✅ | Manage position↔permission-set bindings within the subtree |
-| **authorEnvironmentSets** | `boolean` | ✅ | Author environment-owned permission sets |
-| **assignablePermissionSets** | `string[]` | ✅ | Allowlist of permission-set names the delegate may hand out |
+| **includeSubtree** | `boolean` | optional (default: `true`) | Cover descendant business units too (default true) |
+| **manageAssignments** | `boolean` | optional (default: `false`) | Manage user↔position assignments within the subtree |
+| **manageBindings** | `boolean` | optional (default: `false`) | Manage position↔permission-set bindings within the subtree |
+| **authorEnvironmentSets** | `boolean` | optional (default: `false`) | Author environment-owned permission sets |
+| **assignablePermissionSets** | `string[]` | optional (default: `[]`) | Allowlist of permission-set names the delegate may hand out |
 
 
 ---
@@ -51,16 +51,16 @@ const result = AdminScopeSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **allowCreate** | `boolean` | ✅ | Create permission |
-| **allowRead** | `boolean` | ✅ | Read permission |
-| **allowEdit** | `boolean` | ✅ | Edit permission |
-| **allowDelete** | `boolean` | ✅ | Delete permission |
+| **allowCreate** | `boolean` | optional (default: `false`) | Create permission |
+| **allowRead** | `boolean` | optional (default: `false`) | Read permission |
+| **allowEdit** | `boolean` | optional (default: `false`) | Edit permission |
+| **allowDelete** | `boolean` | optional (default: `false`) | Delete permission |
 | **allowExport** | `boolean` | optional | [#3544] User-level export axis over read (opt-in grant). true = export granted (still bounded by read); unset/false = no export. Merged most-permissively like the CRUD bits; NOT implied by viewAllRecords/modifyAllRecords. |
-| **allowTransfer** | `boolean` | ✅ | [RBAC-gated; ENFORCED now via insert/update owner_id guard, #3004] Change record ownership (assign/reassign/disown owner_id) |
-| **allowRestore** | `boolean` | ✅ | [RBAC-gated; operation pending M2] Restore from trash (Undelete) |
-| **allowPurge** | `boolean` | ✅ | [RBAC-gated; operation pending M2] Permanently delete (Hard Delete/GDPR) |
-| **viewAllRecords** | `boolean` | ✅ | View All Data (Bypass Sharing) |
-| **modifyAllRecords** | `boolean` | ✅ | Modify All Data (Bypass Sharing) — bypasses sharing rules and ownership on the objects record sharing enforces on; on an object with NO owner field sharing abstains, so the platform created_by write floor still applies (#6698). |
+| **allowTransfer** | `boolean` | optional (default: `false`) | [RBAC-gated; ENFORCED now via insert/update owner_id guard, #3004] Change record ownership (assign/reassign/disown owner_id) |
+| **allowRestore** | `boolean` | optional (default: `false`) | [RBAC-gated; operation pending M2] Restore from trash (Undelete) |
+| **allowPurge** | `boolean` | optional (default: `false`) | [RBAC-gated; operation pending M2] Permanently delete (Hard Delete/GDPR) |
+| **viewAllRecords** | `boolean` | optional (default: `false`) | View All Data (Bypass Sharing) |
+| **modifyAllRecords** | `boolean` | optional (default: `false`) | Modify All Data (Bypass Sharing) — bypasses sharing rules and ownership on the objects record sharing enforces on; on an object with NO owner field sharing abstains, so the platform created_by write floor still applies (#6698). |
 | **readScope** | `Enum<'own' \| 'own_and_reports' \| 'unit' \| 'unit_and_below' \| 'org'>` | optional | [ADR-0057 D1] Read depth: own\|unit\|unit_and_below\|org |
 | **writeScope** | `Enum<'own' \| 'own_and_reports' \| 'unit' \| 'unit_and_below' \| 'org'>` | optional | [ADR-0057 D1] Write depth: own\|unit\|unit_and_below\|org |
 | **apiOperations** | `Enum<'get' \| 'list' \| 'create' \| 'update' \| 'delete' \| 'upsert' \| 'bulk' \| 'aggregate' \| 'history' \| 'search' \| 'restore' \| 'purge' \| 'import' \| 'export'>[]` | optional | Server-resolved effective API operations for this object (#3391). Present only when the object tightens exposure via apiMethods; absent = default-allow. The frontend renders this effective set, never the raw whitelist. Vocabulary is the EFFECTIVE ApiOperation set (six primitives + eight derived verbs, #3543), not the authored six-value ApiMethod enum. |
@@ -74,8 +74,8 @@ const result = AdminScopeSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **readable** | `boolean` | ✅ | Field read access |
-| **editable** | `boolean` | ✅ | Field edit access |
+| **readable** | `boolean` | optional (default: `true`) | Field read access |
+| **editable** | `boolean` | optional (default: `false`) | Field edit access |
 
 
 ---
@@ -99,16 +99,16 @@ const result = AdminScopeSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **allowCreate** | `boolean` | ✅ | Create permission |
-| **allowRead** | `boolean` | ✅ | Read permission |
-| **allowEdit** | `boolean` | ✅ | Edit permission |
-| **allowDelete** | `boolean` | ✅ | Delete permission |
+| **allowCreate** | `boolean` | optional (default: `false`) | Create permission |
+| **allowRead** | `boolean` | optional (default: `false`) | Read permission |
+| **allowEdit** | `boolean` | optional (default: `false`) | Edit permission |
+| **allowDelete** | `boolean` | optional (default: `false`) | Delete permission |
 | **allowExport** | `boolean` | optional | [#3544] User-level export axis over read (opt-in grant). true = export granted (still bounded by read); unset/false = no export. Merged most-permissively like the CRUD bits; NOT implied by viewAllRecords/modifyAllRecords. |
-| **allowTransfer** | `boolean` | ✅ | [RBAC-gated; ENFORCED now via insert/update owner_id guard, #3004] Change record ownership (assign/reassign/disown owner_id) |
-| **allowRestore** | `boolean` | ✅ | [RBAC-gated; operation pending M2] Restore from trash (Undelete) |
-| **allowPurge** | `boolean` | ✅ | [RBAC-gated; operation pending M2] Permanently delete (Hard Delete/GDPR) |
-| **viewAllRecords** | `boolean` | ✅ | View All Data (Bypass Sharing) |
-| **modifyAllRecords** | `boolean` | ✅ | Modify All Data (Bypass Sharing) — bypasses sharing rules and ownership on the objects record sharing enforces on; on an object with NO owner field sharing abstains, so the platform created_by write floor still applies (#6698). |
+| **allowTransfer** | `boolean` | optional (default: `false`) | [RBAC-gated; ENFORCED now via insert/update owner_id guard, #3004] Change record ownership (assign/reassign/disown owner_id) |
+| **allowRestore** | `boolean` | optional (default: `false`) | [RBAC-gated; operation pending M2] Restore from trash (Undelete) |
+| **allowPurge** | `boolean` | optional (default: `false`) | [RBAC-gated; operation pending M2] Permanently delete (Hard Delete/GDPR) |
+| **viewAllRecords** | `boolean` | optional (default: `false`) | View All Data (Bypass Sharing) |
+| **modifyAllRecords** | `boolean` | optional (default: `false`) | Modify All Data (Bypass Sharing) — bypasses sharing rules and ownership on the objects record sharing enforces on; on an object with NO owner field sharing abstains, so the platform created_by write floor still applies (#6698). |
 | **readScope** | `Enum<'own' \| 'own_and_reports' \| 'unit' \| 'unit_and_below' \| 'org'>` | optional | [ADR-0057 D1] Read depth: own\|unit\|unit_and_below\|org |
 | **writeScope** | `Enum<'own' \| 'own_and_reports' \| 'unit' \| 'unit_and_below' \| 'org'>` | optional | [ADR-0057 D1] Write depth: own\|unit\|unit_and_below\|org |
 
@@ -126,7 +126,7 @@ const result = AdminScopeSchema.parse(data);
 | **description** | `string` | optional | Human-readable description shown in Setup (persisted as sys_permission_set.description) |
 | **packageId** | `string` | optional | [ADR-0086 D3] Owning package id for a package-shipped set (absent = env-authored) |
 | **managedBy** | `Enum<'package' \| 'platform' \| 'user'>` | optional | [ADR-0086 D3] Record provenance: package (upgrade-owned metadata) vs platform/user (env config) |
-| **isDefault** | `boolean` | ✅ | [ADR-0090 D5] App baseline for the everyone position: app-level sets are auto-bound at boot (guarded, idempotent); package-level sets become install-time suggestions an admin confirms |
+| **isDefault** | `boolean` | optional (default: `false`) | [ADR-0090 D5] App baseline for the everyone position: app-level sets are auto-bound at boot (guarded, idempotent); package-level sets become install-time suggestions an admin confirms |
 | **objects** | `Record<string, { allowCreate: boolean; allowRead: boolean; allowEdit: boolean; allowDelete: boolean; … }>` | ✅ | Entity permissions |
 | **fields** | `Record<string, { readable: boolean; editable: boolean }>` | optional | Field level security |
 | **systemPermissions** | `string[]` | optional | System level capabilities |

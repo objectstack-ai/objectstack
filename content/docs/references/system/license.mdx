@@ -32,7 +32,7 @@ const result = FeatureSchema.parse(data);
 | **code** | `string` | ✅ | Feature code (e.g. core.api_access) |
 | **label** | `string` | ✅ |  |
 | **description** | `string` | optional |  |
-| **type** | `Enum<'boolean' \| 'counter' \| 'gauge'>` | ✅ | License metric type |
+| **type** | `Enum<'boolean' \| 'counter' \| 'gauge'>` | optional (default: `"boolean"`) | License metric type |
 | **unit** | `Enum<'count' \| 'bytes' \| 'seconds' \| 'percent'>` | optional |  |
 | **requires** | `string[]` | optional |  |
 
@@ -79,10 +79,10 @@ License metric type
 | :--- | :--- | :--- | :--- |
 | **code** | `string` | ✅ | Plan code (e.g. pro_v1) |
 | **label** | `string` | ✅ |  |
-| **active** | `boolean` | ✅ |  |
+| **active** | `boolean` | optional (default: `true`) |  |
 | **features** | `string[]` | ✅ | List of enabled boolean features |
 | **limits** | `Record<string, number>` | ✅ | Map of metric codes to limit values (e.g. `{ storage_gb: 10 }`) |
-| **currency** | `string` | optional |  |
+| **currency** | `string` | optional (default: `"USD"`) |  |
 | **priceMonthly** | `number` | optional |  |
 | **priceYearly** | `number` | optional |  |
 

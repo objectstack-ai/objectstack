@@ -44,7 +44,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 | **message** | `string` | ✅ | Human-readable error message |
 | **category** | `Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'server' \| 'external' \| 'maintenance'>` | optional | Error category |
 | **httpStatus** | `number` | optional | HTTP status code |
-| **retryable** | `boolean` | ✅ | Whether the request can be retried |
+| **retryable** | `boolean` | optional (default: `false`) | Whether the request can be retried |
 | **retryStrategy** | `Enum<'no_retry' \| 'retry_immediate' \| 'retry_backoff' \| 'retry_after'>` | optional | Recommended retry strategy |
 | **retryAfter** | `number` | optional | Seconds to wait before retrying |
 | **details** | `any` | optional | Additional error context |

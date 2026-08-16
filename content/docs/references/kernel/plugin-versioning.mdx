@@ -44,7 +44,7 @@ const result = BreakingChangeSchema.parse(data);
 | **migrationGuide** | `string` | optional | How to migrate from old to new |
 | **deprecatedIn** | `string` | optional | Version where old API was deprecated |
 | **removedIn** | `string` | optional | Version where old API will be removed |
-| **automatedMigration** | `boolean` | ✅ | Whether automated migration tool is available |
+| **automatedMigration** | `boolean` | optional (default: `false`) | Whether automated migration tool is available |
 | **severity** | `Enum<'critical' \| 'major' \| 'minor'>` | ✅ | Impact severity |
 
 
@@ -75,7 +75,7 @@ Compatibility level between versions
 | **to** | `string` | ✅ | Version being upgraded to |
 | **compatibility** | `Enum<'fully-compatible' \| 'backward-compatible' \| 'deprecated-compatible' \| 'breaking-changes' \| 'incompatible'>` | ✅ | Compatibility level between versions |
 | **breakingChanges** | `{ introducedIn: string; type: Enum<'api-removed' \| 'api-renamed' \| 'api-signature-changed' \| 'behavior-changed' \| … +3 more>; description: string; migrationGuide?: string; … }[]` | optional |  |
-| **migrationRequired** | `boolean` | ✅ |  |
+| **migrationRequired** | `boolean` | optional (default: `false`) |  |
 | **migrationComplexity** | `Enum<'trivial' \| 'simple' \| 'moderate' \| 'complex' \| 'major'>` | optional |  |
 | **estimatedMigrationTime** | `number` | optional |  |
 | **migrationScript** | `string` | optional | Path to migration script |
@@ -121,9 +121,9 @@ Compatibility level between versions
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | optional |  |
-| **maxConcurrentVersions** | `integer` | optional | How many versions can run at the same time |
-| **selectionStrategy** | `Enum<'latest' \| 'stable' \| 'compatible' \| 'pinned' \| 'canary' \| 'custom'>` | optional |  |
+| **enabled** | `boolean` | optional (default: `false`) |  |
+| **maxConcurrentVersions** | `integer` | optional (default: `2`) | How many versions can run at the same time |
+| **selectionStrategy** | `Enum<'latest' \| 'stable' \| 'compatible' \| 'pinned' \| 'canary' \| 'custom'>` | optional (default: `"latest"`) |  |
 | **routing** | `{ condition: string \| object; version: string; priority?: integer }[]` | optional |  |
 | **rollout** | `{ enabled?: boolean; strategy: Enum<'percentage' \| 'blue-green' \| 'canary'>; percentage?: number; duration?: integer }` | optional |  |
 

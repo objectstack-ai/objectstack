@@ -352,11 +352,11 @@ Event pattern (supports wildcards like "record.*" or "*.created")
 | :--- | :--- | :--- | :--- |
 | **url** | `string` | ✅ | WebSocket server URL |
 | **protocols** | `string[]` | optional | WebSocket sub-protocols |
-| **reconnect** | `boolean` | ✅ | Enable automatic reconnection |
-| **reconnectInterval** | `integer` | ✅ | Reconnection interval in milliseconds |
-| **maxReconnectAttempts** | `integer` | ✅ | Maximum reconnection attempts |
-| **pingInterval** | `integer` | ✅ | Ping interval in milliseconds |
-| **timeout** | `integer` | ✅ | Message timeout in milliseconds |
+| **reconnect** | `boolean` | optional (default: `true`) | Enable automatic reconnection |
+| **reconnectInterval** | `integer` | optional (default: `1000`) | Reconnection interval in milliseconds |
+| **maxReconnectAttempts** | `integer` | optional (default: `5`) | Maximum reconnection attempts |
+| **pingInterval** | `integer` | optional (default: `30000`) | Ping interval in milliseconds |
+| **timeout** | `integer` | optional (default: `5000`) | Message timeout in milliseconds |
 | **headers** | `Record<string, string>` | optional | Custom headers for WebSocket handshake |
 
 
@@ -578,12 +578,12 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable WebSocket server |
-| **path** | `string` | ✅ | WebSocket endpoint path |
-| **heartbeatInterval** | `number` | ✅ | Heartbeat interval in milliseconds |
-| **reconnectAttempts** | `number` | ✅ | Maximum reconnection attempts for clients |
-| **presence** | `boolean` | ✅ | Enable presence tracking |
-| **cursorSharing** | `boolean` | ✅ | Enable collaborative cursor sharing |
+| **enabled** | `boolean` | optional (default: `false`) | Enable WebSocket server |
+| **path** | `string` | optional (default: `"/ws"`) | WebSocket endpoint path |
+| **heartbeatInterval** | `number` | optional (default: `30000`) | Heartbeat interval in milliseconds |
+| **reconnectAttempts** | `number` | optional (default: `5`) | Maximum reconnection attempts for clients |
+| **presence** | `boolean` | optional (default: `false`) | Enable presence tracking |
+| **cursorSharing** | `boolean` | optional (default: `false`) | Enable collaborative cursor sharing |
 
 
 ---

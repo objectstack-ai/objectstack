@@ -32,9 +32,9 @@ Add record entry point configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Show the add record entry point |
-| **position** | `Enum<'top' \| 'bottom' \| 'both'>` | ✅ | Position of the add record button |
-| **mode** | `Enum<'inline' \| 'form' \| 'modal'>` | ✅ | How to add a new record |
+| **enabled** | `boolean` | optional (default: `true`) | Show the add record entry point |
+| **position** | `Enum<'top' \| 'bottom' \| 'both'>` | optional (default: `"bottom"`) | Position of the add record button |
+| **mode** | `Enum<'inline' \| 'form' \| 'modal'>` | optional (default: `"inline"`) | How to add a new record |
 | **formView** | `string` | optional | Named form view to use when mode is "form" or "modal" |
 
 
@@ -48,7 +48,7 @@ Appearance and visualization configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **showDescription** | `boolean` | ✅ | Show the view description text |
+| **showDescription** | `boolean` | optional (default: `true`) | Show the view description text |
 | **allowedVisualizations** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[]` | optional | Whitelist of visualization types users can switch between (e.g. ["grid", "gallery", "kanban"]) |
 
 
@@ -77,7 +77,7 @@ Compound-cell prefix configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field whose value renders before the cell value |
-| **type** | `Enum<'badge' \| 'text'>` | ✅ | How the prefix value is rendered |
+| **type** | `Enum<'badge' \| 'text'>` | optional (default: `"text"`) | How the prefix value is rendered |
 
 
 ---
@@ -155,7 +155,7 @@ Column footer summary configuration
 | **required** | `boolean` | optional | Required override |
 | **hidden** | `boolean` | optional | Hidden override |
 | **colSpan** | `integer` | optional | [legacy — prefer `span`] Absolute column span (1-4). Fragile when the column count is derived per surface (mobile 1 / modal 2 / page 3-4): a fixed span only lines up at the width the author imagined. The renderer clamps it to the current column count. Prefer `span`. |
-| **span** | `Enum<'auto' \| 'full'>` | optional | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count (wide widgets like textarea/richtext/json/file/subform take the whole row). 'full': whole row at any column count. Prefer this over the absolute `colSpan`. |
+| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count (wide widgets like textarea/richtext/json/file/subform take the whole row). 'full': whole row at any column count. Prefer this over the absolute `colSpan`. |
 | **widget** | `string` | optional | Custom widget/component name (overrides type-based inference) |
 | **language** | `string` | optional | Code editor language (for type=code) |
 | **keyField** | `{ field?: string; label?: string \| Record<string, string>; placeholder?: string \| Record<string, string>; helpText?: string \| Record<string, string>; … }` | optional | Key column config for record-typed fields |
@@ -245,11 +245,11 @@ Public-lookup opt-in: enables GET /forms/:slug/lookup/:field for this field on a
 | **name** | `string` | optional | Stable section identifier for i18n lookup (snake_case) |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **description** | `string` | optional | Optional description rendered under the section header. |
-| **collapsible** | `boolean` | optional |  |
-| **collapsed** | `boolean` | optional |  |
+| **collapsible** | `boolean` | optional (default: `false`) |  |
+| **collapsed** | `boolean` | optional (default: `false`) |  |
 | **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. No `current_user` at section level — it is unbound here and the predicate would fault open. |
 | **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse. |
-| **columns** | `Enum<'1' \| '2' \| '3' \| '4'> \| 1 \| 2 \| 3 \| 4` | optional |  |
+| **columns** | `Enum<'1' \| '2' \| '3' \| '4'> \| 1 \| 2 \| 3 \| 4` | optional (default: `1`) |  |
 | **pane** | `Enum<'primary' \| 'secondary'>` | optional | Split pane this section renders in (split forms only; a parse error elsewhere). Omitted → first section 'primary', others 'secondary'. |
 | **fields** | `(string \| { field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| … +42 more>; options?: object[]; reference?: string; … })[]` | ✅ |  |
 
@@ -262,7 +262,7 @@ Public-lookup opt-in: enables GET /forms/:slug/lookup/:field for this field on a
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>` | optional |  |
+| **type** | `Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>` | optional (default: `"simple"`) |  |
 | **layout** | `Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>` | optional | Field layout direction |
 | **columns** | `integer` | optional | Number of columns for the form body |
 | **title** | `string` | optional | Form title |
@@ -300,8 +300,8 @@ Gallery/card view configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **coverField** | `string` | optional | Attachment/image field to display as card cover |
-| **coverFit** | `Enum<'cover' \| 'contain'>` | ✅ | Image fit mode for card cover |
-| **cardSize** | `Enum<'small' \| 'medium' \| 'large'>` | ✅ | Card size in gallery view |
+| **coverFit** | `Enum<'cover' \| 'contain'>` | optional (default: `"cover"`) | Image fit mode for card cover |
+| **cardSize** | `Enum<'small' \| 'medium' \| 'large'>` | optional (default: `"medium"`) | Card size in gallery view |
 | **titleField** | `string` | optional | Field to display as card title |
 | **visibleFields** | `string[]` | optional | Fields to display on card body |
 
@@ -369,8 +369,8 @@ Record grouping configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field name to group by |
-| **order** | `Enum<'asc' \| 'desc'>` | ✅ | Group sort order |
-| **collapsed** | `boolean` | ✅ | Collapse groups by default |
+| **order** | `Enum<'asc' \| 'desc'>` | optional (default: `"asc"`) | Group sort order |
+| **collapsed** | `boolean` | optional (default: `false`) | Collapse groups by default |
 
 
 ---
@@ -397,7 +397,7 @@ HTTP methods a view data source may request — the subset of `HttpMethod` witho
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **url** | `string` | ✅ | API endpoint URL |
-| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>` | ✅ | HTTP method |
+| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>` | optional (default: `"GET"`) | HTTP method |
 | **headers** | `Record<string, string>` | optional | Custom HTTP headers |
 | **params** | `Record<string, any>` | optional | Query parameters |
 | **body** | `any` | optional | Request body for POST/PUT/PATCH |
@@ -426,7 +426,7 @@ List chart view configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **chartType** | `Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>` | ✅ | Chart visualisation type |
+| **chartType** | `Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>` | optional (default: `"bar"`) | Chart visualisation type |
 | **dataset** | `string` | ✅ | Dataset name to bind (ADR-0021) |
 | **dimensions** | `string[]` | optional | Dimension names — X/group/split |
 | **values** | `string[]` | ✅ | Measure names — Y (at least one) |
@@ -466,7 +466,7 @@ List chart view configuration
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | optional | Internal view name (lowercase snake_case) |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
-| **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional |  |
+| **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
 | **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'starts_with' \| … +14 more>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
@@ -522,11 +522,11 @@ List chart view configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | ✅ |  |
+| **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
 | **view** | `string` | optional | Name of the form view to use for details (e.g. "summary_view", "edit_form") |
-| **preventNavigation** | `boolean` | ✅ | Disable standard navigation entirely |
-| **openNewTab** | `boolean` | ✅ | Force open in new tab (applies to page mode) |
-| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | ✅ | [#2578] Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
+| **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
+| **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
+| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | [#2578] Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
 | **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
 
 
@@ -555,7 +555,7 @@ List chart view configuration
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | optional | Internal view name (lowercase snake_case) |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
-| **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional |  |
+| **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
 | **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'starts_with' \| … +14 more>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
@@ -611,7 +611,7 @@ List chart view configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **element** | `Enum<'dropdown' \| 'toggle'>` | ✅ | Filter control style on object views: "dropdown" (per-field value chips). "toggle" is deprecated. "tabs" is page-only — use `listViews` for named presets. |
+| **element** | `Enum<'dropdown' \| 'toggle'>` | optional (default: `"dropdown"`) | Filter control style on object views: "dropdown" (per-field value chips). "toggle" is deprecated. "tabs" is page-only — use `listViews` for named presets. |
 | **fields** | `{ field: string; label?: string \| Record<string, string>; type?: Enum<'select' \| 'multi-select' \| 'boolean' \| 'date-range' \| 'text'>; options?: object[]; … }[]` | optional | Fields exposed as quick filters (dropdown/toggle elements) |
 
 
@@ -623,7 +623,7 @@ List chart view configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **pageSize** | `integer` | ✅ | Number of records per page |
+| **pageSize** | `integer` | optional (default: `25`) | Number of records per page |
 | **pageSizeOptions** | `integer[]` | optional | Available page size options |
 
 
@@ -664,7 +664,7 @@ Row height / density setting for list view
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'none' \| 'single' \| 'multiple'>` | ✅ | Selection mode |
+| **type** | `Enum<'none' \| 'single' \| 'multiple'>` | optional (default: `"none"`) | Selection mode |
 
 
 ---
@@ -682,7 +682,7 @@ Timeline view configuration
 | **titleField** | `string` | ✅ | Field to display as timeline item title |
 | **groupByField** | `string` | optional | Field to group timeline rows |
 | **colorField** | `string` | optional | Field to determine item color |
-| **scale** | `Enum<'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | ✅ | Default timeline scale |
+| **scale** | `Enum<'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional (default: `"week"`) | Default timeline scale |
 
 
 ---
@@ -709,13 +709,13 @@ User action toggles for the view toolbar
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **sort** | `boolean` | ✅ | Allow users to sort records |
-| **search** | `boolean` | ✅ | Allow users to search records |
-| **filter** | `boolean` | ✅ | Allow users to filter records |
-| **refresh** | `boolean` | ✅ | Allow users to reload the view data from the backend without a full page reload |
-| **rowHeight** | `boolean` | ✅ | Allow users to toggle row height/density |
-| **addRecordForm** | `boolean` | ✅ | Add records through a form instead of inline |
-| **editInline** | `boolean` | ✅ | Allow users to edit records inline — click a cell to edit it with the field's type-aware widget (the same control the form uses). Off by default: the list is read-only unless the author opts in. |
+| **sort** | `boolean` | optional (default: `true`) | Allow users to sort records |
+| **search** | `boolean` | optional (default: `true`) | Allow users to search records |
+| **filter** | `boolean` | optional (default: `true`) | Allow users to filter records |
+| **refresh** | `boolean` | optional (default: `true`) | Allow users to reload the view data from the backend without a full page reload |
+| **rowHeight** | `boolean` | optional (default: `true`) | Allow users to toggle row height/density |
+| **addRecordForm** | `boolean` | optional (default: `false`) | Add records through a form instead of inline |
+| **editInline** | `boolean` | optional (default: `false`) | Allow users to edit records inline — click a cell to edit it with the field's type-aware widget (the same control the form uses). Off by default: the list is read-only unless the author opts in. |
 | **buttons** | `string[]` | optional | Custom action button IDs to show in the toolbar |
 
 
@@ -747,7 +747,7 @@ End-user quick-filter configuration (Airtable "User filters" parity)
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **element** | `Enum<'dropdown' \| 'tabs' \| 'toggle'>` | ✅ | Filter control style: "dropdown" (per-field value selectors) or "tabs" (named presets). "toggle" is deprecated. |
+| **element** | `Enum<'dropdown' \| 'tabs' \| 'toggle'>` | optional (default: `"dropdown"`) | Filter control style: "dropdown" (per-field value selectors) or "tabs" (named presets). "toggle" is deprecated. |
 | **fields** | `{ field: string; label?: string \| Record<string, string>; type?: Enum<'select' \| 'multi-select' \| 'boolean' \| 'date-range' \| 'text'>; options?: object[]; … }[]` | optional | Fields exposed as quick filters (dropdown/toggle elements) |
 | **tabs** | `{ name: string; label?: string \| Record<string, string>; icon?: string; view?: string; … }[]` | optional | Named filter presets rendered as tabs (tabs element). Reuses ViewTabSchema |
 | **showAllRecords** | `boolean` | optional | Show an "All records" tab before the presets (tabs element) |
@@ -1045,7 +1045,7 @@ View sharing and access configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'personal' \| 'collaborative'>` | ✅ | View ownership type |
+| **type** | `Enum<'personal' \| 'collaborative'>` | optional (default: `"collaborative"`) | View ownership type |
 | **lockedBy** | `string` | optional | User who locked the view configuration |
 
 
@@ -1065,9 +1065,9 @@ Tab configuration for multi-tab view interface
 | **view** | `string` | optional | Referenced list view name from listViews |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'starts_with' \| … +14 more>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Tab-specific filter criteria |
 | **order** | `integer` | optional | Tab display order |
-| **pinned** | `boolean` | ✅ | Pin tab (cannot be removed by users) |
-| **isDefault** | `boolean` | ✅ | Set as the default active tab |
-| **visible** | `boolean` | ✅ | Tab visibility |
+| **pinned** | `boolean` | optional (default: `false`) | Pin tab (cannot be removed by users) |
+| **isDefault** | `boolean` | optional (default: `false`) | Set as the default active tab |
+| **visible** | `boolean` | optional (default: `true`) | Tab visibility |
 
 
 ---

@@ -57,7 +57,7 @@ Mapping between BPMN XML element and ObjectStack FlowNodeAction
 | :--- | :--- | :--- | :--- |
 | **bpmnType** | `string` | ✅ | BPMN XML element type (e.g., "bpmn:parallelGateway") |
 | **flowNodeAction** | `string` | ✅ | ObjectStack FlowNodeAction value |
-| **bidirectional** | `boolean` | ✅ | Whether the mapping supports both import and export |
+| **bidirectional** | `boolean` | optional (default: `true`) | Whether the mapping supports both import and export |
 | **notes** | `string` | optional | Notes about mapping limitations |
 
 
@@ -71,12 +71,12 @@ Options for exporting an ObjectStack flow as BPMN 2.0 XML
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **version** | `Enum<'2.0' \| '2.0.2'>` | ✅ | Target BPMN specification version |
-| **includeLayout** | `boolean` | ✅ | Include BPMN DI layout data from canvas positions |
-| **includeExtensions** | `boolean` | ✅ | Include ObjectStack extensions in BPMN extensionElements |
+| **version** | `Enum<'2.0' \| '2.0.2'>` | optional (default: `"2.0"`) | Target BPMN specification version |
+| **includeLayout** | `boolean` | optional (default: `true`) | Include BPMN DI layout data from canvas positions |
+| **includeExtensions** | `boolean` | optional (default: `false`) | Include ObjectStack extensions in BPMN extensionElements |
 | **customMappings** | `{ bpmnType: string; flowNodeAction: string; bidirectional: boolean; notes?: string }[]` | optional | Custom element mappings for export |
-| **prettyPrint** | `boolean` | ✅ | Pretty-print XML output with indentation |
-| **namespacePrefix** | `string` | ✅ | XML namespace prefix for BPMN elements |
+| **prettyPrint** | `boolean` | optional (default: `true`) | Pretty-print XML output with indentation |
+| **namespacePrefix** | `string` | optional (default: `"bpmn"`) | XML namespace prefix for BPMN elements |
 
 
 ---
@@ -89,12 +89,12 @@ Options for importing BPMN 2.0 XML into an ObjectStack flow
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **unmappedStrategy** | `Enum<'skip' \| 'warn' \| 'error' \| 'comment'>` | ✅ | How to handle unmapped BPMN elements |
+| **unmappedStrategy** | `Enum<'skip' \| 'warn' \| 'error' \| 'comment'>` | optional (default: `"warn"`) | How to handle unmapped BPMN elements |
 | **customMappings** | `{ bpmnType: string; flowNodeAction: string; bidirectional: boolean; notes?: string }[]` | optional | Custom element mappings to override or extend defaults |
-| **importLayout** | `boolean` | ✅ | Import BPMN DI layout positions into canvas node coordinates |
-| **importDocumentation** | `boolean` | ✅ | Import BPMN documentation elements as node descriptions |
+| **importLayout** | `boolean` | optional (default: `true`) | Import BPMN DI layout positions into canvas node coordinates |
+| **importDocumentation** | `boolean` | optional (default: `true`) | Import BPMN documentation elements as node descriptions |
 | **flowName** | `string` | optional | Override flow name (defaults to BPMN process name) |
-| **validateAfterImport** | `boolean` | ✅ | Validate imported flow against FlowSchema after import |
+| **validateAfterImport** | `boolean` | optional (default: `true`) | Validate imported flow against FlowSchema after import |
 
 
 ---
@@ -108,9 +108,9 @@ Result of a BPMN import/export operation
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Whether the operation completed successfully |
-| **diagnostics** | `{ severity: Enum<'info' \| 'warning' \| 'error'>; message: string; bpmnElementId?: string; nodeId?: string }[]` | ✅ | Diagnostic messages from the operation |
-| **mappedCount** | `integer` | ✅ | Number of elements successfully mapped |
-| **unmappedCount** | `integer` | ✅ | Number of elements that could not be mapped |
+| **diagnostics** | `{ severity: Enum<'info' \| 'warning' \| 'error'>; message: string; bpmnElementId?: string; nodeId?: string }[]` | optional (default: `[]`) | Diagnostic messages from the operation |
+| **mappedCount** | `integer` | optional (default: `0`) | Number of elements successfully mapped |
+| **unmappedCount** | `integer` | optional (default: `0`) | Number of elements that could not be mapped |
 
 
 ---

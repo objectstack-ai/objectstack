@@ -84,7 +84,7 @@ const result = SCIMAddressSchema.parse(data);
 | **postalCode** | `string` | optional | Postal code |
 | **country** | `string` | optional | Country |
 | **type** | `Enum<'work' \| 'home' \| 'other'>` | optional | Address type |
-| **primary** | `boolean` | ✅ | Primary address indicator |
+| **primary** | `boolean` | optional (default: `false`) | Primary address indicator |
 
 
 ---
@@ -110,7 +110,7 @@ const result = SCIMAddressSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **schemas** | `'urn:ietf:params:scim:api:messages:2.0:BulkRequest'[]` | ✅ | SCIM schema URIs (BulkRequest) |
+| **schemas** | `'urn:ietf:params:scim:api:messages:2.0:BulkRequest'[]` | optional (default: `["urn:ietf:params:scim:api:messages:2.0:BulkRequest"]`) | SCIM schema URIs (BulkRequest) |
 | **operations** | `{ method: Enum<'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; path: string; bulkId?: string; data?: Record<string, any>; … }[]` | ✅ | Bulk operations to execute (minimum 1) |
 | **failOnErrors** | `integer` | optional | Stop processing after this many errors |
 
@@ -123,7 +123,7 @@ const result = SCIMAddressSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **schemas** | `'urn:ietf:params:scim:api:messages:2.0:BulkResponse'[]` | ✅ | SCIM schema URIs (BulkResponse) |
+| **schemas** | `'urn:ietf:params:scim:api:messages:2.0:BulkResponse'[]` | optional (default: `["urn:ietf:params:scim:api:messages:2.0:BulkResponse"]`) | SCIM schema URIs (BulkResponse) |
 | **operations** | `{ method: Enum<'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; bulkId?: string; location?: string; status: string; … }[]` | ✅ | Results for each bulk operation |
 
 
@@ -153,7 +153,7 @@ const result = SCIMAddressSchema.parse(data);
 | **value** | `string` | ✅ | Email address |
 | **type** | `Enum<'work' \| 'home' \| 'other'>` | optional | Email type |
 | **display** | `string` | optional | Display label |
-| **primary** | `boolean` | ✅ | Primary email indicator |
+| **primary** | `boolean` | optional (default: `false`) | Primary email indicator |
 
 
 ---
@@ -180,7 +180,7 @@ const result = SCIMAddressSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **schemas** | `string[]` | ✅ | SCIM schema URIs |
+| **schemas** | `string[]` | optional (default: `["urn:ietf:params:scim:api:messages:2.0:Error"]`) | SCIM schema URIs |
 | **status** | `integer` | ✅ | HTTP status code |
 | **scimType** | `Enum<'invalidFilter' \| 'tooMany' \| 'uniqueness' \| 'mutability' \| 'invalidSyntax' \| 'invalidPath' \| 'noTarget' \| 'invalidValue' \| 'invalidVers' \| 'sensitive'>` | optional | SCIM error type |
 | **detail** | `string` | optional | Error detail message |
@@ -194,7 +194,7 @@ const result = SCIMAddressSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **schemas** | `string[]` | ✅ | SCIM schema URIs (must include Group schema) |
+| **schemas** | `string[]` | optional (default: `["urn:ietf:params:scim:schemas:core:2.0:Group"]`) | SCIM schema URIs (must include Group schema) |
 | **id** | `string` | optional | Unique resource identifier |
 | **externalId** | `string` | optional | External identifier from client system |
 | **displayName** | `string` | ✅ | Group display name (REQUIRED) |
@@ -224,7 +224,7 @@ const result = SCIMAddressSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **schemas** | `string[]` | ✅ | SCIM schema URIs |
+| **schemas** | `string[]` | optional (default: `["urn:ietf:params:scim:api:messages:2.0:ListResponse"]`) | SCIM schema URIs |
 | **totalResults** | `integer` | ✅ | Total results count |
 | **Resources** | `({ schemas: string[]; id?: string; externalId?: string; userName: string; … } \| { schemas: string[]; id?: string; externalId?: string; displayName: string; … } \| Record<string, any>)[]` | ✅ | Resources array (Users, Groups, or custom resources) |
 | **startIndex** | `integer` | optional | Start index (1-based) |
@@ -297,7 +297,7 @@ const result = SCIMAddressSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **schemas** | `string[]` | ✅ | SCIM schema URIs |
+| **schemas** | `string[]` | optional (default: `["urn:ietf:params:scim:api:messages:2.0:PatchOp"]`) | SCIM schema URIs |
 | **Operations** | `{ op: Enum<'add' \| 'remove' \| 'replace'>; path?: string; value?: any }[]` | ✅ | Patch operations |
 
 
@@ -312,7 +312,7 @@ const result = SCIMAddressSchema.parse(data);
 | **value** | `string` | ✅ | Phone number |
 | **type** | `Enum<'work' \| 'home' \| 'mobile' \| 'fax' \| 'pager' \| 'other'>` | optional | Phone number type |
 | **display** | `string` | optional | Display label |
-| **primary** | `boolean` | ✅ | Primary phone indicator |
+| **primary** | `boolean` | optional (default: `false`) | Primary phone indicator |
 
 
 ---
@@ -323,7 +323,7 @@ const result = SCIMAddressSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **schemas** | `string[]` | ✅ | SCIM schema URIs (must include User schema) |
+| **schemas** | `string[]` | optional (default: `["urn:ietf:params:scim:schemas:core:2.0:User"]`) | SCIM schema URIs (must include User schema) |
 | **id** | `string` | optional | Unique resource identifier |
 | **externalId** | `string` | optional | External identifier from client system |
 | **userName** | `string` | ✅ | Unique username (REQUIRED) |
@@ -336,7 +336,7 @@ const result = SCIMAddressSchema.parse(data);
 | **preferredLanguage** | `string` | optional | Preferred language (ISO 639-1) |
 | **locale** | `string` | optional | Locale (e.g., en-US) |
 | **timezone** | `string` | optional | Timezone |
-| **active** | `boolean` | ✅ | Account active status |
+| **active** | `boolean` | optional (default: `true`) | Account active status |
 | **password** | `string` | optional | Password (write-only) |
 | **emails** | `{ value: string; type?: Enum<'work' \| 'home' \| 'other'>; display?: string; primary: boolean }[]` | optional | Email addresses |
 | **phoneNumbers** | `{ value: string; type?: Enum<'work' \| 'home' \| 'mobile' \| 'fax' \| 'pager' \| 'other'>; display?: string; primary: boolean }[]` | optional | Phone numbers |

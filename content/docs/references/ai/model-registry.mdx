@@ -32,13 +32,13 @@ const result = ModelCapabilitySchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **textGeneration** | `boolean` | ✅ | Supports text generation |
-| **textEmbedding** | `boolean` | ✅ | Supports text embedding |
-| **imageGeneration** | `boolean` | ✅ | Supports image generation |
-| **imageUnderstanding** | `boolean` | ✅ | Supports image understanding |
-| **functionCalling** | `boolean` | ✅ | Supports function calling |
-| **codeGeneration** | `boolean` | ✅ | Supports code generation |
-| **reasoning** | `boolean` | ✅ | Supports advanced reasoning |
+| **textGeneration** | `boolean` | optional (default: `true`) | Supports text generation |
+| **textEmbedding** | `boolean` | optional (default: `false`) | Supports text embedding |
+| **imageGeneration** | `boolean` | optional (default: `false`) | Supports image generation |
+| **imageUnderstanding** | `boolean` | optional (default: `false`) | Supports image understanding |
+| **functionCalling** | `boolean` | optional (default: `false`) | Supports function calling |
+| **codeGeneration** | `boolean` | optional (default: `false`) | Supports code generation |
+| **reasoning** | `boolean` | optional (default: `false`) | Supports advanced reasoning |
 
 
 ---
@@ -62,7 +62,7 @@ const result = ModelCapabilitySchema.parse(data);
 | **region** | `string` | optional | Deployment region (e.g., "us-east-1") |
 | **description** | `string` | optional |  |
 | **tags** | `string[]` | optional | Tags for categorization |
-| **deprecated** | `boolean` | ✅ |  |
+| **deprecated** | `boolean` | optional (default: `false`) |  |
 | **recommendedFor** | `string[]` | optional | Use case recommendations |
 
 
@@ -88,7 +88,7 @@ const result = ModelCapabilitySchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **currency** | `string` | ✅ |  |
+| **currency** | `string` | optional (default: `"USD"`) |  |
 | **inputCostPer1kTokens** | `number` | optional | Cost per 1K input tokens |
 | **outputCostPer1kTokens** | `number` | optional | Cost per 1K output tokens |
 | **embeddingCostPer1kTokens** | `number` | optional | Cost per 1K embedding tokens |
@@ -122,7 +122,7 @@ const result = ModelCapabilitySchema.parse(data);
 | **models** | `Record<string, { model: object; status?: Enum<'active' \| 'deprecated' \| 'experimental' \| 'disabled'>; priority?: integer; fallbackModels?: string[]; … }>` | ✅ | Model entries by ID |
 | **promptTemplates** | `Record<string, { id: string; name: string; label: string; system?: string \| object; … }>` | optional | Prompt templates by name |
 | **defaultModel** | `string` | optional | Default model ID |
-| **enableAutoFallback** | `boolean` | optional | Auto-fallback on errors |
+| **enableAutoFallback** | `boolean` | optional (default: `true`) | Auto-fallback on errors |
 
 
 ---
@@ -134,8 +134,8 @@ const result = ModelCapabilitySchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **model** | `{ id: string; name: string; version: string; provider: Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'google' \| 'cohere' \| 'huggingface' \| 'local' \| 'custom'>; … }` | ✅ |  |
-| **status** | `Enum<'active' \| 'deprecated' \| 'experimental' \| 'disabled'>` | ✅ |  |
-| **priority** | `integer` | ✅ | Priority for model selection |
+| **status** | `Enum<'active' \| 'deprecated' \| 'experimental' \| 'disabled'>` | optional (default: `"active"`) |  |
+| **priority** | `integer` | optional (default: `0`) | Priority for model selection |
 | **fallbackModels** | `string[]` | optional | Fallback model IDs |
 | **healthCheck** | `{ enabled: boolean; intervalSeconds: integer; lastChecked?: string; status: Enum<'healthy' \| 'unhealthy' \| 'unknown'> }` | optional |  |
 
@@ -153,7 +153,7 @@ const result = ModelCapabilitySchema.parse(data);
 | **minContextWindow** | `number` | optional | Minimum context window size |
 | **provider** | `Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'google' \| 'cohere' \| 'huggingface' \| 'local' \| 'custom'>` | optional |  |
 | **tags** | `string[]` | optional |  |
-| **excludeDeprecated** | `boolean` | ✅ |  |
+| **excludeDeprecated** | `boolean` | optional (default: `true`) |  |
 
 
 ---
@@ -178,7 +178,7 @@ const result = ModelCapabilitySchema.parse(data);
 | **frequencyPenalty** | `number` | optional |  |
 | **presencePenalty** | `number` | optional |  |
 | **stopSequences** | `string[]` | optional |  |
-| **version** | `string` | optional |  |
+| **version** | `string` | optional (default: `"1.0.0"`) |  |
 | **description** | `string` | optional |  |
 | **category** | `string` | optional | Template category (e.g., "code_generation", "support") |
 | **tags** | `string[]` | optional |  |
@@ -194,8 +194,8 @@ const result = ModelCapabilitySchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Variable name (e.g., "user_name", "context") |
-| **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'object' \| 'array'>` | ✅ |  |
-| **required** | `boolean` | ✅ |  |
+| **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'object' \| 'array'>` | optional (default: `"string"`) |  |
+| **required** | `boolean` | optional (default: `false`) |  |
 | **defaultValue** | `any` | optional |  |
 | **description** | `string` | optional |  |
 | **validation** | `{ minLength?: number; maxLength?: number; pattern?: string; enum?: any[] }` | optional |  |

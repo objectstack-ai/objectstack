@@ -26,7 +26,7 @@ const result = CapabilityDeclarationSchema.parse(data);
 | **name** | `string` | ✅ | Stable capability key referenced by systemPermissions / requiredPermissions |
 | **label** | `string` | optional | Human label shown in Setup |
 | **description** | `string` | optional | What holding this capability permits |
-| **scope** | `Enum<'platform' \| 'org'>` | ✅ | platform = a platform-wide power; org = scoped to an organization |
+| **scope** | `Enum<'platform' \| 'org'>` | optional (default: `"platform"`) | platform = a platform-wide power; org = scoped to an organization |
 | **packageId** | `string` | optional | [ADR-0086 D3] Owning package id (author-declared fallback; absent = registry-stamped) |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |

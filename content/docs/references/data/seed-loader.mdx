@@ -51,7 +51,7 @@ Complete object dependency graph for seed data loading
 | :--- | :--- | :--- | :--- |
 | **nodes** | `{ object: string; dependsOn: string[]; references: object[] }[]` | ✅ | All objects in the dependency graph |
 | **insertOrder** | `string[]` | ✅ | Topologically sorted insert order |
-| **circularDependencies** | `string[][]` | ✅ | Circular dependency chains (e.g., [["a", "b", "a"]]) |
+| **circularDependencies** | `string[][]` | optional (default: `[]`) | Circular dependency chains (e.g., [["a", "b", "a"]]) |
 
 
 ---
@@ -81,7 +81,7 @@ Describes how a field reference is resolved during seed loading
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Source field name containing the reference value |
 | **targetObject** | `string` | ✅ | Target object name (snake_case) |
-| **targetField** | `string` | ✅ | Field on target object used for matching |
+| **targetField** | `string` | optional (default: `"name"`) | Field on target object used for matching |
 | **fieldType** | `Enum<'lookup' \| 'master_detail' \| 'user'>` | ✅ | Relationship field type |
 | **multiple** | `boolean` | optional | Field stores an array of references (multiple: true) |
 
@@ -138,9 +138,9 @@ Result of loading a single dataset
 | **total** | `integer` | ✅ | Total records in dataset |
 | **referencesResolved** | `integer` | ✅ | References resolved via externalId |
 | **referencesDeferred** | `integer` | ✅ | References deferred to second pass |
-| **referencesDropped** | `integer` | ✅ | Reference fields dropped from records that were still written |
-| **summariesStale** | `integer` | ✅ | Roll-up summary values left stale by writes for this dataset |
-| **errors** | `{ sourceObject: string; field: string; targetObject: string; targetField: string; … }[]` | ✅ | Reference resolution errors |
+| **referencesDropped** | `integer` | optional (default: `0`) | Reference fields dropped from records that were still written |
+| **summariesStale** | `integer` | optional (default: `0`) | Roll-up summary values left stale by writes for this dataset |
+| **errors** | `{ sourceObject: string; field: string; targetObject: string; targetField: string; … }[]` | optional (default: `[]`) | Reference resolution errors |
 
 
 ---
@@ -153,12 +153,12 @@ Seed data loader configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **dryRun** | `boolean` | ✅ | Validate references without writing data |
-| **haltOnError** | `boolean` | ✅ | Stop on first reference resolution error |
-| **multiPass** | `boolean` | ✅ | Enable multi-pass loading for circular dependencies |
-| **defaultMode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | ✅ | Default conflict resolution strategy |
-| **batchSize** | `integer` | ✅ | Maximum records per batch insert/upsert |
-| **transaction** | `boolean` | ✅ | Wrap entire load in a transaction (all-or-nothing) |
+| **dryRun** | `boolean` | optional (default: `false`) | Validate references without writing data |
+| **haltOnError** | `boolean` | optional (default: `false`) | Stop on first reference resolution error |
+| **multiPass** | `boolean` | optional (default: `true`) | Enable multi-pass loading for circular dependencies |
+| **defaultMode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | optional (default: `"upsert"`) | Default conflict resolution strategy |
+| **batchSize** | `integer` | optional (default: `1000`) | Maximum records per batch insert/upsert |
+| **transaction** | `boolean` | optional (default: `false`) | Wrap entire load in a transaction (all-or-nothing) |
 | **env** | `Enum<'prod' \| 'dev' \| 'test'>` | optional | Only load datasets matching this environment |
 | **organizationId** | `string` | optional | Target organization id for per-tenant seed replay |
 | **identity** | `{ user?: object; org?: object }` | optional | Identity bound to os.user / os.org when resolving CEL seed values |
@@ -175,7 +175,7 @@ Seed loader request with datasets and configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **seeds** | `{ object: string; externalId: string \| string[]; mode: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; env: Enum<'prod' \| 'dev' \| 'test'>[]; … }[]` | ✅ | Seeds to load |
-| **config** | `{ dryRun: boolean; haltOnError: boolean; multiPass: boolean; defaultMode: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; … }` | ✅ | Loader configuration |
+| **config** | `{ dryRun: boolean; haltOnError: boolean; multiPass: boolean; defaultMode: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; … }` | optional (has default) | Loader configuration |
 
 
 ---

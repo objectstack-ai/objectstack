@@ -47,13 +47,13 @@ Backup configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **strategy** | `Enum<'full' \| 'incremental' \| 'differential'>` | optional | Backup strategy |
+| **strategy** | `Enum<'full' \| 'incremental' \| 'differential'>` | optional (default: `"incremental"`) | Backup strategy |
 | **schedule** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron expression for backup schedule — cron`0 2 * * *` |
 | **retention** | `{ days: number; minCopies?: number; maxCopies?: number }` | ✅ | Backup retention policy |
 | **destination** | `{ type: Enum<'s3' \| 'gcs' \| 'azure_blob' \| 'local'>; bucket?: string; path?: string; region?: string }` | ✅ | Backup storage destination |
 | **encryption** | `{ enabled?: boolean; algorithm?: Enum<'AES-256-GCM' \| 'AES-256-CBC' \| 'ChaCha20-Poly1305'>; keyId?: string }` | optional | Backup encryption settings |
 | **compression** | `{ enabled?: boolean; algorithm?: Enum<'gzip' \| 'zstd' \| 'lz4' \| 'snappy'> }` | optional | Backup compression settings |
-| **verifyAfterBackup** | `boolean` | optional | Verify backup integrity after creation |
+| **verifyAfterBackup** | `boolean` | optional (default: `true`) | Verify backup integrity after creation |
 
 
 ---
@@ -67,7 +67,7 @@ Backup retention policy
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **days** | `number` | ✅ | Retention period in days |
-| **minCopies** | `number` | ✅ | Minimum backup copies to retain |
+| **minCopies** | `number` | optional (default: `3`) | Minimum backup copies to retain |
 | **maxCopies** | `number` | optional | Maximum backup copies to store |
 
 
@@ -94,7 +94,7 @@ Complete disaster recovery plan configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | optional | Enable disaster recovery plan |
+| **enabled** | `boolean` | optional (default: `false`) | Enable disaster recovery plan |
 | **rpo** | `{ value: number; unit?: Enum<'seconds' \| 'minutes' \| 'hours'> }` | ✅ | Recovery Point Objective |
 | **rto** | `{ value: number; unit?: Enum<'seconds' \| 'minutes' \| 'hours'> }` | ✅ | Recovery Time Objective |
 | **backup** | `{ strategy?: Enum<'full' \| 'incremental' \| 'differential'>; schedule?: string \| object; retention: object; destination: object; … }` | ✅ | Backup configuration |
@@ -115,10 +115,10 @@ Failover configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **mode** | `Enum<'active_passive' \| 'active_active' \| 'pilot_light' \| 'warm_standby'>` | ✅ | Failover mode |
-| **autoFailover** | `boolean` | ✅ | Enable automatic failover |
-| **healthCheckInterval** | `number` | ✅ | Health check interval in seconds |
-| **failureThreshold** | `number` | ✅ | Consecutive failures before failover |
+| **mode** | `Enum<'active_passive' \| 'active_active' \| 'pilot_light' \| 'warm_standby'>` | optional (default: `"active_passive"`) | Failover mode |
+| **autoFailover** | `boolean` | optional (default: `true`) | Enable automatic failover |
+| **healthCheckInterval** | `number` | optional (default: `30`) | Health check interval in seconds |
+| **failureThreshold** | `number` | optional (default: `3`) | Consecutive failures before failover |
 | **regions** | `{ name: string; role: Enum<'primary' \| 'secondary' \| 'witness'>; endpoint?: string; priority?: number }[]` | ✅ | Multi-region configuration (minimum 2 regions) |
 | **dns** | `{ ttl: number; provider?: Enum<'route53' \| 'cloudflare' \| 'azure_dns' \| 'custom'> }` | optional | DNS failover settings |
 
@@ -148,7 +148,7 @@ Recovery Point Objective (maximum acceptable data loss)
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **value** | `number` | ✅ | RPO value |
-| **unit** | `Enum<'seconds' \| 'minutes' \| 'hours'>` | ✅ | RPO time unit |
+| **unit** | `Enum<'seconds' \| 'minutes' \| 'hours'>` | optional (default: `"minutes"`) | RPO time unit |
 
 
 ---
@@ -162,7 +162,7 @@ Recovery Time Objective (maximum acceptable downtime)
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **value** | `number` | ✅ | RTO value |
-| **unit** | `Enum<'seconds' \| 'minutes' \| 'hours'>` | ✅ | RTO time unit |
+| **unit** | `Enum<'seconds' \| 'minutes' \| 'hours'>` | optional (default: `"minutes"`) | RTO time unit |
 
 
 ---

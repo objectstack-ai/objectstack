@@ -79,8 +79,8 @@ const result = AppDefinitionResponseSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **items** | `{ type: string; name: string; data: Record<string, any> }[]` | ✅ | Items to register |
-| **continueOnError** | `boolean` | ✅ | Continue on individual failure |
-| **validate** | `boolean` | ✅ | Validate before registering |
+| **continueOnError** | `boolean` | optional (default: `false`) | Continue on individual failure |
+| **validate** | `boolean` | optional (default: `true`) | Validate before registering |
 
 
 ---
@@ -188,7 +188,7 @@ const result = AppDefinitionResponseSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **types** | `string[]` | optional | Filter by metadata types |
 | **namespaces** | `string[]` | optional | Filter by namespaces |
-| **format** | `Enum<'json' \| 'yaml'>` | ✅ | Export format |
+| **format** | `Enum<'json' \| 'yaml'>` | optional (default: `"json"`) | Export format |
 
 
 ---
@@ -214,9 +214,9 @@ const result = AppDefinitionResponseSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **data** | `any` | ✅ | Metadata bundle to import |
-| **conflictResolution** | `Enum<'skip' \| 'overwrite' \| 'merge'>` | ✅ | Conflict resolution strategy |
-| **validate** | `boolean` | ✅ | Validate before import |
-| **dryRun** | `boolean` | ✅ | Dry run (no save) |
+| **conflictResolution** | `Enum<'skip' \| 'overwrite' \| 'merge'>` | optional (default: `"skip"`) | Conflict resolution strategy |
+| **validate** | `boolean` | optional (default: `true`) | Validate before import |
+| **dryRun** | `boolean` | optional (default: `false`) | Dry run (no save) |
 
 
 ---
@@ -304,12 +304,12 @@ Overlay to save
 | **baseName** | `string` | ✅ | Metadata name being customized |
 | **packageId** | `string` | optional | Package ID that delivered the base metadata |
 | **packageVersion** | `string` | optional | Package version when overlay was created |
-| **scope** | `Enum<'platform' \| 'user'>` | ✅ | Customization scope (platform=admin, user=personal) |
+| **scope** | `Enum<'platform' \| 'user'>` | optional (default: `"platform"`) | Customization scope (platform=admin, user=personal) |
 | **tenantId** | `string` | optional | Tenant identifier |
 | **owner** | `string` | optional | Owner user ID for user-scope overlays |
 | **patch** | `Record<string, any>` | ✅ | JSON Merge Patch payload (changed fields only) |
 | **changes** | `{ path: string; originalValue?: any; currentValue: any; changedBy?: string; … }[]` | optional | Field-level change tracking for conflict detection |
-| **active** | `boolean` | ✅ | Whether this overlay is active |
+| **active** | `boolean` | optional (default: `true`) | Whether this overlay is active |
 | **createdAt** | `string` | optional |  |
 | **createdBy** | `string` | optional |  |
 | **updatedAt** | `string` | optional |  |
@@ -333,10 +333,10 @@ Metadata query with filtering, sorting, and pagination
 | **scope** | `Enum<'system' \| 'platform' \| 'user'>` | optional | Filter by scope |
 | **state** | `Enum<'draft' \| 'active' \| 'archived' \| 'deprecated'>` | optional | Filter by lifecycle state |
 | **tags** | `string[]` | optional | Filter by tags |
-| **sortBy** | `Enum<'name' \| 'type' \| 'updatedAt' \| 'createdAt'>` | ✅ | Sort field |
-| **sortOrder** | `Enum<'asc' \| 'desc'>` | ✅ | Sort direction |
-| **page** | `integer` | ✅ | Page number |
-| **pageSize** | `integer` | ✅ | Items per page |
+| **sortBy** | `Enum<'name' \| 'type' \| 'updatedAt' \| 'createdAt'>` | optional (default: `"name"`) | Sort field |
+| **sortOrder** | `Enum<'asc' \| 'desc'>` | optional (default: `"asc"`) | Sort direction |
+| **page** | `integer` | optional (default: `1`) | Page number |
+| **pageSize** | `integer` | optional (default: `50`) | Items per page |
 
 
 ---

@@ -90,26 +90,38 @@ export function selectRootDef(schemaName: string, schema: any): any {
  * split this renderer already makes for constraints, which it has never printed
  * in any position.
  *
- * WHY 48. Measured over the 1582 emitted documents (4676 property occurrences
- * carrying a `default`, 360 distinct values), counting occurrences whose
- * canonical JSON is wider than each candidate budget:
+ * WHY 64, and why it is NOT chosen from the density curve. Measured over the
+ * 1582 emitted documents (4676 property occurrences carrying a `default`, 360
+ * distinct values), counting occurrences whose canonical JSON is wider than
+ * each candidate:
  *
- *   budget      |   8 |  12 |  16 |  20 |  24 |  32 |  40 |  48 |  60 |  80 | 120
- *   elided      | 553 | 251 | 157 |  78 |  47 |  40 |  34 |  24 |  17 |  17 |  14
+ *   budget   |   8 |  12 |  16 |  24 |  40 |  48 |  56 |  60 |  64 |  80 | 120
+ *   elided   | 553 | 251 | 157 |  47 |  34 |  24 |  18 |  17 |  17 |  17 |  14
  *
- * p50 is 5 characters and p99 is 25: the population is overwhelmingly scalars
- * (`false`, `0`, `"openai"`, `10`). 48 sits just past the collapse — it spells
- * 99.5% of occurrences in full — and everything it withholds is a structural
- * object or array default (the widest is 705 characters, a whole tab layout),
- * which no table cell should carry regardless of what the budget says. Loosening
- * to 60 buys 7 more occurrences at 12 more columns; that trade is not worth
- * widening a column whose job is to answer one yes/no question.
+ * p50 is 5 characters and p99 is 25 — the population is overwhelmingly scalars
+ * (`false`, `0`, `"openai"`, `10`) — so a budget picked off that curve lands
+ * near 24 and the counts barely move after it. What decides this budget is the
+ * DISCONTINUITY further out, which the counts alone hide. Sorting the distinct
+ * wide values, they stop being one population at exactly one place:
+ *
+ *      43 … 59   scalars and one-line lists an author reads and copies:
+ *                `["urn:ietf:params:scim:schemas:core:2.0:User"]`,
+ *                `"/api/v1/automation/resume/{executionId}/{nodeId}"`,
+ *                `["MIT","Apache-2.0","BSD-3-Clause","BSD-2-Clause","ISC"]`
+ *      88 … 705  structural objects and arrays — a whole logging redact list,
+ *                a designer's tab layout, a mount table
+ *
+ * Nothing at all falls between 60 and 87. 64 sits inside that gap, so the rule
+ * it encodes is the real one — *spell a value the author could retype, withhold
+ * a nested structure* — rather than a percentile that would have to be
+ * re-tuned every time a default moves. It costs nothing on either side: 56 and
+ * 80 elide the same 17-18 occurrences, so the choice inside the gap is free.
  *
  * The Type column's budgets (80 in a shape summary, 160 in a vocabulary's own
  * cell) are deliberately not reused: this value shares its cell with the
  * `optional (default: …)` wrapper AND sits in the narrowest column of the table.
  */
-export const INLINE_DEFAULT_WIDTH_LIMIT = 48;
+export const INLINE_DEFAULT_WIDTH_LIMIT = 64;
 
 /**
  * The Required cell for one property — `✅`, `optional`, or `optional (default: …)`.

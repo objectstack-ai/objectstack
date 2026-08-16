@@ -170,10 +170,20 @@ describe('renderSchemaSection — shapes unchanged by #7658', () => {
  * #8586 flip that #8703 was filed on). Reading `default` rather than `required`
  * makes both modes render the same cell.
  *
- * MEASURED (reverse verification): restoring the old cell — `required.has(key)
- * ? '✅' : 'optional'` — turns the six cases below red and leaves every other
- * case in this file green, which is the asymmetry that matters: nothing about
- * a property WITHOUT a default changes.
+ * MEASURED (reverse verification), both legs, because the two halves of the fix
+ * fail differently and a single number would hide one of them:
+ *
+ *   - Neutralising the HELPER (`renderRequiredCell` always answering
+ *     `required ? '✅' : 'optional'`) turns **6 of the 20 cases in this file
+ *     red**, 14 green.
+ *   - Restoring only the old CALL SITE in `renderProperties`, helper intact,
+ *     turns exactly **1 red** — the rendered-table case at the end of this
+ *     block. That case is therefore the only thing standing between a correct
+ *     helper and a table that never calls it, which is why it asserts whole
+ *     emitted rows rather than the helper's return value.
+ *
+ * Everything else in this file stays green under both, which is the asymmetry
+ * that matters: nothing about a property WITHOUT a default changes.
  */
 describe('renderRequiredCell — a `.default()` member is author-omittable (#8703)', () => {
   it('renders a required-in-output-shape member with a default as optional, naming the value', () => {
@@ -203,6 +213,20 @@ describe('renderRequiredCell — a `.default()` member is author-omittable (#870
     expect(renderRequiredCell({ default: null }, true)).toBe('optional (default: `null`)');
     expect(renderRequiredCell({ type: 'integer', default: 0 }, true)).toBe('optional (default: `0`)');
     expect(renderRequiredCell({ type: 'string', default: '' }, true)).toBe('optional (default: `""`)');
+  });
+
+  it('spells a wide but flat default — the side of the gap the budget is set from', () => {
+    // 56 characters, and one of the real emitted values the 64-character budget
+    // exists to keep: an author can retype it, so withholding it would cost
+    // more than the columns it spends. Everything the budget DOES withhold is
+    // 88 characters or wider and structural (see INLINE_DEFAULT_WIDTH_LIMIT).
+    const licenses = ['MIT', 'Apache-2.0', 'BSD-3-Clause', 'BSD-2-Clause', 'ISC'];
+    expect(JSON.stringify(licenses).length).toBeGreaterThan(48);
+    expect(JSON.stringify(licenses).length).toBeLessThanOrEqual(INLINE_DEFAULT_WIDTH_LIMIT);
+
+    expect(renderRequiredCell({ type: 'array', default: licenses }, true)).toBe(
+      'optional (default: `["MIT","Apache-2.0","BSD-3-Clause","BSD-2-Clause","ISC"]`)',
+    );
   });
 
   it('withholds a default too wide for the cell, still stating that one exists', () => {

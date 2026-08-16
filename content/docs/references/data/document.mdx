@@ -89,7 +89,7 @@ const result = DocumentSchema.parse(data);
 | **size** | `number` | ✅ | File size in bytes |
 | **checksum** | `string` | ✅ | File checksum |
 | **downloadUrl** | `string` | ✅ | Download URL |
-| **isLatest** | `boolean` | ✅ | Is latest version |
+| **isLatest** | `boolean` | optional (default: `false`) | Is latest version |
 
 
 ---
@@ -101,10 +101,10 @@ const result = DocumentSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **provider** | `Enum<'docusign' \| 'adobe-sign' \| 'hellosign' \| 'custom'>` | ✅ | E-signature provider |
-| **enabled** | `boolean` | ✅ | E-signature enabled |
+| **enabled** | `boolean` | optional (default: `false`) | E-signature enabled |
 | **signers** | `{ email: string; name: string; role: string; order: number }[]` | ✅ | Document signers |
-| **expirationDays** | `number` | ✅ | Expiration days |
-| **reminderDays** | `number` | ✅ | Reminder interval days |
+| **expirationDays** | `number` | optional (default: `30`) | Expiration days |
+| **reminderDays** | `number` | optional (default: `7`) | Reminder interval days |
 
 
 ---

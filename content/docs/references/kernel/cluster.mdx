@@ -41,13 +41,13 @@ Cluster capability configuration for the stack.
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **driver** | `Enum<'memory' \| 'redis' \| 'postgres' \| 'nats' \| 'custom'>` | ✅ | Cluster transport driver. Defaults to in-memory single-process. |
+| **driver** | `Enum<'memory' \| 'redis' \| 'postgres' \| 'nats' \| 'custom'>` | optional (default: `"memory"`) | Cluster transport driver. Defaults to in-memory single-process. |
 | **url** | `string` | optional | Driver-specific connection URL. |
-| **useExistingPool** | `boolean` | ✅ | Reuse the main DB pool for the postgres driver. |
+| **useExistingPool** | `boolean` | optional (default: `true`) | Reuse the main DB pool for the postgres driver. |
 | **nodeId** | `string` | optional | Stable node identifier. Auto-generated when absent. |
-| **heartbeatMs** | `integer` | ✅ | Leader-election heartbeat interval in milliseconds. |
-| **lockTtlMs** | `integer` | ✅ | Leader-election lock TTL in milliseconds (≥ 3× heartbeatMs). |
-| **tenantIsolation** | `Enum<'channel-prefix' \| 'none'>` | ✅ | Channel/key namespacing strategy for multi-tenant deployments. |
+| **heartbeatMs** | `integer` | optional (default: `5000`) | Leader-election heartbeat interval in milliseconds. |
+| **lockTtlMs** | `integer` | optional (default: `15000`) | Leader-election lock TTL in milliseconds (≥ 3× heartbeatMs). |
+| **tenantIsolation** | `Enum<'channel-prefix' \| 'none'>` | optional (default: `"channel-prefix"`) | Channel/key namespacing strategy for multi-tenant deployments. |
 | **driverOptions** | `Record<string, any>` | optional | Driver-specific opaque options. |
 
 
@@ -88,7 +88,7 @@ Per-emit cluster routing & ordering options.
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **scope** | `Enum<'local' \| 'cluster' \| 'tenant'>` | ✅ | Delivery scope. Default `local` for backward compatibility. |
+| **scope** | `Enum<'local' \| 'cluster' \| 'tenant'>` | optional (default: `"local"`) | Delivery scope. Default `local` for backward compatibility. |
 | **deliverySemantics** | `Enum<'best-effort' \| 'at-least-once' \| 'exactly-once'>` | optional | Delivery guarantee. Default depends on scope. |
 | **partitionKey** | `string` | optional | Stable key that guarantees emit-order delivery for same-key events. |
 
@@ -143,7 +143,7 @@ Service-registration annotations governing cluster behaviour.
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **clusterScope** | `Enum<'node' \| 'cluster'>` | ✅ | Per-node vs cluster-singleton presence. |
+| **clusterScope** | `Enum<'node' \| 'cluster'>` | optional (default: `"node"`) | Per-node vs cluster-singleton presence. |
 | **leaderStrategy** | `Enum<'leader-elected' \| 'partitioned' \| 'idempotent-broadcast'>` | optional | How the cluster-singleton invariant is maintained. |
 | **clusterId** | `string` | optional | Logical cluster identity used for leader election (defaults to service name). |
 

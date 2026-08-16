@@ -50,7 +50,7 @@ Advanced / low-level Better-Auth options
 | :--- | :--- | :--- | :--- |
 | **secret** | `string` | optional | Encryption secret |
 | **baseUrl** | `string` | optional | Base URL for auth routes |
-| **uiBasePath** | `string` | ✅ | Basename where the auth UI (Console) is mounted (default `/_console`) |
+| **uiBasePath** | `string` | optional (default: `"/_console"`) | Basename where the auth UI (Console) is mounted (default `/_console`) |
 | **databaseUrl** | `string` | optional | Database connection string |
 | **providers** | `{ id: string; clientId: string; clientSecret: string; scope?: string[] }[]` | optional |  |
 | **plugins** | `{ organization: boolean; twoFactor: boolean; passkeys: boolean; passwordRejectBreached: boolean; … }` | optional |  |
@@ -73,16 +73,16 @@ Advanced / low-level Better-Auth options
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **organization** | `boolean` | ✅ | Enable Organization/Teams support (frontend AuthProvider expects this enabled) |
-| **twoFactor** | `boolean` | ✅ | Enable 2FA |
-| **passkeys** | `boolean` | ✅ | Enable Passkey support |
-| **passwordRejectBreached** | `boolean` | ✅ | Reject passwords found in the Have I Been Pwned breach corpus (enables better-auth's haveibeenpwned plugin) |
-| **magicLink** | `boolean` | ✅ | Enable Magic Link login |
-| **oidcProvider** | `boolean` | ✅ | Enable the OpenID Connect provider plugin (acts as an OIDC IdP) |
+| **organization** | `boolean` | optional (default: `true`) | Enable Organization/Teams support (frontend AuthProvider expects this enabled) |
+| **twoFactor** | `boolean` | optional (default: `false`) | Enable 2FA |
+| **passkeys** | `boolean` | optional (default: `false`) | Enable Passkey support |
+| **passwordRejectBreached** | `boolean` | optional (default: `false`) | Reject passwords found in the Have I Been Pwned breach corpus (enables better-auth's haveibeenpwned plugin) |
+| **magicLink** | `boolean` | optional (default: `false`) | Enable Magic Link login |
+| **oidcProvider** | `boolean` | optional (default: `false`) | Enable the OpenID Connect provider plugin (acts as an OIDC IdP) |
 | **dynamicClientRegistration** | `boolean` | optional | Allow unauthenticated RFC 7591 Dynamic Client Registration (default: follows OS_MCP_SERVER_ENABLED) |
-| **deviceAuthorization** | `boolean` | ✅ | Enable RFC 8628 Device Authorization Grant (CLI / TV-style login) |
-| **admin** | `boolean` | ✅ | Enable platform admin operations (ban/unban, set-password, impersonate, set-role) |
-| **phoneNumber** | `boolean` | ✅ | Enable phone-number sign-in (phone + password; OTP sign-in/reset when an SMS service is configured) |
+| **deviceAuthorization** | `boolean` | optional (default: `false`) | Enable RFC 8628 Device Authorization Grant (CLI / TV-style login) |
+| **admin** | `boolean` | optional (default: `false`) | Enable platform admin operations (ban/unban, set-password, impersonate, set-role) |
+| **phoneNumber** | `boolean` | optional (default: `false`) | Enable phone-number sign-in (phone + password; OTP sign-in/reset when an SMS service is configured) |
 
 
 ---
@@ -109,7 +109,7 @@ Email and password authentication options forwarded to better-auth
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable email/password auth |
+| **enabled** | `boolean` | optional (default: `true`) | Enable email/password auth |
 | **disableSignUp** | `boolean` | optional | Disable new user registration via email/password |
 | **requireEmailVerification** | `boolean` | optional | Require email verification before creating a session |
 | **minPasswordLength** | `number` | optional | Minimum password length (default 8) |
@@ -143,8 +143,8 @@ Email verification options forwarded to better-auth
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable mutual TLS authentication |
-| **clientCertRequired** | `boolean` | ✅ | Require client certificates for all connections |
+| **enabled** | `boolean` | optional (default: `false`) | Enable mutual TLS authentication |
+| **clientCertRequired** | `boolean` | optional (default: `false`) | Require client certificates for all connections |
 | **trustedCAs** | `string[]` | ✅ | PEM-encoded CA certificates or file paths |
 | **crlUrl** | `string` | optional | Certificate Revocation List (CRL) URL |
 | **ocspUrl** | `string` | optional | Online Certificate Status Protocol (OCSP) URL |

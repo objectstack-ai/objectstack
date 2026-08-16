@@ -70,8 +70,8 @@ const result = ActionNavItemSchema.parse(data);
 | **description** | `string \| Record<string, string>` | optional | App description |
 | **icon** | `string` | optional | App icon used in the App Launcher |
 | **branding** | `{ primaryColor?: string; accentColor?: string; logo?: string; favicon?: string }` | optional | App-specific branding |
-| **active** | `boolean` | optional | Whether the app is enabled |
-| **isDefault** | `boolean` | optional | Is default app |
+| **active** | `boolean` | optional (default: `true`) | Whether the app is enabled |
+| **isDefault** | `boolean` | optional (default: `false`) | Is default app |
 | **hidden** | `boolean` | optional | Hide from the App Switcher; the shell surfaces hidden apps via the avatar menu instead (navigation only — never an access gate) |
 | **_unpublished** | `boolean` | optional | Machine-managed publish gate (ADR-0045 §3) — true = unpublished, externally unobservable. Written by AI materialization, cleared by publish-drafts. Never authored. |
 | **navigation** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | optional | Full navigation tree for the app sidebar |
@@ -122,8 +122,8 @@ const result = ActionNavItemSchema.parse(data);
 | **label** | `string \| Record<string, string>` | ✅ | Dropdown label |
 | **icon** | `string` | optional | Icon name |
 | **optionsSource** | `{ endpoint: string; valueKey: string; labelKey: string; filter?: object[] }` | ✅ | Option data source |
-| **allValue** | `string` | ✅ | Sentinel value meaning "no concrete selection yet" (empty string is almost always right) |
-| **persist** | `Enum<'query' \| 'session' \| 'none'>` | ✅ | Persist selection via URL query, sessionStorage, or not at all |
+| **allValue** | `string` | optional (default: `""`) | Sentinel value meaning "no concrete selection yet" (empty string is almost always right) |
+| **persist** | `Enum<'query' \| 'session' \| 'none'>` | optional (default: `"query"`) | Persist selection via URL query, sessionStorage, or not at all |
 
 
 ---
@@ -190,7 +190,7 @@ const result = ActionNavItemSchema.parse(data);
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'group'` | ✅ |  |
-| **expanded** | `boolean` | optional | Default expansion state in sidebar |
+| **expanded** | `boolean` | optional (default: `false`) | Default expansion state in sidebar |
 
 
 ---
@@ -220,7 +220,7 @@ A navigation contribution: a package injecting nav items into an app it does not
 | :--- | :--- | :--- | :--- |
 | **app** | `string` | ✅ | Target app name to contribute navigation into (e.g. "setup") |
 | **group** | `string` | optional | Target group nav-item id to append into (e.g. "group_integrations"); omit to append at the app top level |
-| **priority** | `integer` | optional | Merge priority within the target group — lower applied first (matches object extender priority) |
+| **priority** | `integer` | optional (default: `200`) | Merge priority within the target group — lower applied first (matches object extender priority) |
 | **items** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Navigation items contributed into the target app/group |
 
 
@@ -328,7 +328,7 @@ This schema accepts one of the following structures:
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'url'` | ✅ |  |
 | **url** | `string` | ✅ | Target external URL |
-| **target** | `Enum<'_self' \| '_blank'>` | optional | Link target window |
+| **target** | `Enum<'_self' \| '_blank'>` | optional (default: `"_self"`) | Link target window |
 
 ---
 
@@ -435,7 +435,7 @@ This schema accepts one of the following structures:
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'group'` | ✅ |  |
-| **expanded** | `boolean` | optional | Default expansion state in sidebar |
+| **expanded** | `boolean` | optional (default: `false`) | Default expansion state in sidebar |
 | **children** | `[NavigationItem](#navigationitem)[]` | ✅ | Child navigation items |
 
 ---
@@ -533,7 +533,7 @@ This schema accepts one of the following structures:
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'url'` | ✅ |  |
 | **url** | `string` | ✅ | Target external URL |
-| **target** | `Enum<'_self' \| '_blank'>` | optional | Link target window |
+| **target** | `Enum<'_self' \| '_blank'>` | optional (default: `"_self"`) | Link target window |
 
 
 ---

@@ -60,13 +60,13 @@ Inline aggregation for an object-bound chart
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'line' \| 'region'>` | ✅ |  |
-| **axis** | `Enum<'x' \| 'y'>` | ✅ |  |
+| **type** | `Enum<'line' \| 'region'>` | optional (default: `"line"`) |  |
+| **axis** | `Enum<'x' \| 'y'>` | optional (default: `"y"`) |  |
 | **value** | `number \| string` | ✅ | Start value |
 | **endValue** | `number \| string` | optional | End value for regions |
 | **color** | `string` | optional |  |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
-| **style** | `Enum<'solid' \| 'dashed' \| 'dotted'>` | ✅ |  |
+| **style** | `Enum<'solid' \| 'dashed' \| 'dotted'>` | optional (default: `"dashed"`) |  |
 
 
 ---
@@ -83,9 +83,9 @@ Inline aggregation for an object-bound chart
 | **min** | `number` | optional | Minimum value |
 | **max** | `number` | optional | Maximum value |
 | **stepSize** | `number` | optional | Step size for ticks |
-| **showGridLines** | `boolean` | ✅ |  |
+| **showGridLines** | `boolean` | optional (default: `true`) |  |
 | **position** | `Enum<'left' \| 'right' \| 'top' \| 'bottom'>` | optional | Axis position |
-| **logarithmic** | `boolean` | ✅ |  |
+| **logarithmic** | `boolean` | optional (default: `false`) |  |
 
 
 ---
@@ -105,8 +105,8 @@ Inline aggregation for an object-bound chart
 | **series** | `{ name: string; label?: string \| Record<string, string>; type?: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| … +13 more>; color?: string; … }[]` | optional | Defined series configuration |
 | **colors** | `string[] \| Record<string, string>` | optional | Color palette (string[]) or value→color map (`{ value: color }`) |
 | **height** | `number` | optional | Fixed plot height in pixels (overrides the container default) |
-| **showLegend** | `boolean` | ✅ | Display legend |
-| **showDataLabels** | `boolean` | ✅ | Display data labels |
+| **showLegend** | `boolean` | optional (default: `true`) | Display legend |
+| **showDataLabels** | `boolean` | optional (default: `false`) | Display data labels |
 | **annotations** | `{ type: Enum<'line' \| 'region'>; axis: Enum<'x' \| 'y'>; value: number \| string; endValue?: number \| string; … }[]` | optional | Reference lines/bands drawn over the plot: `{ type: "line" \| "region", axis: "x" \| "y", value, endValue?, color?, label?, style? }` |
 | **interaction** | `{ tooltips: boolean; brush: boolean }` | optional | Interaction toggles: `{ tooltips?, brush? }` |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
@@ -188,8 +188,8 @@ Type: `string`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **tooltips** | `boolean` | ✅ | Show the hover tooltip |
-| **brush** | `boolean` | ✅ | Show the range selector under the plot |
+| **tooltips** | `boolean` | optional (default: `true`) | Show the hover tooltip |
+| **brush** | `boolean` | optional (default: `false`) | Show the range selector under the plot |
 
 
 ---
@@ -205,8 +205,8 @@ Type: `string`
 | **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'combo' \| 'gauge' \| 'solid-gauge' \| … +6 more>` | optional | Override chart type for this series |
 | **color** | `string` | optional | Series color (hex/rgb/token) |
 | **stack** | `string` | optional | Stack identifier to group series |
-| **yAxis** | `Enum<'left' \| 'right'>` | ✅ | Bind to specific Y-Axis |
-| **variant** | `Enum<'primary' \| 'comparison'>` | optional | Series visual role |
+| **yAxis** | `Enum<'left' \| 'right'>` | optional (default: `"left"`) | Bind to specific Y-Axis |
+| **variant** | `Enum<'primary' \| 'comparison'>` | optional (default: `"primary"`) | Series visual role |
 | **dashArray** | `string` | optional | SVG stroke-dasharray override |
 | **opacity** | `number` | optional | Series opacity override |
 

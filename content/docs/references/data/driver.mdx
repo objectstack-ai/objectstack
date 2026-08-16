@@ -108,10 +108,10 @@ const result = DriverCapabilitiesSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **min** | `number` | ✅ | Minimum number of connections in pool |
-| **max** | `number` | ✅ | Maximum number of connections in pool |
-| **idleTimeoutMillis** | `number` | ✅ | Time in ms before idle connection is closed |
-| **connectionTimeoutMillis** | `number` | ✅ | Time in ms to wait for available connection |
+| **min** | `number` | optional (default: `2`) | Minimum number of connections in pool |
+| **max** | `number` | optional (default: `10`) | Maximum number of connections in pool |
+| **idleTimeoutMillis** | `number` | optional (default: `30000`) | Time in ms before idle connection is closed |
+| **connectionTimeoutMillis** | `number` | optional (default: `5000`) | Time in ms to wait for available connection |
 
 
 ---

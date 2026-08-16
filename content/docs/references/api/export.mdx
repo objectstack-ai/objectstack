@@ -38,13 +38,13 @@ const result = CreateExportJobRequestSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name to export |
-| **format** | `Enum<'csv' \| 'json' \| 'jsonl' \| 'xlsx' \| 'parquet'>` | ✅ | Export file format |
+| **format** | `Enum<'csv' \| 'json' \| 'jsonl' \| 'xlsx' \| 'parquet'>` | optional (default: `"csv"`) | Export file format |
 | **fields** | `string[]` | optional | Specific fields to include (omit for all fields) |
 | **filter** | `Record<string, any>` | optional | Filter criteria for records to export |
 | **sort** | `{ field: string; direction: Enum<'asc' \| 'desc'> }[]` | optional | Sort order for exported records |
 | **limit** | `integer` | optional | Maximum number of records to export |
-| **includeHeaders** | `boolean` | ✅ | Include header row (CSV/XLSX) |
-| **encoding** | `string` | ✅ | Character encoding for the export file |
+| **includeHeaders** | `boolean` | optional (default: `true`) | Include header row (CSV/XLSX) |
+| **encoding** | `string` | optional (default: `"utf-8"`) | Character encoding for the export file |
 | **templateId** | `string` | optional | Export template ID for predefined field mappings |
 
 
@@ -76,15 +76,15 @@ const result = CreateExportJobRequestSchema.parse(data);
 | **xlsxBase64** | `string` | optional | Base64-encoded .xlsx workbook bytes (when format = xlsx); parsed server-side |
 | **sheet** | `string \| integer` | optional | Worksheet name or 1-based index to read (xlsx; defaults to the first sheet) |
 | **mapping** | `Record<string, string> \| { sourceField: string; targetField: string; targetLabel?: string; transform: Enum<'none' \| 'uppercase' \| 'lowercase' \| 'trim' \| 'date_format' \| 'lookup'>; … }[]` | optional | Source column → target field mapping |
-| **dryRun** | `boolean` | ✅ | Validate + coerce every row without persisting. The verdict is the engine's own write-path validation, with one boundary an author should know: a preview runs NO automations. Hooks never fire in a dry run (#6037) — a preview that executed user-authored side effects (mail, outbound calls, writes to other objects) would be the retired `validateOnly` defect in a new spelling. So a dry run with `runAutomations: true` can report `required` for a field a `beforeInsert` hook would populate during the real import; for hook-derived fields the real write is authoritative. |
-| **writeMode** | `Enum<'insert' \| 'update' \| 'upsert'>` | ✅ | insert / update / upsert semantics |
+| **dryRun** | `boolean` | optional (default: `false`) | Validate + coerce every row without persisting. The verdict is the engine's own write-path validation, with one boundary an author should know: a preview runs NO automations. Hooks never fire in a dry run (#6037) — a preview that executed user-authored side effects (mail, outbound calls, writes to other objects) would be the retired `validateOnly` defect in a new spelling. So a dry run with `runAutomations: true` can report `required` for a field a `beforeInsert` hook would populate during the real import; for hook-derived fields the real write is authoritative. |
+| **writeMode** | `Enum<'insert' \| 'update' \| 'upsert'>` | optional (default: `"insert"`) | insert / update / upsert semantics |
 | **matchFields** | `string[]` | optional | Fields that identify an existing record (required for update/upsert) |
-| **runAutomations** | `boolean` | ✅ | Fire triggers/hooks for each imported row. ON by default, and opting out must be explicit: automations always ran on import historically (the engine ignored this flag until #2922), so a caller that wants a silent bulk load sends `runAutomations: false` — omitting the key runs them. This matches platform convention (Salesforce fires triggers on import by default). One boundary: a `dryRun` preview runs NO automations whatever this flag says (#6037). |
-| **treatAsHistorical** | `boolean` | ✅ | Import as established historical facts. Two effects, both off by default so a normal import is unchanged: (1) skip the state_machine rule so mid-lifecycle rows (e.g. already-closed tickets, closed_won deals) are not rejected by initialStates (#3479); and (2) preserve the original audit timeline — keep the supplied created_at / updated_at / updated_by and author-declared business readonly fields (e.g. closed_at, resolved_by) instead of stamping-now / stripping them (#3493). Undoing a historical import mirrors (2): the captured pre-import values are restored verbatim rather than re-stamped (#3556). |
-| **trimWhitespace** | `boolean` | ✅ | Trim leading/trailing whitespace from string cells |
+| **runAutomations** | `boolean` | optional (default: `true`) | Fire triggers/hooks for each imported row. ON by default, and opting out must be explicit: automations always ran on import historically (the engine ignored this flag until #2922), so a caller that wants a silent bulk load sends `runAutomations: false` — omitting the key runs them. This matches platform convention (Salesforce fires triggers on import by default). One boundary: a `dryRun` preview runs NO automations whatever this flag says (#6037). |
+| **treatAsHistorical** | `boolean` | optional (default: `false`) | Import as established historical facts. Two effects, both off by default so a normal import is unchanged: (1) skip the state_machine rule so mid-lifecycle rows (e.g. already-closed tickets, closed_won deals) are not rejected by initialStates (#3479); and (2) preserve the original audit timeline — keep the supplied created_at / updated_at / updated_by and author-declared business readonly fields (e.g. closed_at, resolved_by) instead of stamping-now / stripping them (#3493). Undoing a historical import mirrors (2): the captured pre-import values are restored verbatim rather than re-stamped (#3556). |
+| **trimWhitespace** | `boolean` | optional (default: `true`) | Trim leading/trailing whitespace from string cells |
 | **nullValues** | `string[]` | optional | Strings treated as null/blank (besides empty string) |
-| **createMissingOptions** | `boolean` | ✅ | Keep unmatched select values instead of failing the row |
-| **skipBlankMatchKey** | `boolean` | ✅ | Skip rows whose matchFields are blank (default: upsert creates them, update skips them) |
+| **createMissingOptions** | `boolean` | optional (default: `false`) | Keep unmatched select values instead of failing the row |
+| **skipBlankMatchKey** | `boolean` | optional (default: `false`) | Skip rows whose matchFields are blank (default: upsert creates them, update skips them) |
 
 
 ---
@@ -206,9 +206,9 @@ const result = CreateExportJobRequestSchema.parse(data);
 | **sourceField** | `string` | ✅ | Field name in the source data (import) or object (export) |
 | **targetField** | `string` | ✅ | Field name in the target object (import) or file column (export) |
 | **targetLabel** | `string` | optional | Display label for the target column (export) |
-| **transform** | `Enum<'none' \| 'uppercase' \| 'lowercase' \| 'trim' \| 'date_format' \| 'lookup'>` | ✅ | Transformation to apply during mapping |
+| **transform** | `Enum<'none' \| 'uppercase' \| 'lowercase' \| 'trim' \| 'date_format' \| 'lookup'>` | optional (default: `"none"`) | Transformation to apply during mapping |
 | **defaultValue** | `any` | optional | Default value if source field is null/empty |
-| **required** | `boolean` | ✅ | Whether this field is required (import validation) |
+| **required** | `boolean` | optional (default: `false`) | Whether this field is required (import validation) |
 
 
 ---
@@ -365,15 +365,15 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | **xlsxBase64** | `string` | optional | Base64-encoded .xlsx workbook bytes (when format = xlsx); parsed server-side |
 | **sheet** | `string \| integer` | optional | Worksheet name or 1-based index to read (xlsx; defaults to the first sheet) |
 | **mapping** | `Record<string, string> \| { sourceField: string; targetField: string; targetLabel?: string; transform: Enum<'none' \| 'uppercase' \| 'lowercase' \| 'trim' \| 'date_format' \| 'lookup'>; … }[]` | optional | Source column → target field mapping |
-| **dryRun** | `boolean` | ✅ | Validate + coerce every row without persisting. The verdict is the engine's own write-path validation, with one boundary an author should know: a preview runs NO automations. Hooks never fire in a dry run (#6037) — a preview that executed user-authored side effects (mail, outbound calls, writes to other objects) would be the retired `validateOnly` defect in a new spelling. So a dry run with `runAutomations: true` can report `required` for a field a `beforeInsert` hook would populate during the real import; for hook-derived fields the real write is authoritative. |
-| **writeMode** | `Enum<'insert' \| 'update' \| 'upsert'>` | ✅ | insert / update / upsert semantics |
+| **dryRun** | `boolean` | optional (default: `false`) | Validate + coerce every row without persisting. The verdict is the engine's own write-path validation, with one boundary an author should know: a preview runs NO automations. Hooks never fire in a dry run (#6037) — a preview that executed user-authored side effects (mail, outbound calls, writes to other objects) would be the retired `validateOnly` defect in a new spelling. So a dry run with `runAutomations: true` can report `required` for a field a `beforeInsert` hook would populate during the real import; for hook-derived fields the real write is authoritative. |
+| **writeMode** | `Enum<'insert' \| 'update' \| 'upsert'>` | optional (default: `"insert"`) | insert / update / upsert semantics |
 | **matchFields** | `string[]` | optional | Fields that identify an existing record (required for update/upsert) |
-| **runAutomations** | `boolean` | ✅ | Fire triggers/hooks for each imported row. ON by default, and opting out must be explicit: automations always ran on import historically (the engine ignored this flag until #2922), so a caller that wants a silent bulk load sends `runAutomations: false` — omitting the key runs them. This matches platform convention (Salesforce fires triggers on import by default). One boundary: a `dryRun` preview runs NO automations whatever this flag says (#6037). |
-| **treatAsHistorical** | `boolean` | ✅ | Import as established historical facts. Two effects, both off by default so a normal import is unchanged: (1) skip the state_machine rule so mid-lifecycle rows (e.g. already-closed tickets, closed_won deals) are not rejected by initialStates (#3479); and (2) preserve the original audit timeline — keep the supplied created_at / updated_at / updated_by and author-declared business readonly fields (e.g. closed_at, resolved_by) instead of stamping-now / stripping them (#3493). Undoing a historical import mirrors (2): the captured pre-import values are restored verbatim rather than re-stamped (#3556). |
-| **trimWhitespace** | `boolean` | ✅ | Trim leading/trailing whitespace from string cells |
+| **runAutomations** | `boolean` | optional (default: `true`) | Fire triggers/hooks for each imported row. ON by default, and opting out must be explicit: automations always ran on import historically (the engine ignored this flag until #2922), so a caller that wants a silent bulk load sends `runAutomations: false` — omitting the key runs them. This matches platform convention (Salesforce fires triggers on import by default). One boundary: a `dryRun` preview runs NO automations whatever this flag says (#6037). |
+| **treatAsHistorical** | `boolean` | optional (default: `false`) | Import as established historical facts. Two effects, both off by default so a normal import is unchanged: (1) skip the state_machine rule so mid-lifecycle rows (e.g. already-closed tickets, closed_won deals) are not rejected by initialStates (#3479); and (2) preserve the original audit timeline — keep the supplied created_at / updated_at / updated_by and author-declared business readonly fields (e.g. closed_at, resolved_by) instead of stamping-now / stripping them (#3493). Undoing a historical import mirrors (2): the captured pre-import values are restored verbatim rather than re-stamped (#3556). |
+| **trimWhitespace** | `boolean` | optional (default: `true`) | Trim leading/trailing whitespace from string cells |
 | **nullValues** | `string[]` | optional | Strings treated as null/blank (besides empty string) |
-| **createMissingOptions** | `boolean` | ✅ | Keep unmatched select values instead of failing the row |
-| **skipBlankMatchKey** | `boolean` | ✅ | Skip rows whose matchFields are blank (default: upsert creates them, update skips them) |
+| **createMissingOptions** | `boolean` | optional (default: `false`) | Keep unmatched select values instead of failing the row |
+| **skipBlankMatchKey** | `boolean` | optional (default: `false`) | Skip rows whose matchFields are blank (default: upsert creates them, update skips them) |
 
 
 ---
@@ -421,10 +421,10 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **mode** | `Enum<'strict' \| 'lenient' \| 'dry_run'>` | ✅ | Validation mode for the import |
+| **mode** | `Enum<'strict' \| 'lenient' \| 'dry_run'>` | optional (default: `"strict"`) | Validation mode for the import |
 | **deduplication** | `{ strategy: Enum<'skip' \| 'update' \| 'create_new' \| 'fail'>; matchFields: string[] }` | optional | Deduplication configuration |
-| **maxErrors** | `integer` | ✅ | Maximum validation errors before aborting |
-| **trimWhitespace** | `boolean` | ✅ | Trim leading/trailing whitespace from string fields |
+| **maxErrors** | `integer` | optional (default: `100`) | Maximum validation errors before aborting |
+| **trimWhitespace** | `boolean` | optional (default: `true`) | Trim leading/trailing whitespace from string fields |
 | **dateFormat** | `string` | optional | Expected date format in import data (e.g., "YYYY-MM-DD") |
 | **nullValues** | `string[]` | optional | Strings to treat as null (e.g., ["", "N/A", "null"]) |
 
@@ -475,7 +475,7 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | optional | Filter by object name |
 | **status** | `Enum<'pending' \| 'processing' \| 'completed' \| 'failed' \| 'cancelled' \| 'expired'>` | optional | Filter by job status |
-| **limit** | `integer` | ✅ | Maximum number of jobs to return |
+| **limit** | `integer` | optional (default: `20`) | Maximum number of jobs to return |
 | **cursor** | `string` | optional | Pagination cursor from a previous response |
 
 
@@ -503,8 +503,8 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | optional | Filter to one target object |
 | **status** | `Enum<'pending' \| 'running' \| 'succeeded' \| 'failed' \| 'cancelled'>` | optional | Filter by job status |
-| **limit** | `integer` | ✅ | Max rows to return |
-| **offset** | `integer` | ✅ | Pagination offset |
+| **limit** | `integer` | optional (default: `50`) | Max rows to return |
+| **offset** | `integer` | optional (default: `0`) | Pagination offset |
 
 
 ---
@@ -529,7 +529,7 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | **name** | `string` | ✅ | Schedule name (snake_case) |
 | **label** | `string` | optional | Human-readable label |
 | **object** | `string` | ✅ | Object name to export |
-| **format** | `Enum<'csv' \| 'json' \| 'jsonl' \| 'xlsx' \| 'parquet'>` | optional | Export file format |
+| **format** | `Enum<'csv' \| 'json' \| 'jsonl' \| 'xlsx' \| 'parquet'>` | optional (default: `"csv"`) | Export file format |
 | **fields** | `string[]` | optional | Fields to include |
 | **filter** | `Record<string, any>` | optional | Record filter criteria |
 | **templateId** | `string` | optional | Export template ID for field mappings |
@@ -563,13 +563,13 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | **name** | `string` | ✅ | Schedule name (snake_case) |
 | **label** | `string` | optional | Human-readable label |
 | **object** | `string` | ✅ | Object name to export |
-| **format** | `Enum<'csv' \| 'json' \| 'jsonl' \| 'xlsx' \| 'parquet'>` | optional | Export file format |
+| **format** | `Enum<'csv' \| 'json' \| 'jsonl' \| 'xlsx' \| 'parquet'>` | optional (default: `"csv"`) | Export file format |
 | **fields** | `string[]` | optional | Fields to include |
 | **filter** | `Record<string, any>` | optional | Record filter criteria |
 | **templateId** | `string` | optional | Export template ID for field mappings |
 | **schedule** | `{ cronExpression: string \| object; timezone?: string }` | ✅ | Schedule timing configuration |
 | **delivery** | `{ method: Enum<'email' \| 'storage' \| 'webhook'>; recipients?: string[]; storagePath?: string; webhookUrl?: string }` | ✅ | Export delivery configuration |
-| **enabled** | `boolean` | optional | Whether the scheduled export is active |
+| **enabled** | `boolean` | optional (default: `true`) | Whether the scheduled export is active |
 | **lastRunAt** | `string` | optional | Last execution timestamp |
 | **nextRunAt** | `string` | optional | Next scheduled execution |
 | **createdAt** | `string` | optional | Creation timestamp |

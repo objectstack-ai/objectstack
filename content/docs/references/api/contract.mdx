@@ -332,7 +332,7 @@ const result = ApiErrorSchema.parse(data);
 | **strategy** | `Enum<'dataloader' \| 'windowed' \| 'prefetch'>` | ✅ | Batch loading strategy type |
 | **windowMs** | `number` | optional | Collection window duration in milliseconds (for windowed strategy) |
 | **prefetchDepth** | `integer` | optional | Depth of relation prefetching (for prefetch strategy) |
-| **associationLoading** | `Enum<'lazy' \| 'eager' \| 'batch'>` | ✅ | How to load related associations |
+| **associationLoading** | `Enum<'lazy' \| 'eager' \| 'batch'>` | optional (default: `"batch"`) | How to load related associations |
 
 
 ---
@@ -344,7 +344,7 @@ const result = ApiErrorSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **records** | `Record<string, any>[]` | ✅ | Array of records to process |
-| **allOrNone** | `boolean` | ✅ | If true, rollback entire transaction on any failure |
+| **allOrNone** | `boolean` | optional (default: `true`) | If true, rollback entire transaction on any failure |
 
 
 ---
@@ -380,12 +380,12 @@ const result = ApiErrorSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **maxBatchSize** | `integer` | ✅ | Maximum number of keys per batch load |
-| **batchScheduleFn** | `Enum<'microtask' \| 'timeout' \| 'manual'>` | ✅ | Scheduling strategy for collecting batch keys |
-| **cacheEnabled** | `boolean` | ✅ | Enable per-request result caching |
+| **maxBatchSize** | `integer` | optional (default: `100`) | Maximum number of keys per batch load |
+| **batchScheduleFn** | `Enum<'microtask' \| 'timeout' \| 'manual'>` | optional (default: `"microtask"`) | Scheduling strategy for collecting batch keys |
+| **cacheEnabled** | `boolean` | optional (default: `true`) | Enable per-request result caching |
 | **cacheKeyFn** | `string` | optional | Name or identifier of the cache key function |
 | **cacheTtl** | `number` | optional | Cache time-to-live in seconds (0 = no expiration) |
-| **coalesceRequests** | `boolean` | ✅ | Deduplicate identical requests within a batch window |
+| **coalesceRequests** | `boolean` | optional (default: `true`) | Deduplicate identical requests within a batch window |
 | **maxConcurrency** | `integer` | optional | Maximum parallel batch requests |
 
 
@@ -484,7 +484,7 @@ const result = ApiErrorSchema.parse(data);
 | **batchStrategy** | `{ strategy: Enum<'dataloader' \| 'windowed' \| 'prefetch'>; windowMs?: number; prefetchDepth?: integer; associationLoading: Enum<'lazy' \| 'eager' \| 'batch'> }` | optional | Batch loading strategy configuration |
 | **maxQueryDepth** | `integer` | ✅ | Maximum depth for nested relation queries |
 | **queryComplexityLimit** | `number` | optional | Maximum allowed query complexity score |
-| **enableQueryPlan** | `boolean` | ✅ | Log query execution plans for debugging |
+| **enableQueryPlan** | `boolean` | optional (default: `false`) | Log query execution plans for debugging |
 
 
 ---

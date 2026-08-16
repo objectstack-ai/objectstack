@@ -41,13 +41,13 @@ PostgreSQL connection configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **url** | `string` | optional | Connection URI (supersedes the discrete fields; must not embed a password — bind the secret instead) |
-| **host** | `string` | ✅ | Host address |
-| **port** | `integer` | ✅ | Port number |
+| **host** | `string` | optional (default: `"localhost"`) | Host address |
+| **port** | `integer` | optional (default: `5432`) | Port number |
 | **database** | `string` | optional | Database name |
 | **username** | `string` | optional | Authentication user |
 | **password** | `never` | optional | Set through the connection form's secret field or `external.credentialsRef` — encrypted into `sys_secret`, never stored in `config` (#7990) |
 | **ssl** | `boolean` | optional | Enable TLS. Certificates go in the datasource-level `ssl` block. |
-| **schema** | `string` | ✅ | Default schema (knex searchPath) |
+| **schema** | `string` | optional (default: `"public"`) | Default schema (knex searchPath) |
 | **applicationName** | `string` | optional | Postgres application_name |
 | **statementTimeout** | `integer` | optional | Abort statements running longer than this (ms) |
 | **autoMigrate** | `Enum<'off' \| 'safe'>` | optional | Dev-only non-destructive schema self-heal (#2186) |

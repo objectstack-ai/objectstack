@@ -73,17 +73,17 @@ const result = ApiChangelogEntrySchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable API documentation |
-| **title** | `string` | ✅ | Documentation title |
+| **enabled** | `boolean` | optional (default: `true`) | Enable API documentation |
+| **title** | `string` | optional (default: `"API Documentation"`) | Documentation title |
 | **version** | `string` | ✅ | API version |
 | **description** | `string` | optional | API description |
-| **servers** | `{ url: string; description?: string; variables?: Record<string, object> }[]` | ✅ | API server URLs |
+| **servers** | `{ url: string; description?: string; variables?: Record<string, object> }[]` | optional (default: `[]`) | API server URLs |
 | **ui** | `{ type: Enum<'swagger-ui' \| 'redoc' \| 'rapidoc' \| 'stoplight' \| 'scalar' \| 'graphiql' \| 'postman' \| 'custom'>; path: string; theme: Enum<'light' \| 'dark' \| 'auto'>; enableTryItOut: boolean; … }` | optional | Testing UI configuration |
-| **generateOpenApi** | `boolean` | ✅ | Generate OpenAPI 3.0 specification |
-| **generateTestCollections** | `boolean` | ✅ | Generate API test collections |
-| **testCollections** | `{ name: string; description?: string; variables: Record<string, any>; requests: object[]; … }[]` | ✅ | Predefined test collections |
-| **changelog** | `{ version: string; date: string; changes: object; migrationGuide?: string }[]` | ✅ | API version changelog |
-| **codeTemplates** | `{ language: string; name: string; template: string; variables?: string[] }[]` | ✅ | Code generation templates |
+| **generateOpenApi** | `boolean` | optional (default: `true`) | Generate OpenAPI 3.0 specification |
+| **generateTestCollections** | `boolean` | optional (default: `true`) | Generate API test collections |
+| **testCollections** | `{ name: string; description?: string; variables: Record<string, any>; requests: object[]; … }[]` | optional (default: `[]`) | Predefined test collections |
+| **changelog** | `{ version: string; date: string; changes: object; migrationGuide?: string }[]` | optional (default: `[]`) | API version changelog |
+| **codeTemplates** | `{ language: string; name: string; template: string; variables?: string[] }[]` | optional (default: `[]`) | Code generation templates |
 | **termsOfService** | `string` | optional | Terms of service URL |
 | **contact** | `{ name?: string; url?: string; email?: string }` | optional | Contact information |
 | **license** | `{ name: string; url?: string }` | optional | API license |
@@ -102,7 +102,7 @@ const result = ApiChangelogEntrySchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Collection name |
 | **description** | `string` | optional | Collection description |
-| **variables** | `Record<string, any>` | ✅ | Shared variables |
+| **variables** | `Record<string, any>` | optional (default: `{}`) | Shared variables |
 | **requests** | `{ name: string; description?: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE' \| 'HEAD' \| 'OPTIONS'>; url: string; … }[]` | ✅ | Test requests in this collection |
 | **folders** | `{ name: string; description?: string; requests: object[] }[]` | optional | Request folders for organization |
 
@@ -119,10 +119,10 @@ const result = ApiChangelogEntrySchema.parse(data);
 | **description** | `string` | optional | Request description |
 | **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE' \| 'HEAD' \| 'OPTIONS'>` | ✅ | HTTP method |
 | **url** | `string` | ✅ | Request URL (can include variables) |
-| **headers** | `Record<string, string>` | ✅ | Request headers |
-| **queryParams** | `Record<string, string \| number \| boolean>` | ✅ | Query parameters |
+| **headers** | `Record<string, string>` | optional (default: `{}`) | Request headers |
+| **queryParams** | `Record<string, string \| number \| boolean>` | optional (default: `{}`) | Query parameters |
 | **body** | `any` | optional | Request body |
-| **variables** | `Record<string, any>` | ✅ | Template variables |
+| **variables** | `Record<string, any>` | optional (default: `{}`) | Template variables |
 | **expectedResponse** | `{ statusCode: integer; body?: any }` | optional | Expected response for validation |
 
 
@@ -135,14 +135,14 @@ const result = ApiChangelogEntrySchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `Enum<'swagger-ui' \| 'redoc' \| 'rapidoc' \| 'stoplight' \| 'scalar' \| 'graphiql' \| 'postman' \| 'custom'>` | ✅ | Testing UI implementation |
-| **path** | `string` | ✅ | URL path for documentation UI |
-| **theme** | `Enum<'light' \| 'dark' \| 'auto'>` | ✅ | UI color theme |
-| **enableTryItOut** | `boolean` | ✅ | Enable interactive API testing |
-| **enableFilter** | `boolean` | ✅ | Enable endpoint filtering |
-| **enableCors** | `boolean` | ✅ | Enable CORS for browser testing |
-| **defaultModelsExpandDepth** | `integer` | ✅ | Default expand depth for schemas (-1 = fully expand) |
-| **displayRequestDuration** | `boolean` | ✅ | Show request duration |
-| **syntaxHighlighting** | `boolean` | ✅ | Enable syntax highlighting |
+| **path** | `string` | optional (default: `"/api-docs"`) | URL path for documentation UI |
+| **theme** | `Enum<'light' \| 'dark' \| 'auto'>` | optional (default: `"light"`) | UI color theme |
+| **enableTryItOut** | `boolean` | optional (default: `true`) | Enable interactive API testing |
+| **enableFilter** | `boolean` | optional (default: `true`) | Enable endpoint filtering |
+| **enableCors** | `boolean` | optional (default: `true`) | Enable CORS for browser testing |
+| **defaultModelsExpandDepth** | `integer` | optional (default: `1`) | Default expand depth for schemas (-1 = fully expand) |
+| **displayRequestDuration** | `boolean` | optional (default: `true`) | Show request duration |
+| **syntaxHighlighting** | `boolean` | optional (default: `true`) | Enable syntax highlighting |
 | **customCssUrl** | `string` | optional | Custom CSS stylesheet URL |
 | **customJsUrl** | `string` | optional | Custom JavaScript URL |
 | **layout** | `{ showExtensions: boolean; showCommonExtensions: boolean; deepLinking: boolean; displayOperationId: boolean; … }` | optional | Layout configuration |
@@ -233,9 +233,9 @@ const result = ApiChangelogEntrySchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **openapi** | `string` | ✅ | OpenAPI specification version |
+| **openapi** | `string` | optional (default: `"3.0.0"`) | OpenAPI specification version |
 | **info** | `{ title: string; version: string; description?: string; termsOfService?: string; … }` | ✅ | API metadata |
-| **servers** | `{ url: string; description?: string; variables?: Record<string, object> }[]` | ✅ | API servers |
+| **servers** | `{ url: string; description?: string; variables?: Record<string, object> }[]` | optional (default: `[]`) | API servers |
 | **paths** | `Record<string, any>` | ✅ | API paths and operations |
 | **components** | `{ schemas?: Record<string, any>; responses?: Record<string, any>; parameters?: Record<string, any>; examples?: Record<string, any>; … }` | optional | Reusable components |
 | **security** | `Record<string, string[]>[]` | optional | Global security requirements |

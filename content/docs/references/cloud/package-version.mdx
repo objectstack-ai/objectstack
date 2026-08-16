@@ -63,7 +63,7 @@ Package dependency declaration
 | :--- | :--- | :--- | :--- |
 | **packageId** | `string` | ✅ | Manifest ID of the dependency |
 | **versionRange** | `string` | ✅ | Semver version range (e.g. ^1.0.0) |
-| **optional** | `boolean` | ✅ | Whether this dependency is optional |
+| **optional** | `boolean` | optional (default: `false`) | Whether this dependency is optional |
 
 
 ---
@@ -80,11 +80,11 @@ Package manifest snapshot embedded in a package version
 | **version** | `string` | ✅ | Semver version string (e.g. 1.2.3) |
 | **name** | `string` | ✅ | Display name |
 | **description** | `string` | optional | Short description |
-| **scope** | `Enum<'platform' \| 'environment'>` | ✅ | Package scope |
+| **scope** | `Enum<'platform' \| 'environment'>` | optional (default: `"environment"`) | Package scope |
 | **minPlatformVersion** | `string` | optional | Minimum required platform version (semver) |
-| **dependencies** | `{ packageId: string; versionRange: string; optional: boolean }[]` | ✅ | Package dependencies |
-| **metadataTypes** | `string[]` | ✅ | Metadata types provided by this package |
-| **migrations** | `string[]` | ✅ | Migration script identifiers (ordered) |
+| **dependencies** | `{ packageId: string; versionRange: string; optional: boolean }[]` | optional (default: `[]`) | Package dependencies |
+| **metadataTypes** | `string[]` | optional (default: `[]`) | Metadata types provided by this package |
+| **migrations** | `string[]` | optional (default: `[]`) | Migration script identifiers (ordered) |
 | **configurationSchema** | `Record<string, any>` | optional | JSON Schema for per-installation configuration properties |
 | **metadata** | `Record<string, any>` | optional | Extension metadata |
 
@@ -100,12 +100,12 @@ Package manifest snapshot embedded in a package version
 | **id** | `string` | ✅ | UUID of the package version (stable, never reused) |
 | **packageId** | `string` | ✅ | UUID of the parent sys_package row |
 | **version** | `string` | ✅ | Semantic version string |
-| **status** | `Enum<'draft' \| 'published' \| 'deprecated'>` | ✅ | Package version lifecycle status |
+| **status** | `Enum<'draft' \| 'published' \| 'deprecated'>` | optional (default: `"draft"`) | Package version lifecycle status |
 | **manifestJson** | `string` | ✅ | JSON-serialized package manifest (frozen on publish) |
 | **checksum** | `string` | optional | SHA-256 hex digest of manifestJson |
 | **releaseNotes** | `string` | optional | Release notes for this version (markdown) |
 | **minPlatformVersion** | `string` | optional | Minimum required platform version (denormalized from manifest) |
-| **isPreRelease** | `boolean` | ✅ | Whether this is a pre-release version |
+| **isPreRelease** | `boolean` | optional (default: `false`) | Whether this is a pre-release version |
 | **publishedAt** | `string` | optional | Publish timestamp (ISO-8601) |
 | **publishedBy** | `string` | optional | User ID who published this version |
 | **createdAt** | `string` | ✅ | Creation timestamp (ISO-8601) |

@@ -40,11 +40,11 @@ const result = EventQueueConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Event queue name |
-| **concurrency** | `integer` | ✅ | Max concurrent event handlers |
+| **name** | `string` | optional (default: `"events"`) | Event queue name |
+| **concurrency** | `integer` | optional (default: `10`) | Max concurrent event handlers |
 | **retryPolicy** | `{ maxRetries: integer; backoffStrategy: Enum<'fixed' \| 'linear' \| 'exponential'>; initialDelayMs: integer; maxDelayMs: integer }` | optional | Default retry policy for events |
 | **deadLetterQueue** | `string` | optional | Dead letter queue name for failed events |
-| **priorityEnabled** | `boolean` | ✅ | Process events based on priority |
+| **priorityEnabled** | `boolean` | optional (default: `true`) | Process events based on priority |
 
 
 ---
@@ -59,7 +59,7 @@ const result = EventQueueConfigSchema.parse(data);
 | **toTimestamp** | `string` | optional | End timestamp for replay (ISO 8601) |
 | **eventTypes** | `string[]` | optional | Event types to replay (empty = all) |
 | **filters** | `Record<string, any>` | optional | Additional filters for event selection |
-| **speed** | `number` | ✅ | Replay speed multiplier (1 = real-time) |
+| **speed** | `number` | optional (default: `1`) | Replay speed multiplier (1 = real-time) |
 | **targetHandlers** | `string[]` | optional | Handler IDs to execute (empty = all) |
 
 
@@ -71,10 +71,10 @@ const result = EventQueueConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable event sourcing |
-| **snapshotInterval** | `integer` | ✅ | Create snapshot every N events |
-| **snapshotRetention** | `integer` | ✅ | Number of snapshots to retain |
-| **retention** | `integer` | ✅ | Days to retain events |
+| **enabled** | `boolean` | optional (default: `false`) | Enable event sourcing |
+| **snapshotInterval** | `integer` | optional (default: `100`) | Create snapshot every N events |
+| **snapshotRetention** | `integer` | optional (default: `10`) | Number of snapshots to retain |
+| **retention** | `integer` | optional (default: `365`) | Days to retain events |
 | **aggregateTypes** | `string[]` | optional | Aggregate types to enable event sourcing for |
 | **storage** | `{ type: Enum<'database' \| 'file' \| 's3' \| 'eventstore'>; options?: Record<string, any> }` | optional | Event store configuration |
 

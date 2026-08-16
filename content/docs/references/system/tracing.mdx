@@ -108,14 +108,14 @@ OpenTelemetry span
 | :--- | :--- | :--- | :--- |
 | **context** | `{ traceId: string; spanId: string; traceFlags: integer; traceState?: object; … }` | ✅ | Trace context |
 | **name** | `string` | ✅ | Span name |
-| **kind** | `Enum<'internal' \| 'server' \| 'client' \| 'producer' \| 'consumer'>` | ✅ | Span kind |
+| **kind** | `Enum<'internal' \| 'server' \| 'client' \| 'producer' \| 'consumer'>` | optional (default: `"internal"`) | Span kind |
 | **startTime** | `string` | ✅ | Span start time |
 | **endTime** | `string` | optional | Span end time |
 | **duration** | `number` | optional | Duration in milliseconds |
 | **status** | `{ code: Enum<'unset' \| 'ok' \| 'error'>; message?: string }` | optional |  |
-| **attributes** | `Record<string, string \| number \| boolean \| string[] \| number[] \| boolean[]>` | ✅ | Span attributes |
-| **events** | `{ name: string; timestamp: string; attributes?: Record<string, string \| number \| boolean \| string[] \| number[] \| boolean[]> }[]` | ✅ |  |
-| **links** | `{ context: object; attributes?: Record<string, string \| number \| boolean \| string[] \| number[] \| boolean[]> }[]` | ✅ |  |
+| **attributes** | `Record<string, string \| number \| boolean \| string[] \| number[] \| boolean[]>` | optional (default: `{}`) | Span attributes |
+| **events** | `{ name: string; timestamp: string; attributes?: Record<string, string \| number \| boolean \| string[] \| number[] \| boolean[]> }[]` | optional (default: `[]`) |  |
+| **links** | `{ context: object; attributes?: Record<string, string \| number \| boolean \| string[] \| number[] \| boolean[]> }[]` | optional (default: `[]`) |  |
 | **resource** | `Record<string, string \| number \| boolean \| string[] \| number[] \| boolean[]>` | optional | Resource attributes |
 | **instrumentationLibrary** | `{ name: string; version?: string }` | optional |  |
 
@@ -245,11 +245,11 @@ Trace context (W3C Trace Context)
 | :--- | :--- | :--- | :--- |
 | **traceId** | `string` | ✅ | Trace ID (32 hex chars) |
 | **spanId** | `string` | ✅ | Span ID (16 hex chars) |
-| **traceFlags** | `integer` | ✅ | Trace flags bitmap |
+| **traceFlags** | `integer` | optional (default: `1`) | Trace flags bitmap |
 | **traceState** | `{ entries: Record<string, string> }` | optional | Trace state |
 | **parentSpanId** | `string` | optional | Parent span ID (16 hex chars) |
-| **sampled** | `boolean` | ✅ |  |
-| **remote** | `boolean` | ✅ |  |
+| **sampled** | `boolean` | optional (default: `true`) |  |
+| **remote** | `boolean` | optional (default: `false`) |  |
 
 
 ---
@@ -262,9 +262,9 @@ Trace context propagation
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **formats** | `Enum<'w3c' \| 'b3' \| 'b3_multi' \| 'jaeger' \| 'xray' \| 'ottrace' \| 'custom'>[]` | ✅ |  |
-| **extract** | `boolean` | ✅ |  |
-| **inject** | `boolean` | ✅ |  |
+| **formats** | `Enum<'w3c' \| 'b3' \| 'b3_multi' \| 'jaeger' \| 'xray' \| 'ottrace' \| 'custom'>[]` | optional (default: `["w3c"]`) |  |
+| **extract** | `boolean` | optional (default: `true`) |  |
+| **inject** | `boolean` | optional (default: `true`) |  |
 | **headers** | `{ traceId?: string; spanId?: string; traceFlags?: string; traceState?: string }` | optional |  |
 | **baggage** | `{ enabled: boolean; maxSize: integer; allowedKeys?: string[] }` | optional |  |
 
@@ -310,7 +310,7 @@ Trace sampling configuration
 | **rateLimit** | `number` | optional | Traces per second |
 | **parentBased** | `{ whenParentSampled?: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| … +3 more>; whenParentNotSampled?: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| … +3 more>; root?: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| … +3 more>; rootRatio?: number }` | optional |  |
 | **composite** | `{ strategy: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| … +3 more>; ratio?: number; condition?: Record<string, any> \| string \| object }[]` | optional |  |
-| **rules** | `{ name: string; match?: object; decision: Enum<'drop' \| 'record_only' \| 'record_and_sample'>; rate?: number }[]` | optional |  |
+| **rules** | `{ name: string; match?: object; decision: Enum<'drop' \| 'record_only' \| 'record_and_sample'>; rate?: number }[]` | optional (default: `[]`) |  |
 | **customSamplerId** | `string` | optional | Custom sampler identifier |
 
 
@@ -339,12 +339,12 @@ Tracing configuration
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Configuration name (snake_case, max 64 chars) |
 | **label** | `string` | ✅ | Display label |
-| **enabled** | `boolean` | optional |  |
+| **enabled** | `boolean` | optional (default: `true`) |  |
 | **sampling** | `{ type: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| … +3 more>; ratio?: number; rateLimit?: number; parentBased?: object; … }` | optional | Trace sampling configuration |
-| **propagation** | `{ formats?: Enum<'w3c' \| 'b3' \| 'b3_multi' \| 'jaeger' \| 'xray' \| 'ottrace' \| 'custom'>[]; extract?: boolean; inject?: boolean; headers?: object; … }` | optional | Trace context propagation |
+| **propagation** | `{ formats?: Enum<'w3c' \| 'b3' \| 'b3_multi' \| 'jaeger' \| 'xray' \| 'ottrace' \| 'custom'>[]; extract?: boolean; inject?: boolean; headers?: object; … }` | optional (default: `{"formats":["w3c"],"extract":true,"inject":true}`) | Trace context propagation |
 | **openTelemetry** | `{ sdkVersion?: string; exporter: object; resource: object; instrumentation?: object; … }` | optional | OpenTelemetry compatibility configuration |
 | **spanLimits** | `{ maxAttributes?: integer; maxEvents?: integer; maxLinks?: integer; maxAttributeValueLength?: integer }` | optional |  |
-| **traceIdGenerator** | `Enum<'random' \| 'uuid' \| 'custom'>` | optional |  |
+| **traceIdGenerator** | `Enum<'random' \| 'uuid' \| 'custom'>` | optional (default: `"random"`) |  |
 | **customTraceIdGeneratorId** | `string` | optional | Custom generator identifier |
 | **performance** | `{ asyncExport?: boolean; exportInterval?: integer }` | optional |  |
 

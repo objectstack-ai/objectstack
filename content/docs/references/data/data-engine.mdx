@@ -107,7 +107,7 @@ Options for DataEngine.delete operations
 | :--- | :--- | :--- | :--- |
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
-| **multi** | `boolean` | optional |  |
+| **multi** | `boolean` | optional (default: `false`) |  |
 
 
 ---
@@ -197,7 +197,7 @@ Options for DataEngine.insert operations
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **returning** | `boolean` | optional |  |
+| **returning** | `boolean` | optional (default: `true`) |  |
 
 
 ---
@@ -355,7 +355,7 @@ This schema accepts one of the following structures:
 | **vector** | `number[]` | ✅ |  |
 | **where** | `Record<string, any> \| any` | optional |  |
 | **fields** | `string[]` | optional |  |
-| **limit** | `integer` | optional |  |
+| **limit** | `integer` | optional (default: `5`) |  |
 | **threshold** | `number` | optional |  |
 
 ---
@@ -403,8 +403,8 @@ Options for DataEngine.update operations
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 | **upsert** | `never` | optional | [REMOVED] `update.options.upsert` was removed in @objectstack/spec 17 (#8057, ADR-0049) — it was declared and allowlisted but never implemented: no engine or driver path ever read it, so `{ upsert: true }` was accepted and silently dropped and the update stayed a plain update. Delete the key. Express create-if-absent explicitly: a by-id update whose id names no row throws RECORD_NOT_FOUND (#7867's not-found gate) rather than inserting, so read the row first (`findOne`) and call `insert` or `update` on what you find. A first-class upsert, if ever built, must reconcile with that gate by design rather than through this silent flag. |
-| **multi** | `boolean` | optional |  |
-| **returning** | `boolean` | optional |  |
+| **multi** | `boolean` | optional (default: `false`) |  |
+| **returning** | `boolean` | optional (default: `false`) |  |
 
 
 ---
@@ -435,7 +435,7 @@ Options for DataEngine.update operations
 | **vector** | `number[]` | ✅ |  |
 | **where** | `Record<string, any> \| any` | optional |  |
 | **fields** | `string[]` | optional |  |
-| **limit** | `integer` | optional |  |
+| **limit** | `integer` | optional (default: `5`) |  |
 | **threshold** | `number` | optional |  |
 
 
@@ -498,7 +498,7 @@ QueryAST-aligned options for DataEngine.delete operations
 | :--- | :--- | :--- | :--- |
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **where** | `Record<string, any> \| any` | optional |  |
-| **multi** | `boolean` | optional |  |
+| **multi** | `boolean` | optional (default: `false`) |  |
 
 
 ---
@@ -538,8 +538,8 @@ QueryAST-aligned options for DataEngine.update operations
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **where** | `Record<string, any> \| any` | optional |  |
 | **upsert** | `never` | optional | [REMOVED] `update.options.upsert` was removed in @objectstack/spec 17 (#8057, ADR-0049) — it was declared and allowlisted but never implemented: no engine or driver path ever read it, so `{ upsert: true }` was accepted and silently dropped and the update stayed a plain update. Delete the key. Express create-if-absent explicitly: a by-id update whose id names no row throws RECORD_NOT_FOUND (#7867's not-found gate) rather than inserting, so read the row first (`findOne`) and call `insert` or `update` on what you find. A first-class upsert, if ever built, must reconcile with that gate by design rather than through this silent flag. |
-| **multi** | `boolean` | optional |  |
-| **returning** | `boolean` | optional |  |
+| **multi** | `boolean` | optional (default: `false`) |  |
+| **returning** | `boolean` | optional (default: `false`) |  |
 
 
 ---

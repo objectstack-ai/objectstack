@@ -146,10 +146,10 @@ Circuit breaker configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable circuit breaker |
-| **failureThreshold** | `number` | ✅ | Failures before opening circuit |
-| **resetTimeoutMs** | `number` | ✅ | Time in open state before half-open |
-| **halfOpenMaxRequests** | `number` | ✅ | Requests allowed in half-open state |
-| **monitoringWindow** | `number` | ✅ | Rolling window for failure count in ms |
+| **failureThreshold** | `number` | optional (default: `5`) | Failures before opening circuit |
+| **resetTimeoutMs** | `number` | optional (default: `30000`) | Time in open state before half-open |
+| **halfOpenMaxRequests** | `number` | optional (default: `1`) | Requests allowed in half-open state |
+| **monitoringWindow** | `number` | optional (default: `60000`) | Rolling window for failure count in ms |
 | **fallbackStrategy** | `Enum<'cache' \| 'default_value' \| 'error' \| 'queue'>` | optional | Fallback strategy when circuit is open |
 
 
@@ -166,7 +166,7 @@ Circuit breaker configuration
 | **type** | `Enum<'saas' \| 'database' \| 'file_storage' \| 'message_queue' \| 'api' \| 'custom'>` | ✅ | Connector type |
 | **description** | `string` | optional | Connector description |
 | **icon** | `string` | optional | Icon identifier |
-| **authentication** | `{ type: 'oauth2'; authorizationUrl: string; tokenUrl: string; clientId: string; … } \| { type: 'api-key'; key: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; password: string } \| { type: 'bearer'; token: string } \| { type: 'none' }` | optional | Authentication configuration (runtime shape with inline secrets — plugin-supplied at registerConnector). Authored entries must not inline secrets (#7990): use `auth.credentialRef` on a provider-bound instance. |
+| **authentication** | `{ type: 'oauth2'; authorizationUrl: string; tokenUrl: string; clientId: string; … } \| { type: 'api-key'; key: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; password: string } \| { type: 'bearer'; token: string } \| { type: 'none' }` | optional (default: `{"type":"none"}`) | Authentication configuration (runtime shape with inline secrets — plugin-supplied at registerConnector). Authored entries must not inline secrets (#7990): use `auth.credentialRef` on a provider-bound instance. |
 | **provider** | `string` | optional | Generic-executor key that materializes this declarative entry at boot (e.g. openapi/mcp/rest). Omit for a catalog-only descriptor. Unknown provider ⇒ hard boot error (ADR-0097). |
 | **providerConfig** | `Record<string, any>` | optional | Provider-specific config validated by the provider factory at boot (e.g. `{ spec, baseUrl }` for openapi, where spec is an inline document, a package-relative file path like './billing-openapi.json', or an http(s) URL). Requires `provider`. |
 | **auth** | `{ type: 'none' } \| { type: 'bearer'; credentialRef: string } \| { type: 'api-key'; credentialRef: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; credentialRef: string }` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
@@ -177,10 +177,10 @@ Circuit breaker configuration
 | **webhooks** | `{ name: string; label?: string; object?: string; triggers?: Enum<'create' \| 'update' \| 'delete' \| 'bulk_update' \| 'bulk_delete'>[]; … }[]` | optional | Webhook configurations (not yet enforced — never read at registration; see #3197) |
 | **rateLimitConfig** | `never` | optional | [REMOVED] `connector.rateLimitConfig` was removed in @objectstack/spec 17.0.0 (#4911, ADR-0049 D2) — the entire shape is gone, not just this key: `ConnectorRateLimitConfig` and its `RateLimitStrategy` enum were removed with it, because no outbound rate-limiting engine ever existed. The platform's only token bucket (runtime `security/rate-limit.ts`) throttles INBOUND requests to us; nothing throttled the calls a connector makes out, so every knob here was inert while reading like a configured cap. Delete the key. Do NOT substitute `shared` `RateLimitConfig` — that is the inbound limiter and would cap the wrong direction; until an outbound throttle exists, rate-limit at the connector provider or upstream gateway. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **retryConfig** | `{ strategy?: Enum<'exponential_backoff' \| 'linear_backoff' \| 'fixed_delay' \| 'no_retry'>; maxAttempts?: number; initialDelayMs?: number; maxDelayMs?: number; … }` | optional | Retry configuration |
-| **connectionTimeoutMs** | `number` | optional | Connection timeout in ms |
-| **requestTimeoutMs** | `number` | optional | Request timeout in ms |
-| **status** | `Enum<'active' \| 'inactive' \| 'error' \| 'configuring'>` | optional | Connector status |
-| **enabled** | `boolean` | optional | Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor (#2612). |
+| **connectionTimeoutMs** | `number` | optional (default: `30000`) | Connection timeout in ms |
+| **requestTimeoutMs** | `number` | optional (default: `30000`) | Request timeout in ms |
+| **status** | `Enum<'active' \| 'inactive' \| 'error' \| 'configuring'>` | optional (default: `"inactive"`) | Connector status |
+| **enabled** | `boolean` | optional (default: `true`) | Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor (#2612). |
 | **errorMapping** | `{ rules: object[]; defaultCategory?: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| … +3 more>; unmappedBehavior: Enum<'passthrough' \| 'generic_error' \| 'throw'>; logUnmapped?: boolean }` | optional | Error mapping configuration |
 | **health** | `{ healthCheck?: object; circuitBreaker?: object }` | optional | Health and resilience configuration |
 | **metadata** | `Record<string, any>` | optional | Custom connector metadata |
@@ -266,8 +266,8 @@ Standard error category
 | **transform** | `never` | optional | [REMOVED] `FieldMapping.transform` — authored as `connector.fieldMappings[].transform` and `externalLookup.fieldMappings[].transform` — was removed in @objectstack/spec 17.0.0 (#5552, ADR-0049), and the whole `FieldMappingTransform` union went with it (`constant` / `cast` / `lookup` / `javascript` / `map`) — no runtime ever executed any of the five, and the `javascript` member advertised `dialect: "js"`, a dialect retired in #3278. Delete the key. The transform pipeline that IS enforced is the import mapping's: `mapping.fieldMapping[].transform` (a string enum — `none`/`constant`/`map`/`split`/`join`/`lookup` — with its settings in `params`), applied by the REST import path, which rejects `javascript` with a 400 rather than pretending to run it. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **defaultValue** | `any` | optional | Default if source is null/undefined |
 | **dataType** | `Enum<'string' \| 'number' \| 'boolean' \| 'date' \| 'datetime' \| 'json' \| 'array'>` | optional | Target data type |
-| **required** | `boolean` | ✅ | Field is required |
-| **syncMode** | `Enum<'read_only' \| 'write_only' \| 'bidirectional'>` | ✅ | Sync mode |
+| **required** | `boolean` | optional (default: `false`) | Field is required |
+| **syncMode** | `Enum<'read_only' \| 'write_only' \| 'bidirectional'>` | optional (default: `"bidirectional"`) | Sync mode |
 
 
 ---
@@ -464,14 +464,14 @@ Connector type
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **strategy** | `Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>` | optional | Synchronization strategy |
-| **direction** | `Enum<'import' \| 'export' \| 'bidirectional'>` | optional | Sync direction |
+| **strategy** | `Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>` | optional (default: `"incremental"`) | Synchronization strategy |
+| **direction** | `Enum<'import' \| 'export' \| 'bidirectional'>` | optional (default: `"import"`) | Sync direction |
 | **schedule** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron expression for scheduled sync — cron`0 */15 * * *` |
-| **realtimeSync** | `boolean` | optional | Enable real-time sync |
+| **realtimeSync** | `boolean` | optional (default: `false`) | Enable real-time sync |
 | **timestampField** | `string` | optional | Field to track last modification time |
-| **conflictResolution** | `Enum<'source_wins' \| 'target_wins' \| 'latest_wins' \| 'manual'>` | optional | Conflict resolution strategy |
-| **batchSize** | `number` | optional | Records per batch |
-| **deleteMode** | `Enum<'hard_delete' \| 'soft_delete' \| 'ignore'>` | optional | Delete handling mode |
+| **conflictResolution** | `Enum<'source_wins' \| 'target_wins' \| 'latest_wins' \| 'manual'>` | optional (default: `"latest_wins"`) | Conflict resolution strategy |
+| **batchSize** | `number` | optional (default: `1000`) | Records per batch |
+| **deleteMode** | `Enum<'hard_delete' \| 'soft_delete' \| 'ignore'>` | optional (default: `"soft_delete"`) | Delete handling mode |
 | **filters** | `Record<string, any>` | optional | Filter criteria for selective sync |
 
 
@@ -488,7 +488,7 @@ Connector type
 | **type** | `Enum<'saas' \| 'database' \| 'file_storage' \| 'message_queue' \| 'api' \| 'custom'>` | ✅ | Connector type |
 | **description** | `string` | optional | Connector description |
 | **icon** | `string` | optional | Icon identifier |
-| **authentication** | `{ type: 'oauth2'; authorizationUrl: string; tokenUrl: string; clientId: string; … } \| { type: 'api-key'; key: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; password: string } \| { type: 'bearer'; token: string } \| { type: 'none' }` | optional | Authentication configuration (runtime shape with inline secrets — plugin-supplied at registerConnector). Authored entries must not inline secrets (#7990): use `auth.credentialRef` on a provider-bound instance. |
+| **authentication** | `{ type: 'oauth2'; authorizationUrl: string; tokenUrl: string; clientId: string; … } \| { type: 'api-key'; key: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; password: string } \| { type: 'bearer'; token: string } \| { type: 'none' }` | optional (default: `{"type":"none"}`) | Authentication configuration (runtime shape with inline secrets — plugin-supplied at registerConnector). Authored entries must not inline secrets (#7990): use `auth.credentialRef` on a provider-bound instance. |
 | **provider** | `string` | optional | Generic-executor key that materializes this declarative entry at boot (e.g. openapi/mcp/rest). Omit for a catalog-only descriptor. Unknown provider ⇒ hard boot error (ADR-0097). |
 | **providerConfig** | `Record<string, any>` | optional | Provider-specific config validated by the provider factory at boot (e.g. `{ spec, baseUrl }` for openapi, where spec is an inline document, a package-relative file path like './billing-openapi.json', or an http(s) URL). Requires `provider`. |
 | **auth** | `{ type: 'none' } \| { type: 'bearer'; credentialRef: string } \| { type: 'api-key'; credentialRef: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; credentialRef: string }` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
@@ -499,10 +499,10 @@ Connector type
 | **webhooks** | `{ name: string; label?: string; object?: string; triggers?: Enum<'create' \| 'update' \| 'delete' \| 'bulk_update' \| 'bulk_delete'>[]; … }[]` | optional | Webhook configurations (not yet enforced — never read at registration; see #3197) |
 | **rateLimitConfig** | `never` | optional | [REMOVED] `connector.rateLimitConfig` was removed in @objectstack/spec 17.0.0 (#4911, ADR-0049 D2) — the entire shape is gone, not just this key: `ConnectorRateLimitConfig` and its `RateLimitStrategy` enum were removed with it, because no outbound rate-limiting engine ever existed. The platform's only token bucket (runtime `security/rate-limit.ts`) throttles INBOUND requests to us; nothing throttled the calls a connector makes out, so every knob here was inert while reading like a configured cap. Delete the key. Do NOT substitute `shared` `RateLimitConfig` — that is the inbound limiter and would cap the wrong direction; until an outbound throttle exists, rate-limit at the connector provider or upstream gateway. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **retryConfig** | `{ strategy?: Enum<'exponential_backoff' \| 'linear_backoff' \| 'fixed_delay' \| 'no_retry'>; maxAttempts?: number; initialDelayMs?: number; maxDelayMs?: number; … }` | optional | Retry configuration |
-| **connectionTimeoutMs** | `number` | optional | Connection timeout in ms |
-| **requestTimeoutMs** | `number` | optional | Request timeout in ms |
-| **status** | `Enum<'active' \| 'inactive' \| 'error' \| 'configuring'>` | optional | Connector status |
-| **enabled** | `boolean` | optional | Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor (#2612). |
+| **connectionTimeoutMs** | `number` | optional (default: `30000`) | Connection timeout in ms |
+| **requestTimeoutMs** | `number` | optional (default: `30000`) | Request timeout in ms |
+| **status** | `Enum<'active' \| 'inactive' \| 'error' \| 'configuring'>` | optional (default: `"inactive"`) | Connector status |
+| **enabled** | `boolean` | optional (default: `true`) | Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor (#2612). |
 | **errorMapping** | `{ rules: object[]; defaultCategory?: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| … +3 more>; unmappedBehavior: Enum<'passthrough' \| 'generic_error' \| 'throw'>; logUnmapped?: boolean }` | optional | Error mapping configuration |
 | **health** | `{ healthCheck?: object; circuitBreaker?: object }` | optional | Health and resilience configuration |
 | **metadata** | `Record<string, any>` | optional | Custom connector metadata |
@@ -526,9 +526,9 @@ Error mapping configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **rules** | `{ sourceCode: string \| number; sourceMessage?: string; targetCode: string; targetCategory: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| … +3 more>; … }[]` | ✅ | Error mapping rules |
-| **defaultCategory** | `Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>` | ✅ | Default category for unmapped errors |
+| **defaultCategory** | `Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>` | optional (default: `"integration_error"`) | Default category for unmapped errors |
 | **unmappedBehavior** | `Enum<'passthrough' \| 'generic_error' \| 'throw'>` | ✅ | What to do with unmapped errors |
-| **logUnmapped** | `boolean` | ✅ | Log unmapped errors |
+| **logUnmapped** | `boolean` | optional (default: `true`) | Log unmapped errors |
 
 
 ---
@@ -561,13 +561,13 @@ Health check configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable health checks |
-| **intervalMs** | `number` | ✅ | Health check interval in milliseconds |
-| **timeoutMs** | `number` | ✅ | Health check timeout in milliseconds |
+| **intervalMs** | `number` | optional (default: `60000`) | Health check interval in milliseconds |
+| **timeoutMs** | `number` | optional (default: `5000`) | Health check timeout in milliseconds |
 | **endpoint** | `string` | optional | Health check endpoint path |
 | **method** | `Enum<'GET' \| 'HEAD' \| 'OPTIONS'>` | optional | HTTP method for health check |
-| **expectedStatus** | `number` | ✅ | Expected HTTP status code |
-| **unhealthyThreshold** | `number` | ✅ | Consecutive failures before marking unhealthy |
-| **healthyThreshold** | `number` | ✅ | Consecutive successes before marking healthy |
+| **expectedStatus** | `number` | optional (default: `200`) | Expected HTTP status code |
+| **unhealthyThreshold** | `number` | optional (default: `3`) | Consecutive failures before marking unhealthy |
+| **healthyThreshold** | `number` | optional (default: `1`) | Consecutive successes before marking healthy |
 
 
 ---
@@ -578,14 +578,14 @@ Health check configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **strategy** | `Enum<'exponential_backoff' \| 'linear_backoff' \| 'fixed_delay' \| 'no_retry'>` | ✅ | Retry strategy |
-| **maxAttempts** | `number` | ✅ | Maximum retry attempts |
-| **initialDelayMs** | `number` | ✅ | Initial retry delay in ms |
-| **maxDelayMs** | `number` | ✅ | Maximum retry delay in ms |
-| **backoffMultiplier** | `number` | ✅ | Exponential backoff multiplier |
-| **retryableStatusCodes** | `number[]` | ✅ | HTTP status codes to retry |
-| **retryOnNetworkError** | `boolean` | ✅ | Retry on network errors |
-| **jitter** | `boolean` | ✅ | Add jitter to retry delays |
+| **strategy** | `Enum<'exponential_backoff' \| 'linear_backoff' \| 'fixed_delay' \| 'no_retry'>` | optional (default: `"exponential_backoff"`) | Retry strategy |
+| **maxAttempts** | `number` | optional (default: `3`) | Maximum retry attempts |
+| **initialDelayMs** | `number` | optional (default: `1000`) | Initial retry delay in ms |
+| **maxDelayMs** | `number` | optional (default: `60000`) | Maximum retry delay in ms |
+| **backoffMultiplier** | `number` | optional (default: `2`) | Exponential backoff multiplier |
+| **retryableStatusCodes** | `number[]` | optional (default: `[408,429,500,502,503,504]`) | HTTP status codes to retry |
+| **retryOnNetworkError** | `boolean` | optional (default: `true`) | Retry on network errors |
+| **jitter** | `boolean` | optional (default: `true`) | Add jitter to retry delays |
 
 
 ---
@@ -615,11 +615,11 @@ Synchronization strategy
 | **object** | `string` | optional | Object whose record events (create/update/delete, bulk_update/bulk_delete) trigger this webhook |
 | **triggers** | `Enum<'create' \| 'update' \| 'delete' \| 'bulk_update' \| 'bulk_delete'>[]` | optional | Events that trigger execution |
 | **url** | `string` | ✅ | External webhook endpoint URL |
-| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>` | ✅ | HTTP method |
+| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>` | optional (default: `"POST"`) | HTTP method |
 | **headers** | `Record<string, string>` | optional | Custom HTTP headers |
-| **timeoutMs** | `integer` | ✅ | Request timeout in milliseconds |
+| **timeoutMs** | `integer` | optional (default: `30000`) | Request timeout in milliseconds |
 | **secret** | `string` | optional | Signing secret for HMAC signature verification |
-| **isActive** | `boolean` | ✅ | Whether webhook is active |
+| **isActive** | `boolean` | optional (default: `true`) | Whether webhook is active |
 | **description** | `string` | optional | Webhook description |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this webhook. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
@@ -630,7 +630,7 @@ Synchronization strategy
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 | **events** | `Enum<'record.created' \| 'record.updated' \| 'record.deleted' \| 'sync.started' \| 'sync.completed' \| 'sync.failed' \| 'auth.expired' \| 'rate_limit.exceeded'>[]` | optional | Connector events to subscribe to (not yet enforced — no runtime dispatches these; see #3197) |
-| **signatureAlgorithm** | `Enum<'hmac_sha256' \| 'hmac_sha512' \| 'none'>` | ✅ | Webhook signature algorithm |
+| **signatureAlgorithm** | `Enum<'hmac_sha256' \| 'hmac_sha512' \| 'none'>` | optional (default: `"hmac_sha256"`) | Webhook signature algorithm |
 
 
 ---

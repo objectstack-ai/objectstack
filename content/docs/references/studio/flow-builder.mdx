@@ -58,17 +58,17 @@ Studio Flow Builder configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **snap** | `{ enabled: boolean; gridSize: integer; showGrid: boolean }` | ✅ | Canvas snap-to-grid settings |
-| **zoom** | `{ min: number; max: number; default: number; step: number }` | ✅ | Canvas zoom settings |
-| **layoutAlgorithm** | `Enum<'dagre' \| 'elk' \| 'force' \| 'manual'>` | ✅ | Default auto-layout algorithm |
-| **layoutDirection** | `Enum<'TB' \| 'BT' \| 'LR' \| 'RL'>` | ✅ | Default auto-layout direction |
+| **snap** | `{ enabled: boolean; gridSize: integer; showGrid: boolean }` | optional (default: `{"enabled":true,"gridSize":16,"showGrid":true}`) | Canvas snap-to-grid settings |
+| **zoom** | `{ min: number; max: number; default: number; step: number }` | optional (default: `{"min":0.25,"max":3,"default":1,"step":0.1}`) | Canvas zoom settings |
+| **layoutAlgorithm** | `Enum<'dagre' \| 'elk' \| 'force' \| 'manual'>` | optional (default: `"dagre"`) | Default auto-layout algorithm |
+| **layoutDirection** | `Enum<'TB' \| 'BT' \| 'LR' \| 'RL'>` | optional (default: `"TB"`) | Default auto-layout direction |
 | **nodeDescriptors** | `{ action: string; shape: Enum<'rounded_rect' \| 'circle' \| 'diamond' \| 'parallelogram' \| 'hexagon' \| … +3 more>; icon: string; defaultLabel: string; … }[]` | optional | Custom node render descriptors (merged with built-in defaults) |
-| **showMinimap** | `boolean` | ✅ | Show minimap panel |
-| **showPropertyPanel** | `boolean` | ✅ | Show property panel |
-| **showPalette** | `boolean` | ✅ | Show node palette sidebar |
-| **undoLimit** | `integer` | ✅ | Maximum undo history steps |
-| **animateExecution** | `boolean` | ✅ | Animate edges during execution preview |
-| **connectionValidation** | `boolean` | ✅ | Validate connections before creating edges |
+| **showMinimap** | `boolean` | optional (default: `true`) | Show minimap panel |
+| **showPropertyPanel** | `boolean` | optional (default: `true`) | Show property panel |
+| **showPalette** | `boolean` | optional (default: `true`) | Show node palette sidebar |
+| **undoLimit** | `integer` | optional (default: `50`) | Maximum undo history steps |
+| **animateExecution** | `boolean` | optional (default: `true`) | Animate edges during execution preview |
+| **connectionValidation** | `boolean` | optional (default: `true`) | Validate connections before creating edges |
 
 
 ---
@@ -82,11 +82,11 @@ Canvas layout and visual data for a flow edge
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **edgeId** | `string` | ✅ | Corresponding FlowEdge.id |
-| **style** | `Enum<'solid' \| 'dashed' \| 'dotted' \| 'bold' \| 'back'>` | ✅ | Line style |
-| **color** | `string` | ✅ | Edge line color |
-| **labelPosition** | `number` | ✅ | Position of the condition label along the edge |
+| **style** | `Enum<'solid' \| 'dashed' \| 'dotted' \| 'bold' \| 'back'>` | optional (default: `"solid"`) | Line style |
+| **color** | `string` | optional (default: `"#94a3b8"`) | Edge line color |
+| **labelPosition** | `number` | optional (default: `0.5`) | Position of the condition label along the edge |
 | **waypoints** | `{ x: number; y: number }[]` | optional | Manual waypoints for edge routing |
-| **animated** | `boolean` | ✅ | Show animated flow indicator |
+| **animated** | `boolean` | optional (default: `false`) | Show animated flow indicator |
 
 
 ---
@@ -119,7 +119,7 @@ Canvas layout data for a flow node
 | **y** | `number` | ✅ | Y position on canvas |
 | **width** | `integer` | optional | Width override in pixels |
 | **height** | `integer` | optional | Height override in pixels |
-| **collapsed** | `boolean` | ✅ | Whether the node is collapsed |
+| **collapsed** | `boolean` | optional (default: `false`) | Whether the node is collapsed |
 | **fillColor** | `string` | optional | Fill color override |
 | **borderColor** | `string` | optional | Border color override |
 | **annotation** | `string` | optional | User annotation displayed near the node |
@@ -167,11 +167,11 @@ Visual render descriptor for a flow node type
 | **shape** | `Enum<'rounded_rect' \| 'circle' \| 'diamond' \| 'parallelogram' \| 'hexagon' \| 'diamond_thick' \| 'attached_circle' \| 'screen_rect'>` | ✅ | Shape to render |
 | **icon** | `string` | ✅ | Lucide icon name |
 | **defaultLabel** | `string` | ✅ | Default display label |
-| **defaultWidth** | `integer` | ✅ | Default width in pixels |
-| **defaultHeight** | `integer` | ✅ | Default height in pixels |
-| **fillColor** | `string` | ✅ | Node fill color (CSS value) |
-| **borderColor** | `string` | ✅ | Node border color (CSS value) |
-| **allowBoundaryEvents** | `boolean` | ✅ | Whether boundary events can be attached to this node type |
+| **defaultWidth** | `integer` | optional (default: `120`) | Default width in pixels |
+| **defaultHeight** | `integer` | optional (default: `60`) | Default height in pixels |
+| **fillColor** | `string` | optional (default: `"#ffffff"`) | Node fill color (CSS value) |
+| **borderColor** | `string` | optional (default: `"#94a3b8"`) | Node border color (CSS value) |
+| **allowBoundaryEvents** | `boolean` | optional (default: `false`) | Whether boundary events can be attached to this node type |
 | **paletteCategory** | `Enum<'event' \| 'gateway' \| 'activity' \| 'data' \| 'subflow'>` | ✅ | Palette category for grouping |
 
 

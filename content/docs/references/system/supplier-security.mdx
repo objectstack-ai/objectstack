@@ -89,12 +89,12 @@ Organization-level supplier security management policy per ISO 27001:2022
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable supplier security management |
-| **reassessmentIntervalDays** | `number` | ✅ | Supplier reassessment interval in days |
-| **requirePreOnboardingAssessment** | `boolean` | ✅ | Require security assessment before supplier onboarding |
-| **formalAssessmentThreshold** | `Enum<'critical' \| 'high' \| 'medium' \| 'low'>` | ✅ | Minimum risk level requiring formal assessment |
-| **monitorChanges** | `boolean` | ✅ | Monitor supplier security posture changes |
-| **requiredCertifications** | `string[]` | ✅ | Required certifications for critical-risk suppliers |
+| **enabled** | `boolean` | optional (default: `true`) | Enable supplier security management |
+| **reassessmentIntervalDays** | `number` | optional (default: `365`) | Supplier reassessment interval in days |
+| **requirePreOnboardingAssessment** | `boolean` | optional (default: `true`) | Require security assessment before supplier onboarding |
+| **formalAssessmentThreshold** | `Enum<'critical' \| 'high' \| 'medium' \| 'low'>` | optional (default: `"medium"`) | Minimum risk level requiring formal assessment |
+| **monitorChanges** | `boolean` | optional (default: `true`) | Monitor supplier security posture changes |
+| **requiredCertifications** | `string[]` | optional (default: `[]`) | Required certifications for critical-risk suppliers |
 
 
 ---
@@ -110,7 +110,7 @@ Individual supplier security requirement
 | **id** | `string` | ✅ | Requirement identifier |
 | **description** | `string` | ✅ | Requirement description |
 | **controlReference** | `string` | optional | ISO 27001 control reference |
-| **mandatory** | `boolean` | ✅ | Whether this requirement is mandatory |
+| **mandatory** | `boolean` | optional (default: `true`) | Whether this requirement is mandatory |
 | **compliant** | `boolean` | optional | Whether the supplier meets this requirement |
 | **evidence** | `string` | optional | Compliance evidence or assessment notes |
 

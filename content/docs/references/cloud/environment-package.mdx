@@ -48,10 +48,10 @@ Package installation record in an environment (sys_package_installation)
 | **environmentId** | `string` | ✅ | Environment this installation belongs to |
 | **packageVersionId** | `string` | ✅ | UUID of the installed sys_package_version row |
 | **packageId** | `string` | ✅ | UUID of the parent sys_package row (denormalized for constraint enforcement) |
-| **status** | `Enum<'installed' \| 'installing' \| 'upgrading' \| 'disabled' \| 'error'>` | ✅ | Package installation status within an environment |
-| **enabled** | `boolean` | ✅ | Whether the package metadata is loaded |
+| **status** | `Enum<'installed' \| 'installing' \| 'upgrading' \| 'disabled' \| 'error'>` | optional (default: `"installed"`) | Package installation status within an environment |
+| **enabled** | `boolean` | optional (default: `true`) | Whether the package metadata is loaded |
 | **settings** | `Record<string, any>` | optional | Per-installation configuration settings |
-| **withSampleData** | `boolean` | ✅ | Replay the package seed datasets on next kernel cold-start |
+| **withSampleData** | `boolean` | optional (default: `false`) | Replay the package seed datasets on next kernel cold-start |
 | **installedAt** | `string` | ✅ | Installation timestamp (ISO-8601) |
 | **installedBy** | `string` | optional | User ID of the installer |
 | **updatedAt** | `string` | optional | Last update timestamp (ISO-8601) |
@@ -86,10 +86,10 @@ Install a package version into a specific environment
 | **packageVersionId** | `string` | optional | Exact package version UUID to install (preferred) |
 | **packageManifestId** | `string` | optional | Package manifest ID (reverse-domain, e.g. com.acme.crm) — resolved to version UUID |
 | **version** | `string` | optional | Version string (defaults to latest published) |
-| **allowDraft** | `boolean` | ✅ | Allow installing a draft version (dev/sandbox environments only) |
+| **allowDraft** | `boolean` | optional (default: `false`) | Allow installing a draft version (dev/sandbox environments only) |
 | **settings** | `Record<string, any>` | optional | Installation-time configuration settings |
-| **withSampleData** | `boolean` | ✅ | Replay the package seed datasets on next kernel cold-start |
-| **enableOnInstall** | `boolean` | ✅ | Activate the package immediately after install |
+| **withSampleData** | `boolean` | optional (default: `false`) | Replay the package seed datasets on next kernel cold-start |
+| **enableOnInstall** | `boolean` | optional (default: `true`) | Activate the package immediately after install |
 | **installedBy** | `string` | optional | User ID of the installer |
 
 
@@ -133,7 +133,7 @@ Upgrade a package installation to a newer version
 | :--- | :--- | :--- | :--- |
 | **targetPackageVersionId** | `string` | optional | Target package version UUID (preferred) |
 | **targetVersion** | `string` | optional | Target version string (defaults to latest published) |
-| **allowDraft** | `boolean` | ✅ | Allow upgrading to a draft version |
+| **allowDraft** | `boolean` | optional (default: `false`) | Allow upgrading to a draft version |
 | **upgradedBy** | `string` | optional | User ID performing the upgrade |
 
 

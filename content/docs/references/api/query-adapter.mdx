@@ -42,8 +42,8 @@ const result = ODataQueryAdapterSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **version** | `Enum<'v2' \| 'v4'>` | ✅ | OData version |
-| **usePrefix** | `boolean` | ✅ | Use $ prefix for system query options ($filter vs filter) |
+| **version** | `Enum<'v2' \| 'v4'>` | optional (default: `"v4"`) | OData version |
+| **usePrefix** | `boolean` | optional (default: `true`) | Use $ prefix for system query options ($filter vs filter) |
 | **stringFunctions** | `Enum<'contains' \| 'startswith' \| 'endswith' \| 'tolower' \| 'toupper' \| 'trim' \| 'concat' \| 'substring' \| 'length'>[]` | optional | Supported OData string functions |
 | **expand** | `{ enabled: boolean; maxDepth: integer }` | optional | $expand configuration |
 
@@ -92,10 +92,10 @@ const result = ODataQueryAdapterSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **filterStyle** | `Enum<'bracket' \| 'dot' \| 'flat' \| 'rsql'>` | ✅ | REST filter parameter encoding style |
+| **filterStyle** | `Enum<'bracket' \| 'dot' \| 'flat' \| 'rsql'>` | optional (default: `"bracket"`) | REST filter parameter encoding style |
 | **pagination** | `{ limitParam: string; offsetParam: string; cursorParam: string; pageParam: string }` | optional | Pagination parameter name mappings |
 | **sorting** | `{ param: string; format: Enum<'comma' \| 'array' \| 'pipe'> }` | optional | Sort parameter mapping |
-| **fieldsParam** | `string` | ✅ | Field selection parameter name |
+| **fieldsParam** | `string` | optional (default: `"fields"`) | Field selection parameter name |
 
 
 ---

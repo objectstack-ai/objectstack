@@ -69,7 +69,7 @@ const result = DataTypeMappingSchema.parse(data);
 | **poolConfig** | `{ min: number; max: number; idleTimeoutMillis: number; connectionTimeoutMillis: number }` | optional | Connection pool configuration |
 | **dialect** | `Enum<'postgresql' \| 'mysql' \| 'sqlite' \| 'mssql' \| 'oracle' \| 'mariadb'>` | ✅ | SQL database dialect |
 | **dataTypeMapping** | `{ text: string; number: string; boolean: string; date: string; … }` | ✅ | SQL data type mapping configuration |
-| **ssl** | `boolean` | ✅ | Enable SSL/TLS connection |
+| **ssl** | `boolean` | optional (default: `false`) | Enable SSL/TLS connection |
 | **sslConfig** | `{ rejectUnauthorized: boolean; ca?: string; cert?: string; key?: string }` | optional | SSL/TLS configuration (required when ssl is true) |
 
 
@@ -81,7 +81,7 @@ const result = DataTypeMappingSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **rejectUnauthorized** | `boolean` | ✅ | Reject connections with invalid certificates |
+| **rejectUnauthorized** | `boolean` | optional (default: `true`) | Reject connections with invalid certificates |
 | **ca** | `string` | optional | CA certificate file path or content |
 | **cert** | `string` | optional | Client certificate file path or content |
 | **key** | `string` | optional | Client private key file path or content |

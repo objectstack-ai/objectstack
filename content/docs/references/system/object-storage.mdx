@@ -39,13 +39,13 @@ const result = AccessControlConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **acl** | `Enum<'private' \| 'public_read' \| 'public_read_write' \| 'authenticated_read' \| 'bucket_owner_read' \| 'bucket_owner_full_control'>` | ✅ | Default access control level |
+| **acl** | `Enum<'private' \| 'public_read' \| 'public_read_write' \| 'authenticated_read' \| 'bucket_owner_read' \| 'bucket_owner_full_control'>` | optional (default: `"private"`) | Default access control level |
 | **allowedOrigins** | `string[]` | optional | CORS allowed origins |
 | **allowedMethods** | `Enum<'GET' \| 'PUT' \| 'POST' \| 'DELETE' \| 'HEAD'>[]` | optional | CORS allowed HTTP methods |
 | **allowedHeaders** | `string[]` | optional | CORS allowed headers |
 | **exposeHeaders** | `string[]` | optional | CORS exposed headers |
 | **maxAge** | `number` | optional | CORS preflight cache duration in seconds |
-| **corsEnabled** | `boolean` | ✅ | Enable CORS configuration |
+| **corsEnabled** | `boolean` | optional (default: `false`) | Enable CORS configuration |
 | **publicAccess** | `{ allowPublicRead: boolean; allowPublicWrite: boolean; allowPublicList: boolean }` | optional | Public access control |
 | **allowedIps** | `string[]` | optional | Allowed IP addresses/CIDR blocks |
 | **blockedIps** | `string[]` | optional | Blocked IP addresses/CIDR blocks |
@@ -65,15 +65,15 @@ const result = AccessControlConfigSchema.parse(data);
 | **region** | `string` | optional | Storage region (e.g., us-east-1, westus) |
 | **provider** | `Enum<'s3' \| 'azure_blob' \| 'gcs' \| 'minio' \| 'r2' \| 'spaces' \| 'wasabi' \| 'backblaze' \| 'local'>` | ✅ | Storage provider |
 | **endpoint** | `string` | optional | Custom endpoint URL (for S3-compatible providers) |
-| **pathStyle** | `boolean` | ✅ | Use path-style URLs (for S3-compatible providers) |
-| **versioning** | `boolean` | ✅ | Enable object versioning |
+| **pathStyle** | `boolean` | optional (default: `false`) | Use path-style URLs (for S3-compatible providers) |
+| **versioning** | `boolean` | optional (default: `false`) | Enable object versioning |
 | **encryption** | `{ enabled: boolean; algorithm: Enum<'AES256' \| 'aws:kms' \| 'azure:kms' \| 'gcp:kms'>; kmsKeyId?: string }` | optional | Server-side encryption configuration |
 | **accessControl** | `{ acl: Enum<'private' \| 'public_read' \| 'public_read_write' \| 'authenticated_read' \| … +2 more>; allowedOrigins?: string[]; allowedMethods?: Enum<'GET' \| 'PUT' \| 'POST' \| 'DELETE' \| 'HEAD'>[]; allowedHeaders?: string[]; … }` | optional | Access control configuration |
 | **lifecyclePolicy** | `{ enabled: boolean; rules: object[] }` | optional | Lifecycle policy configuration |
 | **multipartConfig** | `{ enabled: boolean; partSize: number; maxParts: number; threshold: number; … }` | optional | Multipart upload configuration |
 | **tags** | `Record<string, string>` | optional | Bucket tags for organization |
 | **description** | `string` | optional | Bucket description |
-| **enabled** | `boolean` | ✅ | Enable this bucket |
+| **enabled** | `boolean` | optional (default: `true`) | Enable this bucket |
 
 
 ---
@@ -115,8 +115,8 @@ Lifecycle policy action type
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable lifecycle policies |
-| **rules** | `{ id: string; enabled: boolean; action: Enum<'transition' \| 'delete' \| 'abort'>; prefix?: string; … }[]` | ✅ | Lifecycle rules |
+| **enabled** | `boolean` | optional (default: `false`) | Enable lifecycle policies |
+| **rules** | `{ id: string; enabled: boolean; action: Enum<'transition' \| 'delete' \| 'abort'>; prefix?: string; … }[]` | optional (default: `[]`) | Lifecycle rules |
 
 
 ---
@@ -128,7 +128,7 @@ Lifecycle policy action type
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Rule identifier |
-| **enabled** | `boolean` | ✅ | Enable this rule |
+| **enabled** | `boolean` | optional (default: `true`) | Enable this rule |
 | **action** | `Enum<'transition' \| 'delete' \| 'abort'>` | ✅ | Action to perform |
 | **prefix** | `string` | optional | Object key prefix filter (e.g., "uploads/") |
 | **tags** | `Record<string, string>` | optional | Object tag filters |
@@ -145,11 +145,11 @@ Lifecycle policy action type
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable multipart uploads |
-| **partSize** | `number` | ✅ | Part size in bytes (min 5MB, max 5GB) |
-| **maxParts** | `number` | ✅ | Maximum number of parts (max 10,000) |
-| **threshold** | `number` | ✅ | File size threshold to trigger multipart upload (bytes) |
-| **maxConcurrent** | `number` | ✅ | Maximum concurrent part uploads |
+| **enabled** | `boolean` | optional (default: `true`) | Enable multipart uploads |
+| **partSize** | `number` | optional (default: `10485760`) | Part size in bytes (min 5MB, max 5GB) |
+| **maxParts** | `number` | optional (default: `10000`) | Maximum number of parts (max 10,000) |
+| **threshold** | `number` | optional (default: `104857600`) | File size threshold to trigger multipart upload (bytes) |
+| **maxConcurrent** | `number` | optional (default: `4`) | Maximum concurrent part uploads |
 | **abortIncompleteAfterDays** | `number` | optional | Auto-abort incomplete uploads after N days |
 
 
@@ -186,14 +186,14 @@ Lifecycle policy action type
 | **name** | `string` | ✅ | Storage configuration identifier |
 | **label** | `string` | ✅ | Display label |
 | **provider** | `Enum<'s3' \| 'azure_blob' \| 'gcs' \| 'minio' \| 'r2' \| 'spaces' \| 'wasabi' \| 'backblaze' \| 'local'>` | ✅ | Primary storage provider |
-| **scope** | `Enum<'global' \| 'tenant' \| 'user' \| 'session' \| 'temp' \| 'cache' \| 'data' \| 'logs' \| 'config' \| 'public'>` | ✅ | Storage scope |
+| **scope** | `Enum<'global' \| 'tenant' \| 'user' \| 'session' \| 'temp' \| 'cache' \| 'data' \| 'logs' \| 'config' \| 'public'>` | optional (default: `"global"`) | Storage scope |
 | **connection** | `{ accessKeyId?: string; secretAccessKey?: string; sessionToken?: string; accountName?: string; … }` | ✅ | Connection credentials |
-| **buckets** | `{ name: string; label: string; bucketName: string; region?: string; … }[]` | ✅ | Configured buckets |
+| **buckets** | `{ name: string; label: string; bucketName: string; region?: string; … }[]` | optional (default: `[]`) | Configured buckets |
 | **defaultBucket** | `string` | optional | Default bucket name for operations |
 | **location** | `string` | optional | Root path (local) or base location |
 | **quota** | `integer` | optional | Max size in bytes |
 | **options** | `Record<string, any>` | optional | Provider-specific configuration options |
-| **enabled** | `boolean` | ✅ | Enable this storage configuration |
+| **enabled** | `boolean` | optional (default: `true`) | Enable this storage configuration |
 | **description** | `string` | optional | Configuration description |
 
 
@@ -262,7 +262,7 @@ Storage class/tier for cost optimization
 | **credentials** | `string` | optional | GCP service account credentials JSON |
 | **endpoint** | `string` | optional | Custom endpoint URL |
 | **region** | `string` | optional | Default region |
-| **useSSL** | `boolean` | ✅ | Use SSL/TLS for connections |
+| **useSSL** | `boolean` | optional (default: `true`) | Use SSL/TLS for connections |
 | **timeout** | `number` | optional | Connection timeout in milliseconds |
 
 

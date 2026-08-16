@@ -37,7 +37,7 @@ const result = RegistryConfigSchema.parse(data);
 | **scope** | `string[]` | optional | npm-style scopes managed by this registry (e.g., @my-corp, @enterprise) |
 | **defaultScope** | `string` | optional | Default scope prefix for new plugins |
 | **storage** | `{ backend: Enum<'local' \| 's3' \| 'gcs' \| 'azure-blob' \| 'oss'>; path?: string; credentials?: Record<string, any> }` | optional |  |
-| **visibility** | `Enum<'public' \| 'private' \| 'internal'>` | ✅ | Who can access this registry |
+| **visibility** | `Enum<'public' \| 'private' \| 'internal'>` | optional (default: `"private"`) | Who can access this registry |
 | **accessControl** | `{ requireAuthForRead: boolean; requireAuthForWrite: boolean; allowedPrincipals?: string[] }` | optional |  |
 | **cache** | `{ enabled: boolean; ttl: integer; maxSize?: integer }` | optional |  |
 | **mirrors** | `{ url: string; priority: integer }[]` | optional | Mirror registries for redundancy |
@@ -65,11 +65,11 @@ Registry synchronization strategy
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **url** | `string` | ✅ | Upstream registry endpoint |
-| **syncPolicy** | `Enum<'manual' \| 'auto' \| 'proxy'>` | ✅ | Registry synchronization strategy |
+| **syncPolicy** | `Enum<'manual' \| 'auto' \| 'proxy'>` | optional (default: `"auto"`) | Registry synchronization strategy |
 | **syncInterval** | `integer` | optional | Auto-sync interval in seconds |
 | **auth** | `{ type: Enum<'none' \| 'basic' \| 'bearer' \| 'api-key' \| 'oauth2'>; username?: string; password?: string; token?: string; … }` | optional |  |
 | **tls** | `{ enabled: boolean; verifyCertificate: boolean; certificate?: string; privateKey?: string }` | optional |  |
-| **timeout** | `integer` | ✅ | Request timeout in milliseconds |
+| **timeout** | `integer` | optional (default: `30000`) | Request timeout in milliseconds |
 | **retry** | `{ maxAttempts: integer; backoff: Enum<'fixed' \| 'linear' \| 'exponential'> }` | optional |  |
 
 

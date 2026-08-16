@@ -37,11 +37,11 @@ const result = ApprovalDecision.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable SLA-based escalation for this node |
+| **enabled** | `boolean` | optional (default: `false`) | Enable SLA-based escalation for this node |
 | **timeoutHours** | `number` | ✅ | Hours before escalation triggers |
-| **action** | `Enum<'reassign' \| 'auto_approve' \| 'auto_reject' \| 'notify'>` | ✅ | Action on escalation timeout |
+| **action** | `Enum<'reassign' \| 'auto_approve' \| 'auto_reject' \| 'notify'>` | optional (default: `"notify"`) | Action on escalation timeout |
 | **escalateTo** | `string` | optional | User id or position machine name to escalate to |
-| **notifySubmitter** | `boolean` | ✅ | Notify the original submitter on escalation |
+| **notifySubmitter** | `boolean` | optional (default: `true`) | Notify the original submitter on escalation |
 
 
 ---
@@ -68,14 +68,14 @@ const result = ApprovalDecision.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **approvers** | `{ type: Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'field' \| 'expression' \| … +4 more>; value?: string; resolveAs?: Enum<'user' \| 'department' \| 'position' \| 'team'>; group?: string; … }[]` | ✅ | Allowed approvers for this node |
-| **behavior** | `Enum<'first_response' \| 'unanimous' \| 'quorum' \| 'per_group'>` | ✅ | How to combine multiple approvers |
+| **behavior** | `Enum<'first_response' \| 'unanimous' \| 'quorum' \| 'per_group'>` | optional (default: `"first_response"`) | How to combine multiple approvers |
 | **minApprovals** | `integer` | optional | Approvals required — total (quorum) or per group (per_group). Default 1 |
-| **lockRecord** | `boolean` | ✅ | Lock the record from editing while pending |
+| **lockRecord** | `boolean` | optional (default: `true`) | Lock the record from editing while pending |
 | **approvalStatusField** | `string` | optional | Business-object field to mirror request status onto |
-| **onEmptyApprovers** | `Enum<'admin_rescue' \| 'fail' \| 'auto_approve'>` | ✅ | Behavior when no concrete approver resolves at node entry |
+| **onEmptyApprovers** | `Enum<'admin_rescue' \| 'fail' \| 'auto_approve'>` | optional (default: `"admin_rescue"`) | Behavior when no concrete approver resolves at node entry |
 | **decisionOutputs** | `(string \| { key: string; label?: string; type?: Enum<'text' \| 'user' \| 'department' \| 'position' \| 'team'>; multiple?: boolean; … })[]` | optional | Author-declared decision outputs — bare keys or typed `{ key, type, multiple }` declarations |
 | **escalation** | `{ enabled: boolean; timeoutHours: number; action: Enum<'reassign' \| 'auto_approve' \| 'auto_reject' \| 'notify'>; escalateTo?: string; … }` | optional | Per-node SLA escalation |
-| **maxRevisions** | `integer` | ✅ | Max send-backs for revision before auto-reject (0 = send-back disabled) |
+| **maxRevisions** | `integer` | optional (default: `3`) | Max send-backs for revision before auto-reject (0 = send-back disabled) |
 
 
 ---

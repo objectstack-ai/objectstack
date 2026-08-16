@@ -75,16 +75,16 @@ Interface-level page configuration (Airtable parity)
 | **label** | `string \| Record<string, string>` | ✅ | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **description** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **icon** | `string` | optional | Page icon name |
-| **type** | `Enum<'record' \| 'home' \| 'app' \| 'utility' \| 'list'>` | optional | Page type |
+| **type** | `Enum<'record' \| 'home' \| 'app' \| 'utility' \| 'list'>` | optional (default: `"record"`) | Page type |
 | **variables** | `{ name: string; type?: Enum<'string' \| 'number' \| 'boolean' \| 'object' \| 'array' \| 'record_id'>; defaultValue?: any; source?: string }[]` | optional | Local page state, exposed to expressions as `page.<name>` and writable by interactive elements via `source` (master/detail, filtered dashboards). |
 | **object** | `string` | optional | Bound object (for Record pages) |
-| **template** | `string` | optional | Layout template name (e.g. "header-sidebar-main") |
+| **template** | `string` | optional (default: `"default"`) | Layout template name (e.g. "header-sidebar-main") |
 | **regions** | `{ name: string; width?: Enum<'small' \| 'medium' \| 'large' \| 'full'>; components: object[] }[]` | optional | Layout regions (header, main, sidebar, footer) with their components. Optional — list pages use interfaceConfig, slotted pages use slots, and an empty full page falls back to the synthesized default layout. |
-| **isDefault** | `boolean` | optional |  |
+| **isDefault** | `boolean` | optional (default: `false`) |  |
 | **assignedProfiles** | `string[]` | optional |  |
 | **interfaceConfig** | `{ source?: string; columns?: string[] \| object[]; sort?: object[]; filterBy?: object[]; … }` | optional | Interface-level page configuration (for Airtable-style interface pages) |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
-| **kind** | `Enum<'full' \| 'slotted' \| 'html' \| 'react' \| 'jsx'>` | optional | Page override mode. full \| slotted = structured authoring; html = author-written constrained JSX/HTML+Tailwind compiled (parsed, never executed) to the tree (ADR-0080; the legacy value 'jsx' is a deprecated alias); react = real-React source executed at render by the runtime (ADR-0081); it runs author JS, so it is gated by a host capability that defaults ON and is disabled server-side via the OS_PAGE_REACT=off env toggle. |
+| **kind** | `Enum<'full' \| 'slotted' \| 'html' \| 'react' \| 'jsx'>` | optional (default: `"full"`) | Page override mode. full \| slotted = structured authoring; html = author-written constrained JSX/HTML+Tailwind compiled (parsed, never executed) to the tree (ADR-0080; the legacy value 'jsx' is a deprecated alias); react = real-React source executed at render by the runtime (ADR-0081); it runs author JS, so it is gated by a host capability that defaults ON and is disabled server-side via the OS_PAGE_REACT=off env toggle. |
 | **slots** | `{ header?: object \| object[]; actions?: object \| object[]; alerts?: object \| object[]; highlights?: object \| object[]; … }` | optional | Slot override map for slotted pages |
 | **source** | `string` | optional | Page source text. For kind==='html' (alias 'jsx') it is constrained JSX/HTML+Tailwind compiled to the tree by @objectstack/sdui-parser at save time (parse, never execute). For kind==='react' it is real React/JSX executed at render by @object-ui/react-runtime (trusted tier). Authoritative over `regions` in both. |
 | **requires** | `string[]` | optional | Plugin namespaces the JSX source references (validated at save and load) |
@@ -108,7 +108,7 @@ Interface-level page configuration (Airtable parity)
 | **type** | `Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| 'page:card' \| 'page:section' \| 'record:details' \| 'record:highlights' \| 'record:related_list' \| 'record:activity' \| 'record:chatter' \| 'record:discussion' \| 'record:path' \| 'record:alert' \| 'record:quick_actions' \| 'record:reference_rail' \| 'record:history' \| 'app:launcher' \| 'nav:menu' \| 'nav:breadcrumb' \| 'global:search' \| 'global:notifications' \| 'user:profile' \| 'ai:chat_window' \| 'ai:suggestion' \| 'element:text' \| 'element:number' \| 'element:image' \| 'element:divider' \| 'element:button' \| 'element:filter' \| 'element:form' \| 'element:record_picker' \| 'element:text_input'> \| string` | ✅ | Component Type (Standard enum or custom string) |
 | **id** | `string` | optional | Unique instance ID |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
-| **properties** | `Record<string, any>` | optional | Component props passed to the widget. See component.zod.ts for schemas. |
+| **properties** | `Record<string, any>` | optional (default: `{}`) | Component props passed to the widget. See component.zod.ts for schemas. |
 | **events** | `Record<string, string>` | optional | Event handlers map |
 | **style** | `Record<string, string>` | optional | Inline styles or utility classes |
 | **className** | `string` | optional | CSS class names |
@@ -200,7 +200,7 @@ Page type — the page KIND. Only types with a dedicated renderer are authorizab
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Variable name. Exposed to expressions as `page.<name>`. |
-| **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'object' \| 'array' \| 'record_id'>` | ✅ |  |
+| **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'object' \| 'array' \| 'record_id'>` | optional (default: `"string"`) |  |
 | **defaultValue** | `any` | optional | Initial value. Defaults to a type-appropriate empty value when omitted. |
 | **source** | `string` | optional | Component id that writes this variable (e.g. an element:record_picker whose `id` matches). |
 

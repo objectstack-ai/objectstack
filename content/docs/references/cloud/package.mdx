@@ -75,14 +75,14 @@ Register a new package in the Control Plane
 | **displayName** | `string` | ✅ | Display name shown in Studio and Marketplace |
 | **description** | `string` | optional | Short package description |
 | **readme** | `string` | optional | Long-form package documentation (markdown) |
-| **visibility** | `Enum<'private' \| 'org' \| 'marketplace'>` | ✅ | Package visibility: private = owner org only; org = all envs in owner org; marketplace = public registry |
+| **visibility** | `Enum<'private' \| 'org' \| 'marketplace'>` | optional (default: `"private"`) | Package visibility: private = owner org only; org = all envs in owner org; marketplace = public registry |
 | **category** | `string` | optional | Package category for marketplace discovery (e.g. "crm", "hr", "finance", "devtools") |
 | **tags** | `string[]` | optional | Search and filter tags |
 | **iconUrl** | `string` | optional | Package icon URL |
 | **homepageUrl** | `string` | optional | Package homepage URL |
 | **license** | `string` | optional | SPDX license identifier (e.g. MIT, Apache-2.0) |
-| **publisher** | `Enum<'objectstack' \| 'partner' \| 'community' \| 'private'>` | ✅ | Package publisher provenance tier |
-| **isStarter** | `boolean` | ✅ | If true, surfaces in the Create Project blueprint picker as a starter template |
+| **publisher** | `Enum<'objectstack' \| 'partner' \| 'community' \| 'private'>` | optional (default: `"private"`) | Package publisher provenance tier |
+| **isStarter** | `boolean` | optional (default: `false`) | If true, surfaces in the Create Project blueprint picker as a starter template |
 | **translations** | `Record<string, { displayName?: string; description?: string; readme?: string; tagline?: string; … }>` | optional | Locale-keyed overrides for display_name / description / readme |
 | **createdAt** | `string` | ✅ | Creation timestamp (ISO-8601) |
 | **updatedAt** | `string` | ✅ | Last update timestamp (ISO-8601) |

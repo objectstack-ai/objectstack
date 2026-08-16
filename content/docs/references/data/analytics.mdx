@@ -79,7 +79,7 @@ const result = AggregationMetricType.parse(data);
 | **dimensions** | `Record<string, { name: string; label: string; description?: string; type: Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>; … }>` | ✅ | Qualitative attributes |
 | **joins** | `Record<string, { name: string; relationship: Enum<'one_to_one' \| 'one_to_many' \| 'many_to_one'>; sql: string }>` | optional |  |
 | **refreshKey** | `{ every?: string; sql?: string }` | optional |  |
-| **public** | `boolean` | ✅ |  |
+| **public** | `boolean` | optional (default: `false`) |  |
 
 
 ---
@@ -91,7 +91,7 @@ const result = AggregationMetricType.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Target cube name |
-| **relationship** | `Enum<'one_to_one' \| 'one_to_many' \| 'many_to_one'>` | ✅ |  |
+| **relationship** | `Enum<'one_to_one' \| 'one_to_many' \| 'many_to_one'>` | optional (default: `"many_to_one"`) |  |
 | **sql** | `string` | ✅ | Join condition (ON clause) |
 
 

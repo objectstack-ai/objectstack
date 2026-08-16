@@ -43,7 +43,7 @@ App compatibility check result
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **compatible** | `boolean` | ✅ | Whether the app is compatible |
-| **issues** | `{ severity: Enum<'error' \| 'warning'>; message: string; category: Enum<'kernel_version' \| 'object_conflict' \| 'dependency_missing' \| 'quota_exceeded'> }[]` | ✅ | Compatibility issues |
+| **issues** | `{ severity: Enum<'error' \| 'warning'>; message: string; category: Enum<'kernel_version' \| 'object_conflict' \| 'dependency_missing' \| 'quota_exceeded'> }[]` | optional (default: `[]`) | Compatibility issues |
 
 
 ---
@@ -59,7 +59,7 @@ App install request
 | **tenantId** | `string` | ✅ | Target tenant ID |
 | **appId** | `string` | ✅ | App identifier |
 | **configOverrides** | `Record<string, any>` | optional | Configuration overrides |
-| **skipSeedData** | `boolean` | ✅ | Skip seed data population |
+| **skipSeedData** | `boolean` | optional (default: `false`) | Skip seed data population |
 
 
 ---
@@ -75,9 +75,9 @@ App install result
 | **success** | `boolean` | ✅ | Whether installation succeeded |
 | **appId** | `string` | ✅ | Installed app identifier |
 | **version** | `string` | ✅ | Installed app version |
-| **installedObjects** | `string[]` | ✅ | Objects created/updated |
-| **createdTables** | `string[]` | ✅ | Database tables created |
-| **seededRecords** | `integer` | ✅ | Seed records inserted |
+| **installedObjects** | `string[]` | optional (default: `[]`) | Objects created/updated |
+| **createdTables** | `string[]` | optional (default: `[]`) | Database tables created |
+| **seededRecords** | `integer` | optional (default: `0`) | Seed records inserted |
 | **durationMs** | `integer` | optional | Installation duration |
 | **error** | `string` | optional | Error message on failure |
 
@@ -97,12 +97,12 @@ App manifest for marketplace installation
 | **version** | `string` | ✅ | App version (semver) |
 | **description** | `string` | optional | App description |
 | **minKernelVersion** | `string` | optional | Minimum required kernel version |
-| **objects** | `string[]` | ✅ | Object names provided |
-| **views** | `string[]` | ✅ | View names provided |
-| **flows** | `string[]` | ✅ | Flow names provided |
-| **hasSeedData** | `boolean` | ✅ | Whether app includes seed data |
-| **seedData** | `Record<string, any>[]` | ✅ | Seed data records |
-| **dependencies** | `string[]` | ✅ | Required app dependencies |
+| **objects** | `string[]` | optional (default: `[]`) | Object names provided |
+| **views** | `string[]` | optional (default: `[]`) | View names provided |
+| **flows** | `string[]` | optional (default: `[]`) | Flow names provided |
+| **hasSeedData** | `boolean` | optional (default: `false`) | Whether app includes seed data |
+| **seedData** | `Record<string, any>[]` | optional (default: `[]`) | Seed data records |
+| **dependencies** | `string[]` | optional (default: `[]`) | Required app dependencies |
 
 
 ---

@@ -31,9 +31,9 @@ const result = SeedSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Target Object Name |
-| **externalId** | `string \| string[]` | ✅ | Field (or composite list of fields) matched for the uniqueness check |
-| **mode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | ✅ | Conflict resolution strategy |
-| **env** | `Enum<'prod' \| 'dev' \| 'test'>[]` | ✅ | Applicable environments |
+| **externalId** | `string \| string[]` | optional (default: `"name"`) | Field (or composite list of fields) matched for the uniqueness check |
+| **mode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | optional (default: `"upsert"`) | Conflict resolution strategy |
+| **env** | `Enum<'prod' \| 'dev' \| 'test'>[]` | optional (default: `["prod","dev","test"]`) | Applicable environments |
 | **records** | `Record<string, any>[]` | ✅ | Data records |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |

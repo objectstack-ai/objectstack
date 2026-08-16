@@ -84,20 +84,20 @@ const result = ERDiagramConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable ER diagram panel |
-| **layout** | `Enum<'force' \| 'hierarchy' \| 'grid' \| 'circular'>` | ✅ | Default layout algorithm |
-| **nodeDisplay** | `{ showFields: boolean; maxFieldsVisible: number; showFieldTypes: boolean; showRequiredIndicator: boolean; … }` | ✅ | Node display configuration |
-| **showMinimap** | `boolean` | ✅ | Show minimap for large diagrams |
-| **zoomControls** | `boolean` | ✅ | Show zoom in/out/fit controls |
-| **minZoom** | `number` | ✅ | Minimum zoom level |
-| **maxZoom** | `number` | ✅ | Maximum zoom level |
-| **showEdgeLabels** | `boolean` | ✅ | Show cardinality labels on relationship edges |
-| **highlightOnHover** | `boolean` | ✅ | Highlight connected entities on node hover |
-| **clickToNavigate** | `boolean` | ✅ | Click node to navigate to object detail |
-| **dragToConnect** | `boolean` | ✅ | Drag between nodes to create relationships |
-| **hideOrphans** | `boolean` | ✅ | Hide objects with no relationships |
-| **autoFit** | `boolean` | ✅ | Auto-fit diagram to viewport on load |
-| **exportFormats** | `Enum<'png' \| 'svg' \| 'json'>[]` | ✅ | Available export formats for diagram |
+| **enabled** | `boolean` | optional (default: `true`) | Enable ER diagram panel |
+| **layout** | `Enum<'force' \| 'hierarchy' \| 'grid' \| 'circular'>` | optional (default: `"force"`) | Default layout algorithm |
+| **nodeDisplay** | `{ showFields: boolean; maxFieldsVisible: number; showFieldTypes: boolean; showRequiredIndicator: boolean; … }` | optional (has default) | Node display configuration |
+| **showMinimap** | `boolean` | optional (default: `true`) | Show minimap for large diagrams |
+| **zoomControls** | `boolean` | optional (default: `true`) | Show zoom in/out/fit controls |
+| **minZoom** | `number` | optional (default: `0.1`) | Minimum zoom level |
+| **maxZoom** | `number` | optional (default: `3`) | Maximum zoom level |
+| **showEdgeLabels** | `boolean` | optional (default: `true`) | Show cardinality labels on relationship edges |
+| **highlightOnHover** | `boolean` | optional (default: `true`) | Highlight connected entities on node hover |
+| **clickToNavigate** | `boolean` | optional (default: `true`) | Click node to navigate to object detail |
+| **dragToConnect** | `boolean` | optional (default: `true`) | Drag between nodes to create relationships |
+| **hideOrphans** | `boolean` | optional (default: `false`) | Hide objects with no relationships |
+| **autoFit** | `boolean` | optional (default: `true`) | Auto-fit diagram to viewport on load |
+| **exportFormats** | `Enum<'png' \| 'svg' \| 'json'>[]` | optional (default: `["png","svg"]`) | Available export formats for diagram |
 
 
 ---
@@ -122,13 +122,13 @@ ER diagram layout algorithm
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **showFields** | `boolean` | ✅ | Show field list inside entity nodes |
-| **maxFieldsVisible** | `number` | ✅ | Max fields visible before "N more..." collapse |
-| **showFieldTypes** | `boolean` | ✅ | Show field type badges |
-| **showRequiredIndicator** | `boolean` | ✅ | Show required field indicators |
-| **showRecordCount** | `boolean` | ✅ | Show live record count on nodes |
-| **showIcon** | `boolean` | ✅ | Show object icon on node header |
-| **showDescription** | `boolean` | ✅ | Show description tooltip on hover |
+| **showFields** | `boolean` | optional (default: `true`) | Show field list inside entity nodes |
+| **maxFieldsVisible** | `number` | optional (default: `8`) | Max fields visible before "N more..." collapse |
+| **showFieldTypes** | `boolean` | optional (default: `true`) | Show field type badges |
+| **showRequiredIndicator** | `boolean` | optional (default: `true`) | Show required field indicators |
+| **showRecordCount** | `boolean` | optional (default: `false`) | Show live record count on nodes |
+| **showIcon** | `boolean` | optional (default: `true`) | Show object icon on node header |
+| **showDescription** | `boolean` | optional (default: `true`) | Show description tooltip on hover |
 
 
 ---
@@ -139,15 +139,15 @@ ER diagram layout algorithm
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **inlineEditing** | `boolean` | ✅ | Enable inline editing of field properties |
-| **dragReorder** | `boolean` | ✅ | Enable drag-and-drop field reordering |
-| **showFieldGroups** | `boolean` | ✅ | Show field group headers |
-| **showPropertyPanel** | `boolean` | ✅ | Show the right-side property panel |
-| **propertySections** | `{ key: string; label: string; icon?: string; defaultExpanded: boolean; … }[]` | ✅ | Property panel section definitions |
-| **fieldGroups** | `{ key: string; label: string; icon?: string; defaultExpanded: boolean; … }[]` | ✅ | Field group definitions |
-| **paginationThreshold** | `number` | ✅ | Number of fields before pagination is enabled |
-| **batchOperations** | `boolean` | ✅ | Enable batch add/remove field operations |
-| **showUsageStats** | `boolean` | ✅ | Show field usage statistics |
+| **inlineEditing** | `boolean` | optional (default: `true`) | Enable inline editing of field properties |
+| **dragReorder** | `boolean` | optional (default: `true`) | Enable drag-and-drop field reordering |
+| **showFieldGroups** | `boolean` | optional (default: `true`) | Show field group headers |
+| **showPropertyPanel** | `boolean` | optional (default: `true`) | Show the right-side property panel |
+| **propertySections** | `{ key: string; label: string; icon?: string; defaultExpanded: boolean; … }[]` | optional (has default) | Property panel section definitions |
+| **fieldGroups** | `{ key: string; label: string; icon?: string; defaultExpanded: boolean; … }[]` | optional (default: `[]`) | Field group definitions |
+| **paginationThreshold** | `number` | optional (default: `50`) | Number of fields before pagination is enabled |
+| **batchOperations** | `boolean` | optional (default: `true`) | Enable batch add/remove field operations |
+| **showUsageStats** | `boolean` | optional (default: `false`) | Show field usage statistics |
 
 
 ---
@@ -161,8 +161,8 @@ ER diagram layout algorithm
 | **key** | `string` | ✅ | Group key matching field.group values |
 | **label** | `string` | ✅ | Group display label |
 | **icon** | `string` | optional | Lucide icon name |
-| **defaultExpanded** | `boolean` | ✅ | Whether group is expanded by default |
-| **order** | `number` | ✅ | Sort order (lower = higher) |
+| **defaultExpanded** | `boolean` | optional (default: `true`) | Whether group is expanded by default |
+| **order** | `number` | optional (default: `0`) | Sort order (lower = higher) |
 
 
 ---
@@ -176,8 +176,8 @@ ER diagram layout algorithm
 | **key** | `string` | ✅ | Section key (e.g., "basics", "constraints", "security") |
 | **label** | `string` | ✅ | Section display label |
 | **icon** | `string` | optional | Lucide icon name |
-| **defaultExpanded** | `boolean` | ✅ | Whether section is expanded by default |
-| **order** | `number` | ✅ | Sort order (lower = higher) |
+| **defaultExpanded** | `boolean` | optional (default: `true`) | Whether section is expanded by default |
+| **order** | `number` | optional (default: `0`) | Sort order (lower = higher) |
 
 
 ---
@@ -188,12 +188,12 @@ ER diagram layout algorithm
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **defaultView** | `Enum<'field-editor' \| 'relationship-mapper' \| 'er-diagram' \| 'object-manager'>` | ✅ | Default view |
-| **fieldEditor** | `{ inlineEditing: boolean; dragReorder: boolean; showFieldGroups: boolean; showPropertyPanel: boolean; … }` | ✅ | Field editor configuration |
-| **relationshipMapper** | `{ visualCreation: boolean; showReverseRelationships: boolean; showCascadeWarnings: boolean; displayConfig: object[] }` | ✅ | Relationship mapper configuration |
-| **erDiagram** | `{ enabled: boolean; layout: Enum<'force' \| 'hierarchy' \| 'grid' \| 'circular'>; nodeDisplay: object; showMinimap: boolean; … }` | ✅ | ER diagram configuration |
-| **objectManager** | `{ defaultDisplayMode: Enum<'table' \| 'cards' \| 'tree'>; defaultSortField: Enum<'name' \| 'label' \| 'fieldCount' \| 'updatedAt'>; defaultSortDirection: Enum<'asc' \| 'desc'>; defaultFilter: object; … }` | ✅ | Object manager configuration |
-| **objectPreview** | `{ tabs: object[]; defaultTab: string; showHeader: boolean; showBreadcrumbs: boolean }` | ✅ | Object preview configuration |
+| **defaultView** | `Enum<'field-editor' \| 'relationship-mapper' \| 'er-diagram' \| 'object-manager'>` | optional (default: `"field-editor"`) | Default view |
+| **fieldEditor** | `{ inlineEditing: boolean; dragReorder: boolean; showFieldGroups: boolean; showPropertyPanel: boolean; … }` | optional (has default) | Field editor configuration |
+| **relationshipMapper** | `{ visualCreation: boolean; showReverseRelationships: boolean; showCascadeWarnings: boolean; displayConfig: object[] }` | optional (has default) | Relationship mapper configuration |
+| **erDiagram** | `{ enabled: boolean; layout: Enum<'force' \| 'hierarchy' \| 'grid' \| 'circular'>; nodeDisplay: object; showMinimap: boolean; … }` | optional (has default) | ER diagram configuration |
+| **objectManager** | `{ defaultDisplayMode: Enum<'table' \| 'cards' \| 'tree'>; defaultSortField: Enum<'name' \| 'label' \| 'fieldCount' \| 'updatedAt'>; defaultSortDirection: Enum<'asc' \| 'desc'>; defaultFilter: object; … }` | optional (has default) | Object manager configuration |
+| **objectPreview** | `{ tabs: object[]; defaultTab: string; showHeader: boolean; showBreadcrumbs: boolean }` | optional (has default) | Object preview configuration |
 
 
 ---
@@ -220,8 +220,8 @@ Default view when entering the Object Designer
 | :--- | :--- | :--- | :--- |
 | **package** | `string` | optional | Filter by owning package |
 | **tags** | `string[]` | optional | Filter by object tags |
-| **includeSystem** | `boolean` | ✅ | Include system-level objects |
-| **includeAbstract** | `boolean` | ✅ | Include abstract base objects |
+| **includeSystem** | `boolean` | optional (default: `true`) | Include system-level objects |
+| **includeAbstract** | `boolean` | optional (default: `false`) | Include abstract base objects |
 | **hasFieldType** | `string` | optional | Filter to objects containing a specific field type |
 | **hasRelationships** | `boolean` | optional | Filter to objects with lookup/master_detail fields |
 | **searchQuery** | `string` | optional | Free-text search across name, label, and description |
@@ -248,17 +248,17 @@ Object list display mode
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **defaultDisplayMode** | `Enum<'table' \| 'cards' \| 'tree'>` | ✅ | Default list display mode |
-| **defaultSortField** | `Enum<'name' \| 'label' \| 'fieldCount' \| 'updatedAt'>` | ✅ | Default sort field |
-| **defaultSortDirection** | `Enum<'asc' \| 'desc'>` | ✅ | Default sort direction |
-| **defaultFilter** | `{ package?: string; tags?: string[]; includeSystem: boolean; includeAbstract: boolean; … }` | ✅ | Default filter configuration |
-| **showFieldCount** | `boolean` | ✅ | Show field count badge |
-| **showRelationshipCount** | `boolean` | ✅ | Show relationship count badge |
-| **showQuickPreview** | `boolean` | ✅ | Show quick field preview tooltip on hover |
-| **enableComparison** | `boolean` | ✅ | Enable side-by-side object comparison |
-| **showERDiagramToggle** | `boolean` | ✅ | Show ER diagram toggle in toolbar |
-| **showCreateAction** | `boolean` | ✅ | Show create object action |
-| **showStatsSummary** | `boolean` | ✅ | Show statistics summary bar |
+| **defaultDisplayMode** | `Enum<'table' \| 'cards' \| 'tree'>` | optional (default: `"table"`) | Default list display mode |
+| **defaultSortField** | `Enum<'name' \| 'label' \| 'fieldCount' \| 'updatedAt'>` | optional (default: `"label"`) | Default sort field |
+| **defaultSortDirection** | `Enum<'asc' \| 'desc'>` | optional (default: `"asc"`) | Default sort direction |
+| **defaultFilter** | `{ package?: string; tags?: string[]; includeSystem: boolean; includeAbstract: boolean; … }` | optional (default: `{"includeSystem":true,"includeAbstract":false}`) | Default filter configuration |
+| **showFieldCount** | `boolean` | optional (default: `true`) | Show field count badge |
+| **showRelationshipCount** | `boolean` | optional (default: `true`) | Show relationship count badge |
+| **showQuickPreview** | `boolean` | optional (default: `true`) | Show quick field preview tooltip on hover |
+| **enableComparison** | `boolean` | optional (default: `false`) | Enable side-by-side object comparison |
+| **showERDiagramToggle** | `boolean` | optional (default: `true`) | Show ER diagram toggle in toolbar |
+| **showCreateAction** | `boolean` | optional (default: `true`) | Show create object action |
+| **showStatsSummary** | `boolean` | optional (default: `true`) | Show statistics summary bar |
 
 
 ---
@@ -269,10 +269,10 @@ Object list display mode
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **tabs** | `{ key: string; label: string; icon?: string; enabled: boolean; … }[]` | ✅ | Object detail preview tabs |
-| **defaultTab** | `string` | ✅ | Default active tab key |
-| **showHeader** | `boolean` | ✅ | Show object summary header |
-| **showBreadcrumbs** | `boolean` | ✅ | Show navigation breadcrumbs |
+| **tabs** | `{ key: string; label: string; icon?: string; enabled: boolean; … }[]` | optional (has default) | Object detail preview tabs |
+| **defaultTab** | `string` | optional (default: `"fields"`) | Default active tab key |
+| **showHeader** | `boolean` | optional (default: `true`) | Show object summary header |
+| **showBreadcrumbs** | `boolean` | optional (default: `true`) | Show navigation breadcrumbs |
 
 
 ---
@@ -286,8 +286,8 @@ Object list display mode
 | **key** | `string` | ✅ | Tab key |
 | **label** | `string` | ✅ | Tab display label |
 | **icon** | `string` | optional | Lucide icon name |
-| **enabled** | `boolean` | ✅ | Whether this tab is available |
-| **order** | `number` | ✅ | Sort order (lower = higher) |
+| **enabled** | `boolean` | optional (default: `true`) | Whether this tab is available |
+| **order** | `number` | optional (default: `0`) | Sort order (lower = higher) |
 
 
 ---
@@ -313,10 +313,10 @@ Object list sort field
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `Enum<'lookup' \| 'master_detail' \| 'tree'>` | ✅ | Relationship type |
-| **lineStyle** | `Enum<'solid' \| 'dashed' \| 'dotted'>` | ✅ | Line style in diagrams |
-| **color** | `string` | ✅ | Line color (CSS value) |
-| **highlightColor** | `string` | ✅ | Highlighted color on hover/select |
-| **cardinalityLabel** | `string` | ✅ | Cardinality label (e.g., "1:N", "1:1", "N:M") |
+| **lineStyle** | `Enum<'solid' \| 'dashed' \| 'dotted'>` | optional (default: `"solid"`) | Line style in diagrams |
+| **color** | `string` | optional (default: `"#94a3b8"`) | Line color (CSS value) |
+| **highlightColor** | `string` | optional (default: `"#0891b2"`) | Highlighted color on hover/select |
+| **cardinalityLabel** | `string` | optional (default: `"1:N"`) | Cardinality label (e.g., "1:N", "1:1", "N:M") |
 
 
 ---
@@ -327,10 +327,10 @@ Object list sort field
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **visualCreation** | `boolean` | ✅ | Enable drag-to-create relationships |
-| **showReverseRelationships** | `boolean` | ✅ | Show reverse/child-to-parent relationships |
-| **showCascadeWarnings** | `boolean` | ✅ | Show cascade delete behavior warnings |
-| **displayConfig** | `{ type: Enum<'lookup' \| 'master_detail' \| 'tree'>; lineStyle: Enum<'solid' \| 'dashed' \| 'dotted'>; color: string; highlightColor: string; … }[]` | ✅ | Visual config per relationship type |
+| **visualCreation** | `boolean` | optional (default: `true`) | Enable drag-to-create relationships |
+| **showReverseRelationships** | `boolean` | optional (default: `true`) | Show reverse/child-to-parent relationships |
+| **showCascadeWarnings** | `boolean` | optional (default: `true`) | Show cascade delete behavior warnings |
+| **displayConfig** | `{ type: Enum<'lookup' \| 'master_detail' \| 'tree'>; lineStyle: Enum<'solid' \| 'dashed' \| 'dotted'>; color: string; highlightColor: string; … }[]` | optional (has default) | Visual config per relationship type |
 
 
 ---

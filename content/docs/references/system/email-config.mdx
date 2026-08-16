@@ -79,7 +79,7 @@ const result = EmailAddressConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `Enum<'log' \| 'resend' \| 'postmark' \| 'smtp'>` | ✅ | Transport to deliver through (OS_EMAIL_PROVIDER env). Default log — boots, sends nothing |
+| **provider** | `Enum<'log' \| 'resend' \| 'postmark' \| 'smtp'>` | optional (default: `"log"`) | Transport to deliver through (OS_EMAIL_PROVIDER env). Default log — boots, sends nothing |
 | **apiKey** | `string` | optional | Provider API key (or OS_EMAIL_API_KEY env) |
 | **defaultFrom** | `{ name?: string; address: string }` | optional |  |
 | **retries** | `integer` | optional | Retry attempts on transport throw |

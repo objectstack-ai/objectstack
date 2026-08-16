@@ -68,9 +68,9 @@ const result = ScopeConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Unique service name identifier |
-| **scope** | `Enum<'singleton' \| 'transient' \| 'scoped'>` | ✅ | Service scope type |
-| **factoryType** | `Enum<'sync' \| 'async'>` | ✅ | Whether factory is synchronous or asynchronous |
-| **singleton** | `boolean` | ✅ | Whether to cache the factory result (singleton pattern) |
+| **scope** | `Enum<'singleton' \| 'transient' \| 'scoped'>` | optional (default: `"singleton"`) | Service scope type |
+| **factoryType** | `Enum<'sync' \| 'async'>` | optional (default: `"sync"`) | Whether factory is synchronous or asynchronous |
+| **singleton** | `boolean` | optional (default: `true`) | Whether to cache the factory result (singleton pattern) |
 | **cluster** | `{ clusterScope: Enum<'node' \| 'cluster'>; leaderStrategy?: Enum<'leader-elected' \| 'partitioned' \| 'idempotent-broadcast'>; clusterId?: string }` | optional | Cluster scope & leader strategy for this service. |
 
 
@@ -83,7 +83,7 @@ const result = ScopeConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Unique service name identifier |
-| **scope** | `Enum<'singleton' \| 'transient' \| 'scoped'>` | ✅ | Service scope type |
+| **scope** | `Enum<'singleton' \| 'transient' \| 'scoped'>` | optional (default: `"singleton"`) | Service scope type |
 | **type** | `string` | optional | Service type or interface name |
 | **registeredAt** | `integer` | optional | Unix timestamp in milliseconds when service was registered |
 | **metadata** | `Record<string, any>` | optional | Additional service-specific metadata |
@@ -98,9 +98,9 @@ const result = ScopeConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **strictMode** | `boolean` | ✅ | Throw errors on invalid operations (duplicate registration, service not found, etc.) |
-| **allowOverwrite** | `boolean` | ✅ | Allow overwriting existing service registrations |
-| **enableLogging** | `boolean` | ✅ | Enable logging for service registration and retrieval |
+| **strictMode** | `boolean` | optional (default: `true`) | Throw errors on invalid operations (duplicate registration, service not found, etc.) |
+| **allowOverwrite** | `boolean` | optional (default: `false`) | Allow overwriting existing service registrations |
+| **enableLogging** | `boolean` | optional (default: `false`) | Enable logging for service registration and retrieval |
 | **scopeTypes** | `string[]` | optional | Supported scope types |
 | **maxServices** | `integer` | optional | Maximum number of services that can be registered |
 

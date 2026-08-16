@@ -96,11 +96,11 @@ const result = MetadataBulkResultSchema.parse(data);
 | **customizationPolicies** | `{ metadataType: string; allowCustomization: boolean; lockedFields?: string[]; customizableFields?: string[]; … }[]` | optional | Default customization policies per type |
 | **mergeStrategy** | `{ defaultStrategy: Enum<'keep-custom' \| 'accept-incoming' \| 'three-way-merge'>; alwaysAcceptIncoming?: string[]; alwaysKeepCustom?: string[]; autoResolveNonConflicting: boolean }` | optional | Merge strategy for package upgrades |
 | **additionalTypes** | `never` | optional | [REMOVED] `config.additionalTypes` was removed from `MetadataPluginConfig` in @objectstack/spec 17 (#8586, ADR-0049 enforce-or-remove) — it never had an effect: the only production writer of the metadata type registry is `setTypeRegistry(DEFAULT_METADATA_TYPE_REGISTRY)`, which replaces the array outright, so nothing ever merged these entries and the live type set was exactly the built-in registry whatever you declared here. Delete the key. There is no declared-kind channel: a kind enters the live metadata-type set as a side effect of registering an ITEM of that kind (`SchemaRegistry.registerItem` during app/manifest registration, or `MetadataManager.register` at runtime); bind its schema with `registerMetadataTypeSchema(type, schema)` from your plugin's `init(ctx)` so `GET /api/v1/meta` serves a real JSON Schema for it. |
-| **enableEvents** | `boolean` | ✅ | Emit metadata change events |
-| **validateOnWrite** | `boolean` | ✅ | Validate metadata on write |
-| **enableVersioning** | `boolean` | ✅ | Track metadata version history |
-| **cacheMaxItems** | `integer` | ✅ | Max items in memory cache |
-| **bootstrap** | `Enum<'eager' \| 'lazy' \| 'artifact-only'>` | ✅ | How metadata is primed at plugin start (eager / lazy / artifact-only) |
+| **enableEvents** | `boolean` | optional (default: `true`) | Emit metadata change events |
+| **validateOnWrite** | `boolean` | optional (default: `true`) | Validate metadata on write |
+| **enableVersioning** | `boolean` | optional (default: `false`) | Track metadata version history |
+| **cacheMaxItems** | `integer` | optional (default: `10000`) | Max items in memory cache |
+| **bootstrap** | `Enum<'eager' \| 'lazy' \| 'artifact-only'>` | optional (default: `"eager"`) | How metadata is primed at plugin start (eager / lazy / artifact-only) |
 
 
 ---
@@ -115,7 +115,7 @@ const result = MetadataBulkResultSchema.parse(data);
 | **name** | `'ObjectStack Metadata Service'` | ✅ | Plugin name |
 | **version** | `string` | ✅ | Plugin version |
 | **type** | `'standard'` | ✅ | Plugin type |
-| **description** | `string` | ✅ | Plugin description |
+| **description** | `string` | optional (default: `"Core metadata management service for ObjectStack platform"`) | Plugin description |
 | **capabilities** | `{ crud: boolean; query: boolean; overlay: boolean; watch: boolean; … }` | ✅ | Plugin capabilities |
 | **config** | `{ storage: object; customizationPolicies?: object[]; mergeStrategy?: object; enableEvents: boolean; … }` | optional | Plugin configuration |
 
@@ -135,10 +135,10 @@ const result = MetadataBulkResultSchema.parse(data);
 | **scope** | `Enum<'system' \| 'platform' \| 'user'>` | optional | Filter by scope |
 | **state** | `Enum<'draft' \| 'active' \| 'archived' \| 'deprecated'>` | optional | Filter by lifecycle state |
 | **tags** | `string[]` | optional | Filter by tags |
-| **sortBy** | `Enum<'name' \| 'type' \| 'updatedAt' \| 'createdAt'>` | ✅ | Sort field |
-| **sortOrder** | `Enum<'asc' \| 'desc'>` | ✅ | Sort direction |
-| **page** | `integer` | ✅ | Page number |
-| **pageSize** | `integer` | ✅ | Items per page |
+| **sortBy** | `Enum<'name' \| 'type' \| 'updatedAt' \| 'createdAt'>` | optional (default: `"name"`) | Sort field |
+| **sortOrder** | `Enum<'asc' \| 'desc'>` | optional (default: `"asc"`) | Sort direction |
+| **page** | `integer` | optional (default: `1`) | Page number |
+| **pageSize** | `integer` | optional (default: `50`) | Items per page |
 
 
 ---
@@ -202,12 +202,12 @@ const result = MetadataBulkResultSchema.parse(data);
 | **label** | `string` | ✅ | Display label for the metadata type |
 | **description** | `string` | optional | Description of the metadata type |
 | **filePatterns** | `string[]` | ✅ | Glob patterns to discover files of this type |
-| **supportsOverlay** | `boolean` | optional | Whether overlay customization is supported |
-| **allowOrgOverride** | `boolean` | optional | Allow per-org overlay writes via runtime metadata API |
-| **allowRuntimeCreate** | `boolean` | optional | Allow runtime creation via API |
-| **supportsVersioning** | `boolean` | optional | Whether version history is tracked |
-| **executionPinned** | `boolean` | optional | Transaction rows reference a specific version_hash; history GC is disabled and getByHash() MUST resolve old hashes (ADR-0009) |
-| **loadOrder** | `integer` | optional | Loading priority (lower = earlier) |
+| **supportsOverlay** | `boolean` | optional (default: `true`) | Whether overlay customization is supported |
+| **allowOrgOverride** | `boolean` | optional (default: `false`) | Allow per-org overlay writes via runtime metadata API |
+| **allowRuntimeCreate** | `boolean` | optional (default: `true`) | Allow runtime creation via API |
+| **supportsVersioning** | `boolean` | optional (default: `false`) | Whether version history is tracked |
+| **executionPinned** | `boolean` | optional (default: `false`) | Transaction rows reference a specific version_hash; history GC is disabled and getByHash() MUST resolve old hashes (ADR-0009) |
+| **loadOrder** | `integer` | optional (default: `100`) | Loading priority (lower = earlier) |
 | **domain** | `Enum<'data' \| 'ui' \| 'automation' \| 'system' \| 'security' \| 'ai'>` | ✅ | Protocol domain |
 | **actions** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; objectName?: string; … }[]` | optional | Declarative type-level actions (e.g. datasource "Test connection"), reusing ActionSchema; merged with plugin-registered actions when emitted |
 

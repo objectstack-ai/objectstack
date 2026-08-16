@@ -40,13 +40,13 @@ const result = EventMessageQueueConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **provider** | `Enum<'kafka' \| 'rabbitmq' \| 'aws-sqs' \| 'redis-pubsub' \| 'google-pubsub' \| 'azure-service-bus'>` | ✅ | Message queue provider |
 | **topic** | `string` | ✅ | Topic or queue name |
-| **eventPattern** | `string` | ✅ | Event name pattern to publish (supports wildcards) |
+| **eventPattern** | `string` | optional (default: `"*"`) | Event name pattern to publish (supports wildcards) |
 | **partitionKey** | `string` | optional | JSON path for partition key (e.g., "metadata.tenantId") |
-| **format** | `Enum<'json' \| 'avro' \| 'protobuf'>` | ✅ | Message serialization format |
-| **includeMetadata** | `boolean` | ✅ | Include event metadata in message |
-| **compression** | `Enum<'none' \| 'gzip' \| 'snappy' \| 'lz4'>` | ✅ | Message compression |
-| **batchSize** | `integer` | ✅ | Batch size for publishing |
-| **flushIntervalMs** | `integer` | ✅ | Flush interval for batching |
+| **format** | `Enum<'json' \| 'avro' \| 'protobuf'>` | optional (default: `"json"`) | Message serialization format |
+| **includeMetadata** | `boolean` | optional (default: `true`) | Include event metadata in message |
+| **compression** | `Enum<'none' \| 'gzip' \| 'snappy' \| 'lz4'>` | optional (default: `"none"`) | Message compression |
+| **batchSize** | `integer` | optional (default: `1`) | Batch size for publishing |
+| **flushIntervalMs** | `integer` | optional (default: `1000`) | Flush interval for batching |
 
 
 ---
@@ -60,13 +60,13 @@ const result = EventMessageQueueConfigSchema.parse(data);
 | **id** | `string` | optional | Unique webhook identifier |
 | **eventPattern** | `string` | ✅ | Event name pattern (supports wildcards) |
 | **url** | `string` | ✅ | Webhook endpoint URL |
-| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH'>` | ✅ | HTTP method |
+| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH'>` | optional (default: `"POST"`) | HTTP method |
 | **headers** | `Record<string, string>` | optional | HTTP headers |
 | **authentication** | `{ type: Enum<'none' \| 'bearer' \| 'basic' \| 'api-key'>; credentials?: Record<string, string> }` | optional | Authentication configuration |
 | **retryPolicy** | `{ maxRetries: integer; backoffStrategy: Enum<'fixed' \| 'linear' \| 'exponential'>; initialDelayMs: integer; maxDelayMs: integer }` | optional | Retry policy |
-| **timeoutMs** | `integer` | ✅ | Request timeout in milliseconds |
+| **timeoutMs** | `integer` | optional (default: `30000`) | Request timeout in milliseconds |
 | **transform** | `any` | optional | Transform event before sending |
-| **enabled** | `boolean` | ✅ | Whether webhook is enabled |
+| **enabled** | `boolean` | optional (default: `true`) | Whether webhook is enabled |
 
 
 ---
@@ -77,11 +77,11 @@ const result = EventMessageQueueConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable real-time notifications |
-| **protocol** | `Enum<'websocket' \| 'sse' \| 'long-polling'>` | ✅ | Real-time protocol |
-| **eventPattern** | `string` | ✅ | Event pattern to broadcast |
-| **userFilter** | `boolean` | ✅ | Filter events by user |
-| **tenantFilter** | `boolean` | ✅ | Filter events by tenant |
+| **enabled** | `boolean` | optional (default: `true`) | Enable real-time notifications |
+| **protocol** | `Enum<'websocket' \| 'sse' \| 'long-polling'>` | optional (default: `"websocket"`) | Real-time protocol |
+| **eventPattern** | `string` | optional (default: `"*"`) | Event pattern to broadcast |
+| **userFilter** | `boolean` | optional (default: `true`) | Filter events by user |
+| **tenantFilter** | `boolean` | optional (default: `true`) | Filter events by tenant |
 | **channels** | `{ name: string; eventPattern: string; filter?: any }[]` | optional | Named channels for event broadcasting |
 | **rateLimit** | `{ maxEventsPerSecond: integer; windowMs: integer }` | optional | Rate limiting configuration |
 

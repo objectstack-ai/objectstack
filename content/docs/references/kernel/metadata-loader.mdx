@@ -45,12 +45,12 @@ const result = MetadataFallbackStrategySchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **datasource** | `string` | optional | Datasource name reference for database persistence |
-| **tableName** | `string` | ✅ | Database table name for metadata storage |
-| **fallback** | `Enum<'filesystem' \| 'memory' \| 'none'>` | ✅ | Fallback strategy when datasource is unavailable |
+| **tableName** | `string` | optional (default: `"sys_metadata"`) | Database table name for metadata storage |
+| **fallback** | `Enum<'filesystem' \| 'memory' \| 'none'>` | optional (default: `"none"`) | Fallback strategy when datasource is unavailable |
 | **rootDir** | `string` | optional | Root directory path |
-| **formats** | `Enum<'yaml' \| 'json' \| 'typescript' \| 'javascript'>[]` | ✅ | Enabled formats |
+| **formats** | `Enum<'yaml' \| 'json' \| 'typescript' \| 'javascript'>[]` | optional (default: `["typescript","json","yaml"]`) | Enabled formats |
 | **cache** | `{ enabled: boolean; ttl: integer; maxSize?: integer; databaseLoader?: object }` | optional | Cache settings |
-| **watch** | `boolean` | ✅ | Enable file watching |
+| **watch** | `boolean` | optional (default: `false`) | Enable file watching |
 | **watchOptions** | `{ ignored?: string[]; persistent: boolean; ignoreInitial: boolean }` | optional | File watcher options |
 | **validation** | `{ strict: boolean; throwOnError: boolean }` | optional | Validation settings |
 | **loaderOptions** | `Record<string, any>` | optional | Loader-specific configuration |

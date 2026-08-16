@@ -57,7 +57,7 @@ const result = KnowledgeChunkSchema.parse(data);
 | **sourceRecordId** | `string` | optional |  |
 | **content** | `string` | ✅ |  |
 | **title** | `string` | optional |  |
-| **metadata** | `Record<string, any>` | optional |  |
+| **metadata** | `Record<string, any>` | optional (default: `{}`) |  |
 | **permissions** | `string[]` | optional |  |
 
 
@@ -76,7 +76,7 @@ const result = KnowledgeChunkSchema.parse(data);
 | **score** | `number` | ✅ |  |
 | **snippet** | `string` | ✅ |  |
 | **title** | `string` | optional |  |
-| **metadata** | `Record<string, any>` | optional |  |
+| **metadata** | `Record<string, any>` | optional (default: `{}`) |  |
 
 
 ---

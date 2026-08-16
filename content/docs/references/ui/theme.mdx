@@ -96,7 +96,7 @@ const result = BorderRadiusSchema.parse(data);
 | **name** | `string` | ✅ | Unique theme identifier (snake_case) |
 | **label** | `string` | ✅ | Human-readable theme name |
 | **description** | `string` | optional | Theme description |
-| **mode** | `Enum<'light' \| 'dark' \| 'auto'>` | ✅ | Theme mode (light, dark, or auto) |
+| **mode** | `Enum<'light' \| 'dark' \| 'auto'>` | optional (default: `"light"`) | Theme mode (light, dark, or auto) |
 | **colors** | `{ primary: string; secondary?: string; accent?: string; success?: string; … }` | ✅ | Color palette configuration |
 | **typography** | `{ fontFamily?: object }` | optional | Typography settings |
 | **borderRadius** | `{ none?: string; sm?: string; base?: string; md?: string; … }` | optional | Border radius scale |

@@ -53,7 +53,7 @@ Compliance framework audit event requirements
 | **framework** | `Enum<'gdpr' \| 'hipaa' \| 'sox' \| 'pci_dss' \| 'ccpa' \| 'iso27001'>` | ✅ | Compliance framework identifier |
 | **requiredEvents** | `string[]` | ✅ | Audit event types required by this framework (e.g., "data.delete", "auth.login") |
 | **retentionDays** | `number` | ✅ | Minimum audit log retention period required by this framework (in days) |
-| **alertOnMissing** | `boolean` | ✅ | Raise alert if a required audit event is not being captured |
+| **alertOnMissing** | `boolean` | optional (default: `true`) | Raise alert if a required audit event is not being captured |
 
 
 ---
@@ -68,8 +68,8 @@ Compliance framework encryption requirements
 | :--- | :--- | :--- | :--- |
 | **framework** | `Enum<'gdpr' \| 'hipaa' \| 'sox' \| 'pci_dss' \| 'ccpa' \| 'iso27001'>` | ✅ | Compliance framework identifier |
 | **dataClassifications** | `Enum<'pii' \| 'phi' \| 'pci' \| 'financial' \| 'confidential' \| 'internal' \| 'public'>[]` | ✅ | Data classifications that must be encrypted under this framework |
-| **minimumAlgorithm** | `Enum<'aes-256-gcm' \| 'aes-256-cbc' \| 'chacha20-poly1305'>` | ✅ | Minimum encryption algorithm strength required |
-| **keyRotationMaxDays** | `number` | ✅ | Maximum key rotation interval required (in days) |
+| **minimumAlgorithm** | `Enum<'aes-256-gcm' \| 'aes-256-cbc' \| 'chacha20-poly1305'>` | optional (default: `"aes-256-gcm"`) | Minimum encryption algorithm strength required |
+| **keyRotationMaxDays** | `number` | optional (default: `90`) | Maximum key rotation interval required (in days) |
 
 
 ---
@@ -116,9 +116,9 @@ Security policy for a specific data classification level
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **classification** | `Enum<'pii' \| 'phi' \| 'pci' \| 'financial' \| 'confidential' \| 'internal' \| 'public'>` | ✅ | Data classification level |
-| **requireEncryption** | `boolean` | ✅ | Encryption required for this classification |
-| **requireMasking** | `boolean` | ✅ | Masking required for this classification |
-| **requireAudit** | `boolean` | ✅ | Audit trail required for access to this classification |
+| **requireEncryption** | `boolean` | optional (default: `false`) | Encryption required for this classification |
+| **requireMasking** | `boolean` | optional (default: `false`) | Masking required for this classification |
+| **requireAudit** | `boolean` | optional (default: `false`) | Audit trail required for access to this classification |
 | **retentionDays** | `number` | optional | Data retention limit in days (for compliance) |
 
 
@@ -133,10 +133,10 @@ Masking visibility and audit rule per data classification
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **dataClassification** | `Enum<'pii' \| 'phi' \| 'pci' \| 'financial' \| 'confidential' \| 'internal' \| 'public'>` | ✅ | Data classification this rule applies to |
-| **defaultMasked** | `boolean` | ✅ | Whether data is masked by default |
+| **defaultMasked** | `boolean` | optional (default: `true`) | Whether data is masked by default |
 | **unmaskRoles** | `string[]` | optional | Roles allowed to view unmasked data |
-| **auditUnmask** | `boolean` | ✅ | Log an audit event when data is unmasked |
-| **requireApproval** | `boolean` | ✅ | Require explicit approval before unmasking |
+| **auditUnmask** | `boolean` | optional (default: `true`) | Log an audit event when data is unmasked |
+| **requireApproval** | `boolean` | optional (default: `false`) | Require explicit approval before unmasking |
 | **approvalRoles** | `string[]` | optional | Roles that can approve unmasking requests |
 
 
@@ -150,15 +150,15 @@ Unified security context governance configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable unified security context governance |
+| **enabled** | `boolean` | optional (default: `true`) | Enable unified security context governance |
 | **complianceAuditRequirements** | `{ framework: Enum<'gdpr' \| 'hipaa' \| 'sox' \| 'pci_dss' \| 'ccpa' \| 'iso27001'>; requiredEvents: string[]; retentionDays: number; alertOnMissing: boolean }[]` | optional | Compliance-driven audit event requirements |
 | **complianceEncryptionRequirements** | `{ framework: Enum<'gdpr' \| 'hipaa' \| 'sox' \| 'pci_dss' \| 'ccpa' \| 'iso27001'>; dataClassifications: Enum<'pii' \| 'phi' \| 'pci' \| 'financial' \| 'confidential' \| 'internal' \| 'public'>[]; minimumAlgorithm: Enum<'aes-256-gcm' \| 'aes-256-cbc' \| 'chacha20-poly1305'>; keyRotationMaxDays: number }[]` | optional | Compliance-driven encryption requirements by data classification |
 | **maskingVisibility** | `{ dataClassification: Enum<'pii' \| 'phi' \| 'pci' \| 'financial' \| 'confidential' \| 'internal' \| 'public'>; defaultMasked: boolean; unmaskRoles?: string[]; auditUnmask: boolean; … }[]` | optional | Masking visibility rules per data classification |
 | **dataClassifications** | `{ classification: Enum<'pii' \| 'phi' \| 'pci' \| 'financial' \| 'confidential' \| 'internal' \| 'public'>; requireEncryption: boolean; requireMasking: boolean; requireAudit: boolean; … }[]` | optional | Data classification policies for unified security enforcement |
 | **eventCorrelation** | `{ enabled: boolean; correlationId: boolean; linkAuthToAudit: boolean; linkEncryptionToAudit: boolean; … }` | optional | Cross-subsystem security event correlation settings |
-| **enforceOnWrite** | `boolean` | ✅ | Enforce encryption and masking requirements on data write operations |
-| **enforceOnRead** | `boolean` | ✅ | Enforce masking and audit requirements on data read operations |
-| **failOpen** | `boolean` | ✅ | When false (default), deny access if security context cannot be evaluated |
+| **enforceOnWrite** | `boolean` | optional (default: `true`) | Enforce encryption and masking requirements on data write operations |
+| **enforceOnRead** | `boolean` | optional (default: `true`) | Enforce masking and audit requirements on data read operations |
+| **failOpen** | `boolean` | optional (default: `false`) | When false (default), deny access if security context cannot be evaluated |
 
 
 ---
@@ -171,11 +171,11 @@ Cross-subsystem security event correlation configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable cross-subsystem security event correlation |
-| **correlationId** | `boolean` | ✅ | Inject a shared correlation ID into audit, encryption, and masking events |
-| **linkAuthToAudit** | `boolean` | ✅ | Link authentication events to subsequent data operation audit trails |
-| **linkEncryptionToAudit** | `boolean` | ✅ | Log encryption/decryption operations in the audit trail |
-| **linkMaskingToAudit** | `boolean` | ✅ | Log masking/unmasking operations in the audit trail |
+| **enabled** | `boolean` | optional (default: `true`) | Enable cross-subsystem security event correlation |
+| **correlationId** | `boolean` | optional (default: `true`) | Inject a shared correlation ID into audit, encryption, and masking events |
+| **linkAuthToAudit** | `boolean` | optional (default: `true`) | Link authentication events to subsequent data operation audit trails |
+| **linkEncryptionToAudit** | `boolean` | optional (default: `true`) | Log encryption/decryption operations in the audit trail |
+| **linkMaskingToAudit** | `boolean` | optional (default: `true`) | Log masking/unmasking operations in the audit trail |
 
 
 ---

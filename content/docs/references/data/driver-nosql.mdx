@@ -69,7 +69,7 @@ const result = AggregationPipelineSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable schema validation |
+| **enabled** | `boolean` | optional (default: `false`) | Enable schema validation |
 | **validationLevel** | `Enum<'strict' \| 'moderate' \| 'off'>` | optional | Validation strictness |
 | **validationAction** | `Enum<'error' \| 'warn'>` | optional | Action on validation failure |
 | **jsonSchema** | `Record<string, any>` | optional | JSON Schema for validation |
@@ -150,11 +150,11 @@ const result = AggregationPipelineSchema.parse(data);
 | **name** | `string` | ✅ | Index name |
 | **type** | `Enum<'single' \| 'compound' \| 'unique' \| 'text' \| 'geospatial' \| 'hashed' \| 'ttl' \| 'sparse'>` | ✅ | Index type |
 | **fields** | `{ field: string; order?: Enum<'asc' \| 'desc' \| 'text' \| '2dsphere'> }[]` | ✅ | Fields to index |
-| **unique** | `boolean` | ✅ | Enforce uniqueness |
-| **sparse** | `boolean` | ✅ | Sparse index |
+| **unique** | `boolean` | optional (default: `false`) | Enforce uniqueness |
+| **sparse** | `boolean` | optional (default: `false`) | Sparse index |
 | **expireAfterSeconds** | `integer` | optional | TTL in seconds |
 | **partialFilterExpression** | `Record<string, any>` | optional | Partial index filter |
-| **background** | `boolean` | ✅ | Create index in background |
+| **background** | `boolean` | optional (default: `false`) | Create index in background |
 
 
 ---
@@ -232,7 +232,7 @@ const result = AggregationPipelineSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable replication |
+| **enabled** | `boolean` | optional (default: `false`) | Enable replication |
 | **replicaSetName** | `string` | optional | Replica set name |
 | **replicas** | `integer` | optional | Number of replicas |
 | **readPreference** | `Enum<'primary' \| 'primaryPreferred' \| 'secondary' \| 'secondaryPreferred' \| 'nearest'>` | optional | Read preference for replica set |
@@ -247,7 +247,7 @@ const result = AggregationPipelineSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable sharding |
+| **enabled** | `boolean` | optional (default: `false`) | Enable sharding |
 | **shardKey** | `string` | optional | Field to use as shard key |
 | **shardingStrategy** | `Enum<'hash' \| 'range' \| 'zone'>` | optional | Sharding strategy |
 | **numShards** | `integer` | optional | Number of shards |

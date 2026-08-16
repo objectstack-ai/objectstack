@@ -38,8 +38,8 @@ const result = MiddlewareConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Middleware name (snake_case) |
 | **type** | `Enum<'authentication' \| 'authorization' \| 'logging' \| 'validation' \| 'transformation' \| 'error' \| 'custom'>` | ✅ | Middleware type |
-| **enabled** | `boolean` | ✅ | Whether middleware is enabled |
-| **order** | `integer` | ✅ | Execution order priority |
+| **enabled** | `boolean` | optional (default: `true`) | Whether middleware is enabled |
+| **order** | `integer` | optional (default: `100`) | Execution order priority |
 | **config** | `Record<string, any>` | optional | Middleware configuration object |
 | **paths** | `{ include?: string[]; exclude?: string[] }` | optional | Path filtering |
 

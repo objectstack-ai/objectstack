@@ -36,7 +36,7 @@ const result = PluginInstallConfigSchema.parse(data);
 | **pluginId** | `string` | ✅ |  |
 | **version** | `string` | optional | Defaults to latest |
 | **config** | `Record<string, any>` | optional |  |
-| **autoUpdate** | `boolean` | optional |  |
+| **autoUpdate** | `boolean` | optional (default: `false`) |  |
 | **options** | `{ skipDependencies?: boolean; force?: boolean; target?: Enum<'system' \| 'space' \| 'user'> }` | optional |  |
 
 
@@ -81,7 +81,7 @@ const result = PluginInstallConfigSchema.parse(data);
 | **pricing** | `{ model: Enum<'free' \| 'freemium' \| 'paid' \| 'enterprise'>; price?: number; currency?: string; billingPeriod?: Enum<'one-time' \| 'monthly' \| 'yearly'> }` | optional |  |
 | **publishedAt** | `string` | optional |  |
 | **updatedAt** | `string` | optional |  |
-| **deprecated** | `boolean` | ✅ |  |
+| **deprecated** | `boolean` | optional (default: `false`) |  |
 | **deprecationMessage** | `string` | optional |  |
 | **replacedBy** | `string` | optional | Plugin ID that replaces this one |
 | **flags** | `{ experimental: boolean; beta: boolean; featured: boolean; verified: boolean }` | optional |  |
@@ -103,9 +103,9 @@ const result = PluginInstallConfigSchema.parse(data);
 | **pricingModel** | `Enum<'free' \| 'freemium' \| 'paid' \| 'enterprise'>[]` | optional |  |
 | **minRating** | `number` | optional |  |
 | **sortBy** | `Enum<'relevance' \| 'downloads' \| 'rating' \| 'updated' \| 'name'>` | optional |  |
-| **sortOrder** | `Enum<'asc' \| 'desc'>` | optional |  |
-| **page** | `integer` | optional |  |
-| **limit** | `integer` | optional |  |
+| **sortOrder** | `Enum<'asc' \| 'desc'>` | optional (default: `"desc"`) |  |
+| **page** | `integer` | optional (default: `1`) |  |
+| **limit** | `integer` | optional (default: `20`) |  |
 
 
 ---
@@ -116,12 +116,12 @@ const result = PluginInstallConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **downloads** | `integer` | ✅ |  |
-| **downloadsLastMonth** | `integer` | ✅ |  |
-| **activeInstallations** | `integer` | ✅ |  |
+| **downloads** | `integer` | optional (default: `0`) |  |
+| **downloadsLastMonth** | `integer` | optional (default: `0`) |  |
+| **activeInstallations** | `integer` | optional (default: `0`) |  |
 | **ratings** | `{ average: number; count: integer; distribution?: object }` | optional |  |
 | **stars** | `integer` | optional |  |
-| **dependents** | `integer` | ✅ |  |
+| **dependents** | `integer` | optional (default: `0`) |  |
 
 
 ---
@@ -136,8 +136,8 @@ const result = PluginInstallConfigSchema.parse(data);
 | **name** | `string` | ✅ |  |
 | **website** | `string` | optional |  |
 | **email** | `string` | optional |  |
-| **verified** | `boolean` | ✅ | Whether vendor is verified by ObjectStack |
-| **trustLevel** | `Enum<'official' \| 'verified' \| 'community' \| 'unverified'>` | ✅ |  |
+| **verified** | `boolean` | optional (default: `false`) | Whether vendor is verified by ObjectStack |
+| **trustLevel** | `Enum<'official' \| 'verified' \| 'community' \| 'unverified'>` | optional (default: `"unverified"`) |  |
 
 
 ---

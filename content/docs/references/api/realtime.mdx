@@ -27,8 +27,8 @@ const result = RealtimeConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable realtime synchronization |
-| **transport** | `Enum<'websocket' \| 'sse' \| 'polling'>` | ✅ | Transport protocol |
+| **enabled** | `boolean` | optional (default: `true`) | Enable realtime synchronization |
+| **transport** | `Enum<'websocket' \| 'sse' \| 'polling'>` | optional (default: `"websocket"`) | Transport protocol |
 | **subscriptions** | `{ id: string; events: object[]; transport: Enum<'websocket' \| 'sse' \| 'polling'>; channel?: string }[]` | optional | Default subscriptions |
 
 

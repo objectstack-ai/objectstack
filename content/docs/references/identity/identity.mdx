@@ -61,7 +61,7 @@ const result = AccountSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique user identifier |
 | **email** | `string` | ✅ | User email address |
-| **emailVerified** | `boolean` | ✅ | Whether email is verified |
+| **emailVerified** | `boolean` | optional (default: `false`) | Whether email is verified |
 | **name** | `string` | optional | User display name |
 | **image** | `string` | optional | Profile image URL |
 | **createdAt** | `string` | ✅ | Account creation timestamp |

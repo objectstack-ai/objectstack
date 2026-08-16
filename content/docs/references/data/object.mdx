@@ -67,7 +67,7 @@ const result = ApiMethod.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | optional | Index name (auto-generated if not provided) |
 | **fields** | `string[]` | ✅ | Fields included in the index |
-| **unique** | `boolean \| 'global' \| 'organization'` | ✅ | Whether the index enforces uniqueness, and at which scope (ADR-0120). 'global' = materialized over exactly `fields`, no organization column injected — one holder across the whole installation; 'organization' = the driver prepends the NULL-safe organization key part (COALESCE(organization_id, '__global__')) at registration — one holder per organization; bare true = deprecated positional spelling of 'global' (warned in 17.x by lint unique/unscoped-declared-index, rejected at protocol 18, #5082) — state the scope. 'tenant'/'org' are rejected — the word is 'organization' |
+| **unique** | `boolean \| 'global' \| 'organization'` | optional (default: `false`) | Whether the index enforces uniqueness, and at which scope (ADR-0120). 'global' = materialized over exactly `fields`, no organization column injected — one holder across the whole installation; 'organization' = the driver prepends the NULL-safe organization key part (COALESCE(organization_id, '__global__')) at registration — one holder per organization; bare true = deprecated positional spelling of 'global' (warned in 17.x by lint unique/unscoped-declared-index, rejected at protocol 18, #5082) — state the scope. 'tenant'/'org' are rejected — the word is 'organization' |
 | **type** | `never` | optional | [REMOVED] `indexes[].type` was removed in @objectstack/spec 17.0.0 (#5248, ADR-0049) — no driver ever read it. `SqlDriver.syncDeclaredIndexes` creates every declared index through knex's `table.index()` / `table.unique()`, which cannot express an access method, so the value changed no DDL; its `.default('btree')` merely made an inert knob show up in every parse output. Delete the key. The index method is the driver/dialect's decision (Postgres defaults to B-tree; `gin`/`gist`/`fulltext` are dialect-specific and are chosen by a database-layer migration when a workload actually needs one). Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **partial** | `never` | optional | [REMOVED] `indexes[].partial` was removed in @objectstack/spec 17.0.0 (#5248, #4943, ADR-0049) — no driver ever emitted the `WHERE` clause, so a declared partial index was materialized as a FULL index and the predicate silently did nothing. Delete the key. Partial indexes are built at the database layer, not the declaration surface: issue `CREATE [UNIQUE] INDEX … WHERE <predicate>` from a runtime migration (this is what `metadata-protocol`'s `ensureOverlayIndex` already does for `sys_metadata`). Drift detection is unaffected — it reads partiality back from the database's own DDL, never from this key. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 
@@ -114,12 +114,12 @@ const result = ApiMethod.parse(data);
 | **pluralLabel** | `string` | optional | Human readable plural label (e.g. "Accounts") |
 | **description** | `string` | optional | Developer documentation / description |
 | **icon** | `string` | optional | Icon name (Lucide/Material) for UI representation |
-| **isSystem** | `boolean` | optional | Is system object (protected from deletion; defaults its org-wide sharing to public when no sharingModel is set — plugin-sharing) |
+| **isSystem** | `boolean` | optional (default: `false`) | Is system object (protected from deletion; defaults its org-wide sharing to public when no sharingModel is set — plugin-sharing) |
 | **managedBy** | `Enum<'platform' \| 'config' \| 'system-data' \| 'engine-owned' \| 'append-only' \| 'better-auth'>` | optional | Lifecycle bucket — platform (user CRUD) \| config (admin authored) \| system-data (platform-defined schema, admin/user-writable data) \| engine-owned (engine owns the lifecycle, no user writes) \| append-only (audit) \| better-auth (identity). UI clients honour the resolved affordance matrix. |
 | **ownership** | `Enum<'user' \| 'business_unit' \| 'org' \| 'none'>` | optional | Record-ownership model: user (default — injects reassignable owner_id plus owning_business_unit_id) \| business_unit (unit-owned: owning_business_unit_id only, no owner_id) \| org \| none (no per-record owner, neither anchor). Distinct from the package own/extend contribution kind. |
 | **userActions** | `{ create?: boolean \| object; import?: boolean \| object; edit?: boolean \| object; delete?: boolean \| object; … }` | optional | Per-object override of the resolved CRUD affordance matrix. |
 | **systemFields** | `false \| { tenant?: boolean; audit?: boolean }` | optional | Opt out of, or selectively disable, registry-level system-field auto-injection. |
-| **datasource** | `string` | optional | Target Datasource ID. "default" is the primary DB. |
+| **datasource** | `string` | optional (default: `"default"`) | Target Datasource ID. "default" is the primary DB. |
 | **external** | `{ remoteName?: string; remoteSchema?: string; writable?: boolean; columnMap?: Record<string, string>; … }` | optional | Remote table binding for federated (external) objects. |
 | **fields** | `Record<string, { name?: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| … +42 more>; description?: string; … }>` | ✅ | Field definitions map. Keys must be snake_case identifiers. |
 | **indexes** | `{ name?: string; fields: string[]; unique?: boolean \| 'global' \| 'organization' }[]` | optional | Database performance indexes |
@@ -161,7 +161,7 @@ const result = ApiMethod.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **default** | `Enum<'public' \| 'private'>` | ✅ | Default exposure posture: public (covered by wildcard grants) \| private (needs explicit grant; exempt from wildcard RLS). |
+| **default** | `Enum<'public' \| 'private'>` | optional (default: `"public"`) | Default exposure posture: public (covered by wildcard grants) \| private (needs explicit grant; exempt from wildcard RLS). |
 
 
 ---
@@ -172,14 +172,14 @@ const result = ApiMethod.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **trackHistory** | `boolean` | ✅ | Show the record History tab (audit-trail UI). Pair with per-field trackHistory to pick which field diffs are summarized; audit capture itself is always on for compliance |
-| **searchable** | `boolean` | ✅ | Index records for global search |
-| **apiEnabled** | `boolean` | ✅ | Expose object via automatic APIs |
+| **trackHistory** | `boolean` | optional (default: `false`) | Show the record History tab (audit-trail UI). Pair with per-field trackHistory to pick which field diffs are summarized; audit capture itself is always on for compliance |
+| **searchable** | `boolean` | optional (default: `true`) | Index records for global search |
+| **apiEnabled** | `boolean` | optional (default: `true`) | Expose object via automatic APIs |
 | **apiMethods** | `Enum<'get' \| 'list' \| 'create' \| 'update' \| 'delete' \| 'bulk'>[]` | optional | Whitelist of allowed API operations (six primitives; undefined = all, [] = none) |
-| **files** | `boolean` | ✅ | Generic record Attachments panel (sys_attachment). Opt-in: true surfaces the panel and permits attachments targeting this object; otherwise creation is rejected. Field.file/Field.image are independent |
-| **feeds** | `boolean` | ✅ | Record comments/collaboration feed. Default on; explicit false hides the feed UI and rejects new comments for this object |
-| **activities** | `boolean` | ✅ | Record activity timeline (sys_activity mirror of CRUD). Default on; explicit false stops mirroring and hides the timeline |
-| **clone** | `boolean` | ✅ | Allow record deep cloning |
+| **files** | `boolean` | optional (default: `false`) | Generic record Attachments panel (sys_attachment). Opt-in: true surfaces the panel and permits attachments targeting this object; otherwise creation is rejected. Field.file/Field.image are independent |
+| **feeds** | `boolean` | optional (default: `true`) | Record comments/collaboration feed. Default on; explicit false hides the feed UI and rejects new comments for this object |
+| **activities** | `boolean` | optional (default: `true`) | Record activity timeline (sys_activity mirror of CRUD). Default on; explicit false stops mirroring and hides the timeline |
+| **clone** | `boolean` | optional (default: `true`) | Allow record deep cloning |
 
 
 ---
@@ -197,7 +197,7 @@ const result = ApiMethod.parse(data);
 | **description** | `string` | optional | Override description for the extended object |
 | **validations** | `any[]` | optional | Additional validation rules to merge into the target object |
 | **indexes** | `{ name?: string; fields: string[]; unique?: boolean \| 'global' \| 'organization' }[]` | optional | Additional indexes to merge into the target object |
-| **priority** | `integer` | optional | Merge priority (higher = applied later) |
+| **priority** | `integer` | optional (default: `200`) | Merge priority (higher = applied later) |
 
 
 ---
@@ -212,7 +212,7 @@ External datasource binding (ADR-0015)
 | :--- | :--- | :--- | :--- |
 | **remoteName** | `string` | optional | Remote table/view name. Defaults to object.name. |
 | **remoteSchema** | `string` | optional | Remote schema/database qualifier. |
-| **writable** | `boolean` | ✅ | Per-object write opt-in (also requires datasource.external.allowWrites). |
+| **writable** | `boolean` | optional (default: `false`) | Per-object write opt-in (also requires datasource.external.allowWrites). |
 | **columnMap** | `Record<string, string>` | optional | Remote column name → local field name. |
 | **introspectedAt** | `string` | optional | Set by `os datasource introspect`; informational. |
 | **ignoreColumns** | `string[]` | optional | Remote columns to skip during validation (dev convenience). |
@@ -230,7 +230,7 @@ External datasource binding (ADR-0015)
 | **label** | `string` | ✅ | Group display label |
 | **icon** | `string` | optional | Icon name (Lucide/Material) for the group header |
 | **description** | `string` | optional | Optional description shown under the group header |
-| **collapse** | `Enum<'none' \| 'expanded' \| 'collapsed'>` | ✅ | [ADR-0085] Section collapse behaviour: 'none' (always open, no toggle), 'expanded' (collapsible, starts open), 'collapsed' (collapsible, starts closed). |
+| **collapse** | `Enum<'none' \| 'expanded' \| 'collapsed'>` | optional (default: `"none"`) | [ADR-0085] Section collapse behaviour: 'none' (always open, no toggle), 'expanded' (collapsible, starts open), 'collapsed' (collapsible, starts closed). |
 | **defaultExpanded** | `boolean` | optional | [DEPRECATED → collapse] true → 'expanded', false → 'collapsed'. |
 | **collapsible** | `boolean` | optional | [DEPRECATED → collapse] Boolean pair with `collapsed`; use the `collapse` enum. |
 | **collapsed** | `boolean` | optional | [DEPRECATED → collapse] Boolean pair with `collapsible`; use the `collapse` enum. |

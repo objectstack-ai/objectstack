@@ -155,7 +155,7 @@ Type: `string`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'atomic' \| 'compound' \| 'parallel' \| 'final' \| 'history'>` | ✅ |  |
+| **type** | `Enum<'atomic' \| 'compound' \| 'parallel' \| 'final' \| 'history'>` | optional (default: `"atomic"`) |  |
 | **entry** | `(string \| { type: string; params?: Record<string, any> })[]` | optional | Actions to run when entering this state |
 | **exit** | `(string \| { type: string; params?: Record<string, any> })[]` | optional | Actions to run when leaving this state |
 | **on** | `Record<string, string \| { target?: string; cond?: string \| object; actions?: (string \| object)[]; description?: string } \| { target?: string; cond?: string \| object; actions?: (string \| object)[]; description?: string }[]>` | optional | Map of Event Type -> Transition Definition |
