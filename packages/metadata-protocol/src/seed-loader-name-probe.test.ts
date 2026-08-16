@@ -1,7 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
-import { SeedLoaderService } from './seed-loader';
+// `.js`, not extensionless: under `moduleResolution: NodeNext` an extensionless
+// relative import does not resolve, and every symbol it names degrades to
+// `any` — the shape AGENTS.md names. The sibling seed-loader tests predate the
+// rule and sit in this package's frozen debt; a NEW file must not add to it.
+import { SeedLoaderService } from './seed-loader.js';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
