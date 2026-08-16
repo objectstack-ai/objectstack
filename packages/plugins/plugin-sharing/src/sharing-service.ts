@@ -144,6 +144,45 @@ function hasOwnerField(schema: any): boolean {
 }
 
 /**
+ * [#8418] The one WARN line a write gate emits when it refuses because the
+ * ownership fast-path was defeated by a FEDERATED object's phantom `owner_id`
+ * anchor.
+ *
+ * Ruled on #8418 (2026-08-13 14:22Z, option C): the verdict is UNCHANGED —
+ * `checkEdit` / `checkDelete` stay fail-closed exactly as shipped — and what is
+ * added is this diagnostic, so the refusal stops being invisible. Nothing about
+ * the adjudication reads this constant; removing it would change no verdict.
+ *
+ * ## Why this refusal was the silent one
+ *
+ * Every other unresolvable write gate in this class reaches
+ * {@link SharingService.writeGateFailClosed}, which logs. This one never does,
+ * and the reason is one rung of the SQL driver's recovery ladder: when a query's
+ * `fields` names a column the remote table lacks, the driver DISCARDS the whole
+ * projection and re-runs `select('*')` rather than raising, so
+ * {@link SharingService.matchesOwnerScope} gets a perfectly good row that simply
+ * has no `owner_id` key. No throw ⇒ no `catch` ⇒ no log; `owner == null` ⇒
+ * `false` ⇒ `deny`. The operator sees a bare 403 and there is no trace of it
+ * anywhere on the server.
+ *
+ * WARN, not INFO: unlike #6783's system-write skip — which is correct and
+ * self-healing, hence INFO — this names a deployment that cannot work as
+ * authored. Every principal at every write DEPTH is refused (`org` included:
+ * the null-owner short-circuit runs before the scope is consulted), and only a
+ * `modifyAllRecords` holder can still write. The remedies are the operator's:
+ * declare the real remote `owner_id` column, or put the object under a sharing
+ * model that does not scope by owner.
+ *
+ * It is a statement about the ANCHOR, not about the row or the caller — see
+ * {@link SharingService.notePhantomAnchorWriteDeny} for why that fixes the
+ * dedup key.
+ */
+export const PHANTOM_ANCHOR_WRITE_DENY_NOTICE =
+  '[sharing] write refused: the owner column on this federated object is the platform ' +
+  'injected anchor, not a remote column, so ownership can never match; ' +
+  'declare the real remote owner column or change the sharing model';
+
+/**
  * [ADR-0111 D2] The narrow slice of `ISecurityService` the management gate
  * needs — kept structural so unit tests can pass a stub and so a deployment
  * without `@objectstack/plugin-security` degrades to owner-only (fail closed).
@@ -256,6 +295,26 @@ export class SharingService implements ISharingService {
   private readonly securityService?: () => SharingSecurityProbe | null | undefined;
   private readonly tenancy?: () => SharingTenancyProbe | null | undefined;
   private readonly logger?: SharingServiceOptions['logger'];
+
+  /**
+   * [#8418] Objects that have already reported {@link
+   * PHANTOM_ANCHOR_WRITE_DENY_NOTICE}.
+   *
+   * Keyed by OBJECT NAME and nothing else, which is the whole design of the
+   * dedup and follows #6783's `notified` latch. The condition being reported is
+   * a property of the object's REGISTERED SCHEMA — the platform injected an
+   * `owner_id` into a federated object whose storage it never provisioned — so
+   * it is identical for every row and every caller, and it cannot change while
+   * that schema is registered. Keying by record would emit one line per row of
+   * a bulk write, and keying by caller would multiply one misconfiguration by
+   * the principal count; both trade silence for noise, which is the same defect
+   * wearing a different symptom (#6783 states this reasoning for its own line).
+   *
+   * Scoped to the service instance, the analogue of #6783's binding generation:
+   * the latch re-arms when the service is rebuilt, so a redeployed schema gets
+   * its own line rather than inheriting this instance's silence.
+   */
+  private readonly phantomAnchorNotified = new Set<string>();
 
   constructor(options: SharingServiceOptions) {
     this.engine = options.engine;
@@ -440,12 +499,58 @@ export class SharingService implements ISharingService {
       context: SYSTEM_CTX,
     });
     const owner = Array.isArray(own) && own[0] ? (own[0] as any)[OWNER_FIELD] : undefined;
-    if (owner == null) return false;
+    if (owner == null) {
+      // [#8418] The refusal is unchanged — `return false` below is the same
+      // `false` this line has always returned, and the diagnostic is emitted
+      // only for its side effect. It is placed INSIDE the `owner == null` arm
+      // rather than at the top of the method so it reports the state that
+      // actually defeats the fast path, not the mere fact that the object is
+      // federated: an author-declared remote `owner_id` that happens to be NULL
+      // on this row reaches here too, and `hasPhantomOwnerAnchor` is what tells
+      // the two apart (provenance, never an `external` test).
+      this.notePhantomAnchorWriteDeny(object, context);
+      return false;
+    }
     // Middleware-stamped, not a field of the envelope — see buildReadFilter().
     const writeScope = (context as any).__writeScope as ('own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org' | undefined);
     if (writeScope === 'org') return true;
     const owners = await this.resolveOwnerScopeIds(context, writeScope);
     return owners.includes(String(owner));
+  }
+
+  /**
+   * [#8418] Emit {@link PHANTOM_ANCHOR_WRITE_DENY_NOTICE} at most once per
+   * object, and ONLY when the null owner is the platform's phantom anchor
+   * rather than an ordinary owner-less row.
+   *
+   * **Verdict-free by construction.** It returns `void`, every path through it
+   * is a no-op or a log, and its caller ignores it entirely — so no ordering of
+   * schema lookup, latch and logger can move a verdict. That is the ruled
+   * constraint (#8418 option C) expressed as a shape rather than as a promise.
+   *
+   * Never throws. This runs on the write path inside `checkEdit` /
+   * `checkDelete`'s own `try`, where an escaping error would be caught by
+   * {@link writeGateFailClosed} — which returns `deny` too, so the verdict
+   * would survive, but the operator would get the WRONG diagnosis (an
+   * unresolvable gate) for a gate that resolved perfectly well. A diagnostic
+   * that can misreport the thing it exists to explain is worse than silence.
+   * The latch is claimed BEFORE the log so a throwing logger cannot turn one
+   * suppressed line into one throw per row (#6783's ordering, same reason).
+   */
+  private notePhantomAnchorWriteDeny(object: string, context: ExecutionContext): void {
+    if (this.phantomAnchorNotified.has(object)) return;
+    try {
+      const schema = this.engine.getSchema?.(object);
+      if (!hasPhantomOwnerAnchor(schema)) return;
+      this.phantomAnchorNotified.add(object);
+      this.logger?.warn?.(PHANTOM_ANCHOR_WRITE_DENY_NOTICE, {
+        object,
+        ownerField: OWNER_FIELD,
+        userId: context?.userId ?? 'unknown',
+      });
+    } catch {
+      /* a diagnostic must never fail, or change, an operator's write */
+    }
   }
 
   /**
@@ -914,6 +1019,15 @@ export class SharingService implements ISharingService {
     // DEPTH (`org` included: the null-owner short-circuit runs before the scope is
     // consulted). Only the `modifyAllRecords` bypass can still reach `allow`, and
     // it does so without reading a share row.
+    //
+    // [#8418] The measurement was taken on SQLite, but the non-throwing recovery
+    // is NOT a SQLite property — this comment and #8209's changeset both used to
+    // say it was, and that UNDERSTATED the reach. The projection rung is gated by
+    // the driver's single shared `isUnresolvableColumnError` predicate, which
+    // spells all three dialects it speaks: `no such column` (SQLite), `column …
+    // does not exist` (Postgres) and, since #8926, `Unknown column '…'` (MySQL).
+    // One predicate, one ladder, so the silent `deny` reproduces on EVERY
+    // supported dialect rather than in one developer environment.
     //
     // A grant here is therefore inert BY CONSTRUCTION — the ADR-0078
     // silently-inert trap this whole guard (ADR-0111 D7) exists to close: "share"
