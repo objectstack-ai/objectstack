@@ -40,8 +40,18 @@
 /** Any plain metadata record. */
 type AnyRec = Record<string, unknown>;
 
-/** Keys whose subtree is a filter. The one place a filter is authored. */
-export const FILTER_KEYS: ReadonlySet<string> = new Set(['filter', 'filters', 'runtimeFilter']);
+/**
+ * Keys whose subtree is a filter. The one place a filter is authored.
+ *
+ * `relatedListFilter` (#8704) is the one member that does not spell the key
+ * `filter`: it sits flat on a FIELD beside its `relatedList`/`relatedListTitle`/
+ * `relatedListColumns` family, so the family naming wins over the filter-key
+ * convention. It carries a canonical Query-DSL `FilterCondition` (the schema
+ * door already judges it at parse), and listing it here is what extends the
+ * three walking rules — tokens, empty combinators, preset comparands — to the
+ * new position instead of leaving a per-rule hole.
+ */
+export const FILTER_KEYS: ReadonlySet<string> = new Set(['filter', 'filters', 'runtimeFilter', 'relatedListFilter']);
 
 /** One stack collection a caller wants walked. */
 export interface FilterSurface {

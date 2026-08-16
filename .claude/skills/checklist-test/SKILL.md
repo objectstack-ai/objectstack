@@ -17,121 +17,111 @@ metadata:
   internal: true
 ---
 
-# Checklist test — execute selected items against a live app
+# Checklist test —— 对着活的应用执行选中的测试项
 
-You resolve a **selector** to a set of checklist items, boot the app in isolation, drive
-each item's steps in the browser / over the API, and emit a **run record**. The method
-for judging each clause (verdicts, oracle hierarchy, evidence, the anti-false-positive
-self-check) is **`docs/qa/platform-checklist/RUNNER.md`** — read it first and obey it;
-this skill is the trigger, the selection contract, and the isolation/parallelism plan,
-not a second copy of the runner protocol.
+你把一个**选择器**解析成一组清单测试项,在隔离环境把应用拉起来,在浏览器 / API 上驱
+动每一项的步骤,并产出一份**运行记录**。逐条款判定的方法(判定词、oracle 层级、证
+据、防误报自查)是 **`docs/qa/platform-checklist/RUNNER.md`** —— 先读它、服从它;本
+技能只是触发器、选择契约与隔离/并行方案,不是 runner 协议的第二份拷贝。
 
-Environment know-how (boot, the dist build model, the vendored-console trap, browser
-escape hatches) is the **`dogfood-verification`** skill — read it too. You are not
-reinventing how to boot; you are executing a specific list against a boot.
+环境知识(启动、dist 构建模型、vendored-console 陷阱、浏览器逃生舱)在
+**`dogfood-verification`** 技能 —— 也要读。你不是在重新发明怎么启动;你是在对着一次
+启动执行一份具体清单。
 
-## 0. Resolve the selector — deterministic, no guessing
+## 0. 解析选择器 —— 确定性的,不许猜
 
-Never eyeball which items to run. Ask the resolver:
+永不肉眼挑测试项。问解析器:
 
 ```
 node scripts/checklist-select.mjs <selector> --json
 ```
 
-Selectors (one per run):
+选择器(每次运行一个):
 
-| selector | runs |
+| selector | 跑什么 |
 |---|---|
-| `platform-core.console-login` (bare id) | that one item |
-| `area:records-forms` (or bare `records-forms`) | every item in the area |
-| **`records-forms.json`** (or the full `…/areas/records-forms.json` path) | **every item in that area — a list-directory filename works with no prefix** |
-| `capability:hook` | items mapped to a metadata kind in `coverage.json` |
-| `priority:P0` | the standing smoke |
-| `surface:api` | every API-surface item (cheap — no browser build needed) |
-| `since:v17` | everything introduced in a release (the release-sweep filter) |
-| **`file:packages/plugins/plugin-approvals/src/approval-service.ts`** | **items whose `source[]` cites that file — "test whatever covers this file"** (a bare path with a `/` or a code extension auto-resolves as `file:` too) |
-| `all` | the whole checklist |
+| `platform-core.console-login`(裸 id) | 那一项 |
+| `area:records-forms`(或裸 `records-forms`) | 该区全部测试项 |
+| **`records-forms.json`**(或完整 `…/areas/records-forms.json` 路径) | **该区全部测试项 —— 列目录看到的文件名不带前缀也能用** |
+| `capability:hook` | `coverage.json` 里映射到某个元数据种类的项 |
+| `priority:P0` | 常备冒烟 |
+| `surface:api` | 全部 API 面测试项(便宜 —— 不需要浏览器构建) |
+| `since:v17` | 某个 release 引入的全部项(release-sweep 过滤器) |
+| **`file:packages/plugins/plugin-approvals/src/approval-service.ts`** | **`source[]` 引用该文件的项 ——「测覆盖这个文件的一切」**(带 `/` 或代码扩展名的裸路径也自动按 `file:` 解析) |
+| `all` | 整份清单 |
 
-`--json` gives the runnable list (id · priority · surface · revision). **Blocked items are
-excluded by default** — they can't run on stock fixtures; pass `--include-blocked` only to
-record them as `blocked` with their fixture reason. **Pin the `revision`** the resolver
-reports into the run record: a verdict is only valid for the revision it ran against.
+`--json` 给出可运行清单(id · priority · surface · revision)。**Blocked 项默认排
+除** —— 它们在现成 fixture 上跑不起来;只有要把它们带着 fixture 理由记录成
+`blocked` 时才传 `--include-blocked`。**把解析器报出的 `revision` 钉进运行记录**:
+判定只对它运行时所对的那个 revision 有效。
 
-## 1. Plan the run by surface — build only what you need
+## 1. 按 surface 规划这一轮 —— 只构建需要的
 
-Read the matched items' `surface`:
+读命中项的 `surface`:
 
-- **All `api` / `build` / `cli`** → no console build. Boot the framework (`objectstack dev`)
-  and drive REST/CLI. Fast (~minutes).
-- **Any `browser` / `mixed`** → you need the vendored console dist. It builds SEPARATELY
-  from the showcase workspace closure (`pnpm objectui:build` from the pinned `.objectui-sha`);
-  the first boot 404s `/_console/` until it exists (dogfood §2 — a real precondition, record
-  it, don't fake a block). Budget the build (~10–30 min on a cold monorepo); it dominates
-  wall time, the browser driving is minutes.
+- **全是 `api` / `build` / `cli`** → 不需要 console 构建。把框架拉起来
+  (`objectstack dev`),驱动 REST/CLI。快(分钟级)。
+- **有任何 `browser` / `mixed`** → 需要 vendored console dist。它与 showcase 工作区
+  闭包**分开**构建(`pnpm objectui:build`,从钉住的 `.objectui-sha` 构建);它存在
+  之前,第一次启动对 `/_console/` 是 404(dogfood §2 —— 真实前置条件,记录它,不要
+  伪造 block)。给构建留预算(冷 monorepo 上 ~10–30 分钟);它占掉大头,浏览器驱动
+  只是分钟级。
 
-Build once, up front, for the whole run.
+整轮只构建一次,提前建好。
 
-## 2. Isolate, then execute (per dogfood §0)
+## 2. 先隔离,再执行(照 dogfood §0)
 
-- Own free non-default port + own file DB **per concurrently-running item**
-  (`--seed-admin -d file:/tmp/<run>/<item>.db`). Two runs sharing a port/DB/browser tab is
-  the `shared-browser-tab` trap.
-- **Parallelism:** fan API-surface items out in parallel (each its own port, cheap). Run
-  browser items **few-at-a-time** (2–3), each its own port + browser context — a single
-  machine's CPU and one shared display contend past that. When dispatching runner
-  subagents, **they must be `opus`**, each given: the item JSON, RUNNER.md, the
-  dogfood skill, its own port/DB, and the results-out-of-repo rule (§4).
-- Execute each item's `steps` faithfully; judge each `acceptance` clause and each
-  `negative` against its declared `oracle`, capturing the `evidence` the clause names.
-  **Server truth outranks pixels; DOM only after a screenshot confirms render; a `fail`
-  needs reproduction ×2 + the automation self-check + a reproduction rule in the run
-  issue** (RUNNER §rules).
+- **每个并发运行的测试项**自有的空闲非默认端口 + 自有的文件 DB
+  (`--seed-admin -d file:/tmp/<run>/<item>.db`)。两轮共用端口/DB/浏览器标签页就是
+  `shared-browser-tab` 陷阱。
+- **并行度**:API 面测试项放开并行扇出(各自端口,便宜)。浏览器项**少量并行**
+  (2–3 个),各自端口 + 浏览器上下文 —— 超过这个数,单机 CPU 与共享显示开始互相争
+  抢。派发 runner 子代理时,**必须用 `opus`**,每个给:该项 JSON、RUNNER.md、
+  dogfood 技能、自己的端口/DB、结果不进仓规则(§4)。
+- 忠实执行每项的 `steps`;对照各自声明的 `oracle` 判定每条 `acceptance` 与每条
+  `negative`,采集条款点名的 `evidence`。**服务端真相压过像素;截图确认渲染之后才查
+  DOM;一个 `fail` 需要 ×2 复现 + 自动化自查 + 运行 issue 里的复现规则**
+  (RUNNER §rules)。
 
-## 3. When the run teaches you something about the ITEM
+## 3. 当这一轮教你的是关于测试项本身的东西
 
-A run that discovers the item's `steps` are wrong (a moved route, a renamed key, an
-expiry path that needs localStorage cleared too) is the checklist working. That is a
-checklist EDIT — do it in a **worktree** (PD#11): revise the item, bump `revision`, append
-a `history` entry, keep `node scripts/check-platform-checklist.mjs` green, and land it on a
-task branch. Product defects found while running go to `FOLLOW-UPS.md` (or a filed issue)
-as expected-fail probes — never tick a clause green over a real defect.
+运行发现该项的 `steps` 写错了(路由搬家、键改名、过期路径还需要清 localStorage)——
+这是清单在起作用。那是一次清单**编辑**:在 **worktree** 里做(PD#11):修订该项、递
+增 `revision`、追加一条 `history`、保持 `node scripts/check-platform-checklist.mjs`
+绿,落在任务分支上。运行中发现的产品缺陷进 `FOLLOW-UPS.md`(或立成 issue),作为
+expected-fail 探针 —— 永不在真实缺陷上把条款打成绿。
 
-## 4. The result issue — one GitHub issue per run, text only
+## 4. 结果 issue —— 一次运行一张 GitHub issue,纯文本
 
-Every completed run — **pass or fail alike** — files exactly one GitHub issue as its
-durable record. Nothing about a run enters the repo tree: not the JSON, not screenshots.
-The JSON run record (RUNNER.md shape) is scratch in the executing environment; `runs/`
-stays git-ignored. The issue is the report.
+每次完成的运行 —— **通过与失败同等** —— 恰好立一张 GitHub issue 作为持久记录。运行
+的任何产物都不进仓库树:JSON 不进,截图不进。JSON 运行记录(RUNNER.md 形状)是执行
+环境里的草稿;`runs/` 保持 git-ignore。issue 就是报告。
 
-**The issue is pure text — no images, ever.** Screenshots exist only to let you and your
-subagents reach a verdict *live*; they are a judgment aid, discarded with the run
-environment. The durable report needs the **reproduction rule, not the picture**.
+**issue 是纯文本 —— 永不放图。** 截图只为让你和子代理**现场**得出判定;它们是判断辅
+助,随运行环境一起丢弃。持久报告需要的是**复现规则,不是图片**。
 
-File it with `issue_write` (github MCP):
+用 `issue_write`(github MCP)立单:
 
-- **Title** — `QA run · <selector> · <framework-sha[:8]> · <date>`
-- **Labels** — `qa-run` always; add `bug` (and `regression` for a P0/P1) whenever any
-  clause failed, so a real defect is triageable straight from the run issue without a
-  second one.
-- **Body**, in this order:
-  - **Env fingerprint** — framework sha, `.objectui-sha`, port, db, seed, timestamp.
-  - **Scope** — the selector + the `revision` each item ran against.
-  - **Per-clause verdict table** — item · clause · verdict · one line of **text** oracle
-    evidence (the API/network/build/test result — server truth, never a pixel).
-  - **For every `fail`, a reproduction rule** — the exact ordered steps / the API calls
-    (method · path · body) / the ref-targeted selector path to re-hit it on a fresh boot,
-    plus expected-vs-actual from the oracle. Enough for a human or a fresh agent to
-    reproduce it with no screenshot from you.
-  - Derived item verdicts + any fixture-gap list.
+- **标题** —— `QA run · <selector> · <framework-sha[:8]> · <date>`
+- **标签** —— 恒带 `qa-run`;任何条款失败就加 `bug`(P0/P1 再加 `regression`),让
+  真实缺陷直接从运行 issue 可分诊,不必再立第二张。
+- **正文**,按此顺序:
+  - **环境指纹** —— framework sha、`.objectui-sha`、端口、db、seed、时间戳。
+  - **范围** —— 选择器 + 每项所对的 `revision`。
+  - **逐条款判定表** —— 项 · 条款 · 判定 · 一行**文本** oracle 证据
+    (API/网络/构建/测试结果 —— 服务端真相,永不是像素)。
+  - **每个 `fail` 一条复现规则** —— 精确的有序步骤 / API 调用(method · path ·
+    body)/ ref 定位的 selector 路径,足以在全新启动上重新命中,外加 oracle 的
+    expected-vs-actual。足够让人或全新 agent 不靠你的截图复现。
+  - 派生的整项判定 + fixture 缺口清单(如有)。
 
-Report the same per-clause table + the env-setup-vs-test time split back to the maintainer
-in chat, and link the filed issue.
+同一份逐条款表 + 环境准备与测试的耗时之比,回报给维护者(chat),并链接已立的 issue。
 
 ## Guardrails
 
-- **Don't fake coverage.** Missing fixture → `blocked(fixture)` with the reason; unbuilt
-  console → build it or record `blocked(environment)`; a half-proven item is `partial`,
-  not `pass`. A blocked verdict WITH evidence is a successful run; a faked pass is not.
-- **Don't run blocked items as if runnable** — the resolver hides them for this reason.
-- **One selector, one run, one issue.** For a release sweep, run `since:vN` and
-  `priority:P0` as separate runs → separate issues, rather than smearing them together.
+- **不伪造覆盖。** 缺 fixture → `blocked(fixture)` 带理由;console 没构建 → 构建它
+  或记 `blocked(environment)`;证到一半的项是 `partial`,不是 `pass`。带证据的
+  blocked 判定是一次成功运行;伪造的 pass 不是。
+- **不把 blocked 项当可运行的跑** —— 解析器隐藏它们正为此。
+- **一个选择器、一次运行、一张 issue。** release sweep 把 `since:vN` 与
+  `priority:P0` 作为分开的两轮跑 → 两张 issue,不要糊在一起。

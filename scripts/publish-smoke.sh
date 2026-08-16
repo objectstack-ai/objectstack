@@ -23,6 +23,9 @@
 #             that catches ^-range drift breaking already-published versions.
 #             Needs no repo build; only this script.
 #
+# Both modes then run the scaffolded project's own `build` script and assert it
+# exits 0 — the step section 1b explains, and the one this gate used to lack.
+#
 # Both modes then boot `objectstack dev --fresh` and assert:
 #   - GET  /api/v1/auth/get-session        → 200   (anonymous)
 #   - POST /api/v1/auth/sign-up/email      → 200
@@ -66,6 +69,10 @@ SMOKE_KEEP="${SMOKE_KEEP:-0}"
 SMOKE_ROOT="${SMOKE_ROOT:-$(mktemp -d "${TMPDIR:-/tmp}/objectstack-publish-smoke.XXXXXX")}"
 APP_NAME="smoke-app"
 APP_DIR="$SMOKE_ROOT/$APP_NAME"
+# The namespace the bundled `blank` template ships with, i.e. the value the
+# scaffolder rewrites AWAY from. APP_NAME must not derive to it — see the
+# identity assertion in section 1b, which is what keeps that true on purpose.
+TEMPLATE_NAMESPACE="blank"
 # localhost, not 127.0.0.1: the auth plugin's default trustedOrigins is a
 # localhost wildcard, so a 127.0.0.1 origin draws a 403 INVALID_ORIGIN.
 BASE_URL="http://localhost:$SMOKE_PORT"
@@ -221,6 +228,69 @@ if [ -d "$APP_DIR/node_modules/.pnpm" ]; then
 else
   (cd "$APP_DIR" && npm ls better-auth "@better-auth/core" --all 2>/dev/null | sed 's/^/  /') || true
 fi
+
+# ── 1b. verify identity, then build ─────────────────────────────────────────
+# THE BUILD STEP. `npm run build` is the second command the scaffolder prints,
+# and it is where every "published scaffold is broken" incident so far actually
+# surfaced: #4902 (all five remote templates at once), #7644 (the namespace
+# rewrite on 16.1.0) and #8677 (retired enable.trash/enable.mru on 17.0.0). In
+# every one of them scaffold and install both exited 0 and only the build
+# exited 2 — so a smoke that went straight from install to `objectstack dev`,
+# as this one did, was structurally unable to see any of them. Scheduled run
+# #1932 concluded SUCCESS on 2026-08-10 against a published create-objectstack
+# whose scaffold failed first build on four templates: that green was honest,
+# and it meant nothing.
+#
+# Cost, measured on GA 17.0.0 (Node 22.22.2 / npm 10.9.7): scaffold 2s,
+# install 60s, build 3s. The install was already here, so the ADDED cost of
+# this coverage is ~3s against a job budgeted 25 minutes. The "five extra
+# installs" the issue weighed was the cost of the five-template loop, which is
+# moot: the five remote templates were delisted and unmaintained, and the
+# scaffolder's catalog is `blank` alone (packages/create-objectstack/src/
+# template-registry.ts). Scope here is `blank` for the same reason — it is the
+# whole supported surface, and the entire first-run experience for a new user.
+log "Verifying the scaffolded project's identity"
+[ -f "$APP_DIR/objectstack.config.ts" ] \
+  || fail "scaffolded project has no objectstack.config.ts — cannot read its namespace"
+
+# The project's namespace MUST differ from the template's own. That is
+# load-bearing, not cosmetic: the scaffolder's identity rewrite only does
+# anything when the two differ, and #7644 was precisely a rewrite that silently
+# did nothing. Measured both ways against the #7644 state
+# (create-objectstack@16.1.0): with the two different, the build reports 4
+# "missing the package namespace prefix" errors and exits 2; with the project
+# named after the template, the same defect yields 0 such errors and that whole
+# class goes invisible. APP_NAME differing from the template namespace was
+# accidental before this line — now it is asserted.
+PROJECT_NAMESPACE=$(sed -nE "s/.*namespace:[[:space:]]*['\"\`]([a-z0-9_]+)['\"\`].*/\1/p" \
+  "$APP_DIR/objectstack.config.ts" | head -1)
+[ -n "$PROJECT_NAMESPACE" ] \
+  || fail "could not read a namespace from $APP_DIR/objectstack.config.ts"
+if [ "$PROJECT_NAMESPACE" = "$TEMPLATE_NAMESPACE" ]; then
+  fail "scaffolded namespace '$PROJECT_NAMESPACE' equals the template's own — the identity rewrite is a no-op, so the #7644 defect class cannot reproduce and this gate would be blind to it. Change APP_NAME so the two differ."
+fi
+echo "  ok — namespace '$PROJECT_NAMESPACE' differs from the template's '$TEMPLATE_NAMESPACE'"
+
+# pack mode installed with pnpm, registry mode with npm — build with whichever
+# package manager owns that project's node_modules.
+if [ "$SMOKE_MODE" = "pack" ]; then BUILD_PM="pnpm"; else BUILD_PM="npm"; fi
+
+# Absence must be loud: if the template stops shipping a build script, the run
+# below fails with a package-manager "missing script" message that says nothing
+# about the template. Name the real remedy instead.
+jq -e '.scripts.build | strings' "$APP_DIR/package.json" >/dev/null 2>&1 \
+  || fail "the scaffolded project declares no 'build' script — the first-run path its own output tells the user to run does not exist. Fix the create-objectstack template, not this script."
+
+log "Building the scaffolded project ($BUILD_PM run build) — the #7644/#8677 failure point"
+if ! (cd "$APP_DIR" && env NO_COLOR=1 "$BUILD_PM" run build); then
+  fail "'$BUILD_PM run build' failed in the scaffolded project — a fresh install cannot complete the documented first-run path. This is the #4902/#7644/#8677 failure class."
+fi
+
+# Exit 0 alone is not the assertion: a build that emits nothing would satisfy
+# it while leaving `objectstack start` with no artifact to serve.
+[ -f "$APP_DIR/dist/objectstack.json" ] \
+  || fail "'$BUILD_PM run build' exited 0 but produced no dist/objectstack.json — a build that emits nothing is a false green"
+echo "  ok — built dist/objectstack.json ($(wc -c < "$APP_DIR/dist/objectstack.json") bytes)"
 
 # ── 2. boot the dev server ──────────────────────────────────────────────────
 # --fresh: ephemeral OS_HOME + sqlite DB + seeded admin

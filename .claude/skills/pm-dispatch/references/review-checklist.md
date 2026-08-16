@@ -1,7 +1,7 @@
 # 复核清单细则(references —— 按需加载)
 
-出处:主文件「复核」。You are the reviewer of record —— 对 GitHub 核验,不对报告的
-自述核验;本表逐项展开每份 dev 报告的复核判据。⛔ 不引用 issue 编号。
+出处:主文件「复核」。你是记录在案的复核人(reviewer of record)—— 对 GitHub 核
+验,不对报告的自述核验;本表逐项展开每份 dev 报告的复核判据。⛔ 不引用 issue 编号。
 
 - **PR 形态**:存在、是 draft、目标 `main`、正文首行引用卡片 —— **`Fixes #<n>` 仅
   当合并应当关卡**;只落地了可实施一半(另一半在决策箱或按范围排除)⇒ 必须 `Part of

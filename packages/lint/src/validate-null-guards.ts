@@ -143,9 +143,60 @@
  *    face stays sparse, is documented as sparse, and an author there guards
  *    with `has()` (`declared-fields.ts` says the same from the engine's side).
  *    The exclusion is permanent under the current decision, not pending one.
- *    The ruling's replacement action for this face is the MIRROR of this gate
- *    — flag `!= null` on a sparse binding — and it is an evaluation owed by
- *    the devx / objectui lanes, never a widening of `checkNullGuards`.
+ *
+ *    **The MIRROR gate the ruling named — flag `!= null` on a sparse binding —
+ *    was evaluated (#8881) and DECLINED. Do not build it.** The evaluation is
+ *    the ruling's own word for item 2; this is its answer, so the next reader
+ *    does not re-open it. Four measurements, taken against current `main` of
+ *    BOTH repos (objectui's three-way row binding from objectui#4079 is live,
+ *    so a `record.*` predicate does now resolve the namespace and reach the
+ *    sparse fault for real — the premise shift is confirmed, not inherited):
+ *
+ *      1. **`!= null` is not a distinctive fault — it is one spelling of nine.**
+ *         On a sparse binding the abort happens at KEY RESOLUTION, before any
+ *         operator is reached, so `record.a == 'pending'`, `!record.a`,
+ *         `record.a != 'owner'`, `record.a > 1` and `record.a.contains("x")`
+ *         all fault identically with `No such key: a`. The mirror table above
+ *         reads as though `!= null` were the special case; measured, it is not
+ *         special at all. A rule pointed at it targets an arbitrary syntactic
+ *         slice of the fault class rather than the class.
+ *      2. **Yield: 2 of 34 authored action predicates (5.9%).** Census over
+ *         production + examples in both repos: all 34 record-scoped action
+ *         predicates are members of the fault class; exactly 2 match
+ *         `record.<f> [!=]= null`, and BOTH are in one file
+ *         (`examples/app-showcase/.../predicate-matrix.action.ts`). Zero of the
+ *         34 use `has()`. The 32 the gate would miss include every platform
+ *         object's actions (`sys-user`, `sys-invitation`, `sys-member`,
+ *         `sys-approval-request`).
+ *      3. **Sparseness is not decidable from the metadata this linter sees.**
+ *         It is a property of the VIEW's `$select` projection, not of the action
+ *         or the object's field list — and the two hits in (2) prove it from one
+ *         file: identical `record.<f> != null` guards on identical `locations`,
+ *         where `f_lookup`/`f_lookups` are NOT default-list columns (so the
+ *         predicate faults on `list_item`) while `f_textarea` IS one (so it does
+ *         not). Nothing in the action's own metadata distinguishes them. `&&`
+ *         short-circuiting makes it worse: `record.id == ctx.user.id &&
+ *         record.two_factor_enabled != true` never reaches the absent key on a
+ *         row whose first conjunct is false, so whether a given predicate faults
+ *         depends on row DATA. A sound static rule would have to flag every
+ *         `record.*` read on any action reaching `list_item` — 34 of 34, which
+ *         is a platform-contract finding, not a lint rule.
+ *      4. **The prescription would be wrong.** `has()` guards absence, not
+ *         nullness: measured, `has(record.a) && record.a > 1` FAULTS on a
+ *         projected-but-null column (`no such overload: dyn<null> > int`). A
+ *         list row is both sparse-capable AND null-capable, so both failure
+ *         modes are live on this one face and the only idiom safe across all
+ *         three bindings is the CONJUNCTION `has(record.a) && record.a != null`.
+ *         Telling authors to swap `!= null` for `has()` would trade one silent
+ *         fail-closed vanish for another — the exact error this row already
+ *         refuses in the opposite direction ("reject working metadata and hand
+ *         the author a correction that breaks it"), mirrored.
+ *
+ *    Consequence for the sentence four lines up: "an author there guards with
+ *    `has()`" is correct about SPARSENESS and insufficient on its own, and this
+ *    file and `declared-fields.ts` currently state it without the `!= null`
+ *    half. Correcting that authoring contract is filed separately — it changes
+ *    what authors are told to write, which is not a lint change.
  *  - **Flow / edge `condition` — the row where `binding` and `verdict` came
  *    apart, same shape as `readonlyWhen` above.** #4811 originally excluded
  *    these for flattened-scope ambiguity ("a bare identifier may be a flow

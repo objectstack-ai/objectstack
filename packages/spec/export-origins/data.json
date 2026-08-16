@@ -748,6 +748,7 @@
     "unprovisionedInjectedColumns": "src/data/injected-system-column-provenance.ts#unprovisionedInjectedColumns (function)",
     "urlCredentialQueryParams": "src/data/driver/common.zod.ts#urlCredentialQueryParams (function)",
     "urlUserinfoPassword": "src/data/driver/common.zod.ts#urlUserinfoPassword (function)",
+    "urlUserinfoUsername": "src/data/driver/common.zod.ts#urlUserinfoUsername (function)",
     "utcInstantMs": "src/data/calendar-day.ts#utcInstantMs (function)",
     "validateDriverConfig": "src/data/driver/config-registry.zod.ts#validateDriverConfig (function)",
     "valueSchemaFor": "src/data/field-value.zod.ts#valueSchemaFor (function)"

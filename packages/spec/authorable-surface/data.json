@@ -380,6 +380,7 @@
     "data/Field:reference",
     "data/Field:relatedList",
     "data/Field:relatedListColumns",
+    "data/Field:relatedListFilter",
     "data/Field:relatedListTitle",
     "data/Field:required",
     "data/Field:requiredPermissions",

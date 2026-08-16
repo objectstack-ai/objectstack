@@ -16,46 +16,40 @@ metadata:
   internal: true
 ---
 
-# Checklist author — the coverage sweep that keeps the checklist honest
+# Checklist author —— 让测试清单保持诚实的 coverage sweep
 
-The canonical method lives in **`docs/qa/platform-checklist/SWEEP.md`** — read it
-first and follow it; this skill is the trigger and the orchestration contract, not a
-second copy of the procedure.
+规范方法住在 **`docs/qa/platform-checklist/SWEEP.md`** —— 先读它、照它执行;本技能
+只是触发器与编排契约,不是流程的第二份拷贝。
 
-## What you are producing
+## 你要产出什么
 
-A delta on `docs/qa/platform-checklist/`: new/extended items in `areas/*.json`, a
-reconciled `coverage.json`, defects/docs-drift appended to `FOLLOW-UPS.md` — all
-validating green under `node scripts/check-platform-checklist.mjs`, landed on a task
-branch per AGENTS.md (worktree-first, PD#11).
+一份对 `docs/qa/platform-checklist/` 的增量:`areas/*.json` 里新增/扩充的测试项、
+对账后的 `coverage.json`、追加进 `FOLLOW-UPS.md` 的缺陷/文档漂移 —— 全部在
+`node scripts/check-platform-checklist.mjs` 下校验为绿,并按 AGENTS.md
+(worktree-first,PD#11)落在任务分支上。
 
-## Orchestration contract
+## 编排契约
 
-1. **Worktree first** (PD#11): `git worktree add ../objectstack-<task> -b <branch> main`.
-   All edits there. Read the checklist's current state before dispatching anything.
-2. **Five READ-ONLY gap hunters in parallel** — one per SWEEP.md angle (console UI /
-   spec enums / routes & runtime / built-in apps / docs claims). Each gets: the current
-   item-id list, the already-known waivers and blocked items (don't re-report), and the
-   output contract `surface | evidence path | coverage verdict | proposed id | sketch |
-   fixture?`. Hunters write NO files.
-3. **Dedupe into a scratch register** (delete it before landing). Cross-angle
-   duplicates are high-priority signal, not noise.
-4. **Per-area writer agents** — one agent per `areas/*.json` file so writers never
-   collide; nobody but the orchestrator touches `coverage.json` or `scripts/`.
-   Every item follows README.md's deep-test contract; missing fixtures become
-   `blocked`/`knownGaps`, never faked coverage. Writers ground every endpoint, enum,
-   and error code in source before asserting — treat this skill's own briefs as
-   hypotheses, source as truth.
-5. **Reconcile centrally**: un-waive any kind a hunter proved has a stock fixture
-   (four of six waivers were stale in the 2026-08 sweep — re-audit every waiver every
-   time), map new items in `coverage.json`, pin `enumSource` on any new variants
-   matrix (see README "Variants stay fresh automatically").
-6. **Validate + land**: validator green, then commit on the task branch. Product
-   defects and docs-drift go to `FOLLOW-UPS.md`; security-sensitive findings are
-   NEVER filed publicly without the maintainer's decision.
+1. **Worktree 先行**(PD#11):`git worktree add ../objectstack-<task> -b <branch> main`。
+   全部编辑都在那里做。派发任何 agent 之前先读清单现状。
+2. **五个只读 gap hunter 并行** —— 每个 SWEEP.md 角度一个(console UI / spec 枚举 /
+   路由与运行时 / 内置应用 / 文档声称)。每个拿到:当前 item-id 清单、已知的 waiver
+   与 blocked 项(不重复上报),以及输出契约 `surface | evidence path | coverage
+   verdict | proposed id | sketch | fixture?`。hunter 不写任何文件。
+3. **去重并入一个草稿登记表**(落地前删掉)。跨角度的重复命中是高优先级信号,不是噪音。
+4. **按区 writer agent** —— 每个 `areas/*.json` 文件一个 agent,writer 之间永不相
+   撞;除编排者外谁都不碰 `coverage.json` 与 `scripts/`。每个测试项都遵守 README.md
+   的 deep-test 契约;缺 fixture 就记 `blocked`/`knownGaps`,永不伪造覆盖。writer
+   断言之前把每个 endpoint、枚举、错误码都对到源码上 —— 把本技能的简报当假设,源码
+   才是真相。
+5. **集中对账**:hunter 证明有现成 fixture 的种类一律解除 waiver(2026-08 那轮
+   sweep 里六条 waiver 有四条已过期 —— 每次都重审全部 waiver),新项映射进
+   `coverage.json`,新的 variants 矩阵钉上 `enumSource`(见 README「Variants stay
+   fresh automatically」)。
+6. **校验 + 落地**:校验器绿,再提交到任务分支。产品缺陷与文档漂移进
+   `FOLLOW-UPS.md`;安全敏感的发现,没有维护者的决定**永不**公开立单。
 
-## Scale guidance
+## 规模指引
 
-A full sweep is ~5 hunter + ~8 writer agents. For a scoped question ("X 有测试吗?"),
-run ONE hunter on the relevant angle, verify against the checklist, and author only
-what's missing — same contract, smaller fleet.
+一轮全量 sweep ≈ 5 个 hunter + 8 个 writer agent。范围化的问题(「X 有测试吗?」)
+只在相关角度跑**一个** hunter,对清单核验后只补缺的 —— 契约相同,舰队更小。

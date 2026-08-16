@@ -1203,6 +1203,15 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     // reject working metadata and hand the author a correction that breaks it.
     // Covering this surface means first making the binding total, which is a
     // platform contract change, not a lint change. Ledger: `validate-null-guards.ts`.
+    //
+    // Nor is the INVERSE rule the answer. "Flag `!= null` on a sparse binding"
+    // was evaluated and declined (#8881): on a sparse binding the abort is at
+    // key resolution, so `record.a == 'pending'` faults exactly as `!= null`
+    // does — `!= null` is one spelling of nine, not the fault. Measured yield
+    // over authored metadata in both repos is 2 of 34 record-scoped action
+    // predicates, and whether any given one faults depends on the VIEW's
+    // `$select` projection (and, through `&&` short-circuiting, on row data),
+    // neither of which this pass can see. Full reasoning in the ledger.
   };
   for (const action of asArray(stack.actions)) {
     checkAction('stack', action);
