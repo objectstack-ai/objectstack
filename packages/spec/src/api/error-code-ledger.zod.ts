@@ -153,6 +153,13 @@ export const ERROR_CODE_LEDGER = {
     'EXPORT_NOT_PERMITTED',
     'EXTERNAL_DATASOURCE_ERROR',     // introspection/connection-test refusal from the external-datasource service
     'EXTERNAL_IMPORT_ERROR',         // federated import refused (read-only store, missing remote table)
+    // [#8846] ADR-0106 D6 tier 3: field-visibility grants for an object could
+    // not be evaluated, so the schema is not served — `sendFieldVisibilityFault`
+    // (`error-response.ts`) answers 503 with this code (503, not 500: the
+    // condition is an unhealthy dependency and a retry is right). Reported by
+    // the #8087 dispatcher-vocabulary gate; it reaches the REST door, and the
+    // ledger is door-agnostic.
+    'FIELD_VISIBILITY_UNRESOLVED',
     'FORBIDDEN',
     'FORM_NOT_FOUND',
     'FORM_RESOLVE_FAILED',
@@ -213,6 +220,12 @@ export const ERROR_CODE_LEDGER = {
   ],
   '@objectstack/runtime': [
     'EXPIRED_OR_REVOKED',         // share link
+    // [#8846] a flow that RAN and rejected — a deliberate business rejection,
+    // served as a 400 (#3962) with the semantic code kept on the wire so
+    // callers can branch on it; `/actions` serves the throw through
+    // `errorFromThrown` (`action-execution.ts`). Reported by the #8087
+    // dispatcher-vocabulary gate.
+    'FLOW_FAILED',
     'INVALID_OR_EXPIRED',         // share-link token
     'NEEDS_PASSWORD',             // share link requires a password
     // [#7557] `DELETE /packages/:id` on the DISPATCHER door — per-item failures
@@ -326,6 +339,11 @@ export const ERROR_CODE_LEDGER = {
     'NOT_OVERRIDABLE',
     'OBJECT_OVERLAY_PACKAGE_MISMATCH',  // [ADR-0029 D9.9] object overlay row bound to a package that does not own the object
     'OBJECT_PACKAGE_DISABLED',    // [#7557] object is registered but its owning package is disabled — data plane refuses rather than serving rows
+    // [#8846] the query body's convenience `object` key names a different
+    // object than the route addresses — refused 400 (`protocol.ts`); `/meta`
+    // and `/packages` serve protocol throws through `errorFromThrown`.
+    // Reported by the #8087 dispatcher-vocabulary gate.
+    'QUERY_OBJECT_MISMATCH',
     'ROLLED_BACK',             // atomic data-batch row was written, then undone by the batch rollback (#4793)
     'STORED_TYPE_NOT_CANONICAL',  // [#8908] a package draft is stored under a non-canonical metadata type (pre-#7894 second-namespace residue) — refused at the publish pre-flight, batch-atomic
     'TENANT_SCOPE_REQUIRED',      // [#7780] destructive call named neither an organization nor an explicit cross-tenant intent; needs an explicit opt-in
@@ -343,9 +361,25 @@ export const ERROR_CODE_LEDGER = {
     'OS_PROTOCOL_INCOMPATIBLE',
   ],
   '@objectstack/objectql': [
+    // [#8846] single-row insert: the autonumber counter was re-seeded and the
+    // value re-issued, and the driver still refused the write (`engine.ts`;
+    // carries the driver's failure as `cause`). One of four unswept members of
+    // this package's ERR_* family reported by the #8087 dispatcher-vocabulary
+    // gate.
+    'ERR_AUTONUMBER_COLLISION',
     'ERR_BULK_RESULT_MISMATCH',
+    // [#8846] a transaction wrote to an object on a different datasource than
+    // the one the transaction was opened on (`CrossDatasourceTransactionWriteError`,
+    // `transaction-errors.ts`). Same #8087-gate family as above.
+    'ERR_CROSS_DATASOURCE_TRANSACTION_WRITE',
     'ERR_DATASOURCE_UNAVAILABLE',
     'ERR_DRIVER_CONNECT',
+    // [#8846] a `before*` hook moved or cleared the id the engine resolved a
+    // by-id (or per-row predicate) write against — refused rather than
+    // silently writing a different record (`HOOK_TARGET_REBIND_ERROR_CODE`,
+    // `hook-target-rebind-errors.ts`), during a write the dispatcher is
+    // serving. Same #8087-gate family.
+    'ERR_HOOK_TARGET_REBIND',
     // [#5320] Third EMITTER of the code (metadata-protocol and plugin-security
     // already register it) — the registration loop's `views:` tighten refuses a
     // non-container entry, and the `viewItems:` channel refuses an entry the
@@ -363,6 +397,11 @@ export const ERROR_CODE_LEDGER = {
     // any standard member: it is neither the client's bad input (the caller is
     // server-side automation) nor a missing precondition on a request.
     'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED',
+    // [#8846] `transaction({ require: true })` on a driver with no
+    // `beginTransaction` — thrown BEFORE the callback runs, so nothing has
+    // been written (`TransactionUnsupportedError`, `transaction-errors.ts`;
+    // ADR-0119 D1/D4 fail-closed posture). Same #8087-gate family.
+    'ERR_TRANSACTION_UNSUPPORTED',
     'VALIDATION_FAILED',
   ],
   '@objectstack/core': [
