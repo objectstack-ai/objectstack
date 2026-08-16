@@ -29,6 +29,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
+import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 
 type Handler = (c: any) => Promise<any>;
 
@@ -47,8 +48,8 @@ function makeCtx(rawApp: any) {
     const services: Record<string, any> = {
         'http-server': { getRawApp: () => rawApp },
         manifest: { register: vi.fn() },
-        auth: { api: { getSession: async () => ({ user: { id: 'admin' } }) } },
-        objectql: { syncSchemas: async () => undefined, find: vi.fn(async () => []) },
+        auth: installerAuthService(),
+        objectql: withInstallerGrants({ syncSchemas: async () => undefined, find: vi.fn(async () => []) }),
         metadata: {},
     };
     return {

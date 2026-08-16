@@ -62,9 +62,14 @@
         "$TURBO_ROOT$/packages/verify/src/**",
         "$TURBO_ROOT$/packages/plugins/plugin-security/src/**",
         "$TURBO_ROOT$/packages/services/service-cluster/src/**",
+        "$TURBO_ROOT$/packages/connectors/connector-mcp/src/connector-mcp-plugin.ts",
         "$TURBO_ROOT$/examples/app-showcase/src/ui/views/contact.view.ts",
         "$TURBO_ROOT$/examples/app-showcase/src/data/objects/semantic-zoo.object.ts",
-        "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/task-triage.page.ts"
+        "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/task-triage.page.ts",
+        "$TURBO_ROOT$/content/docs/deployment/cli.mdx",
+        "$TURBO_ROOT$/content/docs/deployment/index.mdx",
+        "$TURBO_ROOT$/content/docs/permissions/authentication.mdx",
+        "$TURBO_ROOT$/scripts/check-nul-bytes.mjs"
       ]
     },
     "@objectstack/lint#test": {

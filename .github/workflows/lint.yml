@@ -382,6 +382,21 @@ jobs:
       - name: Error-code casing guard
         run: pnpm check:error-code-casing
 
+      # #8967: the docs publish an HTTP status per error code and the doors decide
+      # it; nothing reconciled the two. `MISSING_REQUIRED_FIELD` was documented 400
+      # in both pages while five controlled_by_parent refusals answered 422 — on a
+      # public error contract, with CI green the whole time, found only by a human
+      # reading a PR. The runtime side is DERIVED (error classes' `readonly status`,
+      # both `sendError` doors, `HttpStatusErrorCodeMap`), never a second hand-written
+      # table, and the assertion is a set comparison in BOTH directions so a code may
+      # legitimately carry more than one documented status. Runs its own --self-test
+      # first, which pins the real pre-fix doc text as a red case. Placed beside the
+      # other ADR-0112 error-vocabulary guards, and deliberately in a job with no
+      # `paths:` filter — either side of this reconciliation can move it, so filtering
+      # on `packages/**` or on `content/**` would blind it to half its own subject.
+      - name: Documented HTTP status matches the status the runtime emits
+        run: pnpm check:error-status-conformance
+
       # Namespace-wildcard fall-through guard (#4116). A handler mounted on
       # `<prefix>/*` claims the whole namespace, and Hono's first-registered
       # handler that answers wins — so a TERMINAL wildcard makes every other

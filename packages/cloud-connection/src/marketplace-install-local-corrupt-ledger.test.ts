@@ -50,6 +50,7 @@ vi.mock('@objectstack/spec/data', () => ({
 }));
 
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
+import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 import { LocalManifestSource } from './local-manifest-source.js';
 
 type Handler = (c: any) => Promise<any>;
@@ -68,11 +69,11 @@ function makeCtx(rawApp: any) {
     const hooks = new Map<string, any>();
     const services: Record<string, any> = {
         manifest: { register: vi.fn() },
-        objectql: { syncSchemas: async () => undefined, find: vi.fn(async () => [{ id: 'x' }]) },
+        objectql: withInstallerGrants({ syncSchemas: async () => undefined, find: vi.fn(async () => [{ id: 'x' }]) }),
         metadata: {},
         // #5426's two handlers authenticate first; without this they answer 401
         // and never reach the ledger read under test.
-        auth: { api: { getSession: async () => ({ user: { id: 'admin' } }) } },
+        auth: installerAuthService(),
     };
     return {
         ctx: {
