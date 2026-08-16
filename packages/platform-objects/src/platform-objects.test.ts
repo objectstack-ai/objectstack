@@ -188,10 +188,10 @@ describe('@objectstack/platform-objects', () => {
       // predicate, so exactly one is active at any time.
       expect(disable?.target).toBe('/api/v1/auth/admin/oauth2/toggle-disabled');
       expect(disable?.bodyExtra).toEqual({ disabled: true });
-      expect((disable?.visible as any)?.source).toBe('(!record.disabled) && features.oidcProvider != false');
+      expect((disable?.visible as any)?.source).toBe('(has(record.disabled) && record.disabled != true) && features.oidcProvider != false');
       expect(enable?.target).toBe('/api/v1/auth/admin/oauth2/toggle-disabled');
       expect(enable?.bodyExtra).toEqual({ disabled: false });
-      expect((enable?.visible as any)?.source).toBe('(record.disabled) && features.oidcProvider != false');
+      expect((enable?.visible as any)?.source).toBe('(has(record.disabled) && record.disabled == true) && features.oidcProvider != false');
 
       // Generic CRUD must NOT expose mutating methods — all writes are
       // reserved for better-auth wrappers above so OAuth-specific
@@ -456,9 +456,23 @@ describe('@objectstack/platform-objects', () => {
 // Every hand-written `visible: 'features.*'` gate was replaced by the
 // declarative `requiresFeature` sugar; these rows pin the LOWERED predicate
 // to the exact CEL string that was previously hand-written, so the migration
-// is provably behavior-neutral. (transfer_ownership composes a residual row
-// predicate with the gate — parenthesized but operand/order-identical to the
-// old `record.role != 'owner' && features.organization != false`.)
+// is provably behavior-neutral.
+//
+// The RESIDUAL row predicates are no longer byte-identical to the pre-#2874
+// hand-written strings, and that is #8990 rather than drift in this lowering:
+// each `record.*` read is now opened by a `has()` guard, because the action
+// binding is sparse (a list row carries only the view's `$select` projection)
+// and an unguarded read aborts the whole predicate at key resolution — silently
+// dropping the button. What this matrix still pins is what it was built to pin:
+// the GATE term, its `&&` composition, and the operand order — the guards sit
+// inside the parenthesized residual, and `features.*` is untouched.
+//
+// Two rows also changed OPERATOR, not just guard: `disable_oauth_application`
+// was `!record.disabled` and `enable_oauth_application` was a bare
+// `record.disabled`. Both are operators that need a bool and fault on the
+// projected-null column better-auth leaves on every never-toggled application,
+// so they became `!= true` / `== true` — the equality form CEL answers rather
+// than faults on. See sys-oauth-application.object.ts for the measurement.
 describe('feature-gate lowering matrix (#2874)', () => {
   const ORG = 'features.organization != false';
   const MULTI_ORG = 'features.multiOrgEnabled != false';
@@ -475,7 +489,7 @@ describe('feature-gate lowering matrix (#2874)', () => {
     ['SysMember', SysMember, 'add_member', ORG],
     ['SysMember', SysMember, 'update_member_role', ORG],
     ['SysMember', SysMember, 'remove_member', ORG],
-    ['SysMember', SysMember, 'transfer_ownership', `(record.role != 'owner') && ${ORG}`],
+    ['SysMember', SysMember, 'transfer_ownership', `(has(record.role) && record.role != 'owner') && ${ORG}`],
     ['SysInvitation', SysInvitation, 'invite_user', ORG],
     ['SysInvitation', SysInvitation, 'cancel_invitation', ORG],
     ['SysInvitation', SysInvitation, 'resend_invitation', ORG],
@@ -492,16 +506,16 @@ describe('feature-gate lowering matrix (#2874)', () => {
     ['SysUser', SysUser, 'set_user_password', 'features.admin == true'],
     ['SysUser', SysUser, 'set_user_role', 'features.admin == true'],
     ['SysUser', SysUser, 'impersonate_user', 'features.admin == true'],
-    ['SysUser', SysUser, 'enable_two_factor', '(record.id == ctx.user.id && record.two_factor_enabled != true) && features.twoFactor == true'],
-    ['SysUser', SysUser, 'disable_two_factor', '(record.id == ctx.user.id && record.two_factor_enabled == true) && features.twoFactor == true'],
-    ['SysUser', SysUser, 'generate_backup_codes', '(record.id == ctx.user.id && record.two_factor_enabled == true) && features.twoFactor == true'],
+    ['SysUser', SysUser, 'enable_two_factor', '(has(record.id) && record.id == ctx.user.id && has(record.two_factor_enabled) && record.two_factor_enabled != true) && features.twoFactor == true'],
+    ['SysUser', SysUser, 'disable_two_factor', '(has(record.id) && record.id == ctx.user.id && has(record.two_factor_enabled) && record.two_factor_enabled == true) && features.twoFactor == true'],
+    ['SysUser', SysUser, 'generate_backup_codes', '(has(record.id) && record.id == ctx.user.id && has(record.two_factor_enabled) && record.two_factor_enabled == true) && features.twoFactor == true'],
     ['SysTwoFactor', SysTwoFactor, 'enable_two_factor', 'features.twoFactor == true'],
     ['SysTwoFactor', SysTwoFactor, 'disable_two_factor', 'features.twoFactor == true'],
     ['SysTwoFactor', SysTwoFactor, 'regenerate_backup_codes', 'features.twoFactor == true'],
     ['SysOauthApplication', SysOauthApplication, 'create_oauth_application', 'features.oidcProvider != false'],
     ['SysOauthApplication', SysOauthApplication, 'delete_oauth_application', 'features.oidcProvider != false'],
-    ['SysOauthApplication', SysOauthApplication, 'disable_oauth_application', '(!record.disabled) && features.oidcProvider != false'],
-    ['SysOauthApplication', SysOauthApplication, 'enable_oauth_application', '(record.disabled) && features.oidcProvider != false'],
+    ['SysOauthApplication', SysOauthApplication, 'disable_oauth_application', '(has(record.disabled) && record.disabled != true) && features.oidcProvider != false'],
+    ['SysOauthApplication', SysOauthApplication, 'enable_oauth_application', '(has(record.disabled) && record.disabled == true) && features.oidcProvider != false'],
     ['SysOauthApplication', SysOauthApplication, 'rotate_client_secret', 'features.oidcProvider != false'],
   ];
 

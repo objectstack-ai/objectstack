@@ -288,6 +288,20 @@ export const SysUser = ObjectSchema.create({
     // i.e. opened from the user's own detail page or a "My Account" view —
     // via the `visible` CEL predicate. Admin equivalents (set_user_password
     // for any account) are above and stay separate.
+    //
+    // Each predicate opens with `has()` per operand for the SPARSE action face
+    // (#8990): the action binding is whatever record the client already
+    // fetched, so a column the caller did not project is ABSENT, and CEL
+    // aborts the whole expression at key resolution (`No such key: source`)
+    // rather than reading null. The fault is fail-closed, so the button just
+    // stops being offered — indistinguishable from the gate saying no.
+    // `has()` alone is the guard here and the `!= null` half is deliberately
+    // NOT added: every operand below is compared by bare equality against a
+    // literal, and CEL compares heterogeneously, so a projected-null column
+    // answers false instead of faulting (measured). The canonical rule lives
+    // on `materializeDeclaredFields` in `@objectstack/objectql`; the second
+    // half is required only before traversal, a method call, ordering or
+    // arithmetic.
     {
       name: 'update_my_profile',
       label: 'Update Profile',
@@ -297,7 +311,7 @@ export const SysUser = ObjectSchema.create({
       locations: ['record_header'],
       type: 'api',
       target: '/api/v1/auth/update-user',
-      visible: 'record.id == ctx.user.id',
+      visible: 'has(record.id) && record.id == ctx.user.id',
       successMessage: 'Profile updated',
       refreshAfter: true,
       params: [
@@ -317,7 +331,7 @@ export const SysUser = ObjectSchema.create({
       // password form so they can't self-mint a password that bypasses
       // enforced SSO. The break-glass owner (env-native, or flipped back when
       // their break-glass password is set) keeps it. ADR-0024 D4/D5.2.
-      visible: 'record.id == ctx.user.id && record.source != "idp_provisioned"',
+      visible: 'has(record.id) && record.id == ctx.user.id && has(record.source) && record.source != "idp_provisioned"',
       successMessage: 'Password changed',
       refreshAfter: false,
       params: [
@@ -336,7 +350,7 @@ export const SysUser = ObjectSchema.create({
       target: '/api/v1/auth/change-email',
       // A managed user's email is owned by the IdP — a local change would
       // desync. Hide for IdP-provisioned; env-native users keep it.
-      visible: 'record.id == ctx.user.id && record.source != "idp_provisioned"',
+      visible: 'has(record.id) && record.id == ctx.user.id && has(record.source) && record.source != "idp_provisioned"',
       successMessage: 'Verification email sent — check the new address to confirm.',
       refreshAfter: false,
       params: [
@@ -353,7 +367,7 @@ export const SysUser = ObjectSchema.create({
       target: '/api/v1/auth/send-verification-email',
       // Only render for the row owner AND when their email is still
       // unverified — there's nothing to resend once verified.
-      visible: 'record.id == ctx.user.id && record.email_verified == false',
+      visible: 'has(record.id) && record.id == ctx.user.id && has(record.email_verified) && record.email_verified == false',
       successMessage: 'Verification email sent — check your inbox.',
       refreshAfter: false,
       params: [],
@@ -369,7 +383,7 @@ export const SysUser = ObjectSchema.create({
       target: '/api/v1/auth/delete-user',
       // Self-delete needs a local password; managed users are deprovisioned
       // via the IdP (org-removal / SCIM), not local self-service. Hide for them.
-      visible: 'record.id == ctx.user.id && record.source != "idp_provisioned"',
+      visible: 'has(record.id) && record.id == ctx.user.id && has(record.source) && record.source != "idp_provisioned"',
       // Confirm question on `description` — one dialog, not two (#7278/#7309).
       description: 'Permanently delete your account? This cannot be undone — all your sessions will be terminated and all data you own will be removed per the configured retention policy.',
       successMessage: 'Account deleted',
@@ -392,7 +406,7 @@ export const SysUser = ObjectSchema.create({
       locations: ['record_section'],
       type: 'api',
       target: '/api/v1/auth/two-factor/enable',
-      visible: 'record.id == ctx.user.id && record.two_factor_enabled != true',
+      visible: 'has(record.id) && record.id == ctx.user.id && has(record.two_factor_enabled) && record.two_factor_enabled != true',
       requiresFeature: 'twoFactor',
       successMessage: 'Two-factor authentication enabled. Scan the QR code or paste the otpauth URI into your authenticator app, then verify a code to complete setup.',
       refreshAfter: true,
@@ -408,7 +422,7 @@ export const SysUser = ObjectSchema.create({
       locations: ['record_section'],
       type: 'api',
       target: '/api/v1/auth/two-factor/disable',
-      visible: 'record.id == ctx.user.id && record.two_factor_enabled == true',
+      visible: 'has(record.id) && record.id == ctx.user.id && has(record.two_factor_enabled) && record.two_factor_enabled == true',
       requiresFeature: 'twoFactor',
       // Confirm question on `description` — one dialog, not two (#7278/#7309).
       description: 'Turn off two-factor authentication? Your account will be less secure.',
@@ -426,7 +440,7 @@ export const SysUser = ObjectSchema.create({
       locations: ['record_section'],
       type: 'api',
       target: '/api/v1/auth/two-factor/generate-backup-codes',
-      visible: 'record.id == ctx.user.id && record.two_factor_enabled == true',
+      visible: 'has(record.id) && record.id == ctx.user.id && has(record.two_factor_enabled) && record.two_factor_enabled == true',
       requiresFeature: 'twoFactor',
       // Confirm question on `description` — one dialog, not two (#7278/#7309).
       description: 'Generate a new set of backup codes? Any previously generated codes will stop working.',

@@ -252,6 +252,28 @@ export const SysApprovalRequest = ObjectSchema.create({
   // approving, rejecting, or reassigning it to a real approver. `viewer` is
   // attached by getRequest/listRequests; where it is absent the predicate fails
   // closed.
+  //
+  // Every predicate below is guarded for the SPARSE action face (#8990). This
+  // binding is a list row or a record read carrying only what the caller
+  // projected, and CEL aborts the whole expression at key resolution — so the
+  // unguarded `record.viewer.can_act` faulted (`No such key: viewer`) on any
+  // row without the block, and the button silently vanished, indistinguishable
+  // from "the gate said no". `materializeDeclaredFields`'s doc comment in
+  // `@objectstack/objectql` is the canonical statement of the guard rule; this
+  // file follows it and does not restate it.
+  //
+  // `viewer` is a NESTED block, which needs one measurement the canonical rule
+  // does not spell out. Measured against the `@objectstack/formula` CEL engine:
+  // `has(record.viewer) && record.viewer != null && record.viewer.can_act`
+  // still FAULTS on `{viewer: {}}` (`No such key: can_act`) and on
+  // `{viewer: {can_act: null}}` (`Logical operator requires bool operands`).
+  // Guarding the LEAF instead — `has(record.viewer) &&
+  // has(record.viewer.can_act) && record.viewer.can_act == true` — is total
+  // over every binding AND subsumes the parent `!= null` half, because `has()`
+  // on a path whose parent is null answers `false` rather than faulting. So the
+  // leaf `has()` plus the `== true` comparison is the MINIMAL safe form here,
+  // not a longer one: `== true` is load-bearing (a bare truthy read of a null
+  // leaf faults the logical operator), the parent `!= null` is not.
   actions: [
     {
       name: 'approval_approve',
@@ -271,7 +293,9 @@ export const SysApprovalRequest = ObjectSchema.create({
         // string[]`; the decision route persists them on `sys_approval_action`.
         { name: 'attachments', label: 'Attachments', type: 'file', multiple: true, required: false },
       ],
-      visible: 'record.viewer.can_act || record.viewer.can_override',
+      visible:
+        'has(record.viewer) && has(record.viewer.can_act) && record.viewer.can_act == true' +
+        ' || has(record.viewer) && has(record.viewer.can_override) && record.viewer.can_override == true',
       locations: ['record_section', 'list_item'],
       successMessage: 'Approved.',
       refreshAfter: true,
@@ -299,7 +323,9 @@ export const SysApprovalRequest = ObjectSchema.create({
         { name: 'comment', label: 'Comment', type: 'textarea', required: false },
         { name: 'attachments', label: 'Attachments', type: 'file', multiple: true, required: false },
       ],
-      visible: 'record.viewer.can_act || record.viewer.can_override',
+      visible:
+        'has(record.viewer) && has(record.viewer.can_act) && record.viewer.can_act == true' +
+        ' || has(record.viewer) && has(record.viewer.can_override) && record.viewer.can_override == true',
       locations: ['record_section', 'list_item'],
       successMessage: 'Rejected.',
       refreshAfter: true,
@@ -320,7 +346,9 @@ export const SysApprovalRequest = ObjectSchema.create({
         { field: 'submitter_id', name: 'to', label: 'New approver', required: true, helpText: 'User to hand this step to' },
         { name: 'comment', label: 'Comment', type: 'textarea', required: false },
       ],
-      visible: 'record.viewer.can_act || record.viewer.can_override',
+      visible:
+        'has(record.viewer) && has(record.viewer.can_act) && record.viewer.can_act == true' +
+        ' || has(record.viewer) && has(record.viewer.can_override) && record.viewer.can_override == true',
       locations: ['record_section'],
       successMessage: 'Reassigned.',
       refreshAfter: true,
@@ -340,7 +368,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       params: [
         { name: 'comment', label: 'Reason', type: 'textarea', required: false },
       ],
-      visible: 'record.viewer.can_act',
+      visible: 'has(record.viewer) && has(record.viewer.can_act) && record.viewer.can_act == true',
       locations: ['record_section'],
       successMessage: 'Sent back for revision.',
       refreshAfter: true,
@@ -355,7 +383,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       params: [
         { name: 'comment', label: 'What do you need?', type: 'textarea', required: true },
       ],
-      visible: 'record.viewer.can_act',
+      visible: 'has(record.viewer) && has(record.viewer.can_act) && record.viewer.can_act == true',
       locations: ['record_section'],
       successMessage: 'Information requested.',
       refreshAfter: true,
@@ -377,7 +405,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       params: [
         { name: 'comment', label: 'Note', type: 'textarea', required: false },
       ],
-      visible: 'record.status == "pending" && record.viewer.is_submitter',
+      visible: 'has(record.status) && record.status == "pending" && has(record.viewer) && has(record.viewer.is_submitter) && record.viewer.is_submitter == true',
       locations: ['record_section'],
       successMessage: 'Reminder sent.',
       refreshAfter: true,
@@ -397,7 +425,9 @@ export const SysApprovalRequest = ObjectSchema.create({
       ],
       // Recall applies while the request is live for the submitter — pending
       // (withdraw) or returned (abandon the revision instead of resubmitting).
-      visible: '(record.status == "pending" || record.status == "returned") && record.viewer.is_submitter',
+      visible:
+        'has(record.status) && (record.status == "pending" || record.status == "returned")' +
+        ' && has(record.viewer) && has(record.viewer.is_submitter) && record.viewer.is_submitter == true',
       locations: ['record_section'],
       successMessage: 'Recalled.',
       refreshAfter: true,
@@ -412,7 +442,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       params: [
         { name: 'comment', label: 'What changed?', type: 'textarea', required: false },
       ],
-      visible: 'record.status == "returned" && record.viewer.is_submitter',
+      visible: 'has(record.status) && record.status == "returned" && has(record.viewer) && has(record.viewer.is_submitter) && record.viewer.is_submitter == true',
       locations: ['record_section'],
       successMessage: 'Resubmitted.',
       refreshAfter: true,

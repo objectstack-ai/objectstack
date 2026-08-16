@@ -115,7 +115,12 @@ export const SysMember = ObjectSchema.create({
       bodyExtra: { role: 'owner' },
       // The residual row predicate stays hand-written; the feature gate is
       // AND-composed onto it by the requiresFeature lowering.
-      visible: "record.role != 'owner'",
+      // `has()` guards the SPARSE action face (#8990): this is a `list_item`
+      // action, so a member list that does not project `role` would abort the
+      // predicate at key resolution and drop the button silently. `has()`
+      // alone — the operand is a bare equality against a literal (see
+      // `materializeDeclaredFields` in `@objectstack/objectql`).
+      visible: "has(record.role) && record.role != 'owner'",
       requiresFeature: 'organization',
       confirmText: 'Transfer ownership of this organization to the selected member? You will be demoted to admin and lose owner-only privileges.',
       successMessage: 'Ownership transferred',
