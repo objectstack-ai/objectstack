@@ -210,6 +210,7 @@ const ALL_HANDWRITTEN = [
   "content/docs/ui/setup-app.mdx",
   "content/docs/ui/translations.mdx",
   "content/docs/ui/views.mdx",
+  "content/docs/upgrading.mdx",
 ]
 // </generated:docs-audit-scope>
 
