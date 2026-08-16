@@ -365,12 +365,19 @@ describe('#7534 — unknown field on the EXPLICIT filter axes (real ObjectQL eng
         await expect(find({ where: { id: 't1' } })).resolves.toMatchObject({ total: 1 });
     });
 
-    it('GUARD a dotted path on a REAL head passes through — the gate must not narrow what already worked', async () => {
-        // `owner_id` is a real field, so `owner_id.name` is not this gate's
-        // business: it must pass, the same way `?owner_id.name=` does on the
-        // bare-key door. Green in both directions by construction — nothing
-        // refused it before this fix and nothing may refuse it after.
-        await expect(find({ where: { 'owner_id.name': 'Ada' } })).resolves.toBeDefined();
+    it('[#8371] a dotted path on a REAL relation head is now REFUSED — the verdict this gate deliberately lacked', async () => {
+        // This GUARD used to pin the pass-through ("nothing may refuse it
+        // after") — the scope note of a gate that had ONE verdict, not a
+        // ruling that the spelling must stay unjudged forever. #8371 measured
+        // it on all three drivers (zero rows everywhere: `owner_id` is a
+        // registry-injected `lookup`, storing a scalar id no dotted path can
+        // traverse) and ruled the refusal, with the whole key named exactly as
+        // the caller wrote it. The properties that SURVIVE from the old guard
+        // are narrower and still pinned around this test: a nested-relation
+        // OBJECT condition is not descended into, and an unknown head keeps
+        // its typo-shaped answer, first.
+        await expect(find({ where: { 'owner_id.name': 'Ada' } }))
+            .rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', field: 'owner_id.name' });
     });
 
     it('a dotted path on an UNKNOWN head is refused, exactly as the bare-key door judges one', async () => {
