@@ -658,6 +658,34 @@ jobs:
       - name: Cross-package test inputs
         run: pnpm check:cross-package-test-inputs
 
+      # The inventory of `packages/**` tests coupled to `examples/**` (#8754).
+      # Sibling of the gate above, on the axis it cannot see: that one detects
+      # tests whose FILESYSTEM READS escape their package, this one detects
+      # tests that IMPORT an example app live. `packages/cli` dynamically
+      # imports `examples/app-showcase/src/ui/views/contact.view` and asserts
+      # `toEqual` over a hardcoded `_sections` key list; `packages/lint`
+      # statically imports the same app's `Contact`/`ContactViews`. Neither
+      # package declares a dependency on `@objectstack/example-showcase` — the
+      # coupling is a test-only relative import across a workspace boundary — so
+      # `turbo ls --affected` cannot reach them from an examples-only diff and
+      # the first signal is a red `Test Core` in the SHARED merge queue, which
+      # stalls every lane (queue build 31825946401; it caught #8231's remainder
+      # twice in one round, the second time through a package nobody had
+      # thought to check).
+      # ⛔ This gate grades DISCOVERY ONLY — "here are the coupled files, and
+      # here is what CI can see of each". It asserts nothing about how any of
+      # them should be written; adding a new live coupling is allowed, it only
+      # has to be RECORDED so the next example-app edit can be checked against
+      # the list. Classification is mechanical (declared workspace dep /
+      # declared turbo input glob / neither), and only the invisible tier needs
+      # a hand-written note, so the maintained half stays proportional to the
+      # gap. Checked in both directions: an undeclared coupling and a stale
+      # entry both fail, naming themselves.
+      # Inventory on demand: `pnpm examples:live-imports`.
+      # Static scan of test sources; sub-second.
+      - name: examples/** live-import inventory
+        run: pnpm check:examples-live-imports
+
       # Tests must judge SOURCE, not a sibling's build artifact (#7668/#7849).
       # Every publishable package resolves through `exports` to `dist/`, so a
       # package whose tests import a workspace dep with no vitest source alias
