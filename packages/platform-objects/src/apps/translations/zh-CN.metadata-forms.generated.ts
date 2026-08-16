@@ -98,6 +98,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "默认值",
         helpText: "新记录的默认值（JSON 字面量）"
       },
+      "fields.placeholder": {
+        label: "Placeholder",
+        helpText: "Hint text shown inside the empty input; disappears once a value is entered"
+      },
       "fields.maxLength": {
         label: "最大长度",
         helpText: "最大字符数"
@@ -357,6 +361,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       defaultValue: {
         label: "默认值",
         helpText: "新建记录时的默认值"
+      },
+      placeholder: {
+        label: "Placeholder",
+        helpText: "Hint text shown inside the empty input (disappears once a value is entered); use inlineHelpText for always-visible help"
       },
       minLength: {
         label: "最小长度",

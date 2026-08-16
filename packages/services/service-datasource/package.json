@@ -28,7 +28,8 @@
   "dependencies": {
     "@objectstack/core": "workspace:*",
     "@objectstack/spec": "workspace:*",
-    "@objectstack/types": "workspace:*"
+    "@objectstack/types": "workspace:*",
+    "pg-connection-string": "^2.14.0"
   },
   "devDependencies": {
     "@objectstack/driver-memory": "workspace:*",

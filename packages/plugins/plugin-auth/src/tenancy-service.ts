@@ -33,7 +33,7 @@
  * DEGRADED without it. The wall's implementation is open — the Layer 0
  * compiler, `accessible_org_ids` resolution and the D5 write
  * stamping/validation all ship in open packages — but multi-organization
- * operation is a commercial capability (ADR-0081 D2).
+ * operation is a commercial capability (ADR-0105 D12).
  *
  * That is not in tension with cloud ADR-0016's 铁律 (强制免费、治理收费): the rule
  * guarantees a deployment RUNNING a multi-org shape is safe, which is satisfied
@@ -186,7 +186,7 @@ export function createTenancyService(deps: TenancyServiceDeps): TenancyService {
    * BOTH walled postures probe. The wall's CODE is open (the Layer 0 compiler,
    * `accessible_org_ids` resolution and D5 stamping all live in open packages),
    * but ENABLING a multi-organization posture is an entitlement — exactly the
-   * shape `isolated` has had since ADR-0081 D2. Open code, entitled activation:
+   * shape `isolated` has always had (ADR-0105 D12). Open code, entitled activation:
    * the two are separate questions, and conflating them is what briefly made
    * `group` a free multi-org back door around the `isolated` gate.
    *

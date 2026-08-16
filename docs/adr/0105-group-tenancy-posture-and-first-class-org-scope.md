@@ -331,12 +331,31 @@ enterprise `org-scoping` runtime (`@objectstack/organizations`) exactly like
 start** (the ADR-0093 D5 guard, keyed off the resolved posture) rather than
 silently running unwalled. The iron rule guarantees a deployment *running* a
 multi-org shape is safe by default; that is satisfied by refusing to run one
-unwalled — **open code is not free activation**. ADR-0081 D2's commercial
-line stands: both multi-org postures are `@objectstack/organizations`
-capability. Commercial surface (unchanged): org lifecycle management,
-grouping/registry UI, scoped invitations UX, cross-org approval templates,
-master-data distribution management, per-org seed/config replay, org
-analytics, and the D13 promotion tooling.
+unwalled — **open code is not free activation**. The inherited commercial
+line stands, and **this decision is now its owner**: both multi-org postures
+are `@objectstack/organizations` capability. Commercial surface (unchanged):
+org lifecycle management, grouping/registry UI, scoped invitations UX,
+cross-org approval templates, master-data distribution management, per-org
+seed/config replay, org analytics, and the D13 promotion tooling.
+
+> **Citation note (2026-08-16) — hygiene, not a decision.** Code and tests
+> carried this entitlement as **"ADR-0081 D2"**, a label inherited from a
+> decision record that predates this repo's ADR series — the same pre-repo
+> record whose "ADR-0081 D1" label [ADR-0093](./0093-tenancy-mode-and-membership-lifecycle.md)
+> D9 names. That number now collides with this repo's
+> [ADR-0081](./0081-trusted-react-page-tier.md), the trusted `kind:'react'`
+> page tier, whose Decision section is numbered 1–4 and has no D-numbered
+> decisions at all — so a reader following the citation landed in a document
+> about React pages with no signal they were in the wrong record. **D12 is the
+> anchor** for "enabling multi-organization operation is an entitlement": it
+> is the accepted, repo-local decision that both walled postures probe
+> `@objectstack/organizations` to activate, and the #3570 amendment below is
+> the founder ruling that settled it. Nothing about the decision changes here;
+> it simply stops being cited by a number that resolves elsewhere.
+>
+> ⚠️ The anchor is **D12**, not `D2` — this ADR's own **D2** is
+> `accessible_org_ids`, an unrelated kernel decision. The one-character slip
+> reproduces the exact defect this note closes.
 
 > **Amendment (2026-07-27, #3570).** As proposed, this section read "the
 > `group` wall ships open — an open deployment configured into the group
@@ -345,8 +364,9 @@ analytics, and the D13 promotion tooling.
 > entitlement probe. That was the founder decision flagged in #3559, and the
 > founder ruled it wrong on review. Two defects in the original reading:
 > it made the *stronger* multi-org posture (union wall) free while the
-> *weaker* one (`isolated`) stayed entitled — inverting ADR-0081 D2 and
-> handing out a free path around the `org-scoping` gate — and it opened a
+> *weaker* one (`isolated`) stayed entitled — inverting the inherited
+> commercial line and handing out a free path around the `org-scoping` gate
+> — and it opened a
 > silent-degradation hole (`os serve` gated the enterprise package load on
 > `OS_MULTI_ORG_ENABLED`, so `OS_TENANCY_POSTURE=group` skipped both the
 > load and the ADR-0093 D5 fail-fast, booting single-org without saying so).

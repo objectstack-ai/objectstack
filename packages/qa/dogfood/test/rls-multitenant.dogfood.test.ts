@@ -54,7 +54,7 @@ import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { runRlsProofs, formatRlsReport, type RlsReport } from '@objectstack/verify';
 
 // The multi-org runtime moved to the ENTERPRISE `@objectstack/organizations`
-// package (ADR-0081 D2) — not part of this open workspace. Skip (loudly) when
+// package (ADR-0105 D12) — not part of this open workspace. Skip (loudly) when
 // it isn't linked in; enterprise/cloud CI, which ships the package, runs this.
 //
 // #4700: the probe used to be a bare `import()`, which Node ESM resolves against

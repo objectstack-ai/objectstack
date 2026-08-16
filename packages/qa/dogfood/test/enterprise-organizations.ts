@@ -2,7 +2,7 @@
 
 /**
  * #4700 — availability of the enterprise `@objectstack/organizations` package
- * (ADR-0081 D2), for the dogfood gates that can only run multi-org.
+ * (ADR-0105 D12), for the dogfood gates that can only run multi-org.
  *
  * ── The defect this replaces ─────────────────────────────────────────────────
  *
@@ -68,7 +68,7 @@
 
 import { createHostImporter, hostImportFailureKind } from '@objectstack/types/node';
 
-/** The cloud-private enterprise package (ADR-0081 D2). */
+/** The cloud-private enterprise package (ADR-0105 D12). */
 export const ORGANIZATIONS_PKG = '@objectstack/organizations';
 
 /**
@@ -114,7 +114,7 @@ export async function probeOrganizations(
           'reachable as somebody else\'s transitive dependency is not enough (#4719)';
     if (declared) {
       throw new Error(
-        `${MULTI_ORG_ENV}=1 declares that ${ORGANIZATIONS_PKG} (enterprise, ADR-0081 D2) is ` +
+        `${MULTI_ORG_ENV}=1 declares that ${ORGANIZATIONS_PKG} (enterprise, ADR-0105 D12) is ` +
           `installed for this run, but it could not be resolved from ${root}. ` +
           'Refusing to skip the multi-org dogfood gates silently: a run that believes it is ' +
           'exercising cross-tenant isolation and is not would report green over gates that ' +

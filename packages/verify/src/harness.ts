@@ -445,7 +445,7 @@ export async function bootStack(
   }
 
   // Multi-org: the enterprise OrganizationsPlugin (`@objectstack/organizations`,
-  // ADR-0081 D2) MUST register BEFORE SecurityPlugin — the latter probes the
+  // ADR-0105 D12) MUST register BEFORE SecurityPlugin — the latter probes the
   // `org-scoping` service (the historical name the enterprise plugin keeps
   // registering) exactly once at start and caches it, then keeps (vs strips)
   // the wildcard `organization_id` RLS policies accordingly. Mirrors the CLI's
@@ -493,7 +493,7 @@ export async function bootStack(
             'package.json, which is what is actually checked: a package merely reachable through ' +
             'NODE_PATH or a hoisted workspace store is not accepted (#4719) — to run multi-org fixtures.';
       throw new Error(
-        'verify: multiTenant=true requires the enterprise @objectstack/organizations package (migrated from plugin-org-scoping, ADR-0081 D2). ' +
+        'verify: multiTenant=true requires the enterprise @objectstack/organizations package (migrated from plugin-org-scoping, ADR-0105 D12). ' +
           `${remedy} (${(e as Error).message})`,
       );
     }

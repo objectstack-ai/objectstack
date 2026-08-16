@@ -1386,6 +1386,78 @@ describe('ADR-0113 — required is a write contract; storage.notNull is the colu
     expect(() => FieldSchema.parse({ type: 'text', storage: { collation: 'C' } })).toThrow();
   });
 });
+describe('FieldSchema — `placeholder` is a DECLARED key (#9019, ruled Option C on objectui#4676)', () => {
+  // The reverse of the pre-#9019 posture: `placeholder` used to be refused by
+  // name via FIELD_KEY_GUIDANCE ("never a FieldSchema key. Author hint text
+  // through `inlineHelpText` or `description`."). The 2026-08-16 maintainer
+  // ruling flipped the producer: four shipped objectui render surfaces apply
+  // an object-field-level placeholder at render time (plugin-form,
+  // plugin-detail, app-shell resolveActionParams, apps/console FormPage), so
+  // the declaration was the missing half. These are the accept-side pins.
+
+  it('parses and round-trips on a minimal field', () => {
+    const f = FieldSchema.parse({ name: 'nickname', label: 'Nickname', type: 'text', placeholder: 'Enter a nickname' });
+    expect(f.placeholder).toBe('Enter a nickname');
+  });
+
+  it('coexists with BOTH hint siblings — three distinct surfaces, none aliased onto another', () => {
+    const f = FieldSchema.parse({
+      type: 'text',
+      placeholder: 'in-input hint',
+      inlineHelpText: 'always-visible help under the input',
+      description: 'tooltip/developer documentation',
+    });
+    expect(f.placeholder).toBe('in-input hint');
+    expect(f.inlineHelpText).toBe('always-visible help under the input');
+    expect(f.description).toBe('tooltip/developer documentation');
+  });
+
+  it('is optional — absence stays absent (no default materializes)', () => {
+    const f = FieldSchema.parse({ type: 'text' });
+    expect('placeholder' in f).toBe(false);
+  });
+
+  it('rejects a non-string value', () => {
+    expect(() => FieldSchema.parse({ type: 'text', placeholder: 123 })).toThrow();
+    expect(() => FieldSchema.parse({ type: 'text', placeholder: { en: 'x' } })).toThrow();
+  });
+
+  it('is not type-restricted at the schema level (flat on FieldSchema, like scale/min)', () => {
+    expect(() => FieldSchema.parse({ type: 'textarea', placeholder: 'x' })).not.toThrow();
+    expect(() => FieldSchema.parse({ type: 'number', placeholder: 'x' })).not.toThrow();
+  });
+
+  it('does not disturb FieldSchema unknown-key strictness (#4001)', () => {
+    expect(() => FieldSchema.parse({
+      type: 'text',
+      placeholder: 'x',
+      totallyBogusKey: true,
+    } as unknown as Field)).toThrow(/Unrecognized key/);
+  });
+
+  it('the `.describe()` prose carries the three-way distinction (feeds the generated reference page)', () => {
+    const js = z.toJSONSchema(FieldSchema as unknown as z.ZodType, {
+      unrepresentable: 'any',
+      io: 'input',
+    }) as { properties?: Record<string, { type?: string; description?: string }> };
+    const prop = js.properties?.placeholder;
+    expect(prop).toBeDefined();
+    expect(prop!.type).toBe('string');
+    expect(prop!.description).toMatch(/inlineHelpText/);
+    expect(prop!.description).toMatch(/description/);
+  });
+
+  it('parses inside an object document — the PUT /meta authoring shape that used to 422', () => {
+    const obj = ObjectSchema.parse({
+      name: 'crm_lead',
+      label: 'Lead',
+      fields: {
+        nickname: { type: 'text', label: 'Nickname', placeholder: 'e.g. Jay' },
+      },
+    });
+    expect((obj.fields as Record<string, { placeholder?: string }>).nickname.placeholder).toBe('e.g. Jay');
+  });
+});
 
 describe('FieldSchema — `maskingRule` is a DECLARED key (#8993, ruled Option A 2026-08-16)', () => {
   // Re-introduction of the key pruned 2026-06 as dead-in-both-layers — this

@@ -2272,6 +2272,9 @@ importers:
       '@objectstack/types':
         specifier: workspace:*
         version: link:../../types
+      pg-connection-string:
+        specifier: ^2.14.0
+        version: 2.14.0
     devDependencies:
       '@objectstack/driver-memory':
         specifier: workspace:*

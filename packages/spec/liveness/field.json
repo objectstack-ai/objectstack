@@ -162,6 +162,13 @@
       "status": "live",
       "note": "display help (renderer)."
     },
+    "placeholder": {
+      "status": "live",
+      "verifiedAt": "2026-08-16",
+      "evidenceScope": "cross-repo",
+      "evidence": "objectui: packages/plugin-form ObjectForm.tsx:601 (auto form), sectionFields.ts:122 (fromObjectSchema), ModalForm.tsx:425, DrawerForm.tsx:350; objectui: packages/plugin-detail RecordDetailDrawer.tsx:253 (inline edit); objectui: packages/app-shell resolveActionParams.ts:512 (field-backed action params inherit placeholder — documented as intended in that module's header); objectui: apps/console FormPage.tsx:343 (override.placeholder ?? def.placeholder, rendered at :830); underneath, the @object-ui/fields widgets read field.placeholder off the metadata carrier — measured objectui @9ce096fb0 with sensitivity controls (objectui#4676 report comment 5301288148)",
+      "note": "In-input placeholder (HTML placeholder attribute). Declared 2026-08-16 (#9019, maintainer Option C ruling on objectui#4676): the consumers shipped first; the declaration was the missing half. Distinct from inlineHelpText (always-visible below-field help) and description (tooltip)."
+    },
     "unique": {
       "status": "live",
       "evidence": "packages/drivers/driver-sql/src/sql-driver.ts:1853",

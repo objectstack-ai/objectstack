@@ -76,8 +76,6 @@
     "data/FeedFilterMode",
     "data/FeedItemType",
     "data/Field",
-    "data/FieldMaskingKeep",
-    "data/FieldMaskingRule",
     "data/FieldNode",
     "data/FieldReference",
     "data/FieldType",

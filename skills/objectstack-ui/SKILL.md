@@ -1805,7 +1805,7 @@ Register them under `defineStack({ actions: [...] })`.
 | `modal`  | Open a dialog (typically collecting `params`, then executing `body`) | `target`     |
 | `flow`   | Launch a screen/auto-launched flow by name                         | `target`       |
 | `api`    | Call a registered API endpoint                                     | `target`       |
-| `form`   | Open a FormView by name (routed to `/console/forms/:name`)         | `target`       |
+| `form`   | Open a FormView by name (routed to `/_console/forms/:name`)        | `target`       |
 
 ### Where Actions Appear (`locations`)
 

@@ -33,6 +33,7 @@ export const fieldForm = defineForm({
       description: 'Field-type specific settings (visible blocks depend on the chosen type).',
       fields: [
         { field: 'defaultValue', helpText: 'Default value for new records' },
+        { field: 'placeholder', helpText: 'Hint text shown inside the empty input (disappears once a value is entered); use inlineHelpText for always-visible help' },
         // Text field options
         { field: 'minLength', visibleWhen: "data.type == 'text' || data.type == 'textarea' || data.type == 'email'", helpText: 'Minimum character length' },
         { field: 'maxLength', visibleWhen: "data.type == 'text' || data.type == 'textarea' || data.type == 'email'", helpText: 'Maximum character length' },
