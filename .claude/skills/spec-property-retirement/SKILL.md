@@ -18,112 +18,94 @@ metadata:
   internal: true
 ---
 
-# Spec property retirement (ADR-0049 enforce-or-remove)
+# Spec 属性退役(ADR-0049 enforce-or-remove)
 
-A parsed-but-unenforced property is a silent no-op; for a security or capability
-property it is **false compliance** — `tool.permissions` promised an invocation
-gate nothing enforced, `flow.active: false` never stopped a flow. ADR-0049 says
-such a property must be **enforced**, marked **`experimental`**, or **absent**.
-This skill is the third path: what a removal actually costs, and in what order.
+被解析却不被强制执行的属性是静默 no-op;对安全或能力类属性,它是**假合规** ——
+`tool.permissions` 承诺过一道没人强制的调用门,`flow.active: false` 从未停下过任何
+flow。ADR-0049 说这样的属性必须**被强制执行**、标 **`experimental`**,或**不存在**。
+本技能是第三条路:一次删除真正的代价是什么,按什么顺序付。
 
-Removing the key is maybe 5% of the work. The other 95% is that a key is
-authorable in ~14 places, and **every gate that guards one of them fails
-separately and sequentially** — one stale surface masks the rest, so you get one
-red build per surface instead of one for all of them.
+删掉键本身也许只占 5% 的工作。其余 95% 在于:一个键可以在 ~14 个地方被编写,而**守
+着每个地方的门禁是分别地、串行地失败的** —— 一个过期面遮住其余全部,于是你得到的是
+每个面一轮红构建,而不是一轮报出全部。
 
-Read the verification side first: `packages/spec/liveness/README.md` (how a
-verdict is reached, `verifiedAt`, why a preview renderer is not a consumer) and
-AGENTS.md §"Touched `packages/spec`?" (the eight generated artifacts). This file
-does not repeat them.
+先读验证侧:`packages/spec/liveness/README.md`(裁定怎么得出、`verifiedAt`、为什么
+preview renderer 不算消费者)与 AGENTS.md §"Touched `packages/spec`?"(八个生成产
+物)。本文不重复它们。
 
-## 0. Before you remove: is removal the right disposition?
+## 0. 动手删之前:删除是正确的处置吗?
 
-- [ ] **Is it security/capability-shaped?** Then ADR-0049 binds and inertness is
-      a defect, not debt. `rls.enabled` was "live with wrong evidence" and
-      actually UNREAD — a disabled policy kept contributing its grant. That one
-      got **enforced**, not removed. Enforcement wins when the feature exists.
-- [ ] **Is it docs-shaped?** `hook.label`, `hook.description`, `flow.description`
-      have no runtime consumer and are **deliberately KEPT** — they document
-      intent for the next reader (per ADR-0033, often a model). Record the
-      exemption in the ledger `note` so the next audit doesn't re-litigate it.
-      Benign display metadata (`description`, `tags`, `icon`) is never
-      "misleading"; do not mark it `authorWarn` and do not retire it.
-- [ ] **Is there a committed roadmap?** Then `experimental` + a
-      `[EXPERIMENTAL — not enforced]` `.describe()` marker, not removal.
-- [ ] **Same-major bookkeeping.** If an earlier conversion in the *same
-      unreleased major* renames a key you are now deleting, **absorb** it: fold
-      the rename into the removal and delete the rename entry. Composed, its
-      effect is unobservable, and the conversion table's fixture-disjointness
-      contract (§3) will fail if you stack them. Precedent: `agent.knowledge`
-      swallowed the `topics`→`sources` rename pre-release.
+- [ ] **它是安全/能力形状的吗?** 那么 ADR-0049 约束成立,惰性是缺陷不是债。
+      `rls.enabled` 曾是「证据错误的 live」而实际**无人读取** —— disabled 的
+      policy 仍在贡献它的授权。那个键最后是**被强制执行**,不是被删除。功能存在时,
+      强制执行赢。
+- [ ] **它是文档形状的吗?** `hook.label`、`hook.description`、`flow.description`
+      没有运行时消费者,但被**有意保留** —— 它们为下一个读者(按 ADR-0033,常是模
+      型)记录意图。把豁免写进台账 `note`,下次审计不再重审。良性展示元数据
+      (`description`、`tags`、`icon`)永远谈不上「误导」;不要标 `authorWarn`,也
+      不要退役它。
+- [ ] **有已承诺的路线图吗?** 那就是 `experimental` + `.describe()` 里的
+      `[EXPERIMENTAL — not enforced]` 标记,不是删除。
+- [ ] **同 major 记账。** 同一个*未发布 major* 里更早的 conversion 改名了你现在要删
+      的键,就**吸收**它:把改名折进删除,删掉改名条目。二者复合后效果不可观测,而
+      conversion 表的 fixture 不相交契约(§3)会因叠放而失败。先例:
+      `agent.knowledge` 在发布前吞掉了 `topics`→`sources` 改名。
 
-## 1. The build is the referee — not the ledger
+## 1. 裁判是构建,不是台账
 
-A ledger `dead` verdict is an **input** to removal, not a substitute for the
-build's own proof. It is a claim with a timestamp, and code moves under it in
-both directions (`flow.status` and `action.undoable` were both *understated*).
+台账的 `dead` 裁定是删除的**输入**,不能替代构建自己的证明。它是一条带时间戳的声
+明,代码在它底下双向移动(`flow.status` 与 `action.undoable` 都被*低估*过)。
 
-So: **attempt the removal, then let the build rule on it.** In the #3896
-close-out, `view.form.data` was on the worklist as dead ("no form-path reader in
-either repo") and the removal broke `gen:schema` — `defineForm` writes
-`data: { provider: 'schema', schemaId }` onto every `*.form.ts`, and
-`metadata-protocol` serves it to the metadata-admin pipeline. The right response
-is **not** to force the removal: correct the ledger entry to `live` with the real
-evidence and a `verifiedAt`, narrow the conversion, and pin the non-warn. One of
-fourteen keys was refuted this way — budget for it.
+所以:**先尝试删除,让构建来裁。** #3896 收尾里,`view.form.data` 挂在工作清单上是
+dead(「两个仓都没有 form 路径的读者」),而删除打断了 `gen:schema` —— `defineForm`
+往每个 `*.form.ts` 写 `data: { provider: 'schema', schemaId }`,`metadata-protocol`
+把它喂给 metadata-admin 管线。正确的回应**不是**硬删:把台账条目改回 `live`、附真实
+证据与 `verifiedAt`,收窄 conversion,钉上 non-warn。十四个键里有一个是这样被证伪的
+—— 给它留预算。
 
-Two corollaries:
+两条推论:
 
-- **`tsc` and the gates are your best sweepers.** A `retiredKey()` tombstone
-  types the key `never`, so *every* authoring site in the monorepo fails to
-  compile. Two of three `template: true` sites in `examples/app-showcase` were
-  found by the tombstone after a grep missed them. Let the tombstone find the
-  callers before you go hunting.
-- **A grep can only prove presence.** To prove absence, close the call graph by
-  hand (declaration → registration → accessor → *caller*) or author the property
-  and boot the app. See the README's "How to verify a claim without fooling
-  yourself" — including that `git grep -E` does not honour `\b` on macOS.
+- **`tsc` 和门禁是你最好的清扫器。** `retiredKey()` 墓碑把键的类型定为 `never`,于
+  是 monorepo 里*每个*编写点都编译失败。`examples/app-showcase` 三处
+  `template: true` 里有两处是 grep 漏掉、墓碑找到的。让墓碑替你找调用者,再去人肉搜。
+- **grep 只能证明存在。** 要证明不存在,要么手工闭合调用图(声明 → 注册 →
+  accessor → *调用者*),要么编写该属性并启动应用。见 README 的 "How to verify a
+  claim without fooling yourself" —— 包括 macOS 上 `git grep -E` 不认 `\b`。
 
-## 2. The fork: which removal route (decides everything downstream)
+## 2. 分叉:走哪条删除路线(决定下游一切)
 
-| Schema | Route | Mechanism |
+| Schema | 路线 | 机制 |
 |---|---|---|
-| **not `.strict()`** | `retiredKey()` tombstone | `retiredKey(guidance)` in `packages/spec/src/shared/retired-key.ts` — `z.never({ error: () => guidance }).optional()`. Two channels: `tsc` (input type `never`) and the parse (the prescription itself, not "unrecognized key"). |
-| **`.strict()`** | delete the key + guidance map | Delete from the shape; add an entry to a `*_RETIRED_KEY_GUIDANCE` record consumed by a `z.core.$ZodErrorMap` passed as `z.object(shape, { error: … }).strict()`. Reference: `packages/spec/src/ai/tool.zod.ts:29-93,180`. Also `object.zod.ts`'s `UNKNOWN_KEY_GUIDANCE` for object top-level keys. |
-| **nothing parses it** | neither | A prescription nobody can receive is noise. Drop the baseline lines deliberately and say so in the changeset — precedents #3896 and #4834 (PR #4878), both in the kernel plugin-runtime family. The explanatory block that survived the family's deletion is `packages/spec/src/kernel/index.ts` (search `plugin-runtime.zod`). |
+| **非 `.strict()`** | `retiredKey()` 墓碑 | `packages/spec/src/shared/retired-key.ts` 的 `retiredKey(guidance)` —— `z.never({ error: () => guidance }).optional()`。两个通道:`tsc`(输入类型 `never`)与 parse(处方本身,不是 "unrecognized key")。 |
+| **`.strict()`** | 删键 + guidance map | 从 shape 里删除;向某个 `*_RETIRED_KEY_GUIDANCE` record 加条目,由传给 `z.object(shape, { error: … }).strict()` 的 `z.core.$ZodErrorMap` 消费。参考:`packages/spec/src/ai/tool.zod.ts:29-93,180`。object 顶层键另见 `object.zod.ts` 的 `UNKNOWN_KEY_GUIDANCE`。 |
+| **没人 parse 它** | 都不用 | 没人能收到的处方是噪音。有意删掉 baseline 行并在 changeset 里写明 —— 先例 #3896 与 #4834(PR #4878),都在 kernel plugin-runtime 家族。家族删除后幸存的解释块在 `packages/spec/src/kernel/index.ts`(搜 `plugin-runtime.zod`)。 |
 
-Never plain-delete a key from a non-strict schema: zod strips it silently and
-you have replaced one silent no-op with another (the #2169 "Mark Done does
-nothing" shape).
+永不从非 strict schema 上裸删一个键:zod 会静默剥掉它,你只是用一个静默 no-op 换了
+另一个(#2169 "Mark Done does nothing" 的形状)。
 
-### ⚠ The ledger discipline is OPPOSITE per route — and the two failures are not symmetric
+### ⚠ 台账纪律按路线是相反的 —— 两种失败也不对称
 
-The liveness gate walks the **schema's shape** and looks up each property in
-`packages/spec/liveness/<type>.json`. A `retiredKey()` is still a property in
-that shape. Therefore:
+liveness 门禁走的是 **schema 的 shape**,逐个属性去
+`packages/spec/liveness/<type>.json` 里查。`retiredKey()` 在那个 shape 里仍是一个属
+性。因此:
 
-| Route | Key still in the walked shape? | Its ledger entry |
+| 路线 | 键还在被走的 shape 里? | 它的台账条目 |
 |---|---|---|
-| `retiredKey()` tombstone | **YES** (`z.never()` is a property) | **STAYS** — `status: "dead"`, a `verifiedAt`, and a `note` saying REMOVED + why the entry remains |
-| strict removal | no | **DELETED**, along with any CLI advisory-lint expectation |
+| `retiredKey()` 墓碑 | **在**(`z.never()` 是属性) | **保留** —— `status: "dead"`、一个 `verifiedAt`、一条 `note` 写明 REMOVED + 条目为何还在 |
+| strict 删除 | 不在 | **删除**,连同 CLI advisory-lint 的预期 |
 
-Both directions now fail CI, so getting it backwards is loud either way:
+现在两个方向都会红 CI,搞反了两边都很响:
 
-- deleting a **tombstoned** key's row reports it **UNCLASSIFIED** (14 at once in
-  the #3896 sweep — the mistake this section exists to prevent);
-- leaving a **strict-removed** key's row reports it as an **ORPHAN** row.
+- 删掉**墓碑**键的行,报 **UNCLASSIFIED**(#3896 清扫一次 14 个 —— 本节就是防它);
+- 留着 **strict 删除**键的行,报 **ORPHAN** 行。
 
-The orphan leg is new (`scripts/liveness/orphans.mts`). Until it landed, this
-direction never failed at all — the gate walked the schema and looked rows up, so
-a row whose key had left the shape was simply never asked about, and rotted in
-place. That is how the report `aria`/`performance` rows outlived their keys by a
-full release, deleted by hand only because someone happened to read the file. If
-you hit the orphan error and the property really is still authorable, the fix is
-the **walk**, not the row: a property the walk cannot see is a property the
-ratchet cannot govern.
+orphan 这条腿是新的(`scripts/liveness/orphans.mts`)。它落地之前这个方向从不失败
+—— 门禁走 schema 再查行,键已离开 shape 的行根本不会被问到,原地腐烂。report 的
+`aria`/`performance` 行就这样比它们的键多活了一整个 release,靠有人恰好读到那个文件
+才手工删掉。你撞上 orphan 报错而属性确实还可编写时,要修的是 **walk**,不是行:
+walk 看不见的属性就是 ratchet 管不到的属性。
 
-Note template for a tombstone entry (verbatim house style, e.g.
-`liveness/action.json`):
+墓碑条目的 note 模板(house style 原文,如 `liveness/action.json`):
 
 > `REMOVED <date> (#<issue>) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-<N> conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); <what to do instead>.`
 
@@ -157,192 +139,156 @@ ratchet(#2978)会先开火,
 `HookBodyCapability`,沿用 `object.managedBy: 'system'` 的先例)—— 三条路线里没有一条
 适用于「def 存活、只少一个值」。
 
-### Writing the guidance string
+### guidance 字符串怎么写
 
-Five conventions, obeyed by all ~28 tombstones in tree:
+五条惯例,树上 ~28 个墓碑全部遵守:
 
-1. Backticked **fully-qualified** key first — `` `flow.errorHandling.fallbackNodeId` ``, not the bare tail.
-2. `was removed in @objectstack/spec <version> (#issue[, ADR-XXXX Dn])`.
-3. An em-dash clause on **why it was inert or wrong** — "it never had an effect", "no renderer ever read it".
-4. The imperative fix: for a rename, "use `<replacement>`" + "Rename the key; the value (…) is unchanged."; for a removal, "Delete the key." + **what the live mechanism actually is**.
-5. ``Run `os migrate meta --from <N-1>` to rewrite it automatically.`` — **only** when a conversion rewrites sources. No message names a conversion id; the conversion is referenced by the CLI command.
+1. 反引号包着的**全限定**键打头 —— `` `flow.errorHandling.fallbackNodeId` ``,不是裸尾段。
+2. `was removed in @objectstack/spec <version> (#issue[, ADR-XXXX Dn])`。
+3. 一个破折号从句讲**它为何惰性或错误** —— "it never had an effect"、"no renderer ever read it"。
+4. 祈使句修复:改名写 "use `<replacement>`" + "Rename the key; the value (…) is unchanged.";删除写 "Delete the key." + **真正生效的机制是什么**。
+5. ``Run `os migrate meta --from <N-1>` to rewrite it automatically.`` —— **仅当**有 conversion 重写 sources。消息不点名 conversion id;conversion 由 CLI 命令引用。
 
-This string *is* the migration doc for whoever hits it, including someone
-jumping several majors at once, whom the load-path conversion no longer covers.
+这个字符串*就是*撞上它的人的迁移文档 —— 包括一次跳好几个 major、load-path
+conversion 已不再覆盖的那位。
 
-## 3. Register the surface (ADR-0087 D2/D3) — or the gate stops you
+## 3. 注册面(ADR-0087 D2/D3)—— 否则门禁拦你
 
-`scripts/build-schemas.ts` gate (b) fails any newly-tombstoned key that is not
-registered by its **exact** `${defKey}:${name}` in `RETIRED_KEYS_BY_MAJOR`: the
-tombstone is audible only to whoever *hits* it, while `spec-changes.json`, the
-generated upgrade guide and the `spec_changes` MCP tool are the primary channel
-and would stay empty.
+`scripts/build-schemas.ts` 的门 (b) 会打红任何没按**精确** `${defKey}:${name}` 注册
+进 `RETIRED_KEYS_BY_MAJOR` 的新墓碑键:墓碑只对*撞上*它的人可闻,而
+`spec-changes.json`、生成的 upgrade guide 与 `spec_changes` MCP 工具才是主通道,不
+注册它们就一直空着。
 
-⚠ **This is two separate obligations, and only one of them is a string match.**
-The registry entry is what the gate reads; the conversion is what a consumer
-follows. Write both.
+⚠ **这是两个独立义务,其中只有一个是字符串匹配。** registry 条目是门禁读的;
+conversion 是消费者跟的。两个都要写。
 
-- [ ] **A `MetadataConversion`** in `packages/spec/src/conversions/registry.ts`:
-      kebab-case `id` ending `-removed`, `toMajor`, one
-      `emit({ from, to: '(removed)', path })` per key (use the shared `stripKeys`
-      helper), and a `fixture` whose `expectedNotices` equals the **key** count,
-      not the item count. Walkers (`mapCollection`, `mapFlowNodes`, `renameKey`)
-      live in `conversions/walk.ts` and are copy-on-write — return the input
-      reference untouched when nothing matched.
-- [ ] **A `RETIRED_KEYS_BY_MAJOR` entry** in
-      `packages/spec/src/migrations/registry.ts` — the literal
-      `'<defKey>:<name>'` as `authorable-surface/<category>.json` spells it, minus the
-      `[RETIRED]` mark, under this major. This is the string gate (b) reads, by
-      exact set membership; nothing is inferred and nothing radiates from a
-      neighbouring key. The gate's failure prints the line to paste. ⚠ Do **not**
-      add the entry before the tombstone lands: an entry naming a key that is
-      still live fails gate (b2) as a registration nothing consumed.
-      *Why a second table:* until #4659 gate (b) matched the key's **leaf** against
-      every registered `surface` (`endsWith('.' + name)`, all majors, def
-      ignored), so `dashboard.aria` registered `ui/FormView:aria` and protocol
-      11's `flow.node.type` registered any `.type` at all (#4658). The guarantee
-      had lapsed for every common leaf.
-      *The entry also starts the aging clock (#5898):* gate (c) reads the same
-      table to decide when this tombstone's `authorable-surface/` line may be
-      deleted (~two majors), so the major you write it under is the release the
-      clock counts from. Retirements older than the table are **undeclared and
-      therefore not deletable** — nothing could date them honestly (leaf matching
-      dated `data/Index:type` from an unrelated `flow.node.type` at major 11, and
-      the baseline file's own git history starts at 17.0.0-rc.0). To delete one of
-      those lines, establish its true major, add the entry, and say so in the PR.
-      ⚠ Never add a row you cannot date: an estimate here reads as a fact to
-      every later gate.
-- [ ] **`surface` stays prose — it is no longer matched.** Write it the way an
-      author writes metadata (`flow.nodes[].outputSchema`), which is what the
-      upgrade guide prints. Multi-key conversions still join clauses with exactly
-      `' / '` (house style since the tool sweep). Nothing downstream parses it
-      for attribution any more — that job moved to the entry above. Since #5898
-      that is true of **every** consumer: gate (c)'s *aged-out tombstone* proof
-      was the last leaf matcher and now reads the same exact-key table, so no
-      rule anywhere parses a `surface` for attribution.
-- [ ] **`retiredFromLoadPath: true`** — for a retirement, always. Two distinct
-      justifications, and they are not interchangeable: for a *rename* it means
-      "no alias window, deliberately" (the tombstone owns the refusal; the entry
-      exists so `spec-changes.json` and `os migrate meta` still carry it); for a
-      **default flip** it is load-bearing for correctness — a loader that
-      auto-applied `field-required-notnull-explicit` would stamp NOT NULL onto
-      17-authored `required: true`, silently restoring the tri-binding ADR-0113
-      removed. Only `migrate meta --from <old>` may apply a flip, where "this
-      source predates the split" is a fact rather than a guess.
-- [ ] **A D3 chain step** in `packages/spec/src/migrations/registry.ts` — add the
-      id to `MIGRATIONS_BY_MAJOR[N].conversionIds` and extend that step's
-      `rationale`. `conversion.toMajor` **must equal** the step's major.
-      ⚠ Nothing asserts "every conversion is wired into a step" directly, and a
-      typo'd id is **silently skipped at replay**; the chain-replay test catches
-      it only because an unwired fixture never reaches its `after`. So read that
-      test's failure as "not wired", not "transform broken".
-- [ ] **Fixtures must be DISJOINT — twice over.** Every fixture is replayed
-      through the *whole* table and must equal exactly its own `after`, with
-      every notice attributed to its own id. Keep `before` minimal and avoid
-      other entries' keys (a new `objects[].fields` fixture must not carry a bare
-      `required: true`, or the notNull conversion fires on it). Second
-      constraint, easy to miss: a `retiredFromLoadPath` fixture must ALSO be
-      untouched by every *live-window* conversion, since a separate test asserts
-      it passes through the default load path with zero notices. This
-      disjointness contract is what forces same-major absorption (§0).
-- [ ] **Idempotence is by construction, not by test.** No test replays a
-      conversion twice. A `stripKeys` deletion is idempotent (`if (!(key in
-      next)) continue`) and `renameKey` refuses to clobber an existing canonical
-      value; a default flip is **not** idempotent-safe and relies on its own
-      guard plus `retiredFromLoadPath`. If your transform is none of those
-      shapes, prove idempotence yourself — the CLI e2e
-      (`packages/cli/test/migrate-meta.e2e.test.ts`) replays the migrated
-      snapshot and asserts `applied` is empty.
-- [ ] **Response-surface keys with no source to rewrite** register as a
-      `SemanticMigration` (D3 `semantic[]`) with non-empty `reason` and
-      `acceptanceCriteria` instead — `EnhancedApiError.fieldErrors` is the
-      worked example.
+- [ ] **一条 `MetadataConversion`**,在 `packages/spec/src/conversions/registry.ts`:
+      kebab-case 的 `id` 以 `-removed` 结尾、`toMajor`、每键一条
+      `emit({ from, to: '(removed)', path })`(用共享的 `stripKeys` helper),以及一
+      个 `fixture`,其 `expectedNotices` 等于**键**数,不是条目数。walker
+      (`mapCollection`、`mapFlowNodes`、`renameKey`)住在 `conversions/walk.ts`,
+      copy-on-write —— 没命中就原样返回输入引用。
+- [ ] **一条 `RETIRED_KEYS_BY_MAJOR` 条目**,在
+      `packages/spec/src/migrations/registry.ts` —— 字面 `'<defKey>:<name>'`,拼法照
+      `authorable-surface/<category>.json`(去掉 `[RETIRED]` 标),挂在本 major 下。
+      这就是门 (b) 按精确集合成员读的字符串;不做推断,也不从邻键辐射。门禁的失败输
+      出会打印该粘贴的那一行。⚠ **不要**在墓碑落地前先加条目:点名一个还活着的键的
+      条目,会以「无人消费的注册」打红门 (b2)。
+      *为什么要第二张表:* #4659 之前门 (b) 拿键的**叶名**去比对每条已注册的
+      `surface`(`endsWith('.' + name)`,全 major,def 忽略),于是 `dashboard.aria`
+      注册中了 `ui/FormView:aria`,protocol 11 的 `flow.node.type` 注册中了任意
+      `.type`(#4658)。对每个常见叶名,保证早已失效。
+      *条目同时启动老化时钟(#5898):* 门 (c) 读同一张表来决定这个墓碑的
+      `authorable-surface/` 行何时可删(~两个 major),所以你把它写在哪个 major 下,
+      时钟就从那个 release 数起。比这张表更老的退役是**未申报的、因此不可删的** ——
+      没有东西能诚实地给它们定日期(叶匹配曾把 `data/Index:type` 的日期从一个不相干
+      的 `flow.node.type` 定到 major 11,而 baseline 文件自己的 git 历史始于
+      17.0.0-rc.0)。要删那类行,先考证它真实的 major、补条目、在 PR 里写明。
+      ⚠ 永不加一行你定不了日期的:这里的估计会被之后每个门当成事实读。
+- [ ] **`surface` 保持散文 —— 它不再被匹配。** 按作者写元数据的方式写
+      (`flow.nodes[].outputSchema`),那也是 upgrade guide 打印的。多键 conversion
+      仍用恰好 `' / '` 连接子句(tool 清扫以来的 house style)。下游不再有任何东西
+      从它解析归属 —— 那个职责移给了上面的条目。#5898 起这对**每个**消费者都成立:
+      门 (c) 的 *aged-out tombstone* 证明曾是最后一个叶匹配者,现在也读同一张精确键
+      表,再没有任何规则从 `surface` 解析归属。
+- [ ] **`retiredFromLoadPath: true`** —— 退役恒真。两种论证,不可互换:对*改名*它意
+      味着「没有 alias 窗口,故意的」(拒绝由墓碑负责;条目存在是为了
+      `spec-changes.json` 与 `os migrate meta` 仍携带它);对**默认值翻转**它承重正
+      确性 —— 自动应用 `field-required-notnull-explicit` 的 loader 会把 NOT NULL 盖
+      到 17 时代编写的 `required: true` 上,静默恢复 ADR-0113 删掉的三重绑定。只有
+      `migrate meta --from <old>` 可以应用翻转 —— 在那里「这份 source 早于拆分」是
+      事实而不是猜测。
+- [ ] **一步 D3 链**,在 `packages/spec/src/migrations/registry.ts` —— 把 id 加进
+      `MIGRATIONS_BY_MAJOR[N].conversionIds`,扩写该步的 `rationale`。
+      `conversion.toMajor` **必须等于**该步的 major。⚠ 没有东西直接断言「每个
+      conversion 都接进了某一步」,拼错的 id 在 replay 时被**静默跳过**;
+      chain-replay 测试抓得到它,只因为没接线的 fixture 永远到不了自己的 `after`。
+      所以把那个测试的失败读作「没接线」,不是「transform 坏了」。
+- [ ] **fixture 必须不相交 —— 两重。** 每个 fixture 都被整张表 replay,必须恰好等于
+      自己的 `after`,每条 notice 都归属自己的 id。`before` 保持最小、避开其它条目
+      的键(新的 `objects[].fields` fixture 不许带裸 `required: true`,否则 notNull
+      conversion 在它上面开火)。第二重容易漏:`retiredFromLoadPath` 的 fixture 还必
+      须不被任何 *live-window* conversion 碰到,因为另有测试断言它以零 notice 走过
+      默认加载路径。这条不相交契约正是逼出同 major 吸收(§0)的东西。
+- [ ] **幂等靠构造,不靠测试。** 没有测试把 conversion replay 两遍。`stripKeys` 删
+      除天然幂等(`if (!(key in next)) continue`),`renameKey` 拒绝覆盖已存在的
+      canonical 值;默认值翻转**不是**幂等安全的,靠它自己的守卫加
+      `retiredFromLoadPath`。你的 transform 不属于这些形状,就自己证明幂等 —— CLI
+      e2e(`packages/cli/test/migrate-meta.e2e.test.ts`)会 replay 迁移后的快照并断
+      言 `applied` 为空。
+- [ ] **没有 source 可重写的响应面键**,改注册成 `SemanticMigration`(D3
+      `semantic[]`),`reason` 与 `acceptanceCriteria` 非空 ——
+      `EnhancedApiError.fieldErrors` 是成品示例。
 
-## 4. The surface checklist
+## 4. 面清单
 
-Work top to bottom; each line has a gate behind it.
+从上往下做;每一行背后都有一个门。
 
-- [ ] **Schema** — tombstone or strict removal (§2), plus the in-schema comment
-      saying what was removed and what the live mechanism is.
-- [ ] **Orphaned value schemas** — a key's `XxxConfigSchema` with no other
-      consumer goes with it (`PerformanceConfigSchema`, `AIKnowledgeSchema`,
-      `ToolCategorySchema`). An exported schema with no consumer is read as a
-      capability by whoever finds it (#3950 precedent). This — and *only* this —
-      moves `api-surface/`: that snapshot prints type *references*, not
-      expanded shapes, so it is blind to key-level narrowing (#3883 removed three
-      keys from `defineAction`'s input and the snapshot did not change). Its gate
-      also lives in a different workflow (`TypeScript Type Check`, not
-      `Check Generated Artifacts`) and reads the built `dist/*.d.ts`.
-- [ ] **Conversion + chain step + the exact-key `RETIRED_KEYS_BY_MAJOR` entry** (§3).
-- [ ] **Liveness ledger** — per §2's route table, with `verifiedAt`. Update the
-      README's per-type row **and its counts** (that table has drifted badly
-      once; regenerate the counts with the python snippet in the README rather
-      than hand-editing).
-- [ ] **Generated baselines** — `pnpm --filter @objectstack/spec gen:schema`
-      moves `authorable-surface/<category>.json` (tombstone → a new
-      `… [RETIRED]` line; strict removal → the line **vanishes**, which is gate
-      (a)'s trip wire, so delete it in the same PR deliberately) and
-      `json-schema.manifest/<category>.json`. Both are sharded by category since
-      #5837 — the gates read the whole directory as one set, so the retirement
-      procedure is unchanged; only which file the line lives in moved.
-      Then `gen:spec-changes`, `gen:upgrade-guide`, `gen:api-surface`,
-      `gen:docs`. See AGENTS.md for the you-changed-X → regenerate-Y table.
-- [ ] **Forms** — prune the `{ field: '<key>' }` input from
-      `packages/spec/src/**/*.form.ts`. A form input for an unenforced capability
-      is the UI half of false compliance. Leave a one-line comment where it was.
-- [ ] **i18n bundles** — pruning a form input changes the extracted labels:
-      `pnpm i18n:extract` regenerates
-      `packages/platform-objects/src/apps/translations/*.metadata-forms.generated.ts`
-      (merge mode; a retirement is a pure deletion). Gated by `pnpm check:i18n`.
-- [ ] **CLI advisory lint** — `packages/cli/src/utils/lint-liveness-properties.ts`
-      is ledger-driven, so a retired key stops warning by itself; update its
-      **test** to assert the non-warn ("the strict parse owns them now").
-- [ ] **Pin tests** — one negative asserting the prescription itself
-      (``.toThrow(/<key>.*removed.*use `<replacement>`/s)`` — the `s` flag is
-      house style, since the message spans lines) and one positive asserting
-      `not.toHaveProperty(key)` for the non-strict strip path. Reference
-      `packages/spec/src/ai/agent.test.ts:69-95`.
-- [ ] **Examples** — `examples/app-showcase/**` must stop authoring the key.
-      `tsc` finds these for you on the tombstone route.
-- [ ] **Published skills** — `skills/*/SKILL.md` teaching the key (tables,
-      `defineX` examples) — gated by `check:skill-examples` and `check:skill-refs`.
-- [ ] **Docs** — `content/docs/**` prose, tables and code blocks — **EXCEPT
-      `content/docs/releases/`, which a code PR must never touch** (AGENTS.md
-      Documentation Guardrails). Release notes are written centrally at release
-      time from the changesets + the D2/D3 registries; the per-PR row this list
-      used to require made `releases/v<major>.mdx` the repo's hottest conflict
-      magnet. Your changeset (next item) is the input that reaches them. For
-      the rest of `content/docs/**`: grep the key, then read the surrounding
-      files — a removed key hides in a `defineFlow` example three sections from
-      the reference table.
-- [ ] **Changeset** — `major` for `@objectstack/spec`. AGENTS.md: a breaking
-      changeset must carry the FROM → TO mapping and the one-line fix; it ships
-      as `CHANGELOG.md` in the npm package and is what an upgrading agent greps
-      after the tombstone error. `.changeset/tool-inert-keys-removed.md` is the
-      model — its "The retirement kit:" section is the template to copy.
-- [ ] **The source audits `check:generated` explicitly does NOT run — run them
-      as one group, never à la carte.** Its output names them; the trap is
-      running five and skipping the sixth. `check:variant-docs` is the one that
-      bites retirements: deleting a discriminated union orphans its
-      variant/doc-ledger entry, and the gate reds only in CI if you skipped it
-      locally (#5552 / PR #6078: the `type:cast|constant|javascript|lookup|map`
-      entry outlived its union by one review round).
-- [ ] **`packages/qa/dogfood` is in the default consumption radius of a
-      retirement** — not just the packages that import the schema. It holds the
-      ADR-0058 D7 expression-surface conformance ledger
-      (`test/expression-conformance.test.ts`), so removing any schema member
-      that carries an expression surface strands a `covers` entry
-      ("STALE covers — surface no longer in source", same PR, second miss).
-      Run its targeted suite before pushing, whatever your import graph says.
+- [ ] **Schema** —— 墓碑或 strict 删除(§2),外加 schema 内注释:删了什么、真正生
+      效的机制是什么。
+- [ ] **孤儿值 schema** —— 一个键的 `XxxConfigSchema` 没有别的消费者就随它一起走
+      (`PerformanceConfigSchema`、`AIKnowledgeSchema`、`ToolCategorySchema`)。没有
+      消费者的导出 schema 会被发现它的人读成能力(#3950 先例)。这 —— 且**只有**这
+      —— 会动 `api-surface/`:那份快照打印的是类型*引用*,不是展开的 shape,对键级收
+      窄全盲(#3883 从 `defineAction` 的输入删了三个键,快照没动)。它的门还住在另
+      一个 workflow(`TypeScript Type Check`,不是 `Check Generated Artifacts`),读
+      的是构建出的 `dist/*.d.ts`。
+- [ ] **Conversion + 链步 + 精确键 `RETIRED_KEYS_BY_MAJOR` 条目**(§3)。
+- [ ] **Liveness 台账** —— 按 §2 的路线表,带 `verifiedAt`。更新 README 的按类型行
+      **连同计数**(那张表狠狠漂过一次;用 README 里的 python 片段重新生成计数,不
+      要手改)。
+- [ ] **生成 baseline** —— `pnpm --filter @objectstack/spec gen:schema` 会动
+      `authorable-surface/<category>.json`(墓碑 → 一条新的 `… [RETIRED]` 行;
+      strict 删除 → 该行**消失**,这是门 (a) 的绊线,所以同一个 PR 里有意删掉它)与
+      `json-schema.manifest/<category>.json`。#5837 起两者都按 category 分片 —— 门
+      禁把整个目录读成一个集合,退役流程不变;变的只是那一行住在哪个文件。然后
+      `gen:spec-changes`、`gen:upgrade-guide`、`gen:api-surface`、`gen:docs`。
+      「改了 X → 重新生成 Y」的表见 AGENTS.md。
+- [ ] **Forms** —— 从 `packages/spec/src/**/*.form.ts` 剪掉 `{ field: '<key>' }` 输
+      入。未强制能力的表单输入是假合规的 UI 半边。原位留一行注释。
+- [ ] **i18n bundle** —— 剪掉表单输入会改变抽取出的标签:`pnpm i18n:extract` 重新生
+      成 `packages/platform-objects/src/apps/translations/*.metadata-forms.generated.ts`
+      (merge 模式;退役是纯删除)。由 `pnpm check:i18n` 把门。
+- [ ] **CLI advisory lint** —— `packages/cli/src/utils/lint-liveness-properties.ts`
+      是台账驱动的,退役键会自动停止告警;更新它的**测试**去断言 non-warn(「strict
+      parse 现在接管它们」)。
+- [ ] **Pin 测试** —— 一条阴性,断言处方本身
+      (``.toThrow(/<key>.*removed.*use `<replacement>`/s)`` —— `s` 标志是 house
+      style,因为消息跨行),一条阳性,对非 strict 剥除路径断言
+      `not.toHaveProperty(key)`。参考 `packages/spec/src/ai/agent.test.ts:69-95`。
+- [ ] **Examples** —— `examples/app-showcase/**` 必须停止编写该键。墓碑路线上
+      `tsc` 替你找齐。
+- [ ] **已发布 skills** —— 教这个键的 `skills/*/SKILL.md`(表格、`defineX` 示例)
+      —— 由 `check:skill-examples` 与 `check:skill-refs` 把门。
+- [ ] **Docs** —— `content/docs/**` 的散文、表格与代码块 —— **除了
+      `content/docs/releases/`,代码 PR 永不碰它**(AGENTS.md Documentation
+      Guardrails)。release notes 在发布时从 changesets + D2/D3 registry 集中编写;
+      本清单曾要求的逐 PR 加行,把 `releases/v<major>.mdx` 变成了全仓最热的冲突磁
+      铁。你的 changeset(下一项)才是通往它们的输入。`content/docs/**` 的其余部
+      分:先 grep 键名,再读周边文件 —— 被删的键会藏在离参考表三节远的一个
+      `defineFlow` 示例里。
+- [ ] **Changeset** —— `@objectstack/spec` 用 `major`。AGENTS.md:breaking
+      changeset 必须带 FROM → TO 映射与一行修复;它作为 npm 包里的 `CHANGELOG.md`
+      发出,是升级中的 agent 撞上墓碑报错后 grep 的东西。
+      `.changeset/tool-inert-keys-removed.md` 是样板 —— 抄它的 "The retirement
+      kit:" 段。
+- [ ] **`check:generated` 明确不跑的源码审计 —— 整组跑,永不单点。** 它的输出会点名
+      它们;陷阱是跑了五个漏了第六个。咬退役的是 `check:variant-docs`:删掉一个
+      discriminated union 会孤儿化它的 variant/doc-ledger 条目,本地跳过则只在 CI
+      变红(#5552 / PR #6078:`type:cast|constant|javascript|lookup|map` 条目比它的
+      union 多活了一轮复核)。
+- [ ] **`packages/qa/dogfood` 在退役的默认消费半径之内** —— 不只是 import 该
+      schema 的那些包。它持有 ADR-0058 D7 表达式面 conformance 台账
+      (`test/expression-conformance.test.ts`),删掉任何带表达式面的 schema 成员都
+      会搁浅一条 `covers` 条目("STALE covers — surface no longer in source",同一
+      个 PR,第二次漏)。推送前跑它的定向套件,不管你的 import 图怎么说。
 
-**A correction (§1) must propagate to every one of these lines too.** When
-`form.data` flipped back to `live`, the ledger, the conversion and the tests were
-all corrected — but the release-notes row and the ledger README row kept listing
-it as removed, telling authors to delete a key `defineForm` writes. Found and
-fixed a PR later. The correction path is the one nobody has a checklist for; use
-this one.
+**更正(§1)也必须传播到上面每一行。** `form.data` 翻回 `live` 时,台账、
+conversion 与测试都改了 —— 但 release-notes 行与台账 README 行还写着它已删除,教作
+者去删一个 `defineForm` 会写的键。一个 PR 之后才被发现修掉。更正路径是没有人给它准
+备清单的那条;用这一份。
 
-## 5. Run the gates so they can actually fail
+## 5. 把门禁跑到真能失败
 
 ```bash
 cd packages/spec && pnpm build          # REQUIRED first — see the dist trap below
@@ -355,35 +301,28 @@ done
 cd ../.. && pnpm check:i18n && pnpm --filter @objectstack/spec test
 ```
 
-`check:liveness`, `check:empty-state`, `check:skill-examples` have no generator —
-a failure there is a real finding, not a stale artifact.
+`check:liveness`、`check:empty-state`、`check:skill-examples` 没有生成器 —— 那里的
+失败是真发现,不是过期产物。
 
-## 6. Traps that have each cost a red build
+## 6. 各费过一轮红构建的陷阱
 
-- **Stale `dist` (5+ false alarms in one line of work).** Packages load from
-  `dist`. A local suite failing after you edited `src` usually means the dist is
-  old, not that you broke it — `check:api-surface` reads `dist/*.d.ts` and will
-  report phantom "breaking removals". `pnpm turbo run build --filter=<pkg>...`
-  before you believe any local red, and before filing a bug about `main`.
-- **`| tail -1` masks the exit code.** Piping a gate to `tail` reports the
-  pipeline's status, so a failing gate reads as green. Capture `exit=$?`
-  explicitly (as the loop above does). A liveness failure hid behind this.
-- **Truncated greps miss authors.** `| head -8` hid the `SKILL.md`
-  `defineSkill` example; `examples/` had three `template: true` sites, not one.
-  Search files-by-context, then grep the key inside them — and treat `tsc` and
-  the gates as the authoritative sweepers.
-- **Sequential gates mask each other.** `Check Generated Artifacts` and
-  `TypeScript Type Check` each run their gates in order and stop at the first
-  failure. Regenerate everything up front; don't iterate one red build at a time.
-- **A green CI can mean a dormant gate.** `check-generated` runs behind a
-  `paths` filter in `ci.yml`; a path missing from it makes the gate silent on
-  exactly the PRs that break it (the reason the filter carries
-  `packages/spec/src/**` wholesale). If you add a generated artifact or a new
-  input to one, add its paths in the same PR.
-- **Editing only a conversion's `summary` still goes stale.** That string is
-  copied verbatim into `spec-changes.json`'s `to` field and into the upgrade
-  guide's table row, so a prose-only touch needs `gen:spec-changes` +
-  `gen:upgrade-guide` like any other change.
-- **`--check` mode is the gate; bare mode rewrites.** `gen:*` fixes the file,
-  `check:*` is the same script asserting it was committed. Never "fix" a
-  `check:*` failure by editing the generated file by hand.
+- **过期 `dist`(一条工作线上 5+ 次假警报)。** 包从 `dist` 加载。改了 `src` 之后本
+  地套件红,通常是 dist 旧了,不是你改坏了 —— `check:api-surface` 读
+  `dist/*.d.ts`,会报幻影 "breaking removals"。相信任何本地红之前、去立「main 坏
+  了」的单之前,先 `pnpm turbo run build --filter=<pkg>...`。
+- **`| tail -1` 吃掉退出码。** 门禁的管道接上 `tail`,报的是管道的状态,失败的门读
+  成绿。显式抓 `exit=$?`(上面的循环就是)。一次 liveness 失败曾藏在这后面。
+- **截断的 grep 漏掉编写者。** `| head -8` 藏掉了 `SKILL.md` 的 `defineSkill` 示
+  例;`examples/` 有三处 `template: true`,不是一处。先按上下文找文件,再进文件里
+  grep 键 —— 且把 `tsc` 和门禁当权威清扫器。
+- **串行门禁互相遮蔽。** `Check Generated Artifacts` 与 `TypeScript Type Check` 各
+  自按序跑门、停在第一个失败。提前把全部重新生成;不要一次红构建迭代一个。
+- **绿 CI 可能是休眠的门。** `check-generated` 在 `ci.yml` 里跑在 `paths` 过滤器后
+  面;路径不在过滤器里,门恰好对打破它的那些 PR 沉默(过滤器整体携带
+  `packages/spec/src/**` 就是这个原因)。你新增生成产物或某产物的新输入,同一个 PR
+  里把路径加上。
+- **只改 conversion 的 `summary` 也会过期。** 那个字符串被逐字抄进
+  `spec-changes.json` 的 `to` 字段与 upgrade guide 的表行,所以纯散文改动也要
+  `gen:spec-changes` + `gen:upgrade-guide`,和任何别的改动一样。
+- **`--check` 模式是门;裸模式重写。** `gen:*` 修文件,`check:*` 是同一脚本断言它已
+  提交。永不靠手改生成文件去「修」一个 `check:*` 失败。
