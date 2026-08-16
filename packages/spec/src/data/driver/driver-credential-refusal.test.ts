@@ -699,3 +699,198 @@ describe('mongo options passthrough — credential refusal (#9040)', () => {
     }
   });
 });
+
+/**
+ * The contradictory pair "`external.credentialsRef` bound + a mongo
+ * `config.url` naming no user" is refused at the datasource level (#9041) —
+ * the "absence must be loud" half of the #8696 family. The binding is a silent
+ * no-op at connect (`buildMongoAuth` injects only when the URL's userinfo
+ * names a user, because `MongoClient` credentials need a username the URL must
+ * supply and fabricating an empty one is a measured handshake failure), so the
+ * config cannot work as written and the authoring door — the one place both
+ * halves are visible at once — says so.
+ *
+ * Envelope note (same as the #8082/#9040 pins above): the zod issue's `code`
+ * and its pathed location are the whole envelope at this layer — every schema
+ * refusal is wrapped uniformly by the publish door (metadata-protocol's
+ * `422 INVALID_METADATA`, whose `issues[]` carry these codes verbatim).
+ */
+describe('datasource — bound credentialsRef + user-less mongo url refused (#9041)', () => {
+  const BOUND = { credentialsRef: 'sys_secret:01J9ZK4T2N' } as const;
+  const parse = (ds: Record<string, unknown>) => DatasourceSchema.safeParse(ds);
+  const refusalOf = (ds: Record<string, unknown>) => {
+    const result = parse(ds);
+    if (result.success) return undefined;
+    return result.error.issues.find(
+      (i) => i.path.join('.') === 'config.url' && i.message.includes('#9041'),
+    );
+  };
+
+  it('refuses the pair, pathed at `config.url`, naming BOTH fixes and prescribing neither', () => {
+    const issue = refusalOf({
+      name: 'events',
+      driver: 'mongodb',
+      config: { url: 'mongodb://db.internal:27017/app' },
+      external: BOUND,
+    });
+    expect(issue, 'refusal must be pathed at `config.url`').toBeDefined();
+    expect(issue!.code).toBe('custom');
+    // Fence ③ — both valid authoring fixes are named, neither prescribed:
+    // add the username to the URL, or drop the binding.
+    expect(issue!.message).toContain('add the username');
+    expect(issue!.message).toContain('mongodb://user@host/db');
+    expect(issue!.message).toContain('remove the `external.credentialsRef` binding');
+    // And the mechanism, so the author is told WHY the pair cannot work.
+    expect(issue!.message).toContain('silent no-op');
+  });
+
+  it('judges a legacy `driver: mongo` row identically (alias-resolved, like the #9040 read path)', () => {
+    const issue = refusalOf({
+      name: 'events',
+      driver: 'mongo',
+      config: { url: 'mongodb://db.internal:27017/app' },
+      external: BOUND,
+    });
+    expect(issue).toBeDefined();
+  });
+
+  it('a `mongodb+srv://` URL naming no user is the same silent no-op — refused', () => {
+    const issue = refusalOf({
+      name: 'events',
+      driver: 'mongodb',
+      config: { url: 'mongodb+srv://c0.example.net/app' },
+      external: BOUND,
+    });
+    expect(issue).toBeDefined();
+  });
+
+  it('accepts the blessed shape byte-identically: bare-username URL + bound secret (#8155)', () => {
+    const ds = {
+      name: 'events',
+      driver: 'mongodb',
+      config: { url: 'mongodb://app@db.internal:27017/app' },
+      external: { ...BOUND },
+    };
+    const result = parse(ds);
+    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+    expect(result.data!.config).toEqual(ds.config);
+    expect(result.data!.external!.credentialsRef).toBe(BOUND.credentialsRef);
+    // Multi-host too — the form `new URL()` cannot even parse (#8696).
+    const multi = parse({
+      ...ds,
+      config: { url: 'mongodb://app@h1:27017,h2:27017/app' },
+    });
+    expect(multi.success, JSON.stringify(multi.error?.issues)).toBe(true);
+  });
+
+  it('accepts a user-less URL with NO binding — anonymous connect is a legal intent', () => {
+    const result = parse({
+      name: 'events',
+      driver: 'mongodb',
+      config: { url: 'mongodb://db.internal:27017/app' },
+    });
+    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+  });
+
+  it('fence ② — present-but-EMPTY userinfo is NOT this refusal (the client refuses those itself)', () => {
+    // `urlUserinfoUsername` answers `''` (userinfo present), not `undefined`:
+    // `MongoClient` throws `MongoParseError: URI contained empty userinfo
+    // section` on these forms with or without a bound secret (measured on the
+    // card), so the silent-no-op refusal deliberately does not claim them.
+    for (const url of ['mongodb://@db.internal:27017/app', 'mongodb://:p@db.internal:27017/app']) {
+      expect(urlUserinfoUsername(url)).toBe('');
+      expect(refusalOf({
+        name: 'events',
+        driver: 'mongodb',
+        config: { url },
+        external: { ...BOUND },
+      })).toBeUndefined();
+    }
+  });
+
+  it('the COMPOSED branch (no `url`) is out of scope — discrete fields + binding stay accepted', () => {
+    // With no `url` the discrete `username` is live and the factory
+    // interpolates the bound secret into the URI it composes (#8696's other
+    // branch), so there is no contradictory pair to refuse.
+    const result = parse({
+      name: 'events',
+      driver: 'mongodb',
+      config: { database: 'events', host: 'mongo.internal', username: 'svc' },
+      external: { ...BOUND },
+    });
+    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+  });
+
+  it('an empty-string `credentialsRef` is not a binding — mirrors the connect path\'s truthy check', () => {
+    expect(refusalOf({
+      name: 'events',
+      driver: 'mongodb',
+      config: { url: 'mongodb://db.internal:27017/app' },
+      external: { credentialsRef: '' },
+    })).toBeUndefined();
+  });
+
+  it('fence ① — the postgres arm is NOT assumed: a user-less pg DSN + binding stays accepted', () => {
+    // #8873 measured pg injecting on a user-less DSN (`pg` sends a password
+    // only when the server asks), so the mongo mechanism does not transfer;
+    // the postgres equivalent is re-judged after #8873, never inherited.
+    const result = parse({
+      name: 'warehouse',
+      driver: 'postgres',
+      config: { url: 'postgresql://db.internal:5432/analytics' },
+      schemaMode: 'external',
+      external: { ...BOUND },
+    });
+    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+  });
+
+  it('a non-string `url` is the config gate\'s finding, not this one', () => {
+    const result = parse({
+      name: 'events',
+      driver: 'mongodb',
+      config: { url: 42 },
+      external: { ...BOUND },
+    });
+    expect(result.success).toBe(false);
+    // The driver-config parse reports the type error at the same path; the
+    // #9041 refusal stays silent rather than judging a value that has no
+    // userinfo to read.
+    expect(result.error!.issues.some((i) => i.message.includes('#9041'))).toBe(false);
+  });
+
+  it('composes with the #9040 passthrough refusal — one artefact, both findings, own paths', () => {
+    // The PM-mechanism composition pin: the datasource-level #9041 refinement
+    // and the config-level #9040 `credentialFreeMongoOptions` judge the same
+    // artefact independently — an input violating both reports both.
+    const result = parse({
+      name: 'events',
+      driver: 'mongodb',
+      config: {
+        url: 'mongodb://db.internal:27017/app',
+        options: { auth: { username: 'app', password: 'hunter2' } },
+      },
+      external: { ...BOUND },
+    });
+    expect(result.success).toBe(false);
+    const paths = result.error!.issues.map((i) => i.path.join('.'));
+    expect(paths).toContain('config.url');
+    expect(paths).toContain('config.options.auth.password');
+    expect(result.error!.issues.some((i) => i.message.includes('#9041'))).toBe(true);
+    expect(result.error!.issues.some((i) => i.message.includes('#9040'))).toBe(true);
+  });
+
+  it('composes with the #8082 userinfo refusal the other way: a password-bearing URL has a USER', () => {
+    // `user:password@host` violates #8082, but its userinfo NAMES a user — so
+    // this refusal correctly stays out and the author gets exactly the #8082
+    // prescription (bind the secret), not a contradictory second message.
+    const result = parse({
+      name: 'events',
+      driver: 'mongodb',
+      config: { url: 'mongodb://app:hunter2@db.internal:27017/app' },
+      external: { ...BOUND },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.some((i) => i.message.includes('#8082'))).toBe(true);
+    expect(result.error!.issues.some((i) => i.message.includes('#9041'))).toBe(false);
+  });
+});

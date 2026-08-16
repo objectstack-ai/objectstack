@@ -9,7 +9,8 @@ import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { validateDriverConfig } from './driver/config-registry.zod';
+import { urlUserinfoUsername } from './driver/common.zod';
+import { resolveDriverId, validateDriverConfig } from './driver/config-registry.zod';
 
 /*
  * ── Unknown-key strictness (#4001 data step, closed out by #4410) ───────────
@@ -325,6 +326,65 @@ export type ExternalDatasourceSettings = z.input<typeof ExternalDatasourceSettin
 export type ExternalDatasourceSettingsParsed = z.infer<typeof ExternalDatasourceSettingsSchema>;
 
 /**
+ * Refusal for the contradictory pair "`external.credentialsRef` bound + a
+ * mongo `config.url` whose userinfo names NO user" (#9041) — the "absence must
+ * be loud" half of the #8696 family, refused at the one door that sees both
+ * halves at once.
+ *
+ * Why the pair cannot work as written, all measured (on the #9041 card and
+ * re-verified against `buildMongoAuth` in service-datasource's driver
+ * factory): `MongoClient` credentials need a username as well as a password,
+ * and with `url` present the discrete `username` field is ignored
+ * (`MongoConfigSchema.url` supersedes it), so the only place the username can
+ * come from is the URL's own userinfo. The bound secret is therefore injected
+ * only when the URL names a user; on a user-less URL the binding is a silent
+ * no-op — the datasource connects anonymously and the operator is told
+ * nothing. Injecting anyway is worse, not better: measured on mongodb@7.5.0,
+ * a user-less URL carries NO credentials at all, while the same URL with
+ * `auth: { username: '', password: BOUND }` carries `credentials{username:''}`
+ * — fabricating an empty username converts a datasource that connects today
+ * into a guaranteed handshake failure. And refusing at CONNECT would
+ * contradict `MongoConfigSchema.url`'s published contract ("bind the secret …
+ * and it is injected at connect time") while planting a per-branch asymmetry
+ * inside the factory — the defect class #8696 closed. Hence this door.
+ *
+ * Scope fences, each deliberate (#9041's triage, adopted verbatim):
+ *
+ *  - **mongo arm ONLY** (judged through {@link resolveDriverId}, so a stored
+ *    legacy `driver: 'mongo'` row is judged identically to `'mongodb'` — the
+ *    same alias mechanism the #9040 read-path redaction uses). The postgres
+ *    arm injects on a user-less DSN by a different, measured mechanism
+ *    (#8873: `pg` sends a password only when the server asks) and is NOT
+ *    assumed to share this defect.
+ *  - **"names no user" means {@link urlUserinfoUsername} answers
+ *    `undefined`** — no userinfo at all. The present-but-empty forms
+ *    (`mongodb://@h/db`, `mongodb://:p@h/db` — the accessor answers `''`)
+ *    already throw in `MongoClient` itself (`MongoParseError: URI contained
+ *    empty userinfo section`, measured), so only the `undefined` case is
+ *    silent and only it is refused here.
+ *  - **"bound" mirrors the connect path exactly**: `DatasourceConnectionService`
+ *    resolves the ref under `if (credentialsRef)` — a truthy check — so an
+ *    empty-string ref is not a binding there and is not one here.
+ *  - The COMPOSED branch (no `url`; discrete `host`/`username` fields) is out
+ *    of scope by the card's own fences: with no `url` the `username` field is
+ *    live and the factory interpolates the secret into the URI it builds.
+ */
+const CREDENTIALS_REF_MONGO_URL_NO_USER_REFUSED =
+  'this mongo `config.url` names no user in its userinfo while `external.credentialsRef` binds '
+  + 'a secret — a pair that cannot work as written (#9041). MongoClient credentials need a '
+  + 'username as well as a password, and with `url` present the only place the username can '
+  + 'come from is the URL\'s own userinfo (the discrete `username` field is superseded by '
+  + '`url`), so the bound secret is injected only when the URL names a user — on this URL the '
+  + 'binding is a silent no-op: the datasource connects anonymously and the secret is never '
+  + 'used. (Injecting with a fabricated empty username is worse: measured on mongodb@7.5.0, it '
+  + 'turns a connection that works anonymously today into a guaranteed handshake failure.) Two '
+  + 'authoring fixes are valid, depending on what this datasource is meant to do: add the '
+  + 'username to the URL\'s userinfo (`mongodb://user@host/db`) so the bound secret is '
+  + 'injected at connect (#8696) — or, if the datasource is genuinely meant to connect '
+  + 'unauthenticated, remove the `external.credentialsRef` binding. Runtime-environment DSNs '
+  + '(`OS_DATABASE_URL` and friends) do not pass through this publish door and are unaffected.';
+
+/**
  * Replay a driver-config parse onto the datasource's own issue list (#4410).
  *
  * A no-op for a driver the platform ships no contract for — `known: false` is
@@ -547,6 +607,23 @@ export const DatasourceSchema = lazySchema(() => strictObject(
   // with the key: validating entries for connections nothing opens spends the
   // author's trust on a slot that cannot pay it back.
   reportDriverConfigIssues(ctx, ds.driver, ds.config, ['config']);
+
+  // #9041 — see CREDENTIALS_REF_MONGO_URL_NO_USER_REFUSED. This cannot live in
+  // `MongoConfigSchema` (a config-level refinement sees only `config`;
+  // `credentialsRef` sits on the datasource), so it runs here, where both
+  // halves are visible at once. It composes independently with the config
+  // gate above: a config also violating #8082/#8336/#9040 reports those
+  // issues too, each at its own path.
+  if (resolveDriverId(ds.driver) === 'mongodb' && ds.external?.credentialsRef) {
+    const url = ds.config?.['url'];
+    if (typeof url === 'string' && urlUserinfoUsername(url) === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['config', 'url'],
+        message: CREDENTIALS_REF_MONGO_URL_NO_USER_REFUSED,
+      });
+    }
+  }
 
   if (ds.schemaMode !== 'managed' && !ds.external) {
     ctx.addIssue({
