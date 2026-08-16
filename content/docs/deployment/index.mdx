@@ -141,8 +141,8 @@ Publishing and installing are **separate steps**. `os package publish` uploads a
 versioned package to your organization's catalog and changes nothing that is
 running; installing a version into an environment is what moves an app. For an
 unattended pipeline, `os cloud login --email … --password …` skips the browser
-device flow — and note that under `--json` that command emits **NDJSON**, one
-compact JSON document per line, so parse its stdout line by line rather than
+device flow — and note that under `--json` that command emits **NDJSON**:
+compact JSON documents, one per line. Parse its stdout line by line rather than
 with a single `JSON.parse` (see [`os cloud
 login`](/docs/deployment/cli#os-cloud-login)).
 
