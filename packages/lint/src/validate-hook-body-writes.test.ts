@@ -9,6 +9,7 @@ import {
   HOOK_BODY_WRITE_PATTERN_IDS,
   HOOK_BODY_WRITE_EXCLUSIONS,
   HOOK_BODY_WRITE_UNKNOWN_FIELD,
+  HOOK_BODY_WRITE_UNPROVISIONED_ANCHOR,
 } from './validate-hook-body-writes.js';
 
 // Target objects: array-shaped and map-shaped `fields`, plus a second object
@@ -388,5 +389,101 @@ describe('extractHookBodyWriteSet — the ctx.record liveness signal', () => {
     );
     expect(set.writes.filter((w) => w.patternId === 'record-property-assign')).toHaveLength(2);
     expect(set.ctxRecordEscapes).toBe(true);
+  });
+});
+
+// ─── [#8663] Unprovisioned injected anchors on the WRITE axis ────────────────
+//
+// IMPLICIT_FIELDS is object-INDEPENDENT: it answers "could this name be
+// implicitly writable somewhere", which on an ADR-0015 `external` object is not
+// the same question as "did the platform provision a column for it here". The
+// registry injects the anchors onto a federated object exactly as onto a local
+// one, so the write sails past the engine's own write-path validator (which
+// refuses an UNDECLARED name outright) and is rejected by the remote database
+// instead — measured end to end when this rule was written.
+//
+// The `external` binding is what makes the anchors unprovisioned; the object
+// still declares fields, so it stays judgeable and the existence check is live.
+const federatedObject = {
+  name: 'wh_order',
+  datasource: 'warehouse',
+  external: { remoteName: 'fact_orders' },
+  fields: { order_id: { type: 'text' }, amount: { type: 'number' } },
+};
+
+/** The same object WITHOUT the external binding — every anchor provisioned. */
+const localTwin = { name: 'wh_order', fields: { order_id: { type: 'text' }, amount: { type: 'number' } } };
+
+function stackOver(object: Record<string, unknown>, source: string, hookOverrides: Record<string, unknown> = {}) {
+  return {
+    objects: [object, contactObject],
+    hooks: [
+      { name: 'stamp', object: 'wh_order', events: ['beforeInsert'], body: { language: 'js', source }, ...hookOverrides },
+    ],
+  };
+}
+
+describe('[#8663] validateHookBodyWrites — unprovisioned anchor writes', () => {
+  it('warns on a ctx.input write to an injected anchor the federated object has no storage for', () => {
+    const findings = validateHookBodyWrites(stackOver(federatedObject, "ctx.input.owner_id = ctx.user.id;"));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(HOOK_BODY_WRITE_UNPROVISIONED_ANCHOR);
+    // Advisory, NOT the gating severity — the claim is about a remote schema.
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].where).toBe('hook "stamp" › body');
+    expect(findings[0].path).toBe('hooks[0].body.source');
+    expect(findings[0].message).toContain("'owner_id'");
+    expect(findings[0].message).toContain('external object (ADR-0015)');
+    // The measured consequence, not the read-axis one: the value cannot land.
+    expect(findings[0].message).toContain('can never land');
+    expect(findings[0].hint).toContain("declare it in wh_order's own fields");
+  });
+
+  it('the SAME write on the same object without the external binding is silent', () => {
+    expect(validateHookBodyWrites(stackOver(localTwin, "ctx.input.owner_id = ctx.user.id;"))).toEqual([]);
+  });
+
+  it('warns on the ctx.api surface too, naming the method', () => {
+    const findings = validateHookBodyWrites(
+      stackOver(federatedObject, "await ctx.api.object('wh_order').updateById(id, { organization_id: 'org_1' });"),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(HOOK_BODY_WRITE_UNPROVISIONED_ANCHOR);
+    expect(findings[0].message).toContain('updateById');
+    expect(findings[0].message).toContain("'organization_id'");
+  });
+
+  it('an AUTHOR-DECLARED column of the same name is the author\'s — never flagged', () => {
+    // #7859's direction: on a federated object a declared `owner_id` maps a
+    // remote column the author vouches for, so provenance is `author` and both
+    // findings must stay silent.
+    const declared = {
+      ...federatedObject,
+      fields: { ...federatedObject.fields, owner_id: { type: 'text' } },
+    };
+    expect(validateHookBodyWrites(stackOver(declared, "ctx.input.owner_id = ctx.user.id;"))).toEqual([]);
+  });
+
+  it('multi-target: an anchor real on ONE target is a legitimate per-object branch', () => {
+    // `crm_contact` is local, so its owner_id IS provisioned — the body may
+    // branch on ctx.object, and "can never land" would be false.
+    const findings = validateHookBodyWrites(
+      stackOver(federatedObject, "ctx.input.owner_id = ctx.user.id;", { object: ['wh_order', 'crm_contact'] }),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it('leaves the ordinary unknown-field finding on the same object untouched', () => {
+    const findings = validateHookBodyWrites(stackOver(federatedObject, "ctx.input.ordr_id = 'x';"));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(HOOK_BODY_WRITE_UNKNOWN_FIELD);
+    expect(findings[0].severity).toBe('warning');
+  });
+
+  it('a rule-local exemption that is NOT an injected anchor stays exempt on a federated object', () => {
+    // `_id` / `space` / `record_type` are IMPLICIT_FIELDS extensions, not spec
+    // system columns, so no provenance verdict exists for them and the blanket
+    // exemption is still the whole answer.
+    expect(validateHookBodyWrites(stackOver(federatedObject, "ctx.input._id = 'x'; ctx.input.record_type = 'y';"))).toEqual([]);
   });
 });
