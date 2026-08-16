@@ -1280,6 +1280,160 @@ os environments bind <environment-id> --artifact ./dist/objectstack.json --build
 is reserved for the server-side reseed endpoint; use it only when that endpoint
 is available in your deployment.
 
+### Packages
+
+The two commands that move a compiled app onto a platform. They target
+**different systems and authenticate as different identities**: publish uploads
+to ObjectStack Cloud (the catalog), install registers an app into a **running
+runtime**.
+
+| Command | Talks to | Description |
+|---------|----------|-------------|
+| `os package publish [artifact]` | ObjectStack Cloud | Upload a compiled artifact as a versioned package in your organization |
+| `os package install <package>` | A running runtime | Install a package into a live kernel, from that runtime's catalog or from a local artifact |
+
+For which one to reach for and the preview patterns around them, see
+[Publish & preview](/docs/deployment/publish-and-preview). This section is the
+flag-level reference.
+
+#### `os package publish`
+
+Uploads a compiled artifact as a versioned package in your organization's
+catalog. It ensures a `sys_package` row keyed by the manifest id, then snapshots
+the artifact into a new `sys_package_version`. Publishing changes nothing that
+is already running.
+
+```bash
+os compile
+os package publish                                        # dist/objectstack.json → your org
+os package publish --manifest-id com.acme.crm --version 1.2.0
+os package publish dist/objectstack.json --visibility org --note "first cut"
+os package publish --env env_abc123 --install             # publish, then install into an environment
+OS_CLOUD_URL=http://localhost:4000 os package publish     # against a local control plane
+```
+
+**The credential is the *cloud* identity.** Resolution order: `--token`, then
+`$OS_TOKEN`, then `~/.objectstack/cloud.json` (written by
+[`os cloud login`](#os-cloud-login)). It deliberately does **not** fall back to
+`~/.objectstack/credentials.json` — that is the runtime identity
+[`os login`](#os-login) writes, and the two are different accounts. With no
+token at all the command exits `1` and tells you to run `os cloud login`.
+
+**Options:**
+
+| Flag | Env equivalent | Purpose |
+|---|---|---|
+| `artifact` (positional) | — | Path to the compiled artifact (default `dist/objectstack.json`) |
+| `-s, --server <url>` | `OS_CLOUD_URL` | Control-plane URL. Default `https://cloud.objectos.ai`, or the URL recorded by `os cloud login` |
+| `-t, --token <key>` | `OS_CLOUD_API_KEY` | Bearer token; `$OS_TOKEN` and `~/.objectstack/cloud.json` are the fallbacks |
+| `--manifest-id <id>` | `OS_PACKAGE_MANIFEST_ID` | Reverse-domain package id. Default: `artifact.manifest.id`, else `local.` + a slug of the artifact name |
+| `-v, --version <semver>` | — | Version to publish. Default: `artifact.manifest.version`, else `0.0.0-dev.` + a timestamp |
+| `--display-name <name>` | — | Name shown in the Marketplace (default `artifact.manifest.name`) |
+| `--description <text>` | — | Short package description |
+| `--category <slug>` | — | Marketplace category slug (`crm`, `hr`, `devtools`, …) |
+| `--visibility <level>` | — | `org` (default, installable across your organization) · `private` (explicit grants only) · `marketplace` (public after review) |
+| `--org <id>` | `OS_ORG_ID` | `owner_org_id`. Required with a bearer key in service mode; ignored in user mode |
+| `--env <id>` | `OS_ENVIRONMENT_ID` | Environment to install the new version into |
+| `--install` | — | Auto-install into `--env` after publishing. Passed without `--env` it reports the mistake and publishes without installing |
+| `--seed-sample-data` | — | Include sample data in that auto-install |
+| `--pre-release` | — | Mark the version as a pre-release (also inferred — see below) |
+| `--submit` | — | Submit the new version for marketplace review. Needs `--visibility marketplace` and a complete listing |
+| `--auto-approve` | — | Platform admin only: skip the review queue and publish straight to the public catalog |
+| `--readme <markdown>` | — | Inline marketplace README. Mutually exclusive with `--readme-file` |
+| `--readme-file <path>` | — | README file, read at publish time. Mutually exclusive with `--readme` |
+| `--icon-url <url>` | — | Public `http(s)` icon URL. Mutually exclusive with `--icon-file` |
+| `--icon-file <path>` | — | Local PNG/JPEG/WebP/SVG (≤256 KB) uploaded to the icon CDN, which returns a stable URL and rewrites `icon_url` for you. Mutually exclusive with `--icon-url` |
+| `--homepage-url <url>` | — | Public project / docs URL, surfaced in the catalog |
+| `--license <spdx>` | — | SPDX identifier (`Apache-2.0`, `MIT`, …) |
+| `-n, --note <markdown>` | — | Release notes |
+| `--timeout <ms>` | `OS_CLOUD_TIMEOUT_MS` | HTTP timeout in milliseconds, default `120000`. `0` disables it |
+
+**`objectstack.manifest.json` supplies the listing fields.** When that file is
+present in the working directory, publish reads `manifestId`, `displayName`,
+`description`, `category`, `tagline`, `iconUrl`, `homepageUrl`, `license`,
+`readmePath` and a `translations` map from it, so a listing need not be retyped
+as flags on every publish. **CLI flags always win.** A per-locale `readme` entry
+may be inlined markdown or a path resolved against the manifest's own directory
+(`README.zh-CN.md`). Publishing without the file is fully supported — it stays
+flag-driven.
+
+**The namespace travels with the artifact and no flag overrides it.**
+`manifest.namespace` is read off the compiled artifact and sent with the publish
+payload, because the publish-time exclusivity gate (ADR-0048 addendum §A.2)
+must check the object-name prefix the package actually ships — a reservation
+naming a different string than the artifact installs would be worse than none.
+A malformed value is refused before any network call; to change it, edit
+`manifest.namespace` in `objectstack.config.ts` and rebuild. An artifact that
+declares no namespace publishes fine.
+
+**Pre-release is inferred as well as flagged.** A version containing `-alpha`,
+`-beta`, `-rc`, `-dev`, `-preview`, `-staging` or `-pr` is marked a pre-release
+whether or not you pass `--pre-release` — so the generated
+`0.0.0-dev.` + timestamp default never lands as a stable version.
+
+A `422` on version publish is marketplace policy rejecting the listing. The
+command prints each violation and names the flags that fix them, rather than
+leaving them in the server log.
+
+#### `os package install`
+
+Installs a package into a **running** runtime through its local install
+endpoint (ADR-0008 Phase 3): the app is registered into the live kernel, and the
+manifest is cached on the runtime host so the install re-registers on every boot
+and survives restarts. This is the other half of publish — publish uploads to
+the cloud, install puts an app into a runtime.
+
+Two modes, chosen by the shape of the argument:
+
+```bash
+# catalog mode — the TARGET runtime resolves the version from its own catalog
+os package install com.acme.crm --version 1.2.0 --runtime https://app.example.com
+
+# air-gapped mode — the artifact is read locally and sent inline; no catalog, works offline
+os package install ./dist/objectstack.json
+```
+
+The argument is read as a **file path** when it ends in `.json`, starts with
+`./`, `../` or `/`, or names something that exists in the working directory.
+Anything else is a catalog id. The last clause is the one to know: a bare
+catalog id that happens to match a file in the working directory is installed
+from that file instead.
+
+**The credential is the *runtime* identity, not your cloud login.** The target
+runtime authenticates the call with its own session, so `--email` / `--password`
+(or `OS_RUNTIME_EMAIL` / `OS_RUNTIME_PASSWORD`) name an account **on that
+runtime**. A `401` means exactly that, and the command says so; `os cloud login`
+credentials do not apply here.
+
+**Options:**
+
+| Flag | Env equivalent | Purpose |
+|---|---|---|
+| `package` (positional, required) | — | Package manifest id (`com.acme.crm`) **or** a path to a compiled artifact JSON |
+| `-r, --runtime <url>` | `OS_RUNTIME_URL` | Base URL of the runtime to install **into** (default `http://localhost:3000`) |
+| `-v, --version <semver>` | — | Version to install in catalog mode (default `latest`). Air-gapped mode takes the version from the artifact |
+| `--email <email>` | `OS_RUNTIME_EMAIL` | Account email on the target runtime |
+| `--password <password>` | `OS_RUNTIME_PASSWORD` | Account password on the target runtime |
+| `--confirm-global-uniques` | — | Affirm this app's installation-wide `unique` constraints are genuinely platform-wide — see below |
+| `--timeout <ms>` | `OS_CLOUD_TIMEOUT_MS` | HTTP timeout in milliseconds, default `120000`. `0` disables it |
+
+**`--confirm-global-uniques` answers a stop; it does not force one past.**
+Installing an app that declares installation-wide (`unique: 'global'`)
+constraints into a runtime whose tenancy posture is `isolated` stops with
+`UNIQUE_SCOPE_CONFIRMATION_REQUIRED`, and the command prints the offending
+constraints so you can decide per entry (ADR-0120 D5e). Passing the flag records
+an affirmative fact — *these constraints really are platform-wide* — into the
+install manifest, alongside the posture it was given under, a timestamp and the
+confirming identity when the seam knows one; [`os doctor`](#os-doctor) then stops
+re-reporting the affirmed constraints, so the advisory does not become a
+recurring nag. It is deliberately not called `--force`, and deliberately not
+default-on. The other answer is to edit the app's metadata to
+`unique: 'organization'` and rebuild.
+
+A `404` means the target runtime does not mount `MarketplaceInstallLocalPlugin`
+(from `@objectstack/cloud-connection`). The endpoint is opt-in, so a runtime
+composed without it will not accept installs.
+
 ## Configuration
 
 The CLI looks for `objectstack.config.ts` (or `.js`, `.mjs`) in the current directory:

@@ -32,6 +32,7 @@ vi.mock('@objectstack/spec/data', () => ({
 }));
 
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
+import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 
 type Handler = (c: any) => Promise<any>;
 
@@ -79,8 +80,8 @@ function makeC(body: any, manifestId?: string) {
 
 const SERVICES = () => ({
     manifest: { register: vi.fn() },
-    auth: { api: { getSession: async () => ({ user: { id: 'admin' } }) } },
-    objectql: { syncSchemas: async () => undefined },
+    auth: installerAuthService(),
+    objectql: withInstallerGrants({ syncSchemas: async () => undefined }),
     metadata: {},
 });
 

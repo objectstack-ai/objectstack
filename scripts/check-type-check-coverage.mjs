@@ -246,12 +246,22 @@
 //               margin deliberately is still available and is a maintainer call,
 //               exactly as raising any ceiling is.
 //
-//               ⚠️ Two of the five notes -- mcp and service-storage -- still
-//               narrate their margin in the present tense ("RECORDED 63 is a
-//               bootstrap margin") against an `errors` that no longer carries
-//               one. Stale narration, not stale arithmetic: both `errors` are
-//               the measured values named above. Left to their own cards rather
-//               than rewritten from #8728, which is scoped to the lint entry.
+//               ALL FIVE per-entry notes now narrate the present tense, and
+//               each carries a tally re-measured rather than rescaled: lint in
+//               #8728, then mcp, service-storage and objectql at 62b2655d8. The
+//               two that had to be fixed as ARITHMETIC were mcp and
+//               service-storage, whose notes still read "RECORDED 63 is a
+//               bootstrap margin" against an `errors` field that already
+//               disagreed with them. objectql needed something else, and the
+//               difference is the part worth keeping: its note was TRUE AS
+//               HISTORY and misleading only as present tense, because its
+//               margin was never tightened away -- it was spent by growth, so
+//               the entry stands at a recorded number it now measures exactly.
+//               A note that states a RECORDED number the field beside it
+//               contradicts is the single most reliable way to make the next
+//               reader mis-derive this policy: it is what made #8728's dispatch
+//               conclude the margins might still be live, costing a full
+//               five-package re-measure to disprove.
 //
 //               The margins were not a precaution; two of the first four were
 //               paid out inside a single hour of the landing flight. objectql
@@ -452,18 +462,34 @@ const DEBT = {
   },
   '@objectstack/service-storage': {
     errors: 51,
-    note: 'code-tier 8 (TS2339 x4, TS2347 x4); config-tier 21 (TS2835); noise 13 (TS7006 x11, TS6196, '
-      + 'TS6133). This entry is the fourth bootstrap margin, and it earned the label the hard way inside '
+    note: 'code-tier 8 (TS2339 x4, TS2347 x4); config-tier 26 (TS2835 x23, TS2550 x3); noise 17 '
+      + '(TS7006 x15, TS6196, TS6133). RE-TALLIED from tsc at the 51 below (62b2655d8), not the older '
+      + '42-composition rescaled -- the previous tally summed to 42 and was never restated when this '
+      + 'entry was lowered onto 51. The code tier is the half that did NOT move: the same 8, and all 8 '
+      + 'sit in two files (src/file-reference-lifecycle.test.ts x4, src/storage-service-plugin.test.ts '
+      + 'x4). Everything in the 42 -> 51 delta is config-tier and noise -- TS2835 21 -> 23, TS7006 '
+      + '11 -> 15, plus TS2550 x3 (`Array.prototype.at` against a `lib` older than es2022, in '
+      + 'src/storage-adapter-list.conformance.test.ts), a class the old tally did not list at all. Which '
+      + 'PRs contributed the +9 is NOT attributed: the pre-#8225 per-file counts were not retained, and '
+      + 'an invented attribution is worse than an admitted gap. '
+      + 'This entry WAS the fourth bootstrap margin, and it earned the label the hard way inside '
       + 'one flight: 42 -> 41 at e8db1a230 (the spec half of the `IStorageService.list(prefix)` '
       + 'retirement, #5540 / PR #5983, removed one error, and it was lowered rather than left standing) '
       + '-> 42 again at 77c7c884b an hour later, when the adapter half (#5541 / PR #6061) deleted the '
       + 'old list tests (-1 TS7006) and added storage-adapter-list-retirement.test.ts (+2 TS2835). A '
       + 'two-PR retirement moves a count twice, and an exact number recorded between the halves is stale '
-      + 'before it is pushed -- so this one takes the same documented margin as the three proven-hot '
-      + 'packages instead of a sixth calibration lap. 11 of the 42 are in '
-      + 'storage-route-ledger.conformance.test.ts and 7 in storage-service-plugin.test.ts. RECORDED 52 '
-      + 'is a bootstrap margin (+10 over 42 measured at 77c7c884b) -- tighten via the ℹ hint immediately '
-      + 'after landing (#5278 option A).',
+      + 'before it is pushed -- so this one took the same documented margin as the three proven-hot '
+      + 'packages instead of a sixth calibration lap. (The `storage-adapter-list-retirement.test.ts` '
+      + 'that history names no longer exists under that name; the adapter-list coverage is now '
+      + 'src/storage-adapter-list.conformance.test.ts and src/storage-adapter-list-contract.test.ts.) '
+      + 'The two concentrations the old note gave for the 42 both re-verify at 51: 11 in '
+      + 'storage-route-ledger.conformance.test.ts and 7 in storage-service-plugin.test.ts, with '
+      + 'swappable-storage-service.test.ts x7 and storage-routes.test.ts x5 next. '
+      + 'THE MARGIN IS GONE. RECORDED 52 was a bootstrap margin (+10 over 42 measured at 77c7c884b), '
+      + 'and it was spending itself the whole time it stood: the real count climbed 42 -> 51 underneath '
+      + 'it, which is why the composition above had to be re-tallied rather than adjusted. #7888 / '
+      + 'PR #8225 then lowered 52 -> 51 onto the exact measurement, re-confirmed at 51 at 62b2655d8, so '
+      + 'the next new error here goes red on arrival (#5278 option A).',
   },
   '@objectstack/spec-monorepo': {
     errors: 80,
@@ -588,7 +614,17 @@ const TEST_DEBT = {
   },
   '@objectstack/objectql': {
     errors: 355,
-    note: 'TS2339 x115, TS2554 x93 (wrong arity), TS7006 x47, TS2345 x19, TS2322 x12, TS2749 x11. '
+    note: 'code-tier 300 (TS2339 x115, TS2554 x113 wrong arity, TS2345 x24, TS2749 x14, TS2322 x14, '
+      + 'TS18048 x8, TS2353 x4, plus 8 singletons); config-tier 9 (TS2550 x8, `Array.prototype.at` '
+      + 'against a `lib` older than es2022; TS6059 x1, src/dry-run-hash-compat.test.ts importing '
+      + 'scripts/dry-run-hash-compat.ts from outside rootDir); noise 46 (TS7006 x36, TS6133 x9, '
+      + 'TS6196 x1). RE-TALLIED from tsc at the 355 below (62b2655d8) -- not the older composition '
+      + 'rescaled: the previous tally was taken at 333 and summed to 297, so it never described this '
+      + 'entry at its recorded size. What moved between the two is not uniform growth -- TS2554 93 -> '
+      + '113 and TS2345 19 -> 24 rose while TS7006 47 -> 36 FELL, and TS2339 is x115 in both tallies. '
+      + 'Per file: src/engine.test.ts x102, src/datasource-mapping.test.ts x17, '
+      + 'src/summary-rollup.test.ts x13, src/hook-condition-fail-loud.test.ts x13, '
+      + 'src/plugin.integration.test.ts x12, src/registry.test.ts x10. '
       + 'Re-measured 333 at 5ab08428, up from 219 -- the largest absolute growth in either ledger. The '
       + 'shape held (TS2339/TS2554/TS7006 still lead) but every number roughly tripled, and the hidden '
       + 'test layer took on ~40 more files over the same window; src/engine.test.ts alone carries 103 of '
@@ -597,18 +633,28 @@ const TEST_DEBT = {
       + '#5850 introduced, src/engine-update-prior-read-scope.test.ts), and +4 more at c15fcee4c -- ALL '
       + 'FOUR in one file #5861 added, src/save-meta-response-conformance.test.ts: one TS2554 at :115, '
       + 'and at :119 a TS6133 (`LOG` declared, never read) beside two TS2304 (`appendFileSync` and `OUT` '
-      + 'are not names in scope). That last line is worth a look by whoever next touches the file -- an '
-      + 'unresolved name is a line that cannot run, not a typing nicety -- but it is that PR\'s to fix, '
-      + 'not this ledger\'s. This is the package that showed what the merge queue does to a frozen '
+      + 'are not names in scope). That call to look at the unresolved names WAS TAKEN and is now '
+      + 'discharged rather than carried: src/save-meta-response-conformance.test.ts reports zero errors '
+      + 'at 62b2655d8, and the package has no TS2304 left anywhere -- the lines that could not run were '
+      + 'repaired at their source, which is where they belonged. This is the package that showed what '
+      + 'the merge queue does to a frozen '
       + 'number: the queue builds the PR as merged onto the CURRENT queue head, so a count frozen minutes '
       + 'earlier is already stale, and #5278\'s own PR was kicked on this entry three times before it '
       + 'landed. Re-measured at e8db1a230 (this PR merged with main after a day of drift): still 339, '
       + 'the histogram unchanged code for code. Then 345 at 77c7c884b ONE HOUR LATER: +6 TS2554 in '
       + 'src/summary-rollup.test.ts, which #5749 / PR #6013 extended while this PR was in flight. That '
       + '+6 is what the bootstrap margin is FOR -- recorded at 349 it was absorbed silently, and an '
-      + 'exactly-calibrated 339 would have been the sixth red in the same race. RECORDED 355 is a '
-      + 'bootstrap margin (+10 over 345 measured at 77c7c884b) -- tighten via the ℹ hint immediately '
-      + 'after landing (#5278 option A).',
+      + 'exactly-calibrated 339 would have been the sixth red in the same race. RECORDED 355 WAS a '
+      + 'bootstrap margin (+10 over 345 measured at 77c7c884b) -- and that sentence is history, not a '
+      + 'description of this entry today. This is the one of the five that was never lowered, and it did '
+      + 'not need to be: the margin was not handed back, it was SPENT. Real growth carried the '
+      + 'measurement 345 -> 355 while the slack absorbed it, so the recorded number stood still and the '
+      + 'measurement rose to meet it, and this entry now measures its recorded 355 EXACTLY (62b2655d8). '
+      + 'Read the distinction, because both routes end in the same place and only one of them shows up '
+      + 'as a lowering in the history: the other four were TIGHTENED onto their measurement, this one '
+      + 'was OVERTAKEN by its own. There is no slack here today, and the next new error in this package '
+      + 'goes red on arrival exactly as it would on an entry that had been tightened '
+      + '(#5278 option A).',
   },
   '@objectstack/runtime': {
     errors: 227,
@@ -701,7 +747,13 @@ const TEST_DEBT = {
     note: 'TS18046 x51 -- `json` is of type unknown, one `await res.json()` idiom repeated across four '
       + 'files (23 in mcp-server-runtime.http.test.ts, 14 in mcp-action-tools.test.ts, 8 in '
       + 'mcp-http-tools.scopes.test.ts, 6 in mcp-validate-expression.test.ts); TS6133 x1; TS2352 x1. '
-      + 'Measured 52 at 5ab08428 -> 53 at 34558c2cc. This entry is the fifth bootstrap margin and the '
+      + 'RE-TALLIED from tsc at the 53 below (62b2655d8) and unchanged class for class, which is why the '
+      + 'composition above is kept rather than rewritten: the 51 TS18046 sit in exactly those four files '
+      + 'in exactly those counts. The two singletons the old tally named by class without saying where '
+      + 'are src/skill-prompts.test.ts(185,23) for the TS2352 and '
+      + 'src/__tests__/mcp-server-runtime.test.ts(7,1) for the TS6133 (`MCPServerRuntimeConfig` declared, '
+      + 'never read). '
+      + 'Measured 52 at 5ab08428 -> 53 at 34558c2cc. This entry WAS the fifth bootstrap margin and the '
       + 'one the ratchet found on its OWN introducing PR: #5278 reached the merge queue and was kicked '
       + 'at 03:25:18Z on this single +1, which is not #6077\'s doing (that PR\'s own queue generation '
       + 'was green) but a pre-existing drift no gate in this repo could see until the ledger was '
@@ -714,8 +766,11 @@ const TEST_DEBT = {
       + 'unknown, one catch-block idiom", while all 51 are the response-body `json` binding, not a '
       + 'catch block. packages/mcp took a feature landing the same day, so it is an actively-moving '
       + 'package and an exact number here would very likely lose the same race that killed option D '
-      + 'five times over. RECORDED 63 is a bootstrap margin (+10 over 53 measured at 34558c2cc) -- '
-      + 'tighten via the ℹ hint immediately after landing (#5278 option A).',
+      + 'five times over. THE MARGIN IS GONE, and has been since #7888 / PR #8225 lowered 63 -> 53 onto '
+      + 'the exact measurement; RECORDED 63 was that margin (+10 over 53 measured at 34558c2cc) and this '
+      + 'sentence is its history, not this entry\'s present state. RECORDED now equals what tsc reports, '
+      + 're-confirmed at 53 at 62b2655d8, so the next new error in this package goes red on arrival -- '
+      + 're-establishing a margin deliberately remains a maintainer call (#5278 option A).',
   },
   '@objectstack/driver-mongodb': {
     errors: 10,

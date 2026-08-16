@@ -183,11 +183,9 @@ UI 创建并勾 GitHub 连接器、UI 钉模型(会话内 create_trigger 的Rout
 | `domain:drivers` | `packages/drivers/driver-*`(维护者 2026-08-05 对 `driver-memory` / `driver-mongodb` 族有投入冻结指令;`formula` / `driver-sql` 不受影响) |
 | `domain:services` | `packages/services/*`、`packages/connectors/*`、`packages/triggers/*`、`plugin-approvals`、`plugin-webhooks`、`plugin-email`、`plugin-reports`、`embedder-openai`、`knowledge-*` |
 | `domain:identity` | `plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit` |
-| `domain:devx` | `packages/lint`、`packages/sdui-parser`、`content/docs/**`、`apps/docs`、`scripts/`(门禁类)—— 与 `spec-tooling` 相交的三面按「是否围着 spec 契约转」切分 |
+| `domain:devx` | `packages/lint`、`packages/sdui-parser`、`content/docs/**`、`apps/docs`、`scripts/`(门禁类)—— 与 `domain:spec` 相交的三面按「是否围着 spec 契约转」切分 |
 | `domain:skills` | 两个技能根:`.claude/skills/**`(含本文件)+ `skills/**`(维护者 2026-08-11 裁定单设座位,与维护者走专题讨论;skills 更新 ADR-class,见 Guardrails) |
-| `domain:spec` | `packages/spec` 的**语义面**:schema 形状、`contracts/**`、退役行为半边、strictness 台账 —— 判据是**接受面变化** |
-| `domain:spec-surface` | `packages/spec` 的**文本面**:describe/JSDoc/墓碑散文/错误 guidance 与 alias 表 —— changeset 恒 patch |
-| `domain:spec-tooling` | `packages/spec` 的**机器面**:`packages/spec/scripts/**`、`packages/spec/docs/**`;围着 spec 契约转的工具链(门禁/生成器/lint 规则/报错散文/references 管线)归此,一般开发工具面留 `devx`(维护者 2026-08-09 裁决);⛔ 不碰 `packages/spec/src/**/*.zod.ts` 与 strictness 台账 |
+| `domain:spec` | `packages/spec` 整包唯一契约,语义/文本/机器三面同席:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及围着 spec 契约转的工具链(门禁/生成器/lint 规则/报错散文/references 管线)—— 一般开发工具面留 `devx`(维护者 2026-08-09 裁决);席内分派判据见下文「spec 席内分派参考」 |
 | `domain:cli` | `packages/cli`、`runtime`、`verify`、`qa`、`types`、`packages/rest`、`packages/mcp`、`packages/observability`、`packages/client*`、`cloud-connection`、`create-objectstack`、`packages/adapters/*`、`plugin-hono-server`、`plugin-dev` |
 | (无固定归属,按落点分诊) | `packages/apps/*`、`packages/console`(dist 由脚本生成 ⛔ 手改;UI 缺陷走 `repo:objectui`,pin/刷新脚本归 `scripts/` 行)、`examples/*`(归它演练的子系统) |
 
@@ -195,13 +193,14 @@ UI 创建并勾 GitHub 连接器、UI 钉模型(会话内 create_trigger 的Rout
 **(在流通而不在表 = 无主车道)。座位在编情况以 `label:pm:seat` 索引为准,每
 个 `domain:*` 与 `repo:*` 恰一张座位贴。
 
-**`packages/spec` 一包三席**(维护者 2026-08-07 批准;anchoring rule 的显式例外):语义/文本两席
-按「合法元数据集合变没变」分派 —— 改动前能过校验的输入,改动后逐字节同判 ⇒ `spec-surface`,否
-则 `spec`;**任何改变接受/拒绝行为的卡,不论多小,归`domain:spec`**。tooling 席改「围着契约转的
-机器」,与 surface 无交集。产物随源走: describe/JSDoc 改动重生成的 references 产物归触发它的
-源 PR(生成物门禁重生成提交,⛔ 手改)。`metadata` 自 `engine-core` 的二次切分按包边界(无例外);
-改元数据**格式/接受面**的照旧归 `domain:spec`,`/meta` 路由本体在 `packages/rest` 归
-`domain:cli`;拿不准 FLAG 回分诊。surface 席默认 sweep-first 运行。
+**spec 席内分派参考**(维护者 2026-08-16 裁定合并车道:原 `domain:spec-surface` / `domain:spec-tooling` 标签已退役,
+三面同归 `domain:spec` 一席,anchoring rule 双射恢复;以下判据降为席内分派与定价依据):语义/文本按
+「合法元数据集合变没变」分 —— 改动前能过校验的输入,改动后逐字节同判 ⇒ 文本面(changeset 恒 patch,
+默认 sweep-first),否则语义面;**任何改变接受/拒绝行为的卡,不论多小,按语义面处理**。机器面改
+「围着契约转的机器」,与文本面无交集,⛔ 不碰 `packages/spec/src/**/*.zod.ts` 与 strictness 台账。
+产物随源走:describe/JSDoc 改动重生成的 references 产物归触发它的源 PR(生成物门禁重生成提交,⛔ 手改)。
+`metadata` 自 `engine-core` 的二次切分按包边界(无例外);改元数据**格式/接受面**的照旧归 `domain:spec`,
+`/meta` 路由本体在 `packages/rest` 归 `domain:cli`;拿不准 FLAG 回分诊。
 
 **单一生产者。** `domain:*` 只由分诊座位产出;打标签 ≠ 认领;**未打标签的 issue 任何人不得认领
 ** —— 那意味着分诊还没走到,不是「可以自己判一下」。
@@ -387,13 +386,13 @@ dev 侧推分支要早 —— 远程分支是在飞工作最硬的证据。**Sta
 性由门禁农场机械判定,失败在漏跑门不在判断);默认判断档 `opus`(M/L、裁决实施、任何带设计判断的卡;
 拿不准就升一档 —— 错派低档的返工贵过省下的额度);上限 `fable`(最重协议/流程/编排卡,按卡取用非新
 默认)。**⛔ 强制条款两条**:① 凡改 `.claude/skills/pm-dispatch/**` 的卡一律
-`model: "claude-fable-5"`;② 凡**改变契约接受/拒绝行为或扩大公开面**的卡(`domain:spec` 语义车道;
-判据即分诊代裁的机械边界测试与一包三席分席判据,⛔ 不另抄第二份)一律 `claude-fable-5`(维护者
+`model: "claude-fable-5"`;② 凡**改变契约接受/拒绝行为或扩大公开面**的卡(`domain:spec` 语义面;
+判据即分诊代裁的机械边界测试与 spec 席内分派判据,⛔ 不另抄第二份)一律 `claude-fable-5`(维护者
 2026-08-12 裁定,原话:「同意,就按语义面收窄,立卡并通知 spec 席」)—— 契约错毒化一切下游,全仓最贵
 。两条唯一降档出口:**额度耗尽豁免**(维护者 2026-08-13 原话:「fable 如果用完了,可以用 opus」):仅
 当 fable 实测不可用(额度耗尽/限流;墙杀在中途,重派时同样可降)才落 `opus`,⛔ 不再往下,档位与理由记
-入认领评论「Container & model」行。明确不变:`spec-surface` 照旧 sonnet/opus;`spec-tooling` 默认
-opus,门禁语义设计时升 fable;下游适配卡默认 opus 拿不准升档照旧。**档位逐次派发显式传参,永不省略**
+入认领评论「Container & model」行。明确不变(合并后按席内分派面适用):spec 文本面卡照旧
+sonnet/opus;机器面默认 opus,门禁语义设计时升 fable;下游适配卡默认 opus 拿不准升档照旧。**档位逐次派发显式传参,永不省略**
 (解析顺序与 pin 语义以 os-dev 定义 frontmatter 注释为权威;被允许名单挡下时回退**继承的**模型,
 正是要防的静默继承),连同尺寸写进同一行;分诊 suggestion 行是输入不是决定,不采纳给理由。
 
