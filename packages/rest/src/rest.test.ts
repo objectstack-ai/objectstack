@@ -1806,7 +1806,8 @@ describe('createRestApiPlugin', () => {
 });
 
 // ---------------------------------------------------------------------------
-// PUT /meta/:type/:name — If-Match → parentVersion / X-Actor → actor (PR-10d.4)
+// PUT /meta/:type/:name — If-Match → parentVersion (PR-10d.4); the actor comes
+// from the authenticated identity, never a header (#7941)
 // ---------------------------------------------------------------------------
 
 describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.4)', () => {
@@ -1835,12 +1836,18 @@ describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.
 
     await route.handler(req, res);
 
+    // [#7941] `actor` is the authenticated identity, NOT the `x-actor` header
+    // this request also sends. The header is retained in the fixture on
+    // purpose: it is the one assertion that shows the header is ignored even
+    // when present, which is the whole content of the ruling. Asserting
+    // `parentVersion` and `actor` together also keeps the If-Match plumbing
+    // this test is named for covered by the same call.
     expect(protocol.saveMetaItem).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'view',
         name: 'cases',
         parentVersion: 'sha256:abc',
-        actor: 'user_42',
+        actor: 'test-user',
       }),
     );
   });

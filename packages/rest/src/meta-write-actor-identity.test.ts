@@ -37,14 +37,27 @@
  *  2. an internal system write (`isSystem`, no principal) still records
  *     `'system'` / `NULL` — the fix must not stamp a real user onto machine
  *     writes, and an anonymous caller is still refused outright;
- *  3. an explicit `X-Actor` behaves exactly as it did before, so this change
- *     stays separable from the precedence question the issue raises (the
- *     header still outranks the session identity — deliberately unchanged
- *     here, see `resolveMetaWriteActor`).
+ *  3. [#7941] an explicit `X-Actor` does NOT outrank the authenticated
+ *     identity — the admin's id is recorded, not the header's value;
+ *  4. [#7941] and `X-Actor` is inert on the machine-write path too, where
+ *     there is no authenticated user for it to lose to.
  *
- * The final case closes the loop the other three stub: that a bearer token
- * really does land on `resolveExecCtx().userId` for this route, driven through
- * a real `authServiceProvider` with no stub in the identity path at all.
+ * ## The precedence, and why cases 3–4 read the way they do
+ *
+ * This file originally pinned the OPPOSITE of case 3: the header won, pinned
+ * as-is and explicitly not endorsed, labelled as the test to change once the
+ * ordering was ruled on. Maintainer ruling #7941 (2026-08-12, re-confirmed
+ * 2026-08-15) removed the header limb rather than reordering it — the recorded
+ * actor is the identity the request was authorized as, so attribution cannot
+ * drift from authorization and an audit row answers "who changed this" rather
+ * than "who claimed to". Case 4 exists because the ruling allowed keeping the
+ * header for genuine machine/system callers ONLY if a consumer census showed
+ * that shape exists; it did not (nothing in `objectstack` or `objectui` sets
+ * the header), so the carve-out was not taken and its absence is pinned.
+ *
+ * The final case closes the loop the others stub: that a bearer token really
+ * does land on `resolveExecCtx().userId` for this route, driven through a real
+ * `authServiceProvider` with no stub in the identity path at all.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -238,14 +251,13 @@ describe('[#7749] PUT /meta/:type/:name records the authenticated caller as the 
         expect(rows).toHaveLength(0);
     }, 60_000);
 
-    it('an explicit X-Actor still wins over the session identity — precedence unchanged', async () => {
-        // ⚠️ Pinned as-is, NOT endorsed: with the producer fixed this ordering
-        // is live for the first time, so an authenticated caller can attribute
-        // a write to somebody else. Changing whose name lands in an audit row
-        // is a security-semantics decision for the audit contract, tracked
-        // separately on #7749 — this test exists to keep that decision
-        // separable from this fix, and it is the test to CHANGE when the
-        // maintainer rules on the ordering.
+    it('[#7941] an explicit X-Actor does NOT outrank the authenticated identity', async () => {
+        // The flip. This test previously pinned the opposite — the header won,
+        // pinned as-is and explicitly NOT endorsed, as the test to change when
+        // the ordering was ruled on. It has been (#7941, 2026-08-12,
+        // re-confirmed 2026-08-15): the recorded actor is the identity the
+        // request was authorized as, so an admin holding `manage_metadata` can
+        // no longer sign somebody else's name to a metadata write.
         const { engine, route } = await boot({
             userId: ADMIN, systemPermissions: ['manage_metadata'],
         });
@@ -253,8 +265,30 @@ describe('[#7749] PUT /meta/:type/:name records the authenticated caller as the 
         const res = await putMeta(route, 'header_probe_view', { 'x-actor': 'user_42' });
         expect(res._json?.success).toBe(true);
 
-        expect(await auditActor(engine, 'header_probe_view')).toBe('user_42');
-        expect(await historyActor(engine, 'header_probe_view')).toBe('user_42');
+        // Both rows, together in one object for the same reason as the first
+        // test: `user_42` must appear in NEITHER, and a flip that fixed only
+        // one of the two defaults would otherwise pass on the first assertion.
+        expect({
+            audit: await auditActor(engine, 'header_probe_view'),
+            history: await historyActor(engine, 'header_probe_view'),
+        }).toEqual({ audit: ADMIN, history: ADMIN });
+    }, 60_000);
+
+    it('[#7941] X-Actor cannot attribute a write that has NO authenticated user either', async () => {
+        // The carve-out the ruling permitted only if the census showed the
+        // shape exists — honouring the header for genuine machine/system
+        // callers with no authenticated user. The census found no caller that
+        // sets `X-Actor` at all, so the carve-out is not taken, and this pins
+        // that: the header is inert on the machine-write path too, rather than
+        // surviving as a fallback that reintroduces caller-chosen attribution
+        // wherever the identity happens to be absent.
+        const { engine, route } = await boot({ isSystem: true });
+
+        const res = await putMeta(route, 'system_header_probe_view', { 'x-actor': 'user_42' });
+        expect(res._json?.success).toBe(true);
+
+        expect(await auditActor(engine, 'system_header_probe_view')).toBe('system');
+        expect(await historyActor(engine, 'system_header_probe_view')).toBeFalsy();
     }, 60_000);
 
     it('the identity comes from the REAL bearer→session→execCtx chain, no stub', async () => {
@@ -289,5 +323,20 @@ describe('[#7749] PUT /meta/:type/:name records the authenticated caller as the 
         // falls through to the protocol's `'system'` / NULL defaults.
         const anon = await (rest as any).resolveMetaWriteActor(undefined, { headers: {} });
         expect(anon).toBeUndefined();
+
+        // [#7941] …and a header cannot fill that gap. Asserted at the producer
+        // as well as through the route, because this is the seam where the
+        // removed limb used to live: an `X-Actor` on an uncredentialed request
+        // still resolves to nobody, and one sent ALONGSIDE a valid bearer
+        // resolves to the bearer's identity, never the header's value.
+        const headerOnly = await (rest as any).resolveMetaWriteActor(undefined, {
+            headers: { 'x-actor': 'user_42' },
+        });
+        expect(headerOnly).toBeUndefined();
+
+        const headerVsBearer = await (rest as any).resolveMetaWriteActor(undefined, {
+            headers: { authorization: `Bearer token-for-${ADMIN}`, 'x-actor': 'user_42' },
+        });
+        expect(headerVsBearer).toBe(ADMIN);
     }, 60_000);
 });
