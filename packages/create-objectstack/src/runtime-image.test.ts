@@ -211,6 +211,36 @@ describe('scaffolded Dockerfile runtime image tag (#9017)', () => {
     });
   });
 
+  // The tests above call pinRuntimeImage directly, so on their own they would
+  // stay green if the scaffolder simply stopped calling it — every user would
+  // get `latest` and nothing would go red. index.ts cannot be imported to close
+  // that behaviourally (it calls program.parse() at module scope), so its TEXT
+  // is asserted, the same compromise template-consistency.test.ts already makes
+  // for the skills-install command.
+  describe('scaffolder wiring', () => {
+    const source = fs.readFileSync(path.join(pkgRoot, 'src', 'index.ts'), 'utf8');
+
+    it('resolves and pins after installing', () => {
+      expect(
+        source,
+        'index.ts no longer reads the resolved CLI version — the scaffolded ' +
+          'Dockerfile would keep the floating `latest` tag (#9017)',
+      ).toContain('readResolvedCliVersion(targetDir)');
+      expect(
+        source,
+        'index.ts no longer pins the runtime image — the scaffolded Dockerfile ' +
+          'would keep the floating `latest` tag (#9017)',
+      ).toContain('pinRuntimeImage(targetDir, resolved)');
+    });
+
+    it('pins only when the install actually succeeded', () => {
+      // Without node_modules there is no resolved version, so a pin attempted
+      // after a FAILED install would silently do nothing while the comment
+      // still promised it had happened.
+      expect(source).toMatch(/if \(installed\)[\s\S]{0,400}pinRuntimeImage/);
+    });
+  });
+
   describe('readResolvedCliVersion', () => {
     it('reads the installed CLI version', () => {
       installCli(dir, '17.4.2');
