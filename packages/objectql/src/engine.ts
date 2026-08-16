@@ -10081,8 +10081,42 @@ export class ObjectQL implements IObjectQLEngine {
         let dependents: any[];
         try {
           dependents = await this.find(childName, { where: { [fieldName]: id }, context } as any);
-        } catch {
-          continue;
+        } catch (error) {
+          // [#8895] Discriminate by error TYPE — this probe IS the referential
+          // guard, so `continue` is only truthful for the one failure that
+          // really means "no dependents".
+          //
+          // The bare `catch { continue }` this replaces reached `continue` on
+          // ANY probe failure, and every consequence of that is silent: the
+          // `restrict` branch below never fires, so a delete the integrity
+          // rules say must be REFUSED is allowed through; `set_null`/`cascade`
+          // never run, so child rows that should have been nulled or removed
+          // are left orphaned; nothing is logged and the caller is told the
+          // delete succeeded. Fail-OPEN on an integrity guard — the read did
+          // not happen and the answer "there are none" was invented for it
+          // (ADR-0110 D3: "the probe found nothing" and "the probe could not
+          // run" are different facts with opposite meanings here).
+          //
+          // Benign: the child object is registered but its TABLE was never
+          // provisioned (schema sync not run yet). It cannot hold a row that
+          // references anything, so zero dependents IS the truth and skipping
+          // the relation is correct. Asked through the shared
+          // `isMissingTableError` predicate (`@objectstack/metadata/errors`,
+          // #4825) — the same call `seedAutonumber` and `resolveFileReferences`
+          // make — never a hand-rolled code test.
+          //
+          // Everything else (connection drop, timeout, permission denial, a
+          // query error, a missing COLUMN on a provisioned table) means the
+          // dependents may well exist and simply were not seen. It propagates:
+          // the delete fails loudly and nothing is written, which is the same
+          // disposition the maintainer's 2026-08-15 ruling gives this family —
+          // unprovisioned is truthful emptiness, everything else must surface.
+          // A guard that could not be EVALUATED must not silently pass.
+          //
+          // No new response field and no new error code: the caller receives
+          // the probe's own failure, envelope intact.
+          if (isMissingTableError(error)) continue;
+          throw error;
         }
         if (!dependents || dependents.length === 0) continue;
 
