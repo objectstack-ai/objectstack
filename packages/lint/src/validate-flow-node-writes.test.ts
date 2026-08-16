@@ -11,6 +11,7 @@ import {
 import {
   validateFlowNodeWrites,
   FLOW_NODE_WRITE_UNKNOWN_FIELD,
+  FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR,
   FLOW_WRITE_NODE_TYPES,
   FLOW_WRITE_NODE_TYPES_DEFERRED,
 } from './validate-flow-node-writes.js';
@@ -480,5 +481,64 @@ describe('validateFlowNodeWrites', () => {
       flows: [flowWith({ approval_status: 'approved' })],
     });
     expect(findings).toEqual([]);
+  });
+});
+
+// ─── [#8663] Unprovisioned injected anchors on the WRITE axis ────────────────
+//
+// The third consumer of the hook rule's IMPLICIT_FIELDS, and the only one whose
+// existence finding GATES. The provenance finding deliberately does not: it is
+// a claim about a remote schema this repo cannot see, so reclassifying it up to
+// `error` would turn a silent case straight into a build break.
+const federatedDeal = {
+  name: 'wh_order',
+  datasource: 'warehouse',
+  external: { remoteName: 'fact_orders' },
+  fields: { order_id: { type: 'text' }, amount: { type: 'currency' } },
+};
+const localWhOrder = { name: 'wh_order', fields: { order_id: { type: 'text' }, amount: { type: 'currency' } } };
+
+const anchorFlow = (fields: unknown) => ({
+  name: 'stamp_owner',
+  type: 'record_change',
+  nodes: [
+    { id: 'start', type: 'start', config: {} },
+    {
+      id: 'mark',
+      type: 'update_record',
+      label: 'Stamp',
+      config: { objectName: 'wh_order', filter: { id: '{recordId}' }, fields },
+    },
+  ],
+  edges: [],
+});
+
+describe('[#8663] validateFlowNodeWrites — unprovisioned anchor writes', () => {
+  it('warns (does NOT gate) when a node writes an anchor the federated object has no storage for', () => {
+    const findings = validateFlowNodeWrites({ objects: [federatedDeal], flows: [anchorFlow({ owner_id: '{user.id}' })] });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR);
+    // The whole point of the separate id: this rule's other finding is `error`.
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].path).toBe('flows[0].nodes[1].config.fields.owner_id');
+    expect(findings[0].where).toBe('flow "stamp_owner" › node "Stamp"');
+    expect(findings[0].message).toContain('external object (ADR-0015)');
+    expect(findings[0].message).toContain('can never land');
+  });
+
+  it('the same node against the same object without the external binding is silent', () => {
+    expect(validateFlowNodeWrites({ objects: [localWhOrder], flows: [anchorFlow({ owner_id: '{user.id}' })] })).toEqual([]);
+  });
+
+  it('an author-declared column of the same name is never flagged', () => {
+    const declared = { ...federatedDeal, fields: { ...federatedDeal.fields, owner_id: { type: 'text' } } };
+    expect(validateFlowNodeWrites({ objects: [declared], flows: [anchorFlow({ owner_id: '{user.id}' })] })).toEqual([]);
+  });
+
+  it('the gating unknown-field finding on the same federated object is unchanged', () => {
+    const findings = validateFlowNodeWrites({ objects: [federatedDeal], flows: [anchorFlow({ ordr_id: 'x' })] });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(FLOW_NODE_WRITE_UNKNOWN_FIELD);
+    expect(findings[0].severity).toBe('error');
   });
 });

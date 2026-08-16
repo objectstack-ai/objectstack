@@ -138,13 +138,51 @@ const CROSS_PACKAGE_TEST_INPUTS = {
     // import outside these paths fails `check:examples-live-imports`, which
     // matches each coupling target against these globs -- so narrowing here
     // cannot quietly reopen the blind spot.
+    //
+    // The `content/docs` globs are hand-written prose three e2e tests pin, to
+    // enforce the #6730 ruling that the NDJSON exception "stays declared, not just
+    // implemented" -- the declaration has to be findable in the page a script
+    // author actually meets, so the page IS an input. All three were invisible to
+    // this gate until #8995 taught the detector their seed spelling, and the miss
+    // is not theoretical: PR #8983 reworded `deployment/index.mdx` to "one compact
+    // JSON document per line", which every fact survived but the literal
+    // `/one\s+per\s+line/i` pin did not. Undeclared, cli was outside the affected
+    // set, so PR CI was green and the merge queue was the first signal -- it
+    // dequeued the PR and took two unrelated PRs down as batch collateral.
+    //   test/cloud-login-json-ndjson.e2e.test.ts reads deployment/cli.mdx and
+    //     deployment/index.mdx.
+    //   test/login-json-ndjson.e2e.test.ts reads deployment/cli.mdx and
+    //     permissions/authentication.mdx (the page describing the device flow).
+    //   test/login-json-noninteractive.e2e.test.ts reads deployment/cli.mdx.
+    // Per-page rather than `content/docs/**`: docs are edited far more often than
+    // any package here, and a subtree glob would put cli's e2e suite on every
+    // documentation PR.
+    //
+    // `connector-mcp-plugin.ts` is read by test/serve-capability-identity.test.ts,
+    // which pins that the connector still registers the name the #7652 repro uses
+    // rather than importing the class. It surfaced with the three above and has the
+    // same shape of blind spot, but the gate could not have named it: the test
+    // spells the path RELATIVE (`resolve(HERE, '../../connectors/...')`), and the
+    // literal-coverage check below only collects repo-relative literals.
+    //
+    // `check-nul-bytes.mjs` is the one entry no test READS -- it is named in a
+    // comment in login-json-noninteractive.e2e.test.ts. The literal collector takes
+    // quoted paths without parsing, so a mention forces a declaration; that is the
+    // designed trade (over-collection can only widen a radius, never narrow one),
+    // and declaring one rarely-touched file is cheaper than teaching the scanner to
+    // tell prose from code, or than rewording a comment to dodge a scanner.
     globs: [
       'packages/verify/src/**',
       'packages/plugins/plugin-security/src/**',
       'packages/services/service-cluster/src/**',
+      'packages/connectors/connector-mcp/src/connector-mcp-plugin.ts',
       'examples/app-showcase/src/ui/views/contact.view.ts',
       'examples/app-showcase/src/data/objects/semantic-zoo.object.ts',
       'examples/app-showcase/src/ui/pages/task-triage.page.ts',
+      'content/docs/deployment/cli.mdx',
+      'content/docs/deployment/index.mdx',
+      'content/docs/permissions/authentication.mdx',
+      'scripts/check-nul-bytes.mjs',
     ],
   },
   '@objectstack/lint': {
@@ -299,6 +337,9 @@ export const RECOGNISED_PATH_SPELLINGS = [
   "const HERE = dirname(fileURLToPath(import.meta.url));   // seed (ESM)",
   'const HERE = __dirname;                                  // seed (CJS)',
   'const HERE = import.meta.dirname;       // and dirname(import.meta.filename)',
+  "const HERE = resolve(fileURLToPath(import.meta.url), '..');  // seed, walked",
+  '                                        // from the FILE instead of named;',
+  '                                        // import.meta.filename works too',
   "const P = resolve(HERE, '<rel>');       // join() and the path.* forms too",
   "const P = fileURLToPath(new URL('<rel>', import.meta.url));",
   "const P = new URL('<rel>', import.meta.url);",
@@ -415,6 +456,20 @@ function pathExpression(expr, hereDepth, known) {
   if (expr === 'import.meta.dirname') return { end: hereDepth, min: hereDepth, vendored: false };
   if (/^(?:path\.)?dirname\(\s*import\.meta\.filename\s*\)$/.test(expr)) {
     return { end: hereDepth, min: hereDepth, vendored: false };
+  }
+  // The two seeds above NAME the directory. `import.meta.url` and
+  // `import.meta.filename` name the FILE, which sits one level below it, and an
+  // author reaches that same directory by WALKING instead — most often
+  // `resolve(fileURLToPath(import.meta.url), '..')`. Modelling the file at
+  // `hereDepth + 1` is what makes the walked form come out equal to the named one
+  // through the ordinary literal walk below, rather than needing a case of its own,
+  // and it is precisely Node's `resolve`/`join`, which treat a file argument as a
+  // directory prefix like any other. Unrecognised until #8995: three packages/cli
+  // e2e tests seed this way, so their reads of `content/docs/**` produced no flag
+  // and went undeclared — the silence this list exists to prevent, and it cost a
+  // merge-queue dequeue (PR #8983) before anyone saw it.
+  if (expr === 'import.meta.url' || expr === 'import.meta.filename') {
+    return { end: hereDepth + 1, min: hereDepth + 1, vendored: false };
   }
 
   // A `new URL(rel, import.meta.url)` resolves against the importing FILE, so
@@ -836,6 +891,61 @@ function selfTest() {
   ok(
     'does NOT flag an import.meta.dirname seed that stays inside the package',
     !at("const HERE = import.meta.dirname;\nconst FIX = resolve(HERE, '../fixtures');", 2),
+  );
+
+  // The seed WALKED from the file rather than named off it (#8995). Three
+  // packages/cli e2e tests spell it this way; before the file itself was a
+  // recognised expression the whole chain below resolved to `undefined`, so the
+  // reads produced no flag and no declaration -- silently, which is the one
+  // failure mode this detector exists to not have.
+  ok(
+    'flags a resolve(fileURLToPath(import.meta.url), $DOTDOT) seed (packages/cli e2e)',
+    at(
+      "const HERE = resolve(fileURLToPath(import.meta.url), '..');\n" +
+        "const REPO_ROOT = resolve(HERE, '../../..');\n" +
+        "const D = resolve(REPO_ROOT, 'content/docs/deployment/cli.mdx');",
+      1,
+    ),
+  );
+  ok(
+    'flags the same seed with the climb and the tail in ONE three-argument resolve',
+    at(
+      "const HERE = resolve(fileURLToPath(import.meta.url), '..');\n" +
+        "const D = resolve(HERE, '../../..', 'content/docs/deployment/cli.mdx');",
+      1,
+    ),
+  );
+  ok(
+    'flags the walked seed via join() and the path.* form',
+    at(
+      "const HERE = path.join(path.dirname(fileURLToPath(import.meta.url)), '.');\n" +
+        "const S = path.resolve(HERE, '../../other-pkg/src/x.ts');",
+      1,
+    ),
+  );
+  ok(
+    'flags a walked import.meta.filename seed',
+    at("const HERE = resolve(import.meta.filename, '..');\nconst S = resolve(HERE, '../../other-pkg/src/x.ts');", 1),
+  );
+  // The walked seed and the named seed address the same directory, so every
+  // verdict must agree between them. This is the case that fails if the file is
+  // ever modelled at its directory's depth instead of one below it.
+  ok(
+    'walked seed agrees with the named seed on an in-package path',
+    !at("const HERE = resolve(fileURLToPath(import.meta.url), '..');\nconst FIX = resolve(HERE, '../fixtures');", 2) &&
+      !at("const HERE = dirname(fileURLToPath(import.meta.url));\nconst FIX = resolve(HERE, '../fixtures');", 2),
+  );
+  ok(
+    'does NOT flag the walked seed climbing into node_modules (the tsx bin those tests resolve)',
+    !at(
+      "const HERE = resolve(fileURLToPath(import.meta.url), '..');\n" +
+        "const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');",
+      1,
+    ),
+  );
+  ok(
+    'does NOT flag the bare file expression itself (it names its own file)',
+    !at("const SELF = fileURLToPath(import.meta.url);\nconst C = readFileSync(SELF, 'utf8');", 2),
   );
 
   const failed = cases.filter((c) => !c.cond);

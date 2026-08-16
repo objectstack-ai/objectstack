@@ -62,6 +62,7 @@
     "check:service-providers": "node scripts/check-service-providers.mjs",
     "check:route-envelope": "node scripts/check-route-envelope.mjs --self-test && node scripts/check-route-envelope.mjs",
     "check:error-code-casing": "node scripts/check-error-code-casing.mjs --self-test && node scripts/check-error-code-casing.mjs",
+    "check:error-status-conformance": "node scripts/check-error-status-conformance.mjs --self-test && node scripts/check-error-status-conformance.mjs",
     "check:wildcard-fallthrough": "node scripts/check-wildcard-fallthrough.mjs --self-test && node scripts/check-wildcard-fallthrough.mjs",
     "check:meta-type-normalized": "node scripts/check-meta-type-normalized.mjs --self-test && node scripts/check-meta-type-normalized.mjs",
     "check:filter-alias-parity": "node scripts/check-filter-alias-parity.mjs --self-test && node scripts/check-filter-alias-parity.mjs",

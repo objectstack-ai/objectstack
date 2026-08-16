@@ -28,10 +28,55 @@
  * One binding is still sparse, and by decision rather than by gap:
  *
  *  - objectui's action `visible` / `disabled` binds whatever record the client
- *    already fetched. That one is a DECISION (#4953 item 2): making it total
- *    would mean every REST read padding out all declared columns, so it stays
- *    sparse and is documented as sparse — an author on that surface guards with
- *    `has()`, not `!= null`.
+ *    already fetched — a record-detail read, or a LIST ROW carrying only the
+ *    view's `$select` projection. That one is a DECISION (#4953 item 2):
+ *    making it total would mean every REST read padding out all declared
+ *    columns, so it stays sparse, permanently, and is documented as sparse.
+ *
+ * ## The authoring guard for that sparse face (#8975)
+ *
+ * **`has(record.x) && record.x != null`** — before any traversal
+ * (`record.x.k`), method call (`record.x.size()`), ordering (`< <= > >=`) or
+ * arithmetic use of `record.x`.
+ *
+ * This doc comment is the CANONICAL statement of that rule. The showcase
+ * fixture (`examples/app-showcase/src/ui/actions/predicate-matrix.action.ts`)
+ * and the surface ledger in `packages/lint/src/validate-null-guards.ts` defer
+ * to it instead of restating it — three independently worded copies of one
+ * rule is how #8975 came to exist: two of them said opposite things
+ * (`has()` "not `!= null`" here, "`!= null` is the portable form" there) and
+ * measured, NEITHER HALF ALONE IS A GUARD on this face.
+ *
+ * The reason is that two failure modes are live at once. A list row can OMIT a
+ * column (absent key) and can carry a projected column holding NULL, and each
+ * half covers exactly one of them. Measured against the canonical
+ * `@objectstack/formula` CEL engine:
+ *
+ * | predicate                                           | `{}` (absent)          | `{a: null}` (projected) | `{a: 5}` |
+ * |:----------------------------------------------------|:-----------------------|:------------------------|:---------|
+ * | `record.a != null && record.a > 1`                  | FAULT `No such key: a` | `false`                 | `true`   |
+ * | `has(record.a) && record.a > 1`                     | `false`                | FAULT `no such overload: dyn(null) > int` | `true` |
+ * | `has(record.a) && record.a != null && record.a > 1` | `false`                | `false`                 | `true`   |
+ *
+ * Only the conjunction is safe across all three bindings. Prescribing `has()`
+ * on its own does not fix the face, it MIRRORS the bug: a fault here is
+ * fail-closed, the action silently vanishes, and that is indistinguishable
+ * from the gate having said no — so trading a null-shaped vanish for an
+ * absence-shaped one buys nothing.
+ *
+ * One measured exception, recorded so the platform's existing predicates are
+ * not misread: a bare EQUALITY against a literal never faults on a null value
+ * — CEL compares heterogeneously and answers `false` — so `has(record.a) &&
+ * record.a == "high"` is already safe on all three bindings without the
+ * `!= null` half. The conjunction is correct on every shape, which is why it
+ * is what the rule prescribes; the exception explains why the 34 authored
+ * predicates that spell only `!= null` are not uniformly broken in the same
+ * way (their migration is tracked in #8990, not here).
+ *
+ * ⛔ Not enforced by a lint rule, and that is decided rather than pending: the
+ * mirror gate was evaluated and DECLINED (#8881 / PR #8979) because sparseness
+ * is a property of the view's `$select` projection and of row DATA, not of the
+ * metadata a linter sees.
  *
  * CEL is strict about missing keys: `record.x` on a record that does not carry
  * the key `x` aborts the whole expression with `No such key`, which is NOT the
@@ -64,6 +109,13 @@
  * field>)` is uniformly TRUE (a materialised `null` is a present key holding
  * null — CEL's own rule). `has()` therefore guards against an UNDECLARED key,
  * not against an empty value; test emptiness with `record.x != null`.
+ *
+ * That sentence is about the TOTAL bindings this function creates — every
+ * surface listed at the top. It is not in tension with the sparse-face rule
+ * above: on a total record the `has()` half is a tautology and `!= null` is
+ * the whole guard, while on the sparse action face the key may genuinely be
+ * absent and both halves are load-bearing. Same conjunction, one half of it
+ * simply free once the record is total.
  */
 export function materializeDeclaredFields<T extends Record<string, unknown>>(
   record: T,

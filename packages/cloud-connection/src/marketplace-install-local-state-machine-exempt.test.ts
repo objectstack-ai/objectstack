@@ -27,6 +27,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
+import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 
 type Handler = (c: any) => Promise<any>;
 
@@ -222,8 +223,8 @@ describe('marketplace install — state_machine initialStates exemption (#3433)'
         const rawApp = makeRawApp();
         const { ctx, fire } = makeCtx(rawApp, {
             manifest: { register: (m: any) => engine.registerApp(m) },
-            auth: { api: { getSession: async () => ({ user: { id: 'admin' } }) } },
-            objectql: engine,
+            auth: installerAuthService(),
+            objectql: withInstallerGrants(engine),
             metadata: { getObject: vi.fn(async () => undefined), list: vi.fn(async () => []) },
         });
         const plugin = new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: dir });

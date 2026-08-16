@@ -1,5 +1,19 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
+// ⛔ [#8976] THIS FILE IS NOT AN AUTHORIZATION TEST. Do not read it as one.
+//
+// "tenancy posture" here selects WHICH SEEDING PATH runs — inline versus the
+// per-org replay — and how the resulting rows are scoped. It never asks who the
+// caller is or what they may do; a caller with no session at all reached every
+// assertion in this file unchanged, which is exactly what #8976 measured and
+// closed. `postureEnforcesWall` is about DATA scope, not admission.
+//
+// Auditing whether install-local is gated? The file that answers that is
+// `marketplace-install-local-capability-enumeration.test.ts` — every mutating
+// route, derived from the plugin's own route table, against three principals.
+// The final `describe` in this file asserts that companion still exists, so
+// this pointer cannot quietly rot into a wrong answer.
+//
 // #5262 — the marketplace local-install plugin's two seeding decisions ask
 // whether an organization wall is IN FORCE, never the demoted
 // `OS_MULTI_ORG_ENABLED` boolean.
@@ -30,7 +44,7 @@
 // this package use) so the assertions can read what the seeder was ASKED to do.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -48,6 +62,7 @@ vi.mock('@objectstack/spec/data', () => ({
 }));
 
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
+import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 import { LocalManifestSource } from './local-manifest-source.js';
 
 type Handler = (c: any) => Promise<any>;
@@ -112,11 +127,11 @@ const MANIFEST = {
 /** No `sys_organization` rows and no active org on the request. */
 const SERVICES = (findRows: Record<string, any[]> = {}) => ({
     manifest: { register: vi.fn() },
-    auth: { api: { getSession: async () => ({ user: { id: 'admin' } }) } },
-    objectql: {
+    auth: installerAuthService(),
+    objectql: withInstallerGrants({
         syncSchemas: async () => undefined,
         find: vi.fn(async (object: string) => findRows[object] ?? []),
-    },
+    }),
     metadata: {},
     driver: { delete: vi.fn(async () => true) },
 });
@@ -291,5 +306,23 @@ describe('#5262 — rehydrate heal leaves walled deployments to the per-org repl
     it('single-org deployments still heal', async () => {
         await rehydrateUnder({ posture: 'single' }, 'single');
         expect(loadCalls).toHaveLength(1);
+    });
+});
+
+/**
+ * [#8976] The scope disclaimer at the top of this file, made EXECUTABLE.
+ *
+ * A prose pointer to "the file that actually pins authorization" is worth
+ * exactly as much as its target's continued existence, and nothing warns you
+ * when a rename or a delete turns it into a confident wrong answer — which is
+ * the precise failure this whole card is about: a green test that reads as
+ * coverage it does not provide. So the pointer is asserted, not merely written.
+ * If the enumeration pin moves, this goes red and the sentence above gets
+ * corrected instead of quietly lying to the next auditor.
+ */
+describe('#8976 — what this file does NOT cover', () => {
+    it('points at the companion that DOES pin authorization, and it still exists', () => {
+        expect(existsSync(new URL('./marketplace-install-local-capability-enumeration.test.ts', import.meta.url)))
+            .toBe(true);
     });
 });

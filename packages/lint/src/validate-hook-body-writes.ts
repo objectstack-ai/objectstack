@@ -65,7 +65,12 @@ import { createRequire } from 'node:module';
 import type ts from 'typescript';
 import { findClosestMatches, formatSuggestion } from '@objectstack/spec/shared';
 
-import { SYSTEM_FIELDS } from './system-fields.js';
+import {
+  SYSTEM_FIELDS,
+  indexUnprovisionedAnchors,
+  unprovisionedAnchorCause,
+  unprovisionedAnchorHint,
+} from './system-fields.js';
 
 // The TypeScript compiler must NOT be imported at module top level: it is
 // ~9 MB of CJS, and @objectstack/lint sits on the kernel boot path — while
@@ -116,6 +121,19 @@ export interface HookBodyWriteFinding {
 
 // Rule id (registry entry).
 export const HOOK_BODY_WRITE_UNKNOWN_FIELD = 'hook-body-write-unknown-field';
+
+/**
+ * [#8663] The write-axis twin of `flow-template-field-unprovisioned` (#8340):
+ * the body writes a field {@link IMPLICIT_FIELDS} exempts, but on THIS target
+ * the platform registered that anchor without provisioning storage for it.
+ *
+ * A separate id at `warning` severity rather than a reclassification of
+ * {@link HOOK_BODY_WRITE_UNKNOWN_FIELD}, matching #8340's precedent exactly:
+ * the existence verdict is unchanged (the name IS addressable), and what is
+ * added is a second, independently suppressible finding on the path where the
+ * existence check stays silent.
+ */
+export const HOOK_BODY_WRITE_UNPROVISIONED_ANCHOR = 'hook-body-write-unprovisioned-anchor';
 
 // ─── The write-pattern ledger ───────────────────────────────────────────────
 //
@@ -256,16 +274,72 @@ const INPUT_ENVELOPE_KEYS: ReadonlySet<string> = new Set(['id', 'options', 'ast'
  * the cost asymmetry is the same everywhere: over-inclusion is at worst a
  * missed finding, under-inclusion is a false one.
  *
- * Exported for `validate-action-body-writes.ts` only (not re-exported from the
- * package barrel). The action rule is this same check on the other surface that
- * carries a `HookBodySchema` body, so the two must agree on what is implicitly
- * writable — a second copy of this extension would drift exactly the way the
- * five hand-copied lists #4330 collapsed did.
+ * Exported for `validate-action-body-writes.ts` and
+ * `validate-flow-node-writes.ts` (not re-exported from the package barrel). The
+ * three rules are this same check on the three surfaces that write literal
+ * field keys, so they must agree on what is implicitly writable — a second copy
+ * of this extension would drift exactly the way the five hand-copied lists
+ * #4330 collapsed did.
+ *
+ * ⛔ [#8663] This set is OBJECT-INDEPENDENT and therefore only half an answer.
+ * It says a name COULD be implicitly writable somewhere; it cannot say whether
+ * the platform actually provisioned storage for it on the object being written.
+ * On an ADR-0015 `external` object the two diverge — the registered anchor has
+ * no column behind it — so every consumer pairs this membership test with
+ * {@link unprovisionedAnchorWriteConsequence}'s check rather than treating a
+ * hit here as the end of the question. The pairing is why the union may stay
+ * generous: over-inclusion here no longer buys silence on a federated object.
  */
 export const IMPLICIT_FIELDS: ReadonlySet<string> = new Set([
   ...SYSTEM_FIELDS,
   '_id', 'name', 'space', 'owner', 'record_type',
 ]);
+
+/**
+ * [#8663] The CONSEQUENCE clause every unprovisioned-anchor WRITE diagnostic
+ * states — one wording across the three write surfaces (hook body, action body,
+ * flow node), paired with `unprovisionedAnchorCause` / `unprovisionedAnchorHint`
+ * from `system-fields.ts` the way #8340's four read-axis rules pair with them.
+ *
+ * Shared rather than re-typed for #8340's reason: the sentence is the finding's
+ * evidentiary content, and a rule that re-words it drifts from its siblings and
+ * from the runtime it reports. It is shared HERE rather than in
+ * `system-fields.ts` because the consequence is specific to the write axis —
+ * that module's own note reserves the per-site consequence to the site, and the
+ * "site" for this family is the family, not any one of its three files.
+ *
+ * ## Every clause below is measured, not inferred (#8663)
+ *
+ * The card that produced this rule asserted a structural resemblance to the
+ * read-axis gap and explicitly declined to guess the runtime behaviour. Measured
+ * end to end on a write-enabled (`external.allowWrites` + `external.writable`)
+ * federated object bound to a real remote SQLite table:
+ *
+ *  - the engine's own write-path validator PASSES the anchor — it is in the
+ *    registered schema, because `applySystemFields` injects it on a federated
+ *    object exactly as on a local one;
+ *  - a genuinely undeclared name in the same position is REFUSED upstream by
+ *    that validator (`INVALID_FIELD`), on insert and on update alike, and never
+ *    reaches a driver at all;
+ *  - so the injected anchor is the ONLY payload key that reaches the remote
+ *    database raw, where SQLite answers `SQLITE_ERROR: table … has no column
+ *    named owner_id` — an untyped driver error (no ADR-0112 `code`/`status`)
+ *    that aborts the WHOLE statement, taking the correctly named fields of the
+ *    same payload with it. On a schemaless remote the key is persisted instead.
+ *
+ * That is the #4271 driver split, reached through the one door the platform's
+ * own upstream refusal cannot close — which is why this is a finding and not a
+ * duplicate of the unknown-field rule next to it.
+ */
+export function unprovisionedAnchorWriteConsequence(): string {
+  return (
+    `so the value can never land: the anchor exists only in the registered schema, which is what carries ` +
+    `it PAST the write-path validator that refuses an undeclared name outright (INVALID_FIELD). The remote ` +
+    `database is what rejects it — on a SQL remote with an untyped driver error ('no such column') that ` +
+    `aborts the whole statement, so the correctly named fields in the same payload never land either; on a ` +
+    `schemaless remote the key is persisted into a column no read surface returns (#4271).`
+  );
+}
 
 type AnyRec = Record<string, unknown>;
 
@@ -582,6 +656,10 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
 
   // Built lazily: a stack whose hooks are all L1/handler-based never pays it.
   let objectFields: Map<string, Set<string>> | null = null;
+  // [#8663] `objectName -> its unprovisioned injected anchors`. Empty for every
+  // ordinary stack (only an ADR-0015 `external` object contributes an entry), so
+  // the lookup below doubles as the "nothing to say here" fast path.
+  let anchors: ReadonlyMap<string, ReadonlySet<string>> | null = null;
 
   hooks.forEach((hook, hookIndex) => {
     const body = hook.body;
@@ -593,6 +671,7 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
     if (writes.length === 0) return;
 
     objectFields ??= indexObjectFields(stack);
+    anchors ??= indexUnprovisionedAnchors(stack);
     const hookName = typeof hook.name === 'string' && hook.name ? hook.name : `#${hookIndex}`;
 
     // The hook's own target set, for `ctx.input` writes. A wildcard target has
@@ -624,7 +703,30 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
         // missing on EVERY named target (a multi-target body may branch per
         // object, so a partial miss is not statically wrong).
         if (!inputJudgeable) continue;
-        if (IMPLICIT_FIELDS.has(w.field)) continue;
+        if (IMPLICIT_FIELDS.has(w.field)) {
+          // [#8663] The membership test above answered "addressable somewhere",
+          // not "provisioned HERE". Ask the second question before going silent.
+          //
+          // EVERY target must be unprovisioned, mirroring the everywhere-miss
+          // rule this branch already applies to the existence finding: a
+          // multi-target body may branch per object (`if (ctx.object === …)`),
+          // so an anchor that is real on one target is a legitimate write there
+          // and the claim "this can never land" would be false.
+          if (!targets.every((t) => anchors!.get(t)?.has(w.field))) continue;
+          reported.add(dedupeKey);
+          const anchorObj = targets.length === 1 ? targets[0] : targets.join(', ');
+          findings.push({
+            severity: 'warning',
+            rule: HOOK_BODY_WRITE_UNPROVISIONED_ANCHOR,
+            where,
+            path,
+            message:
+              `body writes '${w.field}' to its input, and ${unprovisionedAnchorCause(anchorObj, w.field)} — ` +
+              unprovisionedAnchorWriteConsequence(),
+            hint: unprovisionedAnchorHint(anchorObj, w.field),
+          });
+          continue;
+        }
         if (targetSets.some((s) => s!.has(w.field))) continue;
 
         reported.add(dedupeKey);
@@ -649,7 +751,25 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
         // ctx.api write → the named object.
         const known = judgeableFieldsOf(objectFields!, w.object);
         if (!known) continue; // cross-package, or no declared fields — cannot judge
-        if (IMPLICIT_FIELDS.has(w.field) || known.has(w.field)) continue;
+        // An AUTHOR-declared column wins outright: on a federated object it maps
+        // a remote column the author vouches for (#7859's direction), so it is
+        // never an unprovisioned anchor and never either finding.
+        if (known.has(w.field)) continue;
+        if (IMPLICIT_FIELDS.has(w.field)) {
+          if (!anchors!.get(w.object)?.has(w.field)) continue;
+          reported.add(dedupeKey);
+          findings.push({
+            severity: 'warning',
+            rule: HOOK_BODY_WRITE_UNPROVISIONED_ANCHOR,
+            where,
+            path,
+            message:
+              `body calls ctx.api.object('${w.object}').${w.method ?? 'update'}(…) writing '${w.field}', and ` +
+              `${unprovisionedAnchorCause(w.object, w.field)} — ${unprovisionedAnchorWriteConsequence()}`,
+            hint: unprovisionedAnchorHint(w.object, w.field),
+          });
+          continue;
+        }
 
         reported.add(dedupeKey);
         findings.push({

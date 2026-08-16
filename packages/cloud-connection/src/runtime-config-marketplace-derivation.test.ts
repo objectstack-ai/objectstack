@@ -47,6 +47,7 @@ import { tmpdir } from 'node:os';
 import { RuntimeConfigPlugin, type RuntimeConfigPluginConfig } from './runtime-config-plugin.js';
 import { MarketplaceProxyPlugin } from './marketplace-proxy-plugin.js';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
+import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 
 interface RouteRecord { method: string; path: string }
 
@@ -91,8 +92,8 @@ async function startOn(app: unknown, plugin: { start(ctx: any): Promise<void> })
     const services: Record<string, any> = {
         'http.server': { getRawApp: () => app },
         manifest: { register() {} },
-        auth: { api: { getSession: async () => ({ user: { id: 'admin' } }) } },
-        objectql: { syncSchemas: async () => undefined },
+        auth: installerAuthService(),
+        objectql: withInstallerGrants({ syncSchemas: async () => undefined }),
     };
     const ctx: any = {
         logger: { info() {}, warn: (m: unknown) => { warnings.push(String(m)); }, error() {} },

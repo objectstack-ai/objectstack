@@ -84,13 +84,31 @@
 
 import { findClosestMatches, formatSuggestion } from '@objectstack/spec/shared';
 
-import { indexObjectFields, judgeableFieldsOf, IMPLICIT_FIELDS } from './validate-hook-body-writes.js';
+import {
+  indexObjectFields,
+  judgeableFieldsOf,
+  IMPLICIT_FIELDS,
+  unprovisionedAnchorWriteConsequence,
+} from './validate-hook-body-writes.js';
+import {
+  indexUnprovisionedAnchors,
+  unprovisionedAnchorCause,
+  unprovisionedAnchorHint,
+} from './system-fields.js';
 import { walkFlowNodes, flowNodeLabel } from './flow-walk.js';
 
-export type FlowNodeWriteSeverity = 'error';
+/**
+ * `error` for the existence verdict — a literal key against a literal object is
+ * a certainty (see the module note). [#8663] `warning` for the provenance one:
+ * the same widening `validateFlowTemplatePaths` carries, for the same reason.
+ * The two questions have different certainties, so they cannot share a
+ * severity; the suite that runs this rule is severity-agnostic by contract and
+ * carries each finding's own value through.
+ */
+export type FlowNodeWriteSeverity = 'error' | 'warning';
 
 export interface FlowNodeWriteFinding {
-  /** Always `error` — a literal key against a literal object is a certainty (see module note). */
+  /** Per-finding — see {@link FlowNodeWriteSeverity}, which says why it is not a constant. */
   severity: FlowNodeWriteSeverity;
   rule: string;
   /** Human-readable location, e.g. `flow "close_deal" › node "Mark won"`. */
@@ -103,6 +121,21 @@ export interface FlowNodeWriteFinding {
 
 // Rule id (registry entry).
 export const FLOW_NODE_WRITE_UNKNOWN_FIELD = 'flow-node-write-unknown-field';
+
+/**
+ * [#8663] The flow-node twin of `hook-body-write-unprovisioned-anchor`. This
+ * rule reached the same blind spot from the same direction: it imports
+ * {@link IMPLICIT_FIELDS} from the hook rule, so it inherited the set's
+ * object-independence along with its contents.
+ *
+ * ⚠️ `warning`, NOT this rule's usual `error`. The existence verdict gates
+ * because a literal key against a literal object is a certainty; the provenance
+ * verdict is a claim about a REMOTE schema this repo cannot see, so it advises.
+ * Reclassifying it upward would convert a silent case straight into a build
+ * break — the shape ADR-0072 D1 forbids, at the one severity where it cannot be
+ * ignored.
+ */
+export const FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR = 'flow-node-write-unprovisioned-anchor';
 
 // ─── The covered-node ledger ────────────────────────────────────────────────
 //
@@ -188,6 +221,8 @@ export function validateFlowNodeWrites(stack: AnyRec): FlowNodeWriteFinding[] {
 
   // Built lazily: a stack whose flows carry no write node never pays it.
   let objectFields: Map<string, Set<string>> | null = null;
+  // [#8663] Non-empty only for a stack carrying an ADR-0015 `external` object.
+  let anchors: ReadonlyMap<string, ReadonlySet<string>> | null = null;
 
   flows.forEach((flow, flowIndex) => {
     const flowName = typeof flow.name === 'string' && flow.name ? flow.name : `#${flowIndex}`;
@@ -213,6 +248,7 @@ export function validateFlowNodeWrites(stack: AnyRec): FlowNodeWriteFinding[] {
       if (!objectName) return; // templated / dynamic object — resolved at run time
 
       objectFields ??= indexObjectFields(stack);
+      anchors ??= indexUnprovisionedAnchors(stack);
       // Cross-package objects and objects declaring no fields at all (external /
       // datasource-introspected schemas) are both unjudgeable, and this rule
       // gates — see {@link judgeableFieldsOf}, which is where that guard now
@@ -226,7 +262,24 @@ export function validateFlowNodeWrites(stack: AnyRec): FlowNodeWriteFinding[] {
       const nodeWhere = regionTrail ? `${regionTrail} › node "${nodeName}"` : `node "${nodeName}"`;
 
       for (const fieldName of written) {
-        if (known.has(fieldName) || IMPLICIT_FIELDS.has(fieldName)) continue;
+        // An author-DECLARED column wins outright — on a federated object it
+        // maps a remote column the author vouches for (#7859's direction).
+        if (known.has(fieldName)) continue;
+        if (IMPLICIT_FIELDS.has(fieldName)) {
+          // [#8663] Implicitly writable SOMEWHERE is not provisioned HERE.
+          if (!anchors.get(objectName)?.has(fieldName)) continue;
+          findings.push({
+            severity: 'warning',
+            rule: FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR,
+            where: `flow "${flowName}" › ${nodeWhere}`,
+            path: `${nodePath}.config.fields.${fieldName}`,
+            message:
+              `${node.type} writes '${fieldName}', and ${unprovisionedAnchorCause(objectName, fieldName)} — ` +
+              unprovisionedAnchorWriteConsequence(),
+            hint: unprovisionedAnchorHint(objectName, fieldName),
+          });
+          continue;
+        }
         // A dotted key addresses a nested path, not a top-level column — the
         // document drivers forward it verbatim. Not statically a missing field.
         if (fieldName.includes('.')) continue;

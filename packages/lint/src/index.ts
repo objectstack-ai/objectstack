@@ -484,6 +484,7 @@ export {
   HOOK_BODY_WRITE_PATTERN_IDS,
   HOOK_BODY_WRITE_EXCLUSIONS,
   HOOK_BODY_WRITE_UNKNOWN_FIELD,
+  HOOK_BODY_WRITE_UNPROVISIONED_ANCHOR,
 } from './validate-hook-body-writes.js';
 export type {
   HookBodyWriteFinding,
@@ -506,6 +507,7 @@ export {
   ACTION_RECORD_WRITE_PATTERN_IDS,
   ACTION_BODY_WRITE_EXCLUSIONS,
   ACTION_BODY_WRITE_UNKNOWN_FIELD,
+  ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR,
   ACTION_RECORD_WRITE_DISCARDED,
 } from './validate-action-body-writes.js';
 export type {
@@ -522,6 +524,7 @@ export type {
 export {
   validateFlowNodeWrites,
   FLOW_NODE_WRITE_UNKNOWN_FIELD,
+  FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR,
   FLOW_WRITE_NODE_TYPES,
   FLOW_WRITE_NODE_TYPES_DEFERRED,
 } from './validate-flow-node-writes.js';

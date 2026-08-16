@@ -9,6 +9,7 @@ import {
   ACTION_RECORD_WRITE_PATTERN_IDS,
   ACTION_BODY_WRITE_EXCLUSIONS,
   ACTION_BODY_WRITE_UNKNOWN_FIELD,
+  ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR,
   ACTION_RECORD_WRITE_DISCARDED,
 } from './validate-action-body-writes.js';
 import {
@@ -444,5 +445,59 @@ describe('validateActionBodyWrites — scope and shape tolerance', () => {
     expect(() =>
       validateActionBodyWrites(stackWith("await ctx.api.object('crm_deal').update({ stag: ; if (")),
     ).not.toThrow();
+  });
+});
+
+// ─── [#8663] Unprovisioned injected anchors on the WRITE axis ────────────────
+//
+// This rule shares IMPLICIT_FIELDS with the hook rule, so it shared the set's
+// object-independence too: on an ADR-0015 `external` object the injected anchor
+// is registered but has no column behind it. See the hook rule's test block for
+// the measured runtime chain the diagnostic's wording reports.
+const federatedObject = {
+  name: 'wh_order',
+  datasource: 'warehouse',
+  external: { remoteName: 'fact_orders' },
+  fields: { order_id: { type: 'text' }, amount: { type: 'number' } },
+};
+const localTwin = { name: 'wh_order', fields: { order_id: { type: 'text' }, amount: { type: 'number' } } };
+
+function actionStackOver(object: Record<string, unknown>, source: string) {
+  return {
+    objects: [object],
+    actions: [{ name: 'stamp_owner', label: 'Stamp', objectName: 'wh_order', body: { language: 'js', source } }],
+  };
+}
+
+describe('[#8663] validateActionBodyWrites — unprovisioned anchor writes', () => {
+  it('warns when an action body writes an anchor the federated object has no storage for', () => {
+    const findings = validateActionBodyWrites(
+      actionStackOver(federatedObject, "await ctx.api.object('wh_order').updateById(ctx.recordId, { owner_id: ctx.user.id });"),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].where).toBe('action "stamp_owner" › body');
+    expect(findings[0].path).toBe('actions[0].body.source');
+    expect(findings[0].message).toContain("'owner_id'");
+    expect(findings[0].message).toContain('external object (ADR-0015)');
+    expect(findings[0].message).toContain('can never land');
+  });
+
+  it('the same write without the external binding is silent', () => {
+    expect(
+      validateActionBodyWrites(
+        actionStackOver(localTwin, "await ctx.api.object('wh_order').updateById(ctx.recordId, { owner_id: ctx.user.id });"),
+      ),
+    ).toEqual([]);
+  });
+
+  it('an author-declared column of the same name is never flagged', () => {
+    const declared = { ...federatedObject, fields: { ...federatedObject.fields, owner_id: { type: 'text' } } };
+    expect(
+      validateActionBodyWrites(
+        actionStackOver(declared, "await ctx.api.object('wh_order').updateById(ctx.recordId, { owner_id: ctx.user.id });"),
+      ),
+    ).toEqual([]);
   });
 });

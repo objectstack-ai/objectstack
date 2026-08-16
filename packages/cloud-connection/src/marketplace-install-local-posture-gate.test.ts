@@ -1,8 +1,28 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [ADR-0120 D5e] The `isolated`-posture install gate for installation-wide
- * (`'global'`) uniques, exercised at the real install seam.
+ * ⛔ [#8976] THIS FILE IS NOT AN AUTHORIZATION TEST. Do not read it as one.
+ *
+ * The word "gate" here means the ADR-0120 D5e CONFIRMATION CEREMONY — a
+ * question about the manifest's data shape — and the caller answers it
+ * THEMSELVES, by putting `confirmGlobalUniques` in their own request body (see
+ * "confirming records the attestation…" below, and the `confirmGlobalUniques:
+ * true` in almost every case here). A check whose verdict is read out of the
+ * request being checked can say nothing whatsoever about who may call the
+ * route. This file was green for the entire period in which
+ * `POST /install-local` admitted a caller with no session at all, on a bare
+ * `x-user-id` header, straight through to `syncSchemas()` against the shared
+ * database.
+ *
+ * Auditing whether install-local is gated? The file that answers that is
+ * `marketplace-install-local-capability-enumeration.test.ts` — every mutating
+ * route, derived from the plugin's own route table, against three principals.
+ * The final `describe` in this file asserts that companion still exists, so
+ * this pointer cannot quietly rot into a wrong answer.
+ *
+ * [ADR-0120 D5e] What this file DOES pin: the `isolated`-posture install gate
+ * for installation-wide (`'global'`) uniques, exercised at the real install
+ * seam.
  *
  * What is being pinned, and why each half matters:
  *
@@ -24,10 +44,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
+import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 import { LocalManifestSource } from './local-manifest-source.js';
 
 type Handler = (c: any) => Promise<any>;
@@ -127,8 +148,8 @@ async function mountInstall(storageDir: string) {
     const rawApp = makeRawApp();
     const { ctx, fire } = makeCtx(rawApp, {
         manifest: { register },
-        auth: { api: { getSession: async () => ({ user: { id: 'usr_installer' } }) } },
-        objectql: { syncSchemas },
+        auth: installerAuthService('usr_installer'),
+        objectql: withInstallerGrants({ syncSchemas }, 'usr_installer'),
     });
     const plugin = new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir });
     await plugin.start(ctx as any);
@@ -364,5 +385,23 @@ describe('ADR-0120 D5e — the gate is NOT a boot-time check (#4884)', () => {
         const warned = (ctx.logger.warn as any).mock.calls.map((c: any[]) => String(c[0])).join('\n');
         expect(warned).not.toContain('UNIQUE_SCOPE');
         expect(warned).not.toContain('installation-wide unique');
+    });
+});
+
+/**
+ * [#8976] The scope disclaimer at the top of this file, made EXECUTABLE.
+ *
+ * A prose pointer to "the file that actually pins authorization" is worth
+ * exactly as much as its target's continued existence, and nothing warns you
+ * when a rename or a delete turns it into a confident wrong answer — which is
+ * the precise failure this whole card is about: a green test that reads as
+ * coverage it does not provide. So the pointer is asserted, not merely written.
+ * If the enumeration pin moves, this goes red and the sentence above gets
+ * corrected instead of quietly lying to the next auditor.
+ */
+describe('#8976 — what this file does NOT cover', () => {
+    it('points at the companion that DOES pin authorization, and it still exists', () => {
+        expect(existsSync(new URL('./marketplace-install-local-capability-enumeration.test.ts', import.meta.url)))
+            .toBe(true);
     });
 });

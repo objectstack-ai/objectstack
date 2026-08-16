@@ -40,11 +40,34 @@
  *
  *  - **Prefix with `record.`** A bare `f_boolean` is an undeclared variable on
  *    the record-header path and throws (fail-closed hide).
- *  - **Null-guard before you traverse or call.** `record.f_json.nested.k` and
- *    `record.f_tags.size()` FAULT on a record where the field is `null` —
- *    `null` has no members and no methods. `record.f_json != null &&
- *    record.f_json.nested.k == "v"` is the portable form, and it is why the
- *    Minimal specimen is worth having.
+ *  - **Guard with `has(record.x) && record.x != null` before you traverse,
+ *    call, order or subtract.** TWO failure modes are live on this face, and
+ *    each half of that conjunction covers exactly one. `record.f_json.nested.k`
+ *    and `record.f_tags.size()` FAULT where the field is `null` (`null` has no
+ *    members and no methods) — the `!= null` half. And `record.f_json` FAULTS
+ *    outright with `No such key` on a LIST ROW that never projected the column
+ *    — the `has()` half — because this face binds whatever record the client
+ *    already fetched and stays sparse by decision (#4953 clause 2). Neither
+ *    half alone is a guard; both faults are fail-closed, so the button just
+ *    silently is not there.
+ *
+ *    ⛔ Do not restate the rule here. The CANONICAL statement, with the
+ *    measured three-binding table, lives in `materializeDeclaredFields`'s doc
+ *    comment (`packages/objectql/src/declared-fields.ts`) — this file used to
+ *    carry a second, differently worded version of it that said the opposite
+ *    ("`record.f_json != null && …` is the portable form"), which is #8975.
+ *
+ *    This file is where both halves are falsifiable in a browser: the Minimal
+ *    specimen exercises the NULL half, and the default list's `$select`
+ *    projection — which omits `f_lookup` / `f_lookups` and includes
+ *    `f_textarea` — exercises the ABSENT half on the very same records.
+ *
+ *    ⚠️ The specimens below still spell only the `!= null` half. That is the
+ *    platform-wide state rather than an exception here (0 of the 34 authored
+ *    record-scoped action predicates across both repos use `has()`), and
+ *    migrating them changes what this LIVE fixture demonstrates, so it is
+ *    tracked separately in #8990. Read this bullet for what to write today;
+ *    read the specimens for what the runtime does with the older form.
  *  - **`contains()` / `matches()`, never `startsWith()` / `endsWith()`.** The
  *    latter two are not CEL — objectui routes them to its legacy JS evaluator
  *    with a deprecation warning, and the SERVER's engine has no answer for

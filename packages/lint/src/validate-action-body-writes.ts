@@ -78,10 +78,16 @@
 
 import { findClosestMatches, formatSuggestion } from '@objectstack/spec/shared';
 import {
+  indexUnprovisionedAnchors,
+  unprovisionedAnchorCause,
+  unprovisionedAnchorHint,
+} from './system-fields.js';
+import {
   extractHookBodyWriteSet,
   indexObjectFields,
   judgeableFieldsOf,
   IMPLICIT_FIELDS,
+  unprovisionedAnchorWriteConsequence,
   HOOK_BODY_WRITE_PATTERNS,
   type BodyWritePatternExclusion,
   type HookBodyWritePattern,
@@ -104,6 +110,13 @@ export interface ActionBodyWriteFinding {
 // Rule ids (registry entries). Two, from one walk — see the header.
 export const ACTION_BODY_WRITE_UNKNOWN_FIELD = 'action-body-write-unknown-field';
 export const ACTION_RECORD_WRITE_DISCARDED = 'action-record-write-discarded';
+
+/**
+ * [#8663] The action-surface twin of `hook-body-write-unprovisioned-anchor`.
+ * Same question, same wording, same `warning` severity — this rule and the hook
+ * rule share {@link IMPLICIT_FIELDS}, so they shared its blind spot too.
+ */
+export const ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR = 'action-body-write-unprovisioned-anchor';
 
 // ─── The applicable-pattern ledger ──────────────────────────────────────────
 //
@@ -279,6 +292,8 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
   // Built lazily: only the unknown-field check needs it, so a stack whose
   // action bodies never reach `ctx.api` never pays it.
   let objectFields: Map<string, Set<string>> | null = null;
+  // [#8663] Non-empty only for a stack carrying an ADR-0015 `external` object.
+  let anchors: ReadonlyMap<string, ReadonlySet<string>> | null = null;
 
   for (const site of sites) {
     // Cheap prefilter, narrower than the extractor's own: every consumed
@@ -326,6 +341,7 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
 
     if (writes.length === 0) continue;
     objectFields ??= indexObjectFields(stack);
+    anchors ??= indexUnprovisionedAnchors(stack);
     const reported = new Set<string>();
 
     for (const w of writes) {
@@ -340,7 +356,25 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
 
       const known = judgeableFieldsOf(objectFields, w.object);
       if (!known) continue; // cross-package, or no declared fields — cannot judge
-      if (IMPLICIT_FIELDS.has(w.field) || known.has(w.field)) continue;
+      // An author-DECLARED column is the author's, on a federated object too
+      // (it maps a remote column they vouch for) — never either finding.
+      if (known.has(w.field)) continue;
+      if (IMPLICIT_FIELDS.has(w.field)) {
+        // [#8663] Implicitly writable SOMEWHERE is not provisioned HERE.
+        if (!anchors.get(w.object)?.has(w.field)) continue;
+        reported.add(dedupeKey);
+        findings.push({
+          severity: 'warning',
+          rule: ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR,
+          where,
+          path: site.path,
+          message:
+            `body calls ctx.api.object('${w.object}').${w.method ?? 'update'}(…) writing '${w.field}', and ` +
+            `${unprovisionedAnchorCause(w.object, w.field)} — ${unprovisionedAnchorWriteConsequence()}`,
+          hint: unprovisionedAnchorHint(w.object, w.field),
+        });
+        continue;
+      }
 
       reported.add(dedupeKey);
       findings.push({
