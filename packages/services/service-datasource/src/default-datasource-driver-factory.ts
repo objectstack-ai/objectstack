@@ -46,6 +46,7 @@
  */
 
 import { join } from 'node:path';
+import { parse as parsePostgresConnectionString } from 'pg-connection-string';
 import { resolveDriverId, urlUserinfoUsername, type BuiltinDriverId } from '@objectstack/spec/data';
 import type {
   IDatasourceDriverFactory,
@@ -370,6 +371,59 @@ function resolveSslOption(spec: DatasourceConnectionSpec): unknown {
   return shorthand == null ? undefined : shorthand;
 }
 
+/**
+ * What this factory says when `pg`'s own parser rejects a postgres DSN that
+ * carries a bound credential (#8873).
+ *
+ * Reached only on the secret-bound path, and only for a url `pg` itself cannot
+ * read: {@link postgresDsnFields} runs the client's own parser, so anything it
+ * rejects would raise the identical error at connect time today (measured on
+ * pg 8.22.0 — `postgresql://app@h1:5432,h2:5433/app` throws `ERR_INVALID_URL`
+ * from `new ConnectionParameters` exactly as it does from `parse`). The failure
+ * is therefore moved earlier and named, never invented: this datasource has
+ * never been able to open a connection.
+ *
+ * ⚠️ The url is deliberately NOT echoed. It is the one string in this arm that
+ * can still carry a credential — a stored pre-#8082 row may embed a userinfo
+ * password, and a pre-#8337 row a `?password=` — which is why `pg` redacts it
+ * in its own error (`input: '*****REDACTED*****'`, measured). A message that
+ * quoted the url to be helpful would put that credential into every log that
+ * records a failed datasource build.
+ */
+function unparseablePostgresDsnMessage(args: { datasource?: string; cause: unknown }): string {
+  const where = args.datasource ? `datasource '${args.datasource}'` : 'this postgres datasource';
+  const cause = args.cause instanceof Error ? args.cause.message : String(args.cause);
+  return (
+    `The postgres ${where} binds a credential to a connection url that pg's own parser rejects `
+    + `(${cause}). The url is not shown here because it may itself embed a credential. `
+    + `pg raises the same error when it opens a connection, so this datasource cannot connect `
+    + `with or without the bound secret — correct \`config.url\` to a form pg accepts `
+    + `(\`postgresql://[user@][host][:port][/dbname][?params]\`, single host only).`
+  );
+}
+
+/**
+ * `pg`'s own decomposition of a DSN, used as the connection config itself.
+ *
+ * Parsing with the client's parser rather than a hand-rolled one is the whole
+ * safety argument for {@link buildSqlConnection}'s postgres DSN branch: the
+ * fields handed to `pg` are the fields `pg` would have derived from the same
+ * string, by construction, so there is no second dialect of `postgresql://…`
+ * in this repo to drift out of agreement with the client. It also carries the
+ * parts a partial parse would silently drop — `pg-connection-string` copies
+ * EVERY query parameter into the config, which is how `?sslmode=`,
+ * `?application_name=`, `?options=` and `?connect_timeout=` reach the client at
+ * all (the same mechanism that makes `?password=` a credential spelling, which
+ * `PostgresConfigSchema` refuses at authoring since #8337).
+ */
+function postgresDsnFields(url: string, datasource?: string): Record<string, unknown> {
+  try {
+    return parsePostgresConnectionString(url) as unknown as Record<string, unknown>;
+  } catch (err) {
+    throw new Error(unparseablePostgresDsnMessage({ datasource, cause: err }));
+  }
+}
+
 /** Build the Knex `connection` for a SQL driver from a spec's config + secret. */
 function buildSqlConnection(spec: DatasourceConnectionSpec, client: 'pg' | 'better-sqlite3'): unknown {
   const cfg = (spec.config ?? {}) as Record<string, unknown>;
@@ -387,14 +441,103 @@ function buildSqlConnection(spec: DatasourceConnectionSpec, client: 'pg' | 'bett
   const ssl = resolveSslOption(spec);
   const url = cfg.url as string | undefined;
   if (url) {
-    // For a DSN, a separately-supplied secret overrides the embedded password.
-    // TLS still applies: `sslmode` in a DSN and the `ssl` option are separate
-    // channels to `pg`, and a datasource that declares one should get it.
-    return {
-      connectionString: url,
-      ...(spec.secret ? { password: spec.secret } : {}),
+    // The sibling keys, in the order they have always been layered. `pg` lets
+    // a DSN's own `sslmode` override the datasource's `ssl` block and a DSN's
+    // `?application_name=` override `config.applicationName`; both branches
+    // below keep that precedence by putting the DSN's contribution last.
+    const siblings = {
       ...(ssl !== undefined ? { ssl } : {}),
       ...pgConnectionExtras(cfg),
+    };
+
+    // Nothing bound: byte-for-byte the shape this arm has always emitted. The
+    // blast radius of #8873 is "a secret was bound", so a datasource that binds
+    // none must not change at all — including keeping the DSN unparsed here, so
+    // a url `pg` rejects still fails where it fails today.
+    if (!spec.secret) return { connectionString: url, ...siblings };
+
+    // A bound secret, on the DSN branch (#8873).
+    //
+    // ## Why `connectionString` is gone rather than accompanied
+    //
+    // This arm used to return `{ connectionString: url, password: spec.secret }`
+    // and it was the one arm that LOOKED right — an explicit secret branch and a
+    // comment declaring the intent — while dropping the credential one layer
+    // below, where no assertion on this function's output can see it. `pg`
+    // merges a DSN over the config rather than under it:
+    //
+    // ```js
+    // // pg 8.22.0, lib/connection-parameters.js
+    // if (config.connectionString) {
+    //   config = Object.assign({}, config, parse(config.connectionString))
+    // }
+    // ```
+    //
+    // So the injected password is destroyed TWICE over, by two independent
+    // mechanisms (both measured on pg 8.22.0 + knex 3.3.0):
+    //
+    //  1. `parse()` emits a `password` key for every url — `''` when the DSN
+    //     carries no userinfo password — and `Object.assign` copies it over the
+    //     injected value. `val('password', …)` then reads `''`, falls through to
+    //     `PGPASSWORD` and `defaults`, and the effective password is `null`.
+    //  2. knex hides the key first: `setHiddenProperty` makes `password` a
+    //     NON-ENUMERABLE own property of `connectionSettings`, and
+    //     `Object.assign` copies only enumerable ones — so it never reaches the
+    //     merge in the first place.
+    //
+    // Measured before this change, `postgresql://app@db.internal:5432/app` with
+    // a secret bound: effective password `null`. With a stored pre-#8082 url
+    // embedding `app:embedded-legacy@`: effective password `'embedded-legacy'`
+    // — the DSN beating the credential an operator deliberately bound.
+    //
+    // ⛔ Not fixable by symmetry with either sibling arm, and this is the whole
+    // point of the card: `mysql2` merges a `uri` UNDER its sibling keys (the
+    // explicit key wins, which is why `buildMysqlConnection` returns
+    // `{ uri, password }`), and the mongo arm rides beside an untouched url in
+    // `options.auth`. `pg` merges the other way, so the only place a credential
+    // survives is a config the client will not re-parse.
+    //
+    // ## Why pg's own parse, and not a re-serialised userinfo
+    //
+    // The competing remedy — keep `connectionString` and splice the secret into
+    // the userinfo — was measured and rejected on two counts:
+    //
+    //  - **It does not even fix the defect.** `pg-connection-string` honours a
+    //    `?password=` query parameter OVER the userinfo (the reason #8337
+    //    refuses that spelling at authoring). Measured: a stored pre-#8337 url
+    //    `postgresql://app@db.internal:5432/app?password=from-query-param`
+    //    with the secret spliced into the userinfo still resolves to
+    //    `'from-query-param'`. Overriding the parsed `password` key wins over
+    //    every spelling, because it is applied after the parse.
+    //  - **It would materialise the cleartext credential into a string nothing
+    //    hides.** Measured on knex 3.3.0: with the secret in a discrete
+    //    `password`, `JSON.stringify(client.connectionSettings)` prints
+    //    `{"host":…,"user":"app"}` and the secret is absent; with the secret
+    //    spliced into the url it prints the whole DSN, credential included.
+    //    That is also the shape #8082 refuses to let anyone author and
+    //    `redactUrlPassword` exists to scrub — synthesising it at connect time
+    //    would push the platform's own hardest-to-redact credential spelling
+    //    back into circulation.
+    //
+    // Everything except `password` is therefore what `pg` would have computed
+    // from the same url: verified key-by-key (`user`/`database`/`port`/`host`/
+    // `ssl`/`application_name`/`statement_timeout`/`options`/`connect_timeout`/
+    // `client_encoding`) across the sslmode, unix-socket, `?options=`,
+    // credential-free, embedded-password and no-userinfo forms — identical in
+    // every case.
+    //
+    // A url naming no user still gets the credential, unlike the mongo arm's
+    // deliberate no-op there. The asymmetry is mechanical, not a second policy:
+    // `MongoClient` cannot carry a password without a username and would turn a
+    // working anonymous connection into a guaranteed failure, whereas `pg` sends
+    // a password only when the server asks for one — so injecting cannot break
+    // a datasource that connects today, and refusing would drop a credential the
+    // operator bound. Making that contradictory pair loud belongs at the
+    // authoring door, where both halves are visible at once (#9041).
+    return {
+      ...siblings,
+      ...postgresDsnFields(url, spec.name),
+      password: spec.secret,
     };
   }
   return {
@@ -474,9 +617,12 @@ function buildSqlPool(spec: DatasourceConnectionSpec): Record<string, unknown> {
  * ⛔ Do NOT copy this shape to the postgres arm. `pg` does the OPPOSITE merge —
  * `Object.assign({}, config, parse(config.connectionString))`, i.e. the DSN
  * overrides the explicit key — so `{connectionString, password}` there resolves
- * to the DSN's own (absent) password. That is a live defect, filed separately;
- * it is NOT fixed by symmetry with this arm, and the two clients disagreeing is
- * exactly why each arm's precedence is measured rather than assumed.
+ * to the DSN's own (absent) password. That was a live defect for as long as this
+ * comment described it as one; #8873 closed it by dropping `connectionString`
+ * entirely on that branch and handing `pg` its own parse of the url with the
+ * credential attached. It was NOT fixed by symmetry with this arm, and the two
+ * clients disagreeing is exactly why each arm's precedence is measured rather
+ * than assumed.
  *
  * A DSN with NOTHING bound still passes through as the bare string, so a
  * datasource that never bound a secret is byte-for-byte unaffected.
@@ -661,8 +807,9 @@ function buildMongoUrl(spec: DatasourceConnectionSpec): string {
  * ⛔ Do NOT reach this shape by symmetry from the mysql arm. The clients merge
  * a DSN against explicit keys in OPPOSITE directions — `pg` merges
  * `parse(connectionString)` OVER the explicit config, which is why the postgres
- * arm looks correct and is broken one layer lower (filed separately). Each
- * arm's precedence is measured against its own client.
+ * arm looked correct while being broken one layer lower, and why #8873 had to
+ * close it with a THIRD shape again (no `connectionString` at all). Each arm's
+ * precedence is measured against its own client.
  *
  * ## Why a userinfo-free url gets NOTHING, deliberately
  *
