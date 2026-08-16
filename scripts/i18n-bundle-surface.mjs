@@ -58,7 +58,9 @@
  * and the registry module itself decides which forms are walked. Editing either
  * moves the same four bundles and matches no convention here, because neither
  * carries a filename that distinguishes it. Closing that edge needs an anchor
- * this module does not have; it is filed rather than guessed at.
+ * this module does not have, and the candidates trade off against each other
+ * rather than being one obvious shape, so it is filed rather than guessed at:
+ * issue 9144.
  */
 
 import { readFileSync } from 'node:fs';
