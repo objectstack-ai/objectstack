@@ -504,6 +504,25 @@ describe('FieldSchema', () => {
       }
     });
 
+    // [#8371 / PR #8936] Dotted filter heads are deliberately NOT judged at
+    // this field-agnostic schema door: the field-typed doors own them at query
+    // time (ingress `assertFilterFieldsExist` in @objectstack/metadata-protocol,
+    // engine `assertFilterIsMaterializable` in @objectstack/objectql, sharing
+    // spec's `classifyDottedFilterHead`), and the related-list query composed
+    // from this key reaches them like any other `where`. This pin holds the
+    // door PLACEMENT — parse-clean here, so a schema-side refusal (which
+    // cannot see the CHILD object's field types) does not creep in.
+    it('relatedListFilter leaves dotted heads to the field-typed engine doors (#8371)', () => {
+      const r = FieldSchema.safeParse({
+        name: 'account',
+        label: 'Account',
+        type: 'lookup',
+        reference: 'crm_account',
+        relatedListFilter: { 'project_id.name': 'Acme' },
+      });
+      expect(r.success).toBe(true);
+    });
+
     it('POSITIVE CONTROL: relatedListFilter with the macro/ISO spellings publishes cleanly', () => {
       for (const relatedListFilter of [
         { created_at: { $gte: '{30_days_ago}' } },
