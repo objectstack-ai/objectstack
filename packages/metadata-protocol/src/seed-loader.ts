@@ -260,6 +260,19 @@ export class SeedLoaderService implements ISeedLoaderService {
    * so the sampling is exact.
    */
   private summariesStale = 0;
+  /**
+   * [#9071] Per-{@link load} memo of "does this object declare a `name`
+   * column?", keyed by object name — the question {@link resolveFromDatabase}
+   * must answer before it may spell `where: { name }`.
+   *
+   * Memoised because the question is asked once per unresolved reference VALUE
+   * (hundreds per seeded boot) while its answer is a property of the object,
+   * and `resolveObjectDefinition` reaches the metadata store. Cleared at the
+   * top of every `load` for the same reason {@link summariesStale} is: a
+   * service instance outlives a load, and a publish between two loads can add
+   * the very column this answer is about.
+   */
+  private declaresNameColumnCache = new Map<string, boolean>();
 
   constructor(engine: IDataEngine, metadata: IMetadataService, logger: Logger) {
     this.engine = engine;
@@ -287,6 +300,9 @@ export class SeedLoaderService implements ISeedLoaderService {
     const allResults: SeedLoadResultParsed[] = [];
     // Per-load counter — a service instance can be reused across loads.
     this.summariesStale = 0;
+    // [#9071] Same per-load lifetime, same reason: a publish between two loads
+    // can add (or drop) the `name` column this memo answers about.
+    this.declaresNameColumnCache.clear();
 
     // When the caller pinned no target org (an in-process publish has no active
     // user session — the AI build agent's publish path), BUSINESS seed rows
@@ -1177,6 +1193,31 @@ export class SeedLoaderService implements ISeedLoaderService {
     const probeFields = [targetField];
     if (targetField !== DEFAULT_EXTERNAL_ID_FIELD) probeFields.push(DEFAULT_EXTERNAL_ID_FIELD);
     if (targetField !== 'id') probeFields.push('id');
+
+    // [#9071] Ask the registry before spelling `name`, instead of probing it
+    // blind. On an object that declares no `name` column the driver REFUSES
+    // the filter (`INVALID_FILTER`) rather than answering "no rows" — and it
+    // is right to: a predicate naming a column the object does not have never
+    // ran, so "no match" would be a lie (ADR-0110 D3 — a miss and a fault are
+    // different facts). The refusal is caught below and the chain moves on, so
+    // the probe costs nothing but the ERROR line it provokes — one per
+    // reference value, per pass, hundreds per seeded boot and per per-org
+    // replay, each reading exactly like a real failure.
+    //
+    // The remedy therefore has to be on THIS side: stop asking. Softening,
+    // catching-with-a-quieter-log or downgrading the driver's answer would
+    // keep provoking a fault and then hide it, which is strictly worse than
+    // the noise.
+    //
+    // Dropping the leg cannot change WHICH probe answers: on an object with no
+    // `name` column this probe could only ever throw, never match. When the
+    // registry cannot answer at all (object unknown to metadata AND to the
+    // engine's schema registry), the leg is KEPT — an unknown is not a denial,
+    // and the historical behaviour is the safe default.
+    if (probeFields.includes(DEFAULT_EXTERNAL_ID_FIELD) && !(await this.declaresNameColumn(targetObject))) {
+      probeFields.splice(probeFields.indexOf(DEFAULT_EXTERNAL_ID_FIELD), 1);
+    }
+
     for (const probeField of probeFields) {
       try {
         const where: Record<string, unknown> = { [probeField]: value };
@@ -1204,6 +1245,48 @@ export class SeedLoaderService implements ISeedLoaderService {
       }
     }
     return null;
+  }
+
+  /**
+   * [#9071] Does `objectName` declare the historical `name` column?
+   *
+   * The one question {@link resolveFromDatabase} must be able to answer before
+   * it may add the `name` leg to its probe chain. Answered from the SAME
+   * definition resolver the reference graph is built from
+   * ({@link resolveObjectDefinition} — the metadata service first, then the
+   * engine's own schema registry), so the loader cannot form one opinion about
+   * an object's columns here and a different one two methods up. That resolver
+   * is already imported and already called at boot, so this asks the registry
+   * a question it is standing right next to; no new dependency, no new seam.
+   *
+   * **`true` on an unknown**, deliberately. Three populations reach here: an
+   * object the metadata service knows (authoritative), one only the engine's
+   * registry knows (marketplace-installed packages — the reason
+   * `resolveObjectDefinition` has its fallback at all), and one NEITHER can
+   * describe. For the third the honest answer is "unknown", and an unknown is
+   * not a denial: keeping the leg preserves today's behaviour exactly, and the
+   * probe against a genuinely absent object fails on its first leg regardless.
+   * Answering `false` there would be this file making up a column list.
+   */
+  private async declaresNameColumn(objectName: string): Promise<boolean> {
+    const memoised = this.declaresNameColumnCache.get(objectName);
+    if (memoised !== undefined) return memoised;
+
+    let declared = true;
+    try {
+      const objDef = await this.resolveObjectDefinition(objectName);
+      const fields = objDef?.fields as Record<string, unknown> | undefined;
+      if (fields && typeof fields === 'object') {
+        declared = Object.prototype.hasOwnProperty.call(fields, DEFAULT_EXTERNAL_ID_FIELD);
+      }
+    } catch {
+      // The registry itself could not answer (store outage, unknown type).
+      // Same verdict as an unknown object: keep the historical leg rather than
+      // narrow the chain on a fact nobody established.
+    }
+
+    this.declaresNameColumnCache.set(objectName, declared);
+    return declared;
   }
 
   private async resolveDeferredUpdates(
