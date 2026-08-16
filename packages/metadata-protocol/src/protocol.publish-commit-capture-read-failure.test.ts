@@ -84,11 +84,22 @@ interface CommitItem {
 const keyOf = (w: Record<string, unknown>) =>
     `${w.type}|${w.name}|${w.organization_id ?? '__env__'}|${w.state ?? 'active'}|${w.package_id ?? '__nopkg__'}`;
 
+/**
+ * The overlay reads this fixture serves use flat equality plus `$or`, so those
+ * are the two shapes implemented — and every OTHER combinator is refused
+ * loudly rather than read as a field name (#8494). A double that silently
+ * answers a combinator it does not implement is wrong in the direction no
+ * assertion can see: `row['$and']` is `undefined`, so the clause "does not
+ * match" for a reason that has nothing to do with the data.
+ */
 function matchesWhere(row: Record<string, unknown>, where: Record<string, unknown>): boolean {
     for (const [k, v] of Object.entries(where)) {
         if (k === '$or') {
             if (!(v as Array<Record<string, unknown>>).some((c) => matchesWhere(row, c))) return false;
             continue;
+        }
+        if (k.startsWith('$')) {
+            throw new Error(`fake engine: unsupported combinator ${k}`);
         }
         // `undefined` = "dimension not constrained"; `null` = "must be NULL".
         if (v === undefined) continue;

@@ -37,6 +37,12 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
+// [#5619] The producer's OWN write-verb dispatch decisions (#4550 delete /
+// #5480 update), so the fake engine below cannot accept a call ObjectQL
+// refuses. From `@objectstack/metadata-core`, not `@objectstack/objectql` —
+// objectql depends on THIS package, so that import would close a dependency
+// cycle turbo rejects outright.
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { SeedLoaderService } from './seed-loader';
 
 interface StoreRow extends Record<string, unknown> {
@@ -69,7 +75,14 @@ function createEngine() {
             let records = store[objectName] ?? [];
             if (query?.where) {
                 const where = query.where;
-                records = records.filter((r) => Object.entries(where).every(([k, v]) => r[k] === v));
+                records = records.filter((r) => Object.entries(where).every(([k, v]) => {
+                    // REFUSE rather than guess: a combinator read as a field
+                    // name is a silently-wrong matcher, and this fixture only
+                    // ever receives flat equality (`organization_id`). Same
+                    // convention as `seed-loader-retry.test.ts`.
+                    if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+                    return r[k] === v;
+                }));
             }
             if (typeof query?.limit === 'number') records = records.slice(0, query.limit);
             return records;
@@ -92,6 +105,10 @@ function createEngine() {
             return record;
         }),
         update: vi.fn(async (objectName: string, data: Record<string, unknown>) => {
+            // The seed loader dispatches an update by the id carried IN `data`
+            // (no `where`), so the producer's own decision is asked in exactly
+            // that form — same call as `seed-loader-retry.test.ts`.
+            assertEngineUpdateDispatch(data, undefined);
             const records = store[objectName] ?? [];
             const idx = records.findIndex((r) => r.id === data.id);
             if (idx >= 0) {
@@ -100,7 +117,10 @@ function createEngine() {
             }
             return data;
         }),
-        delete: vi.fn(async () => ({ deleted: 1 })),
+        delete: vi.fn(async (_objectName: string, options?: { where?: Record<string, unknown> }) => {
+            assertEngineDeleteDispatch(options);
+            return { deleted: 1 };
+        }),
         count: vi.fn(async (objectName: string) => (store[objectName] ?? []).length),
         aggregate: vi.fn(async () => []),
     } as unknown as IDataEngine;
