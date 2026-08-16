@@ -360,21 +360,22 @@ PR 前合一次 main;③ 兄弟卡落地后再合一次;④ 冲突交合并队�
    > Worktree: `<repo>-issue-<n>`
    > Domain: `domain:<x>`
    > File surface: `<预期触碰的目录>` (stop on breach; explain in the report)
-   > Container & model: `<S 级机械卡 / M / L>`, `mode:subagent | mode:cloud`, `model: sonnet | opus | fable`
-   > Serial constraints cleared: `<点名同文件/同包的前驱 PR 与在飞认领;无则 "none">`
+   > Container & model: `<S 级机械卡 / M / L>`, `mode:subagent | mode:cloud`, `model: sonnet | opus | fable`(档位引当次 `node scripts/pm/dispatch-gates.mjs --tier <paths>` 输出,⛔ 不凭记忆)
+   > Serial constraints cleared: `<点名同文件/同包的前驱 PR 与在飞认领,及分诊点名的任意车道在飞兄弟卡中本卡 pin 断言其行为者;无则 "none">`
 
-末行把「查过串行约束」变成落在评论里的读数(同包在飞单不点名等于没查);文件面对跨域例外单**必
-填**、普通单建议(定向在飞检查与 epic 领地判断的唯一输入);分支名必须带 issue 号(否
-则 `ls-remote | grep issue-<n>` 找不到)。**Assign 与评论是不可分割的一个动作,限流不拆它**
-—— 评论发不出就撤 assign 或压根不开始;配额没了就把整对排队,永不留半个。
+末行把「查过串行约束」变成落在评论里的读数(同包在飞单不点名等于没查);兄弟卡必读,因为文件面
+不相交挡不住**读耦合**:本卡 pin 断言兄弟卡在改的行为 ⇒ 各自全绿、先合者令后者 CI 无因变红;派
+发令点名跨车道兄弟时**应**注明本卡 pin 是否断言其面,是则在用例内预登记翻转触发词(兄弟行为落
+地即变红:删除或反转,⛔ 不修绿)。文件面对跨域例外单**必填**、普通单建议(定向在飞检查与 epic
+领地判断的唯一输入);分支名必须带 issue 号(否则 `ls-remote | grep issue-<n>` 找不到)。**Assign
+与评论是不可分割的一个动作,限流不拆它**:发不出评论就撤 assign 或不开始;配额尽则整对排队,永不留半个。
 3. **竞态复读**:自己的认领评论上墙后重读全线程 —— assignment 幂等,两个 agent 都会「成功」,**
    认领评论时间戳是唯一仲裁**;更早的评论带不同 session ID/分支 ⇒ 你输了,回「already claimed
    — yielding」另选。**让行是交接不是退场**:连同让行评论交出已诊断的一切与 PM 侧已取的板面读
    数(复现命令、依赖路径、已确认的坑、在飞同文件PR、区域申报、串行约束),赢家不必重扫。
 
-dev 侧推分支要早 —— 远程分支是在飞工作最硬的证据。**Stale-claim reclaim**:认领
->~24h、承诺的分支不存在、无 PR ⇒ 视为死认领 —— 评论询问,再静默一窗后摘 assignee
-(注明原因)回队;有带提交的活分支的认领永不回收。
+dev 侧推分支要早 —— 远程分支是在飞工作最硬的证据。**Stale-claim reclaim**:认领 >~24h、承诺分支
+不存在、无 PR ⇒ 死认领 —— 评论询问,静默一窗后摘 assignee(注明原因)回队;有带提交活分支的认领永不回收。
 
 ### 派发
 
