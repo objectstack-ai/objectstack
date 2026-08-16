@@ -3,11 +3,18 @@
 
 /**
  * dispatch-gates (#7341 item 4) — map a card's file surface to the `check:*`
- * gate families that watch it, derived from the tree AT RUNTIME.
+ * gate families that watch it, and to the model tier its paths MANDATE, both
+ * derived from the tree AT RUNTIME.
  *
  *   node scripts/pm/dispatch-gates.mjs <path> [<path> ...]   # e.g. packages/spec/src/data/filter.zod.ts
  *   node scripts/pm/dispatch-gates.mjs --residue <path> ...  # + name every family the derivation did not place
+ *   node scripts/pm/dispatch-gates.mjs --tier <path> ...     # the tier verdict alone, for the claim comment
  *   node scripts/pm/dispatch-gates.mjs --self-test
+ *
+ * The tier half is a FLOOR from paths only, and it says so on every run: see
+ * MANDATORY_TIER_GLOBS for what it encodes (clause ①, a file-surface
+ * predicate) and what no path derivation can reach (clause ②, judged from the
+ * card's content).
  *
  * ## Why derived, never listed
  *
@@ -1036,6 +1043,181 @@ export function residueLines({ discovered, matched, undetermined, silent }, kind
 }
 
 // ---------------------------------------------------------------------------
+// Model-tier derivation — the half of the tier decision that IS a path question
+// ---------------------------------------------------------------------------
+
+/**
+ * The globs that MANDATE a model tier for any card whose file surface touches
+ * them, as DATA. This is the one list in this file besides CHANGE_KIND_GATES,
+ * and it is here for the same reason: it is enumerable, so a guard can hold it.
+ *
+ * ## Why a tier is derived here at all (#8640)
+ *
+ * Gate families used to be hand-recalled per card; this script exists because
+ * recall expires. The model tier had the same shape and had not been fixed: the
+ * PM recalled the mandatory roots and wrote free prose into the claim comment's
+ * `Container & model` line. Measured incident: a card whose surface included
+ * `.claude/skills/pm-dispatch/references/review-checklist.md` was claimed as
+ * "not under the fable-mandatory roots" and dispatched at opus. One
+ * misclassification sentence flowed unchecked from claim to dispatch to model
+ * choice, and only a downstream seat's skepticism caught it — at PR time, after
+ * the work was done, when the compensation available was a re-review rather
+ * than a re-dispatch. Nothing mechanical had compared the recorded surface
+ * against the mandatory globs, because nothing mechanical could: the globs
+ * lived only in prose.
+ *
+ * So the invariant this section installs is narrow and total: a mandatory path
+ * anywhere in the surface ⇒ the output cannot say otherwise. `deriveTier`
+ * refuses to return a result whose parts contradict each other and `tierLines`
+ * refuses to render one, in the same shape as the residue partition guard —
+ * a derivation that cannot complete exits non-zero rather than printing a wrong
+ * answer.
+ *
+ * ## What this derivation CANNOT promise, stated where it cannot be missed
+ *
+ * The mandatory-tier policy has two clauses and only the first is a question
+ * about paths:
+ *
+ *   - clause ①, encoded below: a card editing the PM dispatch skill is
+ *     `claude-fable-5`, references included. That is a file-surface predicate
+ *     and it is exactly what this script already takes as argv;
+ *   - clause ②, NOT encoded and deliberately not: a card that changes contract
+ *     accept/reject behaviour or widens the public surface is also
+ *     `claude-fable-5`. That is judged from the card's CONTENT — what the change
+ *     does to the contract — and a path cannot answer it. An ordinary-looking
+ *     surface (one package's source file) is the NORMAL shape of a clause-②
+ *     card.
+ *
+ * A path derivation that pretended to cover clause ② would produce the failure
+ * this whole file is written against, one level up: a "no mandate" line read as
+ * a clearance. So the no-mandate output says which clause it checked and which
+ * it cannot reach, every time, rather than leaving the reader to remember there
+ * were two. The output is a FLOOR, never a ceiling.
+ *
+ * The quota exemption (fable measured unavailable ⇒ opus, never lower) is a
+ * claim-time note about a model's availability, not a property of the file
+ * surface. This tool states the mandate; the seat records the exemption and its
+ * reason in the claim comment.
+ *
+ * ## Why the globs are matched with `hintCovers`, asymmetry included
+ *
+ * Same matcher as the gate half, so there is one path-comparison rule in this
+ * file rather than two — and so a glob gets the segment-boundary semantics for
+ * free: `.claude/skills/pm-dispatchers/x.md` is not under
+ * `.claude/skills/pm-dispatch/**`, which a string prefix would have mandated.
+ *
+ * `hintCovers` also matches in the other direction — an input that is an
+ * ANCESTOR of the glob (a surface declared as `.claude/skills`) counts as a
+ * hit. For gate matching that direction is a fabricated lead; here it is the
+ * correct one, because the error costs are not the same in the two halves. An
+ * over-matched gate pastes a wrong command into a prompt; an under-mandated
+ * tier crosses a maintainer guardrail and is only visible afterwards. A surface
+ * declared as a directory that CONTAINS a mandatory root may well touch it, so
+ * the derivation errs toward the mandate. Both directions are pinned in the
+ * self-test.
+ *
+ * ## Keeping this list from rotting
+ *
+ * Two guards, both live. Every declared glob must name a path that EXISTS in
+ * this tree — a renamed skill root would otherwise leave dead data that
+ * mandates nothing while reading as protection, which is the incident class
+ * itself. And two globs that cover one path with DIFFERENT tiers is a
+ * derivation this file cannot complete honestly (nothing here orders tiers), so
+ * it throws rather than picking one.
+ *
+ * ## One measured side effect of putting a path in a MODULE BODY
+ *
+ * Comment masking cannot reach a module-body string, so this glob is now a
+ * watch hint of this file's own source: measured, `extractWatchHints` yields 5
+ * hints here against 4 on the base, the new one being the glob itself. It is
+ * inert today because no check family resolves to THIS file — the gate that
+ * covers it is `check:pm-dispatch-gates`, which resolves to
+ * `check-dispatch-gates.mjs` and matches this file through that file's one
+ * constant. If the tool is ever wired as its own gate (a shape
+ * `check-dispatch-gates.mjs`'s header measures and refuses), this hint would
+ * start printing that gate as MATCHED for every card editing the PM skill —
+ * a fabricated lead. The refusal already recorded there is what keeps it inert;
+ * this note is so the next reader knows the cost is known, not unnoticed.
+ *
+ * The authority for the policy is the maintainer ruling quoted in the PM
+ * dispatch skill (2026-08-10 three-tier ruling, clause ① of its 强制条款).
+ * This table is a machine-readable copy of ONE predicate from it, not a second
+ * statement of the policy: when they disagree, the skill wins and this table is
+ * the thing to fix.
+ */
+export const MANDATORY_TIER_GLOBS = [
+  {
+    glob: '.claude/skills/pm-dispatch/**',
+    tier: 'claude-fable-5',
+    why: 'clause ① of the model-tiering ruling: a card editing the PM dispatch skill is fable-mandatory, references included — the skill is the lane\'s own operating protocol and a wrong edit propagates to every later dispatch',
+  },
+];
+
+/** The tier floor for a card with no mandate — the ruling's 最低下限. */
+export const TIER_FLOOR = 'sonnet';
+
+/** The default judgment tier for a card with no mandate — the ruling's 默认判断档. */
+export const TIER_DEFAULT = 'opus';
+
+/**
+ * Place a card's file surface against the mandatory globs. Pure over its
+ * inputs, so the self-test can drive every branch offline.
+ *
+ * Throws when two globs covering the same surface mandate DIFFERENT tiers:
+ * this file encodes no ordering over tiers, so choosing between them would be a
+ * guess printed as a derivation.
+ */
+export function deriveTier(paths, globs = MANDATORY_TIER_GLOBS) {
+  const hits = [];
+  for (const p of paths) {
+    for (const g of globs) {
+      if (hintCovers(g.glob, p)) hits.push({ path: p, glob: g.glob, tier: g.tier, why: g.why });
+    }
+  }
+  const tiers = [...new Set(hits.map((h) => h.tier))];
+  if (tiers.length > 1) {
+    throw new Error(
+      `mandatory tier is ambiguous for this surface: ${tiers.join(' vs ')} — ` +
+        'two globs cover it with different tiers and this script orders no tiers',
+    );
+  }
+  return { mandatory: hits.length > 0, tier: tiers[0] ?? null, hits, declared: globs.length };
+}
+
+/**
+ * Render the tier verdict. Throws on a result whose parts contradict each other
+ * — a hit with no tier, or a tier with no hit to justify it — because the one
+ * thing this section owes the reader is that a mandatory surface cannot print
+ * as anything else.
+ */
+export function tierLines(result) {
+  const { mandatory, tier, hits, declared } = result;
+  if (mandatory !== hits.length > 0 || mandatory !== Boolean(tier)) {
+    throw new Error(
+      `tier verdict is self-contradictory: mandatory=${mandatory}, tier=${tier ?? 'none'}, ` +
+        `${hits.length} hit(s) — a mandatory surface must print its mandate`,
+    );
+  }
+  const clause2 =
+    '  Clause ② is NOT reachable from paths: a card that changes contract accept/reject behaviour or widens the public' +
+    ' surface is fable-mandatory too, judged from the card CONTENT. This line is a FLOOR, never a clearance.';
+  if (!mandatory) {
+    return [
+      `Model tier — no path-derived mandate: the surface hits none of the ${declared} declared glob(s), derived here, not recalled.`,
+      `  The tier stays the PM's per-card judgment call (floor ${TIER_FLOOR} · default ${TIER_DEFAULT} · ceiling fable).`,
+      clause2,
+    ];
+  }
+  return [
+    `Model tier — MANDATORY: ${tier} (derived from the file surface, not recalled).`,
+    ...hits.map((h) => `  - ${h.path} ⇢ '${h.glob}' — ${h.why}`),
+    '  The only exit is the measured quota exemption (fable unavailable ⇒ opus, never lower), recorded with its reason' +
+      " in the claim comment's `Container & model` line.",
+    clause2,
+  ];
+}
+
+// ---------------------------------------------------------------------------
 // Live derivation
 // ---------------------------------------------------------------------------
 
@@ -1091,6 +1273,12 @@ function derive(paths, { showResidue = false } = {}) {
   }
 
   console.log(`dispatch-gates: ${byCheck.size} check famil(ies) discovered across ${workflows.length} workflow file(s) — derived at runtime, nothing listed in this script.\n`);
+  // The tier verdict prints on EVERY run, hit or not. Printing it only on a hit
+  // would make its absence mean two things at once — "no mandate" and "this
+  // build has no tier derivation" — and the claim comment is written from
+  // whatever the run said.
+  for (const line of tierLines(deriveTier(paths))) console.log(line);
+  console.log('');
   if (matched.size) {
     console.log('Local gates for this card (paste into the dispatch prompt):');
     for (const [check, { entry, hits }] of [...matched].sort()) {
@@ -1692,6 +1880,67 @@ function selfTest() {
   }
   t('a partition that does not account for every discovered family is REFUSED', refused);
 
+  // ── The model-tier derivation (#8640) ─────────────────────────────────────
+  //
+  // The incident these pin: a surface containing a pm-dispatch REFERENCES file
+  // was claimed as "not under the fable-mandatory roots" and dispatched at
+  // opus. Every direction of that judgment is asserted here — the root, the
+  // references half that was actually missed, a mixed surface where the
+  // ordinary paths must not dilute the mandate, and the ordinary surface that
+  // must NOT be mandated (a tool that mandates everything is ignored, which
+  // loses the guardrail by the other road).
+  const fableOf = (paths) => deriveTier(paths);
+  t('a pm-dispatch ROOT path is fable-mandatory', fableOf(['.claude/skills/pm-dispatch/SKILL.md']).tier === 'claude-fable-5');
+  t('a pm-dispatch REFERENCES path is fable-mandatory too — the half the incident missed', fableOf(['.claude/skills/pm-dispatch/references/review-checklist.md']).tier === 'claude-fable-5');
+  const mixed = fableOf(['packages/spec/src/data/filter.zod.ts', '.claude/skills/pm-dispatch/references/review-checklist.md']);
+  t('a MIXED surface is mandatory — one mandatory path decides, ordinary paths do not dilute it', mixed.mandatory && mixed.tier === 'claude-fable-5');
+  t('the mixed verdict reports the offending path, not just the verdict', mixed.hits.length === 1 && mixed.hits[0].path.endsWith('references/review-checklist.md'));
+  t('an ordinary surface carries no path-derived mandate', fableOf(['packages/spec/src/data/filter.zod.ts']).mandatory === false);
+  t("this tool's own file is not mandatory — the card that added this section reads itself correctly", fableOf(['scripts/pm/dispatch-gates.mjs']).mandatory === false);
+  // Segment boundaries, both directions of the shared matcher's asymmetry.
+  t('a sibling directory sharing a name PREFIX is not mandated', fableOf(['.claude/skills/pm-dispatchers/notes.md']).mandatory === false);
+  t('a surface declared as an ANCESTOR of a mandatory root IS mandated — the safe direction here', fableOf(['.claude/skills']).mandatory === true);
+  t('another skill under the same parent is not mandated', fableOf(['.claude/skills/verify/SKILL.md']).mandatory === false);
+  // The rendering is where the invariant is actually delivered: the claim
+  // comment quotes THESE lines.
+  const mandLines = tierLines(mixed).join('\n');
+  t('the mandatory rendering names the tier', mandLines.includes('claude-fable-5'));
+  t('the mandatory rendering says MANDATORY in a word a reader cannot skim past', mandLines.includes('MANDATORY'));
+  t('the mandatory rendering shows its provenance — the path and the glob that covered it', mandLines.includes('.claude/skills/pm-dispatch/references/review-checklist.md') && mandLines.includes(".claude/skills/pm-dispatch/**'"));
+  t('the mandatory rendering names the ONE exit, so a downgrade needs a stated reason', mandLines.includes('quota exemption') && mandLines.includes('opus, never lower'));
+  const plainLines = tierLines(fableOf(['packages/spec/src/data/filter.zod.ts'])).join('\n');
+  t('the no-mandate rendering claims no mandate', !plainLines.includes('MANDATORY'));
+  t('the no-mandate rendering names the floor and the default, so the judgment call has its band', plainLines.includes(TIER_FLOOR) && plainLines.includes(TIER_DEFAULT));
+  t('BOTH renderings state that clause ② is out of reach of paths — a no-mandate line is not a clearance', plainLines.includes('Clause ②') && mandLines.includes('Clause ②'));
+  t('the no-mandate rendering says how many globs it checked, so an empty table cannot read as a clearance', plainLines.includes(`${MANDATORY_TIER_GLOBS.length} declared glob`));
+  // Refusals: a contradiction is not printed, and an ambiguity is not guessed.
+  let tierRefused = false;
+  try {
+    tierLines({ mandatory: false, tier: null, hits: [{ path: 'x', glob: 'y', why: 'z' }], declared: 1 });
+  } catch {
+    tierRefused = true;
+  }
+  t('a verdict with a hit but no mandate is REFUSED, never rendered', tierRefused);
+  let ambiguityRefused = false;
+  try {
+    deriveTier(['.claude/skills/pm-dispatch/SKILL.md'], [
+      { glob: '.claude/skills/pm-dispatch/**', tier: 'claude-fable-5', why: 'a' },
+      { glob: '.claude/skills/**', tier: 'opus', why: 'b' },
+    ]);
+  } catch {
+    ambiguityRefused = true;
+  }
+  t('two globs mandating DIFFERENT tiers for one surface are REFUSED, not guessed between', ambiguityRefused);
+  // Live guards. A glob naming a path this tree does not have is dead data that
+  // mandates nothing while reading as protection — the incident class itself.
+  t('the mandatory table is not empty (the guard below is not vacuous)', MANDATORY_TIER_GLOBS.length > 0);
+  const deadGlobs = MANDATORY_TIER_GLOBS.filter(
+    (g) => !existsSync(join(ROOT, g.glob.replace(/\*\*?/g, '').replace(/\/+$/, ''))),
+  );
+  t(`every declared mandatory glob names a path this tree really has (dead: ${deadGlobs.map((g) => g.glob).join(', ') || 'none'})`, deadGlobs.length === 0);
+  t('every declared glob carries the tier it mandates and a reason', MANDATORY_TIER_GLOBS.every((g) => g.glob && g.tier && g.why));
+  t('the incident file is a real file, so the references case is a live claim and not a fixture', existsSync(join(ROOT, '.claude/skills/pm-dispatch/references/review-checklist.md')));
+
   let failed = 0;
   for (const [name, cond] of cases) {
     if (!cond) failed++;
@@ -1708,13 +1957,19 @@ const argvPaths = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 if (process.argv.includes('--self-test')) {
   selfTest();
 } else if (argvPaths.length === 0) {
-  console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] <path> [<path> ...] | --self-test');
+  console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] [--tier] <path> [<path> ...] | --self-test');
   process.exit(2);
 } else {
+  const paths = argvPaths.map((p) => p.replace(/^\.\//, ''));
   try {
-    derive(argvPaths.map((p) => p.replace(/^\.\//, '')), {
-      showResidue: process.argv.includes('--residue'),
-    });
+    // `--tier` answers the claim-time question alone: it reads no workflow and
+    // no check script, so it still answers on a tree where the gate derivation
+    // cannot run — and a claim comment is written before any of that matters.
+    if (process.argv.includes('--tier')) {
+      for (const line of tierLines(deriveTier(paths))) console.log(line);
+    } else {
+      derive(paths, { showResidue: process.argv.includes('--residue') });
+    }
   } catch (err) {
     console.error(`dispatch-gates: derivation failed — ${err.message}`);
     process.exit(2);
