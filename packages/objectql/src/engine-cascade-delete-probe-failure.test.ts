@@ -27,39 +27,59 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import type { ServiceObject } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 
-const acct = {
+/** The package id every fixture below is registered under. */
+const OWNER_PACKAGE = 'test-8895';
+
+/*
+ * The fixtures are typed as `ServiceObject` (and registered WITH their
+ * `packageId`) rather than left to inference, so this file adds nothing to
+ * `@objectstack/objectql`'s TEST_DEBT ledger — a shrink-only ratchet (#5278).
+ * Typing them is also what shows that `primaryKey` is not a declared field
+ * property: the registry provisions the primary key itself, so carrying it
+ * would be a silent no-op — which is why the sibling cascade fixtures' `id`
+ * declaration is not copied here.
+ */
+const acct: ServiceObject = {
     name: 'acct',
     label: 'Account',
     fields: {
-        id: { name: 'id', type: 'text' as const, primaryKey: true },
-        name: { name: 'name', type: 'text' as const },
+        id: { name: 'id', label: 'ID', type: 'text' as const },
+        name: { name: 'name', label: 'Name', type: 'text' as const },
     },
 };
 // required lookup → the defaulted set_null escalates to `restrict`
-const oppRestrict = {
+const oppRestrict: ServiceObject = {
     name: 'opp',
     label: 'Opportunity',
     fields: {
-        id: { name: 'id', type: 'text' as const, primaryKey: true },
-        name: { name: 'name', type: 'text' as const },
-        account: { name: 'account', type: 'lookup' as const, reference: 'acct', required: true },
-    },
-};
-// explicit cascade → the probe decides whether children are REMOVED
-const taskCascade = {
-    name: 'task',
-    label: 'Task',
-    fields: {
-        id: { name: 'id', type: 'text' as const, primaryKey: true },
-        title: { name: 'title', type: 'text' as const },
+        id: { name: 'id', label: 'ID', type: 'text' as const },
+        name: { name: 'name', label: 'Name', type: 'text' as const },
         account: {
             name: 'account',
+            label: 'Account',
             type: 'lookup' as const,
             reference: 'acct',
             required: true,
-            deleteBehavior: 'cascade',
+        },
+    },
+};
+// explicit cascade → the probe decides whether children are REMOVED
+const taskCascade: ServiceObject = {
+    name: 'task',
+    label: 'Task',
+    fields: {
+        id: { name: 'id', label: 'ID', type: 'text' as const },
+        title: { name: 'title', label: 'Title', type: 'text' as const },
+        account: {
+            name: 'account',
+            label: 'Account',
+            type: 'lookup' as const,
+            reference: 'acct',
+            required: true,
+            deleteBehavior: 'cascade' as const,
         },
     },
 };
@@ -155,7 +175,9 @@ describe('[#8895] cascadeDeleteRelations — a failed dependents probe must not 
         readCalls = stub.readCalls;
         engine.registerDriver(stub.driver, true);
         await engine.init();
-        for (const o of [acct, oppRestrict, taskCascade]) engine.registry.registerObject(o);
+        for (const o of [acct, oppRestrict, taskCascade]) {
+            engine.registry.registerObject(o, OWNER_PACKAGE);
+        }
     });
 
     // ── POSITIVE CONTROLS — the probe RUNS, so the guard's two real answers
