@@ -1009,6 +1009,41 @@ export function buildSharingMiddleware(
       // may write, exactly as the read path scopes finds. The verb is threaded
       // through so a bulk DELETE scopes to owned rows alone (no share widening),
       // while a bulk UPDATE keeps the edit-share widening (ADR-0111 D3).
+      //
+      // [#8792, maintainer ruling 2026-08-15] ⛔ This merge carries NO
+      // `markFilterSubtreeProvenance` and NO `vouchCallerWhereBeforeRewrite`,
+      // and that is RULED, not an oversight. #8220 declares the mark for
+      // READ-scope merge boundaries; write-scope refusal semantics stay
+      // deliberately unspecified rather than inherited from it. So the
+      // asymmetry with the read path above — which marks each injected scope
+      // `'policy'` and vouches the caller's `where` `'author'` — is the ruled
+      // boundary itself. ⛔ Do not "complete" the pattern here. Why:
+      //
+      //  - nothing is disclosed by the omission. Unmarked ⇒ WITHHELD, so a
+      //    cross-field refusal raised anywhere in this composed tree already
+      //    keeps the #7929 redaction. Unmarked is the SAFE fail direction, and
+      //    it is what happens today;
+      //  - marking the injected filter `'policy'` would therefore change no
+      //    behaviour at all, and the only thing the `'author'` vouch would ADD
+      //    is the author's own diagnostic on the author's own predicate — an
+      //    author-experience gain, never a disclosure fix;
+      //  - ⚠️ and that gain is not free, which is the real reason. Vouching the
+      //    caller's `where` on a WRITE boundary WIDENS what a bulk
+      //    update/delete refusal is permitted to name, on a boundary whose
+      //    current behaviour is exactly that redaction. Widening a disclosure
+      //    surface is a product decision wearing a lint's clothing;
+      //  - and there is no inherited answer to widen it BY. A bulk write that
+      //    refuses has already passed the per-verb gate (ADR-0111 D3) and the
+      //    `probeAuthoredRowWrite` deferral above, so "what may a refusal name
+      //    here" is a question read scope never had to answer.
+      //
+      // Re-open trigger, named by the ruling so this is not a permanent "no":
+      // a real report of an author unable to diagnose a bulk-write refusal on
+      // their own predicate. That makes the extension a pulled feature with a
+      // consumer attached, and it returns as a decision — with write-scope
+      // refusal semantics to specify and pin at a real driver, and #8836's
+      // request-scoped invariant to carry (no filter object that can be
+      // vouched `'author'` may outlive the request that vouched it).
       let writeFilter = await service.buildWriteFilter(ctx.object, exec ?? {}, verb);
       // [ADR-0090 D10] Intersect the delegator's writable set for on-behalf-of.
       if (exec?.onBehalfOf?.userId) {
@@ -1018,6 +1053,10 @@ export function buildSharingMiddleware(
           onBehalfOf: undefined,
           __writeScope: exec.__delegatorWriteScope,
         }, verb);
+        // [#8792] Unmarked deliberately too — same ruling, same reasons as
+        // above, not repeated here. Its read-path twin (the delegator's
+        // `buildReadFilter`) IS marked `'policy'`; that difference is the ruled
+        // read/write boundary, not drift between two copies of one pattern.
         writeFilter = composeAnd(writeFilter, delFilter);
       }
       if (writeFilter) {
