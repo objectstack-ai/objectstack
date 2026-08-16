@@ -10,10 +10,11 @@
 // deleted proof, breaks the build.
 //
 // #2567 Phase 2 — the anonymous-deny SURFACES are additionally pinned by the
-// `discover()` ratchet: this test STATICALLY enumerates the data/meta/graphql
-// HTTP entry points from source and asserts each is classified by a matrix row.
-// A new ungated `/data` route (or a removed/stale `covers` key) then fails CI as
-// UNCLASSIFIED / STALE — the surface can't silently regress.
+// `discover()` ratchet: this test STATICALLY enumerates the HTTP/transport
+// entry points named in the curated `PROBES` table below and asserts each is
+// classified by a matrix row. A new ungated route (or a removed/stale
+// `covers` key) then fails CI as UNCLASSIFIED / STALE — the surface can't
+// silently regress.
 
 import { describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'node:url';
@@ -43,13 +44,14 @@ const ATTRIBUTION = { marker: ATTRIBUTION_MARKER, scan: scanProofCandidates } as
 
 // ── #2567 ratchet — static enumeration of anonymous-deny HTTP entry points ──
 //
-// A CURATED per-file probe table (not a blind repo grep): scoped to the four
-// source files and to data/meta/graphql segments only, so control-plane routes
-// (/health, /auth, /ready, /discovery) are never enumerated as data surfaces.
-// But each probe is pattern-based WITHIN its file, so a genuinely new `/data`
-// route (or a new graphql/meta handler) is auto-discovered → new key → a
-// missing `covers` fails CI. Keys are derived from source CONTENT (route
-// literals / handler names), never line numbers, so they don't churn on edits.
+// A CURATED per-file probe table (not a blind repo grep): scoped to the
+// source files and route families named in PROBES below, so control-plane
+// routes (/health, /auth, /ready, /discovery) are never enumerated as data
+// surfaces. But each probe is pattern-based WITHIN its file, so a genuinely
+// new route or handler matching an existing probe's pattern is auto-discovered
+// → new key → a missing `covers` fails CI. Keys are derived from source
+// CONTENT (route literals / handler names), never line numbers, so they don't
+// churn on edits.
 const PROBES: ReadonlyArray<{ file: string; re: RegExp; key: (m: RegExpExecArray) => string }> = [
   // REST /meta umbrella registrar — one guarded registrar covers all ~17 routes.
   {
@@ -222,9 +224,9 @@ describe('ADR-0056 D10 — authorization conformance matrix', () => {
     const problems = checkLedger(AUTHZ_CONFORMANCE, {
       proofRoot: HERE, // proofs are dogfood test files alongside this one
       highRisk: HIGH_RISK,
-      // The ratchet: every discovered data/meta/graphql entry point must be
-      // classified by exactly one row's `covers`, and no `covers` key may be
-      // stale (no longer in source).
+      // The ratchet: every discovered PROBES entry point must be classified
+      // by exactly one row's `covers`, and no `covers` key may be stale (no
+      // longer in source).
       discover: () => discoverAnonymousDenySurfaces(),
       // #7976 — and the cited proofs must NAME the rows they prove.
       attribution: ATTRIBUTION,
