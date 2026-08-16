@@ -35,12 +35,14 @@ import {
   urlUserinfoUsername,
 } from './driver/index';
 import {
+  passthroughSecretPaths,
   redactDatasourceConfig,
   redactUrlCredentialQueryParams,
   redactUrlCredentials,
   redactUrlPassword,
   redactableConfigKeys,
   refusedCredentialKeys,
+  refusedPassthroughSecretPaths,
 } from './datasource-credential-redaction';
 
 /** The pre-#8078 alias spellings — the hand-written half of the definition. */
@@ -266,5 +268,103 @@ describe('write-door alignment, query half: redactUrlCredentials removes exactly
     });
     expect(config).toEqual({ url: 'someproto://h/db?keep=1' });
     expect(redactedKeys).toEqual(['url']);
+  });
+});
+
+describe('passthrough secret redaction (#9040) — the nested spellings the key-name scrub cannot see', () => {
+  const STORED = {
+    url: 'mongodb://app@mongo.internal:27017/events',
+    options: {
+      replicaSet: 'rs0',
+      tls: true,
+      connectTimeoutMS: 5000,
+      auth: { username: 'app', password: 'PLAINTEXT-IN-METADATA' },
+    },
+  };
+
+  it('drops `options.auth.password`, keeps the username and every benign option, names the dotted path', () => {
+    const { config, redactedKeys } = redactDatasourceConfig('mongodb', STORED);
+    expect(config).toEqual({
+      url: 'mongodb://app@mongo.internal:27017/events',
+      options: { replicaSet: 'rs0', tls: true, connectTimeoutMS: 5000, auth: { username: 'app' } },
+    });
+    expect(redactedKeys).toEqual(['options.auth.password']);
+  });
+
+  it('scrubs a stored legacy `driver: "mongo"` row identically — aliases resolve (#6345)', () => {
+    const { redactedKeys } = redactDatasourceConfig('mongo', STORED);
+    expect(redactedKeys).toEqual(['options.auth.password']);
+  });
+
+  it('is pure — the stored input is never mutated', () => {
+    const input = JSON.parse(JSON.stringify(STORED));
+    redactDatasourceConfig('mongodb', input);
+    expect(input).toEqual(STORED);
+  });
+
+  it('drops the binder-slotless client secrets too — proxy, TLS key material, AWS session token', () => {
+    // Still WRITABLE (the binder has exactly one secret slot — the turso-
+    // `encryptionKey` posture), but never SERVED: each is honoured (or, for
+    // AWS_SESSION_TOKEN, refused loudly) by mongodb@7.5.0, so serving it back
+    // is a leak under any boundary.
+    const { config, redactedKeys } = redactDatasourceConfig('mongodb', {
+      options: {
+        replicaSet: 'rs0',
+        proxyHost: 'proxy.internal',
+        proxyUsername: 'svc',
+        proxyPassword: 'sekret',
+        tlsCertificateKeyFilePassword: 'passphrase',
+        key: '-----BEGIN PRIVATE KEY-----',
+        passphrase: 'p',
+        authMechanismProperties: { AWS_SESSION_TOKEN: 'tok', SERVICE_NAME: 'mongodb' },
+      },
+    });
+    expect(config).toEqual({
+      options: {
+        replicaSet: 'rs0',
+        proxyHost: 'proxy.internal',
+        proxyUsername: 'svc',
+        authMechanismProperties: { SERVICE_NAME: 'mongodb' },
+      },
+    });
+    expect(redactedKeys).toEqual([
+      'options.authMechanismProperties.AWS_SESSION_TOKEN',
+      'options.key',
+      'options.passphrase',
+      'options.proxyPassword',
+      'options.tlsCertificateKeyFilePassword',
+    ]);
+  });
+
+  it('a config without the passthrough — or with a malformed one — is untouched', () => {
+    expect(redactDatasourceConfig('mongodb', { database: 'events' }).redactedKeys).toEqual([]);
+    // Off-shape walks fall off silently rather than throwing on a stored row.
+    expect(redactDatasourceConfig('mongodb', { options: 'not-a-record' }).redactedKeys).toEqual([]);
+    expect(redactDatasourceConfig('mongodb', { options: { auth: 'not-a-record' } }).redactedKeys)
+      .toEqual([]);
+  });
+
+  it('other drivers have no passthrough today — measured, not assumed', () => {
+    // postgres/mysql/turso/sqlite/memory ship closed strict-object contracts
+    // with no client-bound record slot; a nested `password` there is an
+    // unknown key the write door refuses, not a served secret.
+    for (const driver of ['postgres', 'mysql', 'turso', 'sqlite', 'sqlite-wasm', 'memory']) {
+      expect(passthroughSecretPaths(driver), driver).toEqual([]);
+    }
+    expect(passthroughSecretPaths('mongodb').length).toBeGreaterThan(0);
+    expect(passthroughSecretPaths('not-a-real-driver')).toEqual([]);
+  });
+
+  it('the write-door subset projects the refusal list — the two doors cannot drift', () => {
+    expect(refusedPassthroughSecretPaths('mongodb')).toEqual([['options', 'auth', 'password']]);
+    expect(refusedPassthroughSecretPaths('mongo')).toEqual([['options', 'auth', 'password']]);
+    expect(refusedPassthroughSecretPaths('postgres')).toEqual([]);
+    // Every write-door-refused path must be read-door-redacted: a refusal the
+    // scrub does not mirror would serve back the very material the write door
+    // calls a secret.
+    const redacted = new Set(passthroughSecretPaths('mongodb').map((p) => p.join('.')));
+    for (const path of refusedPassthroughSecretPaths('mongodb')) {
+      expect(redacted.has(path.join('.'))).toBe(true);
+    }
   });
 });

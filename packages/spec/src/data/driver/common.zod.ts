@@ -338,6 +338,113 @@ export const URL_CREDENTIAL_QUERY_PARAM_REFUSED = (key: string, param: string): 
   + 'themselves refused at publish (#8336). Runtime-environment DSNs (`OS_DATABASE_URL` and '
   + 'friends) do not pass through this publish door and are unaffected.';
 
+/**
+ * Refusal prescription for a credential written into the MongoClient
+ * passthrough (`config.options.auth.password`) — the FOURTH spelling of the
+ * same inline secret (#9040): #7990 refused the top-level key, #8082 the URL
+ * userinfo, #8337 the URL query parameter, and the `options` passthrough was
+ * the next syntax over from all three, exactly as #8337 was one syntax over
+ * from #8082.
+ *
+ * Same wording constraints as the sibling messages, plus one this message may
+ * state that #8337's must not: the bound secret genuinely WINS over a
+ * passthrough `auth` block at connect — measured by #8696's pin
+ * (`bound-secret-dsn-branches.test.ts`), which asserts the injected
+ * `external.credentialsRef` secret outranks `options.auth`. So the "wins over"
+ * reassurance is true here, unlike turso's query form where the URL token
+ * defeats the binder.
+ */
+export const PASSTHROUGH_INLINE_CREDENTIAL_REFUSED = (path: string): string =>
+  `\`${path}\` is a credential and is not accepted in the driver-options passthrough (#9040): `
+  + 'the datasource is persisted whole into `sys_metadata`, which is served back by the '
+  + 'ordinary data API, so a passthrough credential lands in cleartext at rest exactly like an '
+  + 'inline `password` (#7990), a URL userinfo password (#8082) or a credential query '
+  + 'parameter (#8337). Remove the `auth` block\'s password and bind the secret instead: the '
+  + "Setup → Datasources connection form's secret field hands it to the datasource secret "
+  + 'binder, which encrypts it into `sys_secret` and stores only an opaque handle at '
+  + '`external.credentialsRef` — or reference the secrets store directly with '
+  + '`external.credentialsRef`. The resolved secret is injected at connect time and wins over '
+  + 'an `auth` block embedded in the passthrough (#8696, measured). Placeholders are no '
+  + 'escape either: a `${…}` span anywhere in `options` is itself refused at publish (#8336).';
+
+/**
+ * The paths inside mongo's `options` passthrough that resolve into a login
+ * credential the client honours AND the secret binder can replace — the CLOSED
+ * refusal list behind {@link credentialFreeMongoOptions} (#9040).
+ *
+ * Every entry is MEASURED against `mongodb@7.5.0`, the client
+ * `@objectstack/driver-mongodb` pins and spreads `config.options` into
+ * (`new MongoClient(url, { …, ...config.options })`) — never inferred from
+ * documentation:
+ *
+ *  - `auth.password` — `OPTIONS.auth` transforms `{ username, password }` into
+ *    `MongoCredentials`, so the passthrough password IS the login credential
+ *    (measured: `c.options.credentials.password` carries it verbatim). The
+ *    binder replaces it exactly: #8696's pin measures a bound
+ *    `external.credentialsRef` secret outranking this block at connect. Only a
+ *    NON-EMPTY STRING is refused — `auth.username` alone is not credential
+ *    material (#8876's asymmetry, restated for this syntax), an empty password
+ *    is the passthrough twin of `user:@host` (accepted, #8082), and a
+ *    non-string value is not a secret the client accepts (its
+ *    `MongoCredentials` validation fails loudly at construction).
+ *
+ * Deliberately absent, each measured (refusing them would be the speculative
+ * widening #8337 forbids, or a refusal pointing at a remedy that cannot work):
+ *
+ *  - `authMechanismProperties.AWS_SESSION_TOKEN` — under `authMechanism:
+ *    'MONGODB-AWS'` the client itself THROWS on it (`MongoAPIError:
+ *    AWS_SESSION_TOKEN cannot be provided…`, measured — driver v7 requires AWS
+ *    SDK-sourced credentials); under any other mechanism nothing reads it. An
+ *    author who writes it gets a loud client failure, not a silent workaround.
+ *    The read path still redacts it ("leak under any boundary").
+ *  - `proxyPassword`, `tlsCertificateKeyFilePassword`, `key`, `passphrase` —
+ *    honoured by the client (SOCKS5 proxy auth; TLS key material), but the
+ *    secret binder injects exactly ONE secret and that slot is the login
+ *    password, so a refusal here would name a remedy that does not exist and
+ *    remove the only way to configure an authenticated proxy / passphrase-
+ *    protected key. Same posture as turso's still-writable `encryptionKey`
+ *    (#8078; the binder-slot question is #8081 item 4's, not this refusal's).
+ *    They are redacted on read instead
+ *    (`data/datasource-credential-redaction.ts`).
+ */
+export const MONGO_OPTIONS_CREDENTIAL_PATHS: readonly (readonly string[])[] = [
+  ['auth', 'password'],
+];
+
+/** The value at `path` inside a record-ish value, or `undefined` off the walk. */
+function valueAtPath(value: unknown, path: readonly string[]): unknown {
+  let node: unknown = value;
+  for (const segment of path) {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) return undefined;
+    node = (node as Record<string, unknown>)[segment];
+  }
+  return node;
+}
+
+/**
+ * Attach the #9040 passthrough-credential refusal to mongo's `options` slot.
+ *
+ * Composes with `placeholderFreeDeep` the same way `credentialFreeUrl`
+ * composes with `placeholderFree` on the URL keys: both checks are
+ * `superRefine`s judging the same value independently, an input violating both
+ * reports both, and neither changes the other's semantics. Each finding is
+ * reported at its own path so the author is pointed at the exact entry.
+ */
+export function credentialFreeMongoOptions<S extends z.ZodType>(schema: S, key: string) {
+  return schema.superRefine((value, ctx) => {
+    for (const path of MONGO_OPTIONS_CREDENTIAL_PATHS) {
+      const leaf = valueAtPath(value, path);
+      if (typeof leaf === 'string' && leaf.length > 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [...path],
+          message: PASSTHROUGH_INLINE_CREDENTIAL_REFUSED([key, ...path].join('.')),
+        });
+      }
+    }
+  });
+}
+
 /** Percent-decode a query key the way the measured clients do; malformed encoding stays raw. */
 function decodeQueryKey(raw: string): string {
   // `.replace` with a global regex, not `.replaceAll`: the DTS build's lib

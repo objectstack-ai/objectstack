@@ -6,6 +6,7 @@ import { lazySchema } from '../../shared/lazy-schema';
 import { strictObject } from '../../shared/strict-object';
 import type { DriverDefinition } from '../datasource.zod';
 import {
+  credentialFreeMongoOptions,
   credentialFreeUrl,
   driverConfigJsonSchema,
   INLINE_CREDENTIAL_REFUSED,
@@ -123,10 +124,19 @@ export const MongoConfigSchema = lazySchema(() => strictObject(
    * (`replicaSet`, `tls`, timeouts, …). Placeholder-free since #8336, judged
    * DEEP: every nested string value reaches the client, and this passthrough
    * is exactly where a refusal on `url`/`host` would otherwise displace the
-   * placeholder to.
+   * placeholder to. Credential-free since #9040 — `auth.password` was the
+   * FOURTH spelling of the inline secret (after the top-level key #7990, URL
+   * userinfo #8082 and URL query params #8337): the client resolves the block
+   * into `MongoCredentials`, so a passthrough password authenticated for real
+   * while sitting cleartext in `sys_metadata`. A non-empty `auth.password` is
+   * refused with the binder prescription; `auth.username` stays writable
+   * (#8876's asymmetry — a username is not credential material).
    */
-  options: placeholderFreeDeep(z.record(z.string(), z.unknown()), 'options').optional()
-    .describe('Extra MongoClient options (replicaSet, tls, timeouts, …)'),
+  options: credentialFreeMongoOptions(
+    placeholderFreeDeep(z.record(z.string(), z.unknown()), 'options'),
+    'options',
+  ).optional()
+    .describe('Extra MongoClient options (replicaSet, tls, timeouts, …; credential material is refused — bind secrets via the connection form / external.credentialsRef)'),
 })
   .describe('MongoDB Connection Configuration')
   .superRefine((cfg, ctx) => {

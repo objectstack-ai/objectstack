@@ -87,8 +87,9 @@
 import {
   CREDENTIAL_URL_QUERY_PARAM_NAMES,
   credentialQueryParamOf,
+  MONGO_OPTIONS_CREDENTIAL_PATHS,
 } from './driver/common.zod';
-import { getDriverConfigSchema } from './driver/config-registry.zod';
+import { getDriverConfigSchema, resolveDriverId } from './driver/config-registry.zod';
 
 /**
  * Canonical inline-credential spellings, used for a driver whose contract this
@@ -125,6 +126,81 @@ const FORMER_CREDENTIAL_ALIASES = [
 const STILL_WRITABLE_CREDENTIAL_KEYS: Record<string, readonly string[]> = {
   turso: ['encryptionKey'],
 };
+
+/**
+ * Secret-bearing paths inside a driver's passthrough `config` slot — the
+ * FOURTH spelling of the stored credential (#9040), nested where the top-level
+ * key-name scrub cannot see it.
+ *
+ * Only mongo declares a passthrough today (`options`, spread verbatim into
+ * `MongoClientOptions`); postgres/mysql/turso/sqlite/memory have closed
+ * strict-object contracts with no client-bound record slot (measured for
+ * #9040 — memory's `initialData` is seed DATA, deliberately not judged here:
+ * redacting a seeded row's own `password` FIELD would corrupt data the driver
+ * serves, which is not this module's question). Every path is measured against
+ * `mongodb@7.5.0`, the client the driver spreads `options` into:
+ *
+ *  - `options.auth.password` — resolved into `MongoCredentials`; the login
+ *    secret itself, and the one path the WRITE door also refuses
+ *    (`MONGO_OPTIONS_CREDENTIAL_PATHS` in `driver/common.zod.ts`; #8696
+ *    measured a bound secret outranking it at connect). `auth.username` is
+ *    deliberately not here — a username is not credential material (#8876).
+ *  - `options.proxyPassword` — SOCKS5 proxy password, honoured
+ *    (`c.options.proxyPassword`, measured).
+ *  - `options.tlsCertificateKeyFilePassword`, `options.key`,
+ *    `options.passphrase` — TLS key material and passphrases, declared in the
+ *    client's own OPTIONS table. Still WRITABLE (the binder has exactly one
+ *    secret slot — the login password — so there is no working refusal remedy;
+ *    turso-`encryptionKey` posture, #8081 item 4), but never SERVED back:
+ *    redacting on read neither grants nor removes the write capability.
+ *  - `options.authMechanismProperties.AWS_SESSION_TOKEN` — under MONGODB-AWS
+ *    the v7 client throws on it; under any other mechanism nothing reads it.
+ *    Either way a stored copy is a secret served in cleartext, and serving it
+ *    back is a leak under any boundary (the same asymmetry with the write
+ *    door this module already documents for the inline keys).
+ *
+ * Keyed by CANONICAL driver id and looked up through {@link resolveDriverId},
+ * so a stored legacy `driver: 'mongo'` row is scrubbed identically to
+ * `'mongodb'`.
+ */
+const PASSTHROUGH_SECRET_PATHS: Readonly<Record<string, readonly (readonly string[])[]>> = {
+  mongodb: [
+    ['options', 'auth', 'password'],
+    ['options', 'proxyPassword'],
+    ['options', 'tlsCertificateKeyFilePassword'],
+    ['options', 'key'],
+    ['options', 'passphrase'],
+    ['options', 'authMechanismProperties', 'AWS_SESSION_TOKEN'],
+  ],
+};
+
+/**
+ * The nested config paths this module hides for `driver`, dotted-path-ready —
+ * the passthrough sibling of {@link redactableConfigKeys}, exported so the
+ * write-path inverse (`service-datasource`'s `restoreRedactedConfig`) mirrors
+ * exactly the set the read path hides (#9040): a nested redaction the restore
+ * side did not mirror would turn an untouched "Save" on an affected legacy row
+ * into silent credential deletion.
+ */
+export function passthroughSecretPaths(driver: unknown): readonly (readonly string[])[] {
+  const id = resolveDriverId(driver);
+  return id ? (PASSTHROUGH_SECRET_PATHS[id] ?? []) : [];
+}
+
+/**
+ * The config-relative subset of {@link passthroughSecretPaths} the WRITE door
+ * also refuses (#9040) — today `options.auth.password` on mongo, projected
+ * from the write door's own closed list (`MONGO_OPTIONS_CREDENTIAL_PATHS`) so
+ * the two doors cannot drift. What the credential-migration planner consults:
+ * a stored row carrying one of these holds a LIVE login credential the binder
+ * substitutes but cannot mechanically extract (dropping the nested leaf would
+ * leave an `auth` block the client throws on).
+ */
+export function refusedPassthroughSecretPaths(driver: unknown): readonly (readonly string[])[] {
+  return resolveDriverId(driver) === 'mongodb'
+    ? MONGO_OPTIONS_CREDENTIAL_PATHS.map((path) => ['options', ...path])
+    : [];
+}
 
 /** Unwrap `.optional()` / `.default()` / `.nullable()` down to the base type. */
 function baseTypeOf(schema: unknown): string | undefined {
@@ -297,5 +373,43 @@ export function redactDatasourceConfig(
     out[key] = value;
   }
 
-  return { config: out, redactedKeys: redactedKeys.sort() };
+  // The passthrough spellings (#9040): nested secret material the top-level
+  // key-name scrub cannot see. Dropped, not masked, for the same round-trip
+  // reason as the inline keys; each removal is reported as its DOTTED path
+  // (`options.auth.password`), which is the shape the metadata write door's
+  // generic carry-forward (`carryForwardRedactedValues`) already walks.
+  let scrubbed: Record<string, unknown> = out;
+  for (const path of passthroughSecretPaths(driver)) {
+    const [next, dropped] = withoutPath(scrubbed, path);
+    if (dropped) {
+      scrubbed = next;
+      redactedKeys.push(path.join('.'));
+    }
+  }
+
+  return { config: scrubbed, redactedKeys: redactedKeys.sort() };
+}
+
+/**
+ * `container` without the leaf at `path`, copying only the spine — pure, like
+ * everything else on this read path. `dropped` is `false` when the walk falls
+ * off the shape (a missing or non-record segment) or the leaf is absent, in
+ * which case the input is returned untouched so "did anything change?" stays a
+ * usable question.
+ */
+function withoutPath(
+  container: Record<string, unknown>,
+  path: readonly string[],
+): [Record<string, unknown>, boolean] {
+  const [head, ...rest] = path as [string, ...string[]];
+  const value = container[head];
+  if (rest.length === 0) {
+    if (value === undefined) return [container, false];
+    const { [head]: _dropped, ...kept } = container;
+    return [kept, true];
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [container, false];
+  const [child, dropped] = withoutPath(value as Record<string, unknown>, rest);
+  if (!dropped) return [container, false];
+  return [{ ...container, [head]: child }, true];
 }

@@ -594,3 +594,108 @@ describe('urlUserinfoUsername — the username half of the same grammar (#8876)'
     expect(urlUserinfoUsername('//h/db')).toBeUndefined();
   });
 });
+
+/**
+ * The passthrough spelling of the same secret (#9040) — the FOURTH: #7990
+ * refused the top-level key, #8082 the URL userinfo, #8337 the URL query
+ * parameter, and `options.auth.password` was the next syntax over. Measured on
+ * mongodb@7.5.0 (the client `@objectstack/driver-mongodb` spreads
+ * `config.options` into): the block is transformed into `MongoCredentials`, so
+ * the passthrough password authenticated for real while sitting cleartext in
+ * `sys_metadata`.
+ *
+ * Envelope note (same as the #8082 pin above): the zod issue's `code` and its
+ * pathed location are the whole envelope at this layer — every schema refusal
+ * is wrapped uniformly by the publish door (metadata-protocol's
+ * `422 INVALID_METADATA`, whose `issues[]` carry these codes verbatim).
+ */
+describe('mongo options passthrough — credential refusal (#9040)', () => {
+  const VALID = { database: 'events', host: 'mongo.internal', username: 'svc' } as const;
+  const refusalAt = (options: Record<string, unknown>) => {
+    const result = MongoConfigSchema.safeParse({ ...VALID, options });
+    if (result.success) return undefined;
+    return result.error.issues.find((i) => i.path.join('.') === 'options.auth.password');
+  };
+
+  it('refuses a non-empty `auth.password`, naming the mechanisms — and the true precedence', () => {
+    const issue = refusalAt({ auth: { username: 'app', password: 'hunter2' } });
+    expect(issue, 'refusal must be pathed at `options.auth.password`').toBeDefined();
+    expect(issue!.code).toBe('custom');
+    expect(issue!.message).toContain('`options.auth.password`');
+    expect(issue!.message).toContain('external.credentialsRef');
+    expect(issue!.message).toContain('sys_secret');
+    expect(issue!.message).toContain('secret binder');
+    // Unlike #8337's query form, the "wins over" reassurance is TRUE here and
+    // load-bearing: #8696's pin measures the bound secret outranking a
+    // passthrough `auth` block at connect.
+    expect(issue!.message).toContain('wins over');
+  });
+
+  it('refuses a `${…}` placeholder password exactly like a real one — and both doors report', () => {
+    // A placeholder is a non-empty string, so the credential refusal fires;
+    // `placeholderFreeDeep` (#8336) judges the same value independently. The
+    // two `superRefine`s compose without changing each other's semantics —
+    // the PM-mechanism assumption this pin verifies.
+    const result = MongoConfigSchema.safeParse({
+      ...VALID,
+      options: { auth: { username: 'app', password: '${DB_PASSWORD}' } },
+    });
+    expect(result.success).toBe(false);
+    const at = result.error!.issues.filter((i) => i.path.join('.') === 'options.auth.password');
+    expect(at.length).toBe(2);
+    const texts = at.map((i) => i.message).join('\n');
+    expect(texts).toContain('#9040');
+    expect(texts).toContain('#8336');
+  });
+
+  it('re-paths the refusal under `config.options.auth.password` on the authored artefact', () => {
+    const result = DatasourceSchema.safeParse({
+      name: 'events',
+      driver: 'mongodb',
+      config: { database: 'events', options: { auth: { username: 'app', password: 'hunter2' } } },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find(
+      (i) => i.path.join('.') === 'config.options.auth.password',
+    );
+    expect(issue, 'issue must be re-pathed under config.options.auth.password').toBeDefined();
+    expect(issue!.message).toContain('external.credentialsRef');
+  });
+
+  it('`auth.username` alone is NOT credential material (#8876 asymmetry) — stays accepted', () => {
+    // The schema's question is "is a secret being persisted?", and a username
+    // is not one. (The client separately refuses a username-only `auth` block
+    // at construction — `credentials must be an object with 'username' and
+    // 'password' properties`, measured — a loud connect-time failure that is
+    // the client's own contract to enforce, not this door's.)
+    expect(refusalAt({ auth: { username: 'app' } })).toBeUndefined();
+  });
+
+  it('an EMPTY `auth.password` carries no secret — the passthrough twin of `user:@host` (#8082)', () => {
+    expect(refusalAt({ auth: { username: 'app', password: '' } })).toBeUndefined();
+  });
+
+  it('a non-string `auth.password` is not a secret the client accepts — left to its loud validation', () => {
+    // MongoCredentials validation refuses a non-string password at
+    // construction (measured); refusing it here as credential material would
+    // claim a secret where the client sees a type error.
+    expect(refusalAt({ auth: { username: 'app', password: 42 } })).toBeUndefined();
+  });
+
+  it('accepts the legitimate passthrough byte-identically (pin) — replicaSet, tls, timeouts', () => {
+    // The dispatch fence: the refusal must not break what the passthrough is
+    // FOR. Includes the redacted round-trip shape (`auth` with only a
+    // username) — what the #9040 read path serves for an affected legacy row,
+    // and what the Studio edit form PUTs back on an untouched "Save".
+    for (const options of [
+      { replicaSet: 'rs0', tls: true, connectTimeoutMS: 5000, serverSelectionTimeoutMS: 3000 },
+      { auth: { username: 'app' }, replicaSet: 'rs0' },
+    ]) {
+      const config = { ...VALID, options };
+      const before = MongoConfigSchema.safeParse(config);
+      expect(before.success, JSON.stringify(before.error?.issues)).toBe(true);
+      expect(MongoConfigSchema.parse(config)).toEqual(before.data);
+      expect(before.data!.options).toEqual(options);
+    }
+  });
+});

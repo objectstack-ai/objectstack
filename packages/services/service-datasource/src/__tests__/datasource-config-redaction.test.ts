@@ -394,3 +394,84 @@ describe('GREEN ON MAIN — #8078 is not weakened by anything above', () => {
       .toEqual({ known: true, issues: [] });
   });
 });
+
+describe('#9040 — the passthrough spelling, both halves at the service door', () => {
+  /** A legacy mongo row written before #9040: the password rides the MongoClient passthrough. */
+  const LEGACY_MONGO: StoredDatasource = {
+    name: 'legacy_mongo',
+    driver: 'mongodb',
+    origin: 'runtime',
+    config: {
+      url: 'mongodb://app@mongo.internal:27017/events',
+      options: {
+        replicaSet: 'rs0',
+        connectTimeoutMS: 5000,
+        auth: { username: 'app', password: 'PLAINTEXT-IN-METADATA' },
+      },
+    },
+  };
+
+  it('read path: getDatasource() serves the passthrough without its password, and says so', async () => {
+    const { service } = makeService([LEGACY_MONGO]);
+    const read = await service.getDatasource('legacy_mongo');
+    expect(read!.config!.options).toEqual({
+      replicaSet: 'rs0',
+      connectTimeoutMS: 5000,
+      auth: { username: 'app' },
+    });
+    expect(read!.redactedConfigKeys).toContain('options.auth.password');
+  });
+
+  it('an untouched round-trip keeps the stored passthrough credential', async () => {
+    const { service, records } = makeService([LEGACY_MONGO]);
+    const read = await service.getDatasource('legacy_mongo');
+    await service.updateDatasource('legacy_mongo', { config: read!.config, label: 'Renamed' });
+    expect(records[0].label).toBe('Renamed');
+    expect((records[0].config!.options as any).auth).toEqual({
+      username: 'app',
+      password: 'PLAINTEXT-IN-METADATA',
+    });
+  });
+
+  it('editing a SIBLING passthrough option still restores the untouched leaf', async () => {
+    const { service, records } = makeService([LEGACY_MONGO]);
+    const read = await service.getDatasource('legacy_mongo');
+    const options = { ...(read!.config!.options as Record<string, unknown>), replicaSet: 'rs1' };
+    await service.updateDatasource('legacy_mongo', { config: { ...read!.config, options } });
+    expect((records[0].config!.options as any).replicaSet).toBe('rs1');
+    expect((records[0].config!.options as any).auth.password).toBe('PLAINTEXT-IN-METADATA');
+  });
+
+  it('an author who deletes the `auth` block WINS — a removed container is never re-grafted', async () => {
+    const { service, records } = makeService([LEGACY_MONGO]);
+    const read = await service.getDatasource('legacy_mongo');
+    const { auth: _auth, ...options } = read!.config!.options as Record<string, unknown>;
+    await service.updateDatasource('legacy_mongo', { config: { ...read!.config, options } });
+    expect(records[0].config!.options).not.toHaveProperty('auth');
+  });
+
+  it('the restore never aliases a mutation back into the caller patch object', () => {
+    const stored = {
+      options: { auth: { username: 'app', password: 'hunter2' }, replicaSet: 'rs0' },
+    };
+    const patch = { options: { auth: { username: 'app' }, replicaSet: 'rs0' } };
+    const patchOptionsBefore = patch.options;
+    const restored = restoreRedactedConfig('mongodb', patch, stored)!;
+    expect((restored.options as any).auth.password).toBe('hunter2');
+    // The caller's own objects are untouched — the graft copied the spine.
+    expect(patch.options).toBe(patchOptionsBefore);
+    expect((patch.options as any).auth).not.toHaveProperty('password');
+  });
+
+  it('the write gate still refuses a TYPED-IN passthrough password on its own merits', async () => {
+    const { service } = makeService([LEGACY_MONGO]);
+    await expect(
+      service.updateDatasource('legacy_mongo', {
+        config: {
+          url: 'mongodb://app@mongo.internal:27017/events',
+          options: { auth: { username: 'app', password: 'typed-new-secret' } },
+        },
+      }),
+    ).rejects.toThrow(/options\.auth\.password/);
+  });
+});
