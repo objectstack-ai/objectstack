@@ -270,11 +270,24 @@ describe('sys_comment permission matrix (#4630)', () => {
 
     // memberB holds the delete bit and can READ the record, but is neither the
     // author nor able to EDIT the (admin-owned, public_read) parent → 403.
-    // Which layer fires first (RBAC/RLS pre-image vs this gate) decides the
-    // code; both are the fail-closed contract, as in the attachments matrix.
+    //
+    // [#8839] The CODE is asserted exactly, and that is the negative control for
+    // this whole card. Before the fix this refusal came from the platform's
+    // wildcard delete floor (`PERMISSION_DENIED`, "(row-level security)") — the
+    // parent-blind gate that was ALSO refusing legitimate moderators one case
+    // below. Now that `sys_comment_moderation` contributes the alternate match,
+    // the floor no longer answers for this object and the refusal must come from
+    // plugin-audit's parent-derived gate instead: `RECORD_NOT_ACCESSIBLE`.
+    //
+    // So this is not a cosmetic tightening. Accepting `PERMISSION_DENIED` here
+    // would let the exact regression #8839 fixed pass unnoticed: the floor
+    // re-asserting itself over `sys_comment` looks identical to a correct
+    // refusal at the status-code level, and it kills moderation while this case
+    // stays green. If this ever reddens with `PERMISSION_DENIED`, moderation is
+    // dead again — check the policy, not this assertion.
     const denied = await stack.apiAs(memberBTok, 'DELETE', `/data/sys_comment/${row.id}`);
     expect(denied.status).toBe(403);
-    expect(['RECORD_NOT_ACCESSIBLE', 'PERMISSION_DENIED']).toContain(((await denied.json()) as any).code);
+    expect(((await denied.json()) as any).code).toBe('RECORD_NOT_ACCESSIBLE');
     expect(await ql.findOne('sys_comment', { where: { id: row.id }, context: SYS })).toBeTruthy();
 
     // The author may.
