@@ -3,6 +3,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SeedLoaderService } from './seed-loader.js';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 /**
  * `Seed.env` is ENFORCED, not merely authorable (framework#4704).
@@ -61,8 +62,14 @@ function createEngine() {
       store[objectName].push(record);
       return record;
     }),
-    update: vi.fn(async (_o: string, data: any) => data),
-    delete: vi.fn(async () => ({ deleted: 1 })),
+    update: vi.fn(async (_o: string, data: any, options?: any) => {
+      assertEngineUpdateDispatch(data, options);
+      return data;
+    }),
+    delete: vi.fn(async (_objectName: string, options?: any) => {
+      assertEngineDeleteDispatch(options);
+      return { deleted: 1 };
+    }),
     count: vi.fn(async (objectName: string) => (store[objectName] || []).length),
     aggregate: vi.fn(async () => []),
   } as unknown as IDataEngine;

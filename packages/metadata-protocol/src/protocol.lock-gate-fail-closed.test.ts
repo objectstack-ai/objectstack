@@ -88,6 +88,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ErrorCode } from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 /** A registry holding only what the test explicitly puts in it. */
 function registry(items: Record<string, unknown> = {}) {
@@ -177,8 +178,16 @@ function engineWithTransientLockReadFault(opts: {
             if (object === 'sys_metadata_audit') auditRows.push(values);
             return { id: 'inserted', ...values };
         }),
-        update: vi.fn(async (object: string) => { calls.push(`update:${object}`); return { ...row }; }),
-        delete: vi.fn(async (object: string) => { calls.push(`delete:${object}`); return { deleted: 1 }; }),
+        update: vi.fn(async (object: string, data: any, options?: any) => {
+            assertEngineUpdateDispatch(data, options);
+            calls.push(`update:${object}`);
+            return { ...row };
+        }),
+        delete: vi.fn(async (object: string, options?: any) => {
+            assertEngineDeleteDispatch(options);
+            calls.push(`delete:${object}`);
+            return { deleted: 1 };
+        }),
         count: vi.fn(async () => 0),
         transaction: vi.fn(async (fn: any) => fn(engine)),
         execute: vi.fn(async () => ({})),

@@ -79,6 +79,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { validationFailureDetails } from '@objectstack/types';
 import { SeedLoaderService } from './seed-loader.js';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 // ---------------------------------------------------------------------------
 // The physical conditions
@@ -146,8 +147,14 @@ function failingEngine(thrown: () => unknown): IDataEngine {
         find: vi.fn(async () => []),
         findOne: vi.fn(async () => null),
         insert: vi.fn(async () => { throw thrown(); }),
-        update: vi.fn(async () => { throw thrown(); }),
-        delete: vi.fn(async () => ({ deleted: 1 })),
+        update: vi.fn(async (_o: string, data: any, options?: any) => {
+            assertEngineUpdateDispatch(data, options);
+            throw thrown();
+        }),
+        delete: vi.fn(async (_o: string, options?: any) => {
+            assertEngineDeleteDispatch(options);
+            return { deleted: 1 };
+        }),
         count: vi.fn(async () => 0),
         aggregate: vi.fn(async () => []),
     } as unknown as IDataEngine;
@@ -224,8 +231,14 @@ describe('[#8442] raw driver text is withheld from the seed `errors[].message`',
                 return rec;
             }),
             // The ONLY update in this load is pass-2's back-fill.
-            update: vi.fn(async () => { throw driverFault(); }),
-            delete: vi.fn(async () => ({ deleted: 1 })),
+            update: vi.fn(async (_o: string, data: any, options?: any) => {
+                assertEngineUpdateDispatch(data, options);
+                throw driverFault();
+            }),
+            delete: vi.fn(async (_o: string, options?: any) => {
+                assertEngineDeleteDispatch(options);
+                return { deleted: 1 };
+            }),
             count: vi.fn(async () => 0),
             aggregate: vi.fn(async () => []),
         } as unknown as IDataEngine;
