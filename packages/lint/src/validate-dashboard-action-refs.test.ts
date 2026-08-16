@@ -54,41 +54,45 @@ describe('validateDashboardActionRefs (ADR-0049 references / #3367)', () => {
     expect(findings[0].message).toContain('export_dashboard_pdf');
   });
 
-  it('passes a modal action that names a defined action', () => {
+  // objectstack#6739-A (2026-08-09): a `modal` string target names a PAGE, and
+  // only a page. The four tests below pin BOTH directions of that ruling: the
+  // one shape the runtime serves resolves, and each retired limb — a defined
+  // action name, the `<verb>_<object>` prefix convention, a bare object name —
+  // is refused. Until objectui#4782 deleted `DashboardView`'s own modal
+  // handler (the convention's last live copy), this file pinned the opposite:
+  // the three retired shapes passed and a page-named target ERRORED, so
+  // `os validate` blessed exactly the buttons the runtime refuses.
+  it('passes a modal action that names a declared page', () => {
+    const findings = validateDashboardActionRefs(
+      dashWithHeaderActions(
+        [{ label: 'New Deal', actionType: 'modal', actionUrl: 'deal_intake' }],
+        { pages: [{ name: 'deal_intake' }] },
+      ),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it('ERRORS on a modal action that names a defined action — an action is not a page', () => {
     const findings = validateDashboardActionRefs(
       dashWithHeaderActions(
         [{ label: 'New Deal', actionType: 'modal', actionUrl: 'quick_create_deal' }],
         { actions: [{ name: 'quick_create_deal', type: 'modal' }] },
       ),
     );
-    expect(findings).toEqual([]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'error',
+      rule: DASHBOARD_ACTION_TARGET_UNDEFINED,
+    });
+    expect(findings[0].message).toContain('quick_create_deal');
+    expect(findings[0].message).toContain('names no declared page');
   });
 
-  it('passes a modal action using the <verb>_<object> convention against a real object', () => {
+  it('ERRORS on the retired <verb>_<object> convention, even against a real object', () => {
     const findings = validateDashboardActionRefs(
       dashWithHeaderActions(
         [{ label: 'New Deal', actionType: 'modal', actionUrl: 'create_opportunity' }],
         { objects: [{ name: 'opportunity' }] },
-      ),
-    );
-    expect(findings).toEqual([]);
-  });
-
-  it('passes a modal action that is a bare object name (create-form fallback)', () => {
-    const findings = validateDashboardActionRefs(
-      dashWithHeaderActions(
-        [{ label: 'Add Lead', actionType: 'modal', actionUrl: 'lead' }],
-        { objects: [{ name: 'lead' }] },
-      ),
-    );
-    expect(findings).toEqual([]);
-  });
-
-  it('ERRORS on a modal action whose target is neither a defined action nor a real object', () => {
-    const findings = validateDashboardActionRefs(
-      dashWithHeaderActions(
-        [{ label: 'New Deal', actionType: 'modal', actionUrl: 'create_opportunity' }],
-        { objects: [{ name: 'account' }] }, // no `opportunity`
       ),
     );
     expect(findings).toHaveLength(1);
@@ -97,7 +101,27 @@ describe('validateDashboardActionRefs (ADR-0049 references / #3367)', () => {
       rule: DASHBOARD_ACTION_TARGET_UNDEFINED,
     });
     expect(findings[0].message).toContain('create_opportunity');
-    expect(findings[0].message).toContain('or object');
+    // The ruling explicitly declined the middle shape (keep the prefix, reject
+    // bare object names): `create_opportunity` names the page
+    // `create_opportunity`, or it names nothing.
+    expect(findings[0].message).toContain('names no declared page');
+    expect(findings[0].hint).toContain("actionType: 'form'");
+  });
+
+  it('ERRORS on a bare object name — the create-form fallback is retired', () => {
+    const findings = validateDashboardActionRefs(
+      dashWithHeaderActions(
+        [{ label: 'Add Lead', actionType: 'modal', actionUrl: 'lead' }],
+        { objects: [{ name: 'lead' }] },
+      ),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'error',
+      rule: DASHBOARD_ACTION_TARGET_UNDEFINED,
+    });
+    expect(findings[0].message).toContain('lead');
+    expect(findings[0].hint).toContain('stack.pages');
   });
 
   it('passes a url action pointing at a registered report route', () => {
@@ -210,9 +234,10 @@ describe('validateDashboardActionRefs (ADR-0049 references / #3367)', () => {
   });
 
   it('covers the issue #3367 repro: one script + one modal error, one url warning', () => {
-    // Faithful to the runtime: `create_opportunity` resolves via the modal
-    // <verb>_<object> convention ONLY when an `opportunity` object exists. Here
-    // it does not, so all three targets are dead.
+    // Faithful to the runtime: `create_opportunity` would resolve only as the
+    // name of a declared PAGE (objectstack#6739-A — the <verb>_<object>
+    // convention is retired). No page is declared here, so all three targets
+    // are dead.
     const findings = validateDashboardActionRefs(
       dashWithHeaderActions([
         { label: 'Export PDF', actionType: 'script', actionUrl: 'export_dashboard_pdf' },

@@ -72,11 +72,11 @@ lands on the draft→active promotion, per
 
 ### 3. Dead action/route references
 
-A dashboard `header.actions[]` button names a target: a `script`/`modal` action,
-or a `url` route. Nothing in the schema checks that the target exists, so a button
-can ship pointing at an action defined nowhere — it renders and then **silently
-does nothing** when clicked. This is ADR-0049's "declared ≠ enforced" gate applied
-to *references*.
+A dashboard `header.actions[]` button names a target: a `script` action, a
+`modal` page, or a `url` route. Nothing in the schema checks that the target
+exists, so a button can ship pointing at something defined nowhere — it renders
+and then **silently does nothing** when clicked. This is ADR-0049's
+"declared ≠ enforced" gate applied to *references*.
 
 This check covers the dashboard **header** only. It used to check a
 `widgets[].actionUrl` too — until #5010 measured that no renderer has ever drawn a
@@ -89,18 +89,25 @@ carrying the fix.
 ```ts
 header: {
   actions: [
-    // ✗ script/modal target resolves to no defined action → error
+    // ✗ script target resolves to no defined action → error
     { label: 'Export PDF', actionType: 'script', actionUrl: 'export_dashboard_pdf' },
-    // ✓ modal <verb>_<object> against a real `opportunity` object
+    // ✗ modal target names no declared page → error. A modal target names a
+    //   PAGE, only — `create_opportunity` no longer resolves through the
+    //   retired `<verb>_<object>` convention, however real the object is.
+    //   To open an object's form, use actionType: 'form' with an
+    //   '<object>.<view>' form-view target.
     { label: 'New Deal', actionType: 'modal', actionUrl: 'create_opportunity' },
+    // ✓ modal target naming a declared page (`pages: [{ name: 'deal_intake' }]`)
+    { label: 'Intake', actionType: 'modal', actionUrl: 'deal_intake' },
     // ⚠ url path matching no in-app route → warning
     { label: 'Forecast', actionType: 'url', actionUrl: '/reports/forecast' },
   ],
 }
 ```
 
-`script`/`modal` targets that resolve nowhere **fail** validation; a `url` path
-whose `objects/reports/dashboards/pages/views` route is unregistered is **warned**
+A `script` target that names no defined action, or a `modal` target that names
+no declared page, **fails** validation; a `url` path whose
+`objects/reports/dashboards/pages/views` route is unregistered is **warned**
 (external, interpolated, and opaque routes are skipped).
 
 ### 4. Dangling object and action names

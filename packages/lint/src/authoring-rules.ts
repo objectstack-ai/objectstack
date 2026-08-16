@@ -516,9 +516,11 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     runtimeTypes: ['dashboard'],
     run: (stack) => validateWidgetBindings(stack),
   },
-  // ADR-0049 / #3367 — a header or widget action naming a `script`/`modal`
-  // target that resolves to no defined action ships a button that renders and
-  // silently does nothing on click. Unresolved `url` routes stay advisory.
+  // ADR-0049 / #3367 — a dashboard header action naming a dead target ships a
+  // button that renders and refuses (or does nothing) on click: a `script`
+  // target must name a defined action, a `modal` target must name a declared
+  // page (objectstack#6739-A — a modal string target names a PAGE, only).
+  // Unresolved `url` routes stay advisory.
   {
     name: 'validateDashboardActionRefs',
     tier: 'gating',

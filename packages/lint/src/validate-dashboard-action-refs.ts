@@ -38,19 +38,27 @@
  * in `@objectstack/spec` 17.0.0, so authoring one is a `tsc` error and a parse
  * error carrying the prescription. There is no widget target left to resolve.
  *
- * Resolution mirrors the objectui runtime dispatch (`DashboardRenderer` +
- * `DashboardView`) so the lint flags exactly what would fail to resolve at
- * runtime:
+ * Resolution mirrors the objectui runtime dispatch (`DashboardRenderer`
+ * hands the target to the SHARED `useActionModal` since objectui#4782) so the
+ * lint flags exactly what would fail to resolve at runtime:
  *
  *   actionType 'script' → `actionUrl` must name a DEFINED action (`stack.actions`
  *       or any `object.actions`, by `name`). A script target that names no
  *       defined action fails open at runtime ("action not found"). → ERROR.
  *
- *   actionType 'modal'  → `actionUrl` resolves if it names a defined action, OR
- *       matches the runtime `<verb>_<object>` convention the modalHandler
- *       implements (create_/new_/add_/edit_/update_ + a defined object), OR is a
- *       bare defined object name (the handler falls back to that object's create
- *       form). Otherwise → ERROR.
+ *   actionType 'modal'  → `actionUrl` names a declared PAGE (`stack.pages`), and
+ *       only a page — maintainer ruling objectstack#6739-A (2026-08-09). This
+ *       rule used to accept a defined action name, a bare object name, and the
+ *       `<verb>_<object>` convention (create_/new_/add_/edit_/update_ + object),
+ *       on the claim that it mirrored `DashboardView`'s own modal handler. That
+ *       handler — the convention's last live copy — was deleted by objectui#4782
+ *       (after objectui#4764 retired the object fallback in `useActionModal`):
+ *       the runtime resolves a string modal target against page metadata and
+ *       REFUSES everything else, so each retired limb here blessed a button that
+ *       dispatches to a named refusal at runtime. The ruling explicitly declined
+ *       the middle shape (keep the prefix, reject bare object names): a target
+ *       names the page `create_opportunity`, or it names nothing. Opening an
+ *       object's form is `actionType: 'form'`. Otherwise → ERROR.
  *
  *   actionType 'url'    → a relative in-app path. WARN when a recognizable
  *       `<collection>/<name>` segment (objects/reports/dashboards/pages/views)
@@ -110,11 +118,6 @@ function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
 
-/** The runtime modal `<verb>_<object>` convention (objectui `DashboardView`
- *  modalHandler): `create_/new_/add_/edit_/update_` + an object name opens that
- *  object's create/edit form. */
-const MODAL_VERB_RE = /^(?:create|new|add|edit|update)_(.+)$/;
-
 /** URL path segments that name a metadata collection, mapped to the stack key
  *  whose members can appear after them in an in-app route
  *  (`/…/objects/crm_lead`, `/reports/forecast`, `/dashboards/exec`, …). Both the
@@ -147,7 +150,7 @@ function viewContainerName(item: AnyRec): string | undefined {
 interface KnownTargets {
   /** Every action name defined in the stack (global + object-embedded). */
   actions: Set<string>;
-  /** Object names (also valid as bare modal targets and `objects/<name>` routes). */
+  /** Object names (valid in `objects/<name>` routes). */
   objects: Set<string>;
   reports: Set<string>;
   dashboards: Set<string>;
@@ -196,15 +199,15 @@ function resolveActionTarget(
   target: string,
   known: KnownTargets,
 ): boolean {
-  if (known.actions.has(target)) return true;
   if (actionType === 'modal') {
-    // Runtime modalHandler convention: `<verb>_<object>` or a bare object name
-    // opens that object's create/edit form.
-    if (known.objects.has(target)) return true;
-    const m = MODAL_VERB_RE.exec(target);
-    if (m && known.objects.has(m[1])) return true;
+    // A modal string target names a declared PAGE, and only a page
+    // (objectstack#6739-A). The runtime resolves it against page metadata and
+    // refuses everything else — a defined action name, a bare object name, and
+    // the retired `<verb>_<object>` prefix convention all dispatch to a named
+    // refusal, so accepting any of them here blesses a dead button.
+    return known.pages.has(target);
   }
-  return false;
+  return known.actions.has(target);
 }
 
 /**
@@ -275,22 +278,25 @@ export function validateDashboardActionRefs(stack: AnyRec): DashboardActionRefFi
 
     if (actionType === 'script' || actionType === 'modal') {
       if (resolveActionTarget(actionType, target, known)) return;
-      const kindWord = actionType === 'script' ? 'script' : 'modal';
       findings.push({
         severity: 'error',
         rule: DASHBOARD_ACTION_TARGET_UNDEFINED,
         where,
         path,
         message:
-          `${kindWord} action target "${target}" resolves to no defined action` +
-          (actionType === 'modal' ? ' or object' : '') +
-          `. The button renders but does nothing when clicked — a dangling reference ` +
-          `the runtime cannot dispatch (ADR-0049: a declared reference must resolve).`,
+          actionType === 'modal'
+            ? `modal action target "${target}" names no declared page — a modal target ` +
+              `names a PAGE, only (objectstack#6739). The button renders but the runtime ` +
+              `refuses the dispatch when clicked — a dangling reference ` +
+              `(ADR-0049: a declared reference must resolve).`
+            : `script action target "${target}" resolves to no defined action. ` +
+              `The button renders but does nothing when clicked — a dangling reference ` +
+              `the runtime cannot dispatch (ADR-0049: a declared reference must resolve).`,
         hint:
           actionType === 'modal'
-            ? `Define an action named "${target}" (stack.actions or the object's actions), ` +
-              `use the "<verb>_<object>" convention against a real object ` +
-              `(e.g. "create_<object>"), point actionUrl at an existing object, or remove the button.`
+            ? `Point actionUrl at a declared page (stack.pages), or use ` +
+              `actionType: 'form' with an "<object>.<view>" form-view target to open ` +
+              `an object's form, or remove the button.`
             : `Define a script action named "${target}" (stack.actions or the object's actions) ` +
               `with an inline body or a registered handler, or remove the button.`,
       });
