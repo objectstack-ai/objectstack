@@ -174,17 +174,16 @@ describe('the #4148 behaviours survive the generalization', () => {
   it('reports across collections in one walk, with per-type surfaces', () => {
     // `page`/`agent` (6a), `field` (6b) and `dashboard` (6c) used to appear
     // here; each closed, so the parse rejects and the lint correctly stays
-    // quiet — the hand-off this whole layer was built to make. Two collections
-    // still participate so this keeps proving per-type surfacing rather than
-    // degenerating into a single-collection test: `object` reports a NESTED
-    // strip site under a CLOSED root (the #4522 behaviour), and `view` — the
-    // last open root, and the union case — reports at its own.
+    // quiet — the hand-off this whole layer was built to make.
     //
-    // The object-side fixture was `userActions` until #4001 批 20 closed it
-    // (with lifecycle/{retention,ttl,storage,archive}, fieldGroups, external,
-    // systemFields, activityMilestones, publicSharing and the extension entry).
-    // `indexes[]` is what that batch deliberately left open — see the
-    // IndexSchema JSDoc for why — so it is now the object's nested strip site.
+    // The object-side fixture was `userActions` until #4001 批 20 closed it,
+    // then `indexes[]` — the batch's deliberately-held site — until the hold's
+    // evidence was spent (objectui#4772) and it closed too, finishing the file
+    // at 14 of 14. `object` therefore no longer reports ANYWHERE: the walk
+    // still visits the collection (which is what this fixture keeps proving —
+    // a closed collection must not contaminate an open one's findings), and
+    // the index key is REJECTED at the parse instead (asserted below, so a
+    // broken walk cannot hide behind the same empty result).
     const findings = lintUnknownAuthoringKeys({
       objects: [{ name: 'a', label: 'A', indexes: [{ fields: ['a'], zzz: 1 }] }],
       views: [{ name: 'v', object: 'a', zzz: 1 }],
@@ -196,9 +195,13 @@ describe('the #4148 behaviours survive the generalization', () => {
     // and it becomes moot when `view` closes. Left recorded rather than papered
     // over by picking a non-union collection.
     expect([...new Set(findings.map((f) => `${f.surface}:${f.path}`))].sort()).toEqual([
-      'object:objects.a.indexes.0.zzz',
       'view:views.v.zzz',
     ]);
+    // The hand-off half for the object fixture: not unreported — rejected.
+    expect(ObjectSchema.safeParse({
+      name: 'a', label: 'A', fields: { x: { type: 'text', label: 'X' } },
+      indexes: [{ fields: ['a'], zzz: 1 }],
+    }).success).toBe(false);
   });
 
   it('hands off to the parse for the roots that closed', () => {
@@ -259,46 +262,52 @@ describe('nested descent (#4001 evidence phase)', () => {
       userActions: { zzz_nested: 1 },
     }).success).toBe(false);
 
-    // The per-node descent under a CLOSED root — the #4522 behaviour, and the
-    // reason the walk no longer gates a whole collection on its root's posture
-    // — is still exercised, on the one nested shape 批 20 deliberately left
-    // open (`indexes[]`; the IndexSchema JSDoc says why). When that closes,
-    // this describe block is genuinely finished.
-    const [finding, ...rest] = lintUnknownAuthoringKeys({
+    // The per-node descent under a CLOSED root — the #4522 behaviour — was
+    // last exercised here on `indexes[]`, the one nested shape 批 20
+    // deliberately held open. That site closed once objectui#4772 spent the
+    // hold's evidence, so — per this block's own standing sentence ("when that
+    // closes, this describe block is genuinely finished") — the object side is
+    // finished: the fixture flips to the hand-off, and the descent mechanics
+    // stay covered by the `view` union walk one describe over.
+    expect(lintUnknownAuthoringKeys({
       objects: [{ name: 'o1', indexes: [{ fields: ['a'], zzz_nested: 1 }] }],
-    });
-    expect(rest).toEqual([]);
-    expect(finding).toMatchObject({
-      path: 'objects.o1.indexes.0.zzz_nested',
-      surface: 'object',
-      key: 'zzz_nested',
-    });
+    })).toEqual([]);
+    expect(ObjectSchema.safeParse({
+      name: 'o1',
+      label: 'O',
+      fields: { a: { type: 'text', label: 'A' } },
+      indexes: [{ fields: ['a'], zzz_nested: 1 }],
+    }).success).toBe(false);
   });
 
   it('reports inside an array element, indexed by position', () => {
-    // RESTORED at #4001 批 20, under the standing instruction this test left
-    // for itself when it ran out of subject at 6d ("if a new strip surface with
-    // a nested array ever appears, restore the indexed assertion here; do not
-    // let it go untested a second time").
+    // RESTORED at #4001 批 20 on `object.indexes[]` — the batch's deliberately
+    // held site — under the standing instruction this test left for itself
+    // when it ran out of subject at 6d. That hold's evidence was spent
+    // (objectui#4772 converged the console's drifted index editor) and the
+    // site CLOSED, so the subject has run out a second time: the fixture flips
+    // to the hand-off, per key and per position, so a broken walk cannot hide
+    // behind the same empty result.
     //
-    // The subject is `object.indexes[]` — a declared ARRAY OF OBJECTS that is
-    // still strip-mode, and deliberately so: 批 20 closed every other inner
-    // block of `data/object.zod.ts` and held this one, because the console
-    // ships a drifted hand-copy of the shape (`where` for the spec's `partial`)
-    // and closing it would 422 a control the console itself renders. See the
-    // IndexSchema JSDoc. It did not become open again — it never closed.
-    //
-    // Element 1, not 0, so this proves POSITION is carried rather than that a
-    // path happens to end in an index.
-    const [indexed, ...rest] = lintUnknownAuthoringKeys({
+    // Standing instruction, renewed verbatim: if a new strip surface with a
+    // nested array ever appears, restore the indexed assertion here; do not
+    // let it go untested a second time.
+    expect(lintUnknownAuthoringKeys({
       objects: [{ name: 'o1', indexes: [{ fields: ['a'] }, { fields: ['b'], zzz_nested: 1 }] }],
+    })).toEqual([]);
+    // Element 1 rejected AT ITS POSITION — the path carries the index.
+    const parsed = ObjectSchema.safeParse({
+      name: 'o1',
+      label: 'O',
+      fields: { a: { type: 'text', label: 'A' } },
+      indexes: [{ fields: ['a'] }, { fields: ['b'], zzz_nested: 1 }],
     });
-    expect(rest).toEqual([]);
-    expect(indexed).toMatchObject({ path: 'objects.o1.indexes.1.zzz_nested', surface: 'object' });
+    expect(parsed.success).toBe(false);
+    expect(JSON.stringify(parsed.success ? [] : parsed.error.issues)).toContain('zzz_nested');
 
     // The hand-off half: `actions[]` closed at 6d, so the walk stays quiet
     // there. A broken walk would produce the same empty result, which is why
-    // the positive assertion above has to exist alongside it.
+    // the parse assertions above have to exist alongside it.
     expect(lintUnknownAuthoringKeys({
       objects: [{ name: 'o1', actions: [{ name: 'a', zzz_nested: 1 }] }],
     })).toEqual([]);

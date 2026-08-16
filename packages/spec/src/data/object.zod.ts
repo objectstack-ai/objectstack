@@ -350,26 +350,48 @@ export const ObjectCapabilities = strictObject({
  * shape and has no `z.never()` branch, so a tombstone high in the shape prints
  * as `any` and reads as a free-form slot.
  *
- * ## ⛔ Deliberately still `.strip()` — #4001 批 20 held this one site
+ * ## Closed at #4001 批 20 site 14 — the batch's held site, after its producer converged
  *
- * Every other inner block of this file was closed in that batch. This one was
- * NOT, and the reason is a measured live defect rather than an unfinished
- * to-do, so please do not "finish the job" by adding `strictObject` here.
+ * This shape was 批 20's ONE deliberately-open site. The console's embedded
+ * index editor (`objectui` → `metadata-admin/EmbeddedItemEditor.tsx`,
+ * `FALLBACK_SCHEMAS.index`) ships its own hand-copied JSON-Schema for this
+ * shape — the framework publishes none, because `index` is an embedded-only
+ * sub-type with no metadata type of its own — and that copy had drifted: it
+ * offered **`where`** for the partial predicate and **`brin`** in the
+ * algorithm enum, spliced its form output into `object.indexes[]`, and PUT
+ * the WHOLE object. Closing the shape while those controls rendered would
+ * have turned an admin's clean save into a 422 on a control the console
+ * itself drew (the #5114 class), so the strip was held until the producer
+ * was fixed (contract-first: the drift was in the copy, not here).
  *
- * The console's embedded index editor
- * (`objectui` → `metadata-admin/EmbeddedItemEditor.tsx`, `FALLBACK_SCHEMAS.index`)
- * ships its own hand-copied JSON-Schema for this shape — the framework does not
- * publish one, because `index` is an embedded-only sub-type with no metadata
- * type of its own. That copy has drifted: it offers **`where`** for the partial
- * predicate and **`brin`** in the algorithm enum. Both of its drifted controls
- * now edit keys that no longer exist at all, which is #5247's job to delete
- * (it is `Blocked-by` this retirement). Until that lands, an admin filling in
- * "Partial-index predicate" still gets a clean save of a key this schema drops
- * — closing the shape would turn that same click into a 422 on a control the
- * console itself renders (the #5114 class), so the strip stays until the
- * producer is fixed (contract-first: the drift is in the copy, not here).
+ * objectui#4772 (#5247's fix) deleted both drifted controls — the fallback
+ * now offers exactly `name` / `fields` / `unique`, converged to this schema —
+ * so the hold's evidence is spent and the shape is `strictObject` like its
+ * thirteen siblings. `where` keeps a curated `guidance` entry rather than a
+ * rename suggestion: the predicate never reached any DDL under EITHER
+ * spelling (`syncDeclaredIndexes` consumes `name`/`fields`/`unique` only),
+ * and the replacement is a database-layer migration, not another key — a
+ * rename onto the retired `partial` tombstone would be the campaign's
+ * finding 7 (a suggestion pointing into a second rejection).
  */
-export const IndexSchema = lazySchema(() => z.object({
+export const IndexSchema = lazySchema(() => strictObject({
+  surface: 'this index',
+  history:
+    'Until #4001 批 20 closed this site (its held 14th, closed once objectui#4772 ' +
+    "converged the console's drifted index editor), an unknown key here was dropped " +
+    'silently: the index still parsed and registered, minus whatever the author ' +
+    'believed the key did.',
+  guidance: {
+    where:
+      '`where` has never been an index key in this protocol — it was the console ' +
+      "fallback editor's drifted spelling for a partial-index predicate (objectui#4772 " +
+      'removed the control), and no driver ever emitted a predicate under either ' +
+      'spelling. Delete the key. A partial index is built at the database layer, not ' +
+      'the declaration surface: issue `CREATE [UNIQUE] INDEX … WHERE <predicate>` from ' +
+      "a runtime migration (what `metadata-protocol`'s `ensureOverlayIndex` already " +
+      'does for `sys_metadata`).',
+  },
+}, {
   name: z.string().optional().describe('Index name (auto-generated if not provided)'),
   fields: z.array(z.string()).describe('Fields included in the index'),
   // Unique scope on a DECLARED index (ADR-0120 D1, amending #3696):

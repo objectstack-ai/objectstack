@@ -687,7 +687,7 @@ column does not move and the `strip` column falls by the count of what left.
 
 | File | Class | Note |
 |---|---|---|
-| `object.zod.ts` | authorable | top-level already guarded (#1535); inner blocks strict as of 批 20 — except `IndexSchema`, held on a measured console drift (see the `data/` remaining-strip row) |
+| `object.zod.ts` | authorable | top-level already guarded (#1535); **all 14 inner blocks strict** — 13 at 批 20, and the held 14th (`IndexSchema`) closed 2026-08-16 once its hold's evidence was spent: the hold was the #5114 class caught pre-ship (objectui's `FALLBACK_SCHEMAS.index` had drifted, offering `where`/`brin`, and the editor PUT the whole object through `saveMetaItem`), gated on the objectui rename (#5247) and an ADR-0049 answer for `type`/`partial` (#5248). #5248 answered remove (PR #5842, `retiredKey` tombstones + protocol-17 migration); **objectui#4772 then converged the editor to the declared `name`/`fields`/`unique` surface**, so the close shipped with a curated `where` guidance entry (database-layer prescription — deliberately NOT a rename onto the retired `partial` tombstone, which would be finding 7) and per-key pins that the tombstones' own prescriptions survive the strict path. Semantic entry `object-index-unknown-keys-refused` (protocol 18). The file's row left the remaining-strip map by reaching zero; the hold's full history is preserved in that map's section prose and in `object-strictness-batch20.test.ts` §4, which flipped from pinning the strip to pinning the close |
 | `data-engine.zod.ts` | wire (p) | engine contract shapes (was 14 — `DataEngineBatchRequestSchema` retired with `IDataEngine.batch?`, #4618) |
 | `seed-loader.zod.ts` | wire | **re-verdicted 2026-08-14 (#4001 batch D)** — the `(p)` split's "authored" half dissolved under measurement. The seed FILE shape this file's old note meant is `SeedSchema` (`seed.zod.ts`, a registered type, strict since the registered-types batch) — it enters this file only as the `seeds[]` VALUE inside `SeedLoaderRequestSchema`, so the authored half was never one of these 12 sites. Every producer of the request/config halves is framework code, enumerated: `runtime/app-plugin.ts` ×3 (org replay / inline seed / hot-reload), `runtime/domains/packages.ts`, `metadata-protocol/protocol.ts` `applySeedBodies`, `metadata-protocol/seed-loader.ts` `validate()`, `cloud-connection` marketplace install — all `.parse()`/`.safeParse()` over config LITERALS written in code; no `defineStack` key, no metadata type, no Studio form, no CLI flag writes a loader config. `SeedIdentity` is server-constructed by design (`execution-context.zod.ts`: "never client-supplied"); graph/resolution/result/error shapes are built by the loader itself (`buildDependencyGraph`, `buildResult`). BFS from all 26 metadata-type roots + `ObjectStackSchema` (6689 nodes; `ObjectSchema` positive control REACHABLE, fresh uncarried shape negative control UNREACHABLE, synthetic-carrier flip green, same run): all 12 UNREACHABLE. Same class as `data-engine.zod.ts` — an internal service contract (`ISeedLoaderService`), machine-fed at every door |
 | `field.zod.ts` | authorable | partially strict |
@@ -1171,7 +1171,6 @@ triage row record which one was taken.
 
 | File | Class | Batch |
 |---|---|---|
-| `object.zod.ts` | authorable | **13 of 14 closed at #4001 批 20; the 14th is HELD, and that hold is the batch's finding.** The registered type's top level was already closed (#1535/#4519/#4522) — these were the inner blocks under it, and the asymmetry is why the file mattered: an author who has SEEN the root reject a typo reads a clean parse of `lifecycle: { maxAge: '30d' }` as acceptance. Closed: `ObjectAccessConfig`, `Lifecycle` + all four sub-blocks (`retention`/`ttl`/`storage`/`archive`), `ObjectFieldGroup`, `ObjectExternalBinding`, `userActions`, `systemFields`, `activityMilestones`, `publicSharing`, `ObjectExtension`. Reachability was measured, not assumed: a BFS from all 24 metadata-type roots plus `ObjectStackSchema` (4810 nodes, 25 roots) resolves every one `direct` **by identity** — none rests on the `derived-clone` bridge #5056 found can mark a dead shape reachable — with `ObjectSchema`/`PageSchema` as positive controls and 批 14's `EmbedConfigSchema` UNREACHABLE (overlap 0.00) **in the same run**. The parse door was probed separately and at each path: `ObjectSchema.safeParse` REJECTS at the top level today and SILENTLY STRIPPED at all thirteen nested paths, so each closure converts a measured silent strip, not a hypothesis. Doors: `saveMetaItem`'s 422 (`metadata-protocol/protocol.ts` — `getMetadataTypeSchema('object')`), `ObjectSchema.create()`, `defineObjectExtension()`, and `registry.validate()` (diagnostic-only by #3903 design). ⚠️ **`IndexSchema` is deliberately NOT closed — the #5114 class, caught before it shipped rather than after.** objectui's console ships its own hand-copied JSON-Schema for this shape (`metadata-admin/EmbeddedItemEditor.tsx` → `FALLBACK_SCHEMAS.index`), because `index` is an embedded-only sub-type the framework publishes no schema for; that copy has drifted and offers **`where`** for the partial-index predicate where this schema declares **`partial`** (and `brin` in an enum that has no `brin`). The editor splices its form output into `object.indexes[]` and PUTs the WHOLE object, and `saveMetaItem` keeps the body verbatim while validating it — so closing this one shape would 422 a control the console itself renders. Unlike #5073's `allowAddTab` the capability is not merely un-gated but already DEAD in both directions: `driver-sql`'s `syncDeclaredIndexes` consumes `name`/`fields`/`unique` only, so neither `where` NOR `partial` reaches any DDL. That is why the hold is not just "fix the producer first": pointing an author at `partial` today would be a guidance entry claiming more than the platform delivers (finding 18), so the close was gated on BOTH the objectui rename (**#5247**) and an ADR-0049 answer for `type`/`partial` (**#5248**). **#5248 is ANSWERED (remove): PR #5842 retired both keys with `retiredKey` tombstones and the protocol-17 migration `object-index-type-partial-removed`**, so the hold now rests on #5247 alone — still open, and the drifted `where`/`brin` fallback is still present in objectui's `EmbeddedItemEditor.tsx` (re-verified 2026-08-13); its two controls now edit keys that no longer exist at all, which is #5247's job to delete. Recorded in three places (the `IndexSchema` JSDoc + `object-strictness-batch20.test.ts` §4 + this row). One caveat shipped knowingly: `systemFields` is a `false | {…}` union, so its rejection is an `invalid_union` whose own message is the bare *"Invalid input"* — the #5014 flattening. 批 18's `discriminatedUnion` fix is unavailable (one arm is a literal, so there is no discriminant), so the behaviour is pinned honestly rather than papered over; every other site in the file is a plain object and surfaces its prescription directly. Curation is anchored to named siblings and each claim is asserted: the dominant failure here is FLATTENING (`maxAge`/`expireAfter`/`shards` written one level too high, where §3.5's own refine then rejects the object for the WRONG key), so `lifecycle` carries wrong-layer pointers DOWN into its four sub-blocks; `userActions` points at `ui/view.zod.ts`'s identically-named block, whose vocabulary is completely disjoint; `systemFields.owner` points at `ownership`, a key the block's own field doc names but the shape never declared; `external.allowWrites` names the ADR-0015 double opt-in and mirrors `datasource.zod.ts`'s own `writable → allowWrites` alias in the opposite direction; `fieldGroups[].fields` states the direction of the membership edge (declared on the FIELD), and its three DEPRECATED collapse aliases stay ACCEPTED — closing a shape must not turn a documented deprecation into a rejection. Highest author volume in the repo |
 | `data-engine.zod.ts` | wire | **out of scope** — engine request/response contracts |
 | `seed-loader.zod.ts` | wire | **out of forced scope — re-verdicted from `mixed (p)` at #4001 batch D.** The old split's "authored" third (`SeedLoaderConfig` / `SeedIdentity` / `ReferenceResolution`) did not survive its own measurement: `ReferenceResolution` is BUILT by the loader from field metadata (`buildDependencyGraph` — nothing else in the tree constructs one), `SeedIdentity` is server-constructed by declaration, and every `SeedLoaderConfig` producer is a framework code literal (seven parse sites enumerated in the triage row; no authoring surface writes any of these keys). The authored half of seeding is `SeedSchema` — already strict, and it is the `seeds[]` VALUE inside the request, so author typos in seed files are rejected TODAY through the nested strict parse. Internal service contract; stays tolerant like `data-engine.zod.ts` |
 | `filter.zod.ts` | open | **out of scope** — query dialect; user data flows through, validated semantically elsewhere |
@@ -1187,9 +1186,10 @@ triage row record which one was taken.
 
 **Authorable strip in `data/`:**
 [the counts file](./2026-07-unknown-key-strictness-ledger.counts.md#data--open) splits this
-directory three ways, and the middle bucket is now **empty**: `object` is the one
-**firm** authorable row left, and its single site is deliberately HELD (see the row —
-the gate is #5247 alone now that #5248 is answered); `field` LEFT the authorable bucket
+directory three ways, and the first two buckets are now **empty**: `object` was the one
+**firm** authorable row left, its single site deliberately HELD on #5247 — **that hold
+was spent by objectui#4772 and the site closed 2026-08-16 (14 of 14; the row left the
+map at zero — see the triage row and the 批 20 prose below)**; `field` LEFT the authorable bucket
 on 2026-08-13, re-verdicted `no door` on the per-schema read its row had been asking
 for (both sites are ADR-0104-deprecated dead exports, removal tracked at #8562 — see
 the row); and **#4001 batch D (2026-08-14) discharged the last three `mixed (p)` rows
@@ -1210,7 +1210,7 @@ of `open` rather than confirming it, and by one more when **#4001 batch B** clos
 `AutoPersistenceConfigSchema`), dropping its row from the remaining-strip map entirely: the
 file's 6th site, `MemoryConfigSchema`, was already `strictObject` since #4410.
 
-**批 20 closed 13 of `object.zod.ts`'s 14 and parked the row at 1**, which makes it
+**批 20 closed 13 of `object.zod.ts`'s 14 and parked the row at 1**, which made it
 the fourth row in this ledger to shrink without disappearing — after `flow` (批 11),
 `etl` (批 12) and `sharing`/`i18n` (批 14/16) — and the first to do so on a
 `no gate`-shaped reason inside a directory whose other floors are all wire. The
@@ -1218,9 +1218,23 @@ reverse pin cannot see the difference: it fires when a file reaches ZERO, so it
 proves a row's work is *done* and is completely silent about a row whose work is
 *deliberately partial*. To the gate, "finished, the last site is held on measured
 evidence" and "nobody got to it" are the same row, and only the `Class` column and
-this prose separate them. The held site is `IndexSchema`; the evidence is in its
-row above, the schema's own JSDoc, and §4 of `object-strictness-batch20.test.ts`,
-which pins the strip so the day it changes, it changes deliberately.
+this prose separate them. The held site was `IndexSchema`, held because objectui's
+`FALLBACK_SCHEMAS.index` had drifted (offering `where` for the partial predicate
+and `brin` in the algorithm enum) and the editor PUT the whole object through
+`saveMetaItem` — closing the shape would have 422'd a control the console itself
+rendered, the #5114 class caught before shipping. The hold was gated on the
+objectui rename (#5247) and an ADR-0049 answer for `type`/`partial` (#5248,
+answered remove at PR #5842 with `retiredKey` tombstones + the protocol-17
+migration). **The hold's evidence was spent by objectui#4772** (the editor now
+offers exactly `name`/`fields`/`unique`, converged to the schema), **and the site
+closed 2026-08-16 — the row LEFT this map by reaching zero, 14 of 14.** The close
+carries a curated `where` guidance entry (the database-layer prescription;
+deliberately not a rename onto the retired `partial` tombstone, which would be
+finding 7), and §4 of `object-strictness-batch20.test.ts` — which pinned the strip
+precisely so the day it changed, it changed deliberately — flipped in the same
+change to pin the closed posture, including that both tombstones still answer
+their own migration prescriptions rather than a generic `unrecognized_keys`.
+Semantic entry `object-index-unknown-keys-refused` (protocol 18).
 
 **The #5107 split got its first merge-QUEUE test here, and passed silently**, which
 is the outcome worth recording precisely because there is nothing to see. 批 20 was

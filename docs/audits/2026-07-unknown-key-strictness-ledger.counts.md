@@ -22,14 +22,14 @@ regenerate.
 |---|---|
 | Triaged directories | 5 |
 | Object sites in them | 439 |
-| Still-open (strip) sites | 124 |
-| Files carrying at least one | 23 |
+| Still-open (strip) sites | 123 |
+| Files carrying at least one | 22 |
 
 Remaining strip sites by class:
 
 | Bucket | Sites |
 |---|---|
-| authorable — the ruling's forced scope | 2 |
+| authorable — the ruling's forced scope | 1 |
 | unresolved — needs a per-schema verdict | 0 |
 | wire / open — out of forced scope | 118 |
 | no door — no carrier, ADR-0049 territory | 3 |
@@ -45,11 +45,11 @@ The `strict` column is the one the campaign schedules against; it counts both th
 | Dir | Sites | strict | passthrough | catchall | strip |
 |---|---|---|---|---|---|
 | `ui/` | 174 | 163 | 5 | 0 | 6 |
-| `data/` | 153 | 70 | 1 | 0 | 82 |
+| `data/` | 153 | 71 | 1 | 0 | 81 |
 | `automation/` | 65 | 42 | 0 | 0 | 23 |
 | `security/` | 20 | 7 | 0 | 0 | 13 |
 | `studio/` | 27 | 27 | 0 | 0 | 0 |
-| **total** | **439** | **309** | **6** | **0** | **124** |
+| **total** | **439** | **310** | **6** | **0** | **123** |
 
 ## File-level triage — site counts
 
@@ -177,7 +177,7 @@ over it is here.
 
 ### `data/` — open
 
-**82 strip of 153**, in 13 file(s).
+**81 strip of 153**, in 12 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
@@ -191,14 +191,13 @@ over it is here.
 | `field.zod.ts` | 2 | 10 |
 | `filter.zod.ts` | 10 | 11 |
 | `hook.zod.ts` | 5 | 7 |
-| `object.zod.ts` | 1 | 20 |
 | `query.zod.ts` | 4 | 5 |
 | `seed-loader.zod.ts` | 12 | 12 |
-| **total** | **82** | **153** |
+| **total** | **81** | **153** |
 
 | Bucket | Sites |
 |---|---|
-| authorable — the ruling's forced scope | 1 |
+| authorable — the ruling's forced scope | 0 |
 | unresolved — needs a per-schema verdict | 0 |
 | wire / open — out of forced scope | 79 |
 | no door — no carrier, ADR-0049 territory | 2 |

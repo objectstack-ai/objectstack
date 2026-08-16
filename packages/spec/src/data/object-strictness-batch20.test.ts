@@ -12,11 +12,15 @@
  * author who has SEEN the top level reject a typo has every reason to read a
  * clean parse of `lifecycle: { maxAge: '30d' }` as acceptance.
  *
- * 13 of the 14 open sites are closed here. The fourteenth — `IndexSchema` — is
- * deliberately still open, and section 4 pins that decision with the evidence,
- * because a deliberately-open shape explained only in prose is indistinguishable
- * from one nobody got to, which is how the next sweep "finishes the job" and
- * breaks something.
+ * All 14 sites are now closed. The fourteenth — `IndexSchema` — was
+ * deliberately held open while the console's drifted index editor
+ * (`FALLBACK_SCHEMAS.index`, offering `where`/`brin` for keys this schema
+ * never or no longer declared) could still PUT those spellings through a
+ * clean save (the #5114 class); objectui#4772 converged that editor to this
+ * schema, so the hold's evidence is spent and section 4 now pins the CLOSED
+ * posture — including the part a naive close loses: the `type`/`partial`
+ * tombstones must keep answering their own migration prescription rather
+ * than degrading to a generic `unrecognized_keys`.
  *
  * This file is the third of the three places each verdict is recorded (the
  * others: the JSDoc on the shape itself, and the `data/` row in
@@ -32,7 +36,9 @@
  *   3. The CURATION. Every alias/guidance entry is a CLAIM about the schema
  *      (ledger finding 18 — this campaign shipped four false ones), so each is
  *      anchored here to the sibling contract that makes it true.
- *   4. The one shape left OPEN, with the measurement that says why.
+ *   4. The formerly-held `IndexSchema`, now closed: the refusal of the
+ *      console's drifted `where` spelling WITH its curated prescription, and
+ *      the tombstones' prose surviving the strict close.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -461,43 +467,63 @@ describe('#4001 批 20 — curation is anchored to the sibling contract that mak
 });
 
 // ===========================================================================
-// 4. The one shape left OPEN — and the measurement that says why
+// 4. The formerly-held `IndexSchema` — closed once its producer converged
 // ===========================================================================
-describe('#4001 批 20 — `IndexSchema` is deliberately NOT closed', () => {
-  it('still strips, on purpose — do not "finish the job" without reading the JSDoc', () => {
-    const parsed = accept(ObjectSchema, { ...OBJ, indexes: [{ fields: ['name'], where: "status = 'open'" }] }) as {
-      indexes: Array<Record<string, unknown>>;
-    };
-    // The key rides in and is dropped. That IS the defect — it is pinned here
-    // so the day it changes, it changes deliberately.
-    expect(parsed.indexes[0].where).toBeUndefined();
-    expect(parsed.indexes[0].fields).toEqual(['name']);
+describe('#4001 批 20 — `IndexSchema` is closed (the held 14th site, after objectui#4772)', () => {
+  it('declared keys still parse, at every spelling ADR-0120 declares', () => {
+    accept(IndexSchema, { fields: ['name'] });
+    accept(IndexSchema, { name: 'idx_probe', fields: ['name'], unique: true });
+    accept(IndexSchema, { fields: ['code'], unique: 'global' });
+    accept(IndexSchema, { fields: ['code'], unique: 'organization' });
+    // …and through the carrier, which is how the console PUTs it.
+    accept(ObjectSchema, { ...OBJ, indexes: [{ fields: ['name'], unique: 'organization' }] });
   });
 
-  it('the console drift outlived BOTH spellings: `where` strips, `partial` is now retired', () => {
-    // objectui `metadata-admin/EmbeddedItemEditor.tsx` → FALLBACK_SCHEMAS.index
-    // publishes `where` for the partial-index predicate. The spec's key WAS
-    // `partial` — until #5248 / #4943 retired it (no driver ever emitted the
-    // predicate). So the editor now renders a control for a key that does not
-    // exist under either spelling, which is #5247's job to delete.
-    //
-    // The two halves fail DIFFERENTLY, and that difference is the point:
-    //   - `where` was never declared here, and the shape still `.strip()`s, so
-    //     it is discarded in silence — the held-open defect above;
-    //   - `partial` IS declared, as a tombstone, so it is rejected loudly with
-    //     the migration prescription rather than stripped (the whole reason a
-    //     non-strict schema gets a tombstone instead of a plain delete).
-    const parsedWhere = accept(IndexSchema, { fields: ['name'], where: "status = 'open'" }) as Record<string, unknown>;
-    expect(parsedWhere.where, 'the console spelling is silently discarded today').toBeUndefined();
-
-    const retired = IndexSchema.safeParse({ fields: ['name'], partial: "status = 'open'" });
-    expect(retired.success, '`partial` is retired, not stripped').toBe(false);
-    expect(retired.error!.issues[0]!.message).toMatch(/`indexes\[\]\.partial` was removed.*Delete the key/s);
+  it('an unknown key is REFUSED, not stripped — the batch-20 posture, at its own path and through the carrier', () => {
+    // Before this close the key rode in and was dropped (the held-open defect
+    // the old §4 pinned). Now it is a named rejection like the other 13 sites.
+    expect(reject(IndexSchema, { fields: ['name'], notAnIndexKey: 1 })).toContain('notAnIndexKey');
+    expect(rejectOnObject({ indexes: [{ fields: ['name'], notAnIndexKey: 1 }] })).toContain('notAnIndexKey');
   });
 
-  it('its SIBLINGS in the same file are closed — this is a held site, not an unwalked file', () => {
-    // The distinction the ledger's Class column exists to carry: a row parked
-    // at a deliberate floor looks exactly like a row nobody finished.
+  it('the console\'s drifted `where` spelling gets the curated prescription, not a bare rejection', () => {
+    // objectui's FALLBACK_SCHEMAS.index offered `where` for a partial-index
+    // predicate no driver ever read; objectui#4772 deleted the control. An
+    // author (or a stored body from the drift window) still writing it gets
+    // the database-layer prescription — NOT a rename onto the retired
+    // `partial` tombstone, which would be finding 7 (a suggestion pointing
+    // into a second rejection).
+    const msg = rejectOnObject({ indexes: [{ fields: ['name'], where: "status = 'open'" }] });
+    // Anti-vacuity: strict rejects with or without a guidance entry, so anchor
+    // on prose only the curated entry produces.
+    expect(msg, 'the `where` guidance bullet is not being produced at all').toContain('database layer');
+    expect(msg).toContain('ensureOverlayIndex');
+    expect(msg, 'must not steer the author onto the retired spelling').not.toContain('Did you mean');
+    // …and it really is THIS key's guidance rather than something the surface
+    // says to every unknown key: a sibling unknown key gets the bare rejection.
+    expect(reject(IndexSchema, { fields: ['name'], notAnIndexKey: 1 })).not.toContain('database layer');
+  });
+
+  it('the `type`/`partial` tombstones SURVIVE the strict close — their prescription, not `unrecognized_keys` (#5114 class)', () => {
+    // The tombstones are declared keys, so the strict unknown-key path never
+    // sees them; each still answers its own migration text. Losing that prose
+    // to a generic strict rejection would be a regression the close must not
+    // ship — pinned per key, on the message itself.
+    const retiredPartial = IndexSchema.safeParse({ fields: ['name'], partial: "status = 'open'" });
+    expect(retiredPartial.success, '`partial` is retired, not merely unknown').toBe(false);
+    expect(retiredPartial.error!.issues[0]!.message).toMatch(/`indexes\[\]\.partial` was removed.*Delete the key/s);
+
+    const retiredType = IndexSchema.safeParse({ fields: ['name'], type: 'brin' });
+    expect(retiredType.success, '`type` is retired, not merely unknown').toBe(false);
+    expect(retiredType.error!.issues[0]!.message).toMatch(/`indexes\[\]\.type` was removed.*Delete the key/s);
+
+    // …and neither is offered as a rename target for a near-miss: a tombstone
+    // is excluded from the candidate list (`acceptsNothing`), so `partail`
+    // must not be answered with the one key the schema cannot accept.
+    expect(reject(IndexSchema, { fields: ['name'], partail: 'x' })).not.toContain('Did you mean');
+  });
+
+  it('its SIBLINGS in the same file are closed the same way — the file is now 14 of 14', () => {
     expect(rejectOnObject({ lifecycle: { class: 'record', notALifecycleKey: 1 } })).toContain('notALifecycleKey');
     expect(rejectOnObject({ fieldGroups: [{ key: 'g', label: 'G', notAGroupKey: 1 }] })).toContain('notAGroupKey');
   });
