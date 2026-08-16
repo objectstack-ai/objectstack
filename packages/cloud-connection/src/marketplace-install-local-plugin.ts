@@ -67,7 +67,7 @@ import {
 } from './local-manifest-source.js';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
-import type { IHttpServer } from '@objectstack/spec/contracts';
+import type { IHttpServer, IObjectQLEngine } from '@objectstack/spec/contracts';
 
 const ROUTE_BASE = '/api/v1/marketplace/install-local';
 
@@ -1417,8 +1417,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const headers = c?.req?.raw?.headers;
         if (!headers) return null;
         try {
-            let ql: any;
-            try { ql = ctx.getService('objectql'); } catch { /* no data engine */ }
+            // The `objectql` slot's declared contract, not `any` (#4127/#4251):
+            // this lookup is NEW code, so it carries the contract rather than
+            // riding the file's grandfathered entry in
+            // `scripts/slot-lookup-baseline.json`. Same spelling the two sibling
+            // surfaces named above use for this slot (`plugin-sharing`,
+            // `service-settings`) — the full engine seen whole, of which the
+            // resolver reads only `find`.
+            let ql: IObjectQLEngine | undefined;
+            try { ql = ctx.getService<IObjectQLEngine>('objectql'); } catch { /* no data engine */ }
 
             // The better-auth session bridge — resolved lazily and defensively,
             // exactly as the previous implementation did, then handed to the
