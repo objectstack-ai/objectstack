@@ -809,7 +809,8 @@ async function selfTest() {
   }
   console.log(
     `✓ check-required-contexts --self-test: ${checked} assertions ` +
-      `(rename ablations across both workflows + matrix/continue-on-error/trigger shapes + the shard-name collision + the #4690 pins).`,
+      `(rename ablations across both workflows + matrix/continue-on-error/trigger shapes + the shard-name collision + ` +
+      `the \`carries\` step-count ban + the #4690 pins).`,
   );
 }
 
