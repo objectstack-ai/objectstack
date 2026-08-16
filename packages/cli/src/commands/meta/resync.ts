@@ -48,9 +48,16 @@ function safeGetService(kernel: any, name: string): any {
  * boot; this command closes the one remaining gap by force-reconciling the
  * default permission-set rows to the shipped declaration.
  *
- * Business data is never touched — only `sys_permission_set` definition rows.
- * A row an admin has taken over in Setup (`managed_by:'user'`) or a package
- * owns (`'package'`) is an intentional override and is left alone.
+ * Business data is never touched — only `sys_permission_set` definition rows,
+ * and only rows still `managed_by:'platform'` are reconciled. A row a package
+ * owns (`'package'`) is left alone as a deliberate override. A row stamped
+ * `'admin'` — or the legacy spelling `'user'`, healed to `'admin'` by the
+ * boot-time vocabulary normalizer (`normalizeManagedByVocab`) — is left alone
+ * too, but is NOT always a deliberate override: on any install created before
+ * #8692 (2026-08-15) the platform's OWN seeded default sets carry that same
+ * `'admin'` stamp, indistinguishable from a genuine Setup takeover, so
+ * `resynced 0 / skipped N` is a permanent, by-design outcome on those
+ * installs rather than a bug.
  */
 export default class MetaResync extends Command {
   static override description =
