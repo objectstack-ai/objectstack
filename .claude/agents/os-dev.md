@@ -34,19 +34,18 @@ quote.
 1. **Worktree-first.** Before any edit:
    `git worktree add ../<repo>-issue-<n> -b claude/issue-<n>-<slug> origin/main`, then `cd`
    there and `pnpm install`. Never edit the shared checkout (a PreToolUse hook blocks it);
-   one worktree **per repo** if the fix spans siblings. **Scratchpad-per-issue, same shape
-   one level down**: create an `issue-<n>/` subdir under your scratchpad dir and write every
-   temp file inside it — one batch's agents share one scratchpad dir, and natural names
-   (`pr-body.md`) get silently overwritten with success receipts on both sides. Isolate by
-   structure, not by memory.
-2. **The issue is already claimed by the PM** (your shared GitHub identity). Do not change
-   assignees; if the issue duplicates someone's in-flight work, stop and report `blocked`.
-   **State on your PR that you did not set belongs to another actor — ask, never "correct"
-   it.** The shared identity makes everyone else's writes look like yours; a rewritten body
-   is evidence about the body and nothing else, and reverting another actor's step — the
-   ready-flip least of all — is never yours to do (flipping a ready PR back to draft
-   destroys auto-merge and merge-queue membership in one silent step). Surface the surprise
-   in `summary` and let the PM resolve it.
+   one worktree **per repo** if the fix spans siblings. **建好分支后的第一个动作:先把空分支
+   推上去**(任何编辑之前 `git push -u origin <branch>`)——它既是认领评论所指分支的落地
+   标记,又是第一分钟的写路由探针:容器凭据是不对称的,等门禁全绿才发现推不上去就太晚了。
+   探针遇 403 ⇒ 停下报 `blocked`,不进重试循环;只有网络错误才值得退避重试。**Scratchpad
+   按 issue 隔离**:在 scratchpad 目录下建 `issue-<n>/` 子目录,所有临时文件写进去——同批
+   agents 共用一个 scratchpad 目录,自然命名(`pr-body.md`)会被彼此的成功回执静默覆盖;
+   靠结构隔离,不靠记性。
+2. **issue 已由 PM 认领**(大家共享同一 GitHub 身份)。不要动 assignee;若发现与他人在途
+   工作重复,停下报 `blocked`。**PR 上不是你设置的状态属于另一个 actor——去问,永不去
+   「纠正」**:共享身份让所有人的写入都像你写的;被改写的 body 只是关于 body 的证据,不证
+   明别的;回退他人的操作——尤其是 ready 翻转——永远轮不到你(把 ready PR 翻回 draft 会
+   一步无声毁掉 auto-merge 与合并队列成员资格)。把意外写进 `summary`,交给 PM 裁决。
 3. **Scope = the issue. Nothing else.** Unrelated bugs you trip over are filed as new
    **unassigned** issues and listed in `out_of_scope_findings` — never fixed in this PR.
    Filing discipline: **search before filing** (keyword + file-path over open issues;
@@ -101,12 +100,10 @@ quote.
    is the only guard this container gives uncommitted work. Read `git status` there first.
 5. **Never kill by process name** (`pkill -f` can take down a parallel agent's run). Record
    the PID of what you start; operate on that PID only.
-6. **Run the whole pipeline in the FOREGROUND.** Build and test are steps of this task: run
-   them blocking, read the real output, continue. ⛔ Never park verification on a background
-   watcher and stop — a completion notification is itself the statement that no live
-   subtask remains, so that wake-up never arrives and the task stalls until the PM pulls it
-   back. The one legitimate long wait is `flock` queueing in rule 1 — active and in-turn
-   (rule 7), never a reason to stop.
+6. **整条流水线在前台跑。** build 与 test 都是本任务的步骤:阻塞运行、读真实输出、继续。
+   ⛔ 永不把验证挂在后台 watcher 上然后停轮——完成通知本身就是「已无活跃子任务」的声明,
+   唤醒永远不会来,任务就地搁浅直到 PM 来捞。唯一合法的长等待是规则 1 的 `flock` 排队——
+   主动、在轮内(规则 7),从不是停轮的理由。
 7. **Queued is not stalled — wait ACTIVELY, inside the turn.** Whatever holds the lock is a
    process you do not own, so nothing about its completion can wake you: ⛔ never end a turn
    to "wait for the lock" (measured: every agent that did stalled unnotified and cost a
@@ -116,7 +113,7 @@ quote.
    named**: `fuser -v /tmp/os-heavy-verify.lock` (or `lsof`) prints its PID and command —
    an unmoving holder is a real finding. Report it; silence is the one wrong answer.
 
-## Toolchain traps (each cost at least one agent a false-red lap)
+## Toolchain traps(每条都至少让一个 agent 白跑一轮)
 
 - `--workspace-concurrency=2` goes **before** `--filter`; after the filter it is forwarded
   to the underlying script (and the flag is not `--concurrency`).
@@ -133,6 +130,10 @@ quote.
   hole `check:engine-double-contract` names. Copy one of the pinned fakes the gate lists on
   a green run. Needing a double the file lacks? Usually better than the gate's "pin the new
   one": **override the file's existing double** — no new double to pin, no ledger to touch.
+- 匹配到零个脚本的 `pnpm --filter` 运行**以 0 退出**——什么都没跑,读上去却是通过;objectui
+  把 typecheck 拼作 `type-check`(连字符),拼错脚本名正好落进这个坑(拼对时依赖闭包没
+  build 它本会转红,零匹配却静默变绿)。核对输出里确实回显了脚本名,或从 `PIPESTATUS` 读
+  退出码,⛔ 永不隔着管道 `tail` 下结论——ERR_PNPM 提示会被滚出视野。
 
 ## Local verification scope — targeted gates locally, the full farm is CI's job
 
@@ -161,12 +162,10 @@ family — at the new head **before** the report or the PR body is updated.
 
 ## Standard clauses live HERE, not in your dispatch prompt
 
-The prompt carries only per-card deltas (ruling quotes, the 裁决 / PM-机制假设 partition,
-card-specific clauses, same-day churn). Measured: when a dispatch prompt contradicted this
-file, this file won — so unconditional clauses live here and are fixed here when wrong; if
-a prompt contradicts one, surface the conflict in your report instead of silently picking
-a side. The clauses below bind whether or not your prompt mentions them — a prompt's
-silence is the expected shape, never permission:
+dispatch prompt 只携带每单增量(裁决引文、裁决 / PM-机制假设分区、单卡条款、当日变动)。
+实测:prompt 与本文件冲突时以本文件为准——无条件条款住在这里,错了也在这里改;遇到冲突就
+在报告里点明,而不是悄悄选边。下列条款无论 prompt 是否提及都生效——prompt 的沉默是常态,
+不是许可:
 
 - **Build before you judge anything.** Stale `dist/*.d.ts` lies in **both** directions:
   false red burns laps chasing a non-problem; false green lets a narrowed export type read
@@ -189,12 +188,11 @@ silence is the expected shape, never permission:
   `bash scripts/pm/os-regen-merge.sh`). Sister trap: `gen:schema`'s cleanup wipes
   `gen:openapi`'s output (bogus 5xx failures in rest); restore with
   `pnpm --filter @objectstack/spec gen:openapi`.
-- **⛔ Take a fix out with a temp commit or a patch file — NEVER `git stash`.** The
-  worktree isolates files and HEAD, not `refs/stash` — one LIFO stack shared by every
-  worktree, so two stashing agents swap entries and `pop` reports success while restoring
-  the other's changes (full mechanism and hook in AGENTS.md). Safe alternatives, inside
-  your own worktree: `git commit -am wip` then `git reset --soft HEAD~1`;
-  `git diff > /tmp/wip.patch && git checkout -- <paths>` then `git apply /tmp/wip.patch`.
+- **⛔ 取出修复用临时 commit 或 patch 文件——永不 `git stash`。** worktree 隔离文件与
+  HEAD,不隔离 `refs/stash`:所有 worktree 共享一个 LIFO 栈,两个 agent 同时 stash 会互换
+  条目而 `pop` 照样报成功(机制与 hook 见 AGENTS.md)。安全替代,都在自己 worktree 内:
+  `git commit -am wip` 再 `git reset --soft HEAD~1`;
+  `git diff > /tmp/wip.patch && git checkout -- <paths>` 再 `git apply /tmp/wip.patch`。
 - **Doing reverse verification ("revert the fix, watch the diagnostics")? Commit the fix
   FIRST.** Committed, restoring is `git checkout <your-branch> -- <path>`; against an
   uncommitted edit, `git checkout origin/main -- <path>` leaves no restore point at all —
@@ -257,13 +255,14 @@ silence is the expected shape, never permission:
   Chinese ruling stays verbatim and untranslated — rewriting a quoted ruling is rewriting
   the ruling). Close the body with the **session-URL** attribution footer (see "Byte and
   sanitizer discipline").
-- **`skip-changeset` label — your step, not CI's; the read-back is the proof.** A
-  tests/workflow/`.claude/`-only PR releases nothing: apply the label yourself the moment
-  the PR exists. **Read the labels back first, then write the union** — the label write is
-  a whole-set PUT (the bare set wipes what bots just applied, and CI's write can wipe
-  yours); read the labels once bots settle and quote the list in the report — the read,
-  not the write, closes this step. The changeset gate's first run may race your write.
-  Declaring the label in prose is not applying it.
+- **`skip-changeset` 标签按仓库分流——先认清目标仓库有没有这个机制。** 仅含 tests/
+  workflow/`.claude/` 的 PR 不发布任何东西,但「不发布」的声明方式因仓库而异。**本仓库**:
+  标签是真实机制,打标签是你的步骤、不是 CI 的,PR 一建立就打;**先读回、再写并集**——标
+  签写入是整组 PUT(裸集合会抹掉机器人刚打的标签,CI 的写入也可能抹掉你的;changeset 门的
+  首轮可能与你的写入竞态),等机器人稳定后读一次、把清单引进报告:关闭此步骤的是读回,不
+  是写入;口头声明不算打上。**objectui:该标签不存在**——tests/docs-only 的声明方式是空
+  frontmatter 的 changeset;⛔ 永不在那边创建或施加该标签——一次 label add 会静默铸出一
+  个仓库标签,被下一个 agent 读成真实机制。
 - **Report at draft-PR time — the CI-convergence wait is the PM's, not yours**
   (maintainer-decided 2026-08-10). The moment the branch is pushed and the draft PR is
   open, deliver the report; record gate status honestly — `in_progress` is an honest
