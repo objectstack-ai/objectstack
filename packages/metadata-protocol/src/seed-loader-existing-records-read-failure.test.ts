@@ -43,7 +43,11 @@ import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts'
 // objectql depends on THIS package, so that import would close a dependency
 // cycle turbo rejects outright.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
-import { SeedLoaderService } from './seed-loader';
+// `.js` extension deliberately, unlike the older sibling seed-loader tests:
+// `moduleResolution: nodenext` requires it, and an extensionless specifier is
+// exactly the TS2835 that makes up part of this package's frozen TEST_DEBT
+// (#5278). That ledger is shrink-only, so a new file may not add to it.
+import { SeedLoaderService } from './seed-loader.js';
 
 interface StoreRow extends Record<string, unknown> {
     id: string;
