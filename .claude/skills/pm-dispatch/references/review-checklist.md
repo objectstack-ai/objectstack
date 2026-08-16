@@ -19,9 +19,11 @@
   message 分开解析,细则见平台读数事实表);误关的卡以 completed 状态对一切「只看
   open」的过滤隐身,这一读是唯一能兜住它的机械检查。
 - **范围检查**(取 changed files,⛔ 不看报告自述):无 `content/docs/releases/` 改
-  动、用户可见改动有 changeset、无与卡无关的文件。Tests/docs-only PR 走
-  `skip-changeset` 标签,不走空 changeset(空 changeset 滞留发布);含读者可见生成产
-  物时 dev 选 changeset 是对的 —— 以 PR 正文说明的理由为准,两条路都有效,别来回改。
+  动、用户可见改动有 changeset、无与卡无关的文件。Tests/docs-only 按仓库分流:本仓
+  库走 `skip-changeset` 标签、不走空 changeset(空 changeset 在本仓库滞留发布);
+  objectui 无此标签 —— 空 frontmatter changeset 即声明、即正确形态,⛔ 永不要求或
+  铸出该标签;含读者可见生成产物时 dev 选 changeset 是对的 —— 以 PR 正文说明的理
+  由为准,两条路都有效,别来回改。
 - **就地修了范围外的邻接缺陷?**四条件逐条核(同缺陷类·机械·文件无他人认领·同门禁
   族),再核 claim 文件面同轮已修订、PR 正文点名该修并载证据;缺一条即判 REWORK。
 - **改动触及的每个包,`private: false` 即已发布 ⇒ 核 changeset 在不在**:判据是包
@@ -29,8 +31,7 @@
   断 —— 那个判断 dev 在时间压力下会乐观化。⛔ 缺了不入队 —— 合进 main 却永不发
   布,看起来像修好了,比不合更糟。
 - **测试证据**要有真实命令与通过输出,不是一句 tests pass。**测量类交付先看阳性对
-  照**:对照本身失败 ⇒ 该读数记 INCONCLUSIVE,⛔ 不把它的「绿」当被测风险的证据入
-  账。
+  照**:对照本身失败 ⇒ 该读数记 INCONCLUSIVE,⛔ 不把它的「绿」当被测风险的证据入账。
 - **CI 收敛读数只属于复核侧**(维护者 2026-08-10 裁定;dev 的契约是草稿 PR 时点交
   报,报告里 gate `in_progress` 是诚实读数、预期内常态):翻 ready / 挂 auto-merge
   / 入队前亲核 ESLint 与 TypeScript Type Check 两个 job 的 `conclusion` 已为
@@ -38,9 +39,8 @@
   (SendMessage 续派原 dev —— 那是这笔交换已付过的价钱,不是 REWORK 的理由;红着
   合并才是)。重量级卡可在派发令显式写「本单等 CI」。
 - **每个门禁读数先钉到 PR 的当前 head**:先读 PR 的 `head.sha`,再比对 run 的
-  `head_sha` —— 不一致的 run 是关于一个死提交的读数,绿与红**双向都不入账**(旧
-  head 的绿把「新推送未验」读成「消费者干净」,旧 head 的红把已修掉的缺陷重新挂回
-  PR)。
+  `head_sha` —— 不一致的 run 是关于一个死提交的读数,绿与红**双向都不入账**(旧 head
+  的绿把「新推送未验」读成「消费者干净」,旧 head 的红把已修掉的缺陷重新挂回 PR)。
 - **dev 本地跑的门禁并集,同样先钉 head —— 同一条纪律**:dev 的契约要求在**最后一
   次提交之后**跑并集,并把那一跑的 `git rev-parse --short HEAD` 抄进报告与 PR 正
   文;复核就读这个 HEAD 与 PR 当前 `head.sha` 比一次。对不上 ⇒ 那份「本地全绿」是
