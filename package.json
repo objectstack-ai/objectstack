@@ -39,6 +39,7 @@
     "check:doc-anchors": "node scripts/check-doc-anchors.mjs --self-test && node scripts/check-doc-anchors.mjs",
     "check:docs-audit-scope": "node scripts/docs-audit/affected-docs.mjs --self-test && node scripts/docs-audit/check-audit-scope.mjs --self-test && node scripts/docs-audit/check-audit-scope.mjs",
     "check:docs-redirects": "node scripts/check-docs-redirects.mjs --self-test && node scripts/check-docs-redirects.mjs",
+    "check:docs-image-tag": "node scripts/check-docs-image-tag.mjs --self-test && node scripts/check-docs-image-tag.mjs",
     "check:role-word": "node scripts/check-role-word.mjs --self-test && node scripts/check-role-word.mjs",
     "check:quick-reference-counts": "node scripts/check-quick-reference-counts.mjs --self-test && node scripts/check-quick-reference-counts.mjs",
     "check:skill-frame-sync": "node scripts/check-skill-frame-sync.mjs --self-test && node scripts/check-skill-frame-sync.mjs",

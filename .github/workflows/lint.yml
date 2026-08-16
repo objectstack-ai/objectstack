@@ -311,6 +311,43 @@ jobs:
       - name: Docs redirect destinations resolve, and no chains
         run: pnpm check:docs-redirects
 
+      # #9018 docs image tags: the same "example image tag N majors behind
+      # packages/cli" staleness was found and hand-fixed TWICE, independently —
+      # content/docs/deployment/self-hosting.mdx (#8911, PR #8960) and
+      # docker/README.md (#8961, PR #9016). Two occurrences of an identical drift
+      # is where a mechanical guard beats fixing the third one by hand. The drift
+      # is silent by construction: a stale tag is valid Markdown, valid Docker
+      # syntax, and pulls a real (old) image, so a reader following the docs
+      # deploys the wrong major and finds out at boot.
+      #
+      # The gate compares every CONCRETE version pinned on an enumerated doc
+      # surface against packages/cli/package.json's version, reporting file:line
+      # with found vs expected. Surfaces are enumerated, never globbed (#9018 asks
+      # for this): content/docs/** carries ~30 "removed in @objectstack/spec
+      # 17.0.0" sentences, historical facts that must NOT track the CLI version.
+      #
+      # ⚠️ STANDING OBLIGATION, stated where the next release engineer will look:
+      # this gate goes RED on every version bump until the doc surfaces move in
+      # the SAME change. That is the mechanism working, not a false red — the
+      # remedy is mechanical and the failure names every line to edit.
+      #
+      # Same job as the other check:* families, for the reason the #9014 dev
+      # established from the repo's own source rather than from memory: the
+      # REQUIRED_CONTEXTS ledger in scripts/check-required-contexts.mjs records
+      # THIS job's `carries` as "the whole check:* gate family", and every docs
+      # guard (check:doc-anchors, check:docs-redirects, check:docs-audit-scope,
+      # check:role-word) already sits here. The typecheck job additionally runs a
+      # full workspace build this dependency-free filesystem check has no use for.
+      #
+      # Runs its own --self-test first (via the pnpm script), and that is the
+      # load-bearing half: BOTH surfaces the card names were repaired within the
+      # day before this landed, so the live corpus is guaranteed green and a
+      # passing run over real data cannot distinguish a working gate from one
+      # that matches nothing. The self-test is where every limb is observed
+      # failing, and where the X.Y.Z tag-table metavariable is observed excluded.
+      - name: Docs image tags track packages/cli's version
+        run: pnpm check:docs-image-tag
+
       # #4851: the docs-accuracy-audit workflow carries its default scope inline
       # (a workflow script runs in a vm with no filesystem, so it cannot enumerate
       # content/docs/ itself). Hand-kept, that list rotted in BOTH directions —
