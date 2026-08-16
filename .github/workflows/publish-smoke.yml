@@ -22,7 +22,11 @@
 #   registry-canary SMOKE_MODE=registry — weekly `npx create-objectstack@latest`
 #                   against the real npm registry. Catches ^-range drift in the
 #                   ecosystem (a transitive release) breaking ALREADY-published
-#                   versions after the fact. Opens/refreshes an issue on failure.
+#                   versions after the fact, AND — since the driver builds the
+#                   scaffolded project — a published scaffold that no longer
+#                   completes its own documented first run (#4902/#7644/#8677,
+#                   each of which exited 0 through scaffold and install and
+#                   failed only at build). Opens/refreshes an issue on failure.
 #
 # Trigger notes: the changesets release PR (changeset-release/main) is pushed
 # with GITHUB_TOKEN, and GITHUB_TOKEN events never trigger other workflows —
@@ -265,7 +269,7 @@ jobs:
           title="Registry canary failed: fresh npx create-objectstack install is broken"
           existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
             --search "\"$title\" in:title" --json number -q '.[0].number // empty')
-          body=$(printf 'The weekly publish-smoke registry canary failed: a fresh `npx create-objectstack@latest` project no longer passes first-run auth + CRUD against the npm registry.\n\nThis is the #3091 failure class hitting ALREADY-published versions (e.g. a transitive dependency released into a ^ range). See the run log for the failing probe: %s\n' "$run_url")
+          body=$(printf 'The weekly publish-smoke registry canary failed: a fresh `npx create-objectstack@latest` project no longer completes the first-run path against the npm registry — scaffold, npm install, npm run build, then auth + REST CRUD.\n\nRead the run log to see WHICH step failed, because the two have different owners:\n\n- **npm run build failed** — the published scaffold is broken on its own second command. This is the #4902/#7644/#8677 class; the fix is in create-objectstack or the template it ships.\n- **an auth or CRUD probe failed** — this is the #3091 class hitting ALREADY-published versions (e.g. a transitive dependency released into a ^ range).\n\nRun log: %s\n' "$run_url")
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" \
               --body "Still failing as of $run_url"
