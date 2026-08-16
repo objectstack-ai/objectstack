@@ -31,10 +31,15 @@
  * #8154's, deliberately not built here.
  */
 
-import { redactableConfigKeys, redactUrlCredentials } from '@objectstack/spec/data';
+import {
+  passthroughSecretPaths,
+  redactableConfigKeys,
+  redactUrlCredentials,
+} from '@objectstack/spec/data';
 
 export {
   refusedCredentialKeys,
+  passthroughSecretPaths,
   redactableConfigKeys,
   redactUrlPassword,
   redactUrlCredentialQueryParams,
@@ -85,5 +90,50 @@ export function restoreRedactedConfig(
     if (out[key] === redactedStored) out[key] = storedValue;
   }
 
+  // The passthrough spellings (#9040) — the nested material the read path
+  // drops by PATH (`options.auth.password`, `options.proxyPassword`, …). The
+  // same narrow rule as the top-level keys, translated per leaf: restore ONLY
+  // when the patch's container for the leaf exists but does not speak to the
+  // leaf at all — exactly what the read path served. A patch carrying the leaf
+  // is the author's word (a typed-in `auth.password` is then refused by the
+  // #9040 write gate on its own merits); a patch with the CONTAINER removed is
+  // the author's word too (they deleted the block), so nothing is grafted.
+  for (const path of passthroughSecretPaths(driver)) {
+    const storedLeaf = valueAt(stored, path);
+    if (storedLeaf === undefined) continue;
+    const parentPath = path.slice(0, -1);
+    const leafKey = path[path.length - 1] as string;
+    const patchParent = valueAt(out, parentPath);
+    if (!patchParent || typeof patchParent !== 'object' || Array.isArray(patchParent)) continue;
+    if (leafKey in (patchParent as Record<string, unknown>)) continue;
+    graftAt(out, path, storedLeaf);
+  }
+
   return out;
+}
+
+/** The value at `path` inside a record-ish value, or `undefined` off the walk. */
+function valueAt(value: unknown, path: readonly string[]): unknown {
+  let node: unknown = value;
+  for (const segment of path) {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) return undefined;
+    node = (node as Record<string, unknown>)[segment];
+  }
+  return node;
+}
+
+/**
+ * Set `path` to `value` inside `out`, copying every container along the spine
+ * so the caller's `{ ...patch }` shallow copy never aliases a mutation back
+ * into the patch object the caller handed us. Every intermediate container is
+ * known to exist and be a record — the caller checked before grafting.
+ */
+function graftAt(out: Record<string, unknown>, path: readonly string[], value: unknown): void {
+  let node = out;
+  for (const segment of path.slice(0, -1)) {
+    const child = { ...(node[segment] as Record<string, unknown>) };
+    node[segment] = child;
+    node = child;
+  }
+  node[path[path.length - 1] as string] = value;
 }

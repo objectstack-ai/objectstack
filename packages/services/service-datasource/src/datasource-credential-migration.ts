@@ -74,6 +74,7 @@ import {
   redactableConfigKeys,
   redactUrlCredentials,
   refusedCredentialKeys,
+  refusedPassthroughSecretPaths,
   validateDriverConfig,
 } from '@objectstack/spec/data';
 import type { StoredDatasource } from './datasource-admin-service.js';
@@ -170,6 +171,42 @@ export function planCredentialMigration(record: StoredDatasource): CredentialMig
   }
 
   const config = record.config;
+
+  // The passthrough spelling (#9040): a stored `options.auth.password` (or a
+  // legacy row's equivalent) is a LIVE login credential — measured, the client
+  // resolves the block into `MongoCredentials` — that this action cannot
+  // re-home mechanically: dropping the nested leaf would leave an `auth` block
+  // with only a username, which the client refuses at construction
+  // (`credentials must be an object with 'username' and 'password'
+  // properties`, measured on mongodb@7.5.0), and the DSN branch injects a
+  // bound secret only through a URL that already names a user (#8696). Refused
+  // with the per-row remedy, exactly like the URL spellings below.
+  const passthroughKeys = refusedPassthroughSecretPaths(record.driver)
+    .filter((path) => {
+      let node: unknown = config;
+      for (const segment of path) {
+        if (!node || typeof node !== 'object' || Array.isArray(node)) return false;
+        node = (node as Record<string, unknown>)[segment];
+      }
+      return typeof node === 'string' && node !== '';
+    })
+    .map((path) => path.join('.'));
+  if (passthroughKeys.length > 0) {
+    return {
+      action: 'refuse',
+      reason:
+        `Datasource '${record.name}' carries its credential inside the driver-options passthrough `
+        + `(${passthroughKeys.map((k) => `config.${k}`).join(', ')}). Re-homing it here could break the `
+        + 'connection: removing only the nested password leaves an `auth` block the MongoDB client '
+        + 'refuses outright, and the bound secret reaches a DSN connection only through a URL that '
+        + 'already names a user.',
+      remedy:
+        'Edit the datasource in Setup → Datasources: remove the `auth` block from `options` and '
+        + "enter the password in the connection form's secret field, which binds it into the secret "
+        + 'store (keep the username in the URL, e.g. `mongodb://user@host/db`).',
+    };
+  }
+
   const urlKeys = urlCredentialKeys(config);
   if (urlKeys.length > 0) {
     return {

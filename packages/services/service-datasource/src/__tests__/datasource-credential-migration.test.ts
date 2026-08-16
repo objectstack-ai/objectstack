@@ -222,3 +222,70 @@ describe('urlCredentialKeys', () => {
     expect((plan as { remedy: string }).remedy).toContain('secret field');
   });
 });
+
+describe('#9040 — the passthrough spelling at the planner door', () => {
+  const mongoRow = (config: Record<string, unknown>): StoredDatasource => ({
+    name: 'events',
+    driver: 'mongodb',
+    origin: 'runtime',
+    config,
+  });
+
+  it('refuses a stored `options.auth.password` row with the per-row remedy', () => {
+    const plan = planCredentialMigration(
+      mongoRow({
+        url: 'mongodb://app@mongo.internal:27017/events',
+        options: { replicaSet: 'rs0', auth: { username: 'app', password: 'hunter2' } },
+      }),
+    );
+    expect(plan.action).toBe('refuse');
+    if (plan.action !== 'refuse') throw new Error('unreachable');
+    expect(plan.reason).toContain('config.options.auth.password');
+    expect(plan.remedy).toContain('secret field');
+    expect(plan.remedy).toContain('`auth` block');
+  });
+
+  it('refuses the passthrough row even when a discrete key could be bound — whole-row, like the URL rule', () => {
+    const plan = planCredentialMigration(
+      mongoRow({
+        host: 'mongo.internal',
+        database: 'events',
+        password: 'hunter2',
+        options: { auth: { username: 'app', password: 'hunter2' } },
+      }),
+    );
+    expect(plan.action).toBe('refuse');
+    if (plan.action !== 'refuse') throw new Error('unreachable');
+    expect(plan.reason).toContain('config.options.auth.password');
+  });
+
+  it('a benign passthrough is not a credential — the row stays bindable / clean', () => {
+    const clean = planCredentialMigration(
+      mongoRow({
+        url: 'mongodb://app@mongo.internal:27017/events',
+        options: { replicaSet: 'rs0', tls: true, auth: { username: 'app' } },
+      }),
+    );
+    expect(clean).toEqual({ action: 'none', status: 'nothing-to-migrate', remaining: [] });
+
+    const bindable = planCredentialMigration(
+      mongoRow({
+        host: 'mongo.internal',
+        database: 'events',
+        password: 'hunter2',
+        options: { replicaSet: 'rs0' },
+      }),
+    );
+    expect(bindable.action).toBe('bind');
+  });
+
+  it('an empty passthrough password carries no secret — same asymmetry as `user:@host`', () => {
+    const plan = planCredentialMigration(
+      mongoRow({
+        url: 'mongodb://app@mongo.internal:27017/events',
+        options: { auth: { username: 'app', password: '' } },
+      }),
+    );
+    expect(plan).toEqual({ action: 'none', status: 'nothing-to-migrate', remaining: [] });
+  });
+});
