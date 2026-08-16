@@ -58,6 +58,18 @@ dashboard, widget, filter, field, and object. Opt a widget out with
 `filterBindings: { <name>: false }`, or re-target the filter to one of that
 object's own fields.
 
+This is no longer only a CLI verdict. Since #7529 the same rule also runs at the
+**runtime publish door** for `dashboard` writes, so a board published from
+Studio, `PUT /api/v1/meta/*` or an MCP/AI author is refused there too — the same
+located `422 invalid_metadata` envelope, naming the dashboard, the widget and the
+key path. All six of the rule's error-tier findings gate that door as one "this
+board cannot render" class, the filter-field arm above included, while its
+warnings still ride the advisory channel and never block. So an author working
+entirely in Studio, who never runs `os validate`, no longer ships a silently
+empty chart. A **draft** save may still hold a forward reference — the refusal
+lands on the draft→active promotion, per
+[The one gate, four doors](#the-one-gate-four-doors) below.
+
 ### 3. Dead action/route references
 
 A dashboard `header.actions[]` button names a target: a `script`/`modal` action,
@@ -371,7 +383,7 @@ one. `sys_metadata` overlay rows are not in any config file, so there is no
 | CEL / predicate validation (ADR-0032) | ✓ | ✓ | ✓ | ✓ᶠ |
 | List-view navigation modes (ADR-0053) | ✓ | ✓ | ✓ | — |
 | View container shape | ✓ | ✓ | ✓ | — |
-| Widget-binding integrity (ADR-0021) | ✓ | ✓ | ✓ | — |
+| Widget-binding integrity (ADR-0021) | ✓ | ✓ | ✓ | ✓ᵈ |
 | Dashboard action/route references (ADR-0049) | ✓ | ✓ | ✓ | — |
 | Filter placeholder resolvability (#3574) | ✓ | ✓ | ✓ | — |
 | Empty filter combinators — `$and: []`, `$or: []`, `$not: {}` (#5330) | ✓ | ✓ | ✓ | ✓ᶠ |
@@ -399,11 +411,13 @@ one. `sys_metadata` overlay rows are not in any config file, so there is no
 | Emits `dist/objectstack.json` | — | ✓ | — | — |
 
 **`✓ᶠ` means the rule runs at that door for `flow` writes; `✓ᵛ` for `view`
-writes.** Those are the two metadata types rules declare there today — #4463
-shipped P1 as one type and four rule families, and #7220 added the second type
-by moving the whole `views[]` visibility-predicate family across in one edit. So
-an object, page or dashboard save is still checked by the schema parse and by
-nothing else, and the `—` cells above are `—` for two different reasons: some
+writes; `✓ᵈ` for `dashboard` writes.** Each marker names the metadata types that
+rule's own `runtimeTypes` declares, and that entry in `AUTHORING_RULES` is the
+authority — the set has grown a type at a time (#4463 shipped P1 as `flow` and
+four rule families, #7220 moved the whole `views[]` visibility-predicate family
+across in one edit, #7529 put widget-binding integrity on `dashboard`), so read
+the rule rather than assuming a save of some other type reaches storage
+unjudged. The `—` cells above are `—` for two different reasons: some
 rules read a stack-wide collection a one-item write does not carry (pages,
 dashboards, navigation, permission sets), and some parse authored source through
 `typescript`, which the kernel boot path must never load.
