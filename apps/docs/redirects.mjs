@@ -60,7 +60,9 @@ export const docsRedirects = [
   ['/docs/concepts/setup-app', '/docs/ui/setup-app'],
   ['/docs/guides/solutions/create-vs-edit-form', '/docs/ui/create-vs-edit-form'],
   ['/docs/guides/solutions/field-grouping-and-order', '/docs/ui/field-grouping-and-order'],
-  ['/docs/guides/solutions/role-based-interfaces', '/docs/ui/role-based-interfaces'],
+  // The page was renamed role-based -> audience-based (the direction
+  // check:role-word enforces); the redirect kept the old destination.
+  ['/docs/guides/solutions/role-based-interfaces', '/docs/ui/audience-based-interfaces'],
   ['/docs/guides/solutions/public-data-collection', '/docs/ui/public-data-collection'],
   // api
   ['/docs/guides/api-reference', '/docs/api'],
@@ -75,7 +77,11 @@ export const docsRedirects = [
   ['/docs/guides/ai-capabilities', '/docs/ai'],
   ['/docs/concepts/skills', '/docs/ai/skills'],
   ['/docs/guides/skills', '/docs/ai/skills-reference'],
-  ['/docs/guides/plugin-chatbot-integration', '/docs/ai/chatbot-integration'],
+  // ai/chatbot-integration.mdx was deleted as cloud-only content, with no
+  // successor page in this repo — its nav entry and inbound links were removed
+  // rather than re-pointed. Lands on the section index, whose callout is what
+  // now carries the in-product chat runtime's story.
+  ['/docs/guides/plugin-chatbot-integration', '/docs/ai'],
   // plugins
   ['/docs/guides/plugins', '/docs/plugins'],
   ['/docs/guides/plugin-development', '/docs/plugins/development'],
@@ -97,7 +103,11 @@ export const docsRedirects = [
   ['/docs/guides/publish-and-preview', '/docs/deployment/publish-and-preview'],
   ['/docs/guides/environment-variables', '/docs/deployment/environment-variables'],
   ['/docs/guides/single-project-mode', '/docs/deployment/single-project-mode'],
-  ['/docs/concepts/cloud-artifact-api', '/docs/deployment/cloud-artifact-api'],
+  // deployment/cloud-artifact-api.mdx was deleted in the same cloud-only sweep;
+  // publish-and-preview dropped its cross-link instead of absorbing the content,
+  // so there is no successor page. Section index, same as the objectql-migration
+  // entry below.
+  ['/docs/concepts/cloud-artifact-api', '/docs/deployment'],
   ['/docs/guides/objectql-migration', '/docs/deployment'],
   ['/docs/guides/troubleshooting', '/docs/deployment/troubleshooting'],
   // Retired deployment pages (maintainer ruling 2026-08-15). Docker /

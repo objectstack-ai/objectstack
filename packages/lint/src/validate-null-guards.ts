@@ -52,17 +52,27 @@
  * #1871/#4649). Measured against `@marcbachmann/cel-js`, the two bindings do
  * not merely differ in wording — they inarguably invert:
  *
- * | predicate                | TOTAL binding (`{a: null}`) | SPARSE binding (`{}`)  |
- * |:-------------------------|:----------------------------|:-----------------------|
- * | `has(record.a)`          | `true`  ← the trap          | `false` ← a real guard |
- * | `record.a < record.b`    | FAULT `no such overload`    | FAULT `No such key: a` |
- * | `record.a != null`       | `false` ← **the fix works** | FAULT `No such key: a` |
+ * | predicate                | TOTAL binding (`{a: null}`) | SPARSE binding (`{}`)         |
+ * |:-------------------------|:----------------------------|:------------------------------|
+ * | `has(record.a)`          | `true`  ← the trap          | `false` ← guards ABSENCE only |
+ * | `record.a < record.b`    | FAULT `no such overload`    | FAULT `No such key: a`        |
+ * | `record.a != null`       | `false` ← **the fix works** | FAULT `No such key: a`        |
  *
  * So on a total binding `has()` is uniformly true and useless while `!= null`
- * is the cure; on a sparse binding `has()` is exactly the right guard and
- * `!= null` **is itself a fault**. Running this gate over a sparse-bound
- * surface would therefore reject correct metadata and prescribe a "fix" that
- * breaks it — strictly worse than not covering the surface at all. Hence:
+ * is the cure; on a sparse binding `!= null` **is itself a fault**. That
+ * inversion is this module's whole wiring criterion: running this gate over a
+ * sparse-bound surface would reject correct metadata and prescribe a "fix"
+ * that breaks it — strictly worse than not covering the surface at all.
+ *
+ * ⚠️ Read the SPARSE column as an argument about THIS GATE's prescription, not
+ * as the sparse face's authoring rule. It is not the mirror image: a sparse
+ * surface's record can ALSO carry a projected column holding `null`, so
+ * `has()` alone is not the cure over there the way `!= null` is the cure here
+ * (`has(record.a) && record.a > 1` faults on `{a: null}`). The rule for that
+ * face is the CONJUNCTION `has(record.x) && record.x != null`, stated
+ * canonically in `materializeDeclaredFields`'s doc comment
+ * (`packages/objectql/src/declared-fields.ts`, #8975) and deferred to here.
+ * Hence:
  *
  * **This module may only be wired to a surface whose record binding is total.**
  * Necessary, not sufficient — see the `readonlyWhen` row below, where a total
@@ -141,7 +151,9 @@
  *    rather than open: #4953 clause 2 defers making this binding total —
  *    it would mean every REST read padding out all declared columns — so the
  *    face stays sparse, is documented as sparse, and an author there guards
- *    with `has()` (`declared-fields.ts` says the same from the engine's side).
+ *    with `has(record.x) && record.x != null` — BOTH halves, for the reason
+ *    measurement 4 below gives. That sentence is `declared-fields.ts`'s to
+ *    state (#8975); this row follows it and does not re-derive it.
  *    The exclusion is permanent under the current decision, not pending one.
  *
  *    **The MIRROR gate the ruling named — flag `!= null` on a sparse binding —
@@ -193,10 +205,13 @@
  *         the author a correction that breaks it"), mirrored.
  *
  *    Consequence for the sentence four lines up: "an author there guards with
- *    `has()`" is correct about SPARSENESS and insufficient on its own, and this
- *    file and `declared-fields.ts` currently state it without the `!= null`
- *    half. Correcting that authoring contract is filed separately — it changes
- *    what authors are told to write, which is not a lint change.
+ *    `has()`" was correct about SPARSENESS and insufficient on its own. That
+ *    authoring contract was corrected in #8975, which is why the row above now
+ *    reads `has(record.x) && record.x != null` — and why it points at
+ *    `declared-fields.ts` rather than spelling the rule a third time. The
+ *    correction was a separate card on purpose: it changes what authors are
+ *    TOLD TO WRITE, which is not a lint change, and it does not disturb this
+ *    row's verdict (still excluded, still permanently).
  *  - **Flow / edge `condition` — the row where `binding` and `verdict` came
  *    apart, same shape as `readonlyWhen` above.** #4811 originally excluded
  *    these for flattened-scope ambiguity ("a bare identifier may be a flow
