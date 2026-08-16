@@ -534,8 +534,8 @@ export const FieldMaskingKeepSchema = lazySchema(() => strictObject({
   keepTail: z.number().int().min(0).describe('Number of trailing characters to leave readable'),
 }));
 
-/** @see FieldMaskingKeepSchema */
-export type FieldMaskingKeep = z.infer<typeof FieldMaskingKeepSchema>;
+/** @see FieldMaskingKeepSchema (ADR-0122: bare alias = the AUTHOR state; input and parsed coincide here — no transform, no defaults) */
+export type FieldMaskingKeep = z.input<typeof FieldMaskingKeepSchema>;
 
 /**
  * A field's declared partial-masking rule — a named preset or the

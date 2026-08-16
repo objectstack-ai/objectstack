@@ -86,6 +86,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "隐藏",
         helpText: "在默认界面中隐藏"
       },
+      "fields.maskingRule": {
+        label: "脱敏规则",
+        helpText: "部分脱敏:预设('phone'、'id_card'、'bank_account'、'email'、'name')或 {\"keepHead\": n, \"keepTail\": m}。未持有该字段 requiredPermissions 的调用者将看到脱敏值"
+      },
       "fields.searchable": {
         label: "可搜索",
         helpText: "纳入全文搜索"
@@ -449,6 +453,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       sortable: {
         label: "可排序",
         helpText: "允许按此字段排序"
+      },
+      maskingRule: {
+        label: "脱敏规则",
+        helpText: "部分脱敏:预设('phone'、'id_card'、'bank_account'、'email'、'name')或 {\"keepHead\": n, \"keepTail\": m}。未持有该字段 requiredPermissions 的调用者将看到脱敏值"
       }
     }
   },

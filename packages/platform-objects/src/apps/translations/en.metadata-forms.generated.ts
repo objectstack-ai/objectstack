@@ -86,6 +86,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Hidden",
         helpText: "Hidden from default UI"
       },
+      "fields.maskingRule": {
+        label: "Masking Rule",
+        helpText: "Partial masking: preset ('phone', 'id_card', 'bank_account', 'email', 'name') or {\"keepHead\": n, \"keepTail\": m}. Masked unless the caller holds this field's requiredPermissions"
+      },
       "fields.searchable": {
         label: "Searchable",
         helpText: "Include in full-text search"
@@ -449,6 +453,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       sortable: {
         label: "Sortable",
         helpText: "Allow sorting lists by this field"
+      },
+      maskingRule: {
+        label: "Masking Rule",
+        helpText: "Partial masking: preset ('phone', 'id_card', 'bank_account', 'email', 'name') or {\"keepHead\": n, \"keepTail\": m}. Masked for callers not holding this field's requiredPermissions"
       }
     }
   },

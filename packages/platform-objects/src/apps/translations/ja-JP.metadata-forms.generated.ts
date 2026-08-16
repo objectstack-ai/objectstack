@@ -86,6 +86,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "非表示",
         helpText: "既定 UI では非表示"
       },
+      "fields.maskingRule": {
+        label: "マスキングルール",
+        helpText: "部分マスキング:プリセット('phone'、'id_card'、'bank_account'、'email'、'name')または {\"keepHead\": n, \"keepTail\": m}。フィールドの requiredPermissions を持たない呼び出し元にはマスク値が表示されます"
+      },
       "fields.searchable": {
         label: "検索可能",
         helpText: "全文検索に含める"
@@ -449,6 +453,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       sortable: {
         label: "並び替え可能",
         helpText: "このフィールドでリストの並べ替えを許可"
+      },
+      maskingRule: {
+        label: "マスキングルール",
+        helpText: "部分マスキング:プリセット('phone'、'id_card'、'bank_account'、'email'、'name')または {\"keepHead\": n, \"keepTail\": m}。フィールドの requiredPermissions を持たない呼び出し元にはマスク値が表示されます"
       }
     }
   },

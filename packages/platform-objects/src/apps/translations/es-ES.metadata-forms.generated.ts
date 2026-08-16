@@ -86,6 +86,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Oculto",
         helpText: "Oculto en la UI predeterminada"
       },
+      "fields.maskingRule": {
+        label: "Regla de enmascaramiento",
+        helpText: "Enmascaramiento parcial: preset ('phone', 'id_card', 'bank_account', 'email', 'name') o {\"keepHead\": n, \"keepTail\": m}. Enmascarado salvo que el llamante tenga los requiredPermissions del campo"
+      },
       "fields.searchable": {
         label: "Buscable",
         helpText: "Incluir en búsqueda de texto completo"
@@ -449,6 +453,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       sortable: {
         label: "Ordenable",
         helpText: "Permite ordenar listas por este campo"
+      },
+      maskingRule: {
+        label: "Regla de enmascaramiento",
+        helpText: "Enmascaramiento parcial: preset ('phone', 'id_card', 'bank_account', 'email', 'name') o {\"keepHead\": n, \"keepTail\": m}. Enmascarado salvo que el llamante tenga los requiredPermissions del campo"
       }
     }
   },
