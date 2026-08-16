@@ -6,11 +6,31 @@
 // primitive, each in EXACTLY ONE honest state (enforced / experimental /
 // removed). `enforced` rows name their runtime enforcement site; high-risk
 // enforced rows additionally reference an end-to-end dogfood proof. The
-// companion test (`authz-conformance.test.ts`) asserts the matrix is complete,
-// that every referenced proof file exists, AND that the row ↔ proof pairing is
-// MUTUAL — so "the permission model is landed" is a CHECKED artifact, not a
-// one-time scan. A new fail-open (a declared-but-unenforced primitive) or a
-// deleted proof breaks CI.
+// companion test (`authz-conformance.test.ts`) asserts every referenced proof
+// file exists and that the row ↔ proof pairing is MUTUAL (#7976 below), AND
+// ratchets completeness over a CURATED table of HTTP/transport entry points
+// (`discover()`: 15 probes over 11 named source files) — a new ungated route
+// there is UNCLASSIFIED, a deleted guard is STALE, and either breaks CI.
+//
+// [#8711] That completeness is over ROUTES, not over primitives: a primitive
+// enforced by a predicate inside an existing resolver adds no entry point, so
+// it can be neither UNCLASSIFIED nor STALE. Measured against the rows below:
+// 43 of 50 carry no `covers` key at all (7 rows, 9 keys, every one an
+// HTTP/transport pin), and 37 of the file's 43 `enforced` rows are exactly
+// that in-resolver shape — the ADR-0049/#8613 `active` rows among them (see
+// their own block further down) are the normal case, not an exception. Of the
+// 9 `covers` keys that DO exist, 5 are GATE pins tied to the enforcement call
+// itself, not merely a function name — delete `shouldDenyAnonymous` from
+// `/actions`, `/automation` or `/packages`, or drop the MCP context-threading
+// / stdio principal binding, and the pinned key vanishes from source, its row
+// goes STALE, and CI catches the regression. That anti-regression property is
+// real and is what this file mechanically delivers. Outside the curated
+// table, "one row per primitive, each in EXACTLY ONE honest state" is a
+// HAND-MAINTAINED invariant, not a checked one: a primitive added without its
+// row is not something this ratchet can see (a primitive-discovery ratchet
+// was measured unachievable in general form — there is no syntactic signature
+// for "a predicate that decides a grant"; `isRowActive` looks exactly like any
+// other `.filter()`).
 //
 // [#7976] Existence used to be the whole `proof` contract, which meant a row
 // could cite a file exercising a NEIGHBOURING primitive and stay green forever:
@@ -236,12 +256,13 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   // RATCHET, not an omission: `discover()` enumerates HTTP entry points from a
   // curated per-file probe table, and a predicate inside an existing resolver
   // adds no entry point — so neither flag could ever have surfaced as
-  // UNCLASSIFIED during the whole period it was inert, despite this file's
-  // header claiming a declared-but-unenforced primitive breaks CI. These two
-  // rows restore the ledger's stated invariant; whether the invariant's
-  // advertised SCOPE should be narrowed to what the ratchet can check, or the
-  // ratchet widened to reach in-resolver predicates, is the open half of #8711
-  // and is deliberately NOT settled here.
+  // UNCLASSIFIED during the whole period it was inert. These two rows restore
+  // the ledger's stated invariant. [Resolved — maintainer ruling on #8711,
+  // 2026-08-15] The invariant's advertised SCOPE is narrowed to what the
+  // ratchet can check, not the ratchet widened to reach in-resolver
+  // predicates like this one — widening was measured unachievable in general
+  // form. See this file's header for the narrowed claim and the measured
+  // numbers.
   { id: 'permission-set-active', summary: '`sys_permission_set.active` — a deactivated permission set grants nothing (ADR-0049 / #8613)', state: 'enforced',
     enforcement: 'core/security/resolve-authz-context.ts step 6b — isRowActive drops the row BEFORE any derivation, so a deactivated set contributes no name to `grants.permissions`, no systemPermissions and no tabPermissions, AND `hasPlatformAdminGrant` cannot be read off a deactivated `admin_full_access`; plugin-security/security-plugin.ts dbLoader applies the SAME predicate, which is the only place a set reached by NAME is judged (position names are commonly reused as set names, so an ACTIVE position carries a DEACTIVATED set\'s name that far); plugin-auth/last-admin-guard.ts carries `active` in PERMISSION_SET_STANDING_KEYS so deactivating the last admin set is judged as an emptying rather than read as a bootstrap window',
     note: 'Unit-proven; an e2e dogfood proof is a follow-on, the same disposition as the ADR-0105 block above and for the same reason — the flag is a predicate inside the grant resolver, not an HTTP surface, so there is no route for a dogfood boot to drive at it directly. core/security/resolve-authz-context.test.ts "[#8613] the `active` flag on the grant catalogues (ADR-0049)" covers the derivation half, including THE HIGH-BLAST-RADIUS CASE (a deactivated admin_full_access confers no PLATFORM_ADMIN) and that deactivating ONE set leaves the others granting; plugin-security/permission-set-active.test.ts covers the loader half, including THE REACHABILITY CASE (a position name reaching a deactivated set of the same name) plus its non-vacuous twin (the same request with the set ACTIVE does resolve); core/security/row-active.test.ts pins the predicate itself (absent grants, junk does not revoke, 0/1 deactivates). Deliberately NOT in HIGH_RISK: that list marks primitives guarding object data through a sibling HTTP entry point, and this one guards grant DERIVATION. The honest upgrade path is a real proof (seed a deactivated set, drive REST as its holder, observe the refusal), not re-citing a neighbouring file.' },
