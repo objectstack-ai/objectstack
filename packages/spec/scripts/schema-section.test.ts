@@ -34,7 +34,12 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { renderSchemaSection, selectRootDef } from './lib/schema-section';
+import {
+  INLINE_DEFAULT_WIDTH_LIMIT,
+  renderRequiredCell,
+  renderSchemaSection,
+  selectRootDef,
+} from './lib/schema-section';
 
 /** The `#7658` specimen: `z.string().describe(…)` with no vocabulary. */
 const OPAQUE_STRING = {
@@ -147,6 +152,99 @@ describe('renderSchemaSection — shapes unchanged by #7658', () => {
 
     expect(md).toContain('### Union Options');
     expect(md).toContain('Type: `string`');
+  });
+});
+
+/**
+ * THE DEFECT THIS PINS (#8703). `build-schemas.ts` emits the OUTPUT (post-parse)
+ * shape for ~1458 of the 1582 published documents, and in an output shape a
+ * `.default()`-bearing member is listed in `required` — the parse always
+ * produces it. Mirroring that array into a column headed "Required" told the
+ * author "you must write this" about a key they may omit, which is the one
+ * question the column is read as answering. 2526 property occurrences across
+ * 529 documents were in that state when the card was measured.
+ *
+ * The second half is the inconsistency: the same member rendered `optional` on
+ * the 124 input-shape pages, so a refactor that flipped a def between the two
+ * emission modes rewrote its whole Required column with no semantic change (the
+ * #8586 flip that #8703 was filed on). Reading `default` rather than `required`
+ * makes both modes render the same cell.
+ *
+ * MEASURED (reverse verification): restoring the old cell — `required.has(key)
+ * ? '✅' : 'optional'` — turns the six cases below red and leaves every other
+ * case in this file green, which is the asymmetry that matters: nothing about
+ * a property WITHOUT a default changes.
+ */
+describe('renderRequiredCell — a `.default()` member is author-omittable (#8703)', () => {
+  it('renders a required-in-output-shape member with a default as optional, naming the value', () => {
+    // The exact shape `z.boolean().default(true)` compiles to in the output
+    // (post-parse) emission: present in `required`, carrying `default`.
+    expect(renderRequiredCell({ type: 'boolean', default: true }, true)).toBe(
+      'optional (default: `true`)',
+    );
+  });
+
+  it('renders the SAME cell for the input-shape emission of the same member', () => {
+    // Input shape drops it from `required` but keeps `default`. The two
+    // emission modes must not disagree about what the author has to write.
+    expect(renderRequiredCell({ type: 'boolean', default: true }, false)).toBe(
+      'optional (default: `true`)',
+    );
+  });
+
+  it('leaves a property with no default alone in both directions', () => {
+    expect(renderRequiredCell({ type: 'string' }, true)).toBe('✅');
+    expect(renderRequiredCell({ type: 'string' }, false)).toBe('optional');
+  });
+
+  it('spells a `null` default rather than mistaking it for "no default"', () => {
+    // `'default' in prop` is the test, not truthiness: `null`, `false`, `0` and
+    // `""` are all real defaults an author gets by omitting the key.
+    expect(renderRequiredCell({ default: null }, true)).toBe('optional (default: `null`)');
+    expect(renderRequiredCell({ type: 'integer', default: 0 }, true)).toBe('optional (default: `0`)');
+    expect(renderRequiredCell({ type: 'string', default: '' }, true)).toBe('optional (default: `""`)');
+  });
+
+  it('withholds a default too wide for the cell, still stating that one exists', () => {
+    const wide = { tabs: Array.from({ length: 12 }, (_, i) => ({ key: `tab${i}`, order: i * 10 })) };
+    expect(JSON.stringify(wide).length).toBeGreaterThan(INLINE_DEFAULT_WIDTH_LIMIT);
+
+    // The cell still answers the author's question — the key may be omitted —
+    // and the JSON Schema stays the authority on the value, exactly as it is
+    // for the constraints this renderer has never printed.
+    expect(renderRequiredCell({ type: 'object', default: wide }, true)).toBe('optional (has default)');
+  });
+
+  it('escapes a pipe and withholds a backtick rather than breaking the table', () => {
+    // A raw `|` splits the GFM cell even inside a code span; GFM resolves the
+    // `\|` escape before inline parsing, so the escaped form survives there.
+    expect(renderRequiredCell({ type: 'string', default: 'a|b' }, true)).toBe(
+      'optional (default: `"a\\|b"`)',
+    );
+    // A backtick would close the span early and spill raw JSON into the row.
+    expect(renderRequiredCell({ type: 'string', default: 'a`b' }, true)).toBe('optional (has default)');
+  });
+
+  it('reaches the rendered table, not just the helper', () => {
+    const md = renderSchemaSection('MetadataPluginConfig', {
+      type: 'object',
+      description: 'Metadata plugin configuration',
+      properties: {
+        storage: { type: 'object', description: 'Storage config' },
+        enableEvents: { type: 'boolean', default: true, description: 'Emit metadata change events' },
+        cacheMaxItems: { type: 'integer', default: 1000, description: 'Max items in memory cache' },
+      },
+      // The output-shape `required` array: the two defaulted members are in it.
+      required: ['storage', 'enableEvents', 'cacheMaxItems'],
+    });
+
+    expect(md).toContain('| **storage** | `object` | ✅ | Storage config |');
+    expect(md).toContain(
+      '| **enableEvents** | `boolean` | optional (default: `true`) | Emit metadata change events |',
+    );
+    expect(md).toContain(
+      '| **cacheMaxItems** | `integer` | optional (default: `1000`) | Max items in memory cache |',
+    );
   });
 });
 
