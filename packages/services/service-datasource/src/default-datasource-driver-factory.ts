@@ -349,6 +349,10 @@ function pgConnectionExtras(cfg: Record<string, unknown>): Record<string, unknow
  * schema comment warns about ("a TLS setting that never took effect looked
  * identical to one that did"). The block wins when present because it is the
  * more specific statement; `config.ssl` remains the boolean shorthand.
+ *
+ * ⚠️ The `true` this can return is a `pg` spelling, not a universal one — see
+ * {@link mysqlSslOption}, which re-expands it for `mysql2`. Do not "simplify"
+ * that call away.
  */
 function resolveSslOption(spec: DatasourceConnectionSpec): unknown {
   const block = spec.ssl as
@@ -369,6 +373,61 @@ function resolveSslOption(spec: DatasourceConnectionSpec): unknown {
   }
   const shorthand = (spec.config ?? {}).ssl;
   return shorthand == null ? undefined : shorthand;
+}
+
+/**
+ * {@link resolveSslOption}'s answer in the spelling `mysql2` accepts (#8874).
+ *
+ * ## `ssl: true` is not a mysql2 value — it throws
+ *
+ * `pg` takes a boolean; `mysql2` takes an object or the name of a bundled
+ * profile, and rejects everything else outright. Measured on mysql2 3.23.1,
+ * `lib/connection_config.js`:
+ *
+ * ```js
+ * this.ssl = typeof options.ssl === 'string'
+ *   ? ConnectionConfig.getSSLProfile(options.ssl)
+ *   : options.ssl || false;
+ * if (this.ssl) {
+ *   if (typeof this.ssl !== 'object') {
+ *     throw new TypeError(`SSL profile must be an object, instead it's a ${typeof this.ssl}`);
+ *   }
+ *   this.ssl.rejectUnauthorized = this.ssl.rejectUnauthorized !== false;
+ * }
+ * ```
+ *
+ * ```text
+ * {host,port,database,user, ssl:true}  -> TypeError: SSL profile must be an object, instead it's a boolean
+ * {host,port,database,user, ssl:{}}    -> ssl {rejectUnauthorized:true}
+ * ```
+ *
+ * `true` is exactly what `resolveSslOption` answers for the two commonest
+ * declarations — `ssl: { enabled: true }` with no certificate material, and the
+ * `config.ssl` shorthand, whose schema (`DriverSslToggleSchema`) is
+ * `z.boolean()` and so has no other authorable value. So the mysql arm's
+ * DISCRETE-FIELDS branch — the one #8874 describes as honouring the
+ * declaration — has been handing `mysql2` a value that makes every connection
+ * acquisition throw. That is the same declared-≠-enforced defect as the dropped
+ * DSN-branch block, one spelling further along, and it is fixed here rather
+ * than beside it: emitting `ssl: true` onto the DSN branch to "honour" the
+ * declaration would have shipped the throw to a second branch.
+ *
+ * ## Why `{}` is a translation and not a new policy
+ *
+ * `resolveSslOption` states the equivalence itself, above: the boolean IS the
+ * collapsed empty-options object (*"`ssl: {}` would read as 'TLS with default
+ * options' … which is what `enabled: true` with nothing else means anyway"*).
+ * This re-expands the same value for the client that cannot read the collapsed
+ * form. `rejectUnauthorized: true` on the result is `mysql2`'s own default for
+ * an object (line 171 above), not a verification policy chosen here.
+ *
+ * Everything else passes through untouched — an options object stays byte for
+ * byte what the TLS block resolved to, `false` stays `false` (mysql2's own
+ * default, so it disables nothing that was enabled), and a stored row holding a
+ * profile name (`'Amazon RDS'`) still reaches `getSSLProfile`.
+ */
+function mysqlSslOption(resolved: unknown): unknown {
+  return resolved === true ? {} : resolved;
 }
 
 /**
@@ -595,7 +654,9 @@ function buildSqlPool(spec: DatasourceConnectionSpec): Record<string, unknown> {
  *
  * `mysql2` merges a `uri` with sibling keys itself, and the EXPLICIT key wins
  * (`ConnectionConfig`: uri-derived values are only filled in for keys the
- * caller did not supply). So the DSN keeps being parsed by the client that
+ * caller supplied no TRUTHY value for — see the falsy-value note under #8874
+ * below, which matters for `ssl` and not for a bound secret). So the DSN keeps
+ * being parsed by the client that
  * owns its grammar — no URL parsing, no re-encoding, no second dialect of
  * `mysql://…` in this repo — and the bound secret overrides even a legacy
  * embedded password on a stored pre-#8082 row. Measured on mysql2 3.23.1:
@@ -624,21 +685,72 @@ function buildSqlPool(spec: DatasourceConnectionSpec): Record<string, unknown> {
  * clients disagreeing is exactly why each arm's precedence is measured rather
  * than assumed.
  *
- * A DSN with NOTHING bound still passes through as the bare string, so a
- * datasource that never bound a secret is byte-for-byte unaffected.
+ * ## A declared `ssl` reaches the client on the DSN branch too (#8874)
+ *
+ * The gap the paragraph above used to describe as "filed separately". This arm
+ * resolved the TLS option and then returned before anything could use it, so a
+ * mysql datasource that declared TLS **and** wrote a `config.url` negotiated no
+ * TLS at all — declared, resolved, dropped, with no diagnostic, while the
+ * discrete-fields branch of the same arm carried it. Whether a connection was
+ * encrypted therefore depended on which branch of one arm the datasource
+ * happened to take, which is the `datasource.pool` failure shape #5714 / #7243
+ * closed for a different key.
+ *
+ * `MysqlConfigSchema` declares the key honoured with no branch caveat (*"TLS
+ * settings, passed to `mysql2`"*), and its `sslmode` / `tls` / `usessl` aliases
+ * all rewrite to it — where the schema means "not honoured, put it in the url"
+ * it says so in as many words, as the `charset` guidance does. The mongo arm's
+ * *"TLS is a connection-string concern here"* guidance is that arm's, not this
+ * one's. So the triage ruling (honour the declared channel; refuse only if the
+ * branch genuinely cannot) applies with nothing to refuse: `mysql2` reads a
+ * DSN and the `ssl` option as separate channels, exactly as `pg` does, and the
+ * explicit key is the one it keeps.
+ *
+ * ```text
+ * mysql2 3.23.1, no connection opened
+ * {uri:'mysql://app@db.internal:3306/app'}                    -> ssl false      (before)
+ * {uri:'mysql://app@db.internal:3306/app', ssl:{}}            -> ssl {rejectUnauthorized:true}
+ * {uri:…, ssl:{rejectUnauthorized:false}, password:'INJECTED'} -> ssl {rejectUnauthorized:false}, password INJECTED
+ * ```
+ *
+ * ⚠️ mysql2's merge skips a **falsy** explicit value, not merely an absent one
+ * — `if (options[key]) continue;` in `lib/connection_config.js`, which is
+ * looser than a hasOwnProperty rule would be. It costs nothing here: a
+ * declared `ssl: false` is also mysql2's own default, so the only value it
+ * cannot override is a DSN's own `?ssl=`, and mysql2 parses that to a boolean
+ * and throws on it with or without this change.
+ *
+ * ## The shape only changes for datasources that were broken
+ *
+ * A bare DSN string is what knex has always parsed for the no-secret case, and
+ * `ssl` cannot be attached to a string — so honouring a declaration there means
+ * returning an object instead. That return is therefore made **only when a
+ * declared `ssl` actually resolved**; a datasource that declared none still
+ * gets the bare string, byte for byte. The switch is safe where it does happen:
+ * knex's own parse of the string and mysql2's parse of the same value as `uri`
+ * were compared key-by-key (`host`/`port`/`user`/`password`/`database`/
+ * `charset`/`timezone`/`connectTimeout`/`flags`/`socketPath`/
+ * `multipleStatements`) across the bare-username, embedded-password,
+ * no-userinfo, portless, percent-encoded-username and query-parameter
+ * (`?charset=`, `?connectTimeout=`, `?timezone=`) forms — **identical in every
+ * case**. That sweep is pinned in `mysql-dsn-ssl.test.ts`, not merely done once
+ * here.
  */
 function buildMysqlConnection(spec: DatasourceConnectionSpec): unknown {
   const cfg = (spec.config ?? {}) as Record<string, unknown>;
-  const mysqlSsl = resolveSslOption(spec);
+  const mysqlSsl = mysqlSslOption(resolveSslOption(spec));
   const url = cfg.url as string | undefined;
   if (url) {
-    if (!spec.secret) return url;
-    // `ssl` is deliberately NOT carried here: this arm drops a declared `ssl`
-    // block on the DSN branch whether or not a secret is bound (postgres'
-    // branch does carry it), and making TLS appear only for datasources that
-    // happen to bind a credential would be a second, stranger asymmetry. That
-    // gap is a defect of its own and is filed separately, not fixed in passing.
-    return { uri: url, password: spec.secret };
+    // Nothing to carry beside the DSN: the bare-string passthrough this arm has
+    // always emitted, unchanged. The blast radius of both #8696 and #8874 is
+    // "something was declared", so a datasource that declared neither a secret
+    // nor TLS must not move at all.
+    if (mysqlSsl === undefined && !spec.secret) return url;
+    return {
+      uri: url,
+      ...(spec.secret ? { password: spec.secret } : {}),
+      ...(mysqlSsl !== undefined ? { ssl: mysqlSsl } : {}),
+    };
   }
   return {
     host: cfg.host,
