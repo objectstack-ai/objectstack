@@ -235,7 +235,10 @@ describe('#8087 — every code the dispatcher door can emit is parsed against Ap
         // every per-code assertion below would vacuously pass and this suite
         // would go quiet exactly when it had the most to say.
         expect(PENDING_AT_DISPATCHER_DOOR.length).toBeGreaterThan(0);
-        expect(PENDING_LEDGER_REGISTRATION).toEqual(expect.arrayContaining(PENDING_AT_DISPATCHER_DOOR));
+        // Spread: both lists are `readonly string[]`, and `arrayContaining`
+        // takes a mutable one — passing the frozen list straight in is a tsc
+        // error that only the TEST_DEBT ratchet would have caught.
+        expect(PENDING_LEDGER_REGISTRATION).toEqual(expect.arrayContaining([...PENDING_AT_DISPATCHER_DOOR]));
     });
 
     for (const code of PENDING_AT_DISPATCHER_DOOR) {
