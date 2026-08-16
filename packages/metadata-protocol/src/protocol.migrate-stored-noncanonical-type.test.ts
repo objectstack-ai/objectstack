@@ -68,6 +68,17 @@ interface Row {
     metadata: string;
 }
 
+/**
+ * What {@link makeStubEngine} accepts for one seeded row.
+ *
+ * `metadata` is `Omit`-ed out of the `Partial<Row>` half rather than merely
+ * intersected over it: on the row `metadata` is the STORED string, and
+ * `string & unknown` is `string`, so a plain intersection refuses every body
+ * written as an object literal — the seeding convenience this harness exists
+ * for. Stated once, here, so the fixtures below need no casts.
+ */
+type SeedRow = Omit<Partial<Row>, 'metadata'> & { type: string; name: string; metadata: unknown };
+
 function matches(r: Record<string, any>, where: Record<string, unknown>): boolean {
     for (const [k, v] of Object.entries(where)) {
         if (v === undefined) continue;
@@ -85,9 +96,7 @@ function matches(r: Record<string, any>, where: Record<string, unknown>): boolea
  * (#8908 enumerated them); the residue is historical, written before #7894
  * closed the plural `/meta` URL door.
  */
-function makeStubEngine(
-    seedRows: Array<Partial<Row> & { type: string; name: string; metadata: unknown }>,
-) {
+function makeStubEngine(seedRows: SeedRow[]) {
     let nextId = 0;
     const tables = new Map<string, Record<string, any>[]>();
     tables.set(
@@ -149,14 +158,14 @@ const historyRows = (tables: Map<string, Record<string, any>[]>) =>
  * /meta/fields/…` answered 200 and wrote this row until #7894 closed that door;
  * `PUT /meta/field/…` answered 403 NOT_OVERRIDABLE the whole time.
  */
-const storedFieldsRow = {
+const storedFieldsRow: SeedRow = {
     type: 'fields',
     name: 'showcase_task.title',
     metadata: { name: 'title', type: 'text', label: 'Title' },
 };
 
 /** The positive control: an ordinary, genuinely canonical row. */
-const canonicalObjectRow = {
+const canonicalObjectRow: SeedRow = {
     type: 'object',
     name: 'crm_quote',
     metadata: {
@@ -174,7 +183,7 @@ const canonicalObjectRow = {
  * plural `objects`. Both maps fold it to `object`, so it is NOT this class and
  * must keep behaving exactly as it did — a `pending` conversion, not a skip.
  */
-const legacyObjectsPluralRow = {
+const legacyObjectsPluralRow: SeedRow = {
     type: 'objects',
     name: 'crm_invoice',
     metadata: {
