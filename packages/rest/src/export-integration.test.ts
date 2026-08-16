@@ -37,6 +37,7 @@ import ExcelJS from 'exceljs';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { maskFieldValue } from '@objectstack/plugin-security';
 import { RestServer } from './rest-server';
 
 // ---------------------------------------------------------------------------
@@ -603,5 +604,67 @@ describe('export route — search', () => {
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(getBuffer() as any);
     expect(wb.worksheets[0].rowCount).toBe(2); // header + one match
+  });
+});
+
+// ===========================================================================
+// #8993: partial masking (`field.maskingRule`) on the EXPORT path — the
+// auditors' screen-vs-CSV probe. The masking itself is enforced by
+// plugin-security's engine middleware (REPLACE the value with its partial
+// mask; pinned in packages/plugins/plugin-security/src/field-masking-rule.test.ts).
+// This suite pins the export leg of the single-channel scope pin: the export
+// route streams through the SAME engine read path, so the CSV must carry the
+// SAME masked value the list shows — and the masked column's header must
+// survive (the value is served, only partially), unlike a deleted FLS column.
+// The hook below applies the REAL transform (`maskFieldValue`, imported from
+// plugin-security) with the middleware's replace semantics.
+// ===========================================================================
+describe('export route — partial masking parity (#8993)', () => {
+  const partialMaskTitle = (engine: any) =>
+    engine.registerHook(
+      'afterFind',
+      (ctx: any) => {
+        if (Array.isArray(ctx.result)) {
+          for (const r of ctx.result) {
+            if (r && 'title' in r) r.title = maskFieldValue(r.title, { keepHead: 1, keepTail: 0 });
+          }
+        }
+      },
+      { object: 'task' },
+    );
+
+  it('CSV carries the SAME masked value the list serves, and the masked column keeps its header', async () => {
+    const { engine, protocol, route } = await boot();
+    partialMaskTitle(engine);
+
+    // Screen half: the list path serves the masked value.
+    const listRes: any = await protocol.findData({ object: 'task', query: {} });
+    const listRows: any[] = listRes.records ?? listRes.data ?? [];
+    const listTitles = new Map(listRows.map((r: any) => [r.id, r.title]));
+    expect(listTitles.get('1')).toBe('写**');
+    expect(listTitles.get('2')).toBe('写**');
+
+    // CSV half: same value, byte for byte — not the full value, not an empty
+    // cell, not a dropped column.
+    const csv = makeRes();
+    await route.handler({ params: { object: 'task' }, query: { format: 'csv' } } as any, csv.res);
+    const rows = parseCsv(csv.chunks.join(''));
+    expect(rows[0]).toContain('标题');
+    const titleIdx = rows[0].indexOf('标题');
+    const idIdx = rows[0].indexOf('ID');
+    for (const r of rows.slice(1)) {
+      expect(r[titleIdx]).toBe(listTitles.get(r[idIdx]));
+      expect(r[titleIdx]).toBe('写**');
+    }
+  });
+
+  it('JSON export carries the masked value too (no format-specific bypass)', async () => {
+    const { engine, route } = await boot();
+    partialMaskTitle(engine);
+    const json = makeRes();
+    await route.handler({ params: { object: 'task' }, query: { format: 'json' } } as any, json.res);
+    const arr = JSON.parse(json.chunks.join(''));
+    expect(arr.length).toBe(2);
+    for (const row of arr) expect(row.title).toBe('写**');
   });
 });
