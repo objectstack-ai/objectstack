@@ -6,6 +6,7 @@
  * gate families that watch it, derived from the tree AT RUNTIME.
  *
  *   node scripts/pm/dispatch-gates.mjs <path> [<path> ...]   # e.g. packages/spec/src/data/filter.zod.ts
+ *   node scripts/pm/dispatch-gates.mjs --residue <path> ...  # + name every family the derivation did not place
  *   node scripts/pm/dispatch-gates.mjs --self-test
  *
  * ## Why derived, never listed
@@ -38,12 +39,17 @@
  *     one), not as the bare script name: the bare name sends a dev to the root
  *     `package.json`, where a package-scoped gate is absent and therefore reads
  *     as nonexistent (#7440);
- *   - a check with NO discoverable path hints is listed once in the
- *     "repo-wide / undetermined" bucket. It is NOT known to be irrelevant —
- *     many gates read the whole tree (check:nul-bytes) or a convention rather
- *     than a path. The PM's judgment call stays a judgment call; what this
- *     script removes is the memory-shaped half (which named checks exist and
- *     where they live);
+ *   - a check with NO discoverable path hints is counted in the "undetermined"
+ *     bucket. It is NOT known to be irrelevant — many gates read the whole tree
+ *     or a convention rather than a path. The PM's judgment call stays a
+ *     judgment call; what this script removes is the memory-shaped half (which
+ *     named checks exist and where they live);
+ *   - a check whose sources DO name paths, none of which cover the input, is
+ *     counted as "silent". That is the derivation's weakest claim and it used to
+ *     be invisible: a gate that computes its population and names only its own
+ *     baseline artifact scores silent for every card in the tree. All three
+ *     buckets are now accounted for in the closing summary, and `--residue`
+ *     names the two unmatched ones runnably — see residueLines;
  *   - a CONVENTION-TRIGGERED check is one the path derivation can never reach,
  *     because it counts a population it computes for itself and so names no
  *     path literal to match. Those are derived from the change's KIND instead
@@ -436,6 +442,30 @@ export function maskSelfTests(source) {
  * compares against repo-relative inputs. So they are stripped, and a literal
  * that is nothing but dots (`'../..'`, this file's own ROOT) names no file and
  * is dropped outright.
+ *
+ * ## Why a TRAILING dot is stripped too, and why it stopped being cosmetic
+ *
+ * A path literal written as the last word of a sentence keeps the sentence's
+ * period: `scripts/check-skill-compatibility-version.mjs` is spelled in a
+ * backticked span at line 295 of its own module body — an array element, so
+ * comment masking cannot reach it — and it was extracted as the hint
+ * `scripts/check-skill-compatibility-version.mjs.`, with the period. No repo
+ * path ends in a dot, so a hint that does names nothing.
+ *
+ * That was harmless while `hintCovers` compared raw string prefixes, because
+ * the hint still reached the real file through `plain.startsWith(inputPath)`.
+ * The segment-boundary rule below removes exactly that branch, so the two
+ * changes are COUPLED and had to land together — measured on this tree, the
+ * boundary rule alone takes this one live hint from covering its own file to
+ * covering nothing at all:
+ *
+ *   raw prefix (before)         -> true
+ *   segment rule, not stripped  -> false      <- the coupling
+ *   segment rule, stripped      -> true
+ *
+ * A trailing run of dots and slashes is therefore trimmed here, at extraction,
+ * where the hint is built — not at comparison time, where every caller would
+ * have to remember to do it.
  */
 export function extractWatchHints(scriptSource) {
   const moduleBody = maskSelfTests(maskComments(scriptSource));
@@ -448,7 +478,9 @@ export function extractWatchHints(scriptSource) {
     if (!s) continue;
     const looksPathy = s.includes('/') || /^\.(claude|changeset|github|gitattributes)\b/.test(s);
     if (!looksPathy) continue;
-    hints.add(s.replace(/\/+$/, ''));
+    const trimmed = s.replace(/[./]+$/, '');
+    if (!trimmed) continue;
+    hints.add(trimmed);
   }
   return [...hints];
 }
@@ -470,17 +502,75 @@ export function runnableInvocation({ check, filter, direct }) {
 }
 
 /**
- * Does a watch hint cover an input path? Prefix either way, with globs
- * collapsed. A hint that collapses to a bare top-level directory name
- * (`packages`, `scripts` — no slash, not a dotted dir) is rejected as too
- * generic: it would match every file under the tree's biggest directories and
- * drown the signal the matched-via column exists to carry.
+ * Does a watch hint cover an input path? Containment either way, compared on
+ * PATH SEGMENT boundaries, with globs collapsed. A hint that collapses to a
+ * bare top-level directory name (`packages`, `scripts` — no slash, not a dotted
+ * dir) is rejected as too generic: it would match every file under the tree's
+ * biggest directories and drown the signal the matched-via column exists to
+ * carry.
+ *
+ * ## Why a segment boundary and not a raw string prefix (#8534)
+ *
+ * A path prefix is not a string prefix. Compared raw, a hint naming one entry
+ * claims every SIBLING whose name merely starts with the same characters, and
+ * the MATCHED column is what a dispatch prompt pastes — a fabricated lead there
+ * is indistinguishable from a real one to the dev who runs it.
+ *
+ * This was filed as dormant, on a census of 324 hints against 73 PACKAGE
+ * directories that found no live false coverage. Re-measured here against every
+ * tracked file rather than package directories only — 354 live hints × 5940
+ * tracked files — it is not dormant, and one answer changes:
+ *
+ *   hint 'content/docs' vs 'content/docs.site.json'  raw=true  segment=false
+ *       <- check:role-word, check:docs-audit-scope
+ *
+ * `content/docs.site.json` is a real file sitting beside the `content/docs`
+ * directory, and neither gate reads it. So both were printed as MATCHED for any
+ * card touching that file. The sibling class was always live; the earlier census
+ * probed directories, and this specimen is a file.
+ *
+ * The neighbouring predicate already draws this boundary and has a pinned case
+ * for it (`isInI18nBundlePackage`: `path === dir || path.startsWith(dir + '/')`).
+ * This is the one place in the file that did not.
+ *
+ * ## The collapsed-glob reach trade — DECIDED, not assumed
+ *
+ * Globs are collapsed by deletion, so `packages/client*` becomes
+ * `packages/client`. As a glob it would legitimately match a sibling package
+ * `packages/client-react`; under the segment rule it no longer reaches it. That
+ * trade was decided to REFUSE the reach, on three grounds:
+ *
+ *   - measured need: exactly two live hints carry a partial-segment glob, and
+ *     both are npm package specifiers rather than repo paths (`@objectstack/
+ *     spec@*` from check:release-page-status, `@fx/spec*` from
+ *     check:type-source-resolution). No repo path begins with `@`, so both are
+ *     inert either way. The capability this trade would protect has zero live
+ *     instances — a `packages/client*` hint is hypothetical, not a thing the
+ *     tree has;
+ *   - one rule, not two: preserving glob reach means re-deriving, at comparison
+ *     time, information the collapse deliberately destroys — a second matching
+ *     mode keyed on syntax that is already gone by the time this function runs;
+ *   - the error directions are not symmetric, and this file's contract picks a
+ *     side everywhere else: refusing costs a MISSING lead (one card, one CI
+ *     round), preserving costs a FABRICATED lead (pasted into every prompt whose
+ *     surface brushes it). Refusal errs in the direction the header calls the
+ *     safe one.
+ *
+ * Both directions of the trade are pinned in the self-test, so a future reader
+ * finds the decision as an assertion rather than as this paragraph. If a real
+ * `packages/client*`-shaped hint ever appears and the reach is genuinely wanted,
+ * the answer is to spell the hint as the two paths it means, not to widen this
+ * comparison back into a string prefix.
  */
 export function hintCovers(hint, inputPath) {
   const plain = hint.replace(/\*\*?/g, '').replace(/\/+$/, '').replace(/\/$/, '');
   if (plain.length < 2) return false;
   if (!plain.includes('/') && !plain.startsWith('.')) return false;
-  return inputPath.startsWith(plain) || plain.startsWith(inputPath);
+  return (
+    inputPath === plain ||
+    inputPath.startsWith(`${plain}/`) ||
+    plain.startsWith(`${inputPath}/`)
+  );
 }
 
 /**
@@ -674,9 +764,25 @@ export function i18nBundlePackageDirs() {
  * directory that covers your file. Every gate here computes its population
  * instead of naming it, so no source carries a literal to match:
  *
- *   - the two test-file gates — one lints a glob set that lives in the shared
+ *   - the two type-check gates — one lints a glob set that lives in the shared
  *     ESLint config, the other walks the workspace members — sit permanently
  *     in the "undetermined" bucket;
+ *   - the three test-file RATCHETS (`check:query-options-erasure`,
+ *     `check:engine-double-contract`, `check:where-matcher`) each walk the tree
+ *     for `*.test.*` files and reconcile the count against a baseline JSON. What
+ *     their sources name is that baseline and, for two of them, the git ref they
+ *     diff against — never the population. Measured on this tree, their entire
+ *     hint sets are:
+ *
+ *       check:query-options-erasure   scripts/query-options-erasure-baseline.json, origin/main
+ *       check:where-matcher           scripts/where-matcher-conformance.baseline.json, origin/main
+ *       check:engine-double-contract  scripts/engine-double-contract.baseline.json,
+ *                                     @objectstack/{core,objectql,metadata-core}
+ *
+ *     Not one of those can cover a card's path, so all three score `silent` —
+ *     they HAVE hints, so the "undetermined" bucket never sees them either, and
+ *     before this entry named them they were printed in NEITHER half of the
+ *     output for every card in the tree;
  *   - `check:i18n` walks `packages/` at runtime for files NAMED
  *     `i18n-extract.config.ts` and re-extracts each owning package's bundles.
  *     Its source is worse than silent: the path-ish literals it does carry are
@@ -701,6 +807,38 @@ export function i18nBundlePackageDirs() {
  * "Mentions a test file" is not "counts test files", and 22 leads is the same
  * as none. So the pair is written down, and the cost of writing it down is paid
  * back by the two properties below.
+ *
+ * ## Why the two ratchets below joined this entry (#8632)
+ *
+ * `check:engine-double-contract` and `check:where-matcher` were handed to the
+ * PM's judgment in this file's closing prose instead of being derived. Three
+ * measured instances, all of them CI rounds, say that boundary was in the wrong
+ * place — and the deciding evidence is not the incidents but a structural
+ * identity with an entry that was already here.
+ *
+ * All three ratchets discover their population the same way: a walk collecting
+ * `*.test.*` files (`scripts/check-engine-double-contract.mjs`, `walk` at ~line
+ * 342, `/\.(test|spec)\.(ts|tsx|mts)$/`; `scripts/check-where-matcher-
+ * conformance.mjs`, corpus walk at ~line 562, `/\.test\.ts$/`), reconciled
+ * against a shrink-only baseline. `check:query-options-erasure` has sat in this
+ * entry for exactly that reason. Naming one of three and calling the other two a
+ * judgment call was an inconsistency in this table, not a considered line.
+ *
+ * The noise objection recorded on the card — a path-level trigger fires on test
+ * files that contain no fake engine at all — is real and is answered by what
+ * these gates cost to run rather than by narrowing the trigger. Each is a
+ * whole-tree shrink-only ratchet: one invocation answers for the entire tree,
+ * needs no build, and prints the offending file and line when it fails. A seat
+ * that runs one needlessly loses seconds; a seat that is never prompted loses a
+ * CI round, which is what all three instances did. The trigger deliberately does
+ * NOT read the file's contents to confirm a double is present: a card is
+ * dispatched BEFORE its code exists, so the double the gate will object to is
+ * usually not on disk at derivation time — the second instance added one to a
+ * file that already had one, the first added the file itself.
+ *
+ * This is the shape the "22 leads" note rejects a heuristic for, and it survives
+ * that objection because the trigger is the gates' own population test, mirrored
+ * (`isTestFilePath`), not a guess at which scripts look test-flavoured.
  *
  * ## What the i18n entry still refuses to list
  *
@@ -744,9 +882,18 @@ export function i18nBundlePackageDirs() {
  *   only because `hintCovers` rejects one that collapses to a bare top-level
  *   directory. A gate list that fabricates hints out of its own explanations is
  *   the failure this whole script is written against.
+ * - Every `name` here is checked against the LIVE workflows by the self-test,
+ *   not only by the run that happens to print it. The STALE branch reports rot
+ *   to whoever is looking at the output; the self-test case makes the same rot
+ *   fail CI, because this table's names are the one enumerable list in the file
+ *   and an enumerable list is one a guard can hold.
  * - Each entry is deletable, with a stated criterion:
  *   - test-file entry: when a gate on it grows a discoverable path literal,
- *     the ordinary derivation names it and its line becomes redundant.
+ *     the ordinary derivation names it and its line becomes redundant. For the
+ *     three ratchets that means a literal naming their POPULATION — the baseline
+ *     path each already carries is their own output, and a card editing a
+ *     baseline matches through it today without making the gate derivable for
+ *     anybody else.
  *   - i18n entry: when `check-i18n-bundles.mjs` stops discovering its targets
  *     at runtime and names its POPULATION in its own source — a literal each
  *     owning package path starts with — the path half matches and this entry
@@ -771,6 +918,14 @@ export const CHANGE_KIND_GATES = [
       {
         name: 'check:type-check-debt',
         why: "the RATCHET half, and the invocation CI runs for it: `--re-measure` re-runs tsc per ledger entry and fails when a count drifts up, so a new test file that does not typecheck cleanly moves it. Needs the workspace closure BUILT — on an unbuilt worktree it refuses outright, and that throw means NOT MEASURED, never `not applicable to me`. Build first, exactly as lint.yml does: pnpm exec turbo run build --filter=./packages/* --filter=./packages/*/* (quote the filter values for your shell)",
+      },
+      {
+        name: 'check:engine-double-contract',
+        why: 'it walks every *.test.* file for fake engine doubles and fails when one declares delete()/update() without routing through assertEngineDeleteDispatch/assertEngineUpdateDispatch, against a shrink-only per-file baseline. A new double, or a new test file carrying one, moves it — and so does a delegating pass-through seam wrapping a real engine, which is the reading that missed it twice. Repair by fixing the double, never by raising the baseline. Cheap and whole-tree: one run answers for the whole repo and names the file and line',
+      },
+      {
+        name: 'check:where-matcher',
+        why: 'it walks every *.test.ts file for hand-written WHERE matchers and fails on a NEW silently-wrong one (a combinator read as a field name), against a shrink-only baseline. It rides the same test code as the double gate — one new fake engine tripped both, one round apart, because these steps run sequentially inside the ESLint job and the first failure aborts the rest. Conforming by REFUSING the unsupported shape is the convention most of the discovered matchers already follow; the suite cannot notice this class, which is why the gate exists',
       },
     ],
   },
@@ -810,11 +965,81 @@ export function changeKindLines(paths, resolveInvocation, kinds = CHANGE_KIND_GA
   return lines;
 }
 
+/**
+ * The closing accounting: every discovered family placed, with runtime counts
+ * and NOT ONE GATE NAMED.
+ *
+ * ## What this replaced, and why naming any gate here is the bug (#8632)
+ *
+ * This paragraph used to end with a hand-written list — "the rest stay the PM
+ * judgment call — new fake engine => check:engine-double-contract, new error
+ * code => check:error-code-casing, any edit => check:nul-bytes". Three problems,
+ * all measured:
+ *
+ *   - it was a SECOND COPY of a list that lives in `.claude/agents/os-dev.md`,
+ *     which names four gates where this named three (it also carries
+ *     `.claude/agents/**` => check:agent-model-declared). The two copies had
+ *     already drifted apart. A second copy of a list rotting inside prose is the
+ *     canonical incident this file's own header cites as the reason it embeds no
+ *     list of checks — reproduced in the file's last sentence;
+ *   - it was not a census of its own residue and nothing said so.
+ *     `check:where-matcher` is the same class of gate and appears nowhere in
+ *     this file — grep count 0 — so a dev following the output to the letter,
+ *     closing paragraph included, had no path to it at all. That cost a CI
+ *     round;
+ *   - the residue it claimed to summarise is not three families. Measured at the
+ *     time of writing: 98 discovered, 8 matched for a two-path card, 35
+ *     undetermined and 55 silent. An enumeration of 90 families in prose is not
+ *     a thing anyone can keep in sync, so keeping the sentence and guarding it
+ *     was never available — the honest move is to stop enumerating and state the
+ *     partition, which is derived and cannot drift.
+ *
+ * So this function names no gate, and a self-test case holds it to that. The
+ * families themselves are listed on demand by `--residue`, from the live
+ * derivation, where they cannot be stale.
+ *
+ * ## Why `silent` is now printed at all
+ *
+ * It was the undeclared fourth bucket: `classifyEntry` has always produced it
+ * and no output ever mentioned it, so the majority of the farm (55 of 98) was
+ * excluded by a verdict the reader could not see, let alone weigh. And it is the
+ * derivation's WEAKEST claim — a gate that computes its population and names
+ * only its own baseline artifact scores `silent` for every card in the tree,
+ * which is exactly how the three test-file ratchets went missing. Counting it
+ * out loud is what makes "no family names your paths" an answer a reader can
+ * judge instead of an absence they never see.
+ *
+ * Throws when the three verdicts do not account for every discovered family:
+ * under this script's contract a derivation that cannot complete exits non-zero
+ * rather than printing a wrong answer, and a fourth bucket added without wiring
+ * it in here would otherwise silently shrink the residue.
+ */
+export function residueLines({ discovered, matched, undetermined, silent }, kinds = CHANGE_KIND_GATES) {
+  const placed = matched + undetermined + silent;
+  if (placed !== discovered) {
+    throw new Error(
+      `residue accounting is short: ${placed} famil(ies) placed of ${discovered} discovered ` +
+        '(matched + undetermined + silent must cover every discovered family)',
+    );
+  }
+  const unplaced = undetermined + silent;
+  return [
+    `Residue — all ${discovered} discovered famil(ies) placed, derived at runtime:`,
+    `  ${matched} matched above · ${undetermined} undetermined (their sources name no path at all — NOT known irrelevant)` +
+      ` · ${silent} silent (their sources name paths, none of which cover yours).`,
+    '  A `silent` verdict is this derivation\'s weakest claim, not a clearance: a gate that computes its own population and' +
+      ' names only its baseline artifact scores silent for every card in the tree.',
+    `  Convention-triggered gates cut ACROSS all three and are printed above when a kind hits (${kinds.map((k) => k.kind).join('; ')}).`,
+    `  This script names no gate from memory. To list the ${unplaced} famil(ies) the path derivation did not place, runnably:` +
+      ' node scripts/pm/dispatch-gates.mjs --residue <paths>',
+  ];
+}
+
 // ---------------------------------------------------------------------------
 // Live derivation
 // ---------------------------------------------------------------------------
 
-function derive(paths) {
+function derive(paths, { showResidue = false } = {}) {
   const wfDir = join(ROOT, '.github/workflows');
   const workflows = readdirSync(wfDir).filter((f) => /\.ya?ml$/.test(f));
   if (workflows.length === 0) throw new Error('no workflow files found under .github/workflows');
@@ -857,10 +1082,12 @@ function derive(paths) {
 
   const matched = new Map();
   const undetermined = [];
+  const silent = [];
   for (const [check, entry] of byCheck) {
     const { verdict, hits } = classifyEntry(entry, paths);
     if (verdict === 'matched') matched.set(check, { entry, hits });
-    else if (verdict === 'undetermined') undetermined.push(check);
+    else if (verdict === 'undetermined') undetermined.push([check, entry]);
+    else silent.push([check, entry]);
   }
 
   console.log(`dispatch-gates: ${byCheck.size} check famil(ies) discovered across ${workflows.length} workflow file(s) — derived at runtime, nothing listed in this script.\n`);
@@ -882,12 +1109,29 @@ function derive(paths) {
     for (const line of kindLines) console.log(line);
   }
 
-  console.log(
-    `\nRepo-wide / undetermined (no path literals discoverable — not known irrelevant): ${undetermined.length} famil(ies).` +
-      '\nConvention-scoped gates match by what the change IS, not where it lives. This script derives the conventions it can detect mechanically ' +
-      `(${CHANGE_KIND_GATES.map((k) => k.kind).join('; ')}) and prints them above when they hit; the rest stay the PM judgment call — ` +
-      'new fake engine ⇒ check:engine-double-contract, new error code ⇒ check:error-code-casing, any edit ⇒ check:nul-bytes.',
-  );
+  if (showResidue) {
+    const listing = (title, entries, withHints) => {
+      console.log(`\n${title}: ${entries.length} famil(ies).`);
+      for (const [check, entry] of [...entries].sort()) {
+        const names = withHints && entry.hints.length
+          ? `   names: ${[...new Set(entry.hints)].slice(0, 3).join(', ')}${entry.hints.length > 3 ? ', …' : ''}`
+          : '';
+        console.log(`  - ${runnableInvocation(entry)}   [${[...entry.workflows].join(', ')}]${names}`);
+      }
+    };
+    listing('Undetermined (source names no path at all — NOT known irrelevant)', undetermined, false);
+    listing('Silent (source names paths, none of which cover yours — the weakest verdict)', silent, true);
+  }
+
+  console.log('');
+  for (const line of residueLines({
+    discovered: byCheck.size,
+    matched: matched.size,
+    undetermined: undetermined.length,
+    silent: silent.length,
+  })) {
+    console.log(line);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1094,6 +1338,41 @@ function selfTest() {
   t('input dir covers hint below it', hintCovers('packages/spec/scripts/check-x.mjs', 'packages/spec'));
   t('unrelated path does not match', !hintCovers('.claude/agents', 'packages/rest/src/server.ts'));
 
+  // ── Segment boundaries, not string prefixes (#8534) ───────────────────────
+  //
+  // Every case above is one the raw-prefix rule also passed; they stay to prove
+  // the narrowing kept them. The cases below are the ones it failed.
+  t('a hint equal to the input path covers it', hintCovers('docs/adr', 'docs/adr'));
+  t('a sibling sharing a name prefix is NOT covered', !hintCovers('packages/client', 'packages/client-react/src/index.ts'));
+  t('nor in the other direction', !hintCovers('packages/spec-extra/x.ts', 'packages/spec'));
+  // The live specimen this was measured on: a real FILE sitting beside a real
+  // directory of the same name stem, claimed by two gates that never read it.
+  // The filed census called the rule dormant after probing package DIRECTORIES;
+  // it was live all along, one directory level up and on a file. If
+  // content/docs.site.json is ever removed, re-point this case at whatever
+  // sibling pair the tree then has rather than deleting it.
+  t('the live sibling FILE is no longer claimed by the directory hint', !hintCovers('content/docs', 'content/docs.site.json'));
+  t('while the directory it names is still covered', hintCovers('content/docs', 'content/docs/adr/0112-x.mdx'));
+  // The collapsed-glob reach trade, pinned in BOTH directions so the decision
+  // reads as an assertion. Refusing the sibling reach is the DECIDED loss (see
+  // hintCovers' docblock): measured, no repo-path hint of this shape exists —
+  // the only two live partial-segment globs are npm specifiers.
+  t('a collapsed partial-segment glob does NOT reach the sibling it would match as a glob', !hintCovers('packages/client*', 'packages/client-react/src/index.ts'));
+  t('the same glob still covers the package it names', hintCovers('packages/client*', 'packages/client/src/index.ts'));
+  t('a segment-boundary glob is untouched by the trade', hintCovers('packages/client/**', 'packages/client/src/index.ts'));
+
+  // ── A trailing sentence period is not part of the path (#8534, half two) ──
+  //
+  // Coupled to the rule above: the raw-prefix comparison reached the real file
+  // THROUGH the stray period, so the boundary rule alone would have taken this
+  // hint from covering its own file to covering nothing. Both directions pinned.
+  const dotted = extractWatchHints("const CITED = ['scripts/check-x.mjs.'];");
+  t('a hint ending in a sentence period is trimmed to the path it names', dotted.includes('scripts/check-x.mjs'));
+  t('no extracted hint ends in a dot', !dotted.some((h) => h.endsWith('.')));
+  t('and the trimmed hint still reaches its file under the segment rule', dotted.some((h) => hintCovers(h, 'scripts/check-x.mjs')));
+  t('trimming does not eat a leading dotted directory', extractWatchHints("const D = '.claude/agents';").includes('.claude/agents'));
+  t('trimming does not eat a trailing glob', extractWatchHints("const G = 'packages/spec/src/**';").some((h) => h.includes('**')));
+
   // Change-kind derivation. The predicate is pinned in BOTH directions against
   // what the two gates themselves count: filename infix, never directory — a
   // helper inside `__tests__/` is in their non-test population.
@@ -1106,7 +1385,7 @@ function selfTest() {
 
   const resolved = (name) => `pnpm ${name}`;
   const kindHit = changeKindLines(['packages/objectql/src/engine.test.ts'], resolved);
-  t('a test path emits the convention section', kindHit.length === 4 && kindHit[0].includes('adds or edits a test file'));
+  t('a test path emits the convention section', kindHit.length === 6 && kindHit[0].includes('adds or edits a test file'));
   // All three halves anchor on the rendered DELIMITERS (`- pnpm x   —`), for the
   // reason the i18n entry's pins below state at length: a bare `includes` is
   // satisfied by every name that merely STARTS WITH the expected one, so a
@@ -1122,7 +1401,18 @@ function selfTest() {
   // `includes('pnpm check:type-check-coverage')` is satisfied by the debt line's
   // absence AND by a `-v2` rename, which is how a rationale describing the
   // ratchet went on naming the invocation that never runs it.
-  t('the section names all three convention gates, runnably', kindHit.some((l) => l.includes('- pnpm check:query-options-erasure   —')) && kindHit.some((l) => l.includes('- pnpm check:type-check-coverage   —')) && kindHit.some((l) => l.includes('- pnpm check:type-check-debt   —')));
+  t('the section names all five convention gates, runnably', kindHit.some((l) => l.includes('- pnpm check:query-options-erasure   —')) && kindHit.some((l) => l.includes('- pnpm check:type-check-coverage   —')) && kindHit.some((l) => l.includes('- pnpm check:type-check-debt   —')) && kindHit.some((l) => l.includes('- pnpm check:engine-double-contract   —')) && kindHit.some((l) => l.includes('- pnpm check:where-matcher   —')));
+  // The two ratchets this entry gained (#8632), pinned apart from the pair
+  // above because they arrived for a different reason: they were handed to the
+  // PM's judgment in this file's closing prose while a structurally identical
+  // ratchet sat in this table. Their `why` must carry the repair direction —
+  // fix the double / refuse the unsupported shape — because both baselines are
+  // shrink-only and a seat that raises one turns a caught defect into a pinned
+  // one.
+  const doubleLine = kindHit.find((l) => l.includes('- pnpm check:engine-double-contract   —')) ?? '';
+  const whereLine = kindHit.find((l) => l.includes('- pnpm check:where-matcher   —')) ?? '';
+  t('the engine-double line states the guard it wants and refuses the baseline raise', /assertEngineDeleteDispatch/.test(doubleLine) && /shrink-only/.test(doubleLine));
+  t('the where-matcher line states that refusing is the conforming repair', /refus/i.test(whereLine) && /shrink-only/.test(whereLine));
   // The ratchet line's prerequisite is part of the product, not decoration: a
   // seat that runs `--re-measure` on an unbuilt worktree gets a throw, and an
   // unexplained throw reads as "not applicable to me" — which is a green report
@@ -1239,6 +1529,16 @@ function selfTest() {
   const ownHints = readHints('scripts/pm/dispatch-gates.mjs');
   t('this tool still hints the workflow directory it reads', covers(ownHints, '.github/workflows/lint.yml'));
   t('this tool no longer hints the spec paths its own fixtures name', !covers(ownHints, 'packages/spec/src/data/filter.zod.ts'));
+  // The LIVE trailing-dot specimen (#8534): this gate spells its own filename as
+  // the last word of a sentence, in a module-body array element that comment
+  // masking cannot reach, so the hint carried the period. Pinned live because
+  // the fixture above proves the trimming and only this file proves the tree
+  // still contains the shape. If that sentence is ever rewritten, re-point the
+  // case at whatever file then carries a trailing-dot literal — or, if none
+  // does, delete it together with the trim, never ahead of it.
+  const compatHints = readHints('scripts/check-skill-compatibility-version.mjs');
+  t('the live trailing-dot hint is trimmed to the file it names', compatHints.includes('scripts/check-skill-compatibility-version.mjs'));
+  t('so it still reaches that file under the segment rule', covers(compatHints, 'scripts/check-skill-compatibility-version.mjs'));
 
   // ── The one DECLARED coupling (#8551) ─────────────────────────────────────
   //
@@ -1331,7 +1631,7 @@ function selfTest() {
   // The table's own rot detector: a name no live run discovers must say so,
   // never disappear quietly.
   const stale = changeKindLines(['a.test.ts'], () => null);
-  t('an undiscoverable gate renders as STALE', stale.filter((l) => l.includes('STALE')).length === 3);
+  t('an undiscoverable gate renders as STALE', stale.filter((l) => l.includes('STALE')).length === 5);
   // Per NAME, anchored on both sides of the rendered name (`⚠ x: STALE`), so the
   // pair that shares one script is reported apart: a count alone stays green if
   // one of the two is dropped from the table and something else is added, and a
@@ -1339,9 +1639,58 @@ function selfTest() {
   // table has actually rotted.
   t('the coverage half renders STALE under its own name', stale.some((l) => l.includes('⚠ check:type-check-coverage: STALE')));
   t('the ratchet half renders STALE under its own name', stale.some((l) => l.includes('⚠ check:type-check-debt: STALE')));
+  t('the engine-double ratchet renders STALE under its own name', stale.some((l) => l.includes('⚠ check:engine-double-contract: STALE')));
+  t('the where-matcher ratchet renders STALE under its own name', stale.some((l) => l.includes('⚠ check:where-matcher: STALE')));
   const i18nStale = changeKindLines(['packages/services/service-messaging/scripts/i18n-extract.config.ts'], () => null);
   t('an undiscoverable check:i18n renders as STALE', i18nStale.filter((l) => l.includes('⚠ check:i18n: STALE')).length === 1);
   t('every declared convention gate carries a reason', CHANGE_KIND_GATES.every((k) => k.gates.every((g) => g.name && g.why)));
+
+  // ── The census guard (#8632) ──────────────────────────────────────────────
+  //
+  // CHANGE_KIND_GATES is the one enumerable list in this file, so it is the one
+  // list a guard can hold. The STALE branch reports a rotted name to whoever
+  // reads the output; this case makes the same rot fail CI, against the REAL
+  // workflow tree rather than a fixture. Discovery is repeated here rather than
+  // borrowed from `derive`, which prints instead of returning — the assertion is
+  // "every name in the table is a family the workflows really run", and it needs
+  // the live population to mean anything.
+  const liveFamilies = new Set();
+  for (const wf of readdirSync(join(ROOT, '.github/workflows')).filter((f) => /\.ya?ml$/.test(f))) {
+    for (const i of extractCheckInvocations(readFileSync(join(ROOT, '.github/workflows', wf), 'utf8'), wf)) {
+      liveFamilies.add(i.check);
+    }
+  }
+  t('the live workflows discover a farm at all (the guard is not vacuous)', liveFamilies.size > 20);
+  const declared = CHANGE_KIND_GATES.flatMap((k) => k.gates.map((g) => g.name));
+  const missing = declared.filter((n) => !liveFamilies.has(n));
+  t(`every convention gate named in the table is a live family (missing: ${missing.join(', ') || 'none'})`, missing.length === 0);
+  // The two gates this card moved out of the closing prose, pinned individually
+  // — a count alone stays green if one is dropped and another added.
+  t('check:engine-double-contract is a live family, so naming it in the table is not a guess', liveFamilies.has('check:engine-double-contract'));
+  t('check:where-matcher is a live family too — the gate the prose never named', liveFamilies.has('check:where-matcher'));
+
+  // ── The residue accounting (#8632) ────────────────────────────────────────
+  //
+  // Two properties, both of which the deleted prose lacked: it accounts for
+  // every discovered family, and it names no gate. The second is the one that
+  // rots — a hand-written list of gate names in this paragraph is exactly what
+  // was wrong with it — so it is asserted directly rather than by inspection.
+  const residue = residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 55 });
+  t('the residue summary states the discovered total', residue.some((l) => l.includes('98')));
+  t('the residue summary states each bucket', residue.some((l) => l.includes('35 undetermined')) && residue.some((l) => l.includes('55 silent')));
+  t('the residue summary points at the flag that lists the unplaced families', residue.some((l) => l.includes('--residue') && l.includes('90')));
+  t('the residue summary names NO gate — the property the deleted prose lacked', !/check:[\w:-]+/.test(residue.join('\n')));
+  t('the residue summary still names the convention KINDS it derives', residue.some((l) => l.includes('adds or edits a test file')));
+  // The partition must be a partition. A fourth bucket added to classifyEntry
+  // and not wired into the summary would otherwise shrink the residue silently,
+  // which is the failure class this whole card is about.
+  let refused = false;
+  try {
+    residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 54 });
+  } catch {
+    refused = true;
+  }
+  t('a partition that does not account for every discovered family is REFUSED', refused);
 
   let failed = 0;
   for (const [name, cond] of cases) {
@@ -1355,15 +1704,17 @@ function selfTest() {
   console.log(`✓ dispatch-gates self-test: ${cases.length} cases pass.`);
 }
 
-const argvPaths = process.argv.slice(2).filter((a) => a !== '--self-test');
+const argvPaths = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 if (process.argv.includes('--self-test')) {
   selfTest();
 } else if (argvPaths.length === 0) {
-  console.error('usage: node scripts/pm/dispatch-gates.mjs <path> [<path> ...] | --self-test');
+  console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] <path> [<path> ...] | --self-test');
   process.exit(2);
 } else {
   try {
-    derive(argvPaths.map((p) => p.replace(/^\.\//, '')));
+    derive(argvPaths.map((p) => p.replace(/^\.\//, '')), {
+      showResidue: process.argv.includes('--residue'),
+    });
   } catch (err) {
     console.error(`dispatch-gates: derivation failed — ${err.message}`);
     process.exit(2);
