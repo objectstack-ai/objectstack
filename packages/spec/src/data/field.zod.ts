@@ -800,6 +800,40 @@ export const FieldSchema = lazySchema(() => strictObject({
   relatedListTitle: z.string().optional().describe('Title for the detail-page related list'),
   /** Optional explicit columns for the detail-page related list (derived from the child object when omitted). */
   relatedListColumns: z.array(z.any()).optional().describe('Explicit columns for the detail-page related list (derived from the child object when omitted)'),
+  /**
+   * Declarative default FILTER for the detail-page related list (#8704). The
+   * auto-derived related list for this relationship queries the child object
+   * with this constraint AND-composed with the parent-relationship condition
+   * `{ [referenceField]: parentId }` — the effective predicate is the
+   * conjunction, so a child row appears only when it points at the parent AND
+   * matches this filter. Two clauses are CONTRACT, binding on every consumer
+   * of the derived related-list descriptor (maintainer ruling 2026-08-15 on
+   * #8704, 「接受全部建议。」 item 3):
+   *
+   *   - AUTHORED CONSTRAINT, never a user-editable suggestion — a viewer
+   *     cannot remove or relax it from the rendered list.
+   *   - BADGE-COUNT PARITY — the related-list tab badge count is computed
+   *     over the SAME composed predicate, so the count always matches the
+   *     visible rows. A count the filter does not reach ships a silent lie
+   *     (rows hidden, count unchanged); parity is part of this key's
+   *     semantics, not a consumer nicety.
+   *
+   * The canonical use is excluding soft-deleted child rows
+   * (`{ status: { $ne: 'deleted' } }`) without abandoning the auto-derived
+   * record page for a hand-written `record:related_list` page.
+   *
+   * REUSES the canonical Query-DSL {@link FilterConditionSchema} — the same
+   * authoring face as a query `where`, dataset scope filters, and this file's
+   * own `summaryOperations.filter` (which ANDs with the parent-FK match in
+   * exactly the same way) — deliberately NOT a new dialect, so the FILTER-axis
+   * doors apply here automatically: the schema door refuses bare date-range
+   * preset comparands in ordering positions at parse (#8793), and the engine
+   * doors judge the composed query at run time like any other `where` (a
+   * virtual `formula` key is refused with `INVALID_FIELD`, #8296). Like its
+   * three siblings above, it is meaningful on a child's
+   * `master_detail`/`lookup` field (whose `reference` is the parent).
+   */
+  relatedListFilter: FilterConditionSchema.optional().describe("Declarative default filter for the detail-page related list: AND-composed with the parent-relationship condition { [referenceField]: parentId } — an authored constraint, never a user-editable suggestion. The related-list tab badge count honors the same composed filter, so counts match the visible rows. Canonical Query-DSL FilterCondition (the same dialect as a query `where`), e.g. { status: { $ne: 'deleted' } } to hide soft-deleted children."),
 
   /**
    * LOOKUP PICKER (forward) config — how THIS lookup/master_detail field's

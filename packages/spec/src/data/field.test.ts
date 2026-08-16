@@ -452,6 +452,89 @@ describe('FieldSchema', () => {
       expect(() => FieldSchema.parse(field)).toThrow();
     });
 
+    // [#8704] relatedListFilter — the fourth member of the related-list family.
+    it('should accept relatedListFilter (canonical Query-DSL FilterCondition) and round-trip it', () => {
+      const field: Field = {
+        name: 'account',
+        label: 'Account',
+        type: 'lookup',
+        reference: 'crm_account',
+        relatedList: 'primary',
+        relatedListTitle: 'Open Tasks',
+        // The motivating soft-delete case, plus an explicit-operator sibling.
+        relatedListFilter: { status: { $ne: 'deleted' }, archived: false },
+      };
+      const result = FieldSchema.parse(field);
+      expect(result.relatedListFilter).toEqual({ status: { $ne: 'deleted' }, archived: false });
+    });
+
+    it('relatedListFilter supports the full FilterCondition shape ($and/$or/$not, nested)', () => {
+      const result = FieldSchema.parse({
+        name: 'project',
+        label: 'Project',
+        type: 'master_detail',
+        reference: 'crm_project',
+        relatedListFilter: {
+          $and: [{ status: { $nin: ['deleted', 'archived'] } }, { $not: { hidden: true } }],
+        },
+      });
+      expect(result.relatedListFilter).toEqual({
+        $and: [{ status: { $nin: ['deleted', 'archived'] } }, { $not: { hidden: true } }],
+      });
+    });
+
+    // [#8704 ruling condition 1] Reusing FilterConditionSchema — not a new
+    // dialect — is what makes the FILTER-axis schema door (#8793 bare preset
+    // comparands) cover this position with NO new wiring. This pin measures
+    // that the door really reaches the new key.
+    it('relatedListFilter is judged by the #8793 bare-preset-comparand schema door', () => {
+      const r = FieldSchema.safeParse({
+        name: 'account',
+        label: 'Account',
+        type: 'lookup',
+        reference: 'crm_account',
+        relatedListFilter: { created_at: { $gte: 'last_30_days' } },
+      });
+      expect(r.success).toBe(false);
+      if (!r.success) {
+        const issue = r.error.issues.find((i) => i.message.includes('last_30_days'));
+        expect(issue, 'the preset refusal must surface through relatedListFilter').toBeTruthy();
+        expect(issue!.path).toEqual(['relatedListFilter', 'created_at', '$gte']);
+        expect(issue!.message).toContain('#8793');
+      }
+    });
+
+    it('POSITIVE CONTROL: relatedListFilter with the macro/ISO spellings publishes cleanly', () => {
+      for (const relatedListFilter of [
+        { created_at: { $gte: '{30_days_ago}' } },
+        { created_at: { $gte: '2026-01-15' } },
+        { status: { $ne: 'deleted' } },
+      ]) {
+        const r = FieldSchema.safeParse({
+          name: 'account',
+          label: 'Account',
+          type: 'lookup',
+          reference: 'crm_account',
+          relatedListFilter,
+        });
+        expect(r.success, JSON.stringify(relatedListFilter)).toBe(true);
+      }
+    });
+
+    // [#8704 ruling condition 2] The AND-composition and badge-count-parity
+    // clauses are the key's CONTRACT. The auto-derivation that consumes the
+    // key lives wholly in objectui (deriveRelatedLists / RecordDetailView —
+    // companion card objectui#4664), so the artifact this spec can enforce is
+    // the normative contract text every consumer and doc reader is handed.
+    // This pin keeps both clauses in the published `.describe()`.
+    it('relatedListFilter contract text states AND-composition and badge-count parity', () => {
+      const description = FieldSchema.shape.relatedListFilter.description ?? '';
+      expect(description).toContain('AND-composed');
+      expect(description).toContain('{ [referenceField]: parentId }');
+      expect(description).toContain('badge count honors the same composed filter');
+      expect(description).toContain('never a user-editable suggestion');
+    });
+
     it('should preserve forward record-picker config (display/columns/filters/depends)', () => {
       const lookupField: Field = {
         name: 'account',

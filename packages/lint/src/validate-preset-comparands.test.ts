@@ -143,6 +143,43 @@ describe('validatePresetComparands (#8793 — the ruled C half of #8690)', () =>
     ].sort());
   });
 
+  it('[#8704] reaches a field-level relatedListFilter under objects', () => {
+    // `relatedListFilter` is the one FILTER_KEYS member not spelled `filter`:
+    // it rides flat on the field beside its relatedList* family. Listing it in
+    // the shared walk is what lands this rule (and tokens/empty-combinators)
+    // on the new position — this pin holds that coverage.
+    const findings = validatePresetComparands({
+      objects: [{
+        name: 'account',
+        fields: {
+          task: {
+            type: 'lookup',
+            reference: 'account',
+            relatedListFilter: { created_at: { $gte: 'last_30_days' } },
+          },
+        },
+      }],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('objects[0].fields.task.relatedListFilter.created_at.$gte');
+    expect(findings[0].message).toContain('last_30_days');
+  });
+
+  it('[#8704] POSITIVE CONTROL: a clean relatedListFilter reports nothing', () => {
+    expect(validatePresetComparands({
+      objects: [{
+        name: 'account',
+        fields: {
+          task: {
+            type: 'lookup',
+            reference: 'account',
+            relatedListFilter: { status: { $ne: 'deleted' }, created_at: { $gte: '{30_days_ago}' } },
+          },
+        },
+      }],
+    })).toEqual([]);
+  });
+
   it('does not double-report a value the token rule already owns', () => {
     // `{last_30_days}` is a WRAPPED unknown token — validate-filter-tokens'
     // verdict (FILTER_TOKEN_UNKNOWN), not this rule's: a preset name carries
