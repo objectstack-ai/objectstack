@@ -382,10 +382,12 @@ one. `sys_metadata` overlay rows are not in any config file, so there is no
 | Protocol schema (Zod) | ✓ | ✓ | — | ✓ |
 | CEL / predicate validation (ADR-0032) | ✓ | ✓ | ✓ | ✓ᶠ |
 | List-view navigation modes (ADR-0053) | ✓ | ✓ | ✓ | — |
+| Zod-valid but functionally inert declarations — a `summary` with no operations (ADR-0078), a managed object advertising an API method its affordances refuse (#7521) | ✓ | ✓ | ✓ | — |
 | View container shape | ✓ | ✓ | ✓ | — |
 | Widget-binding integrity (ADR-0021) | ✓ | ✓ | ✓ | ✓ᵈ |
 | Dashboard action/route references (ADR-0049) | ✓ | ✓ | ✓ | — |
 | Filter placeholder resolvability (#3574) | ✓ | ✓ | ✓ | — |
+| Ordering comparands naming a date-range preset — `last_30_days` in a `>=` position (#8793) | ✓ | ✓ | ✓ | ✓ᵈᵛᵒᵖᶠ |
 | Empty filter combinators — `$and: []`, `$or: []`, `$not: {}` (#5330) | ✓ | ✓ | ✓ | ✓ᶠ |
 | Object & action name references (#3583) | ✓ | ✓ | ✓ | — |
 | Flow reference integrity — node writes, template paths, read-only writes (#3583) | ✓ | ✓ | ✓ | ✓ᶠ |
@@ -396,31 +398,54 @@ one. `sys_metadata` overlay rows are not in any config file, so there is no
 | SDUI scoped styling (ADR-0065) | ✓ | ✓ | ✓ | — |
 | JSX / React page source parses (ADR-0080/0081) | ✓ | ✓ | ✓ | — |
 | Approval-node approvers (ADR-0090 D3) | ✓ | ✓ | ✓ | ✓ᶠ |
-| Security posture (ADR-0090 — e.g. every custom object declares `sharingModel`) | ✓ | ✓ | ✓ | — |
+| Security posture (ADR-0090 — e.g. every custom object declares `sharingModel`) | ✓ | ✓ | ✓ | ✓ˢᵖᵉᵇᵒ |
+| Security vocabulary freeze (ADR-0090 D3 — the reserved word, replaced by `permission_set` / `position` / `business_unit`) | ✓ | ✓ | ✓ | — |
 | Organization-axis red lines (ADR-0105 D6) | ✓ | ✓ | ✓ | — |
+| Declared enforcement that cannot run — sharing-rule conditions (#4698), row-level-security predicates (#4983), a validation rule's regex / JSON Schema (#4762) and its `format` names (#5178) | ✓ | ✓ | ✓ | — |
 | Platform-schedule `create_record` organization (#6285) | — | — | — | ✓ᶠ |
 | Autonumber `{field}` interpolation | ✓ | ✓ | ✓ | — |
 | View references — form targets, view-key collisions (#2554) | ✓ | ✓ | ✓ | — |
 | Flow authoring anti-patterns (#1874) | ✓ | ✓ | ✓ | ✓ᶠ |
 | Flow trigger readiness — a flow that looks armed and never launches (#5762) | ✓ | ✓ | ✓ | ✓ᶠ |
 | `views[]` conditional-visibility predicates — CEL syntax, parse budget, bare identifiers, binding-root layer, schema path refs (ADR-0089 D3b, #7010) | ✓ | ✓ | ✓ | ✓ᵛ |
-| Advisory: record titles, semantic field pointers (ADR-0085), seed replay/state safety, capability references, liveness | ✓ | ✓ | ✓ | — |
+| Advisory: record titles, semantic field pointers (ADR-0085), form-section layout, action placement, SDUI component props, seed replay/state safety, capability references, liveness | ✓ | ✓ | ✓ | — |
 | Package docs — flatness, prefixes, links (ADR-0046) | ✓ | ✓ | ✓ | — |
 | Undeclared authoring keys — every metadata collection (#3786) and the stack's own top-level keys (#4167) | ✓ | ✓ | — | — |
-| Naming, labels, data-model conventions, i18n coverage | — | — | ✓ | — |
+| Declared-unique scope — a bare `unique: true` index, a field-level and index-level double declaration, legacy organization composites (ADR-0120 D5) | ✓ | ✓ | ✓ | — |
+| Naming, labels, the rest of the data-model best-practice sweep, i18n coverage | — | — | ✓ | — |
 | Emits `dist/objectstack.json` | — | ✓ | — | — |
 
-**`✓ᶠ` means the rule runs at that door for `flow` writes; `✓ᵛ` for `view`
-writes; `✓ᵈ` for `dashboard` writes.** Each marker names the metadata types that
-rule's own `runtimeTypes` declares, and that entry in `AUTHORING_RULES` is the
-authority — the set has grown a type at a time (#4463 shipped P1 as `flow` and
-four rule families, #7220 moved the whole `views[]` visibility-predicate family
-across in one edit, #7529 put widget-binding integrity on `dashboard`), so read
-the rule rather than assuming a save of some other type reaches storage
-unjudged. The `—` cells above are `—` for two different reasons: some
-rules read a stack-wide collection a one-item write does not carry (pages,
-dashboards, navigation, permission sets), and some parse authored source through
-`typescript`, which the kernel boot path must never load.
+**Every superscript in the `runtime publish` column is one metadata type whose
+writes that rule inspects: `✓ᶠ` `flow`, `✓ᵛ` `view`, `✓ᵈ` `dashboard`, `✓ᵒ`
+`object`, `✓ᵖ` `page`, `✓ˢ` `seed`, `✓ᵇ` `book`, `✓ᵖᵉ` `permission`** — the last
+one carries two letters because `page` already holds `ᵖ`. A cell lists one
+superscript per declared type, in the order the rule declares them, and that
+rule's own `runtimeTypes` in `AUTHORING_RULES` is the authority — the set has
+grown a type at a time (#4463 shipped P1 as `flow` and four rule families, #7220
+moved the whole `views[]` visibility-predicate family across in one edit, #7529
+put widget-binding integrity on `dashboard`, #8307 → #8310 walked the ADR-0090
+security-posture block across `seed`, then `permission` and `book`, then
+`object`), so read the rule rather than assuming a save of some other type
+reaches storage unjudged.
+
+That last move is also why the vocabulary freeze is a row of its own. It was
+split out of the security-posture rule on the day the rest of that block
+crossed, because it judges collections the per-write snapshot does not carry:
+one rule id has to sit on ONE side of the wall, so it stayed behind whole rather
+than crossing for some of the collections it judges and not others.
+
+The `—` cells above are `—` for more than one reason, and only the first two are
+about the rule being unable to run there: some rules read a stack-wide
+collection a one-item write does not carry (pages, dashboards, navigation,
+positions, apps — the snapshot has carried `permissions` and `books` since #8309
+and `datasets` since #7529, so those three are no longer in this class); some parse
+authored source through `typescript`, which the kernel boot path must never
+load; some are snapshot-safe and simply have not been rolled out to a type yet
+(a sharing rule or an RLS predicate crosses on a `runtimeTypes` edit, not on new
+wiring); and the capability-reference rule would *graduate* from advisory to
+gating at that door, since the live registry decides what the CLI has to hedge —
+a severity change on a published rule id, which is its own PR rather than a
+wiring change.
 
 The visibility family crossed **together**, and that is the point rather than an
 implementation detail. An earlier attempt wired one of its rules alone, which
@@ -458,13 +483,19 @@ write lands in, and whether this deployment walls organizations), and a build
 machine's environment is a false signal for them — so `os build` must not judge
 it at all.
 
-Two rows are deliberately not universal across the three commands, and both are
-one-directional (neither lets a stack through a gate another command enforces):
+Some rows are deliberately not universal across the three commands, and each is
+one-directional (none lets a stack through a gate another command enforces):
 the Zod parse and the undeclared-key diff need the pre-parse tier and the schema,
 which only the two commands that parse actually have; and `os lint`'s own
-rubric — snake_case names, missing labels, data-model conventions — is a lint
-verdict, not a publish gate. `os build` has never rejected a camelCase object
-name.
+rubric — snake_case names, missing labels, the best-practice data-model sweep —
+is a lint verdict, not a publish gate. `os build` has never rejected a camelCase
+object name.
+
+The declared-unique row is the one that looks like that rubric and is not. Its
+ADR-0120 D5 rules register for `os validate` and `os build` only, because
+`os lint` reaches them through its own data-model sweep and a second
+registration would print every finding twice — coverage recorded, not coverage
+missing, which is what each of those entries says for itself.
 
 That invariant is enforced, not merely documented. Each rule declares its command
 coverage as data, and a CLI test fails if a rule that can emit `error` runs on
