@@ -79,6 +79,7 @@
     "check:changeset-gate-self-tests": "node scripts/check-empty-changeset.mjs --self-test && node scripts/check-adr-0087-registration.mjs --self-test && node scripts/check-changeset-no-major.mjs --self-test",
     "check:override-consistency": "node scripts/check-override-consistency.mjs --self-test && node scripts/check-override-consistency.mjs",
     "check:release-notes": "node scripts/check-release-notes.mjs",
+    "check:release-page-status": "node scripts/check-release-page-status.mjs --self-test && node scripts/check-release-page-status.mjs",
     "check:release-body": "node scripts/release-github-releases.mjs --self-test",
     "check:node-version": "node scripts/check-node-version.mjs",
     "check:workflow-status-functions": "node scripts/check-workflow-status-functions.mjs --self-test && node scripts/check-workflow-status-functions.mjs",

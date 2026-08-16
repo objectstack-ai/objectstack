@@ -540,6 +540,18 @@ jobs:
       - name: Release-notes drift guard
         run: pnpm check:release-notes
 
+      # Release-page STATUS guard (#8892). The guard above proves a released
+      # major has a page; it never reads what the page SAYS. Both of the last
+      # two GA cuts shipped a page still describing itself as a pre-release —
+      # v17 for a day ("the train is preparing to ship"), v16 for three weeks
+      # ("currently published as 16.0.0-rc.0") — with CI fully green each time,
+      # found only because a human read the page. This asserts that for every
+      # GA'd major from v16 on, the status blockquote and the index entry both
+      # describe a shipped release. Scoped to v16+ by maintainer ruling; the
+      # gate prints that cutoff and its reason on both the OK and failure paths.
+      - name: Release-page status guard
+        run: pnpm check:release-page-status
+
       # Release-body limit guard (#4900). The GitHub Releases API rejects any
       # body over 125,000 characters, and @objectstack/spec's changelog section
       # for one v17 RC is ~343,000 — so the release step 422'd after npm had
