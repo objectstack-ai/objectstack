@@ -73,6 +73,17 @@ jobs:
             // their own section, carrying the instruction that makes them safe.
             const readOnly = data.releaseOwnedDocs || [];
             const editable = docs.filter(d => !readOnly.includes(d));
+            // Above this many editable rows, the list stops carrying per-PR information: a
+            // hub package (referenced by nearly every hand-written doc) posts the same
+            // near-invariant dump on every PR that touches it, relayed in full into every
+            // subscribed agent session on every push (#9037). Measured against this repo's
+            // actual per-package referencing-doc counts: @objectstack/spec sits at 106
+            // editable rows, the next-largest non-hub packages (cli/core/runtime) at 18-19,
+            // and the smallest packages that still warrant a real list (e.g.
+            // @objectstack/client) at 11 — 15 sits in the gap between those two clusters,
+            // so the suggested default is kept as-is.
+            const EDITABLE_ROW_CAP = 15;
+            const capped = editable.length > EDITABLE_ROW_CAP;
             let body;
             if (docs.length === 0) {
               body = `${marker}\n### 📓 Docs Drift Check\nNo hand-written docs reference the ${pkgs.length} changed package(s). ✅`;
@@ -84,26 +95,44 @@ jobs:
                 '### 📓 Docs Drift Check',
                 `This PR changes **${pkgs.length}** package(s): ${pkgs.map(p => `\`${p}\``).join(', ')}.`,
               ];
-              if (editable.length) {
+              if (capped) {
+                // NO row list above the cap — folding rows behind a details tag would
+                // still ship every row's bytes to the event relay that pushes this
+                // comment into subscribed agent sessions; only actually omitting them
+                // caps the tokens. The re-derivation command is the escape hatch: full
+                // fidelity is one command away, never lost.
                 body.push(
                   '',
-                  `**${editable.length}** hand-written doc(s) reference the affected code and may need an implementation-accuracy re-verification:`,
-                  '',
-                  editable.map(row).join('\n'),
+                  `**${editable.length}** hand-written doc(s) reference the affected code — list omitted above ${EDITABLE_ROW_CAP} rows. Re-derive: \`node scripts/docs-audit/affected-docs.mjs --json origin/${baseRef}\`.`,
                 );
-              }
-              if (readOnly.length) {
-                body.push(
-                  '',
-                  `⛔ **${readOnly.length}** release-owned page(s) ${editable.length ? 'also ' : ''}reference the affected code. These are **read-only**:`,
-                  '',
-                  readOnly.map(row).join('\n'),
-                  '',
-                  '> `content/docs/releases/` is RELEASE-OWNED (AGENTS.md "Documentation Guardrails"): release',
-                  '> notes are written centrally at release time, and a code PR that edits them is the exact PR',
-                  '> that guardrail exists to stop. They are still audited — read-only. If one of them is actually',
-                  '> wrong, **file an issue** or open a dedicated docs-only PR; do not edit it here.',
-                );
+                if (readOnly.length) {
+                  body.push(
+                    '',
+                    `⛔ **${readOnly.length}** release-owned page(s) also affected — read-only, see AGENTS.md Documentation Guardrails.`,
+                  );
+                }
+              } else {
+                if (editable.length) {
+                  body.push(
+                    '',
+                    `**${editable.length}** hand-written doc(s) reference the affected code and may need an implementation-accuracy re-verification:`,
+                    '',
+                    editable.map(row).join('\n'),
+                  );
+                }
+                if (readOnly.length) {
+                  body.push(
+                    '',
+                    `⛔ **${readOnly.length}** release-owned page(s) ${editable.length ? 'also ' : ''}reference the affected code. These are **read-only**:`,
+                    '',
+                    readOnly.map(row).join('\n'),
+                    '',
+                    '> `content/docs/releases/` is RELEASE-OWNED (AGENTS.md "Documentation Guardrails"): release',
+                    '> notes are written centrally at release time, and a code PR that edits them is the exact PR',
+                    '> that guardrail exists to stop. They are still audited — read-only. If one of them is actually',
+                    '> wrong, **file an issue** or open a dedicated docs-only PR; do not edit it here.',
+                  );
+                }
               }
               body.push(
                 '',

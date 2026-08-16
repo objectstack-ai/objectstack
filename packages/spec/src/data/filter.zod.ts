@@ -1620,6 +1620,18 @@ const AST_OPERATOR_MAP = {
   // vocabulary here with its lowering, per the #3948 single-table rule.)
   'like': '$like',
   'ilike': '$ilike',
+  // [#8934] `icontains` gives the infix (and, through the parity contract, the
+  // view) vocabulary the case-insensitive CONTAINS every driver already
+  // executes as `$icontains` (#5702/#6520) — before this row, the capability
+  // was authorable from exactly one of the three dialects. It lowers to its
+  // OWN operator for the reason the [#7536] note above records one entry up:
+  // `$icontains` LIKE-escapes the comparand and wraps it in `%…%` (a caller's
+  // `%` is a LITERAL character), while `$ilike` passes a raw pattern. That is
+  // a semantic boundary, not two spellings of one thing — `icontains` must
+  // never be folded onto `ilike`/`$ilike` in either vocabulary, nor the
+  // reverse. No `noticontains`: the `$` dialect has no `$notIcontains`, and
+  // this table mirrors the executed set rather than widening it.
+  'icontains': '$icontains',
   'startswith': '$startsWith',
   'starts_with': '$startsWith',
   'endswith': '$endsWith',
@@ -1673,7 +1685,7 @@ export const VALID_AST_OPERATORS = new Set(Object.keys(AST_OPERATOR_MAP));
  */
 const CANONICAL_INFIX: Record<string, string> = {
   '$eq': '=', '$ne': '!=', '$gt': '>', '$gte': '>=', '$lt': '<', '$lte': '<=',
-  '$in': 'in', '$nin': 'nin', '$contains': 'contains',
+  '$in': 'in', '$nin': 'nin', '$contains': 'contains', '$icontains': 'icontains',
   '$notContains': 'not_contains', '$startsWith': 'starts_with',
   '$endsWith': 'ends_with', '$between': 'between',
   '$like': 'like', '$ilike': 'ilike',

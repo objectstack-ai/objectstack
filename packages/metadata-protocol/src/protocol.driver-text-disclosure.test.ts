@@ -31,9 +31,12 @@
  * ## Why this file does NOT test a phrasing heuristic
  *
  * Three downstream boundaries run `looksLikeInternalErrorLeak` — a heuristic
- * over the message. #8132 measured its hole for Postgres and #8263 taught it
- * the two dialects it COVERS. That is an interim by construction: a
- * phrasing test can only ever know the dialects someone has met.
+ * over the message. #8132 measured its hole for Postgres, #8263 taught it the
+ * two dialects it then COVERED, and #8739 added a third (MySQL, under the
+ * 2026-08-15 supported-target ruling). That is an interim by construction: a
+ * phrasing test can only ever know the dialects someone has met, and the count
+ * moving from two to three without moving a single case in this file is the
+ * cleanest available demonstration of why.
  *
  * So the dialect matrix below deliberately includes engines the predicate does
  * NOT recognise, and **asserts that it does not** before asserting the text is
@@ -106,14 +109,26 @@ import { ObjectStackProtocolImplementation } from './protocol.js';
  * each, measured against the shipping predicate in the first test below rather
  * than asserted from memory.
  *
- * The three `false` rows are the reason this card is not "add the phrasing":
- * MySQL, MSSQL and Oracle each say it differently again, and the list of
+ * The remaining `false` rows are the reason this card is not "add the
+ * phrasing": MSSQL and Oracle each say it differently again, and the list of
  * dialects this predicate does not cover is unbounded.
+ *
+ * ⚠️ **The MySQL row moved, and the move is the argument, not a counter-example
+ * to it.** It read `false` until #8739, when the maintainer's 2026-08-15 ruling
+ * made MySQL a supported deployment target and the shared list learned its three
+ * templates. Nothing in THIS file changed to accommodate that — every withhold
+ * below passed before the flip and passes after, because option C withholds by
+ * DECLARATION and never asks the predicate anything. That is exactly what a
+ * phrasing-independent producer is supposed to look like when the phrasing list
+ * moves underneath it. The row is updated here because this array claims to be
+ * a MEASUREMENT of the shared predicate; leaving a stale `false` would make it
+ * a memory, which is the defect #8739 was filed about.
  */
 const DIALECTS: ReadonlyArray<{ engine: string; text: string; knownToPredicate: boolean }> = [
     { engine: 'sqlite', text: 'SQLITE_ERROR: no such table: sys_metadata', knownToPredicate: true },
     { engine: 'postgres', text: 'relation "sys_metadata" does not exist', knownToPredicate: true },
-    { engine: 'mysql', text: "Table 'crm.sys_metadata' doesn't exist", knownToPredicate: false },
+    // [#8739] Covered since the 2026-08-15 ruling — ER_NO_SUCH_TABLE's template.
+    { engine: 'mysql', text: "Table 'crm.sys_metadata' doesn't exist", knownToPredicate: true },
     { engine: 'mssql', text: "Invalid object name 'sys_metadata'.", knownToPredicate: false },
     { engine: 'oracle', text: 'ORA-00942: table or view does not exist', knownToPredicate: false },
 ];
@@ -273,14 +288,17 @@ async function captureThrow(run: () => Promise<unknown>): Promise<any> {
 // ---------------------------------------------------------------------------
 
 describe('[#8136] the shared leak heuristic is dialect-bounded, which is why the cure is at the producer', () => {
-    it('recognises the two engines the predicate covers, and none of the three it does not', () => {
+    it('recognises the three engines the predicate covers, and neither of the two it does not', () => {
         for (const { engine, text, knownToPredicate } of DIALECTS) {
             expect(looksLikeInternalErrorLeak(text), `${engine}: ${text}`).toBe(knownToPredicate);
         }
         // Stated positively so the asymmetry cannot be read as an accident:
-        // three of five phrasings of ONE condition are invisible to every
-        // boundary that runs the predicate.
-        expect(DIALECTS.filter((d) => !d.knownToPredicate)).toHaveLength(3);
+        // two of five phrasings of ONE condition are still invisible to every
+        // boundary that runs the predicate. [#8739] This count was 3 until MySQL
+        // was covered. It is a live measurement, not a constant — and the fact
+        // that it can move while every withhold case below stays green is the
+        // reason this file tests a producer rather than a phrasing list.
+        expect(DIALECTS.filter((d) => !d.knownToPredicate)).toHaveLength(2);
     });
 });
 

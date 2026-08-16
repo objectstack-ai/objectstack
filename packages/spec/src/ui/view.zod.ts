@@ -174,13 +174,23 @@ export const ViewDataSchema = lazySchema(() => z.discriminatedUnion('provider', 
  * no `value`. `before` / `after` are the date-friendly spellings of
  * `less_than` / `greater_than`; `between` expects a two-element `value` array.
  *
+ * `icontains` (#8934) is the case-insensitive twin of `contains`: an ASCII-only
+ * fold on both sides (#4706 Q1 = A — `café` does NOT match `CAFÉ`), comparand
+ * LITERAL (`%`, `_` and regex metacharacters are ordinary characters). It
+ * lowers to `$icontains`, which LIKE-escapes the comparand — it is NOT a
+ * spelling of `ilike`/`$ilike`, which takes a raw LIKE pattern, and the two
+ * must never be aliased onto each other (the #7536 boundary, restated on
+ * `AST_OPERATOR_MAP` in `data/filter.zod.ts`). There is deliberately no
+ * negative form: the `$` dialect has no `$notIcontains`, and this vocabulary
+ * mirrors the executed set rather than widening it.
+ *
  * Note: relative-date operators (`this_quarter`, `last_7_days`, …) are NOT
  * filter-rule operators — they are date-range presets and live on dashboard
  * date-range config (`DashboardFilterSchema.defaultRange`), not here.
  */
 export const VIEW_FILTER_OPERATORS = [
   'equals', 'not_equals',
-  'contains', 'not_contains',
+  'contains', 'not_contains', 'icontains',
   'starts_with', 'ends_with',
   'greater_than', 'less_than',
   'greater_than_or_equal', 'less_than_or_equal',
@@ -230,6 +240,13 @@ export const VIEW_FILTER_PAIR_VALUE_OPERATORS = [
  * downstream consumer sees exactly one vocabulary — one strict contract, not
  * N dialects. Deprecated: new producers MUST emit the canonical forms; these
  * aliases are a migration bridge and may be dropped in a future major.
+ *
+ * `icontains` (#8934) deliberately has NO rows here: this table bridges
+ * spellings that already live in stored metadata, and a canonical operator
+ * born after the table has none — inventing "synonyms" for it would widen the
+ * authoring surface rather than bridge a legacy one. Single-token canonicals
+ * (`contains`, `in`, `between`) carry no camelCase/squashed folds for the same
+ * reason: the folds exist per measured legacy spelling, not per operator.
  */
 export const VIEW_FILTER_OPERATOR_ALIASES: Record<string, ViewFilterOperator> = {
   eq: 'equals',

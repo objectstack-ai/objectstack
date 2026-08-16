@@ -69,13 +69,41 @@
  * The first failure is the whole defect in one line: the arm answered with the
  * DSN *string*, which has no key for a credential to live in.
  *
- * ## The mongodb half is NOT closed here
+ * ## The mongodb half, added second (#8696's remaining arm)
  *
- * `buildMongoUrl`'s `if (explicit) return explicit;` still drops the bound
- * secret, so a mongo DSN datasource still reaches MongoClient with an empty
- * password. It is not pinned as expected behaviour below — a test asserting the
- * defect would read as a contract. The remedy and what blocks it are recorded
- * on `buildMongoUrl` itself; #8696 stays open for it.
+ * `buildMongoUrl`'s `if (explicit) return explicit;` dropped the bound secret
+ * the same way, and is closed by `buildMongoAuth` — `options.auth` beside an
+ * unmodified url, which is a DIFFERENT shape from the mysql half above, on
+ * purpose. Its assertions also sit one layer deeper, and that difference is the
+ * lesson the mysql half paid for: the postgres arm passes the equivalent
+ * config-layer assertion and is still broken, because the client throws the
+ * injected password away afterwards. So nothing below asserts on the url string
+ * this factory built or on the options object it emitted — every mongo
+ * assertion reads `MongoClient`'s own resolved `credentials`, which is what a
+ * handshake would actually use. A test that checked `buildMongoUrl`'s return
+ * value would have passed throughout this defect's life.
+ *
+ * Measured on `origin/main` @ 792524c22, mongodb 7.5.0, before the fix:
+ *
+ * ```text
+ * config.url 'mongodb://app@db.internal:27017/app' + bound secret
+ *   -> client credentials {username:'app', password:''}
+ * ```
+ *
+ * No connection is opened anywhere in this file: the `MongoClient` constructor
+ * resolves `credentials` eagerly, which is exactly why this seam is assertable
+ * without a server.
+ *
+ * ## Reverse verification of the mongo half (predicted before running)
+ *
+ * Predicted in writing before restoring the pre-fix arm with these tests at
+ * their fixed state: the SIX injecting cases go RED on the password, and the
+ * FIVE remaining cases stay GREEN — the passthrough-preservation control
+ * (`options` already rode through verbatim), the two no-injection cases
+ * (nothing bound / a url naming no user, where both versions agree), and the
+ * two composed-branch controls, because the defect is branch-local and an
+ * arm-wide regression would mean this file measures something else.
+ * Measured exactly that set: 6 failed / 5 passed.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -172,5 +200,192 @@ describe('#8696 — mysql: a bound secret reaches the client on the DSN branch',
     });
 
     expect(conn.password).toBe(BOUND_SECRET);
+  });
+});
+
+// ── the mongodb arm ──────────────────────────────────────────────────────────
+
+/** The one authorable mongo URL shape post-#8082: a username, never a password. */
+const MONGO_BARE_USERNAME_DSN = 'mongodb://app@db.internal:27017/app';
+
+/**
+ * What `MongoClient` resolved for this datasource — username, password and
+ * auth source as a handshake would use them.
+ *
+ * Read off the constructed client rather than off the factory's output, and
+ * that is the whole point of this helper: the emitted `options.auth` is what
+ * this module produces, `client.options.credentials` is what the client made of
+ * it *together with the url*. Only the second can answer "did the bound
+ * credential arrive", which is the question the postgres arm answers wrongly at
+ * the first layer.
+ */
+async function mongoCredentials(spec: Record<string, unknown>): Promise<any> {
+  const handle: any = await factory().create({ driver: 'mongodb', ...spec } as any);
+  try {
+    const driver = handle.driver ?? handle;
+    return driver?.client?.options?.credentials;
+  } finally {
+    // Nothing ever connected — the constructor only parses.
+    try { await handle.disconnect?.(); } catch { /* noop */ }
+  }
+}
+
+/** The url the factory handed the client, to prove it was not rewritten. */
+async function mongoUrl(spec: Record<string, unknown>): Promise<string> {
+  const handle: any = await factory().create({ driver: 'mongodb', ...spec } as any);
+  try {
+    const driver = handle.driver ?? handle;
+    return driver?.config?.url;
+  } finally {
+    try { await handle.disconnect?.(); } catch { /* noop */ }
+  }
+}
+
+describe('#8696 — mongodb: a bound secret reaches the client on the DSN branch', () => {
+  it('injects the bound secret beside the DSN instead of dropping it', async () => {
+    const spec = {
+      name: 'events',
+      config: { url: MONGO_BARE_USERNAME_DSN },
+      secret: BOUND_SECRET,
+    };
+
+    // The credential the handshake would use — `''` before this change.
+    expect(await mongoCredentials(spec)).toMatchObject({
+      username: 'app',
+      password: BOUND_SECRET,
+    });
+    // And the authored url is handed over byte for byte: the credential rides
+    // beside it, so no `mongodb://…` is rewritten or re-encoded in this repo.
+    expect(await mongoUrl(spec)).toBe(MONGO_BARE_USERNAME_DSN);
+  });
+
+  it('lets the bound secret win over a legacy password embedded in a stored DSN', async () => {
+    // #8082 refuses this url at the publish door, so it can only arrive as a
+    // stored pre-#8082 row. `auth` wins over the url's own userinfo password
+    // (measured), which is the same precedence the mysql arm states — reached
+    // by a different mechanism, because the clients disagree about merge order.
+    const spec = {
+      name: 'legacy',
+      config: { url: 'mongodb://app:embedded-legacy@db.internal:27017/app' },
+      secret: BOUND_SECRET,
+    };
+
+    expect(await mongoCredentials(spec)).toMatchObject({
+      username: 'app',
+      password: BOUND_SECRET,
+    });
+    expect(await mongoUrl(spec)).toBe('mongodb://app:embedded-legacy@db.internal:27017/app');
+  });
+
+  it('carries the credential on the multi-host DSN `new URL()` cannot even parse', async () => {
+    // The form `MongoConfigSchema.url` documents (`host1[:port1][,…]`). It is
+    // the reason the username is read through the platform's own DSN grammar:
+    // `new URL('mongodb://app@h1:27017,h2:27017/app')` throws ERR_INVALID_URL,
+    // so a WHATWG-based fix would have failed exactly here, and a URL-rewriting
+    // fix would have had to re-emit a host list it could not parse.
+    expect(await mongoCredentials({
+      name: 'replicated',
+      config: { url: 'mongodb://app@h1:27017,h2:27017/app' },
+      secret: BOUND_SECRET,
+    })).toMatchObject({ username: 'app', password: BOUND_SECRET });
+  });
+
+  it('carries the credential on a `mongodb+srv://` DSN too', async () => {
+    // Same no-rewrite argument, second form: the srv scheme resolves hosts by
+    // DNS at connect, so it has no host list to rewrite at all.
+    expect(await mongoCredentials({
+      name: 'atlas',
+      config: { url: 'mongodb+srv://app@cluster0.example.mongodb.net/app' },
+      secret: BOUND_SECRET,
+    })).toMatchObject({ username: 'app', password: BOUND_SECRET });
+  });
+
+  it('decodes a percent-encoded userinfo username instead of authenticating as the raw one', async () => {
+    // The spec accessor answers with the RAW component by contract, and the
+    // client decodes the same component when it reads it from the url itself.
+    // Handing the raw value through would authenticate as `app%40corp` — a
+    // different user from the one the url names, and a silent one.
+    expect(await mongoCredentials({
+      name: 'encoded',
+      config: { url: 'mongodb://app%40corp@db.internal:27017/app' },
+      secret: BOUND_SECRET,
+    })).toMatchObject({ username: 'app@corp', password: BOUND_SECRET });
+  });
+
+  it('wins over an `auth` block written into the `options` passthrough', async () => {
+    // `config.options` reaches MongoClient verbatim, so it is one more spelling
+    // of the same credential. A deliberately bound `credentialsRef` outranks it
+    // — the rule the mysql arm applies to a legacy embedded password.
+    const creds = await mongoCredentials({
+      name: 'passthrough',
+      config: {
+        url: MONGO_BARE_USERNAME_DSN,
+        options: { auth: { username: 'app', password: 'from-passthrough' }, replicaSet: 'rs0' },
+      },
+      secret: BOUND_SECRET,
+    });
+
+    expect(creds).toMatchObject({ username: 'app', password: BOUND_SECRET });
+  });
+
+  it('keeps the author\'s other `options` keys arriving untouched (control)', async () => {
+    // The injection MERGES into the passthrough; it must not replace it.
+    const handle: any = await factory().create({
+      name: 'opts',
+      driver: 'mongodb',
+      config: { url: MONGO_BARE_USERNAME_DSN, options: { replicaSet: 'rs0' } },
+      secret: BOUND_SECRET,
+    } as any);
+    const driver = handle.driver ?? handle;
+
+    expect(driver.config.options).toMatchObject({ replicaSet: 'rs0' });
+    expect(driver.client.options.replicaSet).toBe('rs0');
+    try { await handle.disconnect?.(); } catch { /* noop */ }
+  });
+
+  it('leaves a DSN with nothing bound exactly as it was (no behaviour change)', async () => {
+    // Blast radius is "a secret was bound". A datasource that binds none must
+    // reach the client exactly as it did before — including the empty password
+    // its own url implies, which is not this change's business to alter.
+    const spec = { name: 'anon', config: { url: MONGO_BARE_USERNAME_DSN } };
+
+    expect(await mongoCredentials(spec)).toMatchObject({ username: 'app', password: '' });
+    expect(await mongoUrl(spec)).toBe(MONGO_BARE_USERNAME_DSN);
+  });
+
+  it('does NOT fabricate credentials on a DSN that names no user', async () => {
+    // The one direction that could break a working install. `auth` needs a
+    // username as well as a password, and inventing an empty one is measurably
+    // worse than silence: this url carries NO credentials today, and would
+    // carry `{username:''}` — a guaranteed handshake failure — if the arm
+    // injected regardless. So it stays a no-op, matching the composed branch,
+    // and the loud half of this pair belongs at the authoring door.
+    expect(await mongoCredentials({
+      name: 'anonymous-url',
+      config: { url: 'mongodb://db.internal:27017/app' },
+      secret: BOUND_SECRET,
+    })).toBeUndefined();
+  });
+
+  it('still reads the bound secret on the composed branch (control)', async () => {
+    // Green before this change and after it: the branch that already worked is
+    // what made the DSN branch's silence a per-branch asymmetry rather than an
+    // arm that never read the secret at all.
+    expect(await mongoCredentials({
+      name: 'composed',
+      config: { host: 'db.internal', port: 27017, database: 'events', username: 'svc' },
+      secret: BOUND_SECRET,
+    })).toMatchObject({ username: 'svc', password: BOUND_SECRET });
+  });
+
+  it('keeps preferring the bound secret over an inline `config.password` (control)', async () => {
+    // `config.password` is `z.never()` at every authoring door since #7990, so
+    // this is a stored-row-only shape; the composed branch's precedence is
+    // unchanged by this card.
+    expect(await mongoCredentials({
+      name: 'composed-legacy',
+      config: { host: 'db.internal', database: 'events', username: 'svc', password: 'inline-legacy' },
+      secret: BOUND_SECRET,
+    })).toMatchObject({ username: 'svc', password: BOUND_SECRET });
   });
 });

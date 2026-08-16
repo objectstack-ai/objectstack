@@ -157,6 +157,7 @@ import { InMemoryDriver } from '@objectstack/driver-memory';
 
 - **Purpose**: Production-ready SQL database support with migrations
 - **Supports**: PostgreSQL, MySQL, SQLite, and all Knex-compatible databases
+- **MySQL caveats**: MySQL is supported, with three dialect caveats — `upsert` cannot honour a conflict target, three runtime uniqueness indexes cannot be built, and a unique violation does not name the conflicting column. See [Drivers → MySQL dialect caveats](/docs/data-modeling/drivers#mysql-dialect-caveats)
 - **When to use**: Traditional relational database deployments
 - **README**: [View README](https://github.com/objectstack-ai/objectstack/blob/main/packages/drivers/driver-sql/README.md)
 

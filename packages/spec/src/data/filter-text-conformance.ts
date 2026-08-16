@@ -95,7 +95,7 @@
  * @see https://github.com/objectstack-ai/objectstack/issues/6682 (the $contains family — mongodb and memory both landed)
  */
 
-import type { FilterCondition } from './filter.zod';
+import { parseFilterAST, type FilterCondition } from './filter.zod';
 
 /**
  * A row in the conformance fixture. One text column is enough: every case here
@@ -230,6 +230,18 @@ export const FILTER_TEXT_CASES: readonly FilterTextCase[] = [
     filter: { name: { $icontains: '100%' } },
     expected: ['5'],
     note: 'An unescaped comparand compiles to LIKE \'%100%%\', which also matches row 6 (100X match).',
+  },
+  {
+    name: 'icontains (the infix/view spelling, #8934) lowers to $icontains — % stays a LITERAL through that door too',
+    // Computed THROUGH the lowering on purpose: today this case is byte-equal
+    // at runtime to the one above, and that is the point. If the infix spelling
+    // is ever folded onto `$ilike` instead (the boundary #8934 rules out), the
+    // raw-pattern reading of `100%` also matches row 6 (`100X match`) and this
+    // case goes red on every backend that runs this table — the fold is caught
+    // where it executes, not only in the spec's own suite.
+    filter: parseFilterAST(['name', 'icontains', '100%']) as FilterCondition,
+    expected: ['5'],
+    note: 'The three authoring dialects declare ONE capability (#8934): the infix door must reach the same escaped-substring operator the $ dialect names directly, never the raw-pattern $ilike.',
   },
   {
     name: '$icontains treats _ as a literal character, not a single-character wildcard',

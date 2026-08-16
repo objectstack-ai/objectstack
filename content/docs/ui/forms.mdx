@@ -434,8 +434,6 @@ Widening this — an allowlist of absolute origins, say — waits for measured d
 
 An explicit `submitBehavior` overrides the default in either mode, so nothing here removes an option — it only changes what an author gets for declaring nothing.
 
-> **Current renderer status (2026-08-10).** The console shipping at the pinned `.objectui-sha` still applies `thank-you` as the default in **both** modes. The table above is the contract; the renderer half is tracked in ObjectUI and linked from the [#7245 thread](https://github.com/objectstack-ai/objectstack/issues/7245). Until it lands, declare `submitBehavior` explicitly on an internal FormView that must land somewhere specific.
-
 ## 9. `type: 'form'` action — declarative form launchers
 
 App actions can declare `type: 'form'` to open a FormView without resorting to free-form URLs. The `target` is the FormView name; the runtime navigates to `/console/forms/:name` **inside the console shell** — the operator keeps the sidebar, navigation and breadcrumb, and a successful submit lands on the created record per the mode-aware default above. The full contract is stated on the [Action Protocol page](/docs/protocol/objectui/actions#what-type-form-promises).

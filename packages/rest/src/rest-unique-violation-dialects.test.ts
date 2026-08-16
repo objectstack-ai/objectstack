@@ -99,8 +99,10 @@ function driverError(message: string, extra: Record<string, unknown> = {}): Erro
 const DIALECT_SAMPLES: readonly DialectSample[] = [
     // ---------------------------------------------------------------- MySQL
     // The reported defect. Before #6250 this was `500 INTERNAL_ERROR`: the
-    // message matches no limb of `looksLikeInternalErrorLeak`, so it never
-    // reached the 409 branch nested inside it.
+    // message matched no limb of `looksLikeInternalErrorLeak` AS IT THEN STOOD,
+    // so it never reached the 409 branch nested inside it. ⚠️ Read that as
+    // history, not as a present-tense fact about the predicate — #8739 taught it
+    // MySQL's templates, and the 409 stopped depending on the answer at #6250.
     {
         dialect: 'mysql',
         label: 'ER_DUP_ENTRY — bare driver message (the #6250 report)',
@@ -597,21 +599,36 @@ describe('#7821 face 3 — the conflicting field on the wire', () => {
 });
 
 /**
- * The leak classifier was deliberately left byte-identical (#6250's security
- * flag): the fix hoists the conflict question OUT of it rather than widening
- * its criteria, so nothing else it guards can be reclassified as safe-to-expose
- * as a side effect. These pin the two halves of that.
+ * #6250's security flag, restated as the invariant it always was: the CONFLICT
+ * question is answered independently of the LEAK question. The fix hoisted the
+ * conflict test OUT of the leak classifier's true-branch rather than widening
+ * the classifier's criteria, so nothing the classifier guards could be
+ * reclassified as safe-to-expose as a side effect.
+ *
+ * ⚠️ #8739 later widened that classifier on purpose — under the maintainer's
+ * 2026-08-15 ruling that MySQL is a supported deployment target, it now covers
+ * `Duplicate entry 'x' for key 'i'` along with two other MySQL templates. The
+ * first case below was written as "the classifier still says false" and has
+ * been rewritten to assert the invariant directly, because that is what it was
+ * always for. The rewrite makes it a STRONGER demonstration than the original:
+ * the message now IS classified as a leak, and the 409 is returned anyway —
+ * which can only be true if the conflict branch runs above and independently of
+ * the leak branch, exactly as #6250 arranged. ⛔ Do not "restore" the `false`;
+ * the classifier's MySQL coverage is `error-leak.test.ts`' pin, not this file's.
  */
-describe('#6250 — the fix did not widen the internal-leak classifier', () => {
-    it('a MySQL conflict is still not classified as a leak — it no longer has to be', () => {
+describe('#6250 — the conflict verdict does not depend on the leak classifier', () => {
+    it('a MySQL conflict is a 409 even though the classifier now calls the text a leak', () => {
         const err = driverError(
             `ER_DUP_ENTRY: Duplicate entry '${OFFENDING_VALUE}' for key '${OFFENDING_INDEX}'`,
             { code: 'ER_DUP_ENTRY', errno: 1062 },
         );
-        // Unchanged: the heuristic still does not recognise this phrasing…
-        expect(looksLikeInternalErrorLeak(err.message)).toBe(false);
-        // …and that no longer decides whether the conflict is seen.
+        // [#8739] The classifier covers MySQL's template since the ruling. Before
+        // it did, this was `false` — and the 409 below was already independent
+        // of which way it answered, which is the whole point.
+        expect(looksLikeInternalErrorLeak(err.message)).toBe(true);
+        // The verdict that matters, unchanged across both eras of the line above.
         expect(mapDataError(err, 'sys_user').status).toBe(409);
+        expect(mapDataError(err, 'sys_user').body.code).toBe('UNIQUE_VIOLATION');
     });
 
     it('driver text that is a leak but NOT a conflict still gets the sanitised 500', () => {

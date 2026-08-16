@@ -271,6 +271,46 @@ jobs:
       - name: Docs anchors resolve to real headings
         run: pnpm check:doc-anchors
 
+      # #9014 docs redirects: `apps/docs/redirects.mjs` is a 92-entry table of
+      # PERMANENT (308) redirects, and before this step nothing in the repo read
+      # it — `dispatch-gates.mjs apps/docs/redirects.mjs` named no family over 99
+      # discovered ones, and `git grep -l 'redirects.mjs' -- scripts .github` had
+      # 0 hits. #8948 found three destinations aiming at pages that do not exist:
+      # live URLs answering a 308 into a 404, which browsers cache and crawlers
+      # treat as final. The gate resolves every destination the way Fumadocs
+      # routes it, requires a wildcard destination's target directory to exist,
+      # and rejects chains (a destination itself matched by a source), following
+      # Next's own matching semantics.
+      #
+      # ── Lane, decided against the two workflow files rather than from memory ──
+      #
+      # NOT `check-links.yml`, the topical neighbour: that lane is advisory by
+      # maintainer ruling 2026-08-07 and — verified in the file, since this is the
+      # load-bearing half of the argument — its `on:` block carries only
+      # `workflow_dispatch` and `pull_request`. No `merge_group`, and its own
+      # header forbids promoting it without adding one in the same change. A gate
+      # landed there would not block, which is the whole point of filing #9014.
+      #
+      # This job rather than the same workflow's `TypeScript Type Check` job,
+      # which the card recommended: BOTH are required contexts on lint.yml (see
+      # REQUIRED_CONTEXTS in scripts/check-required-contexts.mjs) and lint.yml
+      # carries `merge_group`, so the required/advisory half of the card's
+      # reasoning holds either way — but the ledger records THIS job as the one
+      # carrying "the whole check:* gate family", and every other docs guard
+      # (`check:doc-anchors` above, `check:docs-audit-scope`, `check:role-word`,
+      # `check:quick-reference-counts`) sits in it. The typecheck job additionally
+      # runs a full workspace build this dependency-free filesystem check has no
+      # use for.
+      #
+      # Runs its own --self-test first (via the pnpm script). That is not
+      # ceremony here: the live table has been 100% green since 62b2655d8, so a
+      # passing run over real data cannot distinguish a working resolver from one
+      # that resolves everything, and the chain and wildcard limbs have never
+      # fired against real data at all. The self-test is where all three limbs are
+      # observed failing.
+      - name: Docs redirect destinations resolve, and no chains
+        run: pnpm check:docs-redirects
+
       # #4851: the docs-accuracy-audit workflow carries its default scope inline
       # (a workflow script runs in a vm with no filesystem, so it cannot enumerate
       # content/docs/ itself). Hand-kept, that list rotted in BOTH directions —

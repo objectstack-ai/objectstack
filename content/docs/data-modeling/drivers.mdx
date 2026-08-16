@@ -75,7 +75,7 @@ libSQL data stayed untouched. Pass the token with `--database-auth-token`
 | Driver | npm package | Class | Explicit `OS_DATABASE_DRIVER` value |
 | :--- | :--- | :--- | :--- |
 | **PostgreSQL** | `@objectstack/driver-sql` (peer: `pg`) | `SqlDriver` | `postgres` \| `postgresql` \| `pg` |
-| **MySQL** | `@objectstack/driver-sql` (peer: `mysql2`) | `SqlDriver` | `mysql` \| `mysql2` |
+| **MySQL** | `@objectstack/driver-sql` (peer: `mysql2`) | `SqlDriver` | `mysql` \| `mysql2` (supported, with three dialect caveats — see [below](#mysql-dialect-caveats)) |
 | **SQLite** | `@objectstack/driver-sql` (peer: `better-sqlite3`) | `SqlDriver` | `sqlite` \| `sql` |
 | **SQLite (WASM)** | `@objectstack/driver-sqlite-wasm` | `SqliteWasmDriver` | `sqlite-wasm` \| `wasm-sqlite` \| `wasm` |
 | **MongoDB** | `@objectstack/driver-mongodb` | `MongoDBDriver` | `mongodb` \| `mongo` (single-tenant only — see [below](#multi-tenancy-not-supported)) |
@@ -297,12 +297,25 @@ new SqlDriver({
 });
 ```
 
-Everything on this page's PostgreSQL section applies unchanged — the same
-`SqlDriver`, the same connect-timeout defaults, the same tenant scoping. One
-behaviour genuinely differs, and it is a limit of the dialect rather than of this
-driver.
+MySQL is a **supported deployment target**, and everything on this page's
+PostgreSQL section applies unchanged — the same `SqlDriver`, the same
+connect-timeout defaults, the same tenant scoping.
 
-### `upsert` conflict targets: the one dialect limit
+### MySQL dialect caveats
+
+Three behaviours genuinely differ, and each is a limit of the dialect rather than
+of this driver. None of them is a defect, none has an in-dialect fix planned, and
+two of the three have **no workaround at all** except running the object — or the
+platform — on SQLite/PostgreSQL. They are listed here rather than left to a boot
+log because they are worth knowing *before* you choose MySQL, not after.
+
+| Caveat | What MySQL does not give you | Way out |
+| :--- | :--- | :--- |
+| [`upsert` cannot honour a conflict target](#upsert-conflict-targets-the-target-mysql-cannot-honour) | `ON DUPLICATE KEY UPDATE` carries no target, so a merge can land on a UNIQUE key you never named. The driver refuses the call rather than let it. | Keep one UNIQUE key per table, or run the object on SQLite/PostgreSQL. |
+| [Three runtime uniqueness indexes cannot be built](#uniqueness-indexes-mysql-cannot-build) | Database enforcement of three platform integrity guarantees. The weaker index stays in force and every boot logs an `error`. | None in-dialect. Run the platform on SQLite/PostgreSQL for the guarantee. |
+| [A unique violation does not name the column](#the-conflicting-column-is-not-named) | The conflicting **field** in import errors and form-field conflict messages. The `409 UNIQUE_VIOLATION` itself is unaffected. | None. The message falls back to generic copy. |
+
+### `upsert` conflict targets: the target MySQL cannot honour
 
 <Callout type="warn">
 On MySQL, `upsert(object, data, conflictKeys)` cannot promise that the merge
@@ -390,6 +403,85 @@ If you meant to merge on a business key, **name it** (`conflictKeys`), which
 makes the intent checkable. On MySQL, a table with more than one UNIQUE key
 cannot have every merge honoured — keep one UNIQUE key per table, or run the
 object on SQLite/PostgreSQL.
+</Callout>
+
+### Uniqueness indexes MySQL cannot build
+
+Three platform tables get their uniqueness from an index issued as raw SQL at
+boot by a `metadata-protocol` runtime migration, because the shape each one needs
+cannot be expressed through the declaration surface. Two of the three are
+**partial** indexes (`CREATE UNIQUE INDEX … WHERE state = '…'`), and all three
+use **functional key parts** (`COALESCE(…)`) to fold a nullable column's NULLs
+into one bucket that is unique among itself.
+
+MySQL/MariaDB has no partial indexes at any version, and rejects the functional
+key parts as these statements spell them. So on MySQL none of the three is built,
+and the guarantee each one backs is not enforced by the database:
+
+| Table | The guarantee that is not enforced on MySQL |
+| :--- | :--- |
+| `sys_metadata` | ADR-0005 overlay uniqueness. Package-less rows (`package_id` NULL) stay NULL-distinct and can duplicate, and `getMetaItem` then has no defined answer for which row wins. |
+| `sys_view_definition` | Active-row view-name uniqueness. An archived view keeps occupying its name slot, and two same-name **active** shared views (`owner` NULL) or environment-level views (`organization_id` NULL) can coexist even though the platform states they cannot. |
+| `sys_setting` | NULL-safe row identity. `user_id` is NULL on every row that is not `scope='user'`, so two tenant-scope rows for one `(namespace, key)` in one organization — or two platform defaults on the global layer — can coexist, and `SettingsService` has no defined answer for which one wins. |
+
+What happens instead is the same in all three cases, and it is deliberate. Each
+migration proves the new index is possible under a throwaway probe name *before*
+dropping anything, so a dialect that cannot take it is left holding **exactly the
+index it already had** — never an unconstrained table, and never a failed boot.
+The gap is then announced at `error` level on every boot, along with a query that
+lists any rows already violating the guarantee.
+
+<Callout type="warn">
+**There is no in-dialect fix**, and none is planned — the DDL these migrations
+need does not exist in MySQL/MariaDB. If you need these three guarantees enforced
+by the database, run the platform on SQLite or PostgreSQL. On MySQL, treat the
+boot's `[metadata-protocol] this database cannot build …` lines as expected
+rather than as a failure, and run the duplicate-listing query each one prints to
+find out whether the gap has actually been hit in your data.
+</Callout>
+
+### The conflicting column is not named
+
+A write that collides with a unique key comes back as `409 UNIQUE_VIOLATION` on
+every dialect, MySQL included — that verdict is not degraded. What differs is the
+follow-up question: *which column* collided.
+
+SQLite and PostgreSQL name the column, so the platform can read it back:
+
+```text
+sqlite    UNIQUE constraint failed: sys_user.email
+postgres  Key (email)=(acme@example.com) already exists.
+mysql     Duplicate entry 'acme@example.com' for key 'idx_email_unique'
+```
+
+MySQL's sentence names the **index**, never the column. There is nothing in it to
+read, so on MySQL the platform answers "not determinable" and the conflicting
+field goes unnamed.
+
+That is an accepted cost rather than an oversight (maintainer ruling 2026-08-08).
+Deriving `email` from `idx_email_unique` would be a guess — index names are
+free-form and a deployment's may match no column at all — and both consumers of
+the answer are worse off with a plausible wrong column than with none:
+
+- The **import runner** renders it into a form field: *"A record with this
+  `email` already exists."* An index name there points the user at a field that
+  does not exist on the object, so they cannot act on it.
+- The **autonumber retry** asks a yes/no question of it — *is the conflicting
+  column the autonumber field?* — where a wrong name produces a wrong retry
+  decision rather than merely a vaguer message.
+
+So on MySQL, expect import errors and form-field conflict messages to fall back
+to generic copy — *"A record with this value already exists"* — instead of naming
+the field. Nothing is misreported; the message is less specific.
+
+<Callout type="info">
+This is not MySQL-only in principle. SQLite and PostgreSQL also decline to name a
+column when the violation reports an index rather than a column
+(`UNIQUE constraint failed: index 'idx_lower_email'`,
+`violates unique constraint "sys_user_email_key"`), and when the key is
+**composite**, since there is then no single offending column to name. MySQL is
+the dialect where going unnamed is the *normal* outcome rather than the
+exception, because its duplicate-entry message never carries a column at all.
 </Callout>
 
 ## MongoDB

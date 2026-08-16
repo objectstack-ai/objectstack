@@ -539,17 +539,64 @@ const FAILURE_PROPAGATION_SITES = new Map([
 //     — cuts the red set to 2, but buys that by exempting three REAL instances:
 //     `searchAll`'s per-object `continue` (hits silently short while
 //     `totalHits` is still reported as the count), `findReferencesToMeta`, and
-//     `cascadeDeleteRelations`, where a failed dependents probe skips a
-//     `restrict` guard altogether. Tuning a criterion until only the instance
-//     you already knew about is red is how a gate stops meaning anything.
+//     `cascadeDeleteRelations`, where a failed dependents probe skipped a
+//     `restrict` guard altogether (repaired since by #8895 — see EXHIBIT
+//     STATUS below; the other two are unchanged, so the narrowing still buys
+//     its number by exempting live instances). Tuning a criterion until only
+//     the instance you already knew about is red is how a gate stops meaning
+//     anything.
 //   - Even where the verdict is right, the ACCUMULATOR is often the wrong
 //     variable: `findReferencesToMeta`'s harm lives in `out`, not in the flagged
-//     `items`; `cascadeDeleteRelations` and `checkGovernance` have no
-//     accumulator at all, only a skipped guard. A message naming the wrong
-//     variable teaches the wrong fix.
+//     `items`; `checkGovernance` (#8906, still open) — and
+//     `cascadeDeleteRelations` as it read when measured — have no accumulator
+//     at all, only a skipped guard. A message naming the wrong variable
+//     teaches the wrong fix.
 //   - And the SCOPE is the only thing holding the line: drop the READ
 //     vocabulary and this shape matches 91 of the 314 catch clauses in these
 //     three roots.
+//
+// EXHIBIT STATUS — one instance named above has since been repaired, and the
+// numbers are deliberately NOT restated for it.
+//
+// Every count in this block measures `origin/main` @ 8664a2c and stays at its
+// measured value. Re-deriving the census against today's tree would swap a
+// reproducible number for an undated one, and decrementing it by hand would be
+// arithmetic standing in for a census — the count is not the argument, and a
+// number nobody can re-run is worth less than a smaller one anchored to a
+// commit. The anchor is checkable: run this gate at 8664a2c and it still
+// answers `66 read seam(s)`; today's main answers 67, a seam the scan roots
+// gained after that commit and NOT from #8895 (which moves nothing — below).
+//
+//   - `cascadeDeleteRelations` — REPAIRED by #8895. Its dependents probe now
+//     asks the declared `isMissingTableError` predicate and rethrows the rest,
+//     so the fail-open `continue` described above is gone. Kept as the worked
+//     example because its harm is still the clearest of the three to state,
+//     not because the seam is still open.
+//   - `searchAll`, `findReferencesToMeta`, `checkGovernance` — UNCHANGED, each
+//     re-read on its own rather than assumed to have moved with #8895
+//     (`checkGovernance` is #8906, open; the other two are metadata-protocol).
+//
+// The conclusion below is unaffected, and #8895 is evidence FOR it twice over.
+//
+// FIRST, the numbers: this gate's output is BYTE-IDENTICAL before and after
+// that fix — `67 read seam(s) … (7 … discriminated) (1 pass … through) (1
+// baselined)` on both trees, measured by ablating the fix back to its
+// pre-#8895 `catch { continue }` and re-running. And the seam is not merely
+// unseen: plant a `return []` in that same catch and the gate names it
+// (`engine.ts:10084 (in cascadeDeleteRelations())`, red). So it sits IN the
+// census throughout, reported clean while it was broken and reported clean now
+// that it is fixed — what decides visibility is the SHAPE of the exit, never
+// whether the seam is correct. A real fail-open on an integrity guard was
+// found, fixed and landed with nothing in this file able to see any of it:
+// surveyed, cleared, harmful — the #6116 shape a fourth time, and the sharpest
+// demonstration available that the blind spot is worth closing eventually.
+//
+// SECOND, the shape of that fix is the direction this block argues for: #8895
+// discriminates through a DECLARED predicate rather than a hand-rolled code
+// test — the "declared, checkable fact" the paragraph below asks for, applied
+// by hand at one seam precisely because no gate could ask for it.
+//
+// So: one exhibit repaired, no criterion made affordable, no verdict moved.
 //
 // The honest conclusion is that this shape does not need a looser invention
 // criterion. It needs the read-seam rule to acquire its OWN declared

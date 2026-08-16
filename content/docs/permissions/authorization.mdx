@@ -1,6 +1,6 @@
 ---
 title: Authorization Architecture
-description: The one-page map of ObjectStack authorization — the enforcement chain, combination semantics, package provenance, lifecycle coverage, and the CI governance that keeps "declared" equal to "enforced". Stitches ADR-0049/0054/0056/0057/0066/0068/0069/0078/0086 into a single narrative.
+description: The one-page map of ObjectStack authorization — the enforcement chain, combination semantics, package provenance, lifecycle coverage, and the CI governance — with its limits — behind "declared" equals "enforced". Stitches ADR-0049/0054/0056/0057/0066/0068/0069/0078/0086 into a single narrative.
 ---
 
 # Authorization Architecture
@@ -15,9 +15,11 @@ nine ADRs to hold the model in your head.
 layer: anonymous deny → declaration-derived public-form grant → object CRUD
 (permission-set union) → OWD/sharing → row-level security → field-level
 security. Grants **union** most-permissively; hard prerequisites (**AND-gates**)
-and fail-closed defaults are the only implicit denies. The whole surface is
-governed by a CI-checked conformance matrix: a declared-but-unenforced
-primitive fails the build.
+and fail-closed defaults are the only implicit denies. Enforcement is tracked in
+a conformance matrix whose CI ratchet covers a **curated set of HTTP/transport
+entry points**: a new ungated route there, or a deleted guard on one already
+pinned, fails the build. For a primitive enforced by a predicate inside a
+resolver the matrix is a **hand-maintained** ledger, not a checked one.
 </Callout>
 
 ---
@@ -48,7 +50,7 @@ site — the file you read when behavior surprises you.
 
 | # | Gate | What it decides | Enforcement site | Failure direction |
 |---|---|---|---|---|
-| 1 | **Anonymous deny** | No identity → HTTP 401. **Uniform across every HTTP surface that reaches object data** (#2567): REST `/data` and the metadata endpoints (`/meta`) — the raw-hono standard `/data` routes left the matrix when that duplicate surface was deleted in v17 (#4073), and the dispatcher GraphQL endpoint left when the GraphQL surface was removed (`/graphql` now 404s) — one shared decision, so a caller denied on `/data` can't read the same rows through a sibling door. **Unconditional** (#3963, closing out ADR-0056 D2): the `api.requireAuth: false` opt-out was retired in v17 — the key is tombstoned, so authoring it is a parse error, and anonymous callers are denied on every data surface with no deployment-level escape hatch. Narrower public surfaces do **not** need it — each derives its own authorization from a declaration rather than from the deployment posture: control plane (`/auth`, `/health`, `/discovery`) is allow-listed; public form submission carries a `publicFormGrant` (ADR-0056 Option A); share-links validate their token then read as SYSTEM; and an anonymous **GET** of the book/doc read surface is admitted so `book.audience: 'public'` works under the secure default, with the ADR-0046 §6.7 audience gate — `'public'` only, fail-closed — doing the authorizing (#3963). | `packages/core/src/security/anonymous-deny.ts` `shouldDenyAnonymous` — called by `rest-server.ts` `enforceAuth` and the dispatcher `handleMetadata`/`handleAI` (default in `packages/spec/src/api/rest-server.zod.ts`); a source-enumerating ratchet in `authz-conformance.test.ts` fails CI if a new surface ships ungated | fail-closed |
+| 1 | **Anonymous deny** | No identity → HTTP 401. **Uniform across every HTTP surface that reaches object data** (#2567): REST `/data` and the metadata endpoints (`/meta`) — the raw-hono standard `/data` routes left the matrix when that duplicate surface was deleted in v17 (#4073), and the dispatcher GraphQL endpoint left when the GraphQL surface was removed (`/graphql` now 404s) — one shared decision, so a caller denied on `/data` can't read the same rows through a sibling door. **Unconditional** (#3963, closing out ADR-0056 D2): the `api.requireAuth: false` opt-out was retired in v17 — the key is tombstoned, so authoring it is a parse error, and anonymous callers are denied on every data surface with no deployment-level escape hatch. Narrower public surfaces do **not** need it — each derives its own authorization from a declaration rather than from the deployment posture: control plane (`/auth`, `/health`, `/discovery`) is allow-listed; public form submission carries a `publicFormGrant` (ADR-0056 Option A); share-links validate their token then read as SYSTEM; and an anonymous **GET** of the book/doc read surface is admitted so `book.audience: 'public'` works under the secure default, with the ADR-0046 §6.7 audience gate — `'public'` only, fail-closed — doing the authorizing (#3963). | `packages/core/src/security/anonymous-deny.ts` `shouldDenyAnonymous` — called by `rest-server.ts` `enforceAuth` and the dispatcher `handleMetadata`/`handleAI` (default in `packages/spec/src/api/rest-server.zod.ts`); a ratchet in `authz-conformance.test.ts` enumerates these entry points from source across a curated file list, and fails CI if a new surface ships ungated in one of those files | fail-closed |
 | 2 | **Public-form grant** | An anonymous form submission carries a declaration-derived `publicFormGrant` authorizing ONLY create + read-back on the form's declared target object — never anything else (ADR-0056 Option A). No guest-portal configuration needed (anonymous principals hold the `guest` position). | `packages/plugins/plugin-security/src/security-plugin.ts` (ObjectQL middleware) | scope-limited allow |
 | 3 | **Object CRUD** | `allowRead/Create/Edit/Delete` (+ the destructive lifecycle class `allowTransfer/Restore/Purge`, gated ahead of the M2 operations — #1883) resolved across the caller's permission sets. | `packages/plugins/plugin-security/src/permission-evaluator.ts` `checkObjectPermission` | fail-closed 403 |
 | 4 | **OWD / sharing** | Org-wide default (`private` / `public_read` / `public_read_write` / `controlled_by_parent`; **unset or unknown ⇒ `private`, fail-closed** — ADR-0090 D1) plus the external dial (`externalSharingModel`, ADR-0090 D11), manual record shares, criteria sharing rules (owner-type rules were removed from the authoring surface in v17 rather than left declared-but-skipped — [Sharing Rules](/docs/permissions/sharing-rules#recipient-types)), business-unit hierarchy widening (ADR-0057 D5: scope-depth hierarchy lives on `sys_business_unit`, not positions). | `packages/plugins/plugin-sharing/src/sharing-service.ts` + `sharing-rule-service.ts` | fail-closed to owner-only |
@@ -254,7 +256,7 @@ one of two doors, each writing only what it owns:
 | 1 · Package development | Zod-validated authoring; positions / sharingRules / permissions seeded at boot with provenance | ADR-0057 D6, ADR-0086 D5, ADR-0049/0078 gates |
 | 2 · Distribution / install / upgrade / uninstall | Install-consent scopes (ADR-0025 — consent ≠ RBAC grants); namespaced, collision-free composition; provenance axis makes uninstall well-defined | ADR-0025/0028/0048/0086 |
 | 3 · Environment composition / assignment | Platform-owned assignment records (`sys_user_position` etc.); anti-escalation; union semantics | ADR-0057 D4 |
-| 4 · Runtime enforcement | The six-gate chain above; ~18 primitives enforced and CI-guarded | ADR-0056 D10 matrix |
+| 4 · Runtime enforcement | The six-gate chain above; each enforced primitive holds a row naming its enforcement site — the matrix file is the authority on the count and on which rows CI can check | ADR-0056 D10 matrix |
 | 5 · Production / enterprise | ADR-0056 D8 dispositions settled (2026-07): compliance configs, data masking, the global RLSConfig, and agent `visibility` were **removed** (never enforced — for `visibility`, correct owner/org enforcement is undesigned, so it was dropped rather than carried; re-introduce under #1901); field encryption stays honestly `[EXPERIMENTAL]` (roadmap — stable schema shape). Enterprise authentication hardening staged per ADR-0069 | ADR-0049/0056 D8, ADR-0069 |
 
 ## Explaining a decision (ADR-0090 D6)
@@ -421,12 +423,27 @@ Five mechanisms — four CI-time, one runtime — make the security posture a
 - **Conformance matrix** (`packages/qa/dogfood/test/authz-conformance.matrix.ts`,
   ADR-0056 D10): every authorization primitive sits in exactly one honest
   state — `enforced` (must name its enforcement site; high-risk rows must
-  reference an end-to-end dogfood proof), `experimental`, or `removed`. A new
-  fail-open or a deleted proof fails CI. A cited proof must also **name the rows
-  it proves** — a header `// authz-row: <id>` line — and CI asserts the pairing
-  is mutual in both directions (#7976), so a row cannot cite a test that
-  exercises a neighbouring primitive, and a shared proof file has to say which
-  rows it covers.
+  reference an end-to-end dogfood proof), `experimental`, or `removed`. CI
+  checks the row shape, that every cited proof file exists, and that the row ↔
+  proof pairing is **mutual** in both directions (#7976) — a cited proof must
+  **name the rows it proves** via a header `// authz-row: <id>` line, so a row
+  cannot cite a test that exercises a neighbouring primitive, and a shared proof
+  file has to say which rows it covers. A **surface ratchet** additionally
+  enumerates HTTP/transport entry points from source over a curated file list:
+  a new ungated route in one of those files fails CI as an unclassified surface,
+  and deleting a guard that a row pins makes the pinned key vanish from source,
+  so the row goes stale and the build goes red. Most keys pinned this way name
+  the enforcement **call** rather than merely a function name, which is what
+  makes them anti-regression — removing the check breaks CI, not just renaming
+  something.
+
+  What CI does **not** check is "one row per primitive" itself. A primitive
+  enforced by a predicate inside an existing resolver adds no HTTP entry point,
+  so the ratchet cannot see it — and most `enforced` rows are exactly that
+  shape. For them the matrix is a **hand-maintained** ledger kept honest by
+  review. Read a row as "this is where the check lives", not as "CI proves
+  nothing was forgotten"; the matrix header carries the measured breakdown.
+
 - **Liveness ledger** (`packages/spec/liveness/`, ADR-0049/0054): every
   governed spec property is classified live / experimental / dead, with
   author-time warnings for declared-but-unenforced flags.

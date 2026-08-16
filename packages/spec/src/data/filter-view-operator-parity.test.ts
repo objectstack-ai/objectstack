@@ -29,6 +29,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   VALID_AST_OPERATORS,
+  canonicalAstOperator,
   isFilterAST,
   parseFilterAST,
 } from './filter.zod';
@@ -97,6 +98,7 @@ describe('every view filter operator has an AST lowering', () => {
     const KNOWN = new Set([
       '$eq', '$ne', '$gt', '$gte', '$lt', '$lte', '$in', '$nin',
       '$between', '$contains', '$notContains', '$startsWith', '$endsWith',
+      '$icontains',
       '$null', '$exists',
     ]);
     const bad: string[] = [];
@@ -139,5 +141,70 @@ describe('every view filter operator has an AST lowering', () => {
   it('still refuses an operator in neither vocabulary', () => {
     // Widening must not turn the gate off.
     expect(isFilterAST(['some_field', 'sounds_like', 'x'])).toBe(false);
+  });
+});
+
+describe('[#8934] icontains joins both remaining vocabularies', () => {
+  // `$icontains` was executable on every driver and evaluation face
+  // (#5702/#6520) while being AUTHORABLE from exactly one of the three filter
+  // dialects. This block pins the closing of that gap: the view vocabulary and
+  // the infix vocabulary both carry `icontains`, and it lowers to the operator
+  // the drivers already run.
+
+  it('is a canonical view operator and a valid AST spelling', () => {
+    expect(VIEW_FILTER_OPERATORS).toContain('icontains');
+    expect(VALID_AST_OPERATORS.has('icontains')).toBe(true);
+  });
+
+  it('lowers to $icontains — the operator every face executes', () => {
+    expect(parseFilterAST(['name', 'icontains', 'acme'])).toEqual({
+      name: { $icontains: 'acme' },
+    });
+  });
+
+  it('folds the operator case-insensitively, like every other spelling', () => {
+    expect(parseFilterAST(['name', 'ICONTAINS', 'acme'])).toEqual({
+      name: { $icontains: 'acme' },
+    });
+  });
+
+  it('keeps a % comparand LITERAL — icontains is escaped substring, not a pattern', () => {
+    // The ruled boundary (#8934, restating #7536's): `$icontains` LIKE-escapes
+    // its comparand, so the author's `%` matches a literal percent sign. Were
+    // `icontains` ever folded onto `$ilike`, this same comparand would become a
+    // raw pattern ("100" then anything) — a different query nobody wrote.
+    expect(parseFilterAST(['name', 'icontains', '100%'])).toEqual({
+      name: { $icontains: '100%' },
+    });
+  });
+
+  it('does NOT alias onto ilike in either direction', () => {
+    const icontains = parseFilterAST(['name', 'icontains', '100%']);
+    const ilike = parseFilterAST(['name', 'ilike', '100%']);
+    expect(icontains).toEqual({ name: { $icontains: '100%' } });
+    expect(ilike).toEqual({ name: { $ilike: '100%' } });
+    expect(icontains).not.toEqual(ilike);
+  });
+
+  it('does NOT collapse onto contains — case sensitivity is contract (#5701)', () => {
+    const icontains = parseFilterAST(['name', 'icontains', 'Acme']);
+    const contains = parseFilterAST(['name', 'contains', 'Acme']);
+    expect(icontains).not.toEqual(contains);
+  });
+
+  it('canonicalises to itself through the generic round-trip', () => {
+    expect(canonicalAstOperator('icontains')).toBe('icontains');
+    expect(canonicalAstOperator('ICONTAINS')).toBe('icontains');
+    expect(canonicalAstOperator('icontains')).not.toBe(canonicalAstOperator('ilike'));
+    expect(canonicalAstOperator('icontains')).not.toBe(canonicalAstOperator('contains'));
+  });
+
+  it('has no negative form — the $ dialect has no $notIcontains', () => {
+    // Ruled out of this card by name: a `not_icontains` would WIDEN the
+    // executed surface rather than mirror it. Separate card if ever wanted.
+    expect(VALID_AST_OPERATORS.has('not_icontains')).toBe(false);
+    expect(VALID_AST_OPERATORS.has('noticontains')).toBe(false);
+    expect(isFilterAST(['name', 'not_icontains', 'x'])).toBe(false);
+    expect((VIEW_FILTER_OPERATORS as readonly string[]).includes('not_icontains')).toBe(false);
   });
 });

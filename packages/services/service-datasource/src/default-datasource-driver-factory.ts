@@ -46,7 +46,7 @@
  */
 
 import { join } from 'node:path';
-import { resolveDriverId, type BuiltinDriverId } from '@objectstack/spec/data';
+import { resolveDriverId, urlUserinfoUsername, type BuiltinDriverId } from '@objectstack/spec/data';
 import type {
   IDatasourceDriverFactory,
   DatasourceConnectionSpec,
@@ -586,22 +586,12 @@ function buildMemoryConfig(spec: DatasourceConnectionSpec): Record<string, unkno
  * dropped the same way. Both now behave the way the SQL builders already did:
  * a datasource secret wins, the config value is the fallback.
  *
- * ⚠️ KNOWN OPEN HALF (#8696): that is true of the COMPOSED branch below only.
- * On the `explicit` (DSN) branch a bound `spec.secret` is still dropped — an
- * authored `mongodb://app@host/db` reaches MongoClient with an EMPTY password,
- * measured — while the mysql arm's identical gap is closed above. The remedy is
- * NOT a URL rewrite: `MongoClient`'s `auth` option injects the password beside
- * an unmodified url (measured on mongodb 7.5.0, and it wins over an embedded
- * userinfo password), and `MongoDBDriver` already spreads `config.options`
- * into the client options, so `options.auth` is a live channel. What blocks it
- * is that `auth` REQUIRES a username as well as a password, and reading the
- * url's userinfo username needs the platform's own DSN grammar: `new URL()`
- * rejects the multi-host form this schema documents (`host1[,…]`, measured
- * ERR_INVALID_URL), and `@objectstack/spec/data` exports the password half of
- * that grammar (`urlUserinfoPassword` / `redactUrlPassword`) but no username
- * half. Adding one belongs beside them — deliberately not hand-rolled here,
- * because a second copy of the userinfo boundaries is the shape #8082's ruling
- * rejected by name. Left to its own change rather than guessed at.
+ * The DSN branch's half of that is closed by {@link buildMongoAuth} (#8696),
+ * NOT here: this function still returns the authored `config.url` byte for
+ * byte. The credential rides beside it in the client options, so nothing in
+ * this repo re-encodes or rewrites a `mongodb://…` — the client keeps owning
+ * its own grammar, the same reason the mysql arm hands `mysql2` a `uri` rather
+ * than parsed fields.
  */
 function buildMongoUrl(spec: DatasourceConnectionSpec): string {
   const cfg = (spec.config ?? {}) as Record<string, unknown>;
@@ -620,6 +610,128 @@ function buildMongoUrl(spec: DatasourceConnectionSpec): string {
   const authSource = cfg.authSource as string | undefined;
   const query = authSource ? `?authSource=${encodeURIComponent(authSource)}` : '';
   return `mongodb://${auth}${host}:${port}/${db}${query}`;
+}
+
+/**
+ * The `MongoClient` `auth` block that carries a bound `spec.secret` onto the
+ * DSN branch of the mongo arm (#8696) — the half {@link buildMongoUrl} does
+ * not, and cannot, do.
+ *
+ * ## The defect this closes
+ *
+ * `DatasourceConnectionService` resolves `external.credentialsRef` to a
+ * cleartext secret and hands it here as `spec.secret`. With a `config.url`
+ * present the arm returned that url verbatim and applied the secret nowhere:
+ * measured on `origin/main` @ 792524c22, `mongodb://app@db.internal:27017/app`
+ * plus a bound secret reached `MongoClient` as
+ * `credentials{username:'app', password:''}`. Since #8082 refuses a
+ * `user:password@` userinfo at the publish door, that bare-username DSN plus a
+ * bound secret is the ONLY authorable URL shape for an authenticated mongo
+ * datasource — so the arm dropped the credential of exactly the configuration
+ * `MongoConfigSchema.url` tells operators to write (*"bind the secret … and it
+ * is injected at connect time. A bare username (`user@host1`) stays
+ * writable."*), and the datasource then connected with no credential at all.
+ * Declared, resolved, injected, dropped at the last call site — Prime
+ * Directive #10 one layer down.
+ *
+ * ## Why `options.auth` and not a URL rewrite
+ *
+ * Measured on mongodb 7.5.0, no connection opened (the `MongoClient`
+ * constructor resolves credentials eagerly):
+ *
+ * ```text
+ * url 'mongodb://app@db.internal:27017/app'   + auth{app,BOUND} -> password BOUND
+ * url 'mongodb://app:embedded-legacy@h/app'   + auth{app,BOUND} -> password BOUND
+ * url 'mongodb://app@h1:27017,h2:27017/app'   + auth{app,BOUND} -> password BOUND
+ * url 'mongodb+srv://app@c0.example.net/app'  + auth{app,BOUND} -> password BOUND
+ * url 'mongodb://app@h/app?authSource=admin'  + auth{app,BOUND} -> source admin
+ * ```
+ *
+ * So the authored url is handed over untouched — no rewrite, no re-encoding of
+ * the secret, no second dialect of `mongodb://…` in this repo — and the bound
+ * secret wins over a legacy embedded userinfo password, the same precedence the
+ * mysql arm states. Multi-host and `+srv` forms ride through unharmed, which a
+ * rewrite could not have promised: `new URL()` cannot even PARSE the multi-host
+ * form this schema documents (measured `ERR_INVALID_URL`), which is why the
+ * username is read through the platform's own DSN grammar
+ * ({@link urlUserinfoUsername}, #8876) rather than WHATWG parsing, and why
+ * hand-rolling that parse here would have been the second copy of the userinfo
+ * boundaries #8082's ruling rejects by name.
+ *
+ * ⛔ Do NOT reach this shape by symmetry from the mysql arm. The clients merge
+ * a DSN against explicit keys in OPPOSITE directions — `pg` merges
+ * `parse(connectionString)` OVER the explicit config, which is why the postgres
+ * arm looks correct and is broken one layer lower (filed separately). Each
+ * arm's precedence is measured against its own client.
+ *
+ * ## Why a userinfo-free url gets NOTHING, deliberately
+ *
+ * `auth` is not constructible from a password alone — `{password}` without a
+ * username throws `MongoParseError: credentials must be an object with
+ * 'username' and 'password' properties` — and inventing one is worse than
+ * silence in the one direction that matters: measured,
+ * `mongodb://db.internal:27017/app` carries NO credentials at all, while the
+ * same url with `auth{'',BOUND}` carries `credentials{username:''}`. Injecting
+ * on a url that declares no userinfo would therefore turn a datasource that
+ * connects anonymously today into a guaranteed handshake failure. So the rule
+ * is: inject only where the url already declares authenticated intent.
+ *
+ * That leaves "secret bound, url names no user" a silent no-op, and that is
+ * chosen rather than merely inherited. It is what the COMPOSED branch above
+ * has always done with the same input (`const auth = user ? … : ''` — no
+ * username, no credential, secret unused), so making this branch loud would
+ * plant a second per-branch asymmetry inside one function, which is the exact
+ * defect class this change closes. And the loud half cannot live here anyway:
+ * `MongoConfigSchema` declares injection on `url`, so refusing at connect
+ * would contradict a published contract and reject the shape #8155's landed
+ * migration instructs operators to write. Making the contradictory pair
+ * (`external.credentialsRef` bound + a url with no userinfo) loud belongs at
+ * the authoring door, where both halves are visible at once — filed, not
+ * guessed at here.
+ *
+ * @returns the `auth` block, or `undefined` when nothing should be injected —
+ *   no secret bound, no DSN (the composed branch injects through the url it
+ *   builds), or a url naming no user.
+ */
+function buildMongoAuth(spec: DatasourceConnectionSpec): { username: string; password: string } | undefined {
+  if (!spec.secret) return undefined;
+  const cfg = (spec.config ?? {}) as Record<string, unknown>;
+  const url = cfg.url as string | undefined;
+  if (!url) return undefined;
+  const username = urlUserinfoUsername(url);
+  // `''` (present-but-empty userinfo) is deliberately NOT excluded here: the
+  // accessor keeps it distinct from `undefined` precisely so this call site can
+  // decide, and the decision is that userinfo present = authenticated intent.
+  // It is inert either way — `MongoClient` refuses `mongodb://:p@h/db` and
+  // `mongodb://@h/db` outright ('URI contained empty userinfo section'), with
+  // or without `auth` — so the client renders that verdict, not this function.
+  if (username === undefined) return undefined;
+  return { username: decodeUserinfoUsername(username), password: spec.secret };
+}
+
+/**
+ * Percent-decode a userinfo username for `MongoClient`'s `auth.username`.
+ *
+ * The spec accessor answers with the RAW component by contract (byte-level
+ * alignment with the redaction half), and the client decodes the same
+ * component when it reads it from the url itself — `mongodb://a%2Fb@h/db`
+ * authenticates as `a/b`, measured. Handing the raw value through would
+ * authenticate a DSN-branch datasource as a DIFFERENT user (`a%2Fb`) than the
+ * url names, so decoding is required, not cosmetic.
+ *
+ * A malformed escape falls back to the raw component instead of throwing.
+ * `decodeURIComponent('100%')` raises `URIError: URI malformed`, and
+ * `MongoClient` raises `MongoParseError: URI malformed` on that same url one
+ * line later — measured, both. The url is fatal either way; the only thing
+ * decided here is WHICH error the operator reads, and the client's names the
+ * client and the URI. Nothing is tolerated: an unusable url stays unusable.
+ */
+function decodeUserinfoUsername(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
 }
 
 /**
@@ -790,10 +902,24 @@ export function createDefaultDatasourceDriverFactory(
         // same change — the pin in `datasource-pool-support.test.ts` reads this
         // arm's source and fails if the two disagree.
         const pool = (spec.pool ?? {}) as Record<string, unknown>;
+        // #8696 — the bound secret rides into the SAME passthrough on the DSN
+        // branch (see `buildMongoAuth`), so it is merged rather than assigned:
+        // the author's `options` keep arriving verbatim, and the injected
+        // `auth` is spread LAST so a resolved `external.credentialsRef` wins
+        // over an `auth` block someone wrote into the passthrough by hand —
+        // the same precedence the mysql arm gives it over a legacy embedded
+        // password. A fresh object every time: `cfg.options` is the stored
+        // config's own object and the cleartext secret must never be written
+        // back onto it.
+        const mongoAuth = buildMongoAuth(spec);
+        const mongoOptions = {
+          ...(cfg.options && typeof cfg.options === 'object' ? (cfg.options as Record<string, unknown>) : {}),
+          ...(mongoAuth ? { auth: mongoAuth } : {}),
+        };
         const driver = new MongoDBDriver({
           url: buildMongoUrl(spec),
           ...(cfg.database ? { database: cfg.database } : {}),
-          ...(cfg.options && typeof cfg.options === 'object' ? { options: cfg.options } : {}),
+          ...(Object.keys(mongoOptions).length > 0 ? { options: mongoOptions } : {}),
           ...(typeof pool.min === 'number' ? { minPoolSize: pool.min } : {}),
           ...(typeof pool.max === 'number' ? { maxPoolSize: pool.max } : {}),
         });
