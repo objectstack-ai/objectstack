@@ -573,6 +573,18 @@ export const FieldSchema = lazySchema(() => strictObject({
       '`columnName` was removed in the 16.x line (#2377) — the SQL driver hardcodes the physical '
       + 'column to the field key, so a custom name was ignored. External/federated objects map '
       + 'physical columns with `external.columnMap` (ADR-0062 D7).',
+    // `currency` is not, and has never been, a declared FieldSchema key — it is
+    // not a retirement, just a natural spelling with no landing key of its own
+    // (#8163). Prose rather than an `aliases` rename because the target is a
+    // NESTED key: `currencyConfig.defaultCurrency` under `currencyMode: 'fixed'`,
+    // which a flat rename cannot express. The spelling is not hypothetical —
+    // objectui's `resolveFieldCurrency` reads `field.currency` first from looser
+    // grid/column configs, so it circulates in configs an AI author will have
+    // seen.
+    currency:
+      '`currency` is not a field key — a fixed currency is declared as `currencyConfig: '
+      + '{ currencyMode: \'fixed\', defaultCurrency: \'JPY\' }`. A field without one uses '
+      + 'the tenant default at runtime.',
     referenceFilters:
       '`referenceFilters` (string[]) was removed in the 16.x line (#2377) — the lookup picker only '
       + 'ever read the structured form. Use `lookupFilters: [{ field, operator, value }]`.',
