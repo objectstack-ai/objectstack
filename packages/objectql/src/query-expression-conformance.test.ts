@@ -117,6 +117,12 @@ const taskObject = {
         // `subtask_total` so both non-members of the virtual family are pinned
         // on the same axis at once.
         ticket_no: { name: 'ticket_no', label: 'Ticket #', type: 'autonumber' as const },
+        // [#8371] A structured-JSON field — the ONE head class the dotted
+        // verdict deliberately does NOT judge. `address.city` is the spelling
+        // the three drivers genuinely disagree on (live on memory and mongodb,
+        // silently empty on sql), so refusing it would delete a working
+        // capability; the pins below assert it still passes BOTH doors.
+        address: { name: 'address', label: 'Address', type: 'address' as const },
     },
 };
 
@@ -302,6 +308,10 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
                 // that matches neither insertion nor title order, so the
                 // control cannot hold vacuously.
                 ticket_no: i + 1,
+                // [#8371] A nested STORED value, so the structured-head
+                // control below exercises a really-nested shape rather than
+                // an absent column.
+                address: { city: i % 2 === 0 ? 'Beijing' : 'Shanghai' },
             });
         });
         stores.set('showcase_task', tasks);
@@ -1186,6 +1196,191 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         bare.registerDriver(makeStubDriver().driver, true);
         await bare.init();
         await expect(bare.find('unregistered_object', { where: { anything: true } })).resolves.toEqual([]);
+    });
+
+    // ─────────────────────────────────────────────────────────────
+    // FILTER — [#8371] the DOTTED-path verdict, on both doors. FILTER was the
+    // last of the four axes with no answer for a dotted name: SORT refuses it
+    // (#4256), PROJECTION refuses it (#7589), and a dotted filter key with a
+    // real head rode past both doors on its head segment. Measured on ALL
+    // THREE real drivers (the #8371 table) before this landed:
+    //
+    //   where {'project_id.name':'Apollo'} -> memory 0 rows, sql 0 rows
+    //                                         (silent), mongodb 0 docs
+    //   where {'is_open.x': true}          -> 0 everywhere
+    //   where {'created_by.name': 'Ada'}   -> 0 everywhere
+    //   CONTROL {project_id:'p1'}          -> 2 rows on all three
+    //   where {'address.city':'Beijing'}   -> memory 2, mongodb 2, sql 0
+    //
+    // Three head classes (relation / virtual / scalar) matched zero rows on
+    // every backend — refused at both doors, `INVALID_FIELD` 400, the SORT
+    // axis' denormalise remedy. ⛔ The structured/JSON head (`address.city`)
+    // is the one spelling the drivers DISAGREE on and stays DELIBERATELY
+    // unjudged — the ruling's carve-out, pinned as a control below.
+    // ─────────────────────────────────────────────────────────────
+
+    it('CONTROL — the nested-relation OBJECT form still passes both doors: the refusal targets the dotted-STRING spelling alone', async () => {
+        // `{ project_id: { name: 'x' } }` is a legitimate nested-relation
+        // condition whose inner keys belong to ANOTHER object — the exact
+        // shape the collectors refuse to descend into. If this control goes
+        // red, the verdict has started judging comparand VALUES, which is a
+        // different (and wrong) gate.
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { where: { project_id: { name: 'Apollo' } } },
+        })).resolves.toMatchObject({ records: expect.any(Array) });
+        await expect(engine.find('showcase_task', { where: { project_id: { name: 'Apollo' } } }))
+            .resolves.toEqual(expect.any(Array));
+    });
+
+    it('⛔ CONTROL — the structured/JSON head stays UNJUDGED at both doors: the ruled carve-out', async () => {
+        // Two of three backends really serve `address.city` (memory and
+        // mongodb: 2 rows in the measurement). A refusal here would delete a
+        // live capability, which the #8371 ruling explicitly declines — so
+        // this pin is the one that fails if anyone ever sweeps the structured
+        // head into the refusal for symmetry.
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { where: { 'address.city': 'Beijing' } },
+        })).resolves.toMatchObject({ records: expect.any(Array) });
+        await expect(engine.find('showcase_task', { where: { 'address.city': 'Beijing' } }))
+            .resolves.toEqual(expect.any(Array));
+    });
+
+    it.each([
+        ['a relation head — the AI-analogy spelling', { where: { 'project_id.name': 'Apollo' } }],
+        ['a virtual head — the spelling that evaded #8296', { where: { 'is_open.x': true } }],
+        ['a system-column head (`created_by` is a lookup)', { where: { 'created_by.name': 'Ada' } }],
+        ['a plain-scalar head', { where: { 'title.x': 'A' } }],
+        ['second of two predicates', { where: { status: 'open', 'project_id.name': 'Apollo' } }],
+        ['under $and', { where: { $and: [{ status: 'open' }, { 'project_id.name': 'Apollo' }] } }],
+        ['under $or', { where: { $or: [{ 'project_id.name': 'Apollo' }, { 'title.x': 'A' }] } }],
+        ['the `filter` spelling', { filter: { 'project_id.name': 'Apollo' } }],
+        ['the `filters` spelling', { filters: { 'project_id.name': 'Apollo' } }],
+    ])('a dotted filter key with a refusable head is a 400, not a silent empty list — %s', async (_label, query) => {
+        // The end-to-end shape the measurement recorded as `200 / 0 rows`:
+        // every one of these heads is REAL (so it cleared the #7534 unknown
+        // check on its head segment) and no backend can serve the path.
+        await expect(protocol.findData({ object: 'showcase_task', query }))
+            .rejects.toMatchObject({
+                status: 400,
+                code: 'INVALID_FIELD',
+                object: 'showcase_task',
+            });
+    });
+
+    it('the ingress refusal names the offending key, the relationship it crosses and the fix', async () => {
+        const err: any = await protocol
+            .findData({ object: 'showcase_task', query: { where: { 'project_id.name': 'Apollo' } } })
+            .then(() => null, (e: unknown) => e);
+        expect(err).toBeTruthy();
+        // ADR-0112 envelope — code AND status, never merely "it threw".
+        expect(err.status).toBe(400);
+        expect(err.code).toBe('INVALID_FIELD');
+        // The standing ruling's clause: NAME the offending key path — the
+        // WHOLE dotted key, exactly as the caller wrote it.
+        expect(err.field).toBe('project_id.name');
+        expect(err.fields).toEqual(['project_id.name']);
+        expect(err.param).toBe('where');
+        expect(err.message).toMatch(/follows the relationship 'project_id' into another object/);
+        expect(err.message).toMatch(/stores the related record's id, not an embedded document/);
+        // The consequence a caller cannot infer from the status code…
+        expect(err.message).toMatch(/can only match zero records/);
+        // …and the SORT #4256 remedy, verbatim but for this axis' verb.
+        expect(err.message).toContain(
+            "Denormalise the value onto 'showcase_task' (a stored field, written when the source changes) and filter that.",
+        );
+    });
+
+    it('a virtual head keeps the DOTTED answer — wrong about the shape first, exactly as on the sort axis', async () => {
+        const err: any = await protocol
+            .findData({ object: 'showcase_task', query: { where: { 'is_open.x': true } } })
+            .then(() => null, (e: unknown) => e);
+        expect(err.status).toBe(400);
+        expect(err.code).toBe('INVALID_FIELD');
+        expect(err.field).toBe('is_open.x');
+        expect(err.message).toMatch(/a dotted path whose head 'is_open' is a virtual 'formula' field/);
+    });
+
+    it('a scalar head says what is (not) beneath it', async () => {
+        const err: any = await protocol
+            .findData({ object: 'showcase_task', query: { where: { 'title.x': 'A' } } })
+            .then(() => null, (e: unknown) => e);
+        expect(err.status).toBe(400);
+        expect(err.field).toBe('title.x');
+        expect(err.message).toMatch(/a 'text' field on object 'showcase_task' that stores a single scalar value/);
+    });
+
+    it('precedence is unknown > dotted — an unknown head keeps its typo-shaped answer, quoting the whole key', async () => {
+        // The #7534 verdict is UNCHANGED for a dotted key whose head is not a
+        // field at all, and it still fires first when a request gets both
+        // wrong — the sort axis' ladder, verdict for verdict.
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { where: { 'nosuchfield.name': 'x' } },
+        })).rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', field: 'nosuchfield.name' });
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { where: { no_such: 1, 'project_id.name': 'Apollo' } },
+        })).rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', field: 'no_such' });
+    });
+
+    it('precedence is dotted > unmaterializable — the undotted virtual verdict is unchanged behind it', async () => {
+        // `{is_open: true}` keeps its #8296 answer (pinned at length above);
+        // here: when a query carries BOTH shapes, the dotted verdict speaks
+        // first, mirroring `unknown` > `dotted` > type on the sort axis.
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { where: { 'project_id.name': 'Apollo', is_open: true } },
+        })).rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', field: 'project_id.name' });
+    });
+
+    it.each([
+        ['find', (e: ObjectQL) => e.find('showcase_task', { where: { 'project_id.name': 'Apollo' } })],
+        ['findOne', (e: ObjectQL) => e.findOne('showcase_task', { where: { 'project_id.name': 'Apollo' } })],
+        ['count', (e: ObjectQL) => e.count('showcase_task', { where: { 'project_id.name': 'Apollo' } })],
+        ['aggregate', (e: ObjectQL) => e.aggregate('showcase_task', {
+            where: { 'project_id.name': 'Apollo' }, aggregations: [{ function: 'count', field: 'id', alias: 'n' }],
+        })],
+        ['update', (e: ObjectQL) => e.update('showcase_task', { status: 'done' }, { where: { 'project_id.name': 'Apollo' }, multi: true })],
+        ['delete', (e: ObjectQL) => e.delete('showcase_task', { where: { 'project_id.name': 'Apollo' }, multi: true })],
+    ])('`engine.%s` refuses the dotted spelling too — the door a saved report reaches', async (_verb, call) => {
+        // Same author-reachable surfaces as the #8296 verdict one block up:
+        // `plugin-reports` forwards a saved report's `query.filter` verbatim
+        // into `engine.find`, never passing the ingress.
+        await expect(call(engine)).rejects.toMatchObject({
+            status: 400,
+            code: 'INVALID_FIELD',
+            field: 'project_id.name',
+            object: 'showcase_task',
+        });
+    });
+
+    it('the engine refusal names the entry point and agrees with the ingress on the remedy, word for word', async () => {
+        const err: any = await engine
+            .find('showcase_task', { where: { 'project_id.name': 'Apollo' } })
+            .then(() => null, (e: unknown) => e);
+        expect(err).toBeTruthy();
+        expect(err.status).toBe(400);
+        expect(err.code).toBe('INVALID_FIELD');
+        expect(err.message).toMatch(/ObjectQL\.find\('showcase_task'\)/);
+        expect(err.message).toMatch(/follows the relationship 'project_id' into another object/);
+        // The one-vocabulary discipline, emitted-vs-emitted: both doors close
+        // with the SAME remedy sentence the #8648 agreement pin protects.
+        const ingressErr: any = await protocol
+            .findData({ object: 'showcase_task', query: { where: { 'project_id.name': 'Apollo' } } })
+            .then(() => null, (e: unknown) => e);
+        const remedyOf = (m: string) => /Denormalise [\s\S]*$/.exec(m)?.[0] ?? '';
+        expect(remedyOf(String(err.message))).not.toBe('');
+        expect(remedyOf(String(err.message))).toBe(remedyOf(String(ingressErr.message)));
+    });
+
+    it('BLAST RADIUS — undotted reads, filters and the expanded read of the relation are untouched', async () => {
+        // The verdict narrows exactly ONE spelling. The head itself still
+        // filters (the denormalise remedy's own precondition)…
+        const byFk: any = await protocol.findData({ object: 'showcase_task', query: { where: { project_id: 'p1' } } });
+        expect(byFk.records).toHaveLength(5);
+        // …and the RIGHT way to read the related column — `$expand` — still
+        // works, so the refusal never blocks the capability it redirects to.
+        const expanded: any = await protocol.findData({
+            object: 'showcase_task', query: { where: { project_id: 'p1' }, expand: 'project_id' },
+        });
+        expect(expanded.records[0].project_id).toMatchObject({ name: 'Apollo' });
     });
 
     // ─────────────────────────────────────────────────────────────
