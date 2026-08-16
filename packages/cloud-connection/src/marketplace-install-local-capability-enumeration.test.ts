@@ -275,7 +275,7 @@ async function knock(shape: Shape, door: Door, storageDir: string) {
     // booted. The observation window is the request, not the process.
     seedCalls.length = 0;
     const handler = mounted.rawApp.routes.get(door.route)!;
-    const headers = shape === 'header-only' ? { 'x-user-id': 'attacker' } : {};
+    const headers: Record<string, string> = shape === 'header-only' ? { 'x-user-id': 'attacker' } : {};
     const res = await handler(makeC(door.body ?? {}, headers, 'com.acme.gated'));
     return { res, effects: door.effectsFired(mounted, storageDir) };
 }
