@@ -744,6 +744,86 @@ describe('ApprovalService (node era)', () => {
     expect(req.pending_approvers).toEqual(['position:sales_manager']);
   });
 
+  // ── the #8710 carve-out, asserted on THIS side (#8863) ──────────────────
+  //
+  // Maintainer ruling, 2026-08-15 (#8710, inheriting #8613), verbatim:
+  //
+  //   > Access-conferring paths filter deactivated positions; addressing
+  //   > paths do not.
+  //
+  // Approver routing is an ADDRESSING path, so `expandPositionUsers` reads the
+  // directory RAW where `PositionGraphService.expandPositionUsers` (sharing,
+  // access-conferring) filters. Until these two cases the carve-out was held up
+  // on this side by a doc comment alone: `sharing-rule.test.ts`'s
+  // `the ADDRESSING primitive stays a RAW directory read` guards the sharing
+  // helper, not this one, so "fixing" the apparent oversight here left the whole
+  // suite green. The regression it would ship is a step that routes to NOBODY —
+  // the expansion comes back short, and when it comes back empty the slot falls
+  // through to the `position:sales_manager` literal no user can ever act on, i.e.
+  // the permanently stuck request of #3807 / #3424, surfacing a deployment later.
+  // Dropping a holder here is fail-OPEN; that is why the lapsed holder stays.
+
+  it('position approver: an EXPIRED sys_user_position row STILL routes (ADR-0091 D2 is not applied here)', async () => {
+    // ⛔ The load-bearing negative pin. An ablation that adds the ADR-0091 D2
+    // window to `expandPositionUsers` — the `isGrantActive` filter plus the
+    // `valid_from`/`valid_until` projection that sharing's `position-graph.ts`
+    // carries — turns this red on `u5`.
+    //
+    // ⚠️ The pin is only worth its line count if the fixture is REALLY expired:
+    // an assertion that "the expired holder is still in the slate" degrades into
+    // a tautology the moment the seeded row stops carrying a lapsed window, and
+    // it degrades SILENTLY (`isGrantActive` reads an absent bound as unbounded,
+    // so a window-less row survives any filter and the case passes green with
+    // its own subject ablated — measured on a sibling pin, #9085). The window
+    // columns below are therefore load-bearing fixture, not decoration, and the
+    // two guards under them fail loudly if a later edit dulls the blade.
+    const LAPSED_UNTIL = '2025-06-30T00:00:00Z';
+    const OPEN_UNTIL = '2099-01-01T00:00:00Z';
+    // Past/future of BOTH clocks on purpose — the injected test clock and the
+    // wall clock — so the pin does not quietly depend on which one a would-be
+    // filter reads (sharing's reads `Date.now()`; this service has a `clock`).
+    expect(Date.parse(LAPSED_UNTIL)).toBeLessThan(Math.min(baseTime, Date.now()));
+    expect(Date.parse(OPEN_UNTIL)).toBeGreaterThan(Math.max(baseTime, Date.now()));
+
+    engine._tables['sys_user_position'] = [
+      // Lapsed over a year before the request opens — a filter WOULD drop this.
+      { id: 'up_lapsed', user_id: 'u5', position: 'sales_manager', organization_id: 't1',
+        valid_from: '2024-01-01T00:00:00Z', valid_until: LAPSED_UNTIL },
+      // The in-window control: proves an ablation's red is the window filter
+      // biting, not the fixture failing to seed or the org scope excluding both.
+      { id: 'up_current', user_id: 'u6', position: 'sales_manager', organization_id: 't1',
+        valid_from: '2024-01-01T00:00:00Z', valid_until: OPEN_UNTIL },
+    ];
+
+    const req = await svc.openNodeRequest(positionInput(), CTX);
+    expect(req.pending_approvers.sort()).toEqual(['u5', 'u6']);
+  });
+
+  it('position approver: the routing read never consults the sys_position catalogue', async () => {
+    // Limb 3 of the same ruling. `sys_position.active` is gated on the sharing
+    // side at the RULE EVALUATOR's call site (`positionConfersAccess` in
+    // `sharing-rule-service.ts`), never inside the graph primitive; the ruling
+    // gives this path no counterpart gate, so a deactivated position keeps
+    // routing here too.
+    //
+    // Pinned on the READ and not only on the slate, because the slate alone
+    // cannot fail: nothing here queries `sys_position` at all, so a deactivated
+    // row is not "kept despite the flag", it is never looked at — and an
+    // outcome-only assertion would pass for that reason rather than for the
+    // ruled one. Asserting the absent read is what an ablation adding the
+    // catalogue lookup + `active` filter turns red.
+    engine._tables['sys_position'] = [
+      { id: 'pos_sm', name: 'sales_manager', organization_id: 't1', active: false },
+    ];
+    engine._tables['sys_user_position'] = [
+      { id: 'up1', user_id: 'u5', position: 'sales_manager', organization_id: 't1' },
+    ];
+
+    const req = await svc.openNodeRequest(positionInput(), CTX);
+    expect(req.pending_approvers).toEqual(['u5']);
+    expect(engine._finds.map(f => f.object)).not.toContain('sys_position');
+  });
+
   // ── approver expansion: org_membership_level + its deprecated `role` alias
   //    (ADR-0090 D3) ────────────────────────────────────────────────────────
 
