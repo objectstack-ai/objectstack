@@ -7,8 +7,29 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "outDir": "./dist",
-    "rootDir": "."
+    // `outDir` / `rootDir` were removed and `noEmit` set as a CONSEQUENCE of
+    // the `paths` block below — the same correction
+    // `packages/qa/downstream-contract` made for the same reason. tsc emits
+    // nothing for this app either way (`typecheck` is `tsc --noEmit`; the app
+    // is BUILT by the ObjectStack CLI, not by tsc), but an emit-shaped config
+    // still enforces the output-tree rules: `rootDir` is inferred from the
+    // `include` roots, so formula's source — pulled in by an import, never a
+    // root — produced a wall of `TS6059: File '.../packages/formula/src/...'
+    // is not under 'rootDir'` that would drown any real error this typecheck
+    // exists to print.
+    "noEmit": true,
+    //
+    // #8990: `test/action-predicate-sparse-face.test.ts` imports the CEL engine
+    // to evaluate this app's row-action predicate. Without this rule the import
+    // resolves through the workspace link to `packages/formula/dist/*.d.ts` — a
+    // BUILD ARTIFACT — so `tsc --noEmit` would be checking against whatever was
+    // last built rather than against the source in this checkout, and a stale
+    // `dist` typechecks green over an engine contract that has since moved.
+    // `pnpm check:type-source-resolution` is the gate; it wants the `paths`
+    // rule, not a registry entry.
+    "paths": {
+      "@objectstack/formula": ["../../packages/formula/src/index.ts"]
+    }
   },
-  "include": ["src/**/*", "objectstack.config.ts", "test/**/*"]
+  "include": ["src/**/*", "objectstack.config.ts", "test/**/*", "vitest.config.ts"]
 }

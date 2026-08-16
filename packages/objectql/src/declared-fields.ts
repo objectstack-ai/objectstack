@@ -64,6 +64,27 @@
  * from the gate having said no — so trading a null-shaped vanish for an
  * absence-shaped one buys nothing.
  *
+ * ## The conjunction is the guard for ONE read — a nested path has two (#8990)
+ *
+ * `has(record.x) && record.x != null` guards the read of `x`. When the
+ * predicate then traverses INTO `x`, the leaf is a second read and a second
+ * operator, and the conjunction above does not reach it. Measured on the same
+ * engine, migrating `sys_approval_request`'s `record.viewer.*` levers:
+ *
+ * | predicate                                                  | `{}` | `{v: null}` | `{v: {}}` | `{v: {a: null}}` | `{v: {a: true}}` |
+ * |:-----------------------------------------------------------|:-----|:------------|:----------|:-----------------|:-----------------|
+ * | `has(record.v) && record.v != null && record.v.a`           | `false` | `false` | FAULT `No such key: a` | FAULT `Logical operator requires bool operands` | `true` |
+ * | `has(record.v) && has(record.v.a) && record.v.a == true`    | `false` | `false` | `false` | `false` | `true` |
+ *
+ * So guard the LEAF, and note that doing so SUBSUMES the parent `!= null`
+ * half: `has()` on a path whose parent is null answers `false` rather than
+ * faulting, which is why the second row needs no `record.v != null` term. The
+ * outer `has()` is still load-bearing (`has(record.v.a)` alone faults
+ * `No such key: v` on `{}`), and so is the `== true` comparison — a bare
+ * truthy read of a null leaf faults the logical operator. Adding the parent
+ * `!= null` back is harmless but redundant; adding it INSTEAD of the leaf
+ * `has()` is the mistake this table exists to prevent.
+ *
  * One measured exception, recorded so the platform's existing predicates are
  * not misread: a bare EQUALITY against a literal never faults on a null value
  * — CEL compares heterogeneously and answers `false` — so `has(record.a) &&

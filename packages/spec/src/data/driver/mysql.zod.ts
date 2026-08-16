@@ -112,7 +112,12 @@ export const MysqlConfigSchema = lazySchema(() => strictObject(
    */
   password: refusedInlineCredentialKey('password', 'Password'),
 
-  /** TLS settings, passed to `mysql2` verbatim. */
+  /**
+   * TLS on/off. `true` reaches `mysql2` as its own default TLS options
+   * (`rejectUnauthorized: true`), not the bare boolean — mysql2 rejects a
+   * boolean outright (#8874). Certificates and verification live in the
+   * datasource-level `ssl` block.
+   */
   ssl: DriverSslToggleSchema.optional().meta({ title: 'Use SSL/TLS' }),
 
   /** Dev-only, loosen-only schema self-heal (#2186). */

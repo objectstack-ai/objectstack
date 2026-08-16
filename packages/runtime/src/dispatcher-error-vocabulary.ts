@@ -49,8 +49,10 @@
  *
  * Registering a code widens the accepted set (`ApiErrorSchema.code` parses
  * against the union), which is a contract-semantics change owned by the
- * `packages/spec` lane. The `pending-registration` rows below are the input to
- * **#8846**, which is `Blocked-by:` this card. ⛔ Nothing here edits the ledger.
+ * `packages/spec` lane. The first derivation's `pending-registration` rows were
+ * the input to **#8846**, which registered all seven and ratcheted them out of
+ * this table; a future `pending-registration` row follows the same path.
+ * ⛔ Nothing here edits the ledger.
  */
 
 /** How the code literal is written at the site — what the scanner matched. */
@@ -119,81 +121,15 @@ export interface UnregisteredCodeSite {
  *   node scripts/check-dispatcher-error-vocabulary.mjs --report
  */
 export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
-    // ── pending registration: real producers, real wire, unknown to the ledger ──
-    {
-        code: 'FLOW_FAILED',
-        file: 'packages/runtime/src/action-execution.ts',
-        shape: 'assign',
-        door: 'dispatcher',
-        verdict: 'pending-registration',
-        why:
-            'A flow that RAN and rejected is tagged `status 400` + `code FLOW_FAILED` here (#3962) so ' +
-            'callers can branch on it, and `/actions` serves that throw through `errorFromThrown`. ' +
-            'One of the three codes this card was filed for, and the only one of the three with a ' +
-            'producer. Owning package for the ledger row: @objectstack/runtime.',
-    },
-    {
-        code: 'QUERY_OBJECT_MISMATCH',
-        file: 'packages/metadata-protocol/src/protocol.ts',
-        shape: 'assign',
-        door: 'dispatcher',
-        verdict: 'pending-registration',
-        why:
-            'Stamped onto a thrown error in the protocol layer; `/meta` and `/packages` both serve ' +
-            'protocol throws through `errorFromThrown`. Owning package: @objectstack/metadata-protocol.',
-    },
-    {
-        code: 'ERR_AUTONUMBER_COLLISION',
-        file: 'packages/objectql/src/engine.ts',
-        shape: 'objlit',
-        door: 'dispatcher',
-        verdict: 'pending-registration',
-        why:
-            "Thrown by the single-row insert path after the counter was re-seeded and re-issued and the " +
-            'driver still refused. An unswept member of a family the ledger already registers for this ' +
-            'package (ERR_DRIVER_CONNECT, ERR_DATASOURCE_UNAVAILABLE, ERR_READONLY_FIELD_REJECTED, ' +
-            'ERR_SUMMARY_RECOMPUTE, ERR_BULK_RESULT_MISMATCH). Owning package: @objectstack/objectql.',
-    },
-    {
-        code: 'ERR_TRANSACTION_UNSUPPORTED',
-        file: 'packages/objectql/src/transaction-errors.ts',
-        shape: 'classfield',
-        door: 'dispatcher',
-        verdict: 'pending-registration',
-        why:
-            'Error-class identity, thrown to the caller; reaches the door through any domain that runs a ' +
-            'transaction. Same unswept ERR_* family as above. Owning package: @objectstack/objectql.',
-    },
-    {
-        code: 'ERR_CROSS_DATASOURCE_TRANSACTION_WRITE',
-        file: 'packages/objectql/src/transaction-errors.ts',
-        shape: 'classfield',
-        door: 'dispatcher',
-        verdict: 'pending-registration',
-        why: 'Sibling of ERR_TRANSACTION_UNSUPPORTED in the same module and the same family.',
-    },
-    {
-        code: 'ERR_HOOK_TARGET_REBIND',
-        file: 'packages/objectql/src/hook-target-rebind-errors.ts',
-        shape: 'classconst',
-        door: 'dispatcher',
-        verdict: 'pending-registration',
-        why:
-            'Error-class identity via HOOK_TARGET_REBIND_ERROR_CODE; a hook refusal raised during a write ' +
-            'the dispatcher is serving. Same family. Owning package: @objectstack/objectql.',
-    },
-    {
-        code: 'FIELD_VISIBILITY_UNRESOLVED',
-        file: 'packages/rest/src/error-response.ts',
-        shape: 'objlit',
-        door: 'rest',
-        verdict: 'pending-registration',
-        why:
-            "[ADR-0106 D6 tier 3] `sendFieldVisibilityFault` hands it to this module's OWN `sendError` " +
-            "overload (`error: any`), not to @objectstack/types' closed-`ErrorCode` one — so it reaches " +
-            'the REST wire at 503 un-narrowed. Reported here because the ledger is door-agnostic; the ' +
-            'REST door having the same hole is filed separately. Owning package: @objectstack/rest.',
-    },
+    // ── pending registration: none. The first derivation reported seven codes
+    // (FLOW_FAILED, QUERY_OBJECT_MISMATCH, ERR_AUTONUMBER_COLLISION,
+    // ERR_TRANSACTION_UNSUPPORTED, ERR_CROSS_DATASOURCE_TRANSACTION_WRITE,
+    // ERR_HOOK_TARGET_REBIND, FIELD_VISIBILITY_UNRESOLVED) and #8846 registered
+    // all seven in ERROR_CODE_LEDGER, so their rows ratcheted out — a
+    // registered code is skipped by the scan, and a `pending-registration` row
+    // whose code is registered fails the gate in the other direction. A future
+    // unswept producer lands here as an `unclassified-site` finding and gets a
+    // new row (then a spec-lane registration, then the row comes out again). ──
 
     // ── sandbox-authored: outside any ledger, by design ────────────────────
     // (no source site — the producer is tenant code; see SANDBOX_AUTHORED_LIMB)
@@ -278,8 +214,9 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
 ];
 
 /**
- * The codes #8846 has to register, deduped and sorted — the deliverable this
- * card owes its downstream.
+ * The codes still awaiting a ledger registration, deduped and sorted. Empty
+ * since #8846 registered the first derivation's seven; a future unswept
+ * producer re-populates it through its table row.
  *
  * ⚠️ This list is the OUTPUT of a measurement, not a wish: every member has a
  * live producer and a door. It shrinks only by being registered.

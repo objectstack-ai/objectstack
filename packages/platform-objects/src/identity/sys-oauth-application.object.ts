@@ -54,6 +54,24 @@ export const SysOauthApplication = ObjectSchema.create({
   // the auth namespace (no generic data-layer bypass). When upstream
   // ships `disabled` support, retarget the enable/disable actions and
   // delete the bridge route.
+  //
+  // The two toggle predicates are guarded for the SPARSE action face (#8990),
+  // and this pair is where the guard actually changes what a user sees. Both
+  // reach `list_item`, and `disabled` is nullable upstream (better-auth writes
+  // the column only when it is set), so a list row can carry it PROJECTED AND
+  // NULL. Measured against the `@objectstack/formula` CEL engine, the old
+  // spellings both broke on exactly that row: `!record.disabled` FAULTED
+  // (`no such overload: !null`) — fail-closed, so the Disable button silently
+  // vanished from every never-toggled application — and `record.disabled`
+  // answered `null` rather than a bool.
+  //
+  // The rewrite is `!x` → `x != true` and bare `x` → `x == true`, not the
+  // conjunction: a bare EQUALITY against a literal never faults on null (CEL
+  // compares heterogeneously), so `has()` is the whole guard here, while `!`
+  // and a bare truthy read are operators that need a bool and fault on one.
+  // The equality form also keeps the intended meaning of a null column —
+  // never disabled, so Disable is offered and Enable is not. See
+  // `materializeDeclaredFields` in `@objectstack/objectql` for the rule.
   actions: [
     {
       name: 'disable_oauth_application',
@@ -74,7 +92,7 @@ export const SysOauthApplication = ObjectSchema.create({
       description: 'Disable this OAuth application? Active access/refresh tokens issued to it will continue to be rejected at the token, authorize, and introspect endpoints. Existing integrations will stop working immediately.',
       successMessage: 'OAuth application disabled',
       refreshAfter: true,
-      visible: '!record.disabled',
+      visible: 'has(record.disabled) && record.disabled != true',
       bodyExtra: { disabled: true },
       params: [
         { name: 'client_id', field: 'client_id', defaultFromRow: true, required: true },
@@ -95,7 +113,7 @@ export const SysOauthApplication = ObjectSchema.create({
       description: 'Re-enable this OAuth application? Token issuance, authorization, and introspection will resume immediately.',
       successMessage: 'OAuth application enabled',
       refreshAfter: true,
-      visible: 'record.disabled',
+      visible: 'has(record.disabled) && record.disabled == true',
       bodyExtra: { disabled: false },
       params: [
         { name: 'client_id', field: 'client_id', defaultFromRow: true, required: true },

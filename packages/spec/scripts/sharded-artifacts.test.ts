@@ -391,6 +391,67 @@ describe('sharded artifacts — entry-point shard naming (#5837)', () => {
   });
 });
 
+// ── #9109 — this file's fixture repos inherit nothing from the machine ───────
+//
+// Same exposure class #9068 closed for `build-schemas-check-mode.test.ts`, and
+// the same two layers, applied here verbatim. The fixtures below were spawned
+// with `cwd` and two `-c user.*` args only, so they inherited the ambient global
+// and system git config, `init.templateDir`, and every `GIT_*` variable.
+//
+// The half that matters here is env leakage rather than gc: no fixture in this
+// file writes `.git/shallow`, so an ordinary gc leaves its fresh reachable
+// objects alone. What a leaked `GIT_DIR`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`
+// or `GIT_ALTERNATE_OBJECT_DIRECTORIES` does instead is point a fixture's git at
+// a repository other than the directory it was handed — and these cases read a
+// revision back out of the repo they just built, so that is not a flake, it is a
+// test that silently measures another repository. The repo-local `[gc]` block is
+// carried anyway, because it is the layer that binds a git process this file
+// never launched, and it costs one `config` call per fixture.
+//
+// Nothing about what these cases assert changes: the fixtures are built from the
+// same writes and read by the same `readShardedKeysAtRev`, only insulated.
+
+/** `GIT_*` variables that would point a fixture's git at a different repository
+ *  (or a different index/object store) than the directory it was handed. */
+const LEAKED_GIT_ENV = [
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_COMMON_DIR',
+  'GIT_INDEX_FILE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_NAMESPACE',
+  'GIT_CEILING_DIRECTORIES',
+  'GIT_TEMPLATE_DIR',
+  'GIT_CONFIG',
+] as const;
+
+/** The environment every fixture git in this file gets. */
+const HERMETIC_ENV: NodeJS.ProcessEnv = (() => {
+  const env = { ...process.env };
+  for (const key of LEAKED_GIT_ENV) delete env[key];
+  // git's own documented "read no config file" spellings. `/dev/null` parses as
+  // an empty config, which is what makes `init.templateDir`, `core.hooksPath`
+  // and any ambient `[gc]` block unable to reach a fixture.
+  env.GIT_CONFIG_GLOBAL = '/dev/null';
+  env.GIT_CONFIG_SYSTEM = '/dev/null';
+  env.GIT_CONFIG_NOSYSTEM = '1';
+  return env;
+})();
+
+/** Passed to every fixture git invocation — including the `init` that runs
+ *  before the repo-local config below exists. Identity first (with the global
+ *  config closed, there is no other source for it), then the maintenance switches. */
+const FIXTURE_GIT_ARGS = [
+  '-c', 'user.name=t',
+  '-c', 'user.email=t@example.invalid',
+  '-c', 'gc.auto=0',
+  '-c', 'maintenance.auto=false',
+  '-c', 'gc.pruneExpire=never',
+  '-c', 'gc.reflogExpire=never',
+  '-c', 'gc.reflogExpireUnreachable=never',
+];
+
 describe('sharded artifacts — the historical baseline reader (#5837)', () => {
   /**
    * The deletion gates anchor on an already-merged upstream commit, and commits
@@ -399,25 +460,65 @@ describe('sharded artifacts — the historical baseline reader (#5837)', () => {
    * layout wins where it exists, the retired single file is read where it is all
    * the revision has, and "neither" stays the `nothing to compare` verdict the
    * single-file gates already drew.
+   *
+   * Non-throwing by contract: this runner is handed to `readShardedKeysAtRev`,
+   * which reads `status` itself and reports a bad revision as `{ error }`. The
+   * fixture-BUILDING calls below get their loudness from `mustSucceed` instead.
    */
   const gitIn = (cwd: string) => (...args: string[]) => {
     const { spawnSync } = require('node:child_process') as typeof import('node:child_process');
-    return spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...args], {
+    return spawnSync('git', [...FIXTURE_GIT_ARGS, ...args], {
       cwd,
       encoding: 'utf-8' as const,
+      env: HERMETIC_ENV,
     });
   };
+
+  /**
+   * `git init` plus the repo-local half of the isolation above.
+   *
+   * Local config is the layer that survives a git process this file did not
+   * start: `gc.auto=0` stops the fixture's own commits from triggering one, and
+   * the `never` expiries mean a gc arriving from anywhere else — an ambient
+   * maintenance schedule, a `[gc]` block in someone's global config — finds
+   * nothing it is allowed to drop.
+   */
+  function initFixtureRepo(root: string): void {
+    const git = gitIn(root);
+    const mustSucceed = (...args: string[]): void => {
+      const r = git(...args);
+      // Silent failure here used to surface as an empty `rev` and a confusing
+      // assertion three calls downstream; a broken fixture says so instead.
+      if (r.status !== 0) {
+        throw new Error(`git ${args.join(' ')} failed (${r.status}) in ${root}: ${r.stderr}`);
+      }
+    };
+    mustSucceed('init', '-q', '-b', 'main', '.');
+    for (const [key, value] of [
+      ['gc.auto', '0'],
+      ['gc.autoDetach', 'false'],
+      ['maintenance.auto', 'false'],
+      ['gc.pruneExpire', 'never'],
+      ['gc.reflogExpire', 'never'],
+      ['gc.reflogExpireUnreachable', 'never'],
+      // Reflogs are the other thing standing between a fixture commit and a
+      // prune, and an ambient `core.logAllRefUpdates=false` would have taken
+      // them away.
+      ['core.logAllRefUpdates', 'true'],
+    ] as const) {
+      mustSucceed('config', key, value);
+    }
+    mustSucceed('add', '-A');
+    mustSucceed('commit', '-q', '-m', 'fixture');
+  }
 
   function repoWith(write: (root: string) => void): { root: string; rev: string } {
     const root = path.join(dir, 'repo');
     const pkg = path.join(root, 'packages', 'spec');
     fs.mkdirSync(pkg, { recursive: true });
     write(pkg);
-    const git = gitIn(root);
-    git('init', '-q', '-b', 'main', '.');
-    git('add', '-A');
-    git('commit', '-q', '-m', 'fixture');
-    return { root: pkg, rev: git('rev-parse', 'HEAD').stdout.trim() };
+    initFixtureRepo(root);
+    return { root: pkg, rev: gitIn(root)('rev-parse', 'HEAD').stdout.trim() };
   }
 
   it('reads the sharded layout when the revision has one', () => {

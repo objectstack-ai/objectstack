@@ -103,6 +103,16 @@ export const SysInvitation = ObjectSchema.create({
     // by an "Inbox / Pending invitations" list opened from the user's
     // own account page. The recipient-only `visible` predicate keeps
     // them out of the admin org-management view.
+    //
+    // Both predicates open each operand with `has()` for the SPARSE action
+    // face (#8990): they reach `list_item`, so the bound record is the row the
+    // inbox view projected, and an unprojected `email` / `status` aborts the
+    // whole predicate at key resolution instead of reading null — fail-closed,
+    // so the Accept/Decline pair vanishes with no way to tell that from the
+    // gate having said no. `has()` alone suffices because both operands are
+    // compared by bare equality against a literal; `materializeDeclaredFields`
+    // in `@objectstack/objectql` states the rule and when the `!= null` half
+    // is additionally required.
     {
       name: 'accept_invitation',
       label: 'Accept Invitation',
@@ -112,7 +122,7 @@ export const SysInvitation = ObjectSchema.create({
       type: 'api',
       target: '/api/v1/auth/organization/accept-invitation',
       recordIdParam: 'invitationId',
-      visible: "record.email == ctx.user.email && record.status == 'pending'",
+      visible: "has(record.email) && record.email == ctx.user.email && has(record.status) && record.status == 'pending'",
       successMessage: 'Invitation accepted',
       refreshAfter: true,
     },
@@ -125,7 +135,7 @@ export const SysInvitation = ObjectSchema.create({
       type: 'api',
       target: '/api/v1/auth/organization/reject-invitation',
       recordIdParam: 'invitationId',
-      visible: "record.email == ctx.user.email && record.status == 'pending'",
+      visible: "has(record.email) && record.email == ctx.user.email && has(record.status) && record.status == 'pending'",
       confirmText: 'Decline this invitation? The inviter will be notified and you will need a new invitation to join.',
       successMessage: 'Invitation declined',
       refreshAfter: true,

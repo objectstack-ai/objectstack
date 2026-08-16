@@ -19,5 +19,14 @@ export const ConvertLeadAction = defineAction({
   // converted — so the button disappears rather than the user clicking it and
   // hitting the flow's "already converted" guard screen. The flow keeps that
   // guard as a server-side backstop.
-  visible: 'record.status != "converted"',
+  //
+  // The `has()` half guards the SPARSE action face (#8990): this action reaches
+  // `list_item`, where the bound record is the row the view's `$select`
+  // projected. Without it, a lead list that does not project `status` aborts
+  // the predicate at key resolution (`No such key: status`) and the button
+  // silently vanishes for every row. `has()` alone is the guard because the
+  // operand is compared by bare equality against a literal — see
+  // `materializeDeclaredFields` in `@objectstack/objectql` for the full rule
+  // and for when the `!= null` half becomes load-bearing.
+  visible: 'has(record.status) && record.status != "converted"',
 });

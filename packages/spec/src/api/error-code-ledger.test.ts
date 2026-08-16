@@ -180,6 +180,38 @@ describe('ErrorCode (standard ∪ registered)', () => {
     expect(ErrorCode.parse('ROUTE_NOT_FOUND')).toBe('ROUTE_NOT_FOUND');
   });
 
+  it('accepts the #8087 dispatcher-gate batch, each under its measured owning package (#8846)', () => {
+    // The seven codes the dispatcher-vocabulary gate's first derivation
+    // reported as "merely unregistered" — live producer, real wire, no ledger
+    // row (option B of the 2026-08-12 ruling, delivered as a gate;
+    // `scripts/check-dispatcher-error-vocabulary.mjs` re-derives the set on
+    // every CI run). Owning packages per #7504 provenance: the package whose
+    // source stamps the code.
+    const batch: Record<string, keyof typeof ERROR_CODE_LEDGER> = {
+      FLOW_FAILED: '@objectstack/runtime',
+      QUERY_OBJECT_MISMATCH: '@objectstack/metadata-protocol',
+      ERR_AUTONUMBER_COLLISION: '@objectstack/objectql',
+      ERR_TRANSACTION_UNSUPPORTED: '@objectstack/objectql',
+      ERR_CROSS_DATASOURCE_TRANSACTION_WRITE: '@objectstack/objectql',
+      ERR_HOOK_TARGET_REBIND: '@objectstack/objectql',
+      FIELD_VISIBILITY_UNRESOLVED: '@objectstack/rest',
+    };
+    for (const [code, owner] of Object.entries(batch)) {
+      expect(ErrorCode.parse(code)).toBe(code);
+      expect(ERROR_CODE_LEDGER[owner], `${code} registered under ${owner}`).toContain(code);
+      // None re-spells a standard member — registered plainly, no waiver.
+      expect(standardSynonymOf(code), `${code} needs no waiver`).toBeUndefined();
+    }
+    // Deliberately NOT registered, and the absence is load-bearing:
+    // STORAGE_FAILURE is producer-less (a row would be unemittable from
+    // birth — the retired-code class the ledger header documents), and
+    // DUPLICATE is the pinned witness of the sandbox-authored `error.code`
+    // limb (#9106) — registering it would delete the only evidence that limb
+    // is open.
+    expect(() => ErrorCode.parse('STORAGE_FAILURE')).toThrow();
+    expect(() => ErrorCode.parse('DUPLICATE')).toThrow();
+  });
+
   it('rejects unregistered, lowercase, and numeric codes', () => {
     expect(() => ErrorCode.parse('TOTALLY_MADE_UP_CODE')).toThrow();
     expect(() => ErrorCode.parse('validation_error')).toThrow(); // pre-ADR-0112 dialect

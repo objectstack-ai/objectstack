@@ -231,10 +231,12 @@ describe('#8087 — every code the dispatcher door can emit is parsed against Ap
         );
 
     it('drives a code from the derivation rather than a list written by hand', () => {
-        // Guards the wiring itself: if the derivation ever produced nothing,
-        // every per-code assertion below would vacuously pass and this suite
-        // would go quiet exactly when it had the most to say.
-        expect(PENDING_AT_DISPATCHER_DOOR.length).toBeGreaterThan(0);
+        // #8846 registered every code the first derivation reported, so the
+        // pending list is EMPTY now and the per-code rejection drives below
+        // are vacuous BY DESIGN — that emptiness is the discharged state, not
+        // a broken wiring. The suite does not go quiet with it: the seven
+        // registered codes are driven POSITIVELY in the '#8846 discharge' case
+        // below, and a future pending row re-populates the loop on its own.
         // Spread: both lists are `readonly string[]`, and `arrayContaining`
         // takes a mutable one — passing the frozen list straight in is a tsc
         // error that only the TEST_DEBT ratchet would have caught.
@@ -273,6 +275,31 @@ describe('#8087 — every code the dispatcher door can emit is parsed against Ap
             expect([...new Set((envelope.error?.issues ?? []).map((i) => i.path.join('.')))]).toEqual(['error.code']);
         });
     }
+
+    it('#8846 discharge: every code the first derivation reported now drives a fully conformant body', () => {
+        // The seven codes the gate's first run reported as merely unregistered
+        // (#8087 → #8846). Hand-spelled HERE deliberately: registration makes
+        // the scan skip them, so no derivation carries them any more — this
+        // pin is what notices a regression that unregisters one while its
+        // producer lives on, and it keeps the "parse EVERY body it emits" half
+        // of the ruling driven for exactly the codes that used to fail it.
+        const registeredBy8846 = [
+            'ERR_AUTONUMBER_COLLISION',
+            'ERR_CROSS_DATASOURCE_TRANSACTION_WRITE',
+            'ERR_HOOK_TARGET_REBIND',
+            'ERR_TRANSACTION_UNSUPPORTED',
+            'FIELD_VISIBILITY_UNRESOLVED',
+            'FLOW_FAILED',
+            'QUERY_OBJECT_MISMATCH',
+        ] as const;
+        for (const code of registeredBy8846) {
+            expect(ErrorCode.safeParse(code).success, `${code} lost its ledger row`).toBe(true);
+            // And through the REAL builder: verbatim carriage plus a body its
+            // declared schema accepts — the exact pair that was broken before.
+            const error = expectConformantError(emitFor(code, 500));
+            expect(error.code).toBe(code);
+        }
+    });
 
     it('the same drive with a REGISTERED code is fully conformant — the control', () => {
         // Without this, "ApiErrorSchema rejects it" above would also be
