@@ -149,12 +149,11 @@ UI 创建并勾 GitHub 连接器、UI 钉模型(会话内 create_trigger 的Rout
    (transfer 不可用时重建:出处头 + 裸 `#N` 改全名 + 关源单为 moved);不成立才是缝卡。**缝卡收窄到真
    协调卡**,留在 objectstack 带 `repo:objectui` / `repo:cloud`,且**正文必须具名读者**(哪个座位、哪一
    步读它 —— 只有标签没有具名读者的队列没人扫);维护者收件箱恒为 objectstack。在飞卡 ⛔ 不中途转仓。
-2. **Contract-first 拆分。** 跨仓 feature 永不是一次派发:父单 + 每仓一 sub-issue, spec/后端
-   先行,下游带 `Blocked-by: <owner/repo>#<n>`;凡 `Blocked-by` 未关闭/未合并的不派发(
-   对 GitHub 现验);被链接或同父的两单永不同批。**Pin 滞后是它的盲区**:本仓 pin 是否已覆盖那
-   个 commit 是第二个读数,派发前用 REST `compare` 核祖先关系(本地 `merge-base` 在浅检出上给
-   假「非祖先」);未覆盖 ⇒ 派发令要求 PR 正文留档分叉窗口,且 ⛔ pin bump 不做 rider(走专
-   用 bump 脚本连带 override 与 lockfile)。
+2. **Contract-first 拆分。** 跨仓 feature 永不是一次派发:父单 + 每仓一 sub-issue, spec/后端先行,下
+   游带 `Blocked-by: <owner/repo>#<n>`;凡 `Blocked-by` 未关闭/未合并的不派发(对 GitHub 现验);被链接
+   或同父的两单永不同批。**Pin 滞后是它的盲区**:本仓 pin 是否已覆盖那个 commit 是第二个读数,派发前
+   用 REST `compare` 核祖先关系(本地 `merge-base` 在浅检出上给假「非祖先」);未覆盖 ⇒ 派发令要求 PR
+   正文留档分叉窗口,且 ⛔ pin bump 不做 rider(走专用 bump 脚本连带 override 与 lockfile)。
 3. **联动杂事立单,不靠记忆。** 已验收 PR 的产物流向另一仓时,由**接受那个 PR 的执行座位**立即
    在消费仓立后续单(带 `Blocked-by:`);`domain:*` 仍由分诊补。
 4. **纵向拆分:一个分诊 PM + N 个执行 PM,一人一车道双射**(维护者 2026-08-05 拍板)。分诊座位全
@@ -278,12 +277,14 @@ UI 创建并勾 GitHub 连接器、UI 钉模型(会话内 create_trigger 的Rout
 。**「生产者在哪?」是常设分诊问题**:declared ≠ enforced 形状的卡先问谁在写这个字段 —— 答案通
 常就是根因,并在派发前改变卡的范围与域标签。
 
-**发现分诊轮(队列的出水口)。** `finding` 恒 = 待首次定级、定级即离标(维护者 2026-08-13 意见;换标
-与 hold 评论纪律见 State model,hold 重验只在 `Restart-when:` 命中时发生,⛔ 不设逐卡豁免评论)。**首触定
-级每轮跑**:预算 3–5 张、优先于一切旧卡重验,先过时前提检查再三选一 —— 晋级 / 关闭 not planned(维
-护者可否决重开,PM 不等批准)/ hold;**判级发生在这里,不在立单时**。车道座位可附证据/前提重验,⛔
-不定级不改标(唯一例外:skills 车道 finding 由该席自分诊,全仓轮跳过)。**自动集中轮**(常设授权,维
-护者 2026-08-13):`finding` >15 ⇒ 下一 fire 跑域分批集中轮,sweep 打包晋级五条照用;原话、批量参数与五条细则见 `references/dispatch-runbook.md`。
+**发现分诊轮(队列的出水口)。** `finding` 恒 = 待首次定级、定级即离标(维护者 2026-08-13 意见;换标与
+hold 评论纪律见 State model,hold 重验只在 `Restart-when:` 命中时发生 —— closed 形态随每轮解锁扫描,可
+执行判据由分诊 Routine 每日一个低频子轮批量执行(十几条一行判据逐小时跑是浪费,每日即消化节奏),命中
+同 closed 命中一个待遇:回队前 ref 重验再回队;⛔ 不设逐卡豁免评论)。**首触定级每轮跑**:预算 3–5 张、
+优先于一切旧卡重验,先过时前提检查再三选一 —— 晋级 / 关闭 not planned(维护者可否决重开,PM 不等批准)
+/ hold;**判级发生在这里,不在立单时**。车道座位可附证据/前提重验,⛔ 不定级不改标(唯一例外:skills 车
+道 finding 由该席自分诊,全仓轮跳过)。**自动集中轮**(常设授权,维护者 2026-08-13):`finding` >15 ⇒ 下
+一 fire 跑域分批集中轮,sweep 打包晋级五条照用;原话、批量参数与五条细则见 `references/dispatch-runbook.md`。
 
 **发版板(`target:<major>`;运维细则见 `references/seat-post-protocol.md`)。** 判据二元(⛔ 不
 做优先级渐变 —— 渐变没人维护):「不修它,当前 RC 能不能发?」判阻塞四类:① 用户今天就撞的已发布
@@ -667,10 +668,9 @@ pull(今天谁撞上;零拉动默认 defer/ remove);③ AI-agent error-resistanc
 ```
 
 `premise_still_valid: false` + `pr: null` 是合法终报 —— 当再分诊输入复核,永不当失败派发。
-`status: needs_decision` 时 `open_questions` 必须非空。`out_of_scope_findings` 应已由 dev 立
-成无 assignee 的卡(查重先行、归挂判据、`finding` 标注,立在修复落地仓并带回链);PM 核验它们存
-在,**并把同轮并行报告互相对读** —— 两个 dev 同一小时审相邻代码会立出孪生卡,只有 PM 同时看得
-见两份报告。
+`status: needs_decision` 时 `open_questions` 必须非空。`out_of_scope_findings` 应已由 dev 立成无 assignee 的卡
+(查重先行、归挂判据、`finding` 标注,立在修复落地仓并带回链);PM 核验它们存在,**并把同轮并行报告互相
+对读** —— 两个 dev 同一小时审相邻代码会立出孪生卡,只有 PM 同时看得见两份报告。
 
 ## 机械守卫索引(原则在此,细节以脚本头为权威)
 
