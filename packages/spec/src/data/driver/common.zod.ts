@@ -160,32 +160,31 @@ export const URL_EMBEDDED_CREDENTIAL_REFUSED = (key: string): string =>
   + 'not pass through this publish door and are unaffected.';
 
 /**
- * The password component of a URL-ish string's userinfo, or `undefined` when
- * the string carries none — the shared value-level parse behind
- * {@link credentialFreeUrl} (#8082).
+ * The userinfo component of a URL-ish string, or `undefined` when the string
+ * carries none — the ONE boundary parse behind both userinfo accessors
+ * ({@link urlUserinfoPassword}, {@link urlUserinfoUsername}), deliberately
+ * unexported so no caller can depend on a third reading of the grammar.
  *
  * Deliberately NOT `new URL()`: real DSNs take forms WHATWG parsing rejects or
- * mangles (postgres/mongo multi-host `user:pass@h1:5432,h2:5432/db`, bare
- * `:memory:`, `file:` paths), and a detector that throws on the exact inputs it
- * must judge would fail open. The boundaries below are RFC 3986's, and match
- * the read-path redactor (`redactUrlPassword` in this package's
- * `data/datasource-credential-redaction.ts`, moved from `service-datasource`
- * by #8300) so the write door refuses precisely the material the read door
- * redacts:
+ * mangles (postgres/mongo multi-host `user:pass@h1:5432,h2:5432/db` throws
+ * `ERR_INVALID_URL`, bare `:memory:`, `file:` paths), and a parse that throws
+ * on the exact inputs it must judge would fail open. The boundaries below are
+ * RFC 3986's, and match the read-path redactor (`redactUrlPassword` in this
+ * package's `data/datasource-credential-redaction.ts`, moved from
+ * `service-datasource` by #8300) so the write door refuses precisely the
+ * material the read door redacts:
  *
  *  - the authority is what follows `//` (scheme-relative included), up to the
  *    first `/`, `?` or `#` — a `:` or `@` in a path or query is never userinfo;
  *  - userinfo ends at the LAST `@` in the authority (a malformed literal `@`
- *    inside a password must not decide how much of it goes unjudged);
- *  - the password starts after the FIRST `:` in userinfo, and only a NON-EMPTY
- *    password is credential material (`user@host` and `user:@host` carry no
- *    secret; both stay accepted, and the second is what the read-path redaction
- *    of a legacy row round-trips as).
+ *    inside a password must not decide how much of it goes unjudged).
  *
  * A string with no `//` (sqlite/turso `file:` paths, `:memory:`) has no
- * authority and answers `undefined`.
+ * authority and answers `undefined`. The FIRST `:` inside the returned
+ * userinfo splits username from password; that split belongs to the two
+ * accessors, not here.
  */
-export function urlUserinfoPassword(value: string): string | undefined {
+function urlUserinfo(value: string): string | undefined {
   const scheme = /^(?:[a-z][a-z0-9+.-]*:)?\/\//i.exec(value);
   if (!scheme) return undefined;
   const rest = value.slice(scheme[0].length);
@@ -193,11 +192,70 @@ export function urlUserinfoPassword(value: string): string | undefined {
   const authority = end === -1 ? rest : rest.slice(0, end);
   const at = authority.lastIndexOf('@');
   if (at === -1) return undefined;
-  const userinfo = authority.slice(0, at);
+  return authority.slice(0, at);
+}
+
+/**
+ * The password component of a URL-ish string's userinfo, or `undefined` when
+ * the string carries none — the shared value-level parse behind
+ * {@link credentialFreeUrl} (#8082).
+ *
+ * Boundaries are {@link urlUserinfo}'s (RFC 3986, aligned with the read-path
+ * redactor — see that parse for why WHATWG parsing is refused here); on top of
+ * them:
+ *
+ *  - the password starts after the FIRST `:` in userinfo, and only a NON-EMPTY
+ *    password is credential material (`user@host` and `user:@host` carry no
+ *    secret; both stay accepted, and the second is what the read-path redaction
+ *    of a legacy row round-trips as).
+ */
+export function urlUserinfoPassword(value: string): string | undefined {
+  const userinfo = urlUserinfo(value);
+  if (userinfo === undefined) return undefined;
   const colon = userinfo.indexOf(':');
   if (colon === -1) return undefined;
   const password = userinfo.slice(colon + 1);
   return password.length > 0 ? password : undefined;
+}
+
+/**
+ * The username component of a URL-ish string's userinfo, or `undefined` when
+ * the string carries no userinfo at all — the other half of the grammar behind
+ * {@link urlUserinfoPassword}, sharing {@link urlUserinfo}'s boundary parse so
+ * the two halves cannot drift (#8876; the #8082 ruling names a single
+ * value-level parse precisely so no second copy exists to disagree with this
+ * one).
+ *
+ * The consumer this exists for is credential *injection*, not refusal: a
+ * driver arm that binds a secret via `external.credentialsRef` against a DSN
+ * (`MongoConfigSchema.url`'s declared contract) must hand its client the
+ * username the URL already names — and reading it needs this grammar, because
+ * `new URL()` rejects the multi-host DSN form outright (#8696). Hence two
+ * deliberate asymmetries with the password half:
+ *
+ *  - a `user:password@` URL is REFUSED at publish ({@link credentialFreeUrl})
+ *    but parsed correctly here — stored legacy rows still carry that shape,
+ *    and an accessor that went blind on exactly those rows would misread the
+ *    inputs the migration path (#8155) must judge;
+ *  - an EMPTY username inside present userinfo answers `''`, distinct from
+ *    the `undefined` of no userinfo — `:pass@host` and `host` are different
+ *    facts, and the caller deciding whether an empty username is usable must
+ *    be able to tell them apart. Only a non-empty PASSWORD was credential
+ *    material; the username is not credential material, so no such collapse
+ *    applies.
+ *
+ * The value is the RAW component, percent-encoding preserved — the same
+ * convention as the password half and the byte-level alignment pin
+ * (`datasource-credential-redaction.test.ts`). A client that expects a
+ * decoded value (`mongodb`'s `auth.username` does) decodes at the point of
+ * use; decoding is value interpretation, not boundary grammar, so it stays
+ * with the caller.
+ */
+export function urlUserinfoUsername(value: string): string | undefined {
+  const userinfo = urlUserinfo(value);
+  if (userinfo === undefined) return undefined;
+  const colon = userinfo.indexOf(':');
+  return colon === -1 ? userinfo : userinfo.slice(0, colon);
 }
 
 /**

@@ -32,6 +32,7 @@ import {
   getDriverConfigSchema,
   urlCredentialQueryParams,
   urlUserinfoPassword,
+  urlUserinfoUsername,
 } from './driver/index';
 import {
   redactDatasourceConfig,
@@ -179,6 +180,16 @@ describe('write-door alignment: redactUrlPassword removes exactly what urlUserin
     for (const url of CREDENTIAL_FREE) {
       expect(urlUserinfoPassword(url)).toBeUndefined();
       expect(redactUrlPassword(url)).toBe(url);
+    }
+  });
+
+  it('redaction preserves the USERNAME byte-for-byte — the #8876 half of the same alignment', () => {
+    // `urlUserinfoUsername` shares the password half's boundary parse by
+    // construction; this pins the redactor to the same grammar from the other
+    // side: stripping the password must never move or rewrite the username the
+    // #8696 injection path will read off the redacted/stored row.
+    for (const url of [...CARRYING, ...CREDENTIAL_FREE]) {
+      expect(urlUserinfoUsername(redactUrlPassword(url)), url).toBe(urlUserinfoUsername(url));
     }
   });
 });

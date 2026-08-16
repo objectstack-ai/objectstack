@@ -31,6 +31,7 @@ import {
   CREDENTIAL_URL_QUERY_PARAMS,
   urlCredentialQueryParams,
   urlUserinfoPassword,
+  urlUserinfoUsername,
 } from './common.zod';
 import {
   getMongoConfigJsonSchema,
@@ -532,5 +533,64 @@ describe('urlUserinfoPassword — the shared value-level parse (#8082)', () => {
     expect(urlUserinfoPassword('postgres://u@h/db')).toBeUndefined();
     expect(urlUserinfoPassword('postgres://u:@h/db')).toBeUndefined();
     expect(urlUserinfoPassword('postgres://:p@h/db')).toBe('p');
+  });
+});
+
+describe('urlUserinfoUsername — the username half of the same grammar (#8876)', () => {
+  it('judges the multi-host DSN forms `new URL()` rejects — the reason this helper exists (#8696)', () => {
+    // `new URL('mongodb://app@h1:27017,h2:27017/app')` throws ERR_INVALID_URL
+    // (measured in the filing); the accessor must judge it, not fail open.
+    expect(urlUserinfoUsername('mongodb://app@h1:27017,h2:27017/app')).toBe('app');
+    expect(urlUserinfoUsername('postgresql://u:p@h1:5432,h2:5432/db')).toBe('u');
+  });
+
+  it('a `user:pass@` URL is refused at publish but PARSED correctly here — stored legacy rows carry it', () => {
+    // The publish door (`credentialFreeUrl`) refuses this shape; the accessor
+    // still reads it, because #8155's URL-bearing legacy rows are exactly the
+    // inputs the migration path must judge.
+    expect(urlUserinfoPassword('mongodb://app:hunter2@h/db')).toBe('hunter2');
+    expect(urlUserinfoUsername('mongodb://app:hunter2@h/db')).toBe('app');
+  });
+
+  it('an EMPTY username inside present userinfo is `""`, distinct from the `undefined` of no userinfo', () => {
+    expect(urlUserinfoUsername('mongodb://:p@h/db')).toBe('');
+    expect(urlUserinfoUsername('mongodb://h:27017/db')).toBeUndefined();
+    expect(urlUserinfoUsername('postgres://:@h/db')).toBe('');
+  });
+
+  it('a bare username and a trailing-colon username both answer the username', () => {
+    expect(urlUserinfoUsername('postgres://svc@h/db')).toBe('svc');
+    // `user:@host` — what the read-path redaction of a legacy row round-trips as.
+    expect(urlUserinfoUsername('postgres://svc:@h/db')).toBe('svc');
+  });
+
+  it('returns the RAW component — percent-encoding preserved for the caller to decode at use', () => {
+    expect(urlUserinfoUsername('mongodb://app%40corp:x@h/db')).toBe('app%40corp');
+    expect(urlUserinfoUsername('mongodb://app%40corp@h/db')).toBe('app%40corp');
+  });
+
+  it('username ends at the FIRST `:`; userinfo ends at the LAST `@` — same boundaries as the password half', () => {
+    // Malformed literal `@` in the password must not change how much of the
+    // userinfo is judged, on either half.
+    expect(urlUserinfoUsername('postgres://u:p@ss@host/db')).toBe('u');
+    // A `:` inside the password does not move the username split.
+    expect(urlUserinfoUsername('postgres://u:p:q@h/db')).toBe('u');
+  });
+
+  it('a colon or `@` in a path, query or fragment is never userinfo', () => {
+    expect(urlUserinfoUsername('https://host/a:b@c')).toBeUndefined();
+    expect(urlUserinfoUsername('https://host/p?to=a:b@c')).toBeUndefined();
+    expect(urlUserinfoUsername('https://host/p#a:b@c')).toBeUndefined();
+  });
+
+  it('non-authority strings carry no userinfo: file paths, :memory:, bare words', () => {
+    for (const value of ['file:./data/objectstack.db', ':memory:', 'public', 'a:b@c']) {
+      expect(urlUserinfoUsername(value), value).toBeUndefined();
+    }
+  });
+
+  it('scheme-relative URLs are judged too', () => {
+    expect(urlUserinfoUsername('//u:p@h/db')).toBe('u');
+    expect(urlUserinfoUsername('//h/db')).toBeUndefined();
   });
 });

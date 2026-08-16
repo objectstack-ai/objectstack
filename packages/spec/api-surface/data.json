@@ -744,6 +744,7 @@
     "unprovisionedInjectedColumns (function)",
     "urlCredentialQueryParams (function)",
     "urlUserinfoPassword (function)",
+    "urlUserinfoUsername (function)",
     "utcInstantMs (function)",
     "validateDriverConfig (function)",
     "valueSchemaFor (function)"
