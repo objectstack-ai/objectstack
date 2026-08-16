@@ -374,6 +374,7 @@
     "data/Field:multiple",
     "data/Field:name",
     "data/Field:options",
+    "data/Field:placeholder",
     "data/Field:precision",
     "data/Field:readonly",
     "data/Field:readonlyWhen",

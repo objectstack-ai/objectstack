@@ -113,8 +113,10 @@ export const objectForm = defineForm({
             // `filterable` removed: never a FieldSchema key (only `sortable` and
             // `searchable` exist); every declared column is filterable.
             { field: 'defaultValue', type: 'text', helpText: 'Default value for new records (JSON literal)' },
-            // `placeholder` removed: never a FieldSchema key. Author hint text
-            // through `inlineHelpText` / `description`.
+            // `placeholder` declared 2026-08-16 (#9019, ruled on objectui#4676):
+            // in-input hint text, distinct from `inlineHelpText` (always-visible
+            // help below the field) and `description` (tooltip).
+            { field: 'placeholder', type: 'text', helpText: 'Hint text shown inside the empty input; disappears once a value is entered' },
 
             // Text constraints
             { field: 'maxLength', type: 'number', helpText: 'Max characters', visibleWhen: "data.type in ['text','textarea','email','url','phone','password','markdown','html','richtext']" },

@@ -1095,6 +1095,26 @@ export const FieldSchema = lazySchema(() => strictObject({
   sortable: z.boolean().optional().default(true).describe('Whether field is sortable in list views'),
   inlineHelpText: z.string().optional().describe('Help text displayed below the field in forms'),
   /**
+   * In-input placeholder text — the HTML `placeholder` attribute on the empty
+   * control, gone the moment a value is typed. Declared 2026-08-16 (#9019,
+   * maintainer ruling Option C on objectui#4676): the consumer side shipped
+   * first — objectui applies an object-field-level `placeholder` at render time
+   * in four packages plus `apps/console` (plugin-form's auto-generated and
+   * sectioned forms, plugin-detail's inline edit, app-shell's field-backed
+   * action params — whose module header documents the inheritance as intended —
+   * and console's FormPage, all feeding the `@object-ui/fields` widgets), while
+   * this schema refused the key by name. That was the #7176 doctrine failed
+   * from the producer side: measured pull, missing declaration — and the
+   * classic preview-renders/save-422s trap for AI authors. The matching
+   * translation surface (`FieldTranslation.placeholder`) was already declared.
+   *
+   * The three hint surfaces are distinct and the distinction is contract:
+   * `placeholder` renders INSIDE the empty input; `inlineHelpText` renders
+   * beside/under the input and stays visible; `description` is the
+   * tooltip/developer documentation.
+   */
+  placeholder: z.string().optional().describe('Placeholder text rendered inside the empty input (the HTML placeholder attribute); disappears once a value is entered. Distinct from `inlineHelpText` (always-visible help rendered beside/under the input) and `description` (tooltip/developer documentation).'),
+  /**
    * Auto-number display format. Literal text interleaved with `{...}` tokens:
    *
    *   - `{0000}` — the sequence counter, zero-padded to that many digits as a

@@ -107,7 +107,13 @@ export const FIELD_KEY_GUIDANCE: Readonly<
   indexed: { why: 'never a FieldSchema key; a field-level index flag built no index (#2377). Declare the index in the object\'s `indexes[]`.' },
   immutable: { why: 'never a FieldSchema key. Use the `readonlyWhen` predicate to lock a field after creation.' },
   filterable: { why: 'never a FieldSchema key — every declared column is filterable. `sortable` and `searchable` are the real knobs.' },
-  placeholder: { why: 'never a FieldSchema key. Author hint text through `inlineHelpText` or `description`.' },
+  // NOTE: no entry for `placeholder`. It sat here as a retirement ("never a
+  // FieldSchema key") until the 2026-08-16 maintainer ruling on objectui#4676
+  // (#9019) declared it: four shipped objectui render surfaces apply an
+  // object-field-level `placeholder` at render time, so `FieldSchema` now
+  // declares the key and an entry here would be advice to delete a live key —
+  // the "no guidance entry names a key the schema now declares" test enforces
+  // the absence.
   startingNumber: { why: 'never a FieldSchema key. An autonumber counter resets per rendered prefix, which `autonumberFormat` itself determines.' },
   validation: { why: 'field-level predicates are not a FieldSchema key — author a `validation` metadata item on the object, which carries its own message.' },
   errorMessage: { why: 'pairs with the `validation` key that never existed; a `validation` metadata item carries its own message.' },
