@@ -326,7 +326,11 @@ action on the object is gated on `record.viewer.can_act ||
 record.viewer.can_override`, and the `viewer` block is computed and attached only
 by the approvals REST path (`/api/v1/approvals/*`) — never by the generic data
 API a plain object view reads. Browse the table directly and you get a correct,
-completely inert list: the rows are there, the buttons are not. The table stays
+completely inert list: the rows are there, the buttons are not. That inertness
+is now a considered `false` rather than an evaluation fault — the predicates
+guard the block with `has(record.viewer) && has(record.viewer.can_act)` before
+reading it, so a row without the block resolves cleanly instead of aborting at
+key resolution. Same empty toolbar, arrived at deliberately. The table stays
 available under **Setup → Approvals → Requests** for admins and diagnostics,
 which is what it is good for.
 </Callout>

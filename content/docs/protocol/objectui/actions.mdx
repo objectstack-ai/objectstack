@@ -327,6 +327,27 @@ Prefer the `record.<field>` form: it reads unambiguously and resolves identicall
 
 Beyond `record`, action predicates also expose the authenticated user as `ctx.user` (e.g. `record.id == ctx.user.id`) and public feature flags as `features.*` (see [Capability gates](#capability-gates-requiresfeature)) — they are not limited to the record. [record-alert](/docs/protocol/objectui/record-alert) conditions surface the analogous identity values under the `os.*` namespace (`os.user` / `os.org` / `os.env`) instead.
 
+<Callout type="warn">
+**The bound record is SPARSE — guard every read with `has()`.** Unlike a
+validation or hook predicate, an action predicate is evaluated against whatever
+record the client already fetched. On `list_item` that is the row the view's
+`$select` projected, so a column the view did not ask for is **absent**, not
+`null` — and CEL aborts the whole expression at key resolution (`No such key:
+status`). The abort is fail-closed, so the button simply is not offered, which
+looks exactly like the predicate having said no. Nothing logs it.
+
+| what the predicate does with `record.x` | guard |
+|---|---|
+| compares it to a literal (`==`, `!=`) | `has(record.x) && record.x == 'draft'` — `has()` alone. CEL compares heterogeneously, so a projected-`null` column answers `false` rather than faulting |
+| traverses, calls a method, orders or does arithmetic | `has(record.x) && record.x != null && record.x.size() > 0` — both halves |
+| traverses into a nested block | guard the **leaf**: `has(record.x) && has(record.x.k) && record.x.k == true`. The leaf guard subsumes the parent `!= null` |
+| tests truthiness (`!record.x`, bare `record.x`) | rewrite to the equality form — `has(record.x) && record.x != true` / `== true`. `!` and the logical operators need a bool and **fault** on `null` |
+
+The last row is the one that bites: `visible: "!record.disabled"` faults on
+every row whose `disabled` column is stored `NULL`, so the button vanishes from
+exactly the records it was meant for.
+</Callout>
+
 #### Capability gates: `requiresFeature`
 
 When an action (or param) only works with an opt-in auth capability behind it — the better-auth `admin` plugin, `phoneNumber`, `twoFactor`, … — gate it with **`requiresFeature: '<flag>'`** instead of a hand-written `features.*` predicate. The flag names the public feature flag served at `/api/v1/auth/config` (see `PUBLIC_AUTH_FEATURES` in `@objectstack/spec/kernel`); at parse time the schema lowers it into the canonical `visible` predicate — `features.X == true` for opt-in flags, `features.X != false` for default-on flags — AND-composing with any explicit `visible` you also declare, then strips itself from the output. An unknown flag name fails the parse.
@@ -340,9 +361,9 @@ target: /api/v1/auth/admin/ban-user
 requiresFeature: admin
 
 # Composes with a residual row predicate:
-# (!record.disabled) && features.oidcProvider != false
+# (has(record.disabled) && record.disabled != true) && features.oidcProvider != false
 name: disable_oauth_application
-visible: "!record.disabled"
+visible: "has(record.disabled) && record.disabled != true"
 requiresFeature: oidcProvider
 ```
 

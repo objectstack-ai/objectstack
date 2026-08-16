@@ -1268,8 +1268,11 @@ is *sparse* by decision: an [action](/docs/ui/actions) `visible` / `disabled`
 predicate is evaluated against whatever record the client already fetched —
 on a list row, only the columns that view actually projected. There
 `record.x != null` **is itself a fault** on an absent key, and the guard is the
-conjunction `has(record.x) && record.x != null`. Flows are not that face; the
-rule above holds here. Just don't carry it across to one where it doesn't.
+conjunction `has(record.x) && record.x != null` — per READ, so a predicate that
+traverses into `record.x` guards the leaf too
+(`has(record.x) && has(record.x.k) && record.x.k == true`; the leaf guard
+subsumes the parent `!= null`). Flows are not that face; the rule above holds
+here. Just don't carry it across to one where it doesn't.
 </Callout>
 
 ## Run a flow via API
