@@ -175,17 +175,6 @@ target: customer_quick_edit
 
 The four `submitBehavior` kinds and their options are documented on the [Forms guide](/docs/ui/forms).
 
-<Callout type="warn">
-**Current renderer status (2026-08-10).** The console shipping at the pinned
-`.objectui-sha` does **not** implement this contract yet: it renders
-`/console/forms/:name` as a top-level page outside the shell, and it falls back
-to the `thank-you` panel in both modes. The statement above is the contract —
-the renderer half is tracked in ObjectUI and linked from the
-[#7245 thread](https://github.com/objectstack-ai/objectstack/issues/7245). Until
-it lands, an internal FormView that must land on its new record has to declare
-`submitBehavior` explicitly.
-</Callout>
-
 ### Modal Actions
 
 Open a modal/page by name. `target` is resolved as a **page** first, then as an object (which opens that object's create/edit form); when it names neither, the action falls through to its server-side handler.
