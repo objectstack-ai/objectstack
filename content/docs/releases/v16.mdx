@@ -1,6 +1,6 @@
 ---
 title: v16.0.0
-description: One org identifier for hook and action authors, quorum and per-group sign-off (会签) approvals, time-relative automations that actually fire, filtered roll-ups, strict dashboard widgets, an identity-scoped MCP stdio transport, and a metadata-driven approvals inbox — plus a large enforce-or-remove sweep that makes dead metadata loud. Backend and Console notes for 16.0.0.
+description: One org identifier for hook and action authors, quorum and per-group sign-off (会签) approvals, time-relative automations that actually fire, filtered roll-ups, strict dashboard widgets, an identity-scoped MCP stdio transport, and a metadata-driven approvals inbox — plus a large enforce-or-remove sweep that makes dead metadata loud. Backend and Console notes for 16.0.0 and 16.1.0.
 ---
 
 **The v16 line** converges the developer surface and makes declared metadata
@@ -18,8 +18,9 @@ dashboard widget typos, dead hook events, phantom webhook triggers, unknown
 > 2026-07-19 and 2026-07-20). `changeset pre exit` ran with that cut, so the
 > `@objectstack/*` packages no longer publish as `16.0.0-rc.N`. The v16 line is
 > closed: `16.1.0` followed on 2026-07-22 and is its final release, and the
-> current series is [17.0.0](/docs/releases/v17). This page describes the
-> 16.0.0 content; the 16.1.0 minor is not covered here. (15.1.1 was a small
+> current series is [17.0.0](/docs/releases/v17). This page covers both
+> releases — 16.0.0 first, then
+> [What's new in 16.1.0](#whats-new-in-1610). (15.1.1 was a small
 > patch on the previous line — better-auth family pinning and auth-plugin init
 > isolation — covered by the [v15 page](/docs/releases/v15).)
 
@@ -74,6 +75,42 @@ dashboard widget typos, dead hook events, phantom webhook triggers, unknown
   schema *before* saving it, the dev banner prints a ready-to-paste
   `claude mcp add` command — and the long-lived stdio transport now requires
   an API-key principal (fail-closed) instead of reading data unscoped.
+
+## Highlights — 16.1.0
+
+- **A missing capability provider fails the build, not the boot.** `os build`
+  and `os validate` now preflight every `requires` entry: one whose provider
+  has no installable version in the active edition (`ai` →
+  `@objectstack/service-ai`, cloud-only) fails fast with an edition-aware
+  message, and an absent-but-installable provider becomes an advisory
+  `pnpm add` hint. Providers were only resolved at `serve`/`start` before, so
+  a `validate && build && test` script passed and the app crashed on boot.
+- **`runAs: 'user'` flows run with the user's real grants.** A
+  record-change-triggered `runAs:'user'` flow ran its data nodes with a
+  zero-grant principal — the triggering user's permission sets and positions
+  were never resolved — so a `private` object 403'd the in-flow write and a
+  `public_read_write` object silently stripped readonly/FLS-gated fields. The
+  engine now resolves that user's actual positions and permission sets at run
+  setup.
+- **Two more dashboard mistakes are build errors.** Header and widget actions
+  pointing at an action or route that does not exist are flagged (a
+  `script`/`modal` target errors; an in-app `url` target warns), and every
+  dashboard-level filter must resolve to a real field on each bound widget's
+  dataset object — previously a button that rendered and did nothing, and SQL
+  that crashed the widget at render time.
+- **Import/Export works on the business-unit objects.** The Import/Export
+  buttons Setup shows for `sys_business_unit` and `sys_business_unit_member`
+  both returned `405 OBJECT_API_METHOD_NOT_ALLOWED`; both objects now declare
+  `import`/`export`, so the HRIS org-tree sync imports units and memberships
+  together.
+- **Admin-gated `Server-Timing` finally emits on `os serve` / `os dev`.** The
+  per-request path — an admin sends `X-OS-Debug-Timing`, an ordinary user gets
+  nothing — never emitted on the shipped server; only the global mode, which
+  discloses to every caller, worked.
+- **Console:** record hits on the full search page and in ⌘K, `globalActions`
+  label overlays on record-detail action bars, injected `owner_id` kept out of
+  auto-generated list columns, and sort repeater rows rendered for union
+  schemas.
 
 ---
 
@@ -792,6 +829,149 @@ pin advancing `94d4876 → af1b0db` (objectui #2706–#2736), bundled as
   flow `keyValue`/`numberList`, ActionParamDialog upload guard, system-field
   classifier) are included in this pin.
 
+## Landed at the 16.0.0 GA cut
+
+Two changesets are in the `## 16.0.0` changelog sections but in **neither**
+`16.0.0-rc.0` nor `16.0.0-rc.1`: they landed between the last RC and the GA
+cut on 2026-07-21, so they ship in 16.0.0 without appearing in any RC.
+
+- **`ViewFilterRule.operator` becomes a closed enum — an accept-set narrowing
+  on a published surface (#3373, changeset `8ff9210`).** The operator was
+  previously an open string, so views could persist operators the runtime
+  cannot evaluate. The Zod schema now constrains it to the supported operator
+  enum and normalizes the known legacy aliases to their canonical form on
+  parse. This is a public spec/api-surface change
+  (`packages/spec/api-surface.json`); it landed on `main` in #3373 without a
+  changeset, and the backfill is what shipped it with the GA instead of
+  leaving it stranded.
+- **Console pin advanced to `9a5f016f7d5c` (changeset `db34d54`, objectui
+  range `69fa5d163a97...9a5f016f7d5c`).** Nested-array columns in the flow
+  designer's node property form (objectui#2761); the record-list "Add View"
+  flow redone — empty-name 405, invisible drafts, canonical naming
+  (objectui#2768); field-type-aware operators and values for the view filter
+  in `SchemaForm` (objectui#2766); dashboard chart bars drawn on first paint
+  (objectui#2759); and the non-atomic batch fallback gated on the discovery
+  `transactionalBatch` capability (objectui#2755).
+
+---
+
+# What's new in 16.1.0
+
+16.1 is a small fast-follow minor — **8 changesets (5 minor, 3 patch), no
+major** — released on 2026-07-22, and the v16 line's final release. Three of
+the five minors add a new `os build` / `os validate` gate, so its practical
+theme is moving configuration failures earlier: from a boot crash or a broken
+render to a build error. The bundled Console advances one pin,
+`9a5f016f7d5c → cf2d56e32a11`.
+
+## New capabilities in 16.1.0
+
+- **`requires` capabilities are preflighted against installable providers
+  (#3366).** A listed capability was only checked at `serve`/`start` time, and
+  a missing provider produced a generic "not installed — add it to your
+  dependencies" error even when the provider has **no installable version in
+  the current edition**; `os validate` (token vocabulary only) and `os build`
+  (never resolved providers) both passed, so a `validate && build && test` CI
+  script never caught it and it surfaced as an opaque boot crash — seen
+  upgrading an open-edition app from `14.7` to `16` after
+  `@objectstack/service-ai` went cloud-only (ADR-0025).
+  `@objectstack/spec/kernel` now exports `PLATFORM_CAPABILITY_PROVIDERS`
+  (token → provider package + edition) and a pure
+  `classifyRequiredCapability()`, one machine-readable source of truth for
+  provider/edition knowledge the serve resolver previously encoded informally.
+  `os build` and `os validate` gained the preflight: no installable version in
+  the active edition is a fast, edition-aware failure; absent-but-installable
+  is an advisory `pnpm add` hint, not a hard error; a satisfied `requires` list
+  passes unchanged. The `os serve` boot error renders the same
+  classification, so preflight and boot read identically.
+- **Dead action and route references in dashboards are flagged (#3367,
+  ADR-0049 applied to references).** `os validate` / `os build` run a new
+  `validateDashboardActionRefs` gate over every dashboard `header.actions[]`
+  and widget `actionUrl`. `actionType: 'script' | 'modal'` is an **error**
+  unless `actionUrl` resolves to a defined action (`stack.actions` or an
+  object's `actions`); `modal` also resolves via the runtime
+  `<verb>_<object>` convention (`create_`/`new_`/`add_`/`edit_`/`update_` plus
+  a real object) and bare object names. A dangling target ships a button that
+  renders and silently does nothing on click — a false affordance.
+  `actionType: 'url'` is a **warning** when a relative in-app path names an
+  `objects`/`reports`/`dashboards`/`pages`/`views` route whose target does not
+  exist in the stack; external URLs, interpolated (`${…}`) targets and opaque
+  routes are skipped.
+- **Dashboard filter fields are validated at build time (#3365, extending
+  ADR-0021).** `validateWidgetBindings` now checks that every dashboard-level
+  filter (`dateRange` and each `globalFilters[]`) resolves to a real field on
+  each bound widget's dataset object. Since #2501 wired these filters into
+  every widget's analytics query, a filter field absent on a widget's object —
+  a `dateRange` bound to `close_date` inherited by an account or contact
+  widget over a different object — emitted invalid SQL (`no such column:
+  close_date`) and crashed the widget at render time. The new rule
+  `dashboard-filter-field-unknown` fails the build with a message naming the
+  dashboard, widget, filter, field and object, unless the widget opts out via
+  `filterBindings: { <name>: false }` or re-targets to an existing field.
+  Effective-field resolution matches the runtime, and registry-injected system
+  fields (`created_at`, the `dateRange` default) and objects outside the
+  validated stack never false-positive.
+
+## Behavior changes & fixes in 16.1.0
+
+- **`runAs: 'user'` flows execute data ops with the triggering user's real
+  permission sets and positions (#3356, follow-up to #1888).** Since #1888 the
+  automation engine honours `flow.runAs`, but the `runAs:'user'` credential
+  propagation was hollow: a record-change-triggered run executed its data
+  nodes (`update_record`, …) with a **zero-grant** principal — only the
+  `member`/`everyone` baseline — even when the triggering user was fully
+  authorized. Two faces by object config: a `private` object 403'd the in-flow
+  write (`not permitted for positions [org_member, everyone]`), and a
+  `public_read_write` object let the write through but **silently stripped**
+  readonly/FLS-gated fields. `@objectstack/core` now exports
+  `resolveUserAuthzGrants(ql, userId, opts)` — the single place that reads
+  `sys_member` / `sys_user_position` / `sys_*_permission_set` — which the HTTP
+  resolver delegates to unchanged, and `AutomationEngine.setUserGrantsResolver`
+  wires it so a `runAs:'user'` run whose trigger left the envelope unresolved
+  resolves the user's positions and permission sets once at run setup and
+  threads them into every data node. Contexts that already carry `permissions`
+  are left untouched (a REST trigger, and an ADR-0090 agent ceiling acting
+  on-behalf-of a user), so a deliberately narrowed identity is never
+  re-broadened; `runAs:'system'` is unchanged, and a resolver error fails safe
+  — it warns and keeps the bare user, never elevates.
+- **Import/Export on `sys_business_unit` and `sys_business_unit_member`
+  (#3025, #3391 P0).** The Business Units list (Setup → Business Units)
+  surfaces Import/Export buttons, but both objects declared an
+  `enable.apiMethods` whitelist of only the five CRUD verbs, and the REST data
+  plane gates import/export on that whitelist (ADR-0049) — so both buttons
+  returned `405 OBJECT_API_METHOD_NOT_ALLOWED`. Both objects now declare
+  `import` and `export`. The pairing matters: the HRIS org-tree sync scenario
+  imports the units *and* their memberships together, so fixing only the unit
+  object left the membership path still 405'ing. Reconcile-safe —
+  `reconcileManagedApiMethods` only strips generic write verbs and never
+  touches `import`/`export`.
+- **Admin-gated `Server-Timing` emits on the standard server (#3361).** The
+  per-request path from #2408 — an admin sends `X-OS-Debug-Timing: 1` (or
+  `json`) and gets phase timings while an ordinary user gets nothing — never
+  emitted on the shipped Hono server: the disclosure gate is flipped by the
+  runtime dispatcher, but the data and metadata routes on `os serve` / `os
+  dev` are served by `@objectstack/rest`'s `RestServer`, whose identity
+  resolver never opened it. Only global mode (`OS_SERVER_TIMING=true`), which
+  discloses to *every* caller, worked. The disclosure predicate
+  `isPerfDisclosurePrincipal(ec)` now lives in `@objectstack/observability`
+  (re-exported from `@objectstack/runtime` for back-compat) as the single
+  definition of who may pull per-request timings, and both
+  `RestServer.resolveExecCtx` and the standalone
+  `@objectstack/plugin-hono-server` CRUD surface open the gate for an
+  admin/service principal via the carried `posture` rung.
+
+## New in Console (Studio) — objectui pin `9a5f016f7d5c → cf2d56e32a11`
+
+- Record hits surface on the full search page, with i18n group labels
+  (objectui#2776), and in the command palette from `/api/v1/search`
+  (objectui#2772, pairing framework#3371).
+- `globalActions` label overlays apply on record-detail action bars
+  (objectui#2770).
+- Injected `owner_id` stays out of auto-generated list columns
+  (objectui#2779).
+- `SchemaForm` renders sort repeater rows for union schemas (objectui#2771,
+  pairing framework#3379).
+
 ## Upgrade checklist
 
 ### 16.0.0
@@ -833,6 +1013,24 @@ pin advancing `94d4876 → af1b0db` (objectui #2706–#2736), bundled as
 - **Console hosts:** import spec schema values from `@objectstack/spec`
   instead of the removed `@object-ui/types` `spec/ui` re-exports.
 
+### 16.1.0
+
+- **Re-run `os build` / `os validate` after upgrading** — three new preflights
+  can fail a stack that built clean on 16.0.0: a `requires` capability whose
+  provider has no installable version in your edition (hard error; an
+  absent-but-installable provider is only an advisory hint), a dashboard
+  `script`/`modal` action whose `actionUrl` names no defined action (error,
+  with unresolvable in-app `url` targets warning), and a dashboard filter
+  naming a field absent from a bound widget's dataset object (new rule
+  `dashboard-filter-field-unknown` — opt a widget out with
+  `filterBindings: { <name>: false }` or re-target the filter).
+- **Automations:** `runAs:'user'` flows now execute data nodes with the
+  triggering user's real permission sets and positions. Review any flow that
+  depended on the previous zero-grant behavior — writes that used to 403 on a
+  `private` object now succeed, and readonly/FLS-gated fields that used to be
+  silently stripped on a `public_read_write` object are now written when the
+  user is authorized. `runAs:'system'` is unchanged.
+
 ## References
 
 ADR-0099 (posture-authoritative tenant wall) · ADR-0101 (MCP stdio
@@ -843,4 +1041,10 @@ ADR-0034 (atomic batch) · ADR-0049 / #2377 (enforce-or-remove) · ADR-0059
 #3266/#3268 (approvals quorum/会签) · #2678 (objectui declared-actions
 inbox) · #1874 (time-relative trigger) · #1868 (filtered roll-ups) · #1928
 (expression guardrails) · #1752 (drill ranges) · #2408 (Server-Timing) ·
-#3280/#3290 (organizationId).
+#3280/#3290 (organizationId) · #3373 (ViewFilterRule operator enum).
+
+**16.1.0** — ADR-0025 (edition boundary) · #3366 (`requires` provider
+preflight) · #3367 (dead dashboard action/route references) · #3365
+(dashboard filter field existence) · #3356 / #1888 (`runAs:'user'` grants) ·
+#3361 / #2408 (per-request `Server-Timing` on the standard server) · #3025 /
+#3391 (business-unit import/export).
