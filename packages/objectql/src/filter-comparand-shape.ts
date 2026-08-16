@@ -72,7 +72,7 @@
  */
 
 import { StandardErrorCode } from '@objectstack/spec/api';
-import { isVirtualSearchField } from '@objectstack/spec/data';
+import { isVirtualSearchField, classifyDottedFilterHead } from '@objectstack/spec/data';
 
 /**
  * The operators whose comparand `FieldOperatorsSchema` declares as a list, with
@@ -350,13 +350,20 @@ function assertFieldListComparands(
  * declaration the caller can fix, and refusing one would turn a policy into a
  * 400 nobody can act on.
  *
- * SCOPE — the unmaterializable verdict ONLY. An UNKNOWN filter field is not
- * judged here: that is the ingress gate's first verdict
- * (`assertFilterFieldsExist`, #7534), the engine deliberately keeps its
- * registry-less tolerance, and widening this door to it is a separate posture
- * change on a second verdict, exactly as #7095 declined to inherit sort's
- * `unknown` and `dotted` legs. DOTTED filter paths are likewise untouched —
- * they have no verdict on this axis at either door.
+ * SCOPE — the unmaterializable verdict and, since #8371, the DOTTED-head
+ * verdict. An UNKNOWN filter field is still not judged here: that is the
+ * ingress gate's first verdict (`assertFilterFieldsExist`, #7534), the engine
+ * deliberately keeps its registry-less tolerance, and widening this door to it
+ * is a separate posture change on a second verdict, exactly as #7095 declined
+ * to inherit sort's `unknown` leg. The dotted verdict IS inherited (unlike
+ * sort's) because it is author-reachable through the exact same forwarded
+ * surfaces as the virtual one — a saved report's `query.filter` never passes
+ * the ingress — and because the #8371 measurement showed the refused head
+ * classes (relation / virtual / scalar) match zero rows on every backend, so
+ * this door refuses nothing a driver could have served. A dotted key whose
+ * head this door cannot classify — structured/JSON (the ruling's deliberate
+ * carve-out: live on two of three backends), arrays, files, heads absent from
+ * the field map — passes through unchanged.
  *
  * A registry-less host (`schema.fields` undefined) returns early, exactly as
  * the ingress gate returns early when `resolveQueryFields` cannot answer: a
@@ -377,7 +384,63 @@ export function assertFilterIsMaterializable(
 ): void {
   const fields = (schema as { fields?: Record<string, unknown> } | undefined)?.fields;
   if (!fields || typeof fields !== 'object') return;
-  const named = collectFilterFieldNames(where);
+  const { named, dotted } = collectFilterFieldNames(where);
+  if (named.length === 0 && dotted.length === 0) return;
+
+  // [#8371] The DOTTED verdict, before the virtual one — mirroring the ingress
+  // door's `unknown` > `dotted` > unmaterializable ladder, so a dotted path
+  // whose head is a formula field gets the same answer at both doors (the
+  // dotted one: it is wrong about the shape too, and the shape is what the
+  // caller wrote). Judged by the ONE classification both doors share
+  // (`classifyDottedFilterHead`, `@objectstack/spec/data`): relation, virtual
+  // and plain-scalar heads matched ZERO rows on all three drivers in the
+  // #8371 measurement, so this refusal takes nothing from anyone — it renames
+  // a silent wrong answer into a loud one. A head the classifier answers
+  // `null` for — structured/JSON (⛔ the ruling's deliberate carve-out, live
+  // on memory and mongodb), arrays, files, or a head not in this field map —
+  // passes through unchanged, the same fail-open direction the collector
+  // documents.
+  const judgedDotted = dotted.filter(
+    (f) => classifyDottedFilterHead(fields[f.split('.')[0]] as never) !== null,
+  );
+  if (judgedDotted.length > 0) {
+    const first = judgedDotted[0];
+    const head = first.split('.')[0];
+    const headDef = fields[head] as { type?: unknown } | undefined;
+    const headClass = classifyDottedFilterHead(headDef as never);
+    const headType = String(headDef?.type ?? '');
+    const body = headClass === 'relation'
+      ? `filters on '${first}', which follows the relationship '${head}' into another object — `
+        + `a filter reaches only columns of '${object}' itself, and '${head}' stores the related `
+        + 'record\'s id, not an embedded document'
+      : headClass === 'virtual'
+        ? `filters on '${first}', a dotted path whose head '${head}' is a virtual ${headType} `
+          + `field on '${object}' — its value is computed on read, so no driver materialises a `
+          + 'column for the path to reach into'
+        : `filters on '${first}', a dotted path into '${head}', a ${headType} field on `
+          + `'${object}' that stores a single scalar value — there is nothing beneath it for a `
+          + 'path to reach';
+    const dottedErr = new Error(
+      `ObjectQL.${operation}('${object}') ${body}`
+      + (judgedDotted.length > 1 ? ` (also: ${judgedDotted.slice(1).join(', ')})` : '')
+      + '. No backend serves the path, so the predicate can only match zero records: the query '
+      + 'was refused instead of answered with an empty list.'
+      // Deliberately the SAME remedy, in the same words, as the ingress
+      // door's dotted refusal and both doors' #8296 virtual refusals. One
+      // vocabulary across the doors.
+      + ` Denormalise the value onto '${object}' (a stored field, written when the source`
+      + ' changes) and filter that.',
+    ) as Error & { code?: string; status?: number; field?: string; fields?: string[]; object?: string };
+    // Same identity argument as the virtual verdict below: the question is
+    // about the NAME (its head's type), so `INVALID_FIELD`/400 — never a new
+    // code, per the #8371 ruling's own words.
+    dottedErr.status = 400;
+    dottedErr.code = StandardErrorCode.enum.INVALID_FIELD;
+    dottedErr.field = first;
+    dottedErr.fields = judgedDotted;
+    dottedErr.object = object;
+    throw dottedErr;
+  }
   if (named.length === 0) return;
   // Judged by the same `@objectstack/spec/data` predicate the SEARCH axis and
   // the ingress door use, never a list minted here, so gate and drivers cannot
@@ -435,15 +498,21 @@ export function assertFilterIsMaterializable(
  *   (`{$gte: 18}`) or a nested-relation condition (`{owner: {region: 'NA'}}`),
  *   and the latter's keys belong to a DIFFERENT object whose field map this
  *   gate has not resolved.
- * - **A DOTTED key is dropped here**, not judged on its head: this door has one
- *   verdict and a dotted filter path has none on this axis (see the scope note
- *   above).
+ * - **A DOTTED key is collected SEPARATELY** (#8371), never merged into
+ *   `named`: its verdict is its own (judged on the head's type by
+ *   `classifyDottedFilterHead`), and folding it into the undotted list would
+ *   hand `'owner.region'` to a virtual check that reads `fields['owner.region']`
+ *   — a lookup that can only miss.
  *
  * `depth` is a cheap backstop against a self-referential `where` — in-process
  * callers hand over live objects, and a gate that can hang the read path is
  * worse than the defect it closes.
  */
-function collectFilterFieldNames(where: unknown, out: string[] = [], depth = 0): string[] {
+function collectFilterFieldNames(
+  where: unknown,
+  out: { named: string[]; dotted: string[] } = { named: [], dotted: [] },
+  depth = 0,
+): { named: string[]; dotted: string[] } {
   if (depth > 32) return out;
   if (!isFilterNode(where)) return out;
   for (const [key, value] of Object.entries(where)) {
@@ -456,8 +525,8 @@ function collectFilterFieldNames(where: unknown, out: string[] = [], depth = 0):
       }
       continue;
     }
-    if (key.includes('.')) continue;
-    out.push(key);
+    if (key.includes('.')) { out.dotted.push(key); continue; }
+    out.named.push(key);
   }
   return out;
 }
