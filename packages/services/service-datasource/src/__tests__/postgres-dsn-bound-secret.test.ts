@@ -62,14 +62,33 @@
  * ## Reverse verification (predicted in writing before running)
  *
  * Predicted with the pre-fix branch (`{ connectionString: url, ...(secret ?
- * { password } : {}) }`) restored over these tests at their fixed state: the
- * FIVE injecting cases go red on the resolved password, and the remaining cases
- * stay green — the no-secret passthrough, the two discrete-branch controls, the
- * "nothing else changed" equivalence sweep (it excludes `password` on purpose)
- * and the unparseable-DSN refusal, which the old branch never reached. The
- * shape matters: an arm-wide regression would mean this file measures something
- * other than the branch-local defect. Measured exactly that set — see the PR
- * body for the run.
+ * { password } : {}) }`) restored over these tests at their fixed state:
+ * **8 failed / 3 passed**, and specifically these —
+ *
+ *  - RED, the five credential cases, each on the resolved password: `null` for
+ *    the bare-username, no-userinfo and ssl/extras urls, `'embedded-legacy'`
+ *    for the stored userinfo row, `'from-query-param'` for the stored query
+ *    row. Those last two are the sharper direction: the credential is not
+ *    merely missing, it is someone else's.
+ *  - RED, the equivalence sweep — it excludes `password` from the key-by-key
+ *    comparison on purpose, but still asserts the injected value separately,
+ *    and that half fails.
+ *  - RED, the `connectionString`-absence mechanism pin: the old branch emits it.
+ *  - RED, the unparseable-DSN refusal, by a DIFFERENT route from all the
+ *    others — the old branch never parses, so it never throws and the
+ *    assertion fails for want of a rejection rather than on a credential.
+ *  - GREEN, the three cases that must not move: the no-secret passthrough and
+ *    both discrete-branch controls. The defect is branch-local, so an arm-wide
+ *    regression would mean this file measures something else.
+ *
+ * Measured exactly that set: 8 failed / 3 passed, first two failures verbatim —
+ *
+ * ```text
+ * × resolves the bound secret as the handshake password instead of nothing
+ *     AssertionError: expected null to be 's3cr3t-from-sys_secret'
+ * × lets the bound secret win over a legacy password embedded in a stored DSN
+ *     AssertionError: expected 'embedded-legacy' to be 's3cr3t-from-sys_secret'
+ * ```
  */
 
 import { describe, it, expect } from 'vitest';
