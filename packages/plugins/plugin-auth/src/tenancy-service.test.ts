@@ -61,7 +61,7 @@ describe('createTenancyService', () => {
     expect(t.degraded).toBe(false);
   });
 
-  // [ADR-0105 D1 / ADR-0081 D2] Multi-organization operation is an ENTITLEMENT.
+  // [ADR-0105 D1 / ADR-0105 D12] Multi-organization operation is an ENTITLEMENT.
   // The wall's code is open, but activating either walled posture requires the
   // enterprise org-scoping runtime — otherwise `group` would be a free multi-org
   // back door around the `isolated` gate. The iron rule (cloud ADR-0016) is

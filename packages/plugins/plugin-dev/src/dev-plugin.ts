@@ -645,7 +645,7 @@ export class DevPlugin implements Plugin {
 
     // 5. Security Plugin (RBAC, RLS, field-level masking)
     // OrganizationsPlugin (when multi-org; ENTERPRISE `@objectstack/organizations`,
-    // ADR-0081 D2) MUST register BEFORE SecurityPlugin because
+    // ADR-0105 D12) MUST register BEFORE SecurityPlugin because
     // SecurityPlugin.start() probes the `org-scoping` service (the historical
     // name the enterprise plugin keeps registering) and caches the result for
     // the lifetime of the plugin.

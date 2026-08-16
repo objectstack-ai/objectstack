@@ -2403,7 +2403,7 @@ export default class Serve extends Command {
             // BEFORE SecurityPlugin. The multi-org runtime (`organization_id`
             // auto-stamp, per-org seed replay, multi-org default-org bootstrap)
             // lives in the closed-source `@objectstack/organizations` package
-            // (ADR-0081 D2; it registers the historical `org-scoping` service
+            // (ADR-0105 D12; it registers the historical `org-scoping` service
             // SecurityPlugin probes at start() to keep vs strip the wildcard
             // `tenant_isolation` RLS — so registration order matters). Without
             // it, deployments are single-org: the open member-management

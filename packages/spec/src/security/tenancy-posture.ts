@@ -25,7 +25,7 @@
  * The wall's IMPLEMENTATION is open — the Layer 0 compiler, `accessible_org_ids`
  * resolution and the D5 write stamping all ship in open packages — but ENABLING
  * a multi-organization posture (`group` or `isolated`) requires the enterprise
- * `@objectstack/organizations` runtime (ADR-0081 D2). The two are separate
+ * `@objectstack/organizations` runtime (ADR-0105 D12). The two are separate
  * questions and must not be conflated: open code does not mean free activation.
  *
  * Cloud ADR-0016's 铁律 (强制免费、治理收费) is satisfied by the first half alone —
