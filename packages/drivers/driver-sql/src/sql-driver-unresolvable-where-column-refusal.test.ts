@@ -50,21 +50,25 @@
  *
  * `INVALID_FILTER` / 400 is required on both SQL drivers by
  * `cross-field-conformance-cases.ts`, so a fix pinned on one dialect proves
- * half the contract. The end-to-end sweep runs the `DIALECT_CELLS` cells whose
- * wording the driver recognises (SQLite always, live Postgres when the runner
- * provisions it), and the MESSAGE-SHAPE sweep at the bottom covers all three
- * dialects' real error texts unconditionally — that parsing is the only
- * dialect-sensitive part of the fix, and it must not go unmeasured on a runner
- * without a live server.
+ * half the contract. The end-to-end sweep runs every `DIALECT_CELLS` cell
+ * (SQLite always; live Postgres and MySQL when the runner provisions them),
+ * and the MESSAGE-SHAPE sweep at the bottom covers all three dialects' real
+ * error texts unconditionally — that parsing is the only dialect-sensitive
+ * part of the fix, and it must not go unmeasured on a runner without a live
+ * server.
  *
- * ⚠️ MySQL is NOT in the end-to-end sweep, and that omission is a measurement,
- * not an oversight: MySQL spells this condition `Unknown column 'x' in 'where
- * clause'`, which `isUnresolvableColumnError` matches with neither arm — so on
- * MySQL the raw dialect error has always travelled out and still does. The
- * message-shape sweep pins exactly that, so the gap is visible and goes red the
- * day someone widens the predicate. It is filed separately rather than closed
- * here because widening would also hand MySQL the #3821 recoveries it has never
- * had, which is an accept-set change in the opposite direction from this one.
+ * [#8926, maintainer ruling 2026-08-16] MySQL joined both sweeps one card
+ * after #8790. Until then its wording (`Unknown column 'x' in 'where clause'`
+ * / `'field list'` / `'order clause'`, `ER_BAD_FIELD_ERROR`) was matched by
+ * neither arm of the predicate — a deliberate, pinned gap, kept visible so it
+ * could only close by ruling. It closed as full dialect parity on the ONE
+ * shared predicate, which moves MySQL's accept set in both directions at
+ * once: an unresolvable WHERE column now refuses with the ADR-0112 envelope
+ * instead of throwing the raw dialect error with the bound literals inlined
+ * (the narrowing), and an unresolvable projection or ORDER BY now recovers
+ * through the #3821 ladder instead of throwing (the widening — a query that
+ * used to error returns rows, deliberately; see the direction pin in the
+ * message-shape sweep).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -82,8 +86,15 @@ const TABLE = 'unresolvable_where_task';
  */
 const SECRET_LITERAL = 'zz-bound-literal-must-not-leak';
 
-/** Cells whose unresolvable-column wording this driver recognises. */
-const RECOGNISED_CELLS = DIALECT_CELLS.filter((c) => c.id === 'sqlite' || c.id === 'pg');
+/**
+ * Cells whose unresolvable-column wording this driver recognises — since
+ * #8926, all three of them. The filter shape is kept so the day a fourth
+ * dialect joins `DIALECT_CELLS`, its wording's reach is a decision this suite
+ * states rather than a default it inherits.
+ */
+const RECOGNISED_CELLS = DIALECT_CELLS.filter(
+  (c) => c.id === 'sqlite' || c.id === 'pg' || c.id === 'mysql',
+);
 
 /**
  * The RULED scope: a plain column the table does not have.
@@ -129,14 +140,19 @@ const UNRESOLVABLE: ReadonlyArray<{ label: string; where: NonNullable<DriverQuer
  * message indistinguishable from a plain missing column — the driver cannot
  * tell `{'title.x': v}` (a path) from a column literally NAMED `title.x`
  * without inspecting the key for a `.`, which is judging dotted-ness and is
- * #8371's call. So this table pins the STATUS QUO, per dialect, and names the
- * owner of the verdict. ⛔ Do not "fix" a cell here by teaching the classifier
- * `42P01`: that mints a dotted-path verdict at the driver and pre-empts #8371.
- * MySQL's cell is owned by #8926 (its wording matches neither arm at all).
+ * #8371's call. Since #8926 MySQL sits in the same cell as SQLite: it too
+ * classifies the dotted key as an undefined COLUMN and spells it exactly like
+ * a plain missing one (`Unknown column 'title.x' in 'where clause'`), so the
+ * widened predicate refuses it enveloped — still without ever inspecting the
+ * key for a `.`. So this table pins the STATUS QUO, per dialect, and names
+ * the owner of the verdict. ⛔ Do not "fix" a cell here by teaching the
+ * classifier `42P01`: that mints a dotted-path verdict at the driver and
+ * pre-empts #8371, which owns the dotted-path axis on every dialect.
  */
 const DOTTED_STATUS_QUO: Readonly<Record<string, { code: string; enveloped: boolean }>> = {
   sqlite: { code: 'INVALID_FILTER', enveloped: true },
   pg: { code: '42P01', enveloped: false },
+  mysql: { code: 'INVALID_FILTER', enveloped: true },
 };
 
 async function caught(run: () => Promise<unknown>): Promise<any> {
@@ -314,8 +330,8 @@ describe(`[#8790] driver-sql — unresolvable WHERE column refuses on BOTH halve
 // A matrix that silently finds zero cells reports OK — assert the axis is real
 // before iterating it.
 describe('[#8790] the dialect axis this suite runs', () => {
-  it('covers the cells whose wording the driver recognises', () => {
-    expect(RECOGNISED_CELLS.map((c) => c.id)).toEqual(['sqlite', 'pg']);
+  it('covers the cells whose wording the driver recognises — all three since #8926', () => {
+    expect(RECOGNISED_CELLS.map((c) => c.id)).toEqual(['sqlite', 'pg', 'mysql']);
   });
 });
 
@@ -376,15 +392,40 @@ const DIALECT_MESSAGES: ReadonlyArray<{
     recognised: false,
     column: null,
   },
-  // ⚠️ The measured gap. MySQL's wording matches neither arm of the predicate,
-  // so this condition still travels out as the raw dialect error on MySQL.
-  // Pinned so the reach is a stated fact rather than an assumption, and so
-  // widening the predicate goes red here first.
+  // [#8926, maintainer ruling 2026-08-16] The gap the entry above's Postgres
+  // sibling still pins, CLOSED for MySQL. This entry spent #8790 pinned
+  // `recognised: false` precisely so the widening could not arrive quietly —
+  // flipping it here IS the ruling being enacted, not a test being fixed.
   {
-    dialect: 'mysql (ER_BAD_FIELD_ERROR) — NOT recognised, see the head note',
+    dialect: "mysql (ER_BAD_FIELD_ERROR), WHERE — recognised since #8926",
     message: "select * from `task` where `nosuchcol` = 'y' - Unknown column 'nosuchcol' in 'where clause'",
-    recognised: false,
-    column: null,
+    recognised: true,
+    column: 'nosuchcol',
+  },
+  // ER_BAD_FIELD_ERROR spells every clause position with one sentence, so the
+  // projection and ORDER-BY spellings ride the same arm — which is what routes
+  // them into the #3821 ladder's recoveries (see the direction pin below).
+  {
+    dialect: "mysql (ER_BAD_FIELD_ERROR), projection — 'field list'",
+    message: "select `title`, `nosuchfield` from `task` - Unknown column 'nosuchfield' in 'field list'",
+    recognised: true,
+    column: 'nosuchfield',
+  },
+  {
+    dialect: "mysql (ER_BAD_FIELD_ERROR), ORDER BY — 'order clause'",
+    message: "select * from `task` order by `nosuchfield` asc - Unknown column 'nosuchfield' in 'order clause'",
+    recognised: true,
+    column: 'nosuchfield',
+  },
+  // Unlike Postgres (undefined_table, the entry above), MySQL classifies a
+  // dotted key as an undefined COLUMN and spells it exactly like a plain
+  // missing one — so it is recognised the same way SQLite's dotted message is,
+  // without the key ever being inspected for a `.` (#8371 owns that axis).
+  {
+    dialect: 'mysql, dotted key — same ER_BAD_FIELD_ERROR sentence',
+    message: "select * from `task` where `title`.`x` = 'y' - Unknown column 'title.x' in 'where clause'",
+    recognised: true,
+    column: 'title.x',
   },
 ];
 
@@ -396,6 +437,28 @@ describe('[#8790] dialect wording — what the refusal recognises and what it na
       expect(unresolvableColumnNameOf(err)).toBe(column);
     });
   }
+
+  // ───────────────────────────────────────────────────────────────
+  // [#8926] THE WIDENING, PINNED AS A DIRECTION — not left implicit
+  // ───────────────────────────────────────────────────────────────
+
+  // Recognition is the single switch that routes a MySQL failure into the
+  // #3821 ladder, so these three clause positions being recognised IS the
+  // ruled behaviour change: a projection or ORDER BY that used to throw the
+  // raw dialect error now returns rows (recovered), and a WHERE now refuses
+  // with the envelope instead of leaking the bound literals. Narrowing any of
+  // the three back out — e.g. matching only 'where clause' to keep the
+  // envelope while withholding the recoveries — is the split predicate the
+  // ruling refused as option B. The live-cell sweep above measures the same
+  // fact end-to-end when a MySQL is provisioned; this pin holds it on every
+  // runner.
+  it('mysql: all three clause positions ride ONE arm — envelope and recoveries arrive together (#8926)', () => {
+    for (const clause of ["'where clause'", "'field list'", "'order clause'"]) {
+      const err = new Error(`select * from \`task\` - Unknown column 'nosuchcol' in ${clause}`);
+      expect(isUnresolvableColumnError(err), `clause position ${clause}`).toBe(true);
+      expect(unresolvableColumnNameOf(err), `clause position ${clause}`).toBe('nosuchcol');
+    }
+  });
 
   it('an unrecognised wording still refuses, just without a name', () => {
     // `null` from the extractor must never be read as "not an unresolvable

@@ -601,23 +601,34 @@ function unsupportedFilterError(message: string): Error {
  * one condition ended up with two behaviours: `find()` swallowed it into `[]`
  * and `count()`, having no copy of the test, threw the dialect's own error.
  *
- * ⚠️ REACH, deliberately UNCHANGED from the inline predicate this replaces —
- * SQLite (`no such column: x`) and Postgres (`column "x" does not exist`).
- * MySQL spells the same condition `Unknown column 'x' in 'where clause'`
- * (`ER_BAD_FIELD_ERROR`) and is matched by NEITHER arm, so on MySQL an
- * unresolvable column has always travelled out as the raw dialect error and
- * still does. That gap is real and is filed separately rather than closed
- * here: widening this predicate would ALSO hand MySQL the #3821 projection and
- * ORDER-BY recoveries it has never had, which is an accept-set change on a GA
- * read path in the opposite direction from the one #8790 was ruled on — not a
- * free extension of it. Widen it in a card that rules on that, not in passing.
+ * REACH — all three dialects this driver speaks: SQLite (`no such column: x`),
+ * Postgres (`column "x" does not exist`) and, since #8926, MySQL
+ * (`Unknown column 'x' in 'where clause'` / `'field list'` / `'order clause'`
+ * — `ER_BAD_FIELD_ERROR` spells every clause position with one sentence).
+ *
+ * [#8926, maintainer ruling 2026-08-16] The MySQL arm is the late one, and it
+ * was ruled rather than assumed, because this predicate serves both consumers
+ * at once and widening it therefore moves the accept set in BOTH directions in
+ * one line: MySQL gains the #8790 refusal envelope (`INVALID_FILTER` / 400
+ * naming the column, the dialect message with its inlined bound literals kept
+ * to the server log — the narrowing), AND it gains the #3821 projection and
+ * ORDER-BY recoveries it never had, so a query that used to throw the raw
+ * dialect error now returns rows (the widening). Both halves are intended —
+ * full dialect parity, one shared predicate; a split predicate (envelope
+ * without recoveries) was considered and refused as a second spelling of one
+ * fact. The widening is safe for the same structural reason #8790 could turn
+ * the ladder's terminal into a refusal: every rung is rebuilt from
+ * `buildBase()`, which unconditionally re-applies `query.where`, so a wider
+ * predicate hands MySQL a recovered projection or sort but can never drop a
+ * WHERE.
  */
 export function isUnresolvableColumnError(error: unknown): boolean {
   const message = (error as { message?: unknown } | null | undefined)?.message;
   if (typeof message !== 'string') return false;
   return (
     message.includes('no such column') ||
-    (message.includes('column') && message.includes('does not exist'))
+    (message.includes('column') && message.includes('does not exist')) ||
+    message.includes("Unknown column '")
   );
 }
 
@@ -655,6 +666,11 @@ export function unresolvableColumnNameOf(error: unknown): string | null {
   // Postgres, unquoted and possibly table-qualified: `column task.nosuchcol does not exist`
   const pgBare = /column\s+([A-Za-z0-9_$.]+)\s+does not exist/.exec(message);
   if (pgBare) return pgBare[1];
+  // MySQL (ER_BAD_FIELD_ERROR), every clause position with one sentence:
+  // `… - Unknown column 'nosuchcol' in 'where clause'` / `'field list'` /
+  // `'order clause'` [#8926]
+  const mysql = /Unknown column '([^']+)' in '/.exec(message);
+  if (mysql) return mysql[1];
   return null;
 }
 
