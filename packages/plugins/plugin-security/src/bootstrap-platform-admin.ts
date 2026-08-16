@@ -17,6 +17,32 @@
  * behavior moved to `@objectstack/organizations` (see
  * `ensureDefaultOrganization`). Install that plugin to get
  * multi-tenant bootstrap.
+ *
+ * ## Provenance of the seeded permission-set rows (#8692, ruled 2026-08-15)
+ *
+ * The seed insert stamps `managed_by: 'platform'` **explicitly**, so a fresh
+ * install's default sets are platform-owned and `os meta resync` reconciles
+ * them — which is what #2705 built the resync flag for. This also puts the
+ * seeder in line with its two siblings in this package,
+ * `bootstrap-builtin-positions.ts` and `bootstrap-system-capabilities.ts`,
+ * which have always stamped `'platform'` rather than inheriting a default.
+ *
+ * ⚠️ **Installs created BEFORE that ruling carry `'admin'` on these rows.**
+ * The pre-ruling insert omitted `managed_by` altogether, so the value came from
+ * the declared `defaultValue: 'admin'` in `objects/sys-permission-set.object.ts`
+ * — measured on a real engine (#8804: a seeded row stored `'admin'`, and a real
+ * resync returned `resynced 0 / resyncSkipped 8`, skipping every shipped
+ * default set).
+ *
+ * For those legacy rows the resync SKIP stands, permanently and by decision:
+ * a stored `'admin'` is **indistinguishable** between "the old seeder's field
+ * default" and "an administrator took this set over in Setup". So there is
+ * deliberately **no migration and no restamp** — rewriting them to `'platform'`
+ * would make genuine admin customizations reconcilable and could silently
+ * overwrite them on the next `os meta resync`. Report, don't rewrite. A legacy
+ * install that wants the platform defaults reconciled has to re-own the rows
+ * deliberately (or re-seed with `--fresh`); that is an operator's choice to
+ * make, not one a boot should make on their behalf.
  */
 
 import type { PermissionSet } from '@objectstack/spec/security';
@@ -34,18 +60,17 @@ interface BootstrapOptions {
    * the compiled declaration.
    *
    * Default (`false`) keeps the insert-once shape: an existing row is left
-   * untouched so an admin's Setup customizations survive every restart, and so
-   * the platform defaults stay env-authored (never clobbered — the exact
-   * posture `bootstrapDeclaredPermissions` relies on). This is correct for
-   * prod boot.
+   * untouched so an admin's Setup customizations survive every restart. This is
+   * correct for prod boot.
    *
    * `os meta resync` sets it to `true` to reconcile the DB rows to the shipped
    * `dist` after a source edit — the dev loop that insert-once otherwise makes
    * silently stale (a changed default set is served with its OLD value until a
    * `--fresh` wipe). Only platform-owned rows (`managed_by` absent or
-   * `'platform'`) are overwritten; a row an admin explicitly took over
-   * (`managed_by:'user'`) or a package owns (`'package'`) is left alone so the
-   * resync never destroys an intentional override.
+   * `'platform'`) are overwritten. Rows carrying any other provenance are left
+   * alone: `'user'` / `'admin'` (taken over in Setup — or, on a pre-#8692
+   * install, seeded before the platform stamped its own rows) and `'package'`
+   * (owned by package metadata).
    */
   resync?: boolean;
 }
@@ -92,6 +117,13 @@ function genId(prefix: string): string {
  * resync update so the two paths can never drift. Identity/provenance columns
  * (`id`, `name`, `active`, `managed_by`, `package_id`) are deliberately NOT
  * here — resync reconciles the declaration, never the ownership.
+ *
+ * [#8692] `managed_by` must stay out of this helper even though the seed insert
+ * now stamps it. Both paths share these fields, so adding it here would make
+ * every resync RESTAMP the row it reconciles -- silently converting a legacy
+ * `admin`-owned row (which may be a real Setup takeover) into a platform-owned
+ * one and clobbering it on that same pass. The insert stamps provenance at its
+ * own call site precisely so the resync update cannot.
  *
  * `description` / `adminScope` are read defensively: neither is on the typed
  * PermissionSet shape (name/label/objects/fields/...), but both persist when a
@@ -145,14 +177,11 @@ export async function bootstrapPlatformAdmin(
     if (existing.length > 0 && existing[0].id) {
       const row = existing[0];
       seeded[ps.name] = row.id;
-      // Insert-once by default: an existing row is env-authored config and is
-      // never clobbered on restart (protects admin Setup edits, and keeps the
-      // platform defaults env-authored — the posture bootstrapDeclaredPermissions
-      // relies on). Under `resync` (`os meta resync`, #2705) reconcile the row to
-      // the shipped dist so a dev source edit takes effect without `--fresh` —
-      // but only for rows the platform still owns. A row an admin explicitly took
-      // over (`managed_by:'user'`) or a package owns (`'package'`) is an
-      // intentional override and is left alone.
+      // Insert-once by default: an existing row is never clobbered on restart,
+      // which is what protects an admin's Setup edits. Under `resync`
+      // (`os meta resync`, #2705) reconcile the row to the shipped dist so a dev
+      // source edit takes effect without `--fresh` -- but only for rows the
+      // platform still owns.
       if (options.resync) {
         if (!row.managed_by || row.managed_by === 'platform') {
           if (await tryUpdate(ql, 'sys_permission_set', { id: row.id, ...platformOwnedFields(ps) })) {
@@ -160,8 +189,15 @@ export async function bootstrapPlatformAdmin(
           }
         } else {
           resyncSkipped += 1;
+          // [#8692] Neutral by ruling: state the provenance and the action, and
+          // claim NOTHING about intent. This used to say "(intentional
+          // override)", which is a lie for every row on a pre-#8692 install --
+          // there the only writer may have been this very seeder one call
+          // earlier, inheriting `defaultValue: 'admin'` rather than any admin
+          // deciding anything. The stored value cannot tell the two apart, so
+          // the log must not pretend it can.
           logger?.warn?.(
-            `[security] resync left ${ps.name} untouched — row is ${row.managed_by}-owned (intentional override)`,
+            `[security] resync left ${ps.name} untouched — row is ${row.managed_by}-owned`,
             { name: ps.name, managedBy: row.managed_by },
           );
         }
@@ -174,6 +210,14 @@ export async function bootstrapPlatformAdmin(
       name: ps.name,
       ...platformOwnedFields(ps),
       active: true,
+      // [#8692] Stamp provenance EXPLICITLY rather than letting it fall to the
+      // declaration's `defaultValue: 'admin'`. Without this the platform's own
+      // default sets are stored indistinguishably from admin-authored ones, so
+      // `os meta resync` skips every single one of them (measured in #8804:
+      // resynced 0 / resyncSkipped 8) -- the exact inverse of what #2705 built
+      // the flag for. Matches `bootstrap-builtin-positions.ts` and
+      // `bootstrap-system-capabilities.ts`, which already stamp `'platform'`.
+      managed_by: 'platform',
     });
     if (created?.id) seeded[ps.name] = created.id;
     else if (created) seeded[ps.name] = id;
