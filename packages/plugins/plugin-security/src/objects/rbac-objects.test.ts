@@ -101,6 +101,15 @@ describe('default permission sets', () => {
       'owner_only_writes',
       'sys_account_self',
       'sys_api_key_self',
+      // [#8839] The one DELETE-class per-object policy, and the only entry here
+      // that widens rather than narrows. `owner_only_deletes` above is a
+      // parent-blind second implementation of "who may remove this row", and on
+      // `sys_comment` it was answering ahead of plugin-audit's
+      // author-or-parent-editor gate — killing comment moderation in every
+      // org-bound deployment. This contributes the alternate match; the gate
+      // still decides. Maintainer-approved widening (2026-08-15), scoped to this
+      // object: the wildcard floor above is deliberately unchanged.
+      'sys_comment_moderation',
       'sys_device_code_self',
       // [#7344] The personal-inbox pair — not better-auth tables, but the same
       // `_self` shape for the same reason: no `organization_id`, so Layer 0 is

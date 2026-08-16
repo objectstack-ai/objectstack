@@ -239,3 +239,74 @@ describe('sys_invitation is row-scoped to its addressee (#8095)', () => {
     }
   });
 });
+
+/**
+ * [#8839] The `sys_comment` moderation carve-out — again a TRIPWIRE, not the
+ * proof. The proof is over HTTP, in
+ * `packages/qa/dogfood/test/comments-permission-matrix.dogfood.test.ts`, which
+ * boots org-bound and arms itself: an assertion whose expectation and reality
+ * both come from this module cannot fail, so nothing here shows that a
+ * moderator can actually delete anything.
+ *
+ * What this block buys is what the HTTP matrix cannot see. The matrix is blind
+ * to the `positions` DOMAIN — drop it and every case there stays green, because
+ * every principal it constructs holds `org_member` anyway. The domain exists for
+ * the principals the fixture does not build (an org-less session, an
+ * `everyone`-only anchor), where an undomained twin would carry a `using` into a
+ * delete class that is EMPTY today and thereby switch off #7665's
+ * derive-from-select rule — handing those principals a WIDER delete scope than
+ * they have now. So it is pinned here, structurally, next to the declaration.
+ */
+describe('sys_comment delete is moderation-shaped, not ownership-shaped (#8839)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const policiesFor = (setName: string, object: string): any[] =>
+    (setByName(setName)?.rowLevelSecurity ?? []).filter((p: any) => p.object === object);
+
+  it('member_default contributes the alternate match that stops the floor pre-empting the gate', () => {
+    const scoped = policiesFor('member_default', 'sys_comment');
+    expect(scoped.map((p) => p.name).sort()).toEqual(['sys_comment_moderation']);
+
+    const [policy] = scoped;
+    // The predicate IS the ruling, and its shape is deliberate: the
+    // parent-editor limb lives on ANOTHER record (the one `thread_id` names)
+    // and RLS has no join, so this policy contributes the alternate match and
+    // plugin-audit's gate keeps deciding. Written out rather than imported so
+    // that editing the module cannot edit the expectation with it.
+    expect(policy.using).toBe('id != null');
+    expect(policy.operation).toBe('delete');
+    expect(policy.enabled).not.toBe(false);
+
+    // The DOMAIN. Exactly the principals `owner_only_deletes` binds — no more.
+    expect(policy.positions).toEqual(['org_member']);
+  });
+
+  it('the wildcard delete floor itself is untouched — the widening is scoped to sys_comment', () => {
+    // ⛔ The ruling's explicit boundary. If this fails, the fix left the card:
+    // the floor must still be a wildcard `created_by` policy over the same
+    // domain, and `sys_comment` must be widened BESIDE it, never by loosening it.
+    const floor = (setByName('member_default').rowLevelSecurity ?? []).find(
+      (p: any) => p.name === 'owner_only_deletes',
+    );
+    expect(floor, 'member_default must keep the wildcard delete floor').toBeTruthy();
+    expect(floor.object).toBe('*');
+    expect(floor.operation).toBe('delete');
+    expect(floor.using).toBe('created_by == current_user.id');
+    expect(floor.positions).toEqual(['org_member']);
+
+    // The update limb is deliberately NOT widened: #8839 ruled on delete, which
+    // is the limb it measured. A `sys_comment` update policy appearing here is a
+    // second access-widening riding in on this one's ruling.
+    expect(policiesFor('member_default', 'sys_comment').map((p) => p.operation)).toEqual(['delete']);
+  });
+
+  it('no OTHER set quietly re-opens sys_comment', () => {
+    // The carve-out belongs to the one set that ships the floor. `viewer_readonly`
+    // and the admin sets must not have grown a twin — an admin already bypasses
+    // Layer 1, and a read-only viewer holding a delete-class policy is nonsense
+    // that would only ever be a mistake.
+    for (const setName of ['viewer_readonly', 'admin_full_access', 'organization_admin', 'organization_admin_no_bypass']) {
+      if (!setByName(setName)) continue;
+      expect(policiesFor(setName, 'sys_comment'), `${setName} sys_comment policies`).toEqual([]);
+    }
+  });
+});

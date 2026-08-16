@@ -814,6 +814,72 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         using: 'inviter_id == current_user.id',
         positions: [MEMBERSHIP_ROLE_DELEGATED_ADMIN],
       },
+      // [#8839] COMMENT MODERATION — the one object whose delete authority is
+      // NOT the `created_by` floor above, because a tighter authority already
+      // owns it and the floor was pre-empting it.
+      //
+      // Maintainer ruling (2026-08-15, accepting the escalation's reading 1):
+      // comment moderation is a declared, implemented capability and the
+      // platform delete floor must not pre-empt it. The widening is scoped to
+      // `sys_comment`; ⛔ the wildcard floor itself is NOT weakened.
+      //
+      // What was broken. `plugin-audit`'s comment gate
+      // (`plugin-audit/src/comment-access-hooks.ts`) implements an explicit
+      // author-or-parent-editor rule on `beforeDelete` — "Rewriting or removing
+      // someone else's words is moderation, hence the tighter
+      // author-or-parent-editor rule" — deriving a comment's access from the
+      // record its `thread_id` names, exactly as an attachment's derives from
+      // its parent. `owner_only_deletes` above is a SECOND, PARENT-BLIND
+      // implementation of the same question, and it runs FIRST: a parent-record
+      // editor moderating someone else's comment holds `org_member` and is not
+      // the comment's `created_by`, so the floor answered `PERMISSION_DENIED`
+      // before the moderation rule was ever consulted. Net effect measured in
+      // #8839: moderation was dead in EVERY org-bound deployment, and the only
+      // fixture that proved the capability
+      // (`qa/dogfood/test/comments-permission-matrix.dogfood.test.ts` case (d))
+      // was green solely because it booted org-less — #8023's disarm shape, so
+      // nothing saw it. That fixture is now armed and is this policy's pin.
+      //
+      // Why the predicate is `id != null` rather than a row-binding one. The
+      // parent-editor limb is not expressible as a row predicate: the authority
+      // lives on ANOTHER record (the one `thread_id` names, resolved through
+      // sharing's `canEdit`), and RLS has no join. So this policy does not
+      // re-implement the rule — it contributes the ALTERNATE MATCH that stops
+      // the floor pre-empting it, and the tighter rule stays where it is
+      // implemented. `id != null` is every row of this object, said plainly —
+      // the same spelling and the same reasoning as `sys_invitation_org_admin`
+      // above. What actually narrows `sys_comment` deletes is, in order: the
+      // object-level delete bit (this set grants NO `allowDelete` — it comes
+      // from an ordinary position-distributed set), Layer 0's tenant wall, and
+      // then plugin-audit's gate, which requires EVERY matched row to pass and
+      // fails closed on a thread naming no authorizable parent. That gate is
+      // not optional: `AuditPlugin` registers `sys_comment` and installs the
+      // gate in the same `start()` (`audit-plugin.ts`), so the object cannot
+      // exist in a deployment where this policy is the last word.
+      //
+      // Why the `positions` DOMAIN is load-bearing, not decoration. It confines
+      // the widening to exactly the principals `owner_only_deletes` binds. An
+      // UNDOMAINED twin would reach principals whose delete-class collection is
+      // empty today (an org-less session, `everyone`-only anchors) — and an
+      // empty write class is precisely the trigger for #7665's
+      // derive-from-select rule (`security-plugin.ts`: derive only when no
+      // write-scope predicate applies). Adding a `using` for those principals
+      // would switch that derivation OFF and hand them a WIDER delete scope
+      // than they have today, on every `sys_comment` row. The domain keeps
+      // their collection empty and their behaviour byte-identical.
+      //
+      // `delete` only — not `all`. `update` is the other half of plugin-audit's
+      // rule, and it is deliberately left under the floor: #8839 ruled on the
+      // delete limb, which is the one it measured. Widening the edit limb is a
+      // separate decision on the same manual floor; do not fold it in here
+      // because the gate happens to share a code path.
+      {
+        name: 'sys_comment_moderation',
+        object: 'sys_comment',
+        operation: 'delete',
+        using: 'id != null',
+        positions: ['org_member'],
+      },
     ],
   }),
   PermissionSetSchema.parse({

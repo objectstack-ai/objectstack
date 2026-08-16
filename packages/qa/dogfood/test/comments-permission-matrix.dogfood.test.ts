@@ -19,42 +19,74 @@
 //   (e) author_id provenance stamping
 //   (f) enable.feeds stays orthogonal, anonymous stays 401
 //
-// ⚠️ READ THIS BEFORE TRUSTING CASE (d)'s MODERATION LIMB ⚠️
+// ⚠️ WHY THIS FILE IS ORG-BOUND, AND WHY THAT IS THE POINT ⚠️
 //
-// [#8408 / #8839] This file boots ORG-LESS, and the moderation half of case (d)
-// — "a user who can EDIT the record may moderate anyone's comment on it" — is
-// GREEN ONLY BECAUSE OF THAT. It is #8023's disarm, measured here rather than
-// suspected:
+// [#8408 / #8839] This file used to boot ORG-LESS, and the moderation half of
+// case (d) — "a user who can EDIT the record may moderate anyone's comment on
+// it" — was GREEN ONLY BECAUSE OF THAT. It was #8023's disarm, measured rather
+// than suspected:
 //
 //   • the platform ships a wildcard row-level DELETE floor (`owner_only_deletes`,
 //     object '*', `created_by == current_user.id`, positions ['org_member'] —
 //     `plugin-security/src/objects/default-permission-sets.ts`);
 //   • an org-less boot hands every sign-up `positions: ['everyone']`, so a
-//     principal never holds `org_member` and that floor NEVER APPLIES here;
-//   • flipping this boot to `orgContext: true` and changing nothing else turns
+//     principal never held `org_member` and that floor NEVER APPLIED here;
+//   • flipping the boot to `orgContext: true` and changing nothing else turned
 //     the moderation assertion RED with `PERMISSION_DENIED` on `sys_comment`,
 //     while the other 9 cases — including (d)'s FIRST half, the author deleting
-//     their OWN comment — stay green.
+//     their OWN comment — stayed green.
 //
 // So the capability `plugin-audit/src/comment-access-hooks.ts` describes as the
-// "author-or-parent-editor rule" is refused by the platform floor before that
-// rule is ever consulted, in every deployment that has an organization. This
-// fixture is not evidence that moderation works; it is evidence that moderation
-// works WHEN NOBODY IS AN ORG MEMBER.
+// "author-or-parent-editor rule" was refused by the platform floor before that
+// rule was ever consulted, in every deployment that has an organization. The
+// fixture was not evidence that moderation works; it was evidence that
+// moderation works WHEN NOBODY IS AN ORG MEMBER.
 //
-// ⛔ Do NOT "fix" this by adding `orgContext: true` + `assertArmed` here. That
-// arming is correct and is deliberately NOT applied yet: it would land a red
-// test over an unsettled contract question (#8839 states the two readings —
-// platform floor should yield to a per-object `sys_comment` delete policy, or
-// case (d) over-claims a capability the platform does not offer). #8839 owns
-// that decision; this file gets armed as part of whichever way it lands.
+// Maintainer ruling (2026-08-15, #8839 — reading 1): moderation is a declared,
+// implemented capability and the platform delete floor must not pre-empt it.
+// `member_default` now carries a per-object `sys_comment_moderation` delete
+// policy (`id != null`, domained to `org_member`) contributing the alternate
+// match, so the floor no longer answers first and plugin-audit's gate — the
+// authority that can actually see the parent record — decides. The reading that
+// case (d) over-claims a capability the platform does not offer was considered
+// and REJECTED.
+//
+// This file is therefore now ARMED, and the arming is the pin: `orgContext:
+// true` below plus `assertArmed`/`principalArmed` in `beforeAll`. ⛔ Do NOT
+// "simplify" the boot back to org-less — that is not a cheaper fixture, it is
+// this file certifying the moderation capability while structurally unable to
+// observe the floor that used to kill it.
+//
+// What the 9 other cases are for, stated so nobody trims them: they are what
+// demonstrates the widening is SCOPED to the moderation limb. Case (d)'s first
+// half in particular — the author deleting their own comment, and a stranger
+// without parent EDIT still refused — is the negative control. It is green both
+// before and after the fix; only the refusal's PROVENANCE moves (the floor's
+// `PERMISSION_DENIED` becomes the gate's `RECORD_NOT_ACCESSIBLE`), which is why
+// it accepts either code.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 import { commentsFixtureStack, commentsFixtureSecurity } from './fixtures/comments-fixture.js';
+import { assertArmed, principalArmed } from './armed.js';
 
 const SYS = { isSystem: true } as const;
+
+/**
+ * [#8074 / #8839] The control this file measures, and the default that silences
+ * it. Named here so the failure message says what was disarmed rather than
+ * which assertion happened to notice.
+ */
+const DELETE_FLOOR =
+  "the platform's wildcard row-level DELETE floor (`owner_only_deletes`, " +
+  "positions ['org_member']) and the `sys_comment_moderation` policy that now " +
+  'contributes the author-or-parent-editor alternate match past it';
+const DELETE_FLOOR_DISARM =
+  'an org-less harness: no organization ⇒ no `sys_member` row ⇒ a fresh sign-up holds only ' +
+  "`['everyone']` ⇒ neither the floor nor the moderation policy applies, and case (d)'s " +
+  'moderation limb passes without ever exercising either. `orgContext: true` in the boot ' +
+  'options below is what arms it.';
 
 /** Extract the created record id from a REST create response ({id} | {record:{id}}). */
 async function createdId(res: Response): Promise<string> {
@@ -87,6 +119,11 @@ describe('sys_comment permission matrix (#4630)', () => {
       // AuditPlugin owns sys_comment: the #2707 enable.feeds gate AND the
       // #4630 record-level gates both ride on it.
       extraPlugins: [new AuditPlugin()],
+      // [#8839] Org-bound on purpose — see the header. A `sys_member` row is
+      // what makes a sign-up hold `org_member`, which is what brings BOTH the
+      // wildcard delete floor and the `sys_comment_moderation` policy into
+      // scope. Org-less, case (d)'s moderation limb measures neither.
+      orgContext: true,
     });
     adminTok = await stack.signIn();
     memberATok = await stack.signUp('cmt-member-a@verify.test');
@@ -103,6 +140,41 @@ describe('sys_comment permission matrix (#4630)', () => {
     for (const userId of [memberAId, memberBId]) {
       await ql.insert('sys_user_permission_set', { user_id: userId, permission_set_id: managerSet.id }, { context: { ...SYS } });
     }
+
+    // [#8074 / #8839] The precondition the header records in prose, now read off
+    // the live stack and enforced BEFORE anything is measured. Asserted here
+    // rather than in an `it()` on purpose: a disarmed fixture must produce ZERO
+    // green cells, and #8023's harm was exactly one green cell in a matrix that
+    // otherwise looked healthy.
+    //
+    // BOTH members are probed, because they play both sides of the limb this
+    // file exists to pin: memberA is the AUTHOR whose comment gets moderated,
+    // memberB is the MODERATOR whose parent-EDIT right the floor used to
+    // ignore. A probe on one of them alone would leave the other free to drift
+    // org-less and re-disarm half the matrix. `cmt_comment_manager` is checked
+    // too — without the delete BIT the request never reaches row-level
+    // evaluation at all, and case (d) would pass on an RBAC refusal while
+    // reading as a moderation result.
+    await assertArmed([
+      principalArmed({
+        stack,
+        token: memberATok,
+        who: 'memberA (the comment AUTHOR)',
+        positions: ['org_member'],
+        permissions: ['cmt_comment_manager'],
+        control: DELETE_FLOOR,
+        disarmedBy: DELETE_FLOOR_DISARM,
+      }),
+      principalArmed({
+        stack,
+        token: memberBTok,
+        who: 'memberB (the MODERATOR — parent-editor, not the author)',
+        positions: ['org_member'],
+        permissions: ['cmt_comment_manager'],
+        control: DELETE_FLOOR,
+        disarmedBy: DELETE_FLOOR_DISARM,
+      }),
+    ]);
 
     const openRes = await stack.apiAs(memberATok, 'POST', '/data/cmt_open', { name: 'open record' });
     expect(openRes.status).toBeLessThan(300);
