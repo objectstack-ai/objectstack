@@ -104,8 +104,24 @@ import process from 'node:process';
 
 const ROOT = new URL('../..', import.meta.url).pathname;
 
-/** The tool under test, repo-relative — and this gate's only watch hint. */
+/** The tool under test, repo-relative — and one of this gate's two watch hints. */
 const TOOL = 'scripts/pm/dispatch-gates.mjs';
+
+/**
+ * The tool's shared enumeration module, declared so a card editing it derives
+ * this gate (#9116).
+ *
+ * The tool imports its i18n walks from there instead of mirroring the gate's
+ * copies, which is the point of that module — but an import specifier is not a
+ * discoverable watch hint (`../i18n-bundle-surface.mjs` strips to a bare
+ * filename, which the extractor rejects as unpathy). Without this constant, a
+ * change to the shared module would move this gate's verdict — the tool's
+ * self-test drives those very functions — while deriving nothing, which is the
+ * blind-spot shape the tool exists to remove. Named here, not in the tool: this
+ * family resolves to THIS file, and hints are scanned from the file a family
+ * resolves to. Pinned live in the tool's own self-test.
+ */
+const SURFACE_MODULE = 'scripts/i18n-bundle-surface.mjs';
 
 const result = spawnSync(process.execPath, [join(ROOT, TOOL), '--self-test'], { stdio: 'inherit' });
 

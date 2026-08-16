@@ -28,8 +28,10 @@
 // `ObjectStackDefinitionSchema` strict (rejected option C, which would silence
 // the lint itself — see `metadata-authoring-lint.ts`).
 //
-// Coverage needs no manifest: `findConfigs` walks `packages/`, so a config that
-// lands tomorrow is gated tomorrow.
+// Coverage needs no manifest: `findExtractConfigs` walks `packages/`, so a
+// config that lands tomorrow is gated tomorrow. That walk is shared with the
+// dispatch-gates derivation rather than mirrored by it (#9116) — see
+// SURFACE_MODULE below.
 //
 // The command each package is checked with is not repeated here: it is parsed
 // out of the config file's own docstring, which already documents how to
@@ -84,9 +86,7 @@
 // is the classifier that closes that gap, and the verdict it raises is a hard
 // prerequisite failure naming the package whose dist is stale — never a count.
 import { spawnSync } from 'node:child_process';
-import { readFileSync, existsSync } from 'node:fs';
-import { readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import {
   CLI,
   CLI_BUILD_FIX,
@@ -96,6 +96,24 @@ import {
   resolveCliCommandFile,
   workspaceBuildFix,
 } from './cli-build-prerequisite.mjs';
+import { findExtractConfigs, flagsFromDocstring } from './i18n-bundle-surface.mjs';
+
+/**
+ * The module this gate's POPULATION is enumerated by, declared as a whole
+ * literal so the derivation can see it (#9116).
+ *
+ * `findConfigs` and `flagsFromDocstring` used to live in this file, and
+ * scripts/pm/dispatch-gates.mjs carried a hand-written mirror of the first —
+ * two spellings of one contract, agreeing only until one side moved. They are
+ * imported from one module now. That module is a real input of this gate, but
+ * an import specifier is not a discoverable watch hint (the leading `./`
+ * strips to a bare filename), so a card editing the shared enumeration would
+ * derive nothing at all. Naming it here as a bare module-body constant is what
+ * makes this family match such a card — the same declared-coupling shape
+ * check-type-check-coverage.mjs uses for the root-program script whose errors
+ * it ratchets, and it is pinned live in dispatch-gates' own self-test.
+ */
+const SURFACE_MODULE = 'scripts/i18n-bundle-surface.mjs';
 
 /** The one command this gate invokes per package, as oclif topic/command parts. */
 const EXTRACT_COMMAND_ID = ['i18n', 'extract'];
@@ -103,28 +121,11 @@ const write = process.argv.includes('--write');
 const filterArg = process.argv.find((a) => a.startsWith('--filter='));
 const filter = filterArg ? filterArg.slice('--filter='.length) : '';
 
-/** Every `scripts/i18n-extract.config.ts` under packages/. */
-function findConfigs(dir, out = []) {
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    if (e.name === 'node_modules' || e.name === 'dist' || e.name.startsWith('.')) continue;
-    const p = join(dir, e.name);
-    if (e.isDirectory()) findConfigs(p, out);
-    else if (e.name === 'i18n-extract.config.ts' && p.includes('/scripts/')) out.push(p);
-  }
-  return out;
-}
-
-/**
- * Read the regenerate command the config documents about itself. Every flag the
- * gate passes comes from there, so a package that changes its locales or output
- * directory updates one place and the gate follows.
- */
-function flagsFromDocstring(configPath) {
-  const src = readFileSync(configPath, 'utf8');
-  const head = src.slice(0, src.indexOf('*/') + 2);
-  const flags = head.match(/--(?:locales|fill|out)=[^\s\\*]+|--(?:objects-only|no-metadata-forms|no-merge)\b/g) ?? [];
-  return [...new Set(flags)];
-}
+// `findConfigs` (every scripts/i18n-extract.config.ts under packages/) and
+// `flagsFromDocstring` (the regenerate command each config documents about
+// itself) moved to the shared module named in SURFACE_MODULE above. This gate
+// and the dispatch-gates derivation now run the SAME walk instead of two
+// spellings of it; see that module's header for why the mirror had to go.
 
 // ---------------------------------------------------------------------------
 // Output classifiers. Pure string -> findings, so `--self-test` can drive them
@@ -653,7 +654,10 @@ function checkCliBuildPrerequisite() {
 
 checkCliBuildPrerequisite();
 
-const configs = findConfigs('packages').sort().filter((c) => !filter || c.includes(filter));
+const configs = findExtractConfigs('packages', 'packages')
+  .map((c) => c.rel)
+  .sort()
+  .filter((c) => !filter || c.includes(filter));
 if (configs.length === 0) {
   console.error(`check-i18n-bundles: no extract configs matched${filter ? ` --filter=${filter}` : ''}`);
   process.exit(1);

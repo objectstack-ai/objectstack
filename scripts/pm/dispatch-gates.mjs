@@ -68,8 +68,21 @@
  */
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import process from 'node:process';
+import {
+  anyConfigExtractsMetadataForms,
+  findExtractConfigs,
+  findMetadataFormModules,
+  flagsExtractMetadataForms,
+  isExtractConfigPath,
+  isMetadataFormModulePath,
+} from '../i18n-bundle-surface.mjs';
+
+// Re-exported so this tool's self-test drives the SAME predicates the gate
+// runs, not copies of them. They used to be written twice — see the shared
+// module's header, and the i18n entry in CHANGE_KIND_GATES below.
+export { isExtractConfigPath, isMetadataFormModulePath };
 
 const ROOT = new URL('../..', import.meta.url).pathname;
 
@@ -681,17 +694,14 @@ export function isTestFilePath(path) {
 }
 
 /**
- * Does this path name an i18n extract config, judged the way `check:i18n`
- * judges it? `scripts/check-i18n-bundles.mjs` (`findConfigs`, ~line 107) tests
- * the FILENAME and additionally requires the file to sit under a `scripts/`
- * directory: `e.name === 'i18n-extract.config.ts' && p.includes('/scripts/')`.
- * Mirrored exactly rather than approximated — a copy that widened the test
- * would name a gate that cannot move, the failure mode this whole script
- * exists to avoid.
+ * `isExtractConfigPath` is imported at the top of this file, not defined here.
+ *
+ * It used to be a hand-written mirror of the gate's own filename test, with a
+ * comment saying so ("mirrored exactly rather than approximated"). A mirror is
+ * a second contract: it agrees until one side moves, and nothing reports the
+ * day it stops agreeing. The test, the walk and the docstring-flag parse now
+ * live once in the shared module and BOTH readers import them (#9116).
  */
-export function isExtractConfigPath(path) {
-  return basename(path) === 'i18n-extract.config.ts' && path.includes('/scripts/');
-}
 
 /**
  * The package directory that OWNS an extract config: everything above the
@@ -725,39 +735,74 @@ export function isInI18nBundlePackage(path, ownerDirs) {
 }
 
 /**
- * Walk `packages/` for extract configs exactly the way the gate walks it —
- * same skip set (`node_modules`, `dist`, dotted entries), same file test — and
- * return the repo-relative package directories that own one, deduped.
+ * The repo-relative package directories that own an extract config, deduped —
+ * derived from the GATE'S OWN walk, imported rather than mirrored.
  *
  * Runtime discovery, like `extractCheckInvocations` re-reading the workflows:
  * when a tenth package grows a bundle, the next run matches it with nothing to
- * update here. `absDir` is the directory to read; `rel` is the repo-relative
- * path it corresponds to, so the answers are comparable to the input paths a
- * card is dispatched with.
+ * update here.
  */
-export function findI18nBundlePackages(absDir, rel = 'packages', out = []) {
-  for (const e of readdirSync(absDir, { withFileTypes: true })) {
-    if (e.name === 'node_modules' || e.name === 'dist' || e.name.startsWith('.')) continue;
-    const child = `${rel}/${e.name}`;
-    if (e.isDirectory()) findI18nBundlePackages(join(absDir, e.name), child, out);
-    else if (isExtractConfigPath(child)) {
-      const owner = owningPackageOfExtractConfig(child);
-      if (owner && !out.includes(owner)) out.push(owner);
-    }
+export function findI18nBundlePackages(configs) {
+  const out = [];
+  for (const { rel } of configs) {
+    const owner = owningPackageOfExtractConfig(rel);
+    if (owner && !out.includes(owner)) out.push(owner);
   }
   return out;
 }
 
 /**
- * The walk, memoised per process — one answer serves every input path. An
+ * The two walks, memoised per process — one answer serves every input path. An
  * unreadable `packages/` throws rather than degrading to "no owners": under
  * this script's contract unreadable input must never look like an empty
  * answer, and the entrypoint turns the throw into a non-zero exit.
  */
+let i18nConfigs = null;
+function i18nExtractConfigs() {
+  i18nConfigs ??= findExtractConfigs(join(ROOT, 'packages'), 'packages');
+  return i18nConfigs;
+}
+
 let i18nOwnerDirs = null;
 export function i18nBundlePackageDirs() {
-  i18nOwnerDirs ??= findI18nBundlePackages(join(ROOT, 'packages'));
+  i18nOwnerDirs ??= findI18nBundlePackages(i18nExtractConfigs());
   return i18nOwnerDirs;
+}
+
+/**
+ * The metadata form modules in the tree, memoised — the population of the
+ * SECOND i18n entry below.
+ */
+let formModules = null;
+export function metadataFormModulePaths() {
+  formModules ??= findMetadataFormModules(join(ROOT, 'packages'), 'packages');
+  return formModules;
+}
+
+/**
+ * Does any package still commit the shared Studio metadata-form baseline?
+ * Read from the configs' own documented flags, memoised — see the shared
+ * module's `anyConfigExtractsMetadataForms`.
+ */
+let metadataFormsExtracted = null;
+export function metadataFormsSurfaceIsExtracted() {
+  metadataFormsExtracted ??= anyConfigExtractsMetadataForms(i18nExtractConfigs());
+  return metadataFormsExtracted;
+}
+
+/**
+ * Does this input path reach a metadata form module?
+ *
+ * A card's surface is named before its code exists, so a directory argument
+ * counts when it CONTAINS one — `packages/spec/src/ui` really does cover seven
+ * of them. The containment is one-directional in the same sense
+ * `isInI18nBundlePackage` is: an input that collapses to a bare top-level
+ * directory (`packages`) is refused, because such an input covers the whole
+ * tree below it and would print this gate for every card in the repo.
+ */
+export function reachesMetadataFormModule(path, modulePaths) {
+  if (!path.includes('/')) return false;
+  return modulePaths.some((m) => m === path || m.startsWith(`${path}/`));
 }
 
 /**
@@ -847,15 +892,42 @@ export function i18nBundlePackageDirs() {
  * that objection because the trigger is the gates' own population test, mirrored
  * (`isTestFilePath`), not a guess at which scripts look test-flavoured.
  *
- * ## What the i18n entry still refuses to list
+ * ## What the two i18n entries still refuse to list
  *
- * Its `matches` does not enumerate the packages that own a bundle today — it
- * repeats the gate's own walk (`findI18nBundlePackages` mirrors `findConfigs`
- * in `scripts/check-i18n-bundles.mjs`: same skip set, same filename-plus-
- * `/scripts/` test). What is written down here is the KIND, not its
- * population, so a tenth package growing a bundle is matched by the next run
- * with nothing to update — the same runtime-discovery contract the workflow
- * and package.json reads already keep.
+ * Neither `matches` enumerates anything. The first walks for the packages that
+ * own a bundle, the second for the tree's metadata form modules, and both walks
+ * are the GATE'S OWN, imported from `scripts/i18n-bundle-surface.mjs` rather
+ * than mirrored here. That import is the fix for a defect this file used to
+ * carry in its own comment: `findI18nBundlePackages` was a hand-written copy
+ * described as mirroring `findConfigs` "exactly", which is a second contract
+ * with no way to report the day it stopped agreeing. What is written down here
+ * is the KIND, not its population, so a tenth package growing a bundle — or an
+ * eighteenth form module — is matched by the next run with nothing to update.
+ *
+ * ## Why the SECOND i18n entry exists (#9116)
+ *
+ * The owning-package entry answers for one of a bundle's two producers. The
+ * `objects` half is enumerated by the config's own package, so the owning
+ * package is the trigger surface. The `metadataForms` half is registry-driven
+ * and identical for every stack, so exactly ONE package commits that baseline
+ * (`platform-objects`; every other config passes `--no-metadata-forms`) while
+ * its source sits in `packages/spec`, which owns no extract config and which
+ * the gate's walk never reaches.
+ *
+ * Measured, and paid for once: PR #9113 added two form entries in
+ * `packages/spec/src/data/`, four `platform-objects` metadata-form bundles
+ * moved, `check:i18n` reddened on CI, and the dev's diff-derived gate union
+ * could not have named the family — the path derivation misses it for the
+ * reason stated above, and the owning-package entry does not cover
+ * `packages/spec`. Cost: one CI round trip plus a patch commit. The invariant
+ * the card states is the one this entry restores — a gate a diff can move must
+ * be derivable FROM that diff; `undetermined` is an honest unknown, not a
+ * standing blind spot on a known edge.
+ *
+ * Its applicability is read, never assumed: `metadataFormsSurfaceIsExtracted`
+ * asks the configs' own documented flags whether any package still commits that
+ * baseline. The day the last one opts out, no form module can move a committed
+ * bundle and this entry stops firing on its own.
  *
  * ## How these entries stay honest
  *
@@ -906,6 +978,11 @@ export function i18nBundlePackageDirs() {
  *     owning package path starts with — the path half matches and this entry
  *     is redundant. Growing more prerequisite paths does not qualify; that is
  *     what it already has.
+ *   - metadata-form entry: when every extract config passes
+ *     `--no-metadata-forms`, no form module can move a committed bundle. That
+ *     day the entry stops firing by itself (its `matches` reads the flags), so
+ *     delete it only once the opt-out is the permanent shape rather than a
+ *     transient one.
  *
  *   Delete an entry the day its criterion is met, not before.
  */
@@ -943,6 +1020,16 @@ export const CHANGE_KIND_GATES = [
       {
         name: 'check:i18n',
         why: "it re-extracts every owning package's translation bundles and fails on drift, so any edit that changes what the extractor emits (an object definition, a label, the config itself) moves it — regenerate with `node scripts/check-i18n-bundles.mjs --write`",
+      },
+    ],
+  },
+  {
+    kind: 'edits a metadata form module (a *.form.ts the Studio form registry collects)',
+    matches: (path) => metadataFormsSurfaceIsExtracted() && reachesMetadataFormModule(path, metadataFormModulePaths()),
+    gates: [
+      {
+        name: 'check:i18n',
+        why: "the metadataForms half of the bundles is registry-driven, so a form's sections, field labels, helpText or placeholder are extracted into ONE package's committed bundles — platform-objects today — and a form edit drifts them from a package your diff never touches. This is the edge PR #9113 paid a CI round for. Same repair as the entry above: regenerate with `node scripts/check-i18n-bundles.mjs --write` and commit the moved bundles",
       },
     ],
   },
@@ -1647,6 +1734,58 @@ function selfTest() {
   t('the i18n section names check:i18n exactly, runnably', i18nHit.some((l) => l.includes('- pnpm check:i18n   —')));
   t('a path outside every owning package emits no i18n section', !changeKindLines(['packages/objectql/src/engine.ts'], resolved).some((l) => l.includes('check:i18n')));
 
+  // ── The metadata-form edge (#9116) ────────────────────────────────────────
+  //
+  // The bundles' OTHER producer, and the half no owning-package test can reach:
+  // the metadataForms surface is registry-driven, its source lives in
+  // packages/spec, and packages/spec owns no extract config. Pure judgments
+  // first, then the live tree, then both rendering directions.
+  t('a form module is one', isMetadataFormModulePath('packages/spec/src/data/object.form.ts'));
+  t('its sibling schema is not', !isMetadataFormModulePath('packages/spec/src/data/object.zod.ts'));
+  t('a bare .form.ts with no name is not one', !isMetadataFormModulePath('packages/spec/src/data/.form.ts'));
+  t('a form module test file is not one', !isMetadataFormModulePath('packages/spec/src/data/object.form.test.ts'));
+
+  const formMods = ['packages/spec/src/data/object.form.ts', 'packages/spec/src/ui/view.form.ts'];
+  t('the module itself reaches', reachesMetadataFormModule('packages/spec/src/data/object.form.ts', formMods));
+  t('a directory CONTAINING one reaches (a card surface is named before its files exist)', reachesMetadataFormModule('packages/spec/src/ui', formMods));
+  t('a sibling sharing a name prefix does not', !reachesMetadataFormModule('packages/spec/src/dat', formMods));
+  t('an unrelated package does not', !reachesMetadataFormModule('packages/objectql/src/engine.ts', formMods));
+  // The over-broad direction, the expensive one: a bare top-level directory
+  // covers the whole tree below it, so it must not drag every form module in.
+  t('a bare top-level directory is refused', !reachesMetadataFormModule('packages', formMods));
+
+  // Applicability is READ from the configs, not assumed — the flag that decides
+  // whether any package still commits the shared baseline at all.
+  t('a config with no opt-out extracts the metadata-form surface', flagsExtractMetadataForms(['--locales=zh-CN', '--fill=default']));
+  t('the opt-out flag removes it', !flagsExtractMetadataForms(['--objects-only', '--no-metadata-forms']));
+
+  // The live tree — the half no fixture can prove.
+  const liveForms = metadataFormModulePaths();
+  t('the live walk discovers form modules', liveForms.length > 0 && liveForms.every((f) => f.endsWith('.form.ts')));
+  t('the live walk finds no duplicates', new Set(liveForms).size === liveForms.length);
+  // If this flips, the entry stops firing BY DESIGN (every package opted out of
+  // the shared baseline) — read the entry's deletion criterion before "fixing" it.
+  t('some package still commits the shared metadata-form baseline', metadataFormsSurfaceIsExtracted());
+
+  // Regression pin for the measured incident (PR #9113): these two exact paths
+  // moved four platform-objects bundles, reddened check:i18n on CI, and derived
+  // NOTHING — the family appeared in neither half of the output. Anchored on the
+  // rendered delimiters for the reason the entry above states: a bare substring
+  // stays green through a prefix-preserving rename, the one rot the STALE branch
+  // exists to catch.
+  const formHit = changeKindLines(['packages/spec/src/data/object.form.ts', 'packages/spec/src/data/field.form.ts'], resolved);
+  t('the measured incident paths now emit the metadata-form section', formHit.length === 2 && formHit[0].includes('metadata form module'));
+  t('that section names check:i18n exactly, runnably', formHit.some((l) => l.includes('- pnpm check:i18n   —')));
+  t('and it names both incident paths, not just the first', formHit[0].includes('object.form.ts') && formHit[0].includes('field.form.ts'));
+  // The over-trigger direction, which the card demanded in its own right: a spec
+  // change that touches no form must NOT be pushed into this gate. Both a schema
+  // beside a real form module and an unrelated package are pinned, because the
+  // first is the one a filename convention could plausibly over-reach into.
+  t('a spec schema next door to a form emits no i18n section', !changeKindLines(['packages/spec/src/data/filter.zod.ts'], resolved).some((l) => l.includes('check:i18n')));
+  t('an unrelated package still emits no i18n section', !changeKindLines(['packages/rest/src/rest-server.ts'], resolved).some((l) => l.includes('check:i18n')));
+  const formStale = changeKindLines(['packages/spec/src/data/object.form.ts'], () => null);
+  t('an undiscoverable check:i18n renders STALE for this entry too', formStale.filter((l) => l.includes('⚠ check:i18n: STALE')).length === 1);
+
   // The measured incident (#8410 / PR #8399), pinned against the REAL workflow
   // rather than a fixture: a fixture proves the parser, only the live file
   // proves that THIS repo's changeset gate is reachable. `Check Changeset`
@@ -1764,6 +1903,30 @@ function selfTest() {
     'so a card editing that script is MATCHED through that constant, not dropped as silent',
     coupledVerdict.verdict === 'matched' && coupledVerdict.hits[0]?.hint === 'scripts/check-test-typecheck.mts',
   );
+
+  // The same coupling, for the module this file now IMPORTS its i18n walks from
+  // (#9116). Sharing one enumeration between the gate and this tool removed a
+  // mirror, and it would have opened a smaller hole of exactly the kind this
+  // card is about: an import specifier is not a discoverable hint, so a card
+  // editing the shared module could move two gates while deriving neither.
+  // Both are pinned LIVE against the real files — delete either constant and
+  // this reddens instead of the silence coming back.
+  const SHARED = 'scripts/i18n-bundle-surface.mjs';
+  t(
+    'the i18n gate declares the module its population is enumerated by',
+    covers(readHints('scripts/check-i18n-bundles.mjs'), SHARED),
+  );
+  t(
+    'the dispatch-gates gate declares it too, since the tool self-test drives those functions',
+    covers(readHints('scripts/pm/check-dispatch-gates.mjs'), SHARED),
+  );
+  t(
+    'and that gate still reaches the tool it runs — the new constant displaces nothing',
+    covers(readHints('scripts/pm/check-dispatch-gates.mjs'), 'scripts/pm/dispatch-gates.mjs'),
+  );
+  // The shared module is a real file, so the two claims above are live rather
+  // than a pair of matching strings.
+  t('the declared shared module exists', existsSync(join(ROOT, SHARED)));
 
   // ── A family's OWN script files as match keys (#8509) ─────────────────────
   //
