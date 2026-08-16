@@ -99,6 +99,16 @@
  *       no named reader). Staleness is read from `updated_at` — an
  *       unparseable timestamp reports as a finding, never as fresh (#4690:
  *       "could not read the input" must not look like "input is clean").
+ *   H11 the important-parked inventory — a card carrying an importance signal
+ *       (native type `Bug`, or a `bug` / `security` / `priority:*` label)
+ *       sitting in `pm:blocked` or `pm:on-hold` and open past the threshold.
+ *       Maintainer concern, 2026-08-16, verbatim: 「我担心的优先的，重要的问
+ *       题，比如bug 被放进 blocked 或者 on-hold 没人理会」. Distinct from H10
+ *       (p0 + UNASSIGNED regardless of state): H11 is the broader
+ *       importance × parked-state cross, so every triage fire prints the
+ *       inventory of important cards that a parked state could otherwise
+ *       hide indefinitely. Report-only like everything here — the remedy is
+ *       the triage round re-checking the card's exit liveness, not a gate.
  *
  * ## The close mechanism, measured (#8293)
  *
@@ -557,6 +567,56 @@ export function h10StaleUnclaimedP0(issue, nowMs = Date.now()) {
 }
 
 // ---------------------------------------------------------------------------
+// H11 — the important-parked inventory (maintainer concern, 2026-08-16).
+// ---------------------------------------------------------------------------
+
+/**
+ * H11 threshold — importance signals parked in `pm:blocked`/`pm:on-hold` are
+ * exactly the cards the maintainer fears go unwatched; 7 days is one full
+ * triage week — long enough that a legitimate short park has cleared, short
+ * enough that a real defect cannot age a release cycle out of sight.
+ */
+export const IMPORTANT_PARKED_STALE_DAYS = 7;
+
+/**
+ * H11 — null when clean, else the finding sentence.
+ *
+ * Importance is read from BOTH the native issue type (`Bug`, object or string
+ * shape — REST serializes it as an object) and the label vocabulary
+ * (`bug` / `security` / any `priority:*`), because the triage protocol only
+ * types new cards and deliberately does not backfill the stock — a label-only
+ * reading would hide exactly the older cards most at risk of being forgotten.
+ * Age is `created_at` ("open longer than", per the card); an unreadable
+ * timestamp flags rather than reading as fresh (#4690 direction, same as H10).
+ */
+export function h11ImportantParked(issue, nowMs = Date.now()) {
+  const labels = labelNames(issue);
+  const parked = labels.includes('pm:blocked') || labels.includes('pm:on-hold');
+  if (!parked) return null;
+  const typeName = typeof issue.type === 'string' ? issue.type : issue.type?.name;
+  const signals = [];
+  if (typeName === 'Bug') signals.push('type:Bug');
+  for (const l of labels) {
+    if (l === 'bug' || l === 'security' || l.startsWith('priority:')) signals.push(l);
+  }
+  if (signals.length === 0) return null;
+  const created = Date.parse(issue.created_at ?? '');
+  const ageDays = Number.isFinite(created) ? (nowMs - created) / 86_400_000 : null;
+  if (ageDays !== null && ageDays <= IMPORTANT_PARKED_STALE_DAYS) return null;
+  const state = labels.includes('pm:blocked') ? 'pm:blocked' : 'pm:on-hold';
+  const age =
+    ageDays === null
+      ? 'an unreadable `created_at` (which must not read as fresh)'
+      : `open ~${Math.round(ageDays)}d`;
+  return (
+    `important card parked: ${signals.join(' + ')} sitting in \`${state}\`, ${age} ` +
+    `(threshold ${IMPORTANT_PARKED_STALE_DAYS}d) — the important-parked inventory exists so a bug ` +
+    `or security card cannot age out of sight inside a parked state. Re-check the card's ` +
+    `\`Blocked-by:\` / \`Restart-when:\` liveness in the triage round.`
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Transport prerequisite — the classifier (pure) and the probe that feeds it.
 //
 // Modelled on `scripts/cli-build-prerequisite.mjs`: the knowledge lives in pure
@@ -852,7 +912,7 @@ function reportPrerequisiteNotMet(v, options = {}) {
   const nothing =
     swept === 0
       ? [
-          `  Nothing was swept: no issue was listed and no predicate (H1–H10) ran, so this`,
+          `  Nothing was swept: no issue was listed and no predicate (H1–H11) ran, so this`,
           `  result says NOTHING about whether the board carries half-states. It is not a`,
           `  clean board and it is not a dirty one — it is no reading at all.`,
         ]
@@ -987,6 +1047,8 @@ async function sweepInto(findings, seen, seenPrs, seenMerged) {
     if (restartless) findings.push([issue, 'H9', restartless]);
     const staleP0 = h10StaleUnclaimedP0(issue);
     if (staleP0) findings.push([issue, 'H10', staleP0]);
+    const parked = h11ImportantParked(issue);
+    if (parked) findings.push([issue, 'H11', parked]);
     if (labels.includes('pm:seat')) {
       const desync = h5SeatStickerDesync(issue);
       if (desync) findings.push([issue, 'H5', desync]);
@@ -1297,6 +1359,31 @@ function selfTest() {
   // The bare conjunction, no state carve-outs: a p0 aging in the decision box
   // is exactly what the brief should show (report-only, tiny population).
   t('H10: p0 aging under needs-user-decision still flags', typeof h10StaleUnclaimedP0(p0([], hoursAgo(48), ['needs-user-decision']), NOW), 'string');
+
+  // -- H11: important-parked inventory (2026-08-16 maintainer concern) --------
+  const daysAgo = (d) => new Date(NOW - d * 86_400_000).toISOString();
+  const parkedCard = (labels, { assignees = [], type, created = daysAgo(10) } = {}) => ({
+    ...issue(labels, assignees),
+    type,
+    created_at: created,
+  });
+  t('H11: type Bug + on-hold past threshold -> finding', typeof h11ImportantParked(parkedCard(['pm:on-hold'], { type: { name: 'Bug' } }), NOW), 'string');
+  t('H11: type as plain string is read too', typeof h11ImportantParked(parkedCard(['pm:on-hold'], { type: 'Bug' }), NOW), 'string');
+  t('H11: bug label + blocked -> finding', typeof h11ImportantParked(parkedCard(['bug', 'pm:blocked']), NOW), 'string');
+  t('H11: security label + on-hold -> finding', typeof h11ImportantParked(parkedCard(['security', 'pm:on-hold']), NOW), 'string');
+  t('H11: priority:p1 + blocked -> finding', typeof h11ImportantParked(parkedCard(['priority:p1', 'pm:blocked']), NOW), 'string');
+  t('H11: …and the finding names the parked state', h11ImportantParked(parkedCard(['bug', 'pm:blocked']), NOW).includes('pm:blocked'), true);
+  t('H11: …and the threshold', h11ImportantParked(parkedCard(['bug', 'pm:blocked']), NOW).includes(`${IMPORTANT_PARKED_STALE_DAYS}d`), true);
+  t('H11: fresh park is clean', h11ImportantParked(parkedCard(['bug', 'pm:on-hold'], { created: daysAgo(2) }), NOW), null);
+  t('H11: exactly at the threshold is clean (strictly beyond fires)', h11ImportantParked(parkedCard(['bug', 'pm:on-hold'], { created: daysAgo(IMPORTANT_PARKED_STALE_DAYS) }), NOW), null);
+  t('H11: important but not parked is out of scope', h11ImportantParked(parkedCard(['bug', 'pm:queue']), NOW), null);
+  t('H11: parked but unimportant is out of scope', h11ImportantParked(parkedCard(['pm:on-hold'], { type: { name: 'Task' } }), NOW), null);
+  // Distinct from H10: an ASSIGNED old parked p0 is out of H10's scope
+  // (assignee set) but squarely in H11's — the cross is the point.
+  t('H11: assigned parked p0 still flags (H10 would not)', typeof h11ImportantParked(parkedCard(['priority:p0', 'pm:blocked'], { assignees: ['os-help'] }), NOW), 'string');
+  t('H11: …and that same card is H10-clean', h10StaleUnclaimedP0({ ...parkedCard(['priority:p0', 'pm:blocked'], { assignees: ['os-help'] }), updated_at: daysAgo(10) }, NOW), null);
+  // #4690 direction, same as H10: unreadable age must not read as fresh.
+  t('H11: unreadable created_at -> finding, not fresh', typeof h11ImportantParked(parkedCard(['bug', 'pm:on-hold'], { created: 'not-a-date' }), NOW), 'string');
 
   // -- transport prerequisite (#7412) ---------------------------------------
   // The three container classes are REAL measurements, not invented fixtures;
