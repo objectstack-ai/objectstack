@@ -18,10 +18,10 @@
  * the merge queue), or, if the stale context is then quietly removed from the
  * settings to unwedge things, every gate that job carries degrades to advisory
  * with no signal anywhere. The second shape is #5617 verbatim: PR #5584 merged
- * with its ESLint job red for 19 minutes, because the job carrying 25 `check:*`
- * gates was not in the required set at all. Four more merges repeated it that
- * night (#6067/#6096/#6051/#6103) before the settings were fixed on
- * 2026-08-07.
+ * with its ESLint job red for 19 minutes, because the job carrying the whole
+ * `check:*` gate family was not in the required set at all. Four more merges
+ * repeated it that night (#6067/#6096/#6051/#6103) before the settings were
+ * fixed on 2026-08-07.
  *
  * ci.yml already writes this contract down in prose — at least eight places,
  * e.g. "the NAME is the required check, so renaming it would silently drop the
@@ -136,6 +136,22 @@ import { fileURLToPath } from 'node:url';
  * job id), and every matrix shard name. Assertions 4, 6 and 7 below are exactly
  * the machine-readable form of the first three exclusions, so enrolling one of
  * them by mistake fails here instead of in the merge queue.
+ *
+ * ⛔ `carries` names the gate FAMILY and never a step count — assertion 10
+ * enforces that, because prose here reads as measurement while being asserted
+ * by nothing. Both counts this registry used to carry were wrong on the day
+ * they were WRITTEN, not merely outgrown: at the authoring commit (d3e53f2d8,
+ * 2026-08-09) the ESLint entry said "(25 steps)" against a job running 35
+ * `pnpm check:*` steps, and the typecheck entry said "(33 steps)" against 10
+ * (43 by the loosest caliber that counts its `--filter` spellings, 29 by
+ * non-setup steps — no caliber yields 33, so what was even measured is no
+ * longer recoverable). 25 was roughly the ESLint count at the #5617 INCIDENT
+ * (24 on 2026-08-06), i.e. a historical figure that had drifted into a
+ * present-tense field. Then it rotted at about three steps a day: 24 → 54
+ * between 2026-08-06 and 2026-08-16, gaining two more while #9103 — the card
+ * reporting the staleness — sat open, every gate green throughout. The count
+ * is a property of the workflow, so the workflow is where it is read from: the
+ * job's own step list, one grep away and never stale (#9103).
  */
 export const REQUIRED_CONTEXTS = [
   {
@@ -143,14 +159,14 @@ export const REQUIRED_CONTEXTS = [
     job: 'lint',
     context: 'ESLint',
     authorized: '#5617 maintainer ruling 2026-08-07 — applied to the settings the same day',
-    carries: 'the whole check:* gate family (25 steps) — the job whose red did not block #5584',
+    carries: 'the whole check:* gate family — the job whose red did not block #5584',
   },
   {
     workflow: 'lint.yml',
     job: 'typecheck',
     context: 'TypeScript Type Check',
     authorized: '#5617 maintainer ruling 2026-08-07 — applied to the settings the same day',
-    carries: 'the type-check + generated-artifact gate family (33 steps)',
+    carries: 'the type-check + generated-artifact gate family',
   },
   {
     workflow: 'ci.yml',
@@ -271,6 +287,27 @@ export function judge({ registry, workflows }) {
       );
     } else {
       byContext.set(entry.context, entry);
+    }
+  }
+
+  // (10) `carries` describes the gate family; it may not embed a step count.
+  // A number in this field reads as a measurement of what the required context
+  // covers — the thing a reader consults to decide whether some gate is
+  // protected — while being asserted by nothing, so it rots green. Measured:
+  // both counts the registry once carried were already wrong at their authoring
+  // commit, and the ESLint job went 24 → 54 `check:*` steps in the ten days to
+  // 2026-08-16 with no gate anywhere noticing (#9103). Re-stamping the number
+  // would only reschedule that; the workflow's step list is the count.
+  for (const entry of registry) {
+    const counted = typeof entry.carries === 'string' ? entry.carries.match(/\b\d+\s+steps?\b/i) : null;
+    if (counted) {
+      problems.push(
+        `the registry's \`carries\` for '${entry.context}' embeds a step count (${JSON.stringify(counted[0])}). ` +
+          `That number is asserted by nothing and rots silently as the gate family grows — both counts this registry used to ` +
+          `carry were wrong on the day they were written, and the ESLint job's went 24 → 54 in ten days with every gate green ` +
+          `(#9103). Name the gate FAMILY here and let the '${entry.job}' job's step list in .github/workflows/${entry.workflow} ` +
+          `be the count.`,
+      );
     }
   }
 
@@ -659,6 +696,28 @@ async function selfTest() {
     workflows: new Map(Object.entries(sources).map(([f, text]) => [f, { doc: parse(text) }])),
   });
   assert(doubled.problems.some((p) => p.includes('twice')), 'a context registered against two jobs ⇒ red');
+
+  // ── (10) a `carries` string that embeds a step count ─────────────────────
+  // The rot mode #9103 recorded, now with an assertion on it. Both spellings
+  // the registry actually used are exercised, since the parenthesised form is
+  // the one a future author is most likely to reintroduce.
+  const workflowsFor = () => new Map(Object.entries(sources).map(([f, text]) => [f, { doc: parse(text) }]));
+  for (const spelling of ['the whole check:* gate family (25 steps)', 'the type-check family, 33 steps']) {
+    const stale = judge({
+      registry: [{ ...REQUIRED_CONTEXTS[0], carries: spelling }, ...REQUIRED_CONTEXTS.slice(1)],
+      workflows: workflowsFor(),
+    });
+    assert(
+      stale.problems.some((p) => p.includes('embeds a step count')),
+      `a \`carries\` string carrying a step count ⇒ red (${JSON.stringify(spelling)})`,
+    );
+  }
+  // The live registry must satisfy it — the half that would have been green for
+  // ten days while the real count doubled.
+  assert(
+    REQUIRED_CONTEXTS.every((entry) => !/\b\d+\s+steps?\b/i.test(entry.carries ?? '')),
+    'no entry in the real registry embeds a step count',
+  );
 
   // ── missing input is a failure, never a pass (#4690) ─────────────────────
   assert(judge({ registry: [], workflows: new Map() }).problems.length === 1, 'an empty registry ⇒ red, never a silent tick');
