@@ -12,10 +12,52 @@
  * refusal pin with no positive control cannot show the gate is discriminating
  * rather than refusing everything, and the two drifting apart into separate
  * cases is how that guarantee gets lost.
+ *
+ * ## [#8937] The clock is pinned at the PROCESS clock, not through the context
+ *
+ * This suite used to fix its clock at `2026-08-15T09:00:00.000Z` and thread it
+ * through the engine as `{ context: { now } as never }`, then assert the
+ * `{30_days_ago}` floor equalled that instant minus 30 days. That held only
+ * while the REAL date and the fixture date agreed: at 2026-08-16T00:00Z it went
+ * red on every branch at once, with no code change, and misattributed itself to
+ * whatever PR happened to be open.
+ *
+ * The mechanism was a clock the engine does not offer. `{30_days_ago}` is
+ * resolved by `resolveFilterTokens` from an instant the engine never supplies,
+ * so the resolver falls back to the PROCESS clock — `context.now` was never
+ * read, and is not declared on `ExecutionContext` at all (neither the spec
+ * schema nor `ExecutionContextLike` in `@objectstack/core` carries it; the
+ * `as never` casts were TypeScript already saying so). Whether the engine
+ * SHOULD expose a declared, injectable clock is #8937's open half — a
+ * public-contract question this file must not assume either way.
+ *
+ * So the fixture now pins the clock the engine ACTUALLY reads, with fake
+ * timers, exactly as this package's sibling temporal suites already do
+ * (`engine-cel-default-temporal-shape`, the three `engine-autonumber-*`
+ * files): `vi.useFakeTimers({ toFake: ['Date'] })` — Date only, so the engine's
+ * async paths are untouched — plus `vi.setSystemTime(PINNED_NOW)`. Every
+ * temporal expectation below is then deterministic forever, and the written
+ * dates are honest: they are what the code under test really sees.
+ *
+ * Two companion cases keep that honest rather than merely green: one shows the
+ * resolver genuinely tracks the clock it is given (so the pin above is not two
+ * constants agreeing), and one records as a TESTED fact that an injected
+ * `context.now` is inert today — the trap that armed this file in the first
+ * place, now stated instead of silent.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { resolveFilterTokens } from '@objectstack/core';
 import { ObjectQL } from './engine.js';
+
+/**
+ * The `{30_days_ago}` floor the platform's own resolver yields for `instant`.
+ * Used by the companion cases to show the resolver is clock-SENSITIVE.
+ */
+function resolvedFloorAt(instant: Date): string {
+  const out = resolveFilterTokens({ $gte: '{30_days_ago}' }, { now: instant });
+  return out.$gte as string;
+}
 
 /** Days back from `now`, as the canonical UTC instant the store holds. */
 function daysAgoIso(now: Date, days: number): string {
@@ -101,9 +143,17 @@ function makeRecordingDriver() {
 describe('[#8690] the temporal-comparand door at the engine collection point', () => {
   let engine: ObjectQL;
   let reads: SeenRead[];
+  /**
+   * [#8937] Pinned as the PROCESS clock below, which is the clock the engine
+   * actually resolves `{30_days_ago}` against — so this date is deterministic,
+   * not a wager on what day the suite runs.
+   */
   const now = new Date('2026-08-15T09:00:00.000Z');
 
   beforeEach(async () => {
+    // Date only: the engine's async paths must keep real timers.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(now);
     const rec = makeRecordingDriver();
     reads = rec.reads;
     engine = new ObjectQL();
@@ -126,14 +176,18 @@ describe('[#8690] the temporal-comparand door at the engine collection point', (
     reads.length = 0;
   });
 
+  afterEach(() => { vi.useRealTimers(); });
+
   const refusalOf = async (p: Promise<unknown>) =>
     p.then(() => null, (e: any) => e as Error & { code?: string; status?: number });
 
   it('refuses the card\'s comparands with code AND status, while the positive control still returns 38', async () => {
     // ── the defect's own cells ──────────────────────────────────────────────
     for (const comparand of ['last_30_days', 'not-a-date-at-all', 'last_7_days', 'last_90_days']) {
+      // No context is threaded: the refusal precedes token resolution entirely,
+      // so no clock — injected or otherwise — can participate in this verdict.
       const err = await refusalOf(
-        engine.find('support_case', { where: { created_date: { $gte: comparand } } }, { context: { now } as never }),
+        engine.find('support_case', { where: { created_date: { $gte: comparand } } }),
       );
       expect(err, `${comparand} must be refused, not answered with an empty chart`).not.toBeNull();
       // The reverse-verification requirement: BOTH halves of the envelope.
@@ -150,11 +204,14 @@ describe('[#8690] the temporal-comparand door at the engine collection point', (
     // ── the POSITIVE CONTROL, in this same test by ruling ───────────────────
     // Without it the four refusals above are equally consistent with a gate
     // that refuses everything.
+    // [#8937] Deterministic because the PROCESS clock is pinned to `now` — the
+    // clock the engine really resolves against — rather than injected through a
+    // context key nothing reads.
     const floor = new Date(now.getTime() - 30 * 86_400_000).toISOString().slice(0, 10);
+    expect(floor).toBe('2026-07-16');
     const inWindow = await engine.find(
       'support_case',
       { where: { created_date: { $gte: '{30_days_ago}' } } },
-      { context: { now } as never },
     );
     expect(inWindow).toHaveLength(38);
     // The token really resolved — the door let the platform's own spelling
@@ -162,6 +219,59 @@ describe('[#8690] the temporal-comparand door at the engine collection point', (
     // Indexed rather than `.at(-1)`: this package's tsconfig targets a lib
     // older than ES2022, so `Array.prototype.at` is not declared for it.
     expect(reads[reads.length - 1].ast.where.created_date.$gte).toBe(floor);
+  });
+
+  /**
+   * [#8937] The discriminating half of the floor assertion above.
+   *
+   * A pinned clock plus a written-down floor would also pass if the resolver
+   * ignored its instant entirely and returned a constant. These pins show the
+   * floor genuinely tracks the instant handed to it, so the positive control
+   * above is a statement about a live clock rather than two frozen values
+   * agreeing. Written dates here are the resolver's INPUTS, so nothing in this
+   * case can rot on a calendar date.
+   */
+  it('resolves {30_days_ago} against the instant it is given, not a constant', () => {
+    const a = new Date('2026-03-10T12:00:00.000Z');
+    const b = new Date('2026-03-15T12:00:00.000Z');
+    // Two instants five days apart yield two DIFFERENT floors, five days apart.
+    expect(resolvedFloorAt(a)).toBe('2026-02-08');
+    expect(resolvedFloorAt(b)).toBe('2026-02-13');
+    // A month/year boundary, and the leap-free February this floor crosses.
+    expect(resolvedFloorAt(new Date('2026-01-05T00:00:00.000Z'))).toBe('2025-12-06');
+    // With no instant supplied the resolver falls back to the process clock —
+    // the path the engine actually takes. Deterministic here because that clock
+    // is pinned, which is the whole point of pinning it.
+    expect(resolveFilterTokens({ $gte: '{30_days_ago}' }, {}).$gte).toBe('2026-07-16');
+  });
+
+  /**
+   * [#8937] A CHARACTERIZATION pin, not an endorsement.
+   *
+   * `now` is not declared on `ExecutionContext` (neither the spec schema nor
+   * `ExecutionContextLike` in `@objectstack/core` carries it), and nothing on
+   * the engine's read path reads it — `filterTokenContextFrom` takes an
+   * explicit `now` argument the engine never passes. An injected `context.now`
+   * is therefore inert today, which is exactly what let a date-armed fixture
+   * look like it was pinning a clock.
+   *
+   * Recorded here so the trap is a stated, tested fact instead of a silent one.
+   * If #8937's open half lands — the engine gaining a declared, injectable
+   * clock — this pin SHOULD go red: delete it in that PR, deliberately.
+   */
+  it('does not honour an injected context.now today — the engine reads the process clock', async () => {
+    // Five years off: were it honoured, the floor would land in 2020.
+    const injected = new Date('2020-06-01T00:00:00.000Z');
+    await engine.find(
+      'support_case',
+      { where: { created_date: { $gte: '{30_days_ago}' } } },
+      { context: { now: injected } as never },
+    );
+
+    const boundFloor = reads[reads.length - 1].ast.where.created_date.$gte;
+    expect(boundFloor).not.toBe(resolvedFloorAt(injected));
+    // It tracked the pinned PROCESS clock instead — the real source.
+    expect(boundFloor).toBe('2026-07-16');
   });
 
   it('refuses on both doors — the lowered object form and the authored array sugar', async () => {
