@@ -96,13 +96,14 @@ describe('looksLikeInternalErrorLeak', () => {
  * FALSE and shipped a physical table name from every boundary that applies the
  * predicate.
  *
- * Scope is deliberately the two dialects the list COVERS (SQLite/libsql and
- * Postgres, via `driver-sql`), not a census of every dialect's spelling — the
- * unbounded-list trap the module note argues against. ⚠️ Covered is not the
- * same as reachable: #8739 measured that MySQL runs here (a live `mysql:8.0`
- * behind a required check) while this list does not cover it, and the
- * "uncovered dialects, uncovered on purpose" block below pins that gap so the
- * scope sentence cannot quietly go false again.
+ * Scope is deliberately the dialects the list COVERS — SQLite/libsql and
+ * Postgres here, MySQL in the #8739 block below — not a census of every
+ * dialect's spelling, which is the unbounded-list trap the module note argues
+ * against. ⚠️ Covered is still not the same as reachable, and the distinction
+ * survived the thing that motivated it: #8739 measured MySQL as reachable while
+ * uncovered, that gap is now closed, and the "dialects the list does NOT cover"
+ * block below keeps the same tripwire pointed at MSSQL and Oracle so the scope
+ * sentence cannot quietly go false again.
  *
  * The negative half is the load-bearing half. A bare `includes('does not
  * exist')` would have matched "user does not exist" and started replacing
@@ -167,45 +168,117 @@ describe('looksLikeInternalErrorLeak — shipped-dialect phrasings (#8132)', () 
 });
 
 /**
- * [#8739] The uncovered dialect, pinned as a MEASUREMENT rather than a
- * paragraph.
+ * [#8739] MySQL, now COVERED — and the same tripwire, re-pointed.
  *
- * The module used to say nobody here runs MySQL, and a reviewer sizing a
- * disclosure residual on PR #8737 quoted it in good faith. The claim was false:
- * `driver-sql` branches on `mysql`/`mysql2`, CI stands up a live `mysql:8.0`
- * for a required check, and live MySQL 8.0.46 measurements landed driver fixes
- * (#8621, #8622). What survived correction is the narrower, still-true fact —
- * this predicate does not COVER MySQL — and that is exactly the fact a reader
- * needs and cannot get from a comment they might not read.
+ * ## What these cases were, and why they are not deleted
  *
- * ⛔ These assert `false`, and a `false` here is NOT a verdict that the text is
- * safe: it is the predicate being SILENT on a dialect it never learned. The
- * phrasing-independent answer is {@link declaresServerFault}, which is dialect-
- * blind by construction.
+ * These began as `toBe(false)` pins. The module used to say nobody here runs
+ * MySQL, and a reviewer sizing a disclosure residual on PR #8737 quoted it in
+ * good faith; the claim was false (`driver-sql` branches on `mysql`/`mysql2`,
+ * CI stands up a live `mysql:8.0` for a required check, live MySQL 8.0.46
+ * measurements landed driver fixes #8621/#8622). PR #8824 corrected the
+ * sentence and pinned the narrower, then-true fact — the predicate did not
+ * COVER MySQL — as a deliberate tripwire for the decision that was still open.
  *
- * ⛔ **If a future PR teaches the list MySQL's spellings, these go red — that is
- * the tripwire, not a broken test.** Do not delete the case to make it green.
- * Come back here, and to `DIALECT_LEAK_PHRASINGS`' note, and update both to say
- * what is then true. Extending the list is a behaviour change at three
- * boundaries (it moves what gets suppressed), and #8739 leaves it parked behind
- * an open product question: is MySQL a supported deployment target, or merely a
- * tested dialect? Same shape as `metadata-protocol`'s
- * `protocol.driver-text-disclosure.test.ts`, which pins its unmet dialects for
- * the same reason.
+ * **That decision has been taken.** Maintainer ruling of 2026-08-15 on #8739:
+ * MySQL is a SUPPORTED DEPLOYMENT TARGET, not merely a tested dialect — the
+ * only answer consistent with what the docs already publish
+ * (`OS_DATABASE_DRIVER=mysql`, `MysqlConfig`, per-field MySQL DDL). So the
+ * tripwire fired as designed, and these cases are REWRITTEN rather than
+ * removed: same three measured messages, opposite expected verdict.
+ *
+ * ⛔ **They must stay equally capable of going red.** Their whole value is that
+ * a future change which silently drops MySQL coverage — deleting a limb,
+ * "simplifying" a pattern, loosening an anchor until it stops matching the
+ * driver's template — fails HERE, on the three templates that were measured off
+ * real MySQL text, rather than in a deployment. Do not soften them into
+ * `expect(...).toBeDefined()` or fold them into the #8132 block, where the
+ * reason they exist would be lost.
+ *
+ * ⛔ **And the `false`-means-UNCOVERED lesson is NOT retired with them.** It was
+ * never about MySQL specifically: a `false` from this predicate is the
+ * predicate being SILENT on a dialect it never learned, and is never a verdict
+ * that the text is safe. The second block below keeps that pinned on MSSQL and
+ * Oracle, which are uncovered today, so the distinction that stopped PR #8737's
+ * near-miss from repeating keeps a live subject. The phrasing-independent
+ * answer remains {@link declaresServerFault}, dialect-blind by construction —
+ * same shape as `metadata-protocol`'s `protocol.driver-text-disclosure.test.ts`,
+ * which withholds by DECLARATION and therefore needs no dialect list at all.
  */
-describe('looksLikeInternalErrorLeak — dialects the list does NOT cover (#8739)', () => {
+describe('looksLikeInternalErrorLeak — MySQL, covered under the #8739 ruling', () => {
     it.each([
         // The tail PR #8737 keeps verbatim in the write-path log. Names an
         // IDENTIFIER on MySQL, as SQLite's and Postgres' spellings do — which is
         // why that PR's conclusion held even though its stated reason did not.
         ['mysql unknown column', "Unknown column 'zzz_nonexistent_field' in 'field list'"],
-        // The same condition the Postgres/SQLite limbs above DO catch.
+        // The clause name is not always `field list`; the pattern requires the
+        // second quoted part but not any particular word in it. This spelling is
+        // the one `packages/spec`'s migration registry records for MySQL.
+        ['mysql unknown column, where clause', "Unknown column 'stage' in 'where clause'"],
+        // The same condition the Postgres/SQLite limbs above catch, in MySQL's
+        // own contracted spelling — `doesn't`, and `db.table` as ONE identifier.
         ['mysql missing table', "Table 'crm.sys_metadata' doesn't exist"],
-        // Value-bearing, and the reason "uncovered" is worth pinning: MySQL puts
-        // a CALLER'S VALUE in this diagnostic. `isUniqueViolationError`
-        // (`unique-violation.ts`) is the predicate that does recognise it; this
-        // one does not, and the two answer different questions on purpose.
+        // Value-bearing, and the reason covering MySQL mattered rather than
+        // merely documenting the gap: MySQL puts a CALLER'S VALUE in this
+        // diagnostic where SQLite and Postgres put an identifier.
         ['mysql duplicate entry', "Duplicate entry 'acme@example.com' for key 'idx_email_unique'"],
+        // MySQL 8 spells the key `table.column`; same template, and the value
+        // half may itself contain a quote, which the pattern tolerates.
+        ['mysql duplicate entry, qualified key', "Duplicate entry 'O'Brien' for key 'crm_account.email'"],
+        // knex prefixes the statement. Already caught by the `insert into ` limb
+        // before #8739 — pinned so the two routes to `true` stay distinguishable
+        // if one of them is ever removed.
+        [
+            'mysql duplicate entry behind a knex statement prefix',
+            "insert into `crm_account` (`email`) values ('acme@example.com') - Duplicate entry 'acme@example.com' for key 'crm_account.email'",
+        ],
+    ])('covers %s', (_label, message) => {
+        expect(looksLikeInternalErrorLeak(message)).toBe(true);
+    });
+
+    /**
+     * ⛔ The false-positive guard for the three MySQL limbs, in the same spirit
+     * as #8132's. Each of these contains the KEYWORDS of a MySQL template
+     * without the driver's anchoring — the quoted identifier, the clause name,
+     * the `for key` tail — and each is a sentence a product surface may
+     * legitimately write. If someone relaxes a MySQL anchor to a bare
+     * `includes(...)`, these go red before a deployment starts answering
+     * "Internal server error" to real questions.
+     */
+    it.each([
+        ['a dedup rule speaking plainly', 'Duplicate entry rejected by the deduplication rule'],
+        ['an import summary', 'Skipped 3 rows: duplicate entry in the uploaded file'],
+        ['a mapping message about an unknown column', 'Unknown column in the uploaded CSV header'],
+        ['an unquoted mapping message', 'Unknown column stage in your mapping'],
+        ['prose about a missing table, unquoted', 'The table you selected does not exist'],
+        ['a business message that merely quotes a name', "'crm.sys_metadata' is not available in this environment"],
+    ])('leaves %s alone', (_label, message) => {
+        expect(looksLikeInternalErrorLeak(message)).toBe(false);
+    });
+});
+
+/**
+ * [#8739] The dialects the list still does NOT cover — the surviving half of
+ * the tripwire above, and the reason the `false`-means-UNCOVERED rule outlives
+ * any one dialect.
+ *
+ * ⛔ These assert `false`, and a `false` here is NOT a verdict that the text is
+ * safe: it is the predicate being SILENT on a dialect it never learned. That is
+ * the exact reading PR #8737 got wrong — it survived on unrelated grounds — and
+ * the distinction needs a live subject, not a retired one, which is what these
+ * two provide now that MySQL is covered.
+ *
+ * ⛔ If a future PR teaches the list one of these, do NOT delete the case: flip
+ * it, cite the reason the way the MySQL block above cites its ruling, and check
+ * that {@link DIALECT_LEAK_PHRASINGS}' note still says what is then true. Both
+ * texts are the ones `metadata-protocol`'s `protocol.driver-text-disclosure.test.ts`
+ * carries in its dialect matrix, deliberately, so the two files measure the
+ * same predicate on the same strings.
+ */
+describe('looksLikeInternalErrorLeak — dialects the list does NOT cover (#8739)', () => {
+    it.each([
+        ['mssql invalid object name', "Invalid object name 'sys_metadata'."],
+        ['oracle missing table or view', 'ORA-00942: table or view does not exist'],
     ])('is silent on %s — false here means UNCOVERED, never "safe"', (_label, message) => {
         expect(looksLikeInternalErrorLeak(message)).toBe(false);
     });
@@ -213,12 +286,14 @@ describe('looksLikeInternalErrorLeak — dialects the list does NOT cover (#8739
     /**
      * The other half of the same measurement: the dialect is uncovered, but the
      * declaration channel is not. A boundary that also asks
-     * {@link declaresServerFault} withholds the identical text.
+     * {@link declaresServerFault} withholds the identical text — which is why
+     * closing the MySQL gap was an improvement to defence in depth and never
+     * the thing standing between an uncovered dialect and disclosure.
      */
     it('withholds the same uncovered text through the declaration channel', () => {
-        const mysqlDump = { status: 500, code: 'DATABASE_ERROR', message: "Table 'crm.sys_metadata' doesn't exist" };
-        expect(looksLikeInternalErrorLeak(mysqlDump.message)).toBe(false);
-        expect(declaresServerFault(mysqlDump)).toBe(true);
+        const mssqlDump = { status: 500, code: 'DATABASE_ERROR', message: "Invalid object name 'sys_metadata'." };
+        expect(looksLikeInternalErrorLeak(mssqlDump.message)).toBe(false);
+        expect(declaresServerFault(mssqlDump)).toBe(true);
     });
 });
 

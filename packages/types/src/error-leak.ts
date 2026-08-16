@@ -36,11 +36,11 @@
 export const INTERNAL_ERROR_MESSAGE = 'Internal server error';
 
 /**
- * [#8132] The dialect phrasings this list COVERS — the SQLite family and
- * Postgres — each anchored on the driver's own errmsg template rather than on
- * its tail. Coverage, not a census of what this repo runs: see "What this list
- * covers, and what it does not" below, which is the load-bearing half for
- * anyone sizing a disclosure residual.
+ * [#8132, #8739] The dialect phrasings this list COVERS — the SQLite family,
+ * Postgres and MySQL/MariaDB — each anchored on the driver's own errmsg
+ * template rather than on its tail. Coverage, not a census of what this repo
+ * runs: see "What this list covers, and what it does not" below, which is the
+ * load-bearing half for anyone sizing a disclosure residual.
  *
  * The gap that forced these: the keyword set below caught SQLite's
  * `SQLITE_ERROR: no such table: sys_metadata` through the `sqlite_` limb, while
@@ -60,13 +60,46 @@ export const INTERNAL_ERROR_MESSAGE = 'Internal server error';
  * against growing a driver taxonomy, and that reason still holds on its own: a
  * phrasing list is unbounded *across dialects*, because every dialect spells
  * every one of these conditions its own way. So these entries are a COVERAGE
- * statement, not a census — they are the two spellings #8132 measured the gap
- * on, and {@link declaresServerFault} remains the answer that does not depend
- * on phrasing at all.
+ * statement, not a census — the two spellings #8132 measured the gap on, plus
+ * the three MySQL templates #8739 added — and {@link declaresServerFault}
+ * remains the answer that does not depend on phrasing at all.
  *
- * ⚠️ **This list's silence is NOT evidence that a dialect is unreachable.**
- * Until #8739 this paragraph said "nobody here runs" MySQL/MSSQL/Oracle, and a
- * reviewer sizing a disclosure residual read it as one. It was false for MySQL,
+ * **Covered as of #8739: MySQL/MariaDB.** Under the maintainer's 2026-08-15
+ * ruling on #8739, MySQL is a SUPPORTED DEPLOYMENT TARGET, not merely a tested
+ * dialect — the answer the published surface already implied
+ * (`OS_DATABASE_DRIVER=mysql` is a documented deployment knob, `MysqlConfig` is
+ * authorable datasource config, `types.mdx` specifies per-field MySQL DDL) and
+ * the one CI's required live-MySQL check already behaves as if. A supported
+ * target's driver text reaches these boundaries in production, so its
+ * templates belong here. Three are covered, one per condition the other two
+ * dialects are already covered for:
+ *
+ *  - `Table 'app.t' doesn't exist` (ER_NO_SUCH_TABLE 1146) — the missing-object
+ *    condition SQLite spells `no such table:` and Postgres spells
+ *    `relation "t" does not exist`.
+ *  - `Unknown column 'c' in 'field list'` (ER_BAD_FIELD_ERROR 1054) — the same
+ *    condition for a column. The clause name varies (`field list`,
+ *    `where clause`, `order clause`, `on clause`) and is REQUIRED by the
+ *    pattern; it is what separates the driver's template from prose.
+ *  - `Duplicate entry 'x' for key 'i'` (ER_DUP_ENTRY 1062) — the
+ *    unique-violation condition the `constraint failed` / `unique constraint`
+ *    keyword limbs already catch for SQLite and Postgres and cannot catch here,
+ *    because MySQL's spelling shares no word with either. It is also the ONLY
+ *    one of the three whose text embeds a CALLER'S VALUE rather than an
+ *    identifier, which is what made the pre-#8739 gap worth closing rather than
+ *    documenting.
+ *
+ * ⛔ Adding this limb does NOT re-open #6250's decision one package over.
+ * `@objectstack/rest` answers the 409 conflict question with
+ * `isUniqueViolationError` (`unique-violation.ts`), ABOVE and independently of
+ * this predicate, precisely so a disclosure rule never decides a status. That
+ * ordering is what keeps the two unentangled now that both recognise the same
+ * MySQL sentence; `rest-unique-violation-dialects.test.ts` pins it.
+ *
+ * ⚠️ **This list's silence is STILL NOT evidence that a dialect is
+ * unreachable, and MySQL is why the warning is worded that way.** Until #8739
+ * this paragraph said "nobody here runs" MySQL/MSSQL/Oracle, and a reviewer
+ * sizing a disclosure residual read it as one. It was false for MySQL,
  * measurably, on the same tree:
  *
  *  - `driver-sql` branches on `mysql`/`mysql2` — the `isMysql` getter,
@@ -80,15 +113,30 @@ export const INTERNAL_ERROR_MESSAGE = 'Internal server error';
  *    #8622), and `unique-violation.ts` — one file over — names sqlite /
  *    postgres / mysql as the three dialect families `sql-driver.ts` recognises.
  *
- * Whether MySQL is a **supported deployment target** or merely a **tested
- * dialect** is an open product question (#8739); this file does not answer it,
- * and neither answer changes the rule a reader needs. What is true either way,
- * and is the only thing to carry away: on a MySQL deployment this predicate is
- * SILENT, not clearing. Its phrasings of these same conditions —
- * `Unknown column 'c' in 'field list'`, `Table 'app.t' doesn't exist`,
- * `Duplicate entry 'x' for key 'i'` — all return FALSE here, pinned in
- * `error-leak.test.ts`. Adding them would change what gets suppressed at three
- * boundaries, so it belongs to that decision, not to a comment.
+ * The rule that outlives any particular dialect: **a `false` from this
+ * predicate means UNCOVERED, never "safe"**, and the reachability of an
+ * uncovered dialect is a separate question this file cannot answer. MSSQL and
+ * Oracle are uncovered today — `Invalid object name 'sys_metadata'.`,
+ * `ORA-00942: table or view does not exist` both return FALSE — and that is a
+ * statement about this list, not about them; `error-leak.test.ts` pins those
+ * two as the standing example so the distinction keeps a live subject.
+ * {@link declaresServerFault} is the phrasing-independent answer, and
+ * `metadata-protocol`'s `protocol.driver-text-disclosure.test.ts` is the worked
+ * demonstration that a producer which withholds by DECLARATION needs no dialect
+ * list at all.
+ *
+ * ⛔ **What is deliberately NOT added here, and why.** MySQL's ACL family
+ * (`Access denied for user 'u'@'h' to database 'd'`, ER_DBACCESS_DENIED_ERROR
+ * 1044; `SELECT command denied to user … for table 't'`,
+ * ER_TABLEACCESS_DENIED_ERROR 1142) is the counterpart of the Postgres
+ * `permission denied for table` limb above and is NOT covered: nothing in this
+ * repo has raised one off a live server, and `unique-violation.ts`' standing
+ * rule for this neighbourhood is that a dialect's spelling is added when it has
+ * been MEASURED off a thrown error, never on a plausible reading of the
+ * dialect's manual. `Access denied` also collides with this platform's own
+ * security prose (`[Security] Access denied: …`, pinned as a negative case), so
+ * a guessed pattern here is the over-match direction, which suppresses
+ * diagnostics an operator needs. Measure one, then add it.
  *
  * ⚠️ Related but NOT reusable: `relation-sub-object.ts` owns the same Postgres
  * sentence for two other questions (which column? / is this a sub-object?), and
@@ -113,6 +161,28 @@ const DIALECT_LEAK_PHRASINGS: readonly RegExp[] = [
   // only when the driver prefixed its code; `better-sqlite3` and libsql both
   // raise them bare, which is the shape measured across this repo.
   /\bno such (?:table|column):/i,
+  // [#8739] MySQL/MariaDB ER_NO_SUCH_TABLE (1146): `Table 'app.t' doesn't
+  // exist`. Its own template, not a spelling of the Postgres one — MySQL
+  // contracts the verb and quotes `db.table` as a single identifier — so the
+  // `relation|column … does not exist` limb above cannot reach it. The quotes
+  // are required for the same reason they are there: the driver always emits
+  // them and prose about a table usually does not.
+  /\btable\s+["'`][^"'`]+["'`]\s+doesn't exist/i,
+  // [#8739] MySQL/MariaDB ER_BAD_FIELD_ERROR (1054): `Unknown column 'c' in
+  // 'field list'`. BOTH quoted parts are required. The second is MySQL's clause
+  // name — `field list`, `where clause`, `order clause`, `on clause` — and it
+  // is the half that makes this the driver's template rather than a sentence
+  // that merely calls a column unknown, which an import or mapping feature has
+  // every right to say.
+  /\bunknown column\s+["'`][^"'`]+["'`]\s+in\s+["'`][^"'`]+["'`]/i,
+  // [#8739] MySQL/MariaDB ER_DUP_ENTRY (1062): `Duplicate entry
+  // 'acme@example.com' for key 'crm_account.email'`. `for key` + a quoted index
+  // is the anchor; the VALUE half is matched loosely and lazily because it is
+  // the caller's own text and MySQL does not escape a quote inside it
+  // (`Duplicate entry 'O'Brien' for key 'i'` is a real shape). A bare
+  // `duplicate entry` with no `for key '…'` tail is not this template and is
+  // left alone.
+  /\bduplicate entry\s+["'`].*?["'`]\s+for key\s+["'`][^"'`]+["'`]/i,
 ];
 
 /**
@@ -123,10 +193,11 @@ const DIALECT_LEAK_PHRASINGS: readonly RegExp[] = [
  * (a message that *starts* as `SELECT`/`INSERT INTO`/`UPDATE`/`DELETE FROM` —
  * drivers prefix the offending SQL to their message), constraint-violation
  * dumps, which name physical tables and columns, and the
- * {@link DIALECT_LEAK_PHRASINGS} the list covers — the SQLite family and
- * Postgres. A dialect outside that coverage (MySQL is reachable here, and is
- * not covered) makes this return FALSE without meaning the text is safe; read
- * {@link DIALECT_LEAK_PHRASINGS}' note before sizing anything on a `false`.
+ * {@link DIALECT_LEAK_PHRASINGS} the list covers — the SQLite family, Postgres
+ * and, since #8739, MySQL/MariaDB. A dialect outside that coverage (MSSQL and
+ * Oracle are the standing examples) makes this return FALSE without meaning the
+ * text is safe; read {@link DIALECT_LEAK_PHRASINGS}' note before sizing
+ * anything on a `false`.
  *
  * Does NOT match ordinary business or validation messages, which is why the
  * statement forms are anchored with `startsWith` and the dialect phrasings on
