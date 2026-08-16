@@ -215,10 +215,29 @@ jobs:
         # resolved version keeps the image in lockstep whether the project got
         # the repo RC, the `latest` fallback (see the install step), or a
         # published stable.
+        #
+        # The TAG this image is built under is READ OUT OF the generated
+        # Dockerfile rather than hardcoded (#9017). The two used to be
+        # hand-matched literals — `:latest` here and `:latest` in the template —
+        # and the scaffolder now pins that tag to the CLI a project resolved, so
+        # a hardcoded tag here would stop naming the image the scaffolded
+        # `FROM` asks for. Docker would then silently pull the last PUBLISHED
+        # image instead of the one built from this checkout, and (b) above would
+        # be quietly false while the job stayed green. Deriving both from one
+        # source is what makes that skew impossible rather than merely fixed.
+        # (This job scaffolds with --skip-install, so today that tag reads
+        # `latest`; it follows the file if that ever changes.)
         run: |
           CLI_VERSION=$(node -p "require('$RUNNER_TEMP/e2e-app/node_modules/@objectstack/cli/package.json').version")
+          RUNTIME_TAG=$(sed -n 's|^FROM ghcr\.io/objectstack-ai/objectstack:||p' \
+            "$RUNNER_TEMP/e2e-app/Dockerfile")
+          if [ -z "$RUNTIME_TAG" ]; then
+            echo "::error::no FROM ghcr.io/objectstack-ai/objectstack:<tag> line in the scaffolded Dockerfile — the base image the next step builds against cannot be named, so this job would silently test a pulled image instead of this checkout"
+            exit 1
+          fi
           echo "Runtime image will bundle @objectstack/cli@$CLI_VERSION (matches the scaffolded artifact's protocol)"
-          docker build -t ghcr.io/objectstack-ai/objectstack:latest \
+          echo "Tagging it ghcr.io/objectstack-ai/objectstack:$RUNTIME_TAG (read from the scaffolded Dockerfile)"
+          docker build -t "ghcr.io/objectstack-ai/objectstack:$RUNTIME_TAG" \
             --build-arg OS_CLI_VERSION="$CLI_VERSION" \
             "$GITHUB_WORKSPACE/docker"
 

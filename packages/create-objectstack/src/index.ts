@@ -24,8 +24,14 @@
  *   - objectstack.config.ts     manifest.id and manifest.name string literals
  *   - README.md                 first H1
  *
- * Finally we run `<pm> install` and (best-effort) install the ObjectStack
- * skills bundle via `npx skills add objectstack-ai/objectstack/skills --all`.
+ * Then we run `<pm> install` — and only afterwards can the Dockerfile's runtime
+ * image tag be pinned, because the template carries a caret range and the tag
+ * has to name the @objectstack/cli version npm actually resolved (#9017). With
+ * `--skip-install` there is no resolved version, so the template keeps `latest`
+ * and its comment keeps telling the reader to pin by hand — true in that path.
+ *
+ * Finally we (best-effort) install the ObjectStack skills bundle via
+ * `npx skills add objectstack-ai/objectstack/skills --all`.
  * The `/skills` subpath scopes discovery to the curated, customer-published
  * catalog — repo-internal skills (e.g. under `.claude/skills/`) must never
  * reach scaffolded projects.
@@ -46,6 +52,7 @@ import {
   findStaleNamespacePrefixes,
 } from './rewrite-identity.js';
 import { lookupTemplate, templateNames } from './template-registry.js';
+import { readResolvedCliVersion, pinRuntimeImage } from './runtime-image.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -348,13 +355,38 @@ const program = new Command()
 
       if (!options.skipInstall) {
         printStep('Installing dependencies...');
+        let installed = false;
         try {
           const pm = detectPackageManager();
           execSync(`${pm} install`, { stdio: 'inherit', cwd: targetDir });
+          installed = true;
           console.log('');
         } catch {
           printWarning('Dependency installation failed. Run `npm install` manually.');
           console.log('');
+        }
+
+        // Pin the Dockerfile's runtime image to the CLI that will build this
+        // project's artifact — knowable only now, because the template pins a
+        // caret RANGE and npm has just resolved it (#9017). Skipped without an
+        // install: with no node_modules there is no resolved version, and the
+        // template's own comment then correctly tells the user to pin by hand.
+        if (installed) {
+          const resolved = readResolvedCliVersion(targetDir);
+          if (resolved) {
+            const result = pinRuntimeImage(targetDir, resolved);
+            if (result.pinned) {
+              printSuccess(`Dockerfile runtime image pinned to ${result.tag}`);
+            } else {
+              // Not fatal: the project is complete, the tag is just less
+              // precise than it could be. runtime-image.test.ts is the guard.
+              printWarning(
+                `Could not pin the Dockerfile runtime image (${result.reason}); ` +
+                  `it still reads \`latest\` — pin it to ${resolved} before deploying.`,
+              );
+            }
+            console.log('');
+          }
         }
       }
 

@@ -20,9 +20,12 @@ RUN npx os build              # → dist/objectstack.json
 # ── Runtime: the official ObjectStack runtime image ──────────────────
 # Ships Node + @objectstack/cli with `os start`, a non-root user, the
 # /api/v1/health HEALTHCHECK, and OS_ARTIFACT_PATH/OS_PORT preset (port 8080)
-# — see docker/README.md in the framework repo. Pin the tag to the
-# @objectstack/cli version in your package.json so the runtime matches the
-# CLI that built the artifact.
+# — see docker/README.md in the framework repo.
+#
+# Dependencies were not installed while scaffolding, so the tag below could
+# not be resolved for you. `latest` floats to whatever release is newest,
+# which is unrelated to the @objectstack/cli your app resolves — pin it to
+# that version, the CLI that builds your artifact, before you deploy.
 FROM ghcr.io/objectstack-ai/objectstack:latest
 COPY --from=build --chown=node:node /app/dist/objectstack.json /srv/app/objectstack.json
 
