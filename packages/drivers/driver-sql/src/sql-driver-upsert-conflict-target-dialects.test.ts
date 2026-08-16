@@ -65,9 +65,17 @@
  * a second UNIQUE key on the table can absorb the conflict. That call is now
  * refused too, with its OWN sentence (#5240 — one condition, one wording; this
  * is a different condition from "no index backs your target" and every remedy it
- * names is different). What is deliberately left merging, and documented rather
- * than silent, is the PRIMARY-KEY-targeted call and the `conflictKeys`-less
- * default — see {@link WRONG_KEY} and the residue pins below.
+ * names is different).
+ *
+ * ✅ **[#8755]'s residue is closed by [#8807]** — the PRIMARY-KEY-targeted call
+ * and the `conflictKeys`-less default, which compile byte-identically and which
+ * no pre-flight can judge because neither names anything. Those are now checked
+ * AFTER the statement and inside a transaction: if the merge landed on a row the
+ * caller never identified, the write is rolled back and the call refuses. What
+ * is deliberately left merging is the legitimate half of the same shape — every
+ * insert, and every merge onto the identity the caller did supply — pinned as
+ * this file's positive controls, which is what keeps the rule selective rather
+ * than a ban on merging over MySQL.
  *
  * ✅ **[#8622] has since repaired the primary-key half**, and only that half.
  * `id` is now insert-only on the merge path for every dialect, so the pin that

@@ -1304,17 +1304,23 @@ function refuseUnbackedConflictTarget(object: string, mergeKeys: string[], cause
  *    out is impossible is worse than no refusal.
  *  - **As the named target** — `upsert(…, ['id'])` is the driver's own identity
  *    path, byte-identical in compilation to the default `conflictKeys`-less
- *    call, which this pre-flight deliberately never probes. Refusing the
- *    explicit spelling while merging the implicit one would make the accept set
- *    a property of how the caller typed the same statement. It is also the only
- *    `conflictKeys` shape the platform itself issues (the lifecycle archiver's
- *    hot→cold copy), whose remedy would read "drop the unique constraint you
- *    declared on your own business column".
+ *    call. Refusing the explicit spelling while merging the implicit one would
+ *    make the accept set a property of how the caller typed the same statement.
+ *    It is also the only `conflictKeys` shape the platform itself issues (the
+ *    lifecycle archiver's hot→cold copy), whose remedy would read "drop the
+ *    unique constraint you declared on your own business column".
  *
- * Both residues are real and are documented as the dialect limit in
- * `content/docs/data-modeling/drivers.mdx` rather than left for a reader to
- * discover: on MySQL a merge can still land on an unnamed unique key whenever no
- * target was named at all, or when the named target is the primary key.
+ * ✅ **[#8807] closed both residues, and NOT by widening this refusal.** The
+ * paragraph above is still the reason the primary key is not refused *here* —
+ * what changed is that "not refused here" no longer means "unprotected". A
+ * primary-key-targeted merge on a table carrying a rival UNIQUE key is now
+ * verified AFTER the statement, inside a transaction, and rolled back if it
+ * landed on a row the caller never identified
+ * ({@link refuseCrossRowIdentityMerge}). That shape was chosen over extending
+ * this pre-flight precisely because of the first bullet: on the primary-key
+ * path every non-primary UNIQUE key is a rival, so a pre-flight refusal there
+ * could not have been narrowed at all and would have been the blanket ban the
+ * #8755 ruling and the #8807 ruling both excluded.
  */
 function refuseAmbiguousConflictTarget(
   object: string,
