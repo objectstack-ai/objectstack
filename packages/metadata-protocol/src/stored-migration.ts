@@ -135,10 +135,21 @@ export interface StoredMigrationReport {
  *
  * True when nothing is left to convert and nothing was refused. `skipped` rows
  * deliberately do NOT count against it: they name a seam that owns them
- * (flows canonicalize at `AutomationEngine.registerFlow`) or a type this pass
- * has no history-recording write path for — both are documented carve-outs, not
- * work this command left half-done. They are still printed, so the operator
- * sees what the verdict does not cover.
+ * (flows canonicalize at `AutomationEngine.registerFlow`), a type this pass has
+ * no history-recording write path for, or (#8957) a row whose STORED `type`
+ * spelling is non-canonical. None is work this command left half-done — each is
+ * outside what a body-canonicalization pass can do. They are still printed, so
+ * the operator sees what the verdict does not cover.
+ *
+ * ⚠️ The third one is a carve-out with a sharper edge than the other two, and
+ * it is deliberate. A non-canonical stored `type` is real residue: the row sits
+ * in a second namespace, the batch publish refuses it (`STORED_TYPE_NOT_CANONICAL`),
+ * and this pass cannot fix it, because rewriting a stored type is an identity
+ * move rather than a body edit (#8908's option (b), explicitly unruled). Making
+ * it flip this verdict would give `os migrate meta --stored` a non-zero exit
+ * that no run of that command could ever clear — a gate failing on a condition
+ * its own tool has no lever for. So it reports, loudly and per row, and leaves
+ * the verdict to mean what it has always meant: nothing left to CONVERT.
  */
 export function storedMigrationClean(report: StoredMigrationReport): boolean {
   return report.pending === 0 && report.failed === 0;
@@ -169,7 +180,12 @@ export function formatStoredMigrationReport(report: StoredMigrationReport): stri
 
   const skipped = report.rows.filter((r) => r.outcome === 'skipped');
   if (skipped.length > 0) {
-    lines.push(`⚠ ${skipped.length} row(s) are outside this pass — they keep reading through the chain:`);
+    // The header states only what is true of EVERY skip class. It used to add
+    // "they keep reading through the chain", which held for the two carve-outs
+    // that existed then and is false for #8957's: a row in a second namespace
+    // is not read through the chain on its canonical type — it is not read at
+    // all. Each row's own reason carries the specific truth.
+    lines.push(`⚠ ${skipped.length} row(s) are outside this pass — each row's reason says why:`);
     for (const row of skipped) {
       lines.push(`  • ${row.type}/${row.name} ${describeScope(row)} — ${row.reason ?? 'skipped'}`);
     }

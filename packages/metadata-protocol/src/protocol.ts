@@ -12961,8 +12961,14 @@ export class ObjectStackProtocolImplementation implements
     } = {}): Promise<StoredMigrationReport> {
         const canonicalizeFlow = request.canonicalizeFlow ?? this.resolveFlowCanonicalizer();
         const apply = request.apply === true;
+        // [#8957] Folded with the URL/registry map, exactly like the per-row
+        // fold below — and the two MUST move together. An operator who reaches
+        // for `--type fields` because that is the spelling the publish refusal
+        // just quoted at them, and one who reaches for `--type field`, are
+        // asking about the same rows. Folding only the row would have moved the
+        // residue out of reach of the very spelling the operator was handed.
         const typeFilter = request.types && request.types.length > 0
-            ? new Set(request.types.map((t) => PLURAL_TO_SINGULAR[t] ?? t))
+            ? new Set(request.types.map((t) => canonicalMetaType(t)))
             : null;
 
         const report: StoredMigrationReport = {
@@ -12987,7 +12993,23 @@ export class ObjectStackProtocolImplementation implements
 
         for (const row of rows) {
             const rawType = String(row.type ?? '');
-            const singular = PLURAL_TO_SINGULAR[rawType] ?? rawType;
+            // [#8957] The URL/registry map, not the manifest-collection map.
+            //
+            // `PLURAL_TO_SINGULAR` omits the types that are not stack
+            // collections, so for a row stored under one of their plural
+            // spellings the fold was a NO-OP: `singular` stayed `'fields'`,
+            // `convertStoredItemDetailed('fields', …)` found no conversions
+            // registered under that name, `changed` was false, and the row was
+            // recorded `canonical` — "nothing to do" about a row this pass had
+            // never actually looked at. {@link canonicalMetaType} reads
+            // `META_URL_TO_SINGULAR`, which embeds every manifest spelling
+            // verbatim under a module-load agreement assertion, so this swap
+            // cannot change the answer for any spelling the old fold resolved:
+            // measured on this tree, the set of spellings where the two folds
+            // disagree is empty, and the set the new fold NEWLY resolves is
+            // exactly {@link isNonCanonicalStoredType}'s six-member class,
+            // which the guard below reports instead of converting.
+            const singular = canonicalMetaType(rawType);
             if (typeFilter && !typeFilter.has(singular)) continue;
             report.scanned++;
 
@@ -13014,6 +13036,43 @@ export class ObjectStackProtocolImplementation implements
                 report[entry.outcome]++;
                 report.rows.push(entry);
             };
+
+            // [#8957] A row whose STORED `type` is non-canonical is reported,
+            // not converted — and reported BEFORE its body is read, because the
+            // verdict is about the row's identity and is decided without it.
+            //
+            // ⛔ The `continue` is load-bearing, not tidiness. With the
+            // canonical fold above in place, falling through would hand
+            // `convertStoredItemDetailed` the CANONICAL type for a row stored
+            // under a different one, and an `apply` run would then re-save it
+            // through `saveMetaItem({ type: singular })` — minting or
+            // overwriting the canonical row from a body that lives under
+            // another key. That is the identity move (#8908's option (b)):
+            // a new `(org, type, name, package_id)` key, history and audit
+            // continuity to decide, and a collision question when the canonical
+            // row already exists. It is explicitly NOT ruled, and this pass
+            // must not reach it by accident on the way to reporting honestly.
+            //
+            // `skipped` (not `failed`) because nothing was refused and nothing
+            // is broken about this pass; the row is outside its reach, the same
+            // shape as the two carve-outs below it. It therefore does not flip
+            // {@link storedMigrationClean} — see that function's doc for why a
+            // pass that CANNOT fix this must not fail forever over it.
+            if (isNonCanonicalStoredType(rawType)) {
+                record({
+                    ...base,
+                    outcome: 'skipped',
+                    reason: `the row is stored under the non-canonical metadata type '${rawType}' `
+                        + `('${rawType}/${base.name}'), and its canonical type is '${singular}'. This pass `
+                        + `canonicalizes BODIES; rewriting a stored type spelling is an identity move `
+                        + `(a new (org, type, name, package_id) key), not an edit, so it is out of its `
+                        + `reach. Nothing on '${singular}' can see this row — no registry read and no `
+                        + `compliance query — and the batch publish refuses it for that reason `
+                        + `(STORED_TYPE_NOT_CANONICAL). Re-author the item under '${singular}' `
+                        + `(PUT /meta/${singular}/${base.name}) and drop the '${rawType}' row.`,
+                });
+                continue;
+            }
 
             let body: unknown;
             try {
@@ -13966,14 +14025,19 @@ export class ObjectStackProtocolImplementation implements
         // option on the card and is explicitly NOT ruled — it stays available as
         // a follow-up with its own appetite. Do not grow one here.
         //
-        // ⚠️ Measured while writing this, and the reason the message does not
-        // just say "run the stored migration": `migrateStoredMetadata` scans
+        // ⚠️ The reason the message does not just say "run the stored
+        // migration", and STILL does not: `migrateStoredMetadata` canonicalizes
+        // BODIES, and rewriting a stored type spelling is an identity move, so
+        // that door cannot fix this residue either. What changed under #8957 is
+        // only what it SAYS about it. When this comment was written it scanned
         // with `PLURAL_TO_SINGULAR[rawType] ?? rawType` — the same manifest map
-        // — so for exactly these spellings it converts BODIES under the plural
-        // key, finds nothing to change, and reports the row `canonical`. The
-        // stored migration is a real, shipped door (`POST /meta/_migrate-stored`)
-        // that today reports "nothing to do" for this residue, so the actionable
-        // instruction is the re-author path, stated in full.
+        // — so for exactly these spellings it converted bodies under the plural
+        // key, found nothing to change, and reported the row `canonical`:
+        // "nothing to do" about the row this gate had just refused, from the
+        // door an operator naturally reaches for next. It now scans with the
+        // canonical fold and reports the row `skipped`, carrying this same
+        // reason. The two doors agree; neither migrates it, and the actionable
+        // instruction is still the re-author path, stated in full.
         for (const d of drafts) {
             if (!isNonCanonicalStoredType(d.type)) continue;
             const canonical = canonicalMetaType(d.type);
@@ -13987,7 +14051,7 @@ export class ObjectStackProtocolImplementation implements
                     + `this row predates that). Re-author the item under '${canonical}' `
                     + `(PUT /meta/${canonical}/${d.name}) and drop the '${d.type}' row. Note that `
                     + `POST /meta/_migrate-stored does NOT rewrite a stored type spelling — it canonicalizes `
-                    + `bodies, and reports rows of this class as already canonical.`,
+                    + `bodies, and reports rows of this class as 'skipped' with that same reason (#8957).`,
                 code: 'STORED_TYPE_NOT_CANONICAL',
                 organizationId: d.organizationId ?? null,
             });
