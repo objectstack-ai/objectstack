@@ -702,12 +702,20 @@ function unionInto(listPath, changedPath) {
     .filter(Boolean);
 
   const present = new Set(items.map((i) => i.name));
+  // findEscapingPackages() walks packages/, apps/ and examples/ in full and reads
+  // every *.test.* file it finds; its answer does not vary between iterations of
+  // the loop below, so it is indexed ONCE here rather than re-walked per matching
+  // declaration. Nothing between here and the old per-iteration call site writes
+  // to packages/apps/examples (the only write in this function is the final
+  // `writeFileSync(listPath, ...)`, to the turbo-ls.json output, after this
+  // point), so hoisting cannot change what the walk sees.
+  const escapingDirs = new Map([...findEscapingPackages()].map(([n, info]) => [n, info.dir]));
   const added = [];
   for (const [name, { globs }] of Object.entries(CROSS_PACKAGE_TEST_INPUTS)) {
     if (present.has(name)) continue;
     const hit = changed.find((f) => matchesAny(f, globs));
     if (!hit) continue;
-    const dir = [...findEscapingPackages()].find(([n]) => n === name)?.[1]?.dir;
+    const dir = escapingDirs.get(name);
     if (!dir) continue;
     items.push({ name, path: join(REPO_ROOT, dir) });
     added.push(`${name}  (declared glob matched ${hit})`);
