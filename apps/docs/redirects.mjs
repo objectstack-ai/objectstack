@@ -92,14 +92,23 @@ export const docsRedirects = [
   ['/docs/concepts/cluster-semantics', '/docs/kernel/cluster'],
   // deployment
   ['/docs/guides/cloud-deployment', '/docs/deployment'],
-  ['/docs/guides/deployment-vercel', '/docs/deployment/vercel'],
+  ['/docs/guides/deployment-vercel', '/docs/deployment/self-hosting'],
   ['/docs/guides/production-readiness', '/docs/deployment/production-readiness'],
   ['/docs/guides/publish-and-preview', '/docs/deployment/publish-and-preview'],
   ['/docs/guides/environment-variables', '/docs/deployment/environment-variables'],
   ['/docs/guides/single-project-mode', '/docs/deployment/single-project-mode'],
   ['/docs/concepts/cloud-artifact-api', '/docs/deployment/cloud-artifact-api'],
-  ['/docs/guides/objectql-migration', '/docs/deployment/migration-from-objectql'],
+  ['/docs/guides/objectql-migration', '/docs/deployment'],
   ['/docs/guides/troubleshooting', '/docs/deployment/troubleshooting'],
+  // Retired deployment pages (maintainer ruling 2026-08-15). Docker /
+  // self-hosting is the shipping path, so the Vercel guide lands on
+  // self-hosting; the `@objectql/core` port guide has no successor page, so it
+  // lands on the section index. The two `/docs/guides/*` entries ABOVE are
+  // re-pointed at these same destinations rather than left aimed here: Next
+  // matches this table once per request, so a chained entry would cost the old
+  // URLs a second round trip (and every redirect hop is SEO signal lost).
+  ['/docs/deployment/vercel', '/docs/deployment/self-hosting'],
+  ['/docs/deployment/migration-from-objectql', '/docs/deployment'],
   // protocol / releases
   ['/docs/guides/cheatsheets/protocol-diagram', '/docs/protocol/diagram'],
   ['/docs/guides/cheatsheets/backward-compatibility', '/docs/protocol/backward-compatibility'],

@@ -52,6 +52,23 @@
  * empty string. That is the risk #7987 was parked on, and the reason the
  * mechanism is a readback rather than a bare flag.
  *
+ * **`sys_account.password`** (#8676) — the credential hash. better-auth's
+ * sign-in verifier reads it off an adapter result row
+ * (`internalAdapter.findCredentialAccount(userId)`), so it belongs to this
+ * seam for the same reason the OAuth columns do.
+ *
+ * ## TWO seams, not one — this module owns both (#8676)
+ *
+ * The table above serves better-auth's storage adapter, which is the only
+ * importer of {@link reattachInternalFieldsOnRead}. plugin-auth also has
+ * readers of its own that reach the RAW engine and never pass through the
+ * adapter — the ADR-0069 D1 password-reuse ring and the dev seed-admin probe.
+ * The strip has no `isSystem` carve-out, so those are starved by a flag just
+ * the same, and the table cannot reach them.
+ * {@link recoverInternalFieldsForSystemRead} is their seam; its own doc carries
+ * the measurement and the reason a bare flag would have shipped a security
+ * control that reports success while doing nothing.
+ *
  * ## The shape (maintainer ruling 2026-08-13, Q2: compose)
  *
  * `Engine.resolveInternalField` — the purpose-built privileged batch accessor
@@ -145,14 +162,32 @@ interface ReadbackColumn {
  */
 const READBACK_FIELDS: Readonly<Record<string, readonly ReadbackColumn[]>> = {
   [SystemObjectName.SESSION]: [{ field: 'token', absenceProvesStrip: true }],
-  // [#7987] All three OAuth credential columns. `password` /
-  // `previous_password_hashes` are NOT here and must not be: they are
-  // better-auth one-way hashes (ADR-0100's third channel), they are not
-  // flagged `internal`, and the accessor refuses any field that is not.
+  // [#7987] All three OAuth credential columns, plus [#8676] `password`.
+  //
+  // `password` is here because better-auth's sign-in verifier reads it OFF an
+  // adapter result row: `internalAdapter.findCredentialAccount(userId)` returns
+  // the row whose `password` is then compared against the submitted one. Under
+  // the #8676 flag that row comes back without the column, so without this row
+  // password sign-in would fail for every user. `absenceProvesStrip: false`
+  // because `sys_account.password` is `required: false` and genuinely empty on
+  // OAuth-only accounts — see the field's own doc above for why that
+  // discriminator is not a detail.
+  //
+  // ⛔ `previous_password_hashes` is deliberately NOT here, and adding it would
+  // be dead code: better-auth has ZERO readers of that column. It is an
+  // ObjectStack-only column read solely by `auth-manager.ts`'s ADR-0069 D1
+  // reuse ring, which reaches the RAW engine and therefore never passes through
+  // this adapter seam at all — it is recovered by
+  // {@link recoverInternalFieldsForSystemRead} instead. A flagged column nobody
+  // reads back through the adapter must stay stripped here, which is the whole
+  // point of the bound. (`sys_api_key.key` is absent for the sibling reason:
+  // its mint route returns the plaintext it generated and never reads the
+  // stored hash back — #7728.)
   [SystemObjectName.ACCOUNT]: [
     { field: 'access_token', absenceProvesStrip: false },
     { field: 'refresh_token', absenceProvesStrip: false },
     { field: 'id_token', absenceProvesStrip: false },
+    { field: 'password', absenceProvesStrip: false },
   ],
 };
 
@@ -189,7 +224,80 @@ export async function reattachInternalFieldsOnRead(
 ): Promise<void> {
   const fields = READBACK_FIELDS[objectName];
   if (!fields) return;
+  await recoverColumns(engine, objectName, rows, fields, requestedFields);
+}
 
+/**
+ * [#8676] Recover flagged columns for one of plugin-auth's OWN raw-engine
+ * reads — the second seam, and the reason a bare flag was not enough.
+ *
+ * ## Why this exists beside {@link reattachInternalFieldsOnRead}
+ *
+ * That function is table-driven and lives on better-auth's storage-adapter
+ * path: it is imported by exactly one file (`objectql-adapter.ts`), so it can
+ * only repair rows that better-auth itself asked the adapter for. Several of
+ * plugin-auth's own readers bypass the adapter entirely and call
+ * `engine.findOne` / `ql.find` directly, and the engine's strip has **no
+ * `isSystem` carve-out** (#7728's design — measured: a `findOne` with
+ * `context: { isSystem: true }` AND an explicit projection naming the column
+ * still comes back without it). Those readers are starved by the flag and the
+ * adapter table cannot reach them.
+ *
+ * What that costs if it is skipped is not hypothetical. `assertPasswordNotReused`
+ * — the ADR-0069 D1 reuse-prevention control — builds its comparison list as
+ * `[currentHash, ...parseHashes(row.previous_password_hashes)].filter(Boolean)`.
+ * With both keys stripped that list is `[]`, the comparison loop never runs,
+ * `PASSWORD_REUSE` is never thrown, and the lookup's own `catch { return
+ * undefined }` means nothing announces it: a security control reporting success
+ * while doing nothing — the same shape #7823 fixed for `revoke-other-sessions`.
+ * Worse, the unit tests around it use fake engines that never apply the strip,
+ * so they stay GREEN while the control is dead.
+ *
+ * ## Posture: recover when the engine can, stay inert when it cannot
+ *
+ * Every column reached through here is treated as `absenceProvesStrip: false`,
+ * and that is a requirement rather than a default. `previous_password_hashes`
+ * is legitimately absent on a credential account that has never changed its
+ * password — the ordinary case for a brand-new account — so "the key is missing
+ * ⇒ the engine stripped it" is simply false for it, and a seam that threw on
+ * absence would break the FIRST password change of every user. `password` is
+ * `required: false` for the sibling reason (OAuth-only accounts carry none).
+ * An engine offering no `resolveInternalField` does not implement the `internal`
+ * channel at all — both halves ship together on the ObjectQL engine — so it
+ * cannot have stripped anything and there is nothing to recover.
+ *
+ * @param engine      The RAW data engine (privileged verb holder).
+ * @param objectName  Protocol object name of the rows just read.
+ * @param rows        The row or rows to repair, mutated in place. A nullish
+ *                    row is a no-op, so a caller may pass a `findOne` result
+ *                    straight through without a null check.
+ * @param fields      The flagged columns this caller actually reads. Keep it to
+ *                    what the caller consumes: each entry costs one id-batched
+ *                    driver read, and the accessor resolves ONE field per call.
+ */
+export async function recoverInternalFieldsForSystemRead(
+  engine: InternalFieldResolvingEngine,
+  objectName: string,
+  rows: unknown,
+  fields: readonly string[],
+): Promise<void> {
+  if (fields.length === 0) return;
+  await recoverColumns(
+    engine,
+    objectName,
+    rows,
+    fields.map((field) => ({ field, absenceProvesStrip: false })),
+  );
+}
+
+/** The shared recovery loop behind both seams above. */
+async function recoverColumns(
+  engine: InternalFieldResolvingEngine,
+  objectName: string,
+  rows: unknown,
+  fields: readonly ReadbackColumn[],
+  requestedFields?: readonly string[],
+): Promise<void> {
   const list = (Array.isArray(rows) ? rows : [rows]).filter(
     (r): r is Record<string, unknown> => Boolean(r) && typeof r === 'object',
   );

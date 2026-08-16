@@ -21,6 +21,7 @@ import {
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import { createObjectQLAdapterFactory, withSystemReadContext } from './objectql-adapter.js';
+import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
 import { runWithAuthActorScope, setAuthActorResolver } from './auth-actor-attribution.js';
 import {
   emitAuthSessionAuditEvent,
@@ -5034,6 +5035,17 @@ export class AuthManager {
         fields: ['id', 'password', 'previous_password_hashes'],
         context: SYSTEM_CTX,
       } as any);
+      // [#8676] Both columns are `internal: true`, so the engine's read path
+      // omits them from the row above — with no `isSystem` carve-out and in
+      // spite of the explicit projection (#7728's design). Recover them
+      // through the privileged accessor, or `compareList` below is empty and
+      // this control silently passes every reused password.
+      await recoverInternalFieldsForSystemRead(
+        engine as never,
+        'sys_account',
+        account,
+        ['password', 'previous_password_hashes'],
+      );
     } catch {
       return undefined; // fail-open on lookup error
     }
@@ -5071,6 +5083,15 @@ export class AuthManager {
         context: SYSTEM_CTX,
       } as any);
       if (!account?.id) return;
+      // [#8676] As above — the flagged column is omitted from the read, so
+      // recover it before extending the ring. Without this the ring is rebuilt
+      // from an empty history on every change and never grows past one entry.
+      await recoverInternalFieldsForSystemRead(
+        engine as never,
+        'sys_account',
+        account,
+        ['previous_password_hashes'],
+      );
       const prev = this.parseHashes(account.previous_password_hashes);
       const next = [oldHash, ...prev.filter((h) => h !== oldHash)].slice(0, count);
       await engine.update(

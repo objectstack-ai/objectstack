@@ -353,7 +353,21 @@ export function checkFieldRefs(
   // question goes unasked and only the existence one is answered — the
   // pre-#8340 behaviour, preserved for out-of-repo callers of this exported
   // core (cloud graph-lint, the AI authoring path). Every in-repo caller passes
-  // it; `check-cross-package-test-inputs` is what would notice if one stopped.
+  // it: `validatePageFieldBindings` below, and `checkBlockFieldProps` in
+  // `validate-react-page-props`.
+  //
+  // [#8664] What NOTICES if one stops is a behaviour test through the
+  // top-level entry point — nothing else can. No CI gate reads call sites:
+  // `check-cross-package-test-inputs`, named here until #8664, is an
+  // input-scoping gate (it decides which packages CI runs and how the `test`
+  // task cache is keyed, from a declared glob list) and has no view of
+  // argument passing. Measured by dropping the argument at each site: both
+  // entry seams go red — "warns on a highlights binding over an unprovisioned
+  // anchor" in this file's test, and "reaches the FILTER position through the
+  // shared core" in validate-react-page-props.test.ts, which also covers the
+  // `queried` call inside `checkBlockFieldProps`. The other four calls inside
+  // `checkBlockFieldProps` are threaded by convention only — dropping the
+  // index there leaves the whole lint suite green (#8943).
   unprovisionedAnchors?: ReadonlyMap<string, ReadonlySet<string>>,
 ): PageFieldFinding[] {
   const findings: PageFieldFinding[] = [];

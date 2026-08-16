@@ -86,8 +86,47 @@ substitute. See the [Data API](/docs/api/data-api).
 
 ### `MISSING_REQUIRED_FIELD`
 **Cause:** A required field was not provided in the request body.  
-**Fix:** Include the missing field. Check `fields` for the field name.  
+**Fix:** Include the missing field. Check `fields` for the field name — **except** on the
+`controlled_by_parent` master-reference paths below, where the status is `422` and no
+`fields` array is sent; read the field name out of the message there.  
 **Retry:** `no_retry`
+
+<Callout type="warn">
+**`MISSING_REQUIRED_FIELD` is `400` with one exception: an absent `controlled_by_parent`
+master reference answers `422`, without `fields`.**
+
+An object whose `sharingModel` is `controlled_by_parent` derives its access from a master
+record, so the gate authorizing writes to it resolves that master *before* the executor —
+and the executor is where required-field validation runs. Which of the two refuses first
+depends on how the master reference is declared. A `master_detail` that is `required` and
+neither `readonly` nor `system` reaches validation and answers the documented
+`400 VALIDATION_FAILED` with `fields`. The other four declarable shapes never reach it and
+answer `422 MISSING_REQUIRED_FIELD` with no `fields`:
+
+- a `master_detail` with no `required`
+- a `master_detail` that is `required` + `readonly`
+- a `master_detail` that is `required` + `system`
+- a `required` `lookup`, when the object declares no `master_detail`
+
+The full matrix is on the protocol page:
+[`MISSING_REQUIRED_FIELD`](/docs/protocol/kernel/error-handling#missing_required_field).
+
+An update or delete **by id** whose *stored* master reference is null answers the same
+`422`, whatever the declaration — the caller sent no such field, so nothing could be named
+in `fields` and no payload would fix it.
+
+The refusal itself is correct and is not going to be relaxed: on those four shapes
+required-field validation does not fire (it skips `system` and `readonly` fields before its
+required check, and never fires on a field that is not `required`), so the gate is the only
+thing standing between the request and a detail record with a null master reference — which
+the `controlled_by_parent` read filter (`fk IN (readable masters)`) can never match, leaving
+a record readable by nobody.
+
+These shapes are **authorable today**: lint reports a `master_detail` without `required` as
+a warning only, and does not report the `readonly`, `system`, or fallback-`lookup` shapes at
+all. **Branch on `code`, treat `fields` as optional, and read the status off the response**
+rather than deriving it from the table at the end of this page.
+</Callout>
 
 ### `INVALID_FORMAT`
 **Cause:** Field value does not match the expected format (e.g., invalid email, wrong date format).  
@@ -632,6 +671,7 @@ async function handleApiCall() {
 | 403 | `authorization` | `PERMISSION_DENIED`, `FIELD_NOT_ACCESSIBLE`, `LICENSE_REQUIRED` |
 | 404 | `not_found` | `RECORD_NOT_FOUND`, `OBJECT_NOT_FOUND`, `ENDPOINT_NOT_FOUND` |
 | 409 | `conflict` | `CONCURRENT_MODIFICATION`, `DUPLICATE_RECORD`, `DELETE_RESTRICTED` |
+| 422 | `validation` | `MISSING_REQUIRED_FIELD` on an absent `controlled_by_parent` master reference (see [above](#missing_required_field)) — this row is an exception to the 400 row, not a second home for the code |
 | 429 | `rate_limit` | `RATE_LIMIT_EXCEEDED`, `QUOTA_EXCEEDED` |
 | 500 | `server` | `INTERNAL_ERROR`, `DATABASE_ERROR`, `TIMEOUT` |
 | 502 | `external` | `EXTERNAL_SERVICE_ERROR`, `INTEGRATION_ERROR` |

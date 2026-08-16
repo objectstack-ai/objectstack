@@ -90,7 +90,7 @@ ObjectStack uses standard HTTP status codes:
 | **403** | Forbidden | Authenticated but insufficient permissions |
 | **404** | Not Found | Resource doesn't exist |
 | **409** | Conflict | Resource already exists or version mismatch |
-| **422** | Unprocessable Entity | Semantic validation failed (e.g. metadata spec validation) |
+| **422** | Unprocessable Entity | Semantic validation failed (e.g. metadata spec validation); also an absent `controlled_by_parent` master reference — see [`MISSING_REQUIRED_FIELD`](#missing_required_field) |
 | **429** | Too Many Requests | Rate limit exceeded |
 | **500** | Internal Server Error | Server-side error |
 | **503** | Service Unavailable | Server overloaded or maintenance |
@@ -244,7 +244,7 @@ if (error.code === 'VALIDATION_ERROR') {
 ```
 
 #### `MISSING_REQUIRED_FIELD`
-**HTTP Status:** 400  
+**HTTP Status:** 400 — with one documented exception, which answers **422** (see below)  
 **Meaning:** Required field is missing
 
 **Example:**
@@ -261,6 +261,45 @@ if (error.code === 'VALIDATION_ERROR') {
   }
 }
 ```
+
+**Exception — an absent `controlled_by_parent` master reference answers 422 with no `fields`.**
+An object whose `sharingModel` is `controlled_by_parent` derives its access from a master
+record, so the gate that authorizes writes to it must resolve that master *before* the
+executor runs — and the executor is where required-field validation lives. When the master
+reference is absent, whichever of the two refuses first decides the envelope, and that
+depends on how the reference is declared:
+
+| Master reference declared as | Refused by | Status | `code` | `fields` |
+|---|---|:---:|---|:---:|
+| `master_detail` + `required`, not `readonly`/`system` | required-field validation | 400 | `VALIDATION_FAILED` | yes |
+| `master_detail` with no `required` | the master-access gate | **422** | `MISSING_REQUIRED_FIELD` | **absent** |
+| `master_detail` + `required` + `readonly` | the master-access gate | **422** | `MISSING_REQUIRED_FIELD` | **absent** |
+| `master_detail` + `required` + `system` | the master-access gate | **422** | `MISSING_REQUIRED_FIELD` | **absent** |
+| a `required` `lookup`, when the object declares no `master_detail` | the master-access gate | **422** | `MISSING_REQUIRED_FIELD` | **absent** |
+
+Only the first row is the documented 400 shape. On the other four, messages are prefixed
+`[Security] Missing master reference:` and name the object and the field, but no `fields`
+array rides along.
+
+The same `422 MISSING_REQUIRED_FIELD` also answers an update or delete **by id** whose
+*stored* master reference is null, whatever the declaration. That is a different path: the
+caller supplied no such field, so there is no request field to name in `fields` and no
+payload that would fix it.
+
+**Why the gate refuses rather than handing over.** Required-field validation skips
+provenance-flagged fields before its required check is reached (`system` and `readonly`
+fields are skipped outright) and never fires on a field that is not `required` at all. On
+those four shapes the gate is the only thing refusing the write, and letting it through was
+measured to create a detail record whose master reference is null — a record the
+`controlled_by_parent` read filter (`fk IN (readable masters)`) can never match, so it is
+readable by nobody and answers 422 on every later write by id. The refusal is correct; only
+its status departs from the rule above.
+
+**These shapes are authorable today.** Publish-time lint reports a `master_detail` without
+`required` as a *warning* (`relationship/master-detail-required`), and does not report the
+`readonly`, `system`, or fallback-`lookup` shapes at all — so a stack can publish clean and
+still reach the 422. Branch on `code`, and read the status off the response rather than
+deriving it from this page.
 
 #### `INVALID_FIELD`
 **HTTP Status:** 400  

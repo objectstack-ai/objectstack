@@ -1,0 +1,206 @@
+---
+title: Upgrading
+description: ObjectStack upgrades come in two halves that run on separate clocks — the platform runtime and your metadata app. Which one you are doing, what each one moves, and where the per-major checklists live.
+---
+
+There are **two upgrades** on this platform, and they run on separate clocks:
+
+| | Platform runtime | Metadata app |
+| :--- | :--- | :--- |
+| Ships as | a Docker image (or the `os` CLI on a host) | a compiled artifact, `dist/objectstack.json` |
+| Versioned by | our release train (`17.0.0`) | your own catalog |
+| Whose cadence | ours | yours |
+| The upgrade action | move the image tag, restart | `os migrate meta --from 16`, then rebuild and ship |
+| Touches your metadata? | no | yes — it rewrites your source |
+
+Most upgrade questions are really the question *which of these am I doing*. You
+can do either one alone. A platform move does not rewrite your app, and
+republishing your app does not move the runtime.
+
+<Callout type="info">
+**The short version.** Moving the runtime forward one major keeps working with
+metadata authored against the previous major — the loader converts it as it
+reads. Falling **two** majors behind is what breaks, because the conversion
+window is one major wide. See [when a platform move forces an app
+move](#when-a-platform-move-forces-an-app-move).
+</Callout>
+
+## The platform runtime
+
+The platform ships as a single version-locked train: every `@objectstack/*`
+package shares one version number, and that number is the platform version.
+
+### Moving the tag
+
+The official image is `ghcr.io/objectstack-ai/objectstack`, and its tags mirror
+`@objectstack/cli` versions (`17.0.0`, `17.0`, `17`, `latest`). **Pin the exact
+version in production** and move it deliberately:
+
+```bash
+# docker-compose.yml, or your orchestrator's manifest
+image: ghcr.io/objectstack-ai/objectstack:17.0.0
+```
+
+On a host running the artifact directly under systemd, the same move is a file
+swap: replace the artifact and restart the service. Roll back by restoring the
+previous artifact.
+
+See [Self-hosting](/docs/deployment/self-hosting) for both deployment shapes in
+full.
+
+### What the boot does when the database disagrees
+
+Moving the runtime can leave the physical database shaped for the previous
+version. What happens next depends on which deployment shape you run.
+
+**The standing production policy is hands-off.** Under `NODE_ENV=production`,
+automatic reconciliation is ignored and every divergence is *warned* about, on
+the assumption that an operator runs `os migrate` deliberately:
+
+```bash
+os migrate plan     # how the database has drifted, categorised safe / needs-confirm / destructive
+os migrate apply    # applies the loosening changes
+os migrate apply --allow-destructive   # the narrowing ones, once you have read the plan
+```
+
+**The artifact-pinned boot is stricter**, because there is nobody at a terminal:
+a container simply comes up carrying a different artifact than the one that
+shaped the database. On that path the boot applies safe and needs-confirm drift
+itself, and **refuses to start on destructive drift**, printing every change and
+the command that resolves it. Nothing is skipped silently — "shrug and serve" is
+the state that gate exists to delete. The refusal happens before the HTTP port
+binds, so a refused boot is a boot that never served traffic.
+
+### When a platform move forces an app move
+
+Each package declares the protocol major it was authored against, and the
+runtime checks that handshake **first**, before it loads anything:
+
+```ts
+manifest: {
+  // ...
+  engines: { protocol: '^17' },
+}
+```
+
+The load path then converts old metadata shapes to the canonical current shape
+as it reads them, emitting a deprecation notice per conversion. **That window is
+exactly one major wide.** Metadata authored against the previous major loads and
+runs; a shape retired one major further back is *rejected*, and the rejection
+carries the fix — the old spelling, the new spelling, and the command that
+rewrites your sources.
+
+The practical consequence:
+
+- **One major behind** — it runs. You will see conversion notices in the boot
+  log. Migrate at your convenience.
+- **Two or more majors behind** — the load rejects the retired shapes. The
+  metadata half is no longer optional, and it is the next section.
+
+## The metadata app
+
+Your app is versioned by you, upgraded by you, and shipped as a compiled
+artifact. Upgrading it across one or more protocol majors is one command
+followed by your normal build.
+
+### One command covers every major you skipped
+
+```bash
+os migrate meta --from 15     # the major your metadata was authored against
+```
+
+`--from` is the major **you** wrote against, not the one you are going to. The
+command replays every step between that major and this runtime's, in order, in a
+single pass — so upgrading across skipped majors does **not** mean running it
+once per major, and does not mean reading several release checklists and merging
+them by hand:
+
+| You ran | Steps it replays |
+| :--- | :--- |
+| `os migrate meta --from 16` | 17 |
+| `os migrate meta --from 15` | 16, 17 |
+| `os migrate meta --from 14` | 15, 16, 17 |
+| `os migrate meta --from 12` | 13, 14, 15, 16, 17 |
+
+The chain reaches back to **protocol 10** — that floor is a release-policy
+decision, not an accident of what still exists. Below it the command refuses
+with a message naming the floor rather than half-migrating you.
+
+Useful flags:
+
+| Flag | What it does |
+| :--- | :--- |
+| `--step` | Report each major's hop separately, so a failure bisects to the exact major |
+| `--out migrated.stack.json` | Write the migrated stack instead of only reporting it |
+| `--to 16` | Stop at an intermediate major instead of this runtime's |
+| `--json` | Machine-readable output, for CI or an agent |
+
+It rewrites **your source** and reads no database. (Its sibling,
+`os migrate meta --stored`, does the opposite — it rewrites one deployment's
+stored metadata rows and reads no config. The two are mutually exclusive.)
+
+### What it does not do — read the output
+
+<Callout type="warn">
+`os migrate meta` applies the **mechanical** rewrites and never guesses at the
+rest. Changes that cannot be converted losslessly are reported as structured
+to-dos for you to resolve — they are not applied, and a clean-looking run can
+still carry dozens of them. The command's output is the work list, not a receipt.
+</Callout>
+
+That split is the reason the per-major checklists below still matter: renames
+and retired keys the tool handles; decisions it cannot make for you stay yours.
+The run also ends by naming the per-deployment **data** migrations that remain
+(`os migrate files-to-references`, `os migrate value-shapes`, and friends) —
+scoped to the field classes your metadata actually declares. It reads no
+database, so that list is what is left to consider, never what this deployment
+has already done.
+
+### The loop
+
+```bash
+os migrate meta --from 15     # 1. rewrite sources; read the to-dos
+                              # 2. resolve them, and the checklist items below
+os validate                   # 3. the gate — schema, CEL predicates, widget bindings
+os build                      # 4. compile to dist/objectstack.json
+                              # 5. ship the artifact; restart
+os migrate plan               # 6. reconcile the database to the new metadata
+```
+
+Step 3 is the real gate: `os validate` runs the same checks as `os build` but
+writes no artifact, which makes it the fast inner loop while you work through
+the to-dos. Full command reference in the [CLI
+documentation](/docs/deployment/cli).
+
+## Per-major specifics
+
+Everything above is the mechanism. The *contents* of a given major — which keys
+were renamed, which defaults changed, which grant you now have to declare
+explicitly — live on that major's release page, written for app authors and
+compiled at release time.
+
+Read the checklist for **every major you are crossing**, not only the one you
+are landing on:
+
+| Release | Upgrade checklist |
+| :--- | :--- |
+| v17.0.0 | [Upgrade checklist](/docs/releases/v17#upgrade-checklist) |
+| v16.0.0 | [Upgrade checklist](/docs/releases/v16#upgrade-checklist) |
+| v15.0.0 | [Upgrade checklist](/docs/releases/v15#upgrade-checklist) |
+| v14.0.0 | [Upgrade checklist](/docs/releases/v14#upgrade-checklist) |
+| v13.0.0 | [Upgrade checklist](/docs/releases/v13#upgrade-checklist) |
+| v12.0.0 | [Upgrade checklist](/docs/releases/v12#upgrade-checklist) |
+| v9.0.0 | [Upgrade checklist](/docs/releases/v9#upgrade-checklist) |
+
+Curated notes for v10 and v11 were never backfilled; consult the per-package
+`CHANGELOG.md` files for those two. The [release notes
+overview](/docs/releases) summarizes what each major changed.
+
+## Not this page
+
+**Upgrading an installed package** — a template app or a third-party package
+already installed into a deployment — is a different operation with its own
+lifecycle (pre-check, plan, snapshot, execute, validate, commit or roll back).
+It is neither of the two halves above: it moves *someone else's* metadata inside
+your deployment. See the [package upgrade
+protocol](/docs/references/kernel/package-upgrade).
