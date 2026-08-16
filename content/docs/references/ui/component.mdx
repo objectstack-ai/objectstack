@@ -660,7 +660,7 @@ Type: `string`
 | **columns** | `string[]` | optional | Fields to display in the related list. Optional: when omitted, columns derive from the related object's highlightFields / default list columns (a related list is just another surface that lists that object). Override chain: child highlightFields → field-level relatedListColumns → this inline list. |
 | **sort** | `string \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sort order for related records |
 | **limit** | `integer` | optional (default: `5`) | Number of records to display initially |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| … +15 more>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Additional filter criteria for related records |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'starts_with' \| … +14 more>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Additional filter criteria for related records |
 | **title** | `string \| Record<string, string>` | optional | Custom title for the related list |
 | **showViewAll** | `boolean` | optional (default: `true`) | Show "View All" link to see all related records |
 | **actions** | `string[]` | optional | Action IDs available for related records |
