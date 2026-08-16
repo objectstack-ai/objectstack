@@ -209,25 +209,49 @@
 //               2026-08-06 on the objectql case: two back-to-back runs were
 //               byte-identical, so this gate has no known nondeterminism.
 //
-//               BOOTSTRAP MARGINS (#5278 option A). The two paragraphs above
-//               describe a race that the exact-calibration loop lost five times
-//               running -- objectql 333 -> 334 -> 335 -> 339 and lint 30 -> 32,
-//               each calibration stale within minutes of being pushed, while
-//               seven unrelated PRs were kicked from the queue as collateral.
-//               The maintainer's ruling was to land the invariant with a
-//               DOCUMENTED margin on the packages that proved hottest rather
-//               than run a sixth lap: `@objectstack/objectql`,
-//               `@objectstack/lint`, `@objectstack/rest`,
-//               `@objectstack/service-storage` and `@objectstack/mcp` are
-//               recorded at their measurement PLUS TEN, and each says so in its
-//               own note, naming the measured number and the sha. This is the
-//               ledger's ONLY
-//               slack and it is deliberately loud: nothing else here may sit
-//               above its measurement, and a margin is not a place to hide a
-//               real increase. Because shrinkage is informational, each of the
-//               five prints its own `ℹ ... can be lowered` line on every run --
-//               that line IS the tightening worklist, and closing it is a
-//               follow-up PR, not a thing to leave running for months.
+//               BOOTSTRAP MARGINS (#5278 option A) -- ALL FIVE PAID OFF, kept
+//               here because the shape is what the next hot landing will want.
+//               The two paragraphs above describe a race that the
+//               exact-calibration loop lost five times running -- objectql
+//               333 -> 334 -> 335 -> 339 and lint 30 -> 32, each calibration
+//               stale within minutes of being pushed, while seven unrelated PRs
+//               were kicked from the queue as collateral. The maintainer's
+//               ruling was to land the invariant with a DOCUMENTED margin on the
+//               packages that proved hottest rather than run a sixth lap:
+//               `@objectstack/objectql`, `@objectstack/lint`,
+//               `@objectstack/rest`, `@objectstack/service-storage` and
+//               `@objectstack/mcp` were recorded at their measurement PLUS TEN,
+//               each saying so in its own note with the measured number and sha.
+//
+//               ⚠️ NONE OF THE FIVE CARRIES THAT SLACK TODAY. The roster above is
+//               the ruling's, not a current inventory, and reading it as one is
+//               the mistake this paragraph exists to stop. Four were tightened
+//               onto their exact measurement: rest 163 -> 155 (#6939 / #7038,
+//               PR #7248), then lint 42 -> 20, mcp 63 -> 53 and
+//               service-storage 52 -> 51 in one sweep (#7888 / PR #8225), with
+//               lint going 20 -> 19 in #8728. The fifth was never lowered and did
+//               not need to be: objectql's RECORDED 355 is untouched and now
+//               MEASURES 355 exactly, so its +10 was spent by real growth rather
+//               than handed back. Both routes end in the same place, and it is
+//               the intended one -- every entry in both ledgers now sits at its
+//               measurement, so the next new error anywhere is red on arrival.
+//
+//               A margin remains the ledger's ONLY sanctioned slack, and it is
+//               deliberately loud: nothing here may sit above its measurement,
+//               and a margin is not a place to hide a real increase. Because
+//               shrinkage is informational, any entry above its measurement
+//               prints its own `ℹ ... can be lowered` line on every run -- that
+//               line IS the tightening worklist, and closing it is a follow-up
+//               PR, not a thing to leave running for months. Re-establishing a
+//               margin deliberately is still available and is a maintainer call,
+//               exactly as raising any ceiling is.
+//
+//               ⚠️ Two of the five notes -- mcp and service-storage -- still
+//               narrate their margin in the present tense ("RECORDED 63 is a
+//               bootstrap margin") against an `errors` that no longer carries
+//               one. Stale narration, not stale arithmetic: both `errors` are
+//               the measured values named above. Left to their own cards rather
+//               than rewritten from #8728, which is scoped to the lint entry.
 //
 //               The margins were not a precaution; two of the first four were
 //               paid out inside a single hour of the landing flight. objectql
@@ -710,14 +734,25 @@ const TEST_DEBT = {
   },
   '@objectstack/lint': {
     errors: 19,
-    note: 'TS7006 x22, TS2835 x6, TS6059 x4. Measured 26 -> 30 (5ab08428, the +4 being TS6059, a file '
-      + 'outside rootDir, a class the pre-#5278 note did not list) -> 32 (e8db1a230). The latest +2 are '
-      + 'both TS7006 and both in files that already existed; three lint test files changed in this window '
-      + '(#5762 / PR #5952, #5378 / PR #5904) and the pre-merge per-file counts were not retained, so the '
-      + 'delta is recorded rather than attributed. 10 of the 32 sit in '
-      + 'src/validate-visibility-predicates.test.ts. RECORDED 42 is a bootstrap margin (+10 over 32 '
-      + 'measured at e8db1a230 and re-confirmed at 32 an hour later at 77c7c884b) -- tighten via the ℹ '
-      + 'hint immediately after landing (#5278 option A).',
+    note: 'TS7006 x11, TS2835 x5, TS6059 x3, re-tallied from tsc at the 19 below -- not the older '
+      + 'composition rescaled. Per file: src/validate-semantic-roles.test.ts x5, '
+      + 'src/validate-dashboard-action-refs.test.ts x4, src/validate-translatable-sections.test.ts x3, '
+      + 'src/validate-filter-tokens.test.ts x3, src/validate-capability-references.test.ts x3, '
+      + 'src/validate-managed-api-methods.test.ts x1. The 5 TS2835 are one per file and all the same '
+      + "shape -- the test's own relative import of the module under test, missing its `.js`. All 3 "
+      + 'TS6059 sit in validate-translatable-sections.test.ts, which still imports contact.object.ts, '
+      + 'contact.view.ts and system/translations/index.ts from examples/app-showcase. '
+      + 'Measured 26 -> 30 (5ab08428, the +4 being TS6059, a file outside rootDir, a class the pre-#5278 '
+      + 'note did not list) -> 32 (e8db1a230), and RECORDED 42 was a bootstrap margin (+10 over that 32). '
+      + 'THE MARGIN IS GONE, and has been since #7888 / PR #8225 lowered 42 -> 20 against a measured 20 at '
+      + 'b5e09b21 -- that PR deliberately left this note describing the larger pile, because inventing a '
+      + 'composition for errors that are gone is the one thing this ledger forbids, so the tally above is '
+      + 'the first one taken at the size the entry actually is. Lowered 20 -> 19 at 585edf738 (#8728). '
+      + 'The -1 is attributed: #8515 / PR #8610 moved the translation-section-name-missing pins onto the '
+      + 'frozen src/showcase-shape.fixtures.ts snapshot and dropped the live `TaskViews` import, which is '
+      + 'the TS6059 that left -- the surviving three name exactly the three example files those tests '
+      + 'still import. One older claim is now false and is corrected rather than carried: '
+      + 'src/validate-visibility-predicates.test.ts held 10 of the 32 and reports none today.',
   },
   '@objectstack/plugin-security': { errors: 11, note: 'TS2739 x8, TS2740 x5, TS2345/TS2322/TS2741 x2 each -- incomplete literals. Re-measured 21 at 5ab08428, up from 20, and still 21 at e8db1a230 after the package gained a test file -- the file count moved, the error count did not (which is why the file count is derived here rather than written down, #5826).' },
   '@objectstack/formula': { errors: 17, note: 'TS2591 x6 (`process`), TS2345 x3, TS2352 x3, TS1470 x2, TS2339 x2. Re-measured 17 at 5ab08428, up from 12; the TS2591 half doubled, which is the missing `types:["node"]` again rather than five new defects.' },
