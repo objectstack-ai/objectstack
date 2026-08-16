@@ -247,8 +247,12 @@ describe('[#6682] the analytics face answers the same text rules', () => {
       .every((ops) => Object.keys(ops).every((op) => EXPRESSIBLE.includes(op))),
   );
 
-  it('covers the whole expressible subset — eleven cases, not an accidental one', () => {
-    expect(analyticsCases.length).toBe(11);
+  it('covers the whole expressible subset — twelve cases, not an accidental one', () => {
+    // Twelve since #8934: the infix `icontains` spelling's `%`-literal case is
+    // computed through `parseFilterAST` and lands as `$icontains`, so it joins
+    // this face's expressible subset automatically — exactly the mechanism the
+    // selection note above promises.
+    expect(analyticsCases.length).toBe(12);
   });
 
   for (const c of analyticsCases) {
