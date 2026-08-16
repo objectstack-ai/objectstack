@@ -46,6 +46,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { omitInternalFieldsFromWriteResponse } from '@objectstack/core';
 import { createStdioDataBridge } from './stdio-data-bridge.js';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 /** The value that must NEVER appear in any MCP response. */
 const SENTINEL = 'INTERNAL-SENTINEL-8497-NEVER-SERIALIZED';
@@ -83,9 +84,14 @@ function makeSentinelEngine(): IDataEngine {
     findOne: vi.fn(async () => storedRow()),
     insert: vi.fn(async (_o: string, data: Record<string, unknown>) =>
       writtenRow((data?.id as string) ?? 'new-1', data)),
-    update: vi.fn(async (_o: string, data: Record<string, unknown>) =>
-      writtenRow('row-1', data)),
-    delete: vi.fn(async () => ({ deleted: 1 })),
+    update: vi.fn(async (_o: string, data: Record<string, unknown>, options?: any) => {
+      assertEngineUpdateDispatch(data, options);
+      return writtenRow('row-1', data);
+    }),
+    delete: vi.fn(async (_o: string, options?: any) => {
+      assertEngineDeleteDispatch(options);
+      return { deleted: 1 };
+    }),
     count: vi.fn(async () => 1),
     aggregate: vi.fn(async () => [{ n: 1 }]),
   } as unknown as IDataEngine;

@@ -41,6 +41,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import { MCPServerPlugin } from './plugin.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 // ---------------------------------------------------------------------------
 // A real stdio client: newline-delimited JSON-RPC over the transport's pipes
@@ -492,8 +493,14 @@ describe('#8034 plugin composition: os serve stdio wiring', () => {
         return [];
       }),
       insert: vi.fn(async () => ({ id: 'new1' })),
-      update: vi.fn(async () => ({})),
-      delete: vi.fn(async () => true),
+      update: vi.fn(async (_o: string, data: any, options?: any) => {
+        assertEngineUpdateDispatch(data, options);
+        return {};
+      }),
+      delete: vi.fn(async (_o: string, options?: any) => {
+        assertEngineDeleteDispatch(options);
+        return true;
+      }),
       aggregate: vi.fn(async () => []),
       count: vi.fn(async () => 0),
       findOne: vi.fn(async () => null),

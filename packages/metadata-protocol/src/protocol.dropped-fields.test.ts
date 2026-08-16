@@ -76,7 +76,10 @@ describe('updateData — forwards engine write strips as droppedFields (#3431)',
   it('omits droppedFields entirely when the engine stripped nothing', async () => {
     const engine = {
       registry: { getObject: () => SCHEMA },
-      update: vi.fn(async (_o: string, data: any) => ({ id: 'rec-1', ...data })),
+      update: vi.fn(async (_o: string, data: any, options?: any) => {
+        assertEngineUpdateDispatch(data, options);
+        return { id: 'rec-1', ...data };
+      }),
       findOne: vi.fn(async () => ({ id: 'rec-1' })),
     };
     const p = new ObjectStackProtocolImplementation(engine as any);

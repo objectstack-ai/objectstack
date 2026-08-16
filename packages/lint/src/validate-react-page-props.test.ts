@@ -1242,4 +1242,101 @@ describe('validateReactPageProps — unprovisioned injected anchors (#8340)', ()
     );
     expect(f).toEqual([]);
   });
+
+  // ───────────────────────────────────────────────────────────────────────
+  // [#8943] The four `checkBlockFieldProps` calls that were threaded by
+  // CONVENTION ONLY.
+  //
+  // `checkFieldRefs` takes the anchor index as an OPTIONAL trailing
+  // parameter, so a call site that stops passing it keeps compiling and
+  // silently downgrades to the pre-#8340 behaviour: existence still
+  // answered, provenance never asked. Nothing else can see that happen —
+  // the parameter being optional means no type error, and the local
+  // `unprovisionedAnchors` binding stays READ by the sibling calls in the
+  // same function, so there is no TS6133 either. No CI gate reads call
+  // sites at all (#8664).
+  //
+  // #8943 measured all six threading sites by dropping the argument at each
+  // in turn. The two module seams were already pinned — `validatePageFieldBindings`
+  // and the `queried` bucket, both covered by the FILTER-position test above.
+  // The four below stayed GREEN across the whole packages/lint suite with the
+  // index dropped. Each test here was then written ablation-first and observed
+  // RED under its own site's ablation, which is precisely why it exists.
+  //
+  // The branches are disjoint by tag and prop, so each test names exactly one
+  // site: `own` refs reach `<ListView columns>`; the subform pair needs
+  // `<ObjectForm subforms>`; the COMPONENT_FIELD_SPECS table is reachable
+  // only through `<Block type>`, since no react tag's own schemaType
+  // (`list-view`, `object-form`, `object-chart`) is a key in it.
+  // ───────────────────────────────────────────────────────────────────────
+
+  /** A LOCAL object — platform storage is real, so it registers no unprovisioned anchor. */
+  const localOrder = { name: 'crm_order', fields: [{ name: 'code' }] };
+
+  it('[#8943] R1 — PINS the `own` display-ref call (the `skipped` bucket of REACT_FIELD_SPECS)', () => {
+    // `<ListView columns>` is a DISPLAY binding, not a query: the consequence
+    // clause is the blank-column one, not the constant-false one.
+    const f = validateReactPageProps(
+      extPage(`function Page(){ return <ListView objectName="ext_customer" columns={['owner_id']} />; }`),
+    );
+    expect(f.filter((x) => x.rule === PAGE_FIELD_UNKNOWN)).toHaveLength(0);
+    const warned = f.filter((x) => x.rule === PAGE_FIELD_UNPROVISIONED);
+    expect(warned).toHaveLength(1);
+    expect(warned[0].severity).toBe('warning');
+    expect(warned[0].path).toBe('pages[0].source › columns[0]');
+    expect(warned[0].message).toContain('external object (ADR-0015)');
+    expect(warned[0].message).toContain('blank, on every record');
+  });
+
+  it('[#8943] R3 — PINS the ObjectForm subform CHILD refs (resolved against `childObject`)', () => {
+    // The child batch resolves against the subform's own object, so the
+    // external one is the CHILD here and the form's object is local.
+    const f = validateReactPageProps(
+      extPage(
+        `function Page(){ return <ObjectForm objectName="crm_order" subforms={[{ childObject: 'ext_customer', columns: ['owner_id'] }]} />; }`,
+        [extCustomer(), localOrder],
+      ),
+    );
+    expect(f.filter((x) => x.rule === PAGE_FIELD_UNKNOWN)).toHaveLength(0);
+    const warned = f.filter((x) => x.rule === PAGE_FIELD_UNPROVISIONED);
+    expect(warned).toHaveLength(1);
+    expect(warned[0].severity).toBe('warning');
+    expect(warned[0].path).toBe('pages[0].source › subforms[0].columns[0]');
+    expect(warned[0].message).toContain('"ext_customer"');
+    expect(warned[0].message).toContain('blank, on every record');
+  });
+
+  it('[#8943] R4 — PINS the subform `totalField` rollup (resolved against the FORM object)', () => {
+    // The exception inside the exception: `totalField` names the PARENT
+    // object's field the child sum rolls up into, so the external object is
+    // the form's own and the child is local.
+    const f = validateReactPageProps(
+      extPage(
+        `function Page(){ return <ObjectForm objectName="ext_customer" subforms={[{ childObject: 'crm_order', columns: ['code'], totalField: 'owner_id' }]} />; }`,
+        [extCustomer(), localOrder],
+      ),
+    );
+    expect(f.filter((x) => x.rule === PAGE_FIELD_UNKNOWN)).toHaveLength(0);
+    const warned = f.filter((x) => x.rule === PAGE_FIELD_UNPROVISIONED);
+    expect(warned).toHaveLength(1);
+    expect(warned[0].severity).toBe('warning');
+    expect(warned[0].path).toBe('pages[0].source › subforms[0].totalField');
+    expect(warned[0].message).toContain('"ext_customer"');
+  });
+
+  it('[#8943] R5 — PINS the COMPONENT_FIELD_SPECS path reached by `<Block type>`', () => {
+    // The shared table `validate-page-field-bindings` walks; on this surface
+    // it is reachable only by the type the author spells out, which is what
+    // makes the escape hatch checked rather than a hole.
+    const f = validateReactPageProps(
+      extPage(`function Page(){ return <Block type="element:form" objectName="ext_customer" fields={['owner_id']} />; }`),
+    );
+    expect(f.filter((x) => x.rule === PAGE_FIELD_UNKNOWN)).toHaveLength(0);
+    const warned = f.filter((x) => x.rule === PAGE_FIELD_UNPROVISIONED);
+    expect(warned).toHaveLength(1);
+    expect(warned[0].severity).toBe('warning');
+    expect(warned[0].where).toBe('page "p" › <Block>');
+    expect(warned[0].path).toBe('pages[0].source › fields[0]');
+    expect(warned[0].message).toContain('external object (ADR-0015)');
+  });
 });

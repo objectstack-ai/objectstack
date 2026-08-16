@@ -120,21 +120,61 @@ const CROSS_PACKAGE_TEST_INPUTS = {
     // cluster package), and the pin exists to fail when the two drift. It only
     // does that if a producer-only change re-runs cli's tests, which is exactly
     // what this declaration buys.
+    //
+    // The `examples/` globs are the showcase modules two i18n tests import LIVE
+    // across the workspace boundary, each named per file because the two read
+    // DIFFERENT namespaces and are not interchangeable:
+    //   test/i18n-section-coverage.test.ts dynamically imports `contact.view`
+    //     and `semantic-zoo.object` and asserts `toEqual` over an exhaustive
+    //     hardcoded `_sections` key list, so any newly NAMED section in either
+    //     module goes red -- this is what PR #8742 broke in queue build
+    //     31825946401, where the merge queue was the first signal.
+    //   test/i18n-tab-coverage.test.ts dynamically imports `task-triage.page`
+    //     and asserts the same way over `_tabs`, so it moves with that page's
+    //     filter-only presets and is untouched by `_sections` edits.
+    // Per-file rather than `examples/app-showcase/**`: the modules above have no
+    // relative imports of their own, so the read set IS the file set, and the
+    // wider glob would put cli's suite on every showcase edit. Adding a live
+    // import outside these paths fails `check:examples-live-imports`, which
+    // matches each coupling target against these globs -- so narrowing here
+    // cannot quietly reopen the blind spot.
     globs: [
       'packages/verify/src/**',
       'packages/plugins/plugin-security/src/**',
       'packages/services/service-cluster/src/**',
+      'examples/app-showcase/src/ui/views/contact.view.ts',
+      'examples/app-showcase/src/data/objects/semantic-zoo.object.ts',
+      'examples/app-showcase/src/ui/pages/task-triage.page.ts',
     ],
   },
   '@objectstack/lint': {
     // authoring-rule-wiring / validate-rule-compilability /
     // lint-startup-registry-verdict.corpus read each authoring rule's source
     // by repo-relative path, plus the CLI commands dir and the runtime gate.
+    //
+    // The `examples/` globs are the showcase modules two validator tests import
+    // LIVE across the workspace boundary. Both assert the SHIPPED app is clean
+    // rather than pinning a fixed shape -- #8515 lifted the pinned-shape cases
+    // onto the frozen `showcase-shape.fixtures.ts` snapshot, so what survives
+    // live are the cases that must keep resolving against the real app:
+    //   src/validate-translatable-sections.test.ts imports `Contact`,
+    //     `ContactViews` and `ShowcaseTranslationBundle`; a section introduced
+    //     WITHOUT a name moves it, a correctly named one does not.
+    //   src/validate-translation-references.test.ts imports `Contact` and
+    //     `ContactViews` and asserts every translation key still resolves, so
+    //     renaming or removing a Contact field, view, section or action moves
+    //     it while adding one generally does not.
+    // Per-file for the same reason as `@objectstack/cli` above: these modules
+    // have no relative imports of their own, and a live import added outside
+    // them fails `check:examples-live-imports` by name.
     globs: [
       'packages/cli/src/commands/**',
       'packages/metadata-protocol/src/**',
       'packages/objectql/src/validation/**',
       'packages/services/service-automation/src/**',
+      'examples/app-showcase/src/data/objects/contact.object.ts',
+      'examples/app-showcase/src/system/translations/index.ts',
+      'examples/app-showcase/src/ui/views/contact.view.ts',
     ],
   },
   '@objectstack/platform-objects': {

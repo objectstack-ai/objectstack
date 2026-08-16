@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AuthManager, ipMatchesRange } from './auth-manager';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
 
 // Mock better-auth so we can control the handler behaviour
 vi.mock('better-auth', () => ({
@@ -899,8 +900,14 @@ describe('AuthManager', () => {
       findOne: vi.fn(async () => null),
       count: vi.fn(async () => 0),
       insert: vi.fn(async () => ({})),
-      update: vi.fn(async () => ({})),
-      delete: vi.fn(async () => undefined),
+      update: vi.fn(async (_o: string, data: any, options?: any) => {
+        assertEngineUpdateDispatch(data, options);
+        return {};
+      }),
+      delete: vi.fn(async (_o: string, options?: any) => {
+        assertEngineDeleteDispatch(options);
+        return undefined;
+      }),
     });
 
     it('registers `delegated_admin` with invitation:create — the gate finally has a caller', async () => {

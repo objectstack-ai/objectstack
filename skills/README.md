@@ -112,6 +112,3 @@ A few common decision points where the right skill isn't obvious:
 ## Related repositories
 
 - [`../objectui`](https://github.com/objectstack-ai/objectui) — Studio UI (separate repo).
-- [`../templates`](https://github.com/objectstack-ai/templates) — template library
-  consumed by `create-objectstack` (separate repo). Scaffolds reference these
-  skills; keep this index in sync when adding or renaming a skill.

@@ -179,8 +179,11 @@ export class DetailRecordNotFoundError extends Error {
  *     (a `master_detail` with no `required`; `required` + `readonly`;
  *     `required` + `system`) — there this gate is the only refusal there is,
  *     and its 422 is what stops an unreadable orphan detail row being minted.
- *     #8772's lint refuses those shapes at publish time; until an app is
- *     republished, this is the answer they get.
+ *     #8772 *proposes* a publish-time lint that would refuse those shapes, but
+ *     it is open and unruled — nothing refuses them at publish today, so an app
+ *     can newly declare one and land here (#8959). This is the answer those
+ *     shapes get for as long as they stay declarable, not merely until some
+ *     legacy app is republished.
  *
  * The wording is unchanged in both, so a surface that pins either sentence sees
  * the same string it always did — what moved is WHICH inserts arrive here.

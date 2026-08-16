@@ -5110,8 +5110,20 @@ export class SecurityPlugin implements Plugin {
       // unmatchable by the `controlled_by_parent` read filter (`fk IN
       // (readable masters)`), so readable by nobody, and answering `422` on
       // every later by-id write through the stored-row leg below. The residual
-      // envelope asymmetry is confined to exactly those shapes, which #8772's
-      // lint now refuses at publish time.
+      // envelope asymmetry is confined to exactly those shapes.
+      //
+      // [#8959] ⛔ "Confined" is NOT a publish-time bound, and this comment used
+      // to claim it was. #8772 *proposes* a lint that would refuse these shapes;
+      // it is open and unruled, so nothing refuses them at publish today and any
+      // app can newly author one. Measured against the lint as it stands:
+      // `master_detail` with no `required` draws `severity: 'warning'` from
+      // `relationship/master-detail-required`, and only `error` findings fail a
+      // build; `required` + `readonly` and `required` + `system` draw nothing at
+      // all — no rule in `packages/lint/src/data-model-rules.ts` reads either
+      // flag. A freshly authored detail therefore reaches this branch and its
+      // 422, which makes the residue a live surface rather than a shrinking
+      // legacy tail. Whether that is acceptable is #8772's to rule; this comment
+      // may not presume an answer in either direction.
       //
       // Only the INSERT shape hands over. The stored-row shape (a by-id write
       // whose persisted FK is null) keeps its 422: the caller sent no such
