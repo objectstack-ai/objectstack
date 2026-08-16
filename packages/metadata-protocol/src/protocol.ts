@@ -11115,7 +11115,23 @@ export class ObjectStackProtocolImplementation implements
      * re-hydration already writes for the same rows.
      */
     private applyObjectRegistryMutation(request: { type: string; name: string; item?: any; packageId?: string | null }): void {
-        if (request.type !== 'object' && request.type !== 'objects') return;
+        // [#8862] The `&& request.type !== 'objects'` limb that stood here is
+        // GONE. It did not merely admit a plural, it registered under one —
+        // `registerItem` below mints the entry under the spelling that arrived
+        // — which is the shape {@link canonicalMetaType}'s header blames for a
+        // real prior bug (one plural read minted a plural entry and shadowed an
+        // entire code-authored listing). It was measured DORMANT in #8862: the
+        // sole caller {@link applyRegistryWriteThrough} has four, and every one
+        // folds at its producer. Removing it makes a hypothetical fifth,
+        // unfolded caller fail CLOSED — it does not register, and
+        // `assertObjectRegistered` raises loudly — instead of silently minting
+        // `registerItem('objects', …)`. What keeps a fifth caller from being
+        // added unexamined is the call-site count pin in
+        // `protocol.object-registry-write-through-spelling.test.ts`, not this
+        // guard; the two are a pair.
+        if (request.type !== 'object') return;
+        // `request.type` is provably `'object'` on the line above, so this
+        // mints the canonical key rather than whatever spelling arrived.
         this.engine.registry.registerItem(request.type, request.item, 'name');
         try {
             const layer = this.classifyObjectContribution(request.name, request.packageId);
@@ -11430,7 +11446,28 @@ export class ObjectStackProtocolImplementation implements
         /** The row's org scope — `null` for an env-wide row. [#6602] */
         organizationId: string | null;
     }): void {
-        if (request.type === 'object' || request.type === 'objects') {
+        // [#8862] The `|| request.type === 'objects'` limb is GONE — this
+        // branch admitted the plural that {@link applyObjectRegistryMutation}
+        // then consumed. All four call sites of this method fold at their
+        // producer (traced in
+        // `protocol.object-registry-write-through-spelling.test.ts`), so the
+        // limb was dead.
+        //
+        // ⚠️ What removal does and does NOT buy, stated precisely because the
+        // obvious reading overstates it. A hypothetical fifth, UNFOLDED caller
+        // passing `'objects'` no longer takes this branch — so it no longer
+        // reaches `registerObject`, and the object is simply not registered:
+        // `assertObjectRegistered` fails CLOSED, a loud recoverable error in
+        // place of a silent one. That is the win. It does NOT mean nothing is
+        // registered at all: on an unscoped kernel the value falls through to
+        // {@link hydrateOverlayIntoRegistry}, which registers under the RAW
+        // type like every other overlay kind. So the plural is no longer an
+        // object-specific hazard minting a shadow OBJECT — it is merely the
+        // same general "producers must fold" contract every other metadata
+        // type already lives under. Folding at the producer stays the rule;
+        // this guard is not a second line of defence and must not be written
+        // as one.
+        if (request.type === 'object') {
             // NOT org-gated, deliberately: an `object` is `allowOrgOverride:
             // false` (ADR-0005) and its physical TABLE is env-wide, so the
             // registry entry backing it is env-wide too — `assertObjectRegistered`
@@ -11732,7 +11769,16 @@ export class ObjectStackProtocolImplementation implements
      * simply no-op, and a sync failure must not abort the publish.
      */
     private async ensureObjectStorage(type: string, name: string): Promise<void> {
-        if (type !== 'object' && type !== 'objects') return;
+        // [#8862] The `&& type !== 'objects'` limb is GONE. Both call sites
+        // hand over a folded value — `saveMetaItem` after
+        // `canonicalizeMetaRequestType`, and `runPublishSideEffects` as
+        // `args.singularType`, which `promoteDraftForPublish` folds through
+        // `PLURAL_TO_SINGULAR` for BOTH its callers (including
+        // `publishPackageDrafts`, the one #8820 named as the structural
+        // hazard because `listDrafts` returns the draft row's stored type
+        // verbatim). Guard-only either way: `type` never reaches
+        // `syncObjectSchema`, which takes `name` alone.
+        if (type !== 'object') return;
         try {
             await this.engine.syncObjectSchema(name);
         } catch (err: any) {
@@ -11787,7 +11833,14 @@ export class ObjectStackProtocolImplementation implements
      * reclaimed by the next sync/drop rather than blocking the delete.
      */
     private async dropObjectStorage(type: string, name: string): Promise<void> {
-        if (type !== 'object' && type !== 'objects') return;
+        // [#8862] The `&& type !== 'objects'` limb is GONE. Both call sites
+        // are in `deleteMetaItem` and fold at the producer: one passes
+        // `singularTypeForRepo` (`PLURAL_TO_SINGULAR[request.type] ??
+        // request.type`), the other re-folds the same expression inline.
+        // Guard-only: `type` never reaches `dropObjectSchema`, which takes
+        // `name` alone. {@link shouldDropStorage} already folded before
+        // deciding, so this guard was answering a question settled upstream.
+        if (type !== 'object') return;
         try {
             await this.engine.dropObjectSchema(name);
         } catch (err: any) {
@@ -13354,10 +13407,16 @@ export class ObjectStackProtocolImplementation implements
         //    `type = 'view'` missed a publish addressed `/meta/views/…`.
         //
         // ⚠️ `ensureObjectStorage` is NOT in that list, because it answered both
-        // spellings identically before this fold and after it: it opens
+        // spellings identically before this fold and after it: it used to open
         // `if (type !== 'object' && type !== 'objects')`, a spelling-tolerant
         // lookup one layer down — the shape {@link canonicalMetaType}'s header
         // rejects.
+        //
+        // [#8862] That tolerant limb is now GONE — the guard reads
+        // `if (type !== 'object')`. The paragraph is kept in the past tense
+        // rather than deleted because the reasoning below is what LICENSED the
+        // removal, and a reader arriving at the fold still needs to know why
+        // the helper was never a second line of defence.
         //
         // [#8820] This paragraph used to justify that with "both of its call
         // sites stand behind a fold". That reason was FALSE. Counting the

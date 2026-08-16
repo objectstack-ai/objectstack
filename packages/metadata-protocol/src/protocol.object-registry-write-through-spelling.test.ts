@@ -1,18 +1,25 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // [#8862] Every `applyRegistryWriteThrough` route registers an object under the
-// CANONICAL SINGULAR key — the `'objects'` limb below it is dormant.
+// CANONICAL SINGULAR key — and the `'objects'` limb below it is now REMOVED.
+//
+// This file was written in two halves, and reads as one only if you know that.
+// The MEASUREMENT half proved the limb dormant (below). The REMOVAL half then
+// deleted it and added section 4, which keeps it deleted. Everything the
+// measurement half says about the limb is therefore in the PAST TENSE — the
+// code it quotes no longer exists, and is quoted because it is what the
+// verdict was about.
 //
 // ---------------------------------------------------------------------------
 // The question this file answers, and why it had to be measured
 // ---------------------------------------------------------------------------
-// `applyObjectRegistryMutation` does not merely ADMIT a plural type key, it
-// consumes one:
+// `applyObjectRegistryMutation` did not merely ADMIT a plural type key, it
+// consumed one — this is the code as it stood before the removal:
 //
 //     if (request.type !== 'object' && request.type !== 'objects') return;
 //     this.engine.registry.registerItem(request.type, request.item, 'name');
 //
-// The spelling that came in is the spelling the registry entry is minted
+// The spelling that came in was the spelling the registry entry got minted
 // under. `canonicalMetaType`'s header names that exact shape as having already
 // cost the repo a real bug: one plural-spelled read minted a plural registry
 // entry, `listItems('actions')` stopped being empty, and the singular fallback
@@ -20,11 +27,12 @@
 // overlay row shadowed an entire code-authored listing and survived the DELETE
 // meant to lift it.
 //
-// So the limb is either a live registry-shadowing defect or dead tolerance,
-// and which one it is depends entirely on whether any caller can deliver
+// So the limb was either a live registry-shadowing defect or dead tolerance,
+// and which one it was depended entirely on whether any caller could deliver
 // `'objects'`. #8862 was filed WITHOUT that measurement, deliberately: it came
 // out of #8820, the card where an unmeasured reachability claim was the whole
-// defect. This file is that measurement.
+// defect. This file is that measurement — and, in section 4, the guard that
+// the removal it licensed stays done.
 //
 // ---------------------------------------------------------------------------
 // The trace, measured on `origin/main` — all four routes fold at the producer
@@ -54,36 +62,59 @@
 // call graph.
 //
 // ---------------------------------------------------------------------------
-// What this file is FOR, given the limb is dead
+// What this file is FOR, now that the limb is gone
 // ---------------------------------------------------------------------------
-// Dormancy proven once is dormancy unenforced. Nothing in the type system says
-// a fifth caller must fold — the parameter is a bare `type: string`, exactly
-// the shape that let #8820's hazard sit unnoticed. Two guards close that:
+// Removal is not self-enforcing either. Nothing in the type system says a
+// fifth caller must fold — the parameter is a bare `type: string`, exactly
+// the shape that let #8820's hazard sit unnoticed. Three guards close that
+// (the third added by the removal half):
 //
 //   • the per-route cases pin the SPELLING that reaches the registry, so a
 //     route that stops folding mints `'objects'` here and fails loudly rather
 //     than silently shadowing a code-authored listing;
 //   • `applyRegistryWriteThrough` call-site COUNT is pinned, so a fifth caller
-//     cannot be added without a human re-reading the trace above.
+//     cannot be added without a human re-reading the trace above;
+//   • [removal half] section 4 pins that no tolerance limb comes BACK — the
+//     guard the count pin cannot give, since a fifth caller and a re-widened
+//     predicate are different regressions.
 //
 // The fold maps are pinned too: they are an external dependency of this
-// verdict, living in `@objectstack/spec`, and the dormancy dies the day either
-// stops resolving `objects`.
+// verdict, living in `@objectstack/spec`, and the removal's safety dies the
+// day either stops resolving `objects`.
+//
+// ⚠️ One thing removal did NOT buy, recorded because the obvious reading
+// overstates it: a hypothetical fifth, unfolded caller no longer registers an
+// OBJECT (so `assertObjectRegistered` fails CLOSED — a loud error replacing a
+// silent one), but on an unscoped kernel the value still falls through to
+// `hydrateOverlayIntoRegistry`, which registers under the raw type like every
+// other overlay kind. Removal took the plural OUT of the object-specific
+// shadowing path; it did not add a second line of defence, and folding at the
+// producer remains the only thing that actually prevents a plural key.
 //
 // ---------------------------------------------------------------------------
-// Ablation directions, predicted BEFORE running (results in the PR body)
+// Ablation directions, predicted BEFORE running (results in the PR bodies)
 // ---------------------------------------------------------------------------
+// Measurement half (#9008), against the tree that still HAD the limb:
 //   1. Ship state                                              -> GREEN
 //   2. `'objects'` limb deleted from BOTH
 //      `applyRegistryWriteThrough` and
 //      `applyObjectRegistryMutation`                           -> GREEN
 //      (the limb is dead once the producers fold — this is the
-//       evidence that licenses its removal as dead tolerance)
+//       evidence that licensed its removal as dead tolerance)
 //   3. `applyObjectRegistryMutation`'s guard inverted to accept
 //      ONLY `'objects'`                                        -> RED
 //      (non-vacuity control: proves the cases really observe
 //       this seam registering, rather than passing for want of
 //       an assertion)
+//
+// Removal half (#8862), against the tree with the limb GONE. ⚠️ Direction 2
+// above is why the per-route cases alone could NOT have caught a bad removal —
+// they are green either way. Section 4 is what carries this half:
+//   4. Ship state (limb removed)                               -> GREEN
+//   5. Any one tolerance limb restored                         -> RED in §4
+//      (the regression this half exists to prevent)
+//   6. Comment stripper neutered to return '' -> RED in §4
+//      (non-vacuity: the expected count is ONE, not zero)
 
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -456,5 +487,104 @@ describe('[#8862] the `applyRegistryWriteThrough` caller set stays closed', () =
     it('`applyObjectRegistryMutation` is reached only through the write-through', () => {
         const callSites = source.match(/this\.applyObjectRegistryMutation\(/g) ?? [];
         expect(callSites).toHaveLength(1);
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 4. [#8862 removal half] The tolerance stays removed
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The four `'objects'` tolerance limbs were deleted once the dormancy above
+// was proven. This block keeps them deleted.
+//
+// It scans EXECUTABLE text — comments stripped — for a reason that is not
+// cosmetic: the removal commit deliberately kept the deleted limbs QUOTED in
+// the surrounding comments (a reader needs to see what was removed and why),
+// so a scan of the raw file would match its own documentation and could never
+// go red. Stripping is what makes this pin capable of failing.
+//
+// ⭐ NON-VACUITY IS STRUCTURAL, not a separate control case. The expected count
+// is ONE, not zero — the surviving occurrence is `listCollection('object',
+// 'objects')`, a genuine singular/plural COLLECTION PAIR and a different
+// construct entirely (it names two registry collections; it does not tolerate
+// a spelling). So a stripper that silently blanked the file would report zero
+// and fail, and a returning tolerance limb reports two and fails. Measured
+// both directions on the removal commit: `origin/main` before it scored FIVE
+// (the pair + the four limbs), the tree after it scores ONE.
+//
+// ⛔ Do not "fix" a failure here by relaxing the count. If a plural spelling
+// genuinely has to reach one of these seams again, the answer is the same one
+// #8820 and #8862 both landed on: fold at the PRODUCER. A tolerant predicate
+// one layer below a folding boundary is the shape `canonicalMetaType`'s header
+// rejects, and the shape that already cost this repo one registry-shadowing
+// bug.
+
+/**
+ * Remove comments while preserving string literals, so a scan can tell code
+ * from prose ABOUT that code. Handles `//`, block comments, and the three
+ * quote forms with escapes.
+ */
+function executableTextOf(src: string): string {
+    let out = '';
+    let i = 0;
+    const n = src.length;
+    while (i < n) {
+        const c = src[i];
+        const d = src[i + 1];
+        if (c === '/' && d === '/') {
+            while (i < n && src[i] !== '\n') i++;
+            continue;
+        }
+        if (c === '/' && d === '*') {
+            i += 2;
+            while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++;
+            i += 2;
+            continue;
+        }
+        if (c === "'" || c === '"' || c === '`') {
+            const quote = c;
+            out += c;
+            i++;
+            while (i < n) {
+                if (src[i] === '\\') {
+                    out += src[i] + (src[i + 1] ?? '');
+                    i += 2;
+                    continue;
+                }
+                out += src[i];
+                if (src[i] === quote) { i++; break; }
+                i++;
+            }
+            continue;
+        }
+        out += c;
+        i++;
+    }
+    return out;
+}
+
+describe('[#8862] the `objects` tolerance stays removed', () => {
+    const code = executableTextOf(readFileSync(
+        fileURLToPath(new URL('./protocol.ts', import.meta.url)),
+        'utf8',
+    ));
+
+    it('has exactly one executable `objects` literal — the collection pair, not a tolerance', () => {
+        const occurrences = code.match(/'objects'/g) ?? [];
+        // ONE, not zero: see the non-vacuity note above. Zero means the
+        // stripper broke; two or more means a tolerance limb came back.
+        expect(occurrences).toHaveLength(1);
+        const lines = code.split('\n').filter((l) => l.includes("'objects'"));
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain("listCollection('object', 'objects')");
+    });
+
+    it('none of the four seams admits a plural any more', () => {
+        // The narrowed forms, pinned positively so a reformat that defeats the
+        // count above still has to keep these honest.
+        expect(code.match(/request\.type !== 'object'\) return;/g) ?? []).toHaveLength(1);
+        expect(code.match(/request\.type === 'object'\) \{/g) ?? []).toHaveLength(1);
+        // `ensureObjectStorage` + `dropObjectStorage`.
+        expect(code.match(/\n\s*if \(type !== 'object'\) return;/g) ?? []).toHaveLength(2);
     });
 });
