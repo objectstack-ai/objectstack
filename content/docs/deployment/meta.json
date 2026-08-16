@@ -2,15 +2,15 @@
   "title": "Deployment & Operations",
   "pages": [
     "index",
-    "cli",
-    "validating-metadata",
     "self-hosting",
-    "backup-restore",
     "production-readiness",
-    "publish-and-preview",
-    "environment-variables",
-    "single-project-mode",
+    "backup-restore",
     "tenancy-modes",
+    "single-project-mode",
+    "publish-and-preview",
+    "validating-metadata",
+    "cli",
+    "environment-variables",
     "troubleshooting"
   ]
 }

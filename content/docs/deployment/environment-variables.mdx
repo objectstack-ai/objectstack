@@ -63,7 +63,7 @@ read at startup unless noted otherwise. Boolean variables accept `true` / `false
 
 | Variable | Type | Default | Description |
 |:---|:---|:---|:---|
-| `OS_SECRET_KEY` | string | — | 32-byte master key (64 hex chars or base64) for `sys_secret` encryption — encrypted settings, `secret` fields, datasource credentials. **Required** for containerized or multi-node deployments; on a single durable host `os start` mints and persists a dev key instead. See [Deployment Modes](/docs/deployment#environment-variables). |
+| `OS_SECRET_KEY` | string | — | 32-byte master key (64 hex chars or base64) for `sys_secret` encryption — encrypted settings, `secret` fields, datasource credentials. **Required** for containerized or multi-node deployments; on a single durable host `os start` mints and persists a dev key instead. See [Self-Hosted Deployment](/docs/deployment/self-hosting#the-minimum-viable-production-environment). |
 | `OS_DEV_CRYPTO_KEY` | string | — | Development convenience crypto key, consulted after `OS_SECRET_KEY`. Do not use in production. |
 | `OS_CLUSTER_DRIVER` | string | `memory` | Cluster coordination driver id. When set to anything other than `memory`, the runtime treats the deployment as multi-node (and requires `OS_SECRET_KEY`). Non-memory drivers are opt-in sibling packages (e.g. `redis` via `@objectstack/service-cluster-redis`) — see [Cluster](/docs/kernel/cluster). |
 | `OS_REDIS_URL` | url | — | Connection URL passed to a non-memory cluster driver (e.g. `OS_CLUSTER_DRIVER=redis`). |

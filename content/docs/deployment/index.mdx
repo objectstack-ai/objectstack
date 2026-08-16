@@ -1,183 +1,205 @@
 ---
-title: Deployment Modes
-description: Choose between local standalone runtime and Cloud-managed environment deployment.
+title: Deployment Overview
+description: Two things deploy on this platform and they move on separate clocks — the platform runtime you operate, and the metadata app you build. Which one you are doing decides which pages in this section are yours.
 ---
 
-# Deployment Modes
+# Deployment Overview
 
-This repository ships the framework runtime, examples, adapters, CLI, docs, and
-the published console bundle. Local development is a single-environment runtime.
-Cloud deployment uses a separate ObjectOS Cloud control plane plus the
-environment-aware runtime seams exported from `@objectstack/runtime`.
+Two different things get deployed here, and they run on **separate clocks**:
 
-| Mode | Runs from this repo | Environment selection | Typical use |
-|:---|:---:|:---|:---|
-| Local example | Yes | One active `OS_ENVIRONMENT_ID` | Framework development and smoke tests |
-| Standalone app | Yes | One compiled artifact or stack config | Self-hosted app backend |
-| Cloud-managed environment | Runtime seams only | Cloud control plane, hostname, scoped URL, header, or session | SaaS and multi-environment deployments |
+| | **The platform runtime** | **Your metadata app** |
+|:---|:---|:---|
+| The sentence that fits | "I operate ObjectStack." | "I build an app that runs on it." |
+| Ships as | a Docker image (or the `os` CLI on a host) | a compiled artifact, `dist/objectstack.json` |
+| Versioned by | our release train (`17.0.0`) | your own catalog |
+| Whose cadence | ours | yours |
+| The deploy action | move the image tag, restart | compile, then install it or pin it at boot |
+| Rolling back | restore the previous tag or artifact | install the previous version |
 
----
+The two are genuinely independent: a deployment can move from platform 16 to 17
+without touching its app, and publish twelve app versions without moving the
+platform. Most deployment questions are really the question *which of these am I
+doing* — so this section is ordered that way, and so is the sidebar.
 
-## Local runtime
+**Where it runs — Docker, Compose, Kubernetes, a bare Node.js host, or an
+ObjectStack Cloud environment — is a detail inside the first of those two, not a
+third thing alongside them.** Pick which job you are doing first; the venue is a
+choice you make inside it.
 
-Use the repo scripts for framework development:
-
-```bash
-OS_PORT=3000 pnpm dev
-pnpm dev:crm -- --fresh -p 38421
-pnpm docs:dev
-```
-
-`pnpm dev` starts the showcase kitchen-sink example. It is the best local
-exercise path for objects, views, flows, AI metadata, security, and the console
-bundle.
-
-For a generated app:
-
-```bash
-os dev
-os start
-os start --artifact ./dist/objectstack.json
-```
-
-The active environment is selected with `OS_ENVIRONMENT_ID`.
+<Callout type="info">
+**Doing both is normal; doing both in one motion is not.** A team that
+self-hosts its own app operates the runtime *and* ships the app — still two
+jobs, two cadences, two checklists. Read the one you are acting on today.
+</Callout>
 
 ---
 
-## Standalone artifact runtime
+## The platform runtime — you operate it
 
-Any directory with a compiled `dist/objectstack.json` can boot through the CLI
-or `@objectstack/runtime` helpers:
+The platform ships as a single version-locked train: every `@objectstack/*`
+package shares one version number, and that number is the platform version. It
+is published as an official runtime image, `ghcr.io/objectstack-ai/objectstack`,
+whose tags mirror `@objectstack/cli` versions (`17.0.0`, `17.0`, `17`,
+`latest`). Pin the exact version in production and move it deliberately.
 
-```bash
-os compile
-OS_ENVIRONMENT_ID=env_prod OS_ARTIFACT_PATH=./dist/objectstack.json os serve
-```
+### Where it runs
 
-Deployment config stays outside the artifact. Database URLs, auth secrets,
-runtime credentials, and environment identity are injected through process env
-or the host's deployment config.
+- **Docker — the standard path.** The image is Node 22 + `@objectstack/cli` +
+  `os start`, running as a non-root user with a built-in health check. Compose
+  with Postgres and Kubernetes are shapes of that same path rather than
+  alternatives to it; [bare Node.js under
+  systemd](/docs/deployment/self-hosting#bare-nodejs-systemd--without-containers)
+  is the minority path, for hosts where a container runtime is not available.
+  See [Docker (official
+  image)](/docs/deployment/self-hosting#docker-official-image--the-standard-path).
+- **ObjectStack Cloud.** The control plane provisions environments and operates
+  the runtime for you, and apps arrive by installing a package version from your
+  organization's catalog. Cloud hosts, database provisioning, billing, and
+  public SaaS distribution live outside this repository; the framework runtime
+  exposes the environment registry, marketplace proxy, and runtime-config seams
+  that distribution consumes.
+- **A local runtime, for development.** `pnpm dev` in this repository, or
+  `os dev` in a generated app: one process, one active environment, no
+  control-plane hop. See [Single-Environment
+  Mode](/docs/deployment/single-project-mode).
 
----
+### How many environments one runtime serves
 
-## Cloud-managed deployment
+A single-environment host owns exactly one active environment, selected with
+`OS_ENVIRONMENT_ID`. An environment-aware host resolves one **per request** —
+from the scoped URL, the hostname, `X-Environment-Id`, the session, or a
+configured default. That is a property of the runtime you operate, not of the
+app it runs; the full precedence list is [Resolution
+order](/docs/api/environment-routing#resolution-order). Control-plane endpoints
+under `/api/v1/cloud/...` manage environments rather than running inside one and
+are deliberately excluded from it.
 
-Publishing and installing are **separate steps**. The CLI publishes a
-**versioned package** to your organization's catalog — it does not touch any
-environment, and you never pass an environment id:
+### The pages for operating the platform
 
-```bash
-os cloud login        # once: stores a cloud token
-os package publish     # → sys_package + immutable, checksummed sys_package_version
-```
-
-See the cloud [package](/docs/references/cloud/package) and
-[package-version](/docs/references/cloud/package-version) references.
-
-> **Automating the login step.** `os cloud login` uses the browser device flow
-> in an interactive terminal, and under `--json` it is one of the CLI's two
-> declared **NDJSON** commands (`os login` is the other): stdout is a stream of
-> compact JSON documents, **one per line**, and the verification-URL record is
-> written *before* you authorize so a script can show it while it still
-> matters. Parse that stdout line by line, not with a single `JSON.parse`. See
-> [`os cloud login`](/docs/deployment/cli#os-cloud-login) in the CLI reference.
-> For an unattended pipeline, `os cloud login --email … --password …` skips the
-> device flow entirely and emits a single record.
-
-Installing then happens **inside the target environment**: sign in to that
-environment's Console → **Marketplace** → pick the package → **Install**. The
-install is authorized by your environment login and applied to that environment
-(metadata + sample data); the kernel is evicted so it is live on the next
-request — no restart, and no environment id to remember.
-
-> **CI shortcut.** A pipeline deploying to a *known* environment can publish and
-> install in one call: `os package publish --env <id> --install`. This is for
-> automation only — interactive installs happen in the environment Marketplace.
-
-> **Removed: the legacy env-revision path.** The direct-to-environment `os publish`
-> / `os rollback` commands (which wrote `sys_environment_revision`) were **removed**
-> (#2237, ADR-0006 v4). All publishing now goes through the package flow above
-> (`os package publish`); to change what an environment runs, install a package
-> version into it.
-
-Cloud control-plane hosts, database provisioning, billing, and public SaaS
-deployment are outside this framework repository. The framework runtime exposes
-the environment registry, marketplace proxy, and runtime-config seams consumed
-by that distribution.
-
----
-
-## Routing precedence
-
-Environment-aware hosts resolve requests in this order:
-
-1. `/api/v1/environments/:environmentId/...`
-2. Hostname through the environment registry
-3. `X-Environment-Id`
-4. `session.activeEnvironmentId`
-5. Configured default environment
-6. Single unambiguous environment
-
-Control-plane paths under `/api/v1/cloud/environments/...` are not data-plane
-requests and do not run through a target environment kernel.
-
----
-
-## Environment variables
-
-| Variable | Purpose |
+| Page | What it answers |
 |:---|:---|
-| `OS_ENVIRONMENT_ID` | Active local or publish target environment. |
-| `OS_CLOUD_URL` | Cloud control-plane base URL used by publish/package commands. |
-| `OS_ARTIFACT_PATH` | Artifact path for `os serve` and standalone hosts. |
-| `OS_DATABASE_URL` | Local runtime business database URL. |
-| `OS_DATABASE_DRIVER` | Local runtime driver id. |
-| `OS_AUTH_SECRET` | Better Auth session secret for hosted runtimes. |
-| `OS_SECRET_KEY` | 32-byte master key for `sys_secret` encryption (encrypted settings, `secret` fields, datasource credentials). 64 hex chars or base64 of 32 bytes. |
-| `OS_CLUSTER_DRIVER` | Cluster coordination driver. When set, the runtime treats the deployment as multi-node. |
-| `OS_PORT` | HTTP listen port. |
+| [Self-Hosted Deployment](/docs/deployment/self-hosting) | Running the artifact on infrastructure you operate — Docker, Compose with Postgres, Kubernetes, systemd, health checks, reverse proxy and TLS, and the four values every deployment must pin |
+| [Production Readiness](/docs/deployment/production-readiness) | Security headers, rate limiting, observability, and the [go-live checklist](/docs/deployment/production-readiness#go-live-checklist) |
+| [Backup & Restore](/docs/deployment/backup-restore) | What state a deployment actually holds, how to back up each piece per database driver, and the restore drill to rehearse before you need it |
+| [Tenancy Postures & Membership](/docs/deployment/tenancy-modes) | Which of the three postures this deployment runs in, how new users join an organization, and the degraded-tenancy boot guard |
+| [Single-Environment Mode](/docs/deployment/single-project-mode) | The one-environment boot shape — what it includes, and what it deliberately does not |
 
-Third-party provider variables such as `OPENAI_API_KEY`, `TURSO_*`,
-`RESEND_API_KEY`, and OAuth client secrets keep their provider names. Mail
-settings are the exception — they route through the email service's
-env-override convention as `OS_EMAIL_<KEY>` (e.g. `OS_EMAIL_PROVIDER`,
-`OS_EMAIL_API_KEY`, `OS_EMAIL_FROM`), not a raw `SMTP_*` name.
+### Upgrading the platform
+
+Moving the platform forward is its own procedure: move the tag, restart, and
+know what the boot does when the database is still shaped for the previous
+version. See [Upgrading → The platform
+runtime](/docs/upgrading#the-platform-runtime).
+
+---
+
+## Your metadata app — you build it
+
+An app is **not part of the platform**. It compiles to its own immutable
+artifact, carries its own version, and is released by you, when you decide:
+
+```text
+objectstack.config.ts ──(os compile)──▶ dist/objectstack.json
+```
+
+Deployment config stays **outside** that artifact. Database URLs, auth secrets,
+runtime credentials, and environment identity are host inputs, injected as
+`OS_*` variables or CLI flags.
+
+### Validate before you compile
+
+ObjectStack metadata is data, not code paths, so most mistakes pass `tsc` and
+then fail silently at runtime. One command catches them at author time:
+
+```bash
+os validate     # schema + CEL predicates + widget bindings — no artifact
+```
+
+Run it after every metadata edit — see [Validating
+Metadata](/docs/deployment/validating-metadata).
+
+### How the app reaches a running platform
+
+There are two ways in, and picking the wrong one is the expensive mistake:
+
+| | **Catalog install** | **Artifact-pinned boot** |
+|:---|:---|:---|
+| The app arrives | *after* the platform is running | *at boot*, as an input to the process |
+| Named by | package id + version (`com.acme.crm@1.2.0`) | a URL to the compiled artifact (`OS_ARTIFACT_URL`) |
+| Switching versions | install another version; no restart | change the variable, restart |
+| Apps per runtime | many, side by side | one — it *is* this runtime's app |
+
+One question decides it: **is this app the reason the runtime exists?** If yes,
+pin the artifact — the deployment defines the app. If no, install from the
+catalog — the runtime is a platform that receives apps. The full comparison, the
+tie-breakers, and every publish command are on [Publish, Versioning &
+Preview](/docs/deployment/publish-and-preview#the-two-ways-in); the operational
+detail of the pinned path is [Artifact-pinned
+boot](/docs/deployment/self-hosting#artifact-pinned-boot-os_artifact_url).
+
+Publishing and installing are **separate steps**. `os package publish` uploads a
+versioned package to your organization's catalog and changes nothing that is
+running; installing a version into an environment is what moves an app. For an
+unattended pipeline, `os cloud login --email … --password …` skips the browser
+device flow — and note that under `--json` that command emits **NDJSON**, one
+compact JSON document per line, so parse its stdout line by line rather than
+with a single `JSON.parse` (see [`os cloud
+login`](/docs/deployment/cli#os-cloud-login)).
+
+### The pages for shipping an app
+
+| Page | What it answers |
+|:---|:---|
+| [Publish, Versioning & Preview](/docs/deployment/publish-and-preview) | Compile the artifact, publish a version, install it, and the preview patterns — including how to rehearse a pinned rollout locally |
+| [Validating Metadata](/docs/deployment/validating-metadata) | The mistakes a type-checker cannot see, and the one gate that rejects them before you ship |
+
+### Upgrading the app
+
+`os migrate meta --from <major>` replays every step between the major your
+metadata was authored against and this runtime's, in one pass; you then rebuild
+and ship as usual. See [Upgrading → The metadata
+app](/docs/upgrading#the-metadata-app).
+
+---
+
+## Where the two meet
+
+Three places, and each is where treating the two as one thing goes wrong:
+
+1. **The `engines.protocol` handshake.** The artifact declares which platform
+   majors it can run on, and a runtime outside that range **refuses** the app
+   rather than half-loading it. Everything else about the two version numbers is
+   independent.
+2. **The artifact source is an operator's input.** Whoever runs the platform
+   sets it, and it selects which version of the app boots. The sources have a
+   fixed precedence, so a container that presets one variable cannot shadow a
+   deliberate override:
+
+   ```text
+   --artifact  >  OS_ARTIFACT_URL  >  OS_ARTIFACT_PATH  >  <cwd>/dist/objectstack.json
+   ```
+
+3. **The database.** Moving either side can leave the physical schema shaped for
+   the other. `os migrate plan` reports the drift, categorised safe /
+   needs-confirm / destructive; `os migrate apply` reconciles it.
 
 <Callout type="tip">
 **Every deployed app is AI-operable by default:** an MCP server is served at
-`/api/v1/mcp` in every deployment mode, exposing your objects and actions to AI clients
-under the same permissions and RLS (set `OS_MCP_SERVER_ENABLED=false` to opt out). See
-[MCP Server env vars](/docs/deployment/environment-variables#mcp-server) and
-[Your app as an MCP server](/docs/api#your-app-as-an-mcp-server).
-</Callout>
-
-<Callout type="warn">
-**Set `OS_SECRET_KEY` for any containerized or multi-node deployment.** The
-default `LocalCryptoProvider` encrypts every `sys_secret` value under one
-32-byte key. On a single host, `os start` mints and persists that key to
-`~/.objectstack/dev-crypto-key` automatically, so the zero-config quickstart
-just works. But on an **ephemeral filesystem (containers)** the minted key is
-lost on restart, and across **multiple nodes** each node would mint a
-*different* key — in both cases previously-encrypted secrets become
-undecryptable.
-
-Provision one stable key shared by every node and every restart:
-
-```bash
-OS_SECRET_KEY=$(openssl rand -hex 32)
-```
-
-When `OS_CLUSTER_DRIVER` is set (multi-node), `os start` will **not** auto-mint
-a key — it fails loud at boot until `OS_SECRET_KEY` is provided, rather than
-silently running under a key that won't survive. For production, prefer a
-managed KMS / Vault provider behind the same `ICryptoProvider` seam.
+`/api/v1/mcp` in every deployment, exposing your objects and actions to AI
+clients under the same permissions and RLS (set `OS_MCP_SERVER_ENABLED=false` to
+opt out). See [MCP Server env
+vars](/docs/deployment/environment-variables#mcp-server) and [Your app as an MCP
+server](/docs/api#your-app-as-an-mcp-server).
 </Callout>
 
 ---
 
-## Related
+## Shared reference
 
-- [Self-Hosted Deployment](/docs/deployment/self-hosting)
-- [Single-Environment Mode](/docs/deployment/single-project-mode)
-- [Environment-Scoped Routing](/docs/api/environment-routing)
-- [Publish, Versioning & Preview](/docs/deployment/publish-and-preview)
+Three pages belong to neither side and are read from both:
+
+| Page | Why both |
+|:---|:---|
+| [CLI reference](/docs/deployment/cli) | One command surface covers both jobs: [`os start`](/docs/deployment/cli#os-start) and `os migrate` operate the runtime, while `os validate`, `os compile`, and `os package publish` ship the app |
+| [Environment Variables](/docs/deployment/environment-variables) | The canonical `OS_*` catalog. Configuration belongs to the **host** rather than to either shipped thing, which is exactly why it is neither side's page |
+| [Troubleshooting & FAQ](/docs/deployment/troubleshooting) | Symptom-first answers for validation, query, configuration, and performance problems on either side |
