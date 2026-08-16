@@ -98,6 +98,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Default Value",
         helpText: "Default value for new records (JSON literal)"
       },
+      "fields.placeholder": {
+        label: "Placeholder",
+        helpText: "Hint text shown inside the empty input; disappears once a value is entered"
+      },
       "fields.maxLength": {
         label: "Max Length",
         helpText: "Max characters"
@@ -357,6 +361,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       defaultValue: {
         label: "Default Value",
         helpText: "Default value for new records"
+      },
+      placeholder: {
+        label: "Placeholder",
+        helpText: "Hint text shown inside the empty input (disappears once a value is entered); use inlineHelpText for always-visible help"
       },
       minLength: {
         label: "Min Length",

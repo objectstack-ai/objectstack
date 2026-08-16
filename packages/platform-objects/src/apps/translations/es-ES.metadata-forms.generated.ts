@@ -98,6 +98,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Valor predeterminado",
         helpText: "Valor predeterminado para registros nuevos (literal JSON)"
       },
+      "fields.placeholder": {
+        label: "Placeholder",
+        helpText: "Hint text shown inside the empty input; disappears once a value is entered"
+      },
       "fields.maxLength": {
         label: "Longitud máxima",
         helpText: "Máximo de caracteres"
@@ -357,6 +361,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       defaultValue: {
         label: "Valor predeterminado",
         helpText: "Valor predeterminado para registros nuevos"
+      },
+      placeholder: {
+        label: "Placeholder",
+        helpText: "Hint text shown inside the empty input (disappears once a value is entered); use inlineHelpText for always-visible help"
       },
       minLength: {
         label: "Longitud mínima",

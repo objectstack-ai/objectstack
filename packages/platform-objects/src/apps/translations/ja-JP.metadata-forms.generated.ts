@@ -98,6 +98,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "既定値",
         helpText: "新規レコードの既定値（JSON リテラル）"
       },
+      "fields.placeholder": {
+        label: "Placeholder",
+        helpText: "Hint text shown inside the empty input; disappears once a value is entered"
+      },
       "fields.maxLength": {
         label: "最大長",
         helpText: "最大文字数"
@@ -357,6 +361,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       defaultValue: {
         label: "既定値",
         helpText: "新規レコードの既定値"
+      },
+      placeholder: {
+        label: "Placeholder",
+        helpText: "Hint text shown inside the empty input (disappears once a value is entered); use inlineHelpText for always-visible help"
       },
       minLength: {
         label: "最小長",
