@@ -10,6 +10,7 @@ import { TranslationBundleSchema, TranslationConfigSchema } from './system/trans
 import { StackServerConfigSchema } from './system/stack-server.zod';
 import { hasPlatformObjectPrefix } from './system/constants/platform-object-names';
 import { objectStackErrorMap, formatZodError } from './shared/error-map.zod';
+import { strictObject } from './shared/strict-object';
 import { deepEqualAuthored } from './shared/deep-equal';
 import { normalizeStackInput, type MetadataCollectionInput, type MapSupportedField } from './shared/metadata-collection.zod';
 import type { ConversionNotice } from './conversions/types.js';
@@ -178,7 +179,57 @@ function applyApiEndpointGates(
  * - AI Agents generate this to create apps.
  * - CI Tools deploy this to the server.
  */
-export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
+/*
+ * #8687 — the TOP-LEVEL door is `strictObject` like every inner authorable
+ * surface the #4001 campaign closed. Before this, an unknown top-level key
+ * parsed green and was silently dropped: a `flow`-for-`flows` typo (or the
+ * stale `approvalProcesses`) shipped an artifact missing that whole metadata
+ * family, with `os validate` — even `--strict` — exiting 0, because the
+ * `defineStack:` diagnostic was printed at load, outside the warning tally.
+ *
+ * The near-miss guidance that used to arrive through `lintUnknownStackKeys`
+ * (`objectz` → "did you mean `objects`?") now arrives through the refusal
+ * itself: `strictObject`'s error map suggests the closest declared key, and
+ * the lint deliberately goes quiet on a strict schema (its own posture rule —
+ * see `kernel/metadata-authoring-lint.ts`), so there is one voice, not two.
+ *
+ * The `guidance` entries are the curated half: retired/never-keys where a
+ * rename suggestion would be wrong. `storage` mirrors `STACK_KEY_GUIDANCE`
+ * (`data/authoring-key-lint.ts`), which stays exported for the generic lint
+ * API but no longer fires for this surface.
+ */
+export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
+  surface: 'this stack definition',
+  history:
+    'Until #8687 closed this surface (the outermost #4001 door), an unknown top-level stack '
+    + 'key parsed green and its value was silently dropped — a one-character typo could ship '
+    + 'an artifact missing a whole metadata family while `os validate` exited 0. The declared '
+    + 'keys are enumerated by `ObjectStackDefinitionSchema` (@objectstack/spec, stack.zod.ts) '
+    + 'and in the stack-definition reference docs.',
+  guidance: {
+    storage:
+      'the file-storage backend is a deployment concern, not an application declaration. '
+      + 'Configure it with the OS_STORAGE_* environment variables, or per-deployment in Setup → '
+      + 'Settings → Storage (which also holds credentials — a stack definition would commit them '
+      + 'to git and to any published artifact).',
+    approvals:
+      'approvals are not a top-level collection (ADR-0019): author an approval as a flow with '
+      + 'one or more Approval nodes, in `flows`.',
+    approvalProcesses:
+      'approvals are not a top-level collection (ADR-0019, standalone `approvals` removed in '
+      + '7.4): author an approval as a flow with one or more Approval nodes, in `flows`.',
+    workflows:
+      'there is no top-level `workflows` collection (ADR-0020): a record state machine is a '
+      + '`state_machine` validation rule on the object it governs.',
+    portals:
+      'the top-level `portals` collection was removed (#3464) — nothing ever consumed it. '
+      + 'Author external-user UI with `apps`/`views` plus positions and permission sets.',
+    onDisable:
+      'no kernel, runtime or service ever called `onDisable` (#4212 retired the uninvoked '
+      + 'lifecycle family), so a value written here goes nowhere. Do teardown inside the '
+      + 'resources `onEnable` acquires.',
+  },
+}, {
   /** System Configuration */
   manifest: ManifestSchema.optional().describe('Project Package Configuration'),
   datasources: z.array(DatasourceSchema).optional().describe('External Data Connections'),
@@ -507,6 +558,27 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
       effect: FlowFunctionEffectSchema.optional(),
     })),
   ]).optional().describe('Named handler functions referenced by hooks/actions/script nodes (optionally declaring their effect)'),
+
+  /**
+   * App lifecycle hook the runtime EXECUTES off the authored bundle:
+   * `AppPlugin` invokes it at `start()` with the host context (`ctx.ql`) —
+   * the documented place to register action handlers and drivers
+   * (`examples/app-todo` and `examples/app-showcase` both ship one).
+   *
+   * DECLARED since #8687 closed this schema against unknown keys. Before
+   * that, `onEnable` was deliberately undeclared — the parse stripped it and
+   * the runtime read it off the authored object — and the top-level lint
+   * stayed quiet about it via `STACK_RUNTIME_MEMBERS` ("not declared" and
+   * "dropped at load" are different claims). A strict close of an undeclared
+   * `onEnable` would have refused the pattern our own examples ship, so the
+   * key is now declared: `declared = honoured`, in both directions.
+   *
+   * A function still cannot survive `dist/objectstack.json` — on the
+   * artifact-boot path the CLI grafts it back from the authored module
+   * (#4095, `GRAFTABLE_RUNTIME_MEMBERS`, derived from
+   * `STACK_RUNTIME_MEMBERS`).
+   */
+  onEnable: z.function().optional().describe('App lifecycle hook invoked by AppPlugin at start() with the host context (ctx.ql) — register action handlers and drivers here. Executed off the authored bundle; never serialized into the JSON artifact (#4095 grafts it back on artifact boot).'),
   mappings: z.array(MappingSchema).optional().describe('Data Import/Export Mappings'),
   analyticsCubes: z.array(CubeSchema).optional().describe('Analytics Semantic Layer Cubes'),
 
@@ -1744,6 +1816,14 @@ const COMPOSE_KEY_DISPOSITIONS: Record<keyof ObjectStackDefinition, ComposeDispo
   api: 'single',
   server: 'single',
   runtimeModule: 'single',
+  // #8687: declared alongside the strict close (it was undeclared-but-honoured
+  // before, so composition never saw it through a parsed stack). One bundle
+  // gets one `onEnable` (`AppPlugin` invokes a single hook at start()); two
+  // stacks shipping DIFFERENT hooks cannot be merged without inventing an
+  // execution order neither author wrote — refuse and name them, like
+  // `api`/`server`. Multi-app hosts keep per-app hooks by composing PLUGINS
+  // (each AppPlugin carries its own bundle), not by folding stacks into one.
+  onEnable: 'single',
   // #5051: the last key still on last-wins; aligned here, see the note above.
   i18n: 'single',
 };

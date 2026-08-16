@@ -38,8 +38,9 @@ const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
  */
 const PRE17_CONFIG = `
 export default {
-  name: 'migrate_meta_e2e',
-  label: 'Migrate Meta E2E',
+  // #8687: top-level name/label were never stack keys (silently stripped
+  // before the strict close, refused now) — the identity lives in manifest.
+  manifest: { id: 'migrate_meta_e2e', name: 'Migrate Meta E2E', version: '1.0.0', type: 'app' },
   objects: [{
     name: 'e2e_ticket',
     label: 'Ticket',

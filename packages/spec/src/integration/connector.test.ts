@@ -807,8 +807,12 @@ describe('[#4911] `./integration` no longer publishes an outbound rate-limit sha
     // is only worth anything if it fires through `stack.connectors[]`, which is
     // the surface an author actually writes (`DeclarativeConnectorEntrySchema`
     // is `ConnectorSchema.superRefine(…)`, so it inherits the tombstone).
+    // No top-level `name` here: it was never a declared stack key — the strip-
+    // mode schema used to swallow it, and the #8687 strict close refuses it,
+    // which would have made the positive control below fail for the wrong
+    // reason. The stack's identity lives in `manifest`, which this probe does
+    // not need.
     const rejected = ObjectStackSchema.safeParse({
-      name: 'acme',
       connectors: [{ ...connector, rateLimitConfig: { maxRequests: 1 } }],
     });
     expect(rejected.success).toBe(false);
@@ -816,7 +820,7 @@ describe('[#4911] `./integration` no longer publishes an outbound rate-limit sha
 
     // Positive control: the identical stack minus the retired key parses, so the
     // failure above is attributable to `rateLimitConfig` and nothing else.
-    expect(ObjectStackSchema.safeParse({ name: 'acme', connectors: [connector] }).success)
+    expect(ObjectStackSchema.safeParse({ connectors: [connector] }).success)
       .toBe(true);
   });
 

@@ -178,7 +178,9 @@ describe('os validate --json over a pipe', () => {
     }
     writeFileSync(
       join(configDir, 'objectstack.config.ts'),
-      `export default ${JSON.stringify({ name: 'trunc', objects }, null, 2)};\n`,
+      // #8687: no stray top-level `name` — it would add a 901st (unrecognized_keys)
+      // error and break the exact-count assertion below.
+      `export default ${JSON.stringify({ objects }, null, 2)};\n`,
     );
   });
 

@@ -81,14 +81,19 @@ describe('MetadataPlugin._parseAndRegisterArtifact — view name resolution (PR-
             logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
         } as any;
 
+        // Manifest fields belong under `manifest:` — the flattened spelling this
+        // fixture used to carry was never a compiled-artifact shape (the strip-
+        // mode schema silently dropped all seven keys, and `scope: 'app'` is not
+        // even a manifest scope). #8687's strict close refuses the flat keys.
         const artifact = {
-            id: 'com.example.test',
-            name: 'test',
-            version: '0.0.0',
-            type: 'app',
-            scope: 'app',
-            namespace: 'test',
-            defaultDatasource: 'memory',
+            manifest: {
+                id: 'com.example.test',
+                name: 'test',
+                version: '0.0.0',
+                type: 'app',
+                namespace: 'test',
+                defaultDatasource: 'memory',
+            },
             views: [
                 {
                     // intentionally NO top-level name — mirrors compiled artifact shape
@@ -131,14 +136,16 @@ describe('MetadataPlugin._parseAndRegisterArtifact — package docs (ADR-0046)',
             logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
         } as any;
 
+        // Same #8687 re-spell as above: manifest fields under `manifest:`.
         const artifact = {
-            id: 'com.example.docs',
-            name: 'test',
-            version: '0.0.0',
-            type: 'app',
-            scope: 'app',
-            namespace: 'test',
-            defaultDatasource: 'memory',
+            manifest: {
+                id: 'com.example.docs',
+                name: 'test',
+                version: '0.0.0',
+                type: 'app',
+                namespace: 'test',
+                defaultDatasource: 'memory',
+            },
             docs: [
                 { name: 'test_index', label: 'Overview', content: '# Overview\n' },
                 { name: 'test_guide', content: '# Guide\n' },
