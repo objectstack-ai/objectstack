@@ -1230,6 +1230,119 @@
           "ref": "claude/platform-test-checklist-ocwugl"
         }
       ]
+    },
+    {
+      "id": "integration-system.datasource-credential-refusal-matrix",
+      "title": "A datasource credential can never be authored inline NOR read back: every inline-credential door refuses at publish, and BOTH read doors redact — including legacy alias spellings already sitting in stored rows",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "mixed",
+      "personas": ["seeded admin", "authenticated non-admin", "anonymous"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the ability to author/publish a datasource (os build and/or POST /api/v1/datasources)",
+          "the ability to write a stored sys_metadata datasource row directly, to plant a legacy alias spelling that no current parse would produce"
+        ],
+        "knownGaps": [
+          "The legacy-alias clause tests a row shape the CURRENT parse refuses to create — a stored row from before the aliases moved to `guidance`. It is only reachable by writing the row directly (the wizard persists through metadata.register, whose validation is a structural name/label check, so that path can plant one). If the run cannot write such a row, that clause is blocked(fixture) and MUST be recorded — a redaction that has never been tested against the shape it exists for is an untested redaction.",
+          "`encryptionKey` (turso) is deliberately STILL WRITABLE while being redacted on read (#8081 scope item 4). Scoring it as a write refusal is a false fail; the correct expectation is write-accepted + read-redacted."
+        ]
+      },
+      "steps": [
+        "enumerate the inline-credential refusal doors from packages/spec/src/migrations/entries/semantic/ — at minimum the config-key door, the URL userinfo door, the URL query-parameter door, the driver-options door (mongo), the placeholder door, and the connector inline-authentication door",
+        "for EACH door, author a datasource carrying the credential in that position and attempt to publish it (os build, then the runtime admin door)",
+        "author the same datasource with the credential bound through `external.credentialsRef` (or the connection form) and confirm it publishes AND connects",
+        "read the published datasource back through the datasource-admin door (GET /api/v1/datasources)",
+        "read the SAME datasource back through the metadata door (GET /meta/<datasource type>) — a different code path with its own redaction hook",
+        "plant a stored row carrying a legacy alias spelling (passwd / pwd / token / jwt / auth_token / authtoken) and read it back through both doors",
+        "author a datasource for a driver the platform ships no contract for, carrying a canonically-spelled credential key, and read it back",
+        "for turso specifically, write `encryptionKey`, then read it back through both doors",
+        "grep the full response bodies of every read above for the planted cleartext values"
+      ],
+      "acceptance": [
+        {
+          "clause": "EVERY enumerated inline-credential door refuses at publish — the matrix is exhaustive over the doors the semantic registry declares, not a sample of one",
+          "oracle": "build",
+          "verify": "one publish attempt per door; each refuses with a message naming the offending key/position and pointing at external.credentialsRef. The run record lists one row per door",
+          "evidence": "the per-door refusal table"
+        },
+        {
+          "clause": "the credential-bound alternative WORKS: the same datasource authored with external.credentialsRef publishes and actually connects — the refusal has a paved path, it is not a dead end",
+          "oracle": "api",
+          "verify": "publish succeeds and a health/connect probe succeeds",
+          "evidence": "publish response + connect probe"
+        },
+        {
+          "clause": "BOTH read doors redact — the datasource-admin path AND the metadata path — and they agree. A credential visible through either door is a P0 leak",
+          "oracle": "api",
+          "verify": "grep each full response body for the planted cleartext; both must be absent, and the two doors' redacted shapes must be consistent with each other",
+          "evidence": "both response bodies, quoted in full for the config object"
+        },
+        {
+          "clause": "redaction is presence-preserving, not existence-erasing: a SET credential reads back as the mask (or hasSecret-style marker) while an UNSET one reads back null — the distinction a console renders 'configured vs not configured' from",
+          "oracle": "api",
+          "verify": "read one datasource with the credential set and one without; the two must be distinguishable, and the set one must not read back null",
+          "evidence": "both config objects"
+        },
+        {
+          "clause": "legacy ALIAS spellings sitting in a stored row are redacted too — the spellings no current parse produces are exactly the ones a schema-shape-derived redactor would miss",
+          "oracle": "api",
+          "verify": "the planted alias value is absent from both doors' response bodies; if the row could not be planted, record blocked(fixture) rather than passing",
+          "evidence": "the planted row + both reads"
+        },
+        {
+          "clause": "an UNKNOWN driver's canonically-spelled credential keys are redacted by NAME — an unrecognized driver means 'nothing to check against', never 'nothing to protect'",
+          "oracle": "api",
+          "verify": "read back the unknown-driver datasource; the canonical credential key must be redacted despite no shipped contract for that driver",
+          "evidence": "the response body"
+        },
+        {
+          "clause": "the echoed-mask write guard holds: writing the mask value back verbatim is treated as 'unchanged' and does NOT overwrite the stored credential",
+          "oracle": "api",
+          "verify": "read a datasource, PUT the response back unmodified, then probe connectivity — the connection must still work. A form round-trip that destroys the stored credential is the ADR-0100 §B3 defect",
+          "evidence": "the round-trip + the post-round-trip connect probe"
+        },
+        {
+          "clause": "the redaction is not a privilege artifact: a non-admin and an anonymous caller get no MORE than the admin does through either door (they should get less, or be refused outright)",
+          "oracle": "api",
+          "verify": "repeat both reads as non-admin and anonymous; neither may reveal a value the admin read redacted",
+          "evidence": "all four responses"
+        }
+      ],
+      "negative": [
+        "a cleartext credential appearing anywhere in a read response — P0, and the reason every clause greps the FULL body rather than inspecting the fields it expects",
+        "a door that refuses at build but accepts through the runtime admin path (or the reverse) — the two-door disagreement that lets a credential in the back way",
+        "a redaction applied on the datasource-admin door but not the metadata door: the two share no dependency except spec, which is precisely why the credential-key definition was centralized there, and precisely how they could drift",
+        "an alias-spelled credential surviving redaction because the redactor derived its key set from the current schema shape only",
+        "an unknown driver's credential served in cleartext on the grounds that no contract declares it a credential",
+        "an echoed mask overwriting the stored credential with the literal mask string",
+        "a refusal that names no replacement — an author blocked from the inline spelling with no pointer to credentialsRef will reach for a workaround"
+      ],
+      "traps": ["auth-state-leak", "cache-staleness"],
+      "source": [
+        "ADR-0100 (credential read mask; §B3 echoed-mask write guard)",
+        "ADR-0015 / ADR-0062 (credentials route through datasource config)",
+        "packages/spec/src/data/secret-mask.ts (the one mask literal both readers import)",
+        "packages/spec/src/data/datasource-credential-redaction.ts (the ONE definition of 'what is a credential key' — schema-derived z.never() refusals, FORMER_CREDENTIAL_ALIASES, STILL_WRITABLE_CREDENTIAL_KEYS)",
+        "packages/spec/src/kernel/metadata-type-redaction.ts (the per-type redaction hook — the metadata read door)",
+        "packages/services/service-datasource/src/datasource-config-redaction.ts + datasource-credential-migration.ts (the datasource-admin read door)",
+        "packages/spec/src/migrations/entries/semantic/17.datasource-config-inline-credential-refused.ts · 17.datasource-config-placeholder-refused.ts · 17.datasource-config-url-userinfo-refused.ts · 17.connector-inline-authentication-publish-refused.ts",
+        "packages/spec/src/migrations/entries/semantic/18.datasource-config-url-query-credential-refused.ts · 18.datasource-config-mongo-options-credential-refused.ts · 18.datasource-credentialsref-mongo-url-no-user-refused.ts · 18.datasource-config-postgres-url-unparseable-refused.ts",
+        "packages/spec/src/migrations/entries/retired-keys/17.data__MongoConfig__password.ts · 17.data__MysqlConfig__password.ts · 17.data__PostgresConfig__password.ts · 17.data__TursoConfig__authToken.ts",
+        "#7990 / #8081 / #8126 / #8154 / #8300 (the centralization of the credential-key definition into spec)",
+        "sibling coverage this item deliberately does NOT duplicate: integration-system.datasource-admin-lifecycle (admin-door lifecycle, 'secret never echoes'), platform-core.settings-hub-roundtrip (settings secrets), records-forms.encrypted-field-behavior (ADR-0100 field-level masking)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-17",
+          "change": "new — the credential campaign is the single largest behavior cluster in the window (retired keys on four driver configs, eight+ semantic refusal doors, a centralized credential-key definition, and a second redaction door on the metadata read path) and no ratchet could see any of it: `datasource` was already a mapped kind, and none of the doors is an enum member. Existing coverage reached only the datasource-ADMIN door's 'secret never echoes'; the metadata read door (#8154), the legacy-alias class, the unknown-driver rule and the echoed-mask write guard were untested. P0 because every clause failure is a cleartext credential disclosure",
+          "ref": "#9299"
+        }
+      ]
     }
   ]
 }

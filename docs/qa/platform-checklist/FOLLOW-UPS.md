@@ -1,4 +1,8 @@
-# Follow-ups — open items from the capability-coverage sweep (2026-08-08)
+# Follow-ups — open items from the capability-coverage sweeps
+
+Standing decision register, one section per sweep (append, never rewrite — a resolved
+row stays with its resolution so the next sweep can see what was already decided).
+Sections §1–§4 are the **2026-08-08** sweep; §5 is the **2026-08-17** re-audit (R4).
 
 Decision register from the capability-coverage sweep. The gap items found by the
 five-angle sweep have all been authored into `areas/*.json` (checklist grew 84 → 170
@@ -67,3 +71,46 @@ these to the showcase would make them runnable:
 - The checklist itself (`areas/*.json`, `coverage.json`, `README.md`, `RUNNER.md`,
   `scripts/check-platform-checklist.mjs`) ships in this branch; this file carries the
   decisions that remain with the maintainer.
+
+## 5. Sweep 2026-08-17 (R4) — re-audit against the window since the 2026-08-08 ledger
+
+Ledger 182 → 190 items; `coverage.json` 28 mapped / 2 waived → **30 mapped / 0 waived**.
+
+### 5a. Docs drift (PD#10 class)
+
+| # | drift | evidence | captured in |
+|---|---|---|---|
+| E1 | **The scaffold's own `dev` script cannot serve the console the quick-start sends newcomers to.** `content/docs/getting-started/quick-start.mdx` ("How you verify") instructs `npx os dev --ui` then open `http://localhost:3000/_console/`. The blank template ships `"dev": "objectstack dev"` — no `--ui` — and `--ui` is documented in the CLI as the flag that "Enable[s] the bundled Console portal at /_console/". A newcomer who runs `npm run dev` (the script the scaffold gives them) therefore lands on a server with no console, with nothing explaining why. Either the template script should carry `--ui` or the docs should tell them to use the flag explicitly — a maintainer call, not an agent's. | `packages/create-objectstack/src/templates/blank/package.json` · `packages/cli/src/commands/dev.ts:69` · `content/docs/getting-started/quick-start.mdx` | `cli.scaffold-console-first-paint` (clause 3, an expected-divergence probe — the run confirms it at runtime rather than ticking) |
+| E2 | **Stale defect note in `packages/spec/liveness/doc.json`.** Its `_note` records "DocSchema declares no `tags`, yet the book-side `include: { tag }` rule and the REST corpus both expect one — the tag rule can currently never match". That defect is **fixed**: `DocSchema` now declares `tags` (`packages/spec/src/data/../system/doc.zod.ts:126`, with the history spelled out in the surrounding comment). The ledger note now describes a bug that no longer exists, which is the same failure class this sweep is correcting in `SWEEP.md`. Outside this card's file surface (`docs/qa/platform-checklist/**`), so it is reported, not edited. | `packages/spec/liveness/doc.json` `_note` vs `packages/spec/src/system/doc.zod.ts:111-127` | — (liveness ledger prose, not a checklist item) |
+
+### 5b. Checked and CLEAN (recorded so the next sweep does not re-derive it)
+
+- **No published doc prescribes a retired scaffolder template.** Grepped all of
+  `content/docs/` for `todo` / `compliance` / `content` / `contracts` / `procurement` as
+  `-t` / `--template` operands: zero hits. Every documented invocation is a bare
+  `npx create-objectstack my-app`, which resolves to `blank`, the only entry in
+  `TEMPLATES`. The delisting is cleanly reflected on the docs side.
+- **`npm run validate` and `npx os validate` are the same binary** (the blank template's
+  `validate` script is `objectstack validate`), so the spelling difference between
+  `cli.scaffold-first-run` and the quick-start is not a divergence.
+- **The first-run *commands* are covered** by `cli.scaffold-first-run` (P1, CI-automated)
+  and `studio-authoring.first-run-loop` (P0). Only the seam between them was open, and
+  that is now `cli.scaffold-console-first-paint`. No duplicates were authored.
+
+### 5c. For the maintainer
+
+- **Both surviving coverage waivers were stale** (`book`, `doc`) and are retired in this
+  PR — see `SWEEP.md` "Discipline". Running total: 6 of 6 waivers ever written turned out
+  stale. Worth considering whether a waiver should carry a mandatory re-audit date.
+- **Cost figures in the corrected `SWEEP.md` sentence are this run's own measurements**,
+  which came out higher than the ones supplied with the card (validator ~0.12–0.18 s vs
+  ~80 ms; `pnpm check:platform-checklist` ~2.9 s wall vs 0.165 s). The container was under
+  load from a parallel cold monorepo install, and the `pnpm` wrapper's startup dominates
+  the wall figure. The corrected text therefore records the *direct-node* cost (~0.25 s
+  for self-test + validator) and explicitly warns that timing through `pnpm` measures the
+  wrapper — a durable statement rather than a number that goes stale.
+- **No security-sensitive finding to withhold from this PR.** The two highest-severity
+  items authored (`access-security.no-active-org-session-semantics`,
+  `integration-system.datasource-credential-refusal-matrix`) assert guards that are
+  already shipped and already public in their ADRs/issues; nothing here discloses an
+  unfixed hole.
