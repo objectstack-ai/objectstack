@@ -72,9 +72,9 @@
         },
         "include": {
           "status": "live",
-          "verifiedAt": "2026-08-01",
+          "verifiedAt": "2026-08-17",
           "evidence": "packages/spec/src/system/book.zod.ts:236, packages/spec/src/system/book.zod.ts:193",
-          "note": "the derived-membership rule — the heart of the §6.2.1 design. CAVEAT, recorded not hidden: only the GLOB form can match today. The `{ tag }` variant is declared and the resolver implements it (matchesInclude reads doc.tags), but DocSchema declares no `tags` property, so the corpus always carries `tags: undefined` and a tag rule matches nothing. Either add `doc.tags` or retire the variant (enforce-or-remove)."
+          "note": "the derived-membership rule — the heart of the §6.2.1 design. Both forms are live: the GLOB variant matches on name/group, and the `{ tag }` variant (matchesInclude reads doc.tags) started matching the moment DocSchema DECLARED `tags` in 17.0.0 (#4509, ADR-0049) — see doc.json's `tags` entry for the fix's full history."
         },
         "package": {
           "status": "live",
