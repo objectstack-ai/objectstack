@@ -48,7 +48,7 @@ MongoDB Connection Configuration
 | **username** | `string` | optional | Authentication user |
 | **password** | `never` | optional | Set through the connection form's secret field or `external.credentialsRef` — encrypted into `sys_secret`, never stored in `config` (#7990) |
 | **authSource** | `string` | optional | Authentication database |
-| **options** | `Record<string, any>` | optional | Extra MongoClient options (replicaSet, tls, timeouts, …; credential material is refused — bind secrets via the connection form / external.credentialsRef) |
+| **options** | `Record<string, any>` | optional | Extra MongoClient options (replicaSet, tls, timeouts, …). Only `auth.password` is refused inline — bind it via the connection form / external.credentialsRef. `proxyPassword`, `tlsCertificateKeyFilePassword`, `key`, and `passphrase` are accepted and stored at rest in cleartext; they're redacted only when the datasource is read back, not refused at write. |
 
 
 ---

@@ -44,10 +44,13 @@
 // ## The doc side: two grades of statement, deliberately
 //
 //   claimed  A per-code assertion, used for BOTH directions:
-//              • `error-handling.mdx`  `#### \`CODE\`` + `**HTTP Status:** …`
-//                (every 4xx/5xx integer on that line — this is what carries a
+//              • an entry heading + `**HTTP Status:** …` on EITHER page (every
+//                4xx/5xx integer on that line — this is what carries a
 //                documented exception: "400 — with one documented exception,
-//                which answers **422**" claims {400, 422})
+//                which answers **422**" claims {400, 422}). One designated
+//                spelling for "this code's published status", honoured wherever
+//                it appears, so a page that publishes a status per entry rather
+//                than per category has a shape to write it in.
 //              • `error-catalog.mdx`   the HTTP Status Quick Reference rows
 //   covered  A weaker CATEGORY statement, used for direction A only:
 //              • `error-catalog.mdx`   `## … Errors (NNN)` section headings
@@ -56,17 +59,40 @@
 // mirrors `ErrorCategory.validation → 400` (`ErrorHttpStatusMap`): it states the
 // CATEGORY's status, not each member's. Reading it as a per-code assertion makes
 // the gate manufacture findings out of a heading that never claimed them —
-// `## Server Errors (500)` groups codes served at 500, 501, 503 and 504. It can
-// still ABSOLVE an emitted status (a 405 under `## Request Errors (405/428)` is
+// `## Request Errors (405/428)` groups two codes over two statuses, and
+// `## Server Errors (5xx)` names no parseable status at all (its members'
+// statuses come from the quick-reference rows instead). A heading can still
+// ABSOLVE an emitted status (a 405 under `## Request Errors (405/428)` is
 // documented), which is all direction A needs from it.
 //
-// ## Bounds — stated here and printed on every run, so a partial gate can never
+// ## Entry headings are a WHITELIST of spellings, so an unread one is a finding
+//
+// The doc side finds its per-code entries by scanning heading text, and a text
+// scan sees only the spellings it knows — an unrecognised one yields no
+// statement, SILENTLY. So the recognised shapes are published in
+// `ENTRY_HEADING_SHAPES` rather than buried in a regex, and a heading that names
+// a code in any OTHER shape lands in the doc-side unreadable census and FAILS
+// the gate. That census is the doc-side twin of the runtime side's `unresolved`
+// list, and it exists because the gate had one on the runtime side only: the
+// entry `### \`INVALID_REQUEST\` — unrecognised type spelling` carries a
+// descriptive suffix, the bare-heading pattern missed it, and the 400 that page
+// publishes for that code was read by nothing and reconciled in neither
+// direction — while the run printed a bound claiming no page published it.
+// Reaching for a shape that is not listed? Extend `ENTRY_HEADING_SHAPES` **and
+// add a `--self-test` case in the same edit** — never route around it.
+//
+// ## Bounds — DERIVED here and printed on every run, so a partial gate can never
 // ## read as a complete one
 //
-//   • Reconciled vocabulary: `StandardErrorCode` members ONLY. Those are the
-//     codes both pages publish a status for. Registered ledger codes
-//     (`ERROR_CODE_LEDGER`) are derived and counted, but neither page publishes
-//     their status, so there is nothing to reconcile them against.
+//   • Reconciled vocabulary: every `StandardErrorCode` member, PLUS every other
+//     code a scanned page actually publishes a status for. The second half is
+//     computed from the parsed pages (`reconciledVocabulary`), never asserted:
+//     registered ledger codes (`ERROR_CODE_LEDGER`) reach the docs one at a
+//     time, and a bound that merely CLAIMED "no page publishes their status"
+//     went false the day one of them was documented, silently and with the
+//     claim still printing. The residual — ledger codes derived with no
+//     doc-published status — is what is reported as not reconciled, and it is a
+//     subtraction, not a promise.
 //   • `HttpStatusErrorCodeMap`'s EXPLICIT entries only, never
 //     `standardErrorCodeForHttpStatus`'s bucket fallback — the same bound
 //     `standardSynonymOf` draws in `error-code-ledger.zod.ts`, and for the same
@@ -381,14 +407,59 @@ export function parseStandardErrorCodes(errorsZodSource) {
 
 const STATUS_IN_PROSE = /\b([45]\d\d)\b/g;
 
+/** A heading — at either entry level — that names an error code. */
+const CODE_TOKEN_HEADING = /^(#{3,4})\s+`([A-Z][A-Z0-9_]*)`(.*)$/;
+
+/**
+ * The ENTRY-HEADING spellings the doc side recognises, published rather than
+ * left implicit inside a regex — the `check:cross-package-test-inputs`
+ * convention, adopted for the same reason: a text scan sees only the spellings
+ * it knows, and an unrecognised one produces no statement *silently*.
+ *
+ * `suffix` matches whatever follows the code token on the heading line.
+ * Anything not matched here is REPORTED (see `unreadableHeadingMessage`), never
+ * dropped — the file header explains which real published status the silent
+ * drop hid.
+ */
+export const ENTRY_HEADING_SHAPES = [
+  { name: 'bare code', example: '### `RECORD_NOT_FOUND`', suffix: /^\s*$/ },
+  {
+    name: 'code + descriptive suffix',
+    example: '### `INVALID_REQUEST` — unrecognised type spelling',
+    suffix: /^\s+[—–-]\s+\S/,
+  },
+];
+
+/**
+ * @param {string} line
+ * @param {number} level heading depth this page writes its code entries at
+ * @returns {{ code: string, readable: boolean, shape?: string, why?: string } | null}
+ */
+export function readEntryHeading(line, level) {
+  const m = CODE_TOKEN_HEADING.exec(line);
+  if (!m) return null;
+  if (m[1].length !== level) {
+    return {
+      code: m[2],
+      readable: false,
+      why: `it is a level-\`${m[1]}\` heading, and this page writes its error-code entries at level \`${'#'.repeat(level)}\``,
+    };
+  }
+  const shape = ENTRY_HEADING_SHAPES.find((s) => s.suffix.test(m[3]));
+  if (shape) return { code: m[2], readable: true, shape: shape.name };
+  return { code: m[2], readable: false, why: `the text after the code token, ${JSON.stringify(m[3])}, matches no recognised shape` };
+}
+
 /**
  * @param {{ handling: string, catalog: string }} docs
- * @returns {{ claimed: Map<string, Map<number, string[]>>, covered: Map<string, Map<number, string[]>>, documented: Set<string> }}
+ * @returns {{ claimed: Map<string, Map<number, string[]>>, covered: Map<string, Map<number, string[]>>,
+ *             documented: Set<string>, unreadableHeadings: object[] }}
  */
 export function parseDocumentedStatuses(docs) {
   const claimed = new Map();
   const covered = new Map();
   const documented = new Set();
+  const unreadableHeadings = [];
   const add = (map, code, status, where) => {
     documented.add(code);
     if (!map.has(code)) map.set(code, new Map());
@@ -397,23 +468,40 @@ export function parseDocumentedStatuses(docs) {
     if (!perStatus.get(status).includes(where)) perStatus.get(status).push(where);
   };
 
+  /**
+   * The designated per-entry status claim, honoured on BOTH pages: the first
+   * `**HTTP Status:**` line inside the entry's opening window. A page that
+   * publishes a status per ENTRY rather than per category — the `/meta` section
+   * of the catalog says in prose that it does exactly that — needs a shape to
+   * say so in that this parser reads.
+   */
+  const claimEntryStatusLine = (lines, i, code, path) => {
+    for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
+      const line = /^\*\*HTTP Status:\*\*(.*)$/.exec(lines[j]);
+      if (!line) continue;
+      for (const s of line[1].matchAll(STATUS_IN_PROSE)) {
+        add(claimed, code, Number(s[1]), `${path}:${j + 1}`);
+      }
+      return;
+    }
+  };
+  const unreadable = (path, i, line, head) =>
+    unreadableHeadings.push({ path, line: i + 1, code: head.code, why: head.why, text: line.trim() });
+  const entries = [];
+
   // error-handling.mdx — `#### \`CODE\`` then `**HTTP Status:** …`
   const h = docs.handling.split('\n');
   for (let i = 0; i < h.length; i++) {
-    const head = /^#### `([A-Z][A-Z0-9_]*)`\s*$/.exec(h[i]);
+    const head = readEntryHeading(h[i], 4);
     if (!head) continue;
-    documented.add(head[1]);
-    for (let j = i + 1; j < Math.min(i + 6, h.length); j++) {
-      const line = /^\*\*HTTP Status:\*\*(.*)$/.exec(h[j]);
-      if (!line) continue;
-      for (const s of line[1].matchAll(STATUS_IN_PROSE)) {
-        add(claimed, head[1], Number(s[1]), `${DOC_HANDLING}:${j + 1}`);
-      }
-      break;
-    }
+    if (!head.readable) { unreadable(DOC_HANDLING, i, h[i], head); continue; }
+    documented.add(head.code);
+    entries.push({ code: head.code, where: `${DOC_HANDLING}:${i + 1}` });
+    claimEntryStatusLine(h, i, head.code, DOC_HANDLING);
   }
 
-  // error-catalog.mdx — section headings (covered) and the quick-reference rows (claimed)
+  // error-catalog.mdx — section headings (covered), the per-entry
+  // `**HTTP Status:**` line (claimed) and the quick-reference rows (claimed)
   const c = docs.catalog.split('\n');
   let section = null;
   for (let i = 0; i < c.length; i++) {
@@ -422,11 +510,14 @@ export function parseDocumentedStatuses(docs) {
       section = { title: sec[1], statuses: [...sec[1].matchAll(STATUS_IN_PROSE)].map((m) => Number(m[1])) };
       continue;
     }
-    const entry = /^### `([A-Z][A-Z0-9_]*)`\s*$/.exec(c[i]);
+    const entry = readEntryHeading(c[i], 3);
     if (entry) {
-      documented.add(entry[1]);
+      if (!entry.readable) { unreadable(DOC_CATALOG, i, c[i], entry); continue; }
+      documented.add(entry.code);
+      entries.push({ code: entry.code, where: `${DOC_CATALOG}:${i + 1}` });
+      claimEntryStatusLine(c, i, entry.code, DOC_CATALOG);
       for (const st of section?.statuses ?? []) {
-        add(covered, entry[1], st, `${DOC_CATALOG}:${i + 1} (§ ${section.title})`);
+        add(covered, entry.code, st, `${DOC_CATALOG}:${i + 1} (§ ${section.title})`);
       }
       continue;
     }
@@ -437,7 +528,56 @@ export function parseDocumentedStatuses(docs) {
       }
     }
   }
-  return { claimed, covered, documented };
+  return { claimed, covered, documented, unreadableHeadings, entries };
+}
+
+/**
+ * Entries whose heading the parser READ but for which no scanned page publishes
+ * a status in any graded shape — no `**HTTP Status:**` line, no quick-reference
+ * row, and a section heading naming no status (`## Batch Operation Errors`,
+ * `## Server Errors (5xx)`).
+ *
+ * REPORTED, deliberately not failed. This is the residue of the same blind spot
+ * the vocabulary derivation closes, one grade weaker: such a page may still
+ * publish the status in prose or in a JSON example — `/meta`'s `400` was
+ * published exactly that way — and prose is not a shape a deriver may mine
+ * (the runtime side refuses to for the same reason). Failing here would demand
+ * a status for codes whose producer this gate cannot find either, i.e. demand
+ * that someone INVENT a published contract to satisfy a gate. So the honest
+ * move is the one the unresolved/unpinned censuses already make: say it on
+ * every run, so a partial gate cannot read as a complete one.
+ */
+export function ungradedEntries({ entries, claimed, covered }) {
+  const seen = new Set();
+  const out = [];
+  for (const e of entries) {
+    if (seen.has(e.code)) continue;
+    seen.add(e.code);
+    if ((claimed.get(e.code)?.size ?? 0) + (covered.get(e.code)?.size ?? 0) === 0) out.push(e);
+  }
+  return out;
+}
+
+/**
+ * The reconciled vocabulary, DERIVED rather than asserted: every
+ * `StandardErrorCode` member, plus every OTHER code a scanned page actually
+ * publishes a status for.
+ *
+ * The second half is the whole point. Ledger codes (`ERROR_CODE_LEDGER`) reach
+ * the docs one at a time, and while the vocabulary was a fixed list the run
+ * printed "neither page publishes their status" as a claim — which went false
+ * the day one of them was documented, with no gate in either direction and the
+ * claim still printing. Derived from the parsed pages, that sentence cannot go
+ * false: a code the docs publish a status for is reconciled BECAUSE they publish
+ * it, and the residual is a subtraction. Count-independent by construction —
+ * registering a new ledger code moves no literal here.
+ *
+ * @param {{ members: string[], claimed: Map<string, unknown>, covered: Map<string, unknown> }} input
+ */
+export function reconciledVocabulary({ members, claimed, covered }) {
+  const published = new Set([...claimed.keys(), ...covered.keys()]);
+  const extra = [...published].filter((code) => !members.includes(code)).sort();
+  return { vocabulary: [...members, ...extra], docPublishedBeyondStandard: extra };
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -453,14 +593,14 @@ const evidence = (map, code, status) => (map.get(code)?.get(status) ?? []).join(
  * @returns {{ emittedNotDocumented: object[], documentedNotReachable: object[],
  *             unpinned: string[], reconciledCodes: number, reconciledPairs: number }}
  */
-export function reconcile({ members, emitted, claimed, covered, documented }) {
+export function reconcile({ vocabulary, emitted, claimed, covered, documented }) {
   const emittedNotDocumented = [];
   const documentedNotReachable = [];
   const unpinned = [];
   let reconciledCodes = 0;
   let reconciledPairs = 0;
 
-  for (const code of members) {
+  for (const code of vocabulary) {
     const runtime = statuses(emitted, code);
     const docClaimed = statuses(claimed, code);
     const docCovered = statuses(covered, code);
@@ -525,6 +665,17 @@ export function newUnpinnedMessage(code) {
     + `\`status\`/\`statusCode\` (or a \`sendError\` door with a literal status). Only if the code is `
     + `genuinely unemitted today, admit it into scripts/error-status-unpinned-baseline.json — that `
     + `path WEAKENS this ratchet and is ${RATCHET_AUTHORITY_MARKER}, not a co-equal remedy.`
+  );
+}
+
+export function unreadableHeadingMessage(u) {
+  return (
+    `${u.path}:${u.line}: this heading names error code \`${u.code}\` in a shape the doc-side parser does not `
+    + `recognise — ${u.why}. Every status the page publishes under that heading is therefore read by NOTHING, `
+    + `in either direction, while the run keeps printing a scope that no longer describes the pages. Write the `
+    + `heading in a recognised shape (${ENTRY_HEADING_SHAPES.map((s) => s.example).join('  ·  ')}), or teach `
+    + `ENTRY_HEADING_SHAPES the new shape AND add a --self-test case for it in the same edit. Heading read: `
+    + `${JSON.stringify(u.text)}`
   );
 }
 
@@ -594,8 +745,17 @@ function runFixture({ files, handling, catalog, members }) {
   const index = buildConstantIndex(sources);
   const derived = deriveRuntimeStatuses(sources, index);
   const doc = parseDocumentedStatuses({ handling, catalog });
-  const result = reconcile({ members, emitted: derived.emitted, ...doc });
-  return { ...result, unresolved: derived.unresolved, emitted: derived.emitted };
+  const { vocabulary, docPublishedBeyondStandard } = reconciledVocabulary({ members, ...doc });
+  const result = reconcile({ vocabulary, emitted: derived.emitted, ...doc });
+  return {
+    ...result,
+    vocabulary,
+    docPublishedBeyondStandard,
+    unreadableHeadings: doc.unreadableHeadings,
+    ungraded: ungradedEntries(doc),
+    unresolved: derived.unresolved,
+    emitted: derived.emitted,
+  };
 }
 
 function selfTest() {
@@ -758,7 +918,111 @@ function selfTest() {
   check('14 a computed-key status table resolves', computed.reconciledPairs === 1 && computed.unresolved.length === 0,
     JSON.stringify(computed.unresolved));
 
-  const CASES = 24;
+  // ── The doc-published ledger half. Fixture text is byte-copied out of the
+  //    landed `error-catalog.mdx` `/meta` section, whose entry heading carries a
+  //    descriptive suffix and whose section heading names no status at all —
+  //    the exact combination that made a published 400 invisible.
+  const META_CATALOG = [
+    '## Metadata API Errors (`/meta`)',
+    '',
+    '### `INVALID_REQUEST` — unrecognised type spelling',
+    '**HTTP Status:** 400  ',
+    '',
+    '**Cause:** The type segment of a `/meta` path is not a spelling ObjectStack recognises,',
+  ].join('\n');
+  const META_PRODUCER = "sendError(res, 400, 'INVALID_REQUEST', 'not a recognised spelling');";
+
+  // 15 — a LEDGER code the docs publish a status for is reconciled, in both
+  //      directions, without appearing in `StandardErrorCode`.
+  const ledgerDoc = runFixture({
+    files: { 'a/meta.ts': META_PRODUCER },
+    handling: '', catalog: META_CATALOG, members: ['VALIDATION_ERROR'],
+  });
+  check('15 a doc-published ledger code enters the reconciled vocabulary',
+    ledgerDoc.vocabulary.includes('INVALID_REQUEST')
+    && ledgerDoc.docPublishedBeyondStandard.join(',') === 'INVALID_REQUEST',
+    JSON.stringify(ledgerDoc.docPublishedBeyondStandard));
+  check('15b it reconciles GREEN against its producer, with the pair actually seen',
+    ledgerDoc.emittedNotDocumented.length === 0 && ledgerDoc.documentedNotReachable.length === 0
+    && ledgerDoc.reconciledPairs === 1,
+    JSON.stringify([ledgerDoc.emittedNotDocumented, ledgerDoc.documentedNotReachable, ledgerDoc.reconciledPairs]));
+
+  // 16 — the extension is load-bearing, not decorative: the SAME ledger code
+  //      goes red when the published status is not one the runtime can emit.
+  //      This is the defect the ledger half was previously blind to.
+  const ledgerDrift = runFixture({
+    files: { 'a/meta.ts': "sendError(res, 409, 'INVALID_REQUEST', 'drifted');" },
+    handling: '', catalog: META_CATALOG, members: ['VALIDATION_ERROR'],
+  });
+  check('16 a doc-published ledger code with a drifted status fires BOTH directions',
+    ledgerDrift.documentedNotReachable.length === 1 && ledgerDrift.documentedNotReachable[0].status === 400
+    && ledgerDrift.emittedNotDocumented.length === 1 && ledgerDrift.emittedNotDocumented[0].status === 409,
+    JSON.stringify([ledgerDrift.documentedNotReachable, ledgerDrift.emittedNotDocumented]));
+
+  // 17 — the surviving bound: a ledger code NO page publishes a status for stays
+  //      OUT of the vocabulary (derived, counted, not reconciled). The residual
+  //      is a subtraction, so this must not drift into a per-code assertion.
+  const ledgerSilent = runFixture({
+    files: { 'a/e.ts': "export class E extends Error {\n  readonly code = 'SETTINGS_LOCKED';\n  readonly statusCode = 409;\n}" },
+    handling: '', catalog: META_CATALOG, members: ['VALIDATION_ERROR'],
+  });
+  check('17 an undocumented ledger code stays outside the vocabulary',
+    !ledgerSilent.vocabulary.includes('SETTINGS_LOCKED') && ledgerSilent.emitted.has('SETTINGS_LOCKED')
+    && ledgerSilent.emittedNotDocumented.length === 0,
+    JSON.stringify(ledgerSilent.vocabulary));
+
+  // 18 — the unreadable census: a heading that names a code in an unrecognised
+  //      shape is REPORTED, never silently dropped. Both refusal reasons.
+  const oddShape = runFixture({
+    files: {}, handling: '', catalog: '## Errors (400)\n\n### `INVALID_REQUEST`: unrecognised type spelling\n',
+    members: ['VALIDATION_ERROR'],
+  });
+  check('18 an unrecognised heading shape lands in the census',
+    oddShape.unreadableHeadings.length === 1 && oddShape.unreadableHeadings[0].code === 'INVALID_REQUEST'
+    && !oddShape.vocabulary.includes('INVALID_REQUEST'),
+    JSON.stringify(oddShape.unreadableHeadings));
+  const wrongLevel = runFixture({
+    files: {}, handling: '#### `TIMEOUT`\n**HTTP Status:** 504  \n',
+    catalog: '## Errors (400)\n\n#### `VALIDATION_ERROR`\n', members: ['VALIDATION_ERROR', 'TIMEOUT'],
+  });
+  check('18b a code entry at the wrong heading level is reported, and the right level still reads',
+    wrongLevel.unreadableHeadings.length === 1 && wrongLevel.unreadableHeadings[0].code === 'VALIDATION_ERROR'
+    && /level/.test(wrongLevel.unreadableHeadings[0].why),
+    JSON.stringify(wrongLevel.unreadableHeadings));
+  check('18c the census message names the recognised shapes and demands a self-test case',
+    ENTRY_HEADING_SHAPES.every((s) => unreadableHeadingMessage(oddShape.unreadableHeadings[0]).includes(s.example))
+    && /--self-test case/.test(unreadableHeadingMessage(oddShape.unreadableHeadings[0])));
+
+  // 19 — `**HTTP Status:**` is honoured on the CATALOG too (it was read on the
+  //      handling page only), and a section heading still only ever COVERS.
+  const catalogClaim = runFixture({
+    files: { 'a/e.ts': "export class E extends Error {\n  readonly code = 'TIMEOUT';\n  readonly status = 504;\n}" },
+    handling: '', catalog: '## Server Errors (5xx)\n\n### `TIMEOUT`\n**HTTP Status:** 500  \n', members: ['TIMEOUT'],
+  });
+  check('19 a per-entry HTTP Status line on the catalog is a CLAIM, so direction B fires',
+    catalogClaim.documentedNotReachable.length === 1 && catalogClaim.documentedNotReachable[0].status === 500,
+    JSON.stringify(catalogClaim.documentedNotReachable));
+  check('19b a status-less section heading (`5xx`) covers nothing',
+    catalogClaim.emittedNotDocumented.length === 1 && catalogClaim.emittedNotDocumented[0].status === 504);
+
+  // 20 — the ungraded census: an entry the parser READ but for which no page
+  //      publishes a status in a graded shape is reported, and does NOT fail.
+  //      This is the `## Batch Operation Errors` shape on the live catalog.
+  const ungradedFx = runFixture({
+    files: {}, handling: '',
+    catalog: '## Batch Operation Errors\n\n### `TRANSACTION_FAILED`\n**Cause:** the transaction rolled back.\n',
+    members: ['TRANSACTION_FAILED'],
+  });
+  check('20 an entry with no graded status is reported in the ungraded census',
+    ungradedFx.ungraded.length === 1 && ungradedFx.ungraded[0].code === 'TRANSACTION_FAILED',
+    JSON.stringify(ungradedFx.ungraded));
+  check('20b the ungraded census does not manufacture a finding',
+    ungradedFx.emittedNotDocumented.length === 0 && ungradedFx.documentedNotReachable.length === 0
+    && ungradedFx.unreadableHeadings.length === 0);
+  check('20c an entry that DOES publish a graded status is not in the census',
+    ungradedEntries({ entries: [{ code: 'TIMEOUT', where: 'x:1' }], claimed: new Map([['TIMEOUT', new Map([[504, []]])]]), covered: new Map() }).length === 0);
+
+  const CASES = 36;
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\n✗ check-error-status-conformance --self-test: ${failures.length}/${CASES} case(s) failed.\n`);
@@ -768,8 +1032,10 @@ function selfTest() {
     `✓ check-error-status-conformance --self-test: ${CASES} cases pass — the real pre-#8963 doc text goes RED naming `
     + 'MISSING_REQUIRED_FIELD @422, the landed text goes green WITH the accepted statuses actually seen '
     + '(positive control), both directions fire independently, section headings absolve but never demand, '
-    + 'narrated envelopes in comments are not producers, unresolvable declarations are reported, and the '
-    + 'baseline-expanding remedy stays maintainer-only.',
+    + 'narrated envelopes in comments are not producers, unresolvable declarations are reported, a LEDGER code '
+    + 'the docs publish a status for is reconciled in both directions while one no page publishes stays out of '
+    + 'the vocabulary, an entry heading in an unrecognised shape is reported instead of silently dropped, and '
+    + 'the baseline-expanding remedy stays maintainer-only.',
   );
   process.exit(0);
 }
@@ -814,14 +1080,15 @@ const doc = parseDocumentedStatuses({
   handling: readFileSync(DOC_HANDLING, 'utf8'),
   catalog: readFileSync(DOC_CATALOG, 'utf8'),
 });
-const result = reconcile({ members, emitted: derived.emitted, ...doc });
+const { vocabulary, docPublishedBeyondStandard } = reconciledVocabulary({ members, ...doc });
+const result = reconcile({ vocabulary, emitted: derived.emitted, ...doc });
 
 const baseline = existsSync(BASELINE_PATH)
   ? JSON.parse(readFileSync(BASELINE_PATH, 'utf8'))
   : { unpinned: [] };
 const baselined = new Set(baseline.unpinned ?? []);
 const newlyUnpinned = result.unpinned.filter((c) => !baselined.has(c));
-const nowPinned = [...baselined].filter((c) => !result.unpinned.includes(c) && members.includes(c)).sort();
+const nowPinned = [...baselined].filter((c) => !result.unpinned.includes(c) && vocabulary.includes(c)).sort();
 
 if (update) {
   writeFileSync(
@@ -839,14 +1106,18 @@ if (update) {
   process.exit(0);
 }
 
-const ledgerCodes = [...derived.emitted.keys()].filter((c) => !members.includes(c)).length;
+// The residual, as a SUBTRACTION from what the pages publish rather than a
+// claim about it: codes the deriver found that are neither a `StandardErrorCode`
+// member nor published with a status by a scanned page. Nothing here is a
+// literal, so registering a ledger code moves no number that has to be edited.
+const unreconciledLedger = [...derived.emitted.keys()].filter((c) => !vocabulary.includes(c)).sort();
 
 // `--report` prints the whole derivation rather than only the disagreements.
 // A finding is only as trustworthy as the evidence behind it, and "which
 // producers did you actually see for this code?" is the first question anyone
 // reading a failure asks.
 if (process.argv.includes('--report')) {
-  for (const code of members) {
+  for (const code of vocabulary) {
     const runtime = derived.emitted.get(code);
     if (!runtime) continue;
     console.log(`${code}`);
@@ -854,19 +1125,36 @@ if (process.argv.includes('--report')) {
       console.log(`    ${status}  ${where.join('\n          ')}`);
     }
   }
+  console.log(`\nderived but NOT reconciled — no scanned page publishes a status for these ${unreconciledLedger.length}:`);
+  for (const c of unreconciledLedger) console.log(`    ${c}`);
 }
 
 console.log('check:error-status-conformance — documented HTTP status ⇄ runtime-emitted status');
 console.log(
-  `  scope: ${members.length} StandardErrorCode members reconciled; ${sources.size} source files scanned; `
-  + `${derived.sites} producer site(s) derived; ${ledgerCodes} registered ledger code(s) derived but NOT reconciled `
-  + '(neither doc page publishes their status).',
+  `  scope: ${vocabulary.length} code(s) reconciled = ${members.length} StandardErrorCode member(s) `
+  + `+ ${docPublishedBeyondStandard.length} ledger code(s) a doc page publishes a status for`
+  + `${docPublishedBeyondStandard.length ? ` (${docPublishedBeyondStandard.join(', ')})` : ''}; `
+  + `${sources.size} source files scanned; ${derived.sites} producer site(s) derived; `
+  + `${unreconciledLedger.length} further ledger code(s) derived but NOT reconciled — no scanned page publishes `
+  + 'a status for them, so there is nothing to reconcile them against.',
 );
 console.log(
   `  reconciled: ${result.reconciledCodes} code(s) with a derived producer, `
   + `${result.reconciledPairs} (code, status) pair(s) matched against the docs.`,
 );
 console.log(`  unpinned: ${result.unpinned.length} documented code(s) with no derivable producer (baselined: ${baselined.size}).`);
+const ungraded = ungradedEntries(doc);
+if (ungraded.length) {
+  console.log(
+    `  ungraded: ${ungraded.length} doc entr(y|ies) whose heading was read but for which no page publishes a `
+    + 'status in a graded shape (reported, not failed — see `ungradedEntries`) —',
+  );
+  for (const e of ungraded) console.log(`      ${e.code}  ${e.where}`);
+}
+if (doc.unreadableHeadings.length) {
+  console.log(`  unreadable: ${doc.unreadableHeadings.length} doc heading(s) naming a code in an unrecognised shape —`);
+  for (const u of doc.unreadableHeadings) console.log(`      ${u.path}:${u.line} ${JSON.stringify(u.text)}`);
+}
 if (derived.unresolved.length) {
   console.log(`  unresolved: ${derived.unresolved.length} declaration(s) the deriver could not read —`);
   for (const u of derived.unresolved) console.log(`      ${u}`);
@@ -883,6 +1171,7 @@ if (result.reconciledPairs === 0) {
 const failures = [];
 for (const f of result.emittedNotDocumented) failures.push(emittedNotDocumentedMessage(f));
 for (const f of result.documentedNotReachable) failures.push(documentedNotReachableMessage(f));
+for (const u of doc.unreadableHeadings) failures.push(unreadableHeadingMessage(u));
 for (const c of newlyUnpinned) failures.push(newUnpinnedMessage(c));
 for (const c of nowPinned) failures.push(nowPinnedMessage(c));
 

@@ -521,6 +521,63 @@ if (!res.success) showToast(res.error);
 
 ---
 
+## Metadata API Errors (`/meta`)
+
+`/meta` refusals carry codes registered to `@objectstack/metadata-protocol` in the
+[error-code ledger](/docs/references/api/error-code-ledger), not the standard catalog
+above — so their status is published here rather than inherited from a category. This
+section documents the **type-spelling** refusal the `/meta` request boundary raises. It
+is not a complete inventory of `/meta` errors.
+
+### `INVALID_REQUEST` — unrecognised type spelling
+
+**HTTP Status:** 400  
+**Cause:** The type segment of a `/meta` path is not a spelling ObjectStack recognises,
+*and* it evidently reaches for a metadata type the platform itself declares — a
+misspelling of a real type. `GET /meta/viewes` is refused because `viewes` is not a
+recognised spelling of the declared type `view`.
+
+**Fix:** Address the type by its canonical singular name, or by its canonical REST
+plural. The refusal names both, so the correction never has to be guessed — for
+`viewes` it names `view` and `views`. See the [Metadata API](/docs/api/metadata-api).  
+**Retry:** `no_retry` — the spelling is refused deterministically; retrying it
+unchanged returns the same `400`.
+
+`GET /api/v1/meta/viewes` answers `400` with:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "INVALID_REQUEST",
+    "message": "[invalid_request] 'viewes' is not a recognised spelling of metadata type 'view'. Address it as 'view' or 'views'. Refused rather than treated as a plugin-registered type, because forwarding an unrecognised spelling of a declared type would create a second namespace under type='viewes'.",
+    "httpStatus": 400
+  }
+}
+```
+
+<Callout type="warn">
+**This is not a refusal of plural type names.** Recognised plurals are *not* refused:
+the boundary folds them to the canonical singular and serves the request — `views`
+addresses `view`, `objects` addresses `object`. What this error refuses is a spelling
+that resolves to no type at all while reaching for one the platform declares.
+</Callout>
+
+**Why it is refused rather than passed through.** A type segment the platform does not
+recognise would otherwise be treated as a plugin-registered kind, and a write under it
+would mint a second metadata namespace keyed by the misspelling — `type='viewes'`
+alongside `type='view'` — which nothing reads and nothing serves. Refusing at the
+boundary is what keeps one type to one key.
+
+⛔ **Not this error:** a segment that reaches for no declared type — `/meta/fieldz`, or
+a plugin-registered kind such as `theme` — is not a misspelling of anything the platform
+declares, so this rule stays silent and the request continues down the plugin path. A
+**write** whose segment is not a metadata type at all is refused separately: same
+`INVALID_REQUEST` code and `400` status, different message (*"… is not a metadata
+type"*). Tell the two apart by the message, not the code.
+
+---
+
 ## Error Response Structure
 
 Every error response follows the `EnhancedApiError` schema:

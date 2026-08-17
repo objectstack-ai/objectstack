@@ -109,6 +109,11 @@ reviewing an agent's work, these are the two things most worth a close read:
   `status`. A bare reference silently hides the action on every record — the single
   most common AI mistake, which is exactly why `os validate` rejects it. See it in
   action in [Build with Claude Code → the gate](/docs/getting-started/build-with-claude-code#4-the-gate-os-validate-catches-ai-mistakes).
+  On a row action, also **guard the field with `has()`** —
+  `has(record.status) && record.status != 'sent'` — because a list row carries
+  only the columns that view projects, and reading an absent one faults and
+  hides the button. See [Actions](/docs/ui/actions) for when the guard needs
+  `&& record.x != null` on top.
 - **Views & Apps** (`defineView`, `App.create`) — the list/form lenses and the
   navigation. Reading these tells you what the user will actually see and click.
 

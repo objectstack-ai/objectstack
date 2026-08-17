@@ -24,6 +24,27 @@ export const ApiErrorSchema = lazySchema(() => z.object({
    * which is that union as a single parse.
    */
   code: ErrorCode.describe('Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages)'),
+  /**
+   * The producer's own code, verbatim, when it is NOT a member of the closed
+   * `code` vocabulary above — the open, author-authored channel (#9106,
+   * ADR-0112 amendment 2026-08-17).
+   *
+   * `code` is closed at every door: a thrown code outside `StandardErrorCode ∪
+   * <the serving side's ledger>` is DEMOTED here, and `code` carries the
+   * member the HTTP status derives instead (`resolveThrownHttpError` in
+   * `@objectstack/types` is the one rule both doors read). This is how a
+   * metadata app's own `throw Object.assign(new Error(msg), { code })` still
+   * reaches the wire — #7867's capability, preserved — without opening the
+   * closed set consumers branch on exhaustively: platform conditions are
+   * matched on `code`; app-specific spellings ride here.
+   *
+   * ABSENT whenever the producer's code IS a vocabulary member (it is already
+   * in `code`, and repeating it would make every registered refusal carry two
+   * spellings of one fact) and whenever the producer declared none. Presence
+   * therefore MEANS demotion: a consumer that sees this field knows the
+   * producer spelled a code the serving side's ledger does not know.
+   */
+  declaredCode: z.string().optional().describe('The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106)'),
   message: z.string().describe('Readable error message'),
   category: z.string().optional().describe('Error category (e.g. validation, authorization)'),
   /**

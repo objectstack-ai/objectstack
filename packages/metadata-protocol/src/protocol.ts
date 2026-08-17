@@ -6373,7 +6373,51 @@ export class ObjectStackProtocolImplementation implements
             note: string | null;
         }>;
     }> {
-        const singular = PLURAL_TO_SINGULAR[request.type] ?? request.type;
+        // [#9157] #4432 / #7894 — CANONICAL TYPE KEY, and the first of the three
+        // READ verbs to get it. See {@link canonicalMetaType}.
+        //
+        // `auditMetaItem` serves `GET /api/v1/meta/:type/:name/audit`
+        // (`rest-route-ledger.ts:180`, caller-supplied `:type`) and derived its
+        // key from `PLURAL_TO_SINGULAR` — the MANIFEST-COLLECTION map #7894
+        // moved this boundary off. The one-line replacement #8769
+        // (`publishMetaItem`), #8819 (`rollbackMetaItem`) and #8868
+        // (`diffMetaItem`) each made on a write verb.
+        //
+        // Ruled by the maintainer on 2026-08-16 (#9180 step ①): the `/meta`
+        // type segment is singular, always. What the fold reaches here,
+        // measured rather than assumed:
+        //
+        //  • the `where.type` of the `sys_metadata_audit` read below. For the
+        //    four MANIFEST-ABSENT types (`field`, `seed`, `external_catalog`,
+        //    `translation` — legitimately absent from the manifest map because
+        //    they are not stack collections) the plural stayed plural all the
+        //    way into that `where`, matched no row, and this method answered
+        //    `{ events: [] }` for an item that HAS an audit trail. Not a
+        //    refusal and not an error: the empty-accumulator shape (#8896)
+        //    delivered to an operator who is reading the protection log right
+        //    before a rename or a delete.
+        //  • the #7894 boundary REFUSAL, which never ran on this verb: it lives
+        //    INSIDE `canonicalizeMetaRequestType`, so an unrecognised spelling
+        //    of a declared type (`viewes`) was forwarded to the plugin path and
+        //    answered 200-empty instead of 400 naming `view` / `views`.
+        //
+        // ⚠️ What it does NOT do, stated because the filing card claimed
+        // otherwise and the claim was measured false: it does not refuse
+        // `views`. `metaUrlSpellingRefusal('views')` is `null` — a RECOGNISED
+        // plural is in `META_URL_TO_SINGULAR` and therefore FOLDS. Retiring the
+        // recognised plural spellings themselves is #9180 step ③, deliberately
+        // not bundled here.
+        //
+        // Placed before the `try` on purpose: the catch below answers
+        // `{ events: [] }` for an unprovisioned table, and a caller error
+        // swallowed into that shape is exactly the 200-empty this closes.
+        request = canonicalizeMetaRequestType(request);
+        // Canonical by construction from the fold above. NOT a second fold —
+        // the `PLURAL_TO_SINGULAR` lookup that used to stand here is what #7894
+        // removed from this boundary. The binding survives under its own name
+        // because the read below consumes it as "the key the row is stored
+        // under", the shape {@link diffMetaItem} keeps.
+        const singular = request.type;
         const limit = Math.min(
             Math.max(1, request.limit ?? 100),
             500,
@@ -11395,12 +11439,105 @@ export class ObjectStackProtocolImplementation implements
      * Returns whether anything was registered (org-scoped rows, bodies
      * without a `name`, and registry doubles without `registerItem`, are
      * no-ops).
+     *
+     * ## [#9111] `type` is an ASSERTED input, not a silently-trusted one
+     *
+     * The spelling handed in is the spelling the registry entry is minted
+     * under — `registerItem(type, …)` below, and the same `type` again in
+     * {@link hydrateExpandedViewItems}. Until this assert the parameter was a
+     * bare `type: string` with a load-bearing "callers must fold" contract
+     * that lived in no type, no signature and no check. That family has cost
+     * four cards (#8820, #8862, #9009, #9111); this is the fifth rediscovery
+     * not happening.
+     *
+     * **Measured across every producer before asserting** (the card's phase 1
+     * — six routes, and the read side FIRST, because #9157 had just falsified
+     * "every `/meta` entry point folds" one function over):
+     *
+     *  1. `getMetaItems` (read-side hydration)   — `canonicalizeMetaRequestType`
+     *  2. `saveMetaItem` → write-through         — `canonicalizeMetaRequestType`
+     *  3. `rollbackMetaItem` → write-through     — `canonicalizeMetaRequestType`
+     *  4. `promoteDraftForPublish` → write-through — `PLURAL_TO_SINGULAR`, but
+     *     both its callers are covered: `publishMetaItem` folds at the
+     *     boundary, and `publishPackageDrafts` is pre-empted by #8908's
+     *     `STORED_TYPE_NOT_CANONICAL` pre-flight ({@link isNonCanonicalStoredType}).
+     *  5. `revertCommit` → write-through         — `PLURAL_TO_SINGULAR[it.type]`
+     *     over a STORED commit-item type. **Unguarded.**
+     *  6. `loadMetaFromDb` (boot)                — `PLURAL_TO_SINGULAR[record.type]`
+     *     over a STORED row type. **Unguarded.**
+     *
+     * Routes 5 and 6 fold through the MANIFEST-COLLECTION map, which is
+     * TOLERANT AND INCOMPLETE in exactly the way #9161 named one seam over: it
+     * resolves the plurals that were never the hazard and passes through the
+     * six spellings whose types are not stack collections (`fields`, `seeds`,
+     * `external_catalogs`, `externalCatalogs`, `translations`,
+     * `email_templates`). For those the fold is a NO-OP and the raw spelling
+     * reaches `registerItem` — a second registry namespace for an item that has
+     * a canonical home, invisible to every canonical read.
+     *
+     * DORMANT for live traffic, and that is a measurement, not an assumption:
+     * the only `sys_metadata` writer that stamps a caller-chosen `type`
+     * (`saveMetaItem`'s `repo.put`) folds at the boundary, so no live write can
+     * mint such a row. The population that reaches routes 5 and 6 is pre-#7894
+     * AT-REST residue, which is real and which nothing rewrites on upgrade.
+     *
+     * ⛔ The refusal is an ASSERT and deliberately NOT a fold. Folding here
+     * would be the tolerant lookup below a folding boundary that
+     * {@link canonicalMetaType}'s header has rejected since #4432 — and it
+     * would do something worse than dilute a contract: a pre-#7894 row exists
+     * BECAUSE `PUT /meta/fields/…` slipped past the lock that answers
+     * `PUT /meta/field/…` with 403 NOT_OVERRIDABLE. Quietly folding it into the
+     * canonical key at boot would honour, process-wide, precisely the override
+     * #7894 closed the door on. Refusing leaves the row exactly as unreachable
+     * as it is today and says so out loud instead.
+     *
+     * Loudness per route, since neither is a `/meta` request with a caller to
+     * answer to: at boot the throw is caught by `loadMetaFromDb`'s per-record
+     * handler, so the row is counted in `errors` and named in a warning
+     * (registering nothing was already the honest outcome — a `'fields'` entry
+     * serves no reader); on the write-through it degrades to
+     * {@link applyRegistryWriteThrough}'s best-effort `console.warn`, which is
+     * correct there and not a softened assert — the row is already persisted,
+     * and #4521's contract is that a registry hiccup must never fail a
+     * committed write.
+     *
+     * ⚠️ This assert touches NO audit row, NO commit record and NO repository
+     * key. It is scoped to the registry mint door, and no producer's spelling
+     * is changed by it — so #8908's `AUDIT_TYPE_NOT_CANONICAL` ruling (which
+     * requires the caller's spelling to reach the audit writer unfolded, and to
+     * fail loudly at 500 when it is wrong) is untouched in both directions.
+     *
+     * What it cannot refuse, by construction: a canonical type (no canonical
+     * spelling folds elsewhere), and a plugin-registered or otherwise
+     * unrecognised kind — {@link canonicalMetaType} is the identity for
+     * anything the static map does not carry, so a runtime kind the platform
+     * has never heard of can never trip this gate.
      */
     private hydrateOverlayIntoRegistry(
         type: string,
         data: unknown,
         options: { packageId?: string | null; organizationId: string | null },
     ): boolean {
+        // [#9111] See the header: the mint door asserts, the caller folds.
+        // Placed FIRST, ahead of every no-op return below, so the contract is
+        // judged on the spelling itself rather than on whether this particular
+        // row happened to be registrable — a caller that stops folding must not
+        // be able to hide behind an org-scoped or nameless body.
+        const canonicalType = canonicalMetaType(type);
+        if (canonicalType !== type) {
+            const err: any = new Error(
+                `[registry_type_not_canonical] Refusing to register a SchemaRegistry overlay entry under `
+                + `the non-canonical metadata type '${type}' (canonical: '${canonicalType}'). The registry `
+                + `holds exactly one plain key per (type, name) and every reader addresses it through the `
+                + `'/meta' boundary, which folds — an entry minted under '${type}' is a second namespace no `
+                + `canonical read, listing or declaration lookup can reach (#4432). Fold the type at the `
+                + `producer (canonicalMetaType), not here; see this method's header for why the mint door `
+                + `refuses instead of folding.`,
+            );
+            err.code = 'REGISTRY_TYPE_NOT_CANONICAL';
+            err.status = 500;
+            throw err;
+        }
         // [#6602] ADR-0005 — a per-org overlay is served on demand, never
         // grafted into the registry every org in this process shares.
         if (options.organizationId !== null && options.organizationId !== undefined) return false;
@@ -11554,15 +11691,23 @@ export class ObjectStackProtocolImplementation implements
         // passing `'objects'` no longer takes this branch — so it no longer
         // reaches `registerObject`, and the object is simply not registered:
         // `assertObjectRegistered` fails CLOSED, a loud recoverable error in
-        // place of a silent one. That is the win. It does NOT mean nothing is
-        // registered at all: on an unscoped kernel the value falls through to
+        // place of a silent one. That is the win.
+        //
+        // [#9111] The rest of this paragraph is now HISTORY, and is kept in the
+        // past tense because it is what the next card was filed about. It used
+        // to read: "It does NOT mean nothing is registered at all — on an
+        // unscoped kernel the value falls through to
         // {@link hydrateOverlayIntoRegistry}, which registers under the RAW
-        // type like every other overlay kind. So the plural is no longer an
-        // object-specific hazard minting a shadow OBJECT — it is merely the
-        // same general "producers must fold" contract every other metadata
-        // type already lives under. Folding at the producer stays the rule;
-        // this guard is not a second line of defence and must not be written
-        // as one.
+        // type like every other overlay kind." That was true, and it was the
+        // last unfolded seam of this family. It no longer holds: the hydrator
+        // now ASSERTS its type is canonical (`REGISTRY_TYPE_NOT_CANONICAL`),
+        // so an unfolded plural arriving here is refused at the mint door
+        // rather than minting a shadow entry under the raw spelling.
+        //
+        // ⛔ That is still not a second line of defence, and must not be
+        // written as one: folding at the producer stays the rule, and the
+        // assert exists to make a producer that stops folding FAIL LOUDLY
+        // instead of silently — not to repair its key.
         if (request.type === 'object') {
             // NOT org-gated, deliberately: an `object` is `allowOrgOverride:
             // false` (ADR-0005) and its physical TABLE is env-wide, so the
@@ -13046,6 +13191,14 @@ export class ObjectStackProtocolImplementation implements
      *
      * ## What it declines to touch, and says so
      *
+     * This section documents the function's internal surface, which is not
+     * always identical to what an operator running the CLI can observe:
+     * `os migrate meta --stored` always passes its own automation engine
+     * (see `canonicalizeFlow` above), so the first bullet below is never
+     * observed from that door. That does not by itself account for every
+     * difference between this list and `content/docs/deployment/cli.mdx`'s
+     * decline table — see #9271.
+     *
      * - **`flow` rows with no reachable automation engine.** Flow-node
      *   conversions carry ADR-0078's open-namespace conflict guard, which
      *   needs the engine's live executor registry. When one is reachable —
@@ -13076,6 +13229,17 @@ export class ObjectStackProtocolImplementation implements
      *   body is a genuine contract violation, not chain-owned history. They
      *   surface as `failed` with the validation message, keep reading through
      *   the chain, and stay fixable in Studio.
+     * - **Rows stored under a non-canonical metadata type spelling** (#8957,
+     *   {@link isNonCanonicalStoredType}). This pass canonicalizes BODIES;
+     *   rewriting a stored type spelling is an identity move — a new
+     *   `(org, type, name, package_id)` key, not an edit — so it is out of
+     *   its reach. Nothing on the canonical type can see such a row — no
+     *   registry read, no compliance query — and the batch publish refuses
+     *   it for the same reason (`STORED_TYPE_NOT_CANONICAL`). Reported
+     *   `skipped`, not `failed`: nothing is broken about this pass, the row
+     *   is simply outside its reach. Re-author the item under the canonical
+     *   type (`PUT /meta/<canonical>/<name>`) and drop the non-canonical
+     *   row.
      */
     async migrateStoredMetadata(request: {
         /** Write. Omitted / false = preview: reports what it would do, writes nothing. */
@@ -13396,7 +13560,40 @@ export class ObjectStackProtocolImplementation implements
         sinceSeq?: number;
         limit?: number;
     }): Promise<{ events: import('@objectstack/metadata-core').MetadataEvent[] }> {
-        const singularType = PLURAL_TO_SINGULAR[request.type] ?? request.type;
+        // [#9157] #4432 / #7894 — CANONICAL TYPE KEY. See {@link canonicalMetaType}
+        // and the twin comment on {@link auditMetaItem}; #9180 step ① routes all
+        // three read verbs, and this one is where the manifest map was doing the
+        // most damage.
+        //
+        // `historyMetaItem` serves `GET /api/v1/meta/:type/:name/history`
+        // (`rest-route-ledger.ts:178`). The plural was not merely a wrong key
+        // here — it was a door AROUND the gate immediately below, measured on
+        // `origin/main`:
+        //
+        //   `translation` declares `allowOrgOverride: true`, so the singular
+        //   passes `isOverlayAllowed` and reads real `sys_metadata_history`
+        //   rows. `translations` is MANIFEST-ABSENT, so the old line left it
+        //   plural; `isOverlayAllowed('translations')` is false, and
+        //   `isRuntimeCreateAllowed('translations')` then returns TRUE through
+        //   its no-static-registry-entry arm — the PLUGIN path, which every
+        //   gate is permissive toward by construction. So the plural sailed
+        //   past the gate and asked the repository for `type='translations'`,
+        //   which no row carries, and the endpoint answered `{ events: [] }`
+        //   about an item with a full change log.
+        //
+        //   `fields` inverts the same asymmetry: singular `field` declares
+        //   neither flag and is REFUSED by the gate (early `{ events: [] }`,
+        //   zero engine calls), while the plural passed it and issued a real
+        //   `sys_metadata_history` read keyed `'fields'`. Same body, opposite
+        //   path — which is why the pins assert the KEY the repository was
+        //   asked for and not only the body.
+        //
+        // The fold is placed ABOVE the gate deliberately: a misspelling
+        // (`viewes`) must be refused 400 naming `view` / `views`, not silently
+        // absorbed by the early return.
+        request = canonicalizeMetaRequestType(request);
+        // Canonical by construction from the fold above — NOT a second fold.
+        const singularType = request.type;
         if (!ObjectStackProtocolImplementation.isOverlayAllowed(singularType)
             && !ObjectStackProtocolImplementation.isRuntimeCreateAllowed(singularType)) {
             return { events: [] };
@@ -17803,7 +18000,36 @@ export class ObjectStackProtocolImplementation implements
             kind: string;
         }>;
     }> {
-        const singularTarget = PLURAL_TO_SINGULAR[request.type] ?? request.type;
+        // [#9157] #4432 / #7894 — CANONICAL TYPE KEY. See {@link canonicalMetaType}
+        // and the twin comments on {@link auditMetaItem} / {@link historyMetaItem}.
+        // Third and last of the read verbs #9180 step ① routes.
+        //
+        // `findReferencesToMeta` serves `GET /api/v1/meta/:type/:name/references`
+        // (`rest-route-ledger.ts:151`). ⚠️ What this fold buys HERE is narrower
+        // than on the two verbs above, and the difference is stated rather than
+        // implied because a future reader will otherwise assume symmetry:
+        //
+        //  • The REFUSAL is the whole wire-visible change. `viewes` used to miss
+        //    `REFERENCE_PATHS` and answer 200 `{ references: [] }` — read by an
+        //    operator as "nothing depends on this", immediately before the
+        //    rename or delete this panel exists to gate (ADR-0110 D3). It is now
+        //    400, naming `view` / `views`.
+        //  • The manifest-ABSENT class changes NOTHING here, measured rather
+        //    than assumed: every {@link REFERENCE_PATHS} key (`object`, `view`,
+        //    `tool`, `skill`, `flow`, `dashboard`, `page`) is manifest-PRESENT,
+        //    so the old map already folded each of them. `translations` folded
+        //    to `translation` answers `{ references: [] }` exactly as
+        //    `translations` did, because `translation` is not a registry key
+        //    either — which this method's own doc calls a legitimate no-hit
+        //    rather than an error. Closing THAT gap is a `REFERENCE_PATHS`
+        //    coverage question and not a spelling one; it is not this card.
+        //
+        // ⛔ Do not "improve" this by teaching `REFERENCE_PATHS` a plural key.
+        // That is the spelling-tolerant lookup one layer down which
+        // {@link canonicalMetaType} has rejected since #4432.
+        request = canonicalizeMetaRequestType(request);
+        // Canonical by construction from the fold above — NOT a second fold.
+        const singularTarget = request.type;
         const targetName = request.name;
         const matchers = REFERENCE_PATHS[singularTarget];
         if (!matchers || matchers.length === 0) {

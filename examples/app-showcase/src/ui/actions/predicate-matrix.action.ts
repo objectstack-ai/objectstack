@@ -59,15 +59,30 @@
  *
  *    This file is where both halves are falsifiable in a browser: the Minimal
  *    specimen exercises the NULL half, and the default list's `$select`
- *    projection — which omits `f_lookup` / `f_lookups` and includes
- *    `f_textarea` — exercises the ABSENT half on the very same records.
+ *    projection — whose columns are `name` / `f_select` / `f_number` /
+ *    `f_boolean` / `f_rating`, so every OTHER gated field is absent — exercises
+ *    the ABSENT half on the very same records.
  *
- *    ⚠️ The specimens below still spell only the `!= null` half. That is the
- *    platform-wide state rather than an exception here (0 of the 34 authored
- *    record-scoped action predicates across both repos use `has()`), and
- *    migrating them changes what this LIVE fixture demonstrates, so it is
- *    tracked separately in #8990. Read this bullet for what to write today;
- *    read the specimens for what the runtime does with the older form.
+ *    Every specimen below carries the guard as of #8990. What that changed is
+ *    the FAULT, not the verdict: measured against the running app's own
+ *    payloads, 40 of these 53 predicates aborted with `No such key` on a
+ *    default-list row before the migration and 0 do after, while every verdict
+ *    on a record-DETAIL binding (where the read projects all declared columns)
+ *    is unchanged. So the Full-vs-Minimal contrast this fixture exists to show
+ *    is exactly as it was, and the list surface now answers `false` where it
+ *    used to silently drop the button.
+ *
+ *    ⚠️ That makes the guard itself the thing under test here: delete a `has()`
+ *    and the action vanishes from the row kebab and the selection bar while
+ *    staying correct on the detail page. That asymmetry IS the specimen —
+ *    it is what no unit test of a single surface can see.
+ *
+ *    The MINIMAL form is per predicate, not a blanket: `has()` alone where the
+ *    read is only compared by `==` / `!=` (CEL compares heterogeneously and
+ *    answers `false` rather than faulting), the full conjunction only where an
+ *    operand can fault — traversal, method call, ordering, arithmetic, `in`,
+ *    or a bare `!`. Over-guarding is not the safe default; it is the pattern
+ *    the next author copies.
  *  - **`contains()` / `matches()`, never `startsWith()` / `endsWith()`.** The
  *    latter two are not CEL — objectui routes them to its legacy JS evaluator
  *    with a deprecation warning, and the SERVER's engine has no answer for
@@ -154,7 +169,9 @@ export const ZooRelationGateAction = defineAction({
   type: 'script',
   body: echo,
   successMessage: 'Both relations resolved to the same id.',
-  visible: 'record.f_lookup != null && record.f_lookups != null && record.f_lookup == record.f_lookups[0]',
+  visible:
+    'has(record.f_lookup) && has(record.f_lookups) && record.f_lookups != null'
+    + ' && record.f_lookups.size() > 0 && record.f_lookup == record.f_lookups[0]',
   locations: [...RECORD_SURFACES],
   refreshAfter: false,
 });
@@ -183,7 +200,7 @@ export const ZooOwnerGateAction = defineAction({
   type: 'script',
   body: echo,
   successMessage: 'You own this specimen.',
-  visible: 'record.owner_id == os.user.id',
+  visible: 'has(record.owner_id) && record.owner_id == os.user.id',
   locations: [...RECORD_SURFACES],
   refreshAfter: false,
 });
@@ -204,7 +221,7 @@ export const ZooUserIdentityGateAction = defineAction({
   type: 'script',
   body: echo,
   successMessage: 'You are the assigned user on this specimen.',
-  visible: 'record.f_user == os.user.id',
+  visible: 'has(record.f_user) && record.f_user == os.user.id',
   locations: [...RECORD_SURFACES],
   refreshAfter: false,
 });
@@ -238,7 +255,7 @@ export const ZooDialectSplitAction = defineAction({
   objectName: zoo,
   type: 'script',
   body: echo,
-  visible: 'record.f_textarea != null && record.f_textarea.contains("Line two")',
+  visible: 'has(record.f_textarea) && record.f_textarea != null && record.f_textarea.contains("Line two")',
   locations: [...RECORD_SURFACES],
   refreshAfter: false,
 });
@@ -274,7 +291,7 @@ export const ZooVisibleStringAction = defineAction({
   objectName: zoo,
   type: 'script',
   body: echo,
-  visible: 'record.f_boolean == true',
+  visible: 'has(record.f_boolean) && record.f_boolean == true',
   locations: [...RECORD_SURFACES],
   refreshAfter: false,
 });
@@ -287,7 +304,7 @@ export const ZooVisibleTaggedAction = defineAction({
   objectName: zoo,
   type: 'script',
   body: echo,
-  visible: P`record.f_boolean == true`,
+  visible: P`has(record.f_boolean) && record.f_boolean == true`,
   locations: [...RECORD_SURFACES],
   refreshAfter: false,
 });
@@ -300,7 +317,7 @@ export const ZooVisibleEnvelopeAction = defineAction({
   objectName: zoo,
   type: 'script',
   body: echo,
-  visible: { dialect: 'cel', source: 'record.f_boolean == true' },
+  visible: { dialect: 'cel', source: 'has(record.f_boolean) && record.f_boolean == true' },
   locations: [...RECORD_SURFACES],
   refreshAfter: false,
 });
@@ -317,7 +334,7 @@ export const ZooDisabledAction = defineAction({
   objectName: zoo,
   type: 'script',
   body: echo,
-  disabled: 'record.f_rating < 4',
+  disabled: 'has(record.f_rating) && record.f_rating != null && record.f_rating < 4',
   locations: ['record_header', 'record_section'],
   refreshAfter: false,
 });
@@ -409,11 +426,19 @@ export const ZooPermEmptyAction = defineAction({
  * (`f_number` / `f_select` / `f_radio` / `f_multiselect` / `f_checkboxes` /
  * `f_time` / `f_master_detail` / `f_percent` / `f_rating` / `f_autonumber`).
  *
- * Every predicate that touches a nullable non-scalar is null-guarded — see the
- * authoring rules at the top of this file. That is not defensive padding: the
- * unguarded form FAULTS on Minimal, and a fault is fail-closed on the row and
- * selection surfaces and fail-OPEN on the lenient ones, so the same typo shows
- * the button to everybody on one surface and to nobody on the next.
+ * Every predicate here is guarded — see the authoring rules at the top of this
+ * file. That is not defensive padding: the unguarded form FAULTS, and a fault
+ * is fail-closed on the row and selection surfaces and fail-OPEN on the lenient
+ * ones, so the same typo shows the button to everybody on one surface and to
+ * nobody on the next.
+ *
+ * ⚠️ "Nullable non-scalar" is NOT the line, and this block used to say it was.
+ * Measured on the canonical engine, a SCALAR faults just as readily the moment
+ * the operator is not an equality: `record.f_slider > 50` aborts with
+ * `no such overload: dyn<null> > int` on a projected NULL, and `!(record.f_boolean)`
+ * with `no such overload: !null`. What decides the guard is the OPERATOR, not
+ * the field's type — which is why the numeric, `in`, `!` and ternary specimens
+ * below carry the same `!= null` half as the structured ones.
  */
 const zooTypeGate = (name: string, label: string, visible: string) =>
   defineAction({
@@ -429,63 +454,63 @@ const zooTypeGate = (name: string, label: string, visible: string) =>
 
 export const ZooTypeGates = [
   // ── Relational: the id, never the expanded record ────────────────────────
-  zooTypeGate('lookup', 'lookup — set', 'record.f_lookup != null'),
-  zooTypeGate('lookup_multi', 'lookup multiple — >1', 'record.f_lookups != null && record.f_lookups.size() > 1'),
-  zooTypeGate('master_detail', 'master_detail — set', 'record.f_master_detail != null'),
-  zooTypeGate('tree', 'tree — unset', 'record.f_tree == null'),
-  zooTypeGate('user', 'user — unset', 'record.f_user == null'),
-  zooTypeGate('user_identity', 'user — is me', 'record.f_user == os.user.id'),
-  zooTypeGate('owner', 'owner_id (injected) — mine', 'record.owner_id == os.user.id'),
+  zooTypeGate('lookup', 'lookup — set', 'has(record.f_lookup) && record.f_lookup != null'),
+  zooTypeGate('lookup_multi', 'lookup multiple — >1', 'has(record.f_lookups) && record.f_lookups != null && record.f_lookups.size() > 1'),
+  zooTypeGate('master_detail', 'master_detail — set', 'has(record.f_master_detail) && record.f_master_detail != null'),
+  zooTypeGate('tree', 'tree — unset', 'has(record.f_tree) && record.f_tree == null'),
+  zooTypeGate('user', 'user — unset', 'has(record.f_user) && record.f_user == null'),
+  zooTypeGate('user_identity', 'user — is me', 'has(record.f_user) && record.f_user == os.user.id'),
+  zooTypeGate('owner', 'owner_id (injected) — mine', 'has(record.owner_id) && record.owner_id == os.user.id'),
 
   // ── Text family: contains() / matches(), never startsWith() ──────────────
-  zooTypeGate('text', 'text — name non-empty', 'record.name != null && record.name.size() > 0'),
-  zooTypeGate('textarea', 'textarea — contains', 'record.f_textarea != null && record.f_textarea.contains("Line two")'),
-  zooTypeGate('email', 'email — matches', 'record.f_email != null && record.f_email.matches(".*@example[.]com")'),
-  zooTypeGate('url', 'url — contains', 'record.f_url != null && record.f_url.contains("objectstack")'),
-  zooTypeGate('phone', 'phone — contains', 'record.f_phone != null && record.f_phone.contains("555")'),
-  zooTypeGate('markdown', 'markdown — contains', 'record.f_markdown != null && record.f_markdown.contains("Heading")'),
-  zooTypeGate('html', 'html — contains', 'record.f_html != null && record.f_html.contains("bold")'),
-  zooTypeGate('code', 'code — contains', 'record.f_code != null && record.f_code.contains("ok")'),
+  zooTypeGate('text', 'text — name non-empty', 'has(record.name) && record.name != null && record.name.size() > 0'),
+  zooTypeGate('textarea', 'textarea — contains', 'has(record.f_textarea) && record.f_textarea != null && record.f_textarea.contains("Line two")'),
+  zooTypeGate('email', 'email — matches', 'has(record.f_email) && record.f_email != null && record.f_email.matches(".*@example[.]com")'),
+  zooTypeGate('url', 'url — contains', 'has(record.f_url) && record.f_url != null && record.f_url.contains("objectstack")'),
+  zooTypeGate('phone', 'phone — contains', 'has(record.f_phone) && record.f_phone != null && record.f_phone.contains("555")'),
+  zooTypeGate('markdown', 'markdown — contains', 'has(record.f_markdown) && record.f_markdown != null && record.f_markdown.contains("Heading")'),
+  zooTypeGate('html', 'html — contains', 'has(record.f_html) && record.f_html != null && record.f_html.contains("bold")'),
+  zooTypeGate('code', 'code — contains', 'has(record.f_code) && record.f_code != null && record.f_code.contains("ok")'),
 
   // ── Numeric ──────────────────────────────────────────────────────────────
-  zooTypeGate('number', 'number — > 100', 'record.f_number > 100'),
-  zooTypeGate('currency', 'currency — > 1000', 'record.f_currency != null && record.f_currency > 1000.0'),
-  zooTypeGate('percent', 'percent — >= 75', 'record.f_percent >= 75'),
-  zooTypeGate('rating', 'rating — >= 4', 'record.f_rating >= 4'),
-  zooTypeGate('slider', 'slider — > 50', 'record.f_slider > 50'),
-  zooTypeGate('progress', 'progress — >= 80', 'record.f_progress >= 80'),
-  zooTypeGate('formula', 'formula — > 100', 'record.f_formula > 100.0'),
-  zooTypeGate('autonumber', 'autonumber — is 0001', 'record.f_autonumber == "0001"'),
+  zooTypeGate('number', 'number — > 100', 'has(record.f_number) && record.f_number != null && record.f_number > 100'),
+  zooTypeGate('currency', 'currency — > 1000', 'has(record.f_currency) && record.f_currency != null && record.f_currency > 1000.0'),
+  zooTypeGate('percent', 'percent — >= 75', 'has(record.f_percent) && record.f_percent != null && record.f_percent >= 75'),
+  zooTypeGate('rating', 'rating — >= 4', 'has(record.f_rating) && record.f_rating != null && record.f_rating >= 4'),
+  zooTypeGate('slider', 'slider — > 50', 'has(record.f_slider) && record.f_slider != null && record.f_slider > 50'),
+  zooTypeGate('progress', 'progress — >= 80', 'has(record.f_progress) && record.f_progress != null && record.f_progress >= 80'),
+  zooTypeGate('formula', 'formula — > 100', 'has(record.f_formula) && record.f_formula != null && record.f_formula > 100.0'),
+  zooTypeGate('autonumber', 'autonumber — is 0001', 'has(record.f_autonumber) && record.f_autonumber == "0001"'),
 
   // ── Temporal: `today()` is the CEL stdlib's, evaluated identically here ───
-  zooTypeGate('date', 'date — before today', 'record.f_date != null && record.f_date < today()'),
-  zooTypeGate('datetime', 'datetime — set', 'record.f_datetime != null'),
-  zooTypeGate('time', 'time — is 14:30', 'record.f_time == "14:30:00"'),
+  zooTypeGate('date', 'date — before today', 'has(record.f_date) && record.f_date != null && record.f_date < today()'),
+  zooTypeGate('datetime', 'datetime — set', 'has(record.f_datetime) && record.f_datetime != null'),
+  zooTypeGate('time', 'time — is 14:30', 'has(record.f_time) && record.f_time == "14:30:00"'),
 
   // ── Boolean / choice ─────────────────────────────────────────────────────
-  zooTypeGate('boolean', 'boolean — true', 'record.f_boolean == true'),
-  zooTypeGate('toggle', 'toggle — true', 'record.f_toggle == true'),
-  zooTypeGate('select', 'select — high', 'record.f_select == "high"'),
-  zooTypeGate('radio', 'radio — yes', 'record.f_radio == "yes"'),
-  zooTypeGate('multiselect', 'multiselect — has red', '"red" in record.f_multiselect'),
-  zooTypeGate('checkboxes', 'checkboxes — has email', '"email" in record.f_checkboxes'),
-  zooTypeGate('tags', 'tags — any', 'record.f_tags.size() > 0'),
+  zooTypeGate('boolean', 'boolean — true', 'has(record.f_boolean) && record.f_boolean == true'),
+  zooTypeGate('toggle', 'toggle — true', 'has(record.f_toggle) && record.f_toggle == true'),
+  zooTypeGate('select', 'select — high', 'has(record.f_select) && record.f_select == "high"'),
+  zooTypeGate('radio', 'radio — yes', 'has(record.f_radio) && record.f_radio == "yes"'),
+  zooTypeGate('multiselect', 'multiselect — has red', 'has(record.f_multiselect) && record.f_multiselect != null && "red" in record.f_multiselect'),
+  zooTypeGate('checkboxes', 'checkboxes — has email', 'has(record.f_checkboxes) && record.f_checkboxes != null && "email" in record.f_checkboxes'),
+  zooTypeGate('tags', 'tags — any', 'has(record.f_tags) && record.f_tags != null && record.f_tags.size() > 0'),
 
   // ── Structured ───────────────────────────────────────────────────────────
-  zooTypeGate('json', 'json — nested key', 'record.f_json != null && record.f_json.nested.k == "v"'),
-  zooTypeGate('location', 'location — lat > 40', 'record.f_location != null && record.f_location.lat > 40.0'),
-  zooTypeGate('address', 'address — US', 'record.f_address != null && record.f_address.country == "US"'),
-  zooTypeGate('color', 'color — is #2563EB', 'record.f_color == "#2563EB"'),
-  zooTypeGate('composite', 'composite — width 10', 'record.f_composite != null && record.f_composite.width == 10'),
-  zooTypeGate('repeater', 'repeater — 2 rows', 'record.f_repeater != null && record.f_repeater.size() == 2'),
-  zooTypeGate('record', 'record-of-records — score 9', 'record.f_record != null && record.f_record.primary.score == 9'),
-  zooTypeGate('vector', 'vector — 4 dims', 'record.f_vector != null && record.f_vector.size() == 4'),
+  zooTypeGate('json', 'json — nested key', 'has(record.f_json) && has(record.f_json.nested) && has(record.f_json.nested.k) && record.f_json.nested.k == "v"'),
+  zooTypeGate('location', 'location — lat > 40', 'has(record.f_location) && has(record.f_location.lat) && record.f_location.lat != null && record.f_location.lat > 40.0'),
+  zooTypeGate('address', 'address — US', 'has(record.f_address) && has(record.f_address.country) && record.f_address.country == "US"'),
+  zooTypeGate('color', 'color — is #2563EB', 'has(record.f_color) && record.f_color == "#2563EB"'),
+  zooTypeGate('composite', 'composite — width 10', 'has(record.f_composite) && has(record.f_composite.width) && record.f_composite.width == 10'),
+  zooTypeGate('repeater', 'repeater — 2 rows', 'has(record.f_repeater) && record.f_repeater != null && record.f_repeater.size() == 2'),
+  zooTypeGate('record', 'record-of-records — score 9', 'has(record.f_record) && has(record.f_record.primary) && has(record.f_record.primary.score) && record.f_record.primary.score == 9'),
+  zooTypeGate('vector', 'vector — 4 dims', 'has(record.f_vector) && record.f_vector != null && record.f_vector.size() == 4'),
 
   // ── Operators, not field types: the shapes a real predicate combines ─────
-  zooTypeGate('and', 'AND — boolean && number', 'record.f_boolean == true && record.f_number > 100'),
-  zooTypeGate('or', 'OR — select || rating', 'record.f_select == "high" || record.f_rating >= 4'),
-  zooTypeGate('not', 'NOT — !boolean', '!(record.f_boolean)'),
-  zooTypeGate('ternary', 'ternary — rating ? :', 'record.f_rating >= 4 ? true : false'),
+  zooTypeGate('and', 'AND — boolean && number', 'has(record.f_boolean) && record.f_boolean == true && has(record.f_number) && record.f_number != null && record.f_number > 100'),
+  zooTypeGate('or', 'OR — select || rating', '(has(record.f_select) && record.f_select == "high") || (has(record.f_rating) && record.f_rating != null && record.f_rating >= 4)'),
+  zooTypeGate('not', 'NOT — !boolean', 'has(record.f_boolean) && record.f_boolean != null && !(record.f_boolean)'),
+  zooTypeGate('ternary', 'ternary — rating ? :', 'has(record.f_rating) && record.f_rating != null && (record.f_rating >= 4 ? true : false)'),
 ];
 
 export const allPredicateMatrixActions = [

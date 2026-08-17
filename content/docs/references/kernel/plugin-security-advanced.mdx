@@ -173,7 +173,7 @@ Scope of permission application
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **permissions** | `{ id: string; resource: Enum<'data.object' \| 'data.record' \| 'data.field' \| 'ui.view' \| 'ui.dashboard' \| … +11 more>; actions: Enum<'create' \| 'read' \| 'update' \| 'delete' \| 'execute' \| 'manage' \| 'configure' \| … +4 more>[]; scope?: Enum<'global' \| 'tenant' \| 'user' \| 'resource' \| 'plugin'>; … }[]` | ✅ |  |
+| **permissions** | `{ id: string; resource: Enum<'data.object' \| 'data.record' \| 'data.field' \| 'ui.view' \| 'ui.dashboard' \| …>; actions: Enum<'create' \| 'read' \| 'update' \| 'delete' \| 'execute' \| 'manage' \| 'configure' \| …>[]; scope?: Enum<'global' \| 'tenant' \| 'user' \| 'resource' \| 'plugin'>; … }[]` | ✅ |  |
 | **groups** | `{ name: string; description: string; permissions: string[] }[]` | optional |  |
 | **defaultGrant** | `Enum<'prompt' \| 'allow' \| 'deny' \| 'inherit'>` | optional (default: `"prompt"`) |  |
 

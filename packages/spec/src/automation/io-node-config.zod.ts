@@ -123,18 +123,33 @@ const NOTIFY_KEY_GUIDANCE: Readonly<Record<string, string>> = {
  *
  * Executor semantics worth knowing beyond the key set:
  *
- *  - `recipients` and `title` are **required at execute time** (the step fails
- *    without them). The descriptor's form deliberately publishes no `required`
- *    array — see the comment on the `configSchema` literal — so requiredness
- *    lives here and in the execute-time guard, not in the form.
+ *  - `recipients` is **required at execute time** (the step fails without it),
+ *    and the node needs ONE content source: inline `title` (+ optional
+ *    `message`), or a `template` reference (#9205). The descriptor's form
+ *    deliberately publishes no `required` array — see the comment on the
+ *    `configSchema` literal — so requiredness lives here and in the
+ *    execute-time guard, not in the form.
+ *  - **Localization contract (#9205, ruled 「走 emailTemplates 路线」):**
+ *    `template` names a `sys_email_template` bundle
+ *    (`EmailTemplateDefinitionSchema`, `system/email-template.zod.ts`), and the
+ *    delivery path resolves `(name, recipient locale)` per recipient at
+ *    delivery time via `IEmailService.sendTemplate({ template, locale })`.
+ *    Inline `title`/`message` are the NON-localizable path — raw strings sent
+ *    to every recipient verbatim. The two paths are mutually exclusive on one
+ *    node (see the `superRefine` below): runtime precedence would silently
+ *    ignore one of them, so the ambiguous combination is unrepresentable
+ *    instead — the same posture as `objectNavTargetExclusivity`
+ *    (`ui/app.zod.ts`).
  *  - `recipients`, `title`, `message`, `actionUrl` and `payload` pass through
- *    `interpolate()`, so `{record.x}` templates are legal in them. `channels`,
- *    `topic` and `severity` are read RAW — a `{token}` in those three is
- *    forwarded verbatim, never resolved (channel ids are static routing and
- *    `severity` is a closed vocabulary, not per-record data). Re-measured
- *    against `notify-node.ts` for #7086: the previous wording ("every
- *    string-ish value except `channels`") was stale for `topic` and `severity`,
- *    and it is what makes closing the `severity` gate below safe.
+ *    `interpolate()`, so `{record.x}` templates are legal in them. So do
+ *    `templateData` VALUES (they are per-run render inputs). `channels`,
+ *    `topic`, `severity` and `template` are read RAW — a `{token}` in those is
+ *    forwarded verbatim, never resolved (channel ids are static routing,
+ *    `severity` is a closed vocabulary, and `template` is a static metadata
+ *    cross-reference, not per-record data). Re-measured against
+ *    `notify-node.ts` for #7086: the previous wording ("every string-ish value
+ *    except `channels`") was stale for `topic` and `severity`, and it is what
+ *    makes closing the `severity` gate below safe.
  *  - `sourceObject`/`sourceId` only take effect as a PAIR — a half-specified
  *    click-through target is dropped so the inbox never renders a dead link.
  *    The schema keeps both optional rather than refining, because the executor
@@ -152,10 +167,32 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
   /** Who gets the notification — user id(s) / audience selector(s). */
   recipients: z.union([z.string(), z.array(z.string())])
     .describe('Recipient user id(s) / audience selector(s); `{token}` templates resolve per run'),
-  /** Notification title (execute-time required). */
-  title: z.string().describe('Notification title'),
-  /** Notification body. */
-  message: z.string().optional().describe('Notification body'),
+  /**
+   * Inline notification title — the NON-localizable content path. Required
+   * unless `template` is set (the superRefine below owes one of the two).
+   */
+  title: z.string().optional()
+    .describe('Notification title, sent to every recipient verbatim (not localizable — use `template` for per-locale content). Either this or `template` is required; the two are mutually exclusive.'),
+  /** Notification body (inline path only). */
+  message: z.string().optional()
+    .describe('Notification body, sent verbatim like `title` (not localizable). Only valid with inline `title`, never with `template`.'),
+  /**
+   * The localizable content path (#9205): name of a `sys_email_template`
+   * bundle. Resolved by `(name, recipient locale)` AT DELIVERY TIME —
+   * `IEmailService.sendTemplate({ template, locale })` picks the recipient
+   * locale's row with the documented en-US fallback ladder. Read RAW like
+   * `topic`/`channels`: a static metadata cross-reference, never interpolated.
+   * Mutually exclusive with inline `title`/`message`.
+   */
+  template: z.string().optional()
+    .describe('Email template name (`sys_email_template.name`, e.g. `crm.large_deal_won`) — the localizable content path: the delivery path resolves `(name, recipient locale)` at delivery time and renders subject/body per recipient. Mutually exclusive with inline `title`/`message`, which are the non-localizable path. Read raw — no `{token}` interpolation.'),
+  /**
+   * Render context for the referenced template's `{{var}}` holes. Values are
+   * interpolated per run (`{record.x}` resolves), so flow state can feed the
+   * template. Only meaningful with `template` — refused without it.
+   */
+  templateData: z.record(z.string(), z.unknown()).optional()
+    .describe('Render context for the referenced template\'s `{{var}}` placeholders; values interpolate `{token}` templates per run. Only valid together with `template`.'),
   /** Channels to fan out to (default: inbox). Read raw — no template interpolation. */
   channels: z.union([z.string(), z.array(z.string())]).optional()
     .describe('Channels to fan out to (default: inbox)'),
@@ -194,6 +231,48 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
   /** Extra template inputs merged into the notification payload. */
   payload: z.record(z.string(), z.unknown()).optional()
     .describe('Extra template inputs merged into the notification payload'),
+}).superRefine((cfg, ctx) => {
+  // #9205 — correct-by-construction (the `objectNavTargetExclusivity`
+  // posture, ui/app.zod.ts): `template` combined with inline `title`/`message`
+  // is an authoring ambiguity — the delivery path would have to silently pick
+  // which content wins, per channel, and whichever loses would look exactly
+  // like a delivered notification. Reject at the gate with the fix in the
+  // message instead of resolving by precedence.
+  //
+  // These checks run only on a structurally valid config (zod skips object
+  // -level refinements once a property has failed — probed on zod 4.4.3 for
+  // ui/action.zod.ts), which is fine: each names keys, not values.
+  if (cfg.template !== undefined && (cfg.title !== undefined || cfg.message !== undefined)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['template'],
+      message:
+        '`template` cannot be combined with inline `title`/`message` — pick ONE content path: '
+        + '`template` (localizable: resolves `(name, recipient locale)` from sys_email_template at delivery) '
+        + 'or inline `title` + `message` (sent verbatim, not localizable). To localize, keep `template`, move '
+        + 'the text into the template bundle\'s rows, and delete `title`/`message`; runtime precedence would '
+        + 'silently ignore one of them.',
+    });
+  }
+  if (cfg.templateData !== undefined && cfg.template === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['templateData'],
+      message:
+        '`templateData` is the render context for a `template` reference, and this node names no `template` — '
+        + 'nothing would ever read it. Add the `template` it feeds, or delete `templateData`.',
+    });
+  }
+  if (cfg.template === undefined && cfg.title === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['title'],
+      message:
+        'A notify node needs one content source: inline `title` (+ optional `message`), or a `template` '
+        + 'reference resolving a sys_email_template bundle per recipient locale at delivery. Neither was given, '
+        + 'so there is nothing to deliver.',
+    });
+  }
 }));
 
 export type NotifyConfig = z.input<typeof NotifyConfigSchema>;

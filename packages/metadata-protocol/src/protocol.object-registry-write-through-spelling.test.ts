@@ -91,6 +91,16 @@
 // shadowing path; it did not add a second line of defence, and folding at the
 // producer remains the only thing that actually prevents a plural key.
 //
+// [#9111] That paragraph was the card this one was filed as. The fall-through
+// half is now CLOSED: `hydrateOverlayIntoRegistry` asserts its type is
+// canonical (`REGISTRY_TYPE_NOT_CANONICAL`, status 500) rather than minting
+// under the raw spelling, so an unfolded caller is refused at the mint door
+// too. Its final sentence still stands unchanged and is the reason the assert
+// is an assert and not a fold: folding at the producer remains the only thing
+// that PREVENTS a plural key — the assert only guarantees that failing to do
+// so is loud. Measured trace and the fold-map hole it closes:
+// `protocol.hydrate-overlay-canonical-type.test.ts`.
+//
 // ---------------------------------------------------------------------------
 // Ablation directions, predicted BEFORE running (results in the PR bodies)
 // ---------------------------------------------------------------------------

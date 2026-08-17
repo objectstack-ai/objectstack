@@ -203,10 +203,16 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
   '@objectstack/example-embed-objectql': [
     '@objectstack/driver-memory', '@objectstack/objectql', '@objectstack/spec',
   ],
+  // #8990 / PR #9280 — `@objectstack/formula` came OUT of this entry (a shrink) when
+  // the app's tsconfig gained a `paths` rule pointing at formula's SOURCE. The test
+  // added there typechecks against the CEL engine's contract, and a stale `dist/*.d.ts`
+  // would typecheck GREEN over a contract that has since moved — the dangerous
+  // direction this file's header names. Same pair examples/app-crm moved through on
+  // PR #9166.
   '@objectstack/example-showcase': [
     '@objectstack/cloud-connection', '@objectstack/connector-mcp', '@objectstack/connector-openapi',
     '@objectstack/connector-rest', '@objectstack/connector-slack', '@objectstack/core',
-    '@objectstack/driver-sql', '@objectstack/formula', '@objectstack/objectql',
+    '@objectstack/driver-sql', '@objectstack/objectql',
     '@objectstack/plugin-approvals', '@objectstack/runtime', '@objectstack/service-automation',
     '@objectstack/service-datasource', '@objectstack/service-messaging', '@objectstack/spec',
   ],

@@ -4877,8 +4877,31 @@ const step18: MigrationStep = {
     '`bottom`/`right`/`left`; the mechanical conversion rewrites the old spellings ' +
     '(`sidebar` → `right`, `inline` → `bottom`, `drawer` → `right`), and the three ' +
     'schema defaults (`position`, `collapsible`, `defaultCollapsed`) are dropped per ' +
-    'the `maxVisible` principle — renderer fallbacks stay the renderer\'s facts.',
-  conversionIds: ['field-malformed-scale-precision-removed', 'record-chatter-position-vocabulary'],
+    'the `maxVisible` principle — renderer fallbacks stay the renderer\'s facts. ' +
+    'It also retires `targetVariable` on `element:text_input` and ' +
+    '`element:record_picker` (#9198, ADR-0049 enforce-or-remove): a declarative hint ' +
+    'with zero readers in any repo — the live binding runs the other direction, ' +
+    'resolved from the page variable whose `source` names the component\'s `id` ' +
+    '(PageVariableSchema) — so an author who wrote only `targetVariable` got an input ' +
+    'that wrote nothing, with a success receipt. The mechanical conversion strips the ' +
+    'key from old sources (pure lossless delete — it never had an effect to lose); ' +
+    'the tombstone\'s prescription says how to declare the binding that works. ' +
+    'Finally, it retires the whole `element:filter` element (#9220, ADR-0049 ' +
+    'enforce-or-remove at ELEMENT grain — the wider finding #9198 recorded and left for ' +
+    'its own card): no renderer for the element ever shipped in any repo — objectui ' +
+    'registers none, Studio\'s designer palette lists it as a no-renderer exclusion, and ' +
+    'the 2026-06 page-liveness audit recorded it rendering "Unknown component type" — so ' +
+    'every one of its six authorable keys was a capability claim nothing kept. All six ' +
+    'are retiredKey tombstones; the mechanical conversion strips them from old sources ' +
+    '(pure lossless deletes) and leaves the bare node, inert as it always was. List ' +
+    'surfaces own their filtering: a view\'s `userFilters` quick-filter bar / the list ' +
+    'toolbar\'s filter builder.',
+  conversionIds: [
+    'field-malformed-scale-precision-removed',
+    'record-chatter-position-vocabulary',
+    'element-input-target-variable-removed',
+    'element-filter-removed',
+  ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
@@ -4961,6 +4984,38 @@ const step18: MigrationStep = {
         + 'keys at every level (cube, refreshKey, measures, metric filters, dimensions, joins); '
         + 'every `/analytics/query` body\'s `timeDimensions[]` items carry only '
         + '`dimension`/`granularity`/`dateRange`. Declared keys parse byte-identically to before.',
+    },
+    {
+      id: 'cbp-master-detail-required-forced',
+      surface: 'object.fields.<master>.required on a `master_detail` reference under '
+        + '`sharingModel: \'controlled_by_parent\'` — authored via `ObjectSchema.create()`',
+      replacement: '`required: true` on the master reference (or nothing at all — the builder now '
+        + 'forces `required: true` when the key is omitted). An explicit `required: false` on that '
+        + 'shape is refused at `ObjectSchema.create()` with a located error carrying this same '
+        + 'prescription. Metadata at rest is untouched: raw `.parse()`/`.safeParse()` still accept '
+        + 'the old shape, the security gate\'s derived enforcement stays, and the lint rule '
+        + '`relationship/master-detail-required` stays `warning` until its own v18 promotion '
+        + '(#8772 Direction 1)',
+      reason:
+        'A `controlled_by_parent` detail derives ALL of its record access from the master that its '
+        + '`master_detail` reference names (ADR-0055). With the reference not `required`, an insert '
+        + 'may omit the master FK: the row lands with a null FK that the derived read filter '
+        + '`masterFK IN (accessible master ids)` can never match — unreadable by everyone — and '
+        + 'every later by-id write answers `422 MISSING_REQUIRED_FIELD`. #8772 measured that only '
+        + 'the security gate closed this shape while the declaration surface still accepted it. '
+        + 'The maintainer ruling (2026-08-16, Direction 2) makes the unsafe shape impossible to '
+        + 'NEWLY declare at the builder; whether to keep `required: false` was never a real choice '
+        + '(the value contradicts the sharing model), so the flip is forced rather than convertible '
+        + '— and an explicitly authored `false` is refused rather than silently rewritten '
+        + '(ADR-0032 "no silent failure").',
+      acceptanceCriteria:
+        'Every `ObjectSchema.create()` call declaring `sharingModel: \'controlled_by_parent\'` '
+        + 'either omits `required` on its `master_detail` reference(s) (now emitted as '
+        + '`required: true`) or declares `required: true` explicitly; the authored app builds and '
+        + 'boots. An explicit `required: false` there fails the build with '
+        + '`ObjectSchema.create(...): field ... declares required: false on a master_detail '
+        + 'reference under sharingModel: controlled_by_parent`. Stored metadata keeps loading '
+        + 'byte-identically (`safeParse` green, `required` unrewritten).',
     },
     {
       id: 'dashboard-header-modal-target-page-only',
@@ -6141,6 +6196,168 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // The prescription reaches authors through the tombstone (`tsc` + the parse)
     // and the D3 semantic entry `metadata-plugin-additional-types-retired`.
     'kernel/MetadataPluginConfig:additionalTypes',
+    // #9220 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:filter` never
+    // had a renderer or reader anywhere: objectui registers none (its
+    // renderers/basic/elements.tsx header deferred the element to "owning plugins"
+    // that never materialized), Studio's designer palette carries it as a
+    // no-renderer PALETTE_EXCLUSIONS entry ("list surfaces own filtering
+    // (userFilters / filter builder)"), and the 2026-06 page-liveness audit
+    // recorded it rendering "Unknown component type". Measured at retirement time
+    // (objectstack @2f65b1b42, objectui @5ffcc14; cloud per the card's recorded
+    // sweep): zero production readers of any `element:filter` key — so every key,
+    // this one included, was a capability claim nothing kept. Per-key retirement
+    // would have been the wrong grain (the #9198 lesson, one element over); all
+    // six authorable keys are tombstoned together.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstones ship on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // Sources are rewritten by the D2 conversion `element-filter-removed`, which
+    // strips all six keys and leaves the bare node — inert as it always was.
+    'ui/ElementFilterProps:aria',
+    // #9220 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:filter` never
+    // had a renderer or reader anywhere: objectui registers none (its
+    // renderers/basic/elements.tsx header deferred the element to "owning plugins"
+    // that never materialized), Studio's designer palette carries it as a
+    // no-renderer PALETTE_EXCLUSIONS entry ("list surfaces own filtering
+    // (userFilters / filter builder)"), and the 2026-06 page-liveness audit
+    // recorded it rendering "Unknown component type". Measured at retirement time
+    // (objectstack @2f65b1b42, objectui @5ffcc14; cloud per the card's recorded
+    // sweep): zero production readers of any `element:filter` key — so every key,
+    // this one included, was a capability claim nothing kept. Per-key retirement
+    // would have been the wrong grain (the #9198 lesson, one element over); all
+    // six authorable keys are tombstoned together.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstones ship on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // Sources are rewritten by the D2 conversion `element-filter-removed`, which
+    // strips all six keys and leaves the bare node — inert as it always was.
+    'ui/ElementFilterProps:fields',
+    // #9220 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:filter` never
+    // had a renderer or reader anywhere: objectui registers none (its
+    // renderers/basic/elements.tsx header deferred the element to "owning plugins"
+    // that never materialized), Studio's designer palette carries it as a
+    // no-renderer PALETTE_EXCLUSIONS entry ("list surfaces own filtering
+    // (userFilters / filter builder)"), and the 2026-06 page-liveness audit
+    // recorded it rendering "Unknown component type". Measured at retirement time
+    // (objectstack @2f65b1b42, objectui @5ffcc14; cloud per the card's recorded
+    // sweep): zero production readers of any `element:filter` key — so every key,
+    // this one included, was a capability claim nothing kept. Per-key retirement
+    // would have been the wrong grain (the #9198 lesson, one element over); all
+    // six authorable keys are tombstoned together.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstones ship on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // Sources are rewritten by the D2 conversion `element-filter-removed`, which
+    // strips all six keys and leaves the bare node — inert as it always was.
+    'ui/ElementFilterProps:layout',
+    // #9220 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:filter` never
+    // had a renderer or reader anywhere: objectui registers none (its
+    // renderers/basic/elements.tsx header deferred the element to "owning plugins"
+    // that never materialized), Studio's designer palette carries it as a
+    // no-renderer PALETTE_EXCLUSIONS entry ("list surfaces own filtering
+    // (userFilters / filter builder)"), and the 2026-06 page-liveness audit
+    // recorded it rendering "Unknown component type". Measured at retirement time
+    // (objectstack @2f65b1b42, objectui @5ffcc14; cloud per the card's recorded
+    // sweep): zero production readers of any `element:filter` key — so every key,
+    // this one included, was a capability claim nothing kept. Per-key retirement
+    // would have been the wrong grain (the #9198 lesson, one element over); all
+    // six authorable keys are tombstoned together.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstones ship on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // Sources are rewritten by the D2 conversion `element-filter-removed`, which
+    // strips all six keys and leaves the bare node — inert as it always was.
+    'ui/ElementFilterProps:object',
+    // #9220 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:filter` never
+    // had a renderer or reader anywhere: objectui registers none (its
+    // renderers/basic/elements.tsx header deferred the element to "owning plugins"
+    // that never materialized), Studio's designer palette carries it as a
+    // no-renderer PALETTE_EXCLUSIONS entry ("list surfaces own filtering
+    // (userFilters / filter builder)"), and the 2026-06 page-liveness audit
+    // recorded it rendering "Unknown component type". Measured at retirement time
+    // (objectstack @2f65b1b42, objectui @5ffcc14; cloud per the card's recorded
+    // sweep): zero production readers of any `element:filter` key — so every key,
+    // this one included, was a capability claim nothing kept. Per-key retirement
+    // would have been the wrong grain (the #9198 lesson, one element over); all
+    // six authorable keys are tombstoned together.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstones ship on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // Sources are rewritten by the D2 conversion `element-filter-removed`, which
+    // strips all six keys and leaves the bare node — inert as it always was.
+    'ui/ElementFilterProps:showSearch',
+    // #9220 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:filter` never
+    // had a renderer or reader anywhere: objectui registers none (its
+    // renderers/basic/elements.tsx header deferred the element to "owning plugins"
+    // that never materialized), Studio's designer palette carries it as a
+    // no-renderer PALETTE_EXCLUSIONS entry ("list surfaces own filtering
+    // (userFilters / filter builder)"), and the 2026-06 page-liveness audit
+    // recorded it rendering "Unknown component type". Measured at retirement time
+    // (objectstack @2f65b1b42, objectui @5ffcc14; cloud per the card's recorded
+    // sweep): zero production readers of any `element:filter` key — so every key,
+    // this one included, was a capability claim nothing kept. Per-key retirement
+    // would have been the wrong grain (the #9198 lesson, one element over); all
+    // six authorable keys are tombstoned together.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstones ship on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // Sources are rewritten by the D2 conversion `element-filter-removed`, which
+    // strips all six keys and leaves the bare node — inert as it always was.
+    'ui/ElementFilterProps:targetVariable',
+    // #9198 — ADR-0049 enforce-or-remove. `targetVariable` on
+    // `element:record_picker` was a declarative hint with zero readers: the picker
+    // writes the selected record id through the reverse binding — the page
+    // variable whose `source` names this component's `id` (PageVariableSchema;
+    // `usePageVariableBinding(schema?.id)` in objectui's console renderer) — and
+    // nothing anywhere read this key. Measured (objectstack-ai/objectui#3834,
+    // re-verified at retirement time): zero production readers in objectui,
+    // framework and cloud; the only repo-wide hits were the reverse-parity gate's
+    // exemption block and spec's own accept tests. Same silent-no-op hazard and
+    // same disposition as the `element:text_input` twin registered beside this
+    // entry, and as the #5775 record-picker inert keys one shape over.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // Sources are rewritten by the D2 conversion
+    // `element-input-target-variable-removed`.
+    'ui/ElementRecordPickerProps:targetVariable',
+    // #9198 — ADR-0049 enforce-or-remove. `targetVariable` on `element:text_input`
+    // was a declarative hint with zero readers: its own describe text said the
+    // live binding "resolves via the variable whose `source` equals this component
+    // id" (PageVariableSchema), and that reverse lookup
+    // (`usePageVariableBinding(schema?.id)` in objectui's console renderer) is the
+    // only binding mechanism that exists. Measured (objectstack-ai/objectui#3834,
+    // re-verified at retirement time): no production reader in objectui, framework
+    // or cloud — the only repo-wide hits were the reverse-parity gate's exemption
+    // block (which cites the origin card) and spec's own accept tests. An author
+    // who wrote `targetVariable` and skipped the variable's `source` got an input
+    // that wrote nothing, with a success receipt — the ADR-0078 silent-no-op
+    // shape, on the exact surface AI authors write from. Same disposition as its
+    // sibling inert hint (objectui#3829, settled by retirement in objectui
+    // PR #4794).
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // Sources are rewritten by the D2 conversion
+    // `element-input-target-variable-removed` (a page component IS a stack
+    // collection member, unlike the `kernel/Manifest:loading` family).
+    'ui/ElementTextInputProps:targetVariable',
     // </os-generated retired-key:18>
   ],
 };

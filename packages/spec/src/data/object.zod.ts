@@ -2250,6 +2250,76 @@ function assertSystemDataIsWritable(
 }
 
 /**
+ * [#9138 — #8772 maintainer ruling, Direction 2 / ADR-0055] Under
+ * `sharingModel: 'controlled_by_parent'` the builder FORCES `required: true`
+ * on every `master_detail` reference, and REFUSES an explicit
+ * `required: false` there, loudly.
+ *
+ * Why: a `controlled_by_parent` detail's access is *derived* from its master
+ * through that reference (the `sharingModel` docblock above already states
+ * "exactly one required `master_detail` field"). A non-required master
+ * reference arms the worst measured failure shape: an insert may omit the
+ * master FK, the row lands with a null FK, the derived read filter
+ * `masterFK IN (accessible master ids)` can never match null — the row is
+ * invisible to everyone — and every later by-id write answers
+ * `422 MISSING_REQUIRED_FIELD`. Today only the security gate
+ * (`assertControlledByParentWrite`) closes that shape, and #8772 measured that
+ * the declaration and the enforcement disagree. This makes the unsafe shape
+ * impossible to NEWLY declare:
+ *
+ * - omitted `required` → forced to `true` (the lint rule
+ *   `relationship/master-detail-required` already computes exactly this fix);
+ * - explicit `required: false` → refused with a located error — the author
+ *   wrote a contradiction, and silently flipping an explicitly authored value
+ *   would hide it (ADR-0032 "no silent failure").
+ *
+ * Lives at `create()` — the authoring surface (ADR-0077) — beside
+ * {@link assertSystemDataIsWritable}, and deliberately NOT in raw
+ * `.parse()`/`.safeParse()`: metadata already at rest must keep loading.
+ * Runtime tolerance is the other half of the #8772 ruling — the security
+ * gate's fallbacks stay, and the lint rule stays `warning` until v18 — so
+ * publish-time refuses new declarations while runtime tolerates old ones.
+ *
+ * Alias spellings (`isRequired` / `mandatory` / `notNull`) need no handling
+ * here: `FieldSchema` is a `strictObject`, so those keys are refused at parse
+ * with a rename suggestion — they can never land a `required: false` this
+ * check would miss. A non-boolean `required` is left for Zod to report as the
+ * real type error.
+ */
+function forceCbpMasterDetailRequired(
+  objectName: unknown,
+  sharingModel: unknown,
+  fields: unknown,
+): unknown {
+  if (sharingModel !== 'controlled_by_parent') return fields;
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return fields;
+  let out: Record<string, unknown> | undefined;
+  for (const [fieldName, def] of Object.entries(fields as Record<string, unknown>)) {
+    if (!def || typeof def !== 'object' || Array.isArray(def)) continue;
+    const field = def as Record<string, unknown>;
+    if (field.type !== 'master_detail') continue;
+    if (field.required === true) continue;
+    if (field.required === false) {
+      const name = typeof objectName === 'string' && objectName.length > 0 ? objectName : '<unnamed>';
+      throw new Error(
+        `ObjectSchema.create('${name}'): field \`${fieldName}\` declares \`required: false\` on a `
+        + "`master_detail` reference under `sharingModel: 'controlled_by_parent'` — a contradiction "
+        + 'with no honest reading (#8772). A controlled-by-parent detail derives ALL of its record '
+        + 'access from the master this field names (ADR-0055); a row allowed to omit the master FK '
+        + 'is unreadable by everyone (the derived filter `masterFK IN (accessible master ids)` '
+        + 'never matches null) and unwritable thereafter. Remove `required: false` (the builder '
+        + 'declares the reference required by construction), or if this object is not a '
+        + 'master-detail child, change its `sharingModel`.',
+      );
+    }
+    if (field.required !== undefined) continue;
+    out ??= { ...(fields as Record<string, unknown>) };
+    out[fieldName] = { ...field, required: true };
+  }
+  return out ?? fields;
+}
+
+/**
  * [ADR-0079] Back-compat alias normalization: an object authored with the
  * deprecated `displayNameField` key still parses by mapping it onto the
  * canonical `nameField` when `nameField` is absent. `displayNameField` is
@@ -2368,8 +2438,15 @@ export const ObjectSchema = lazySchema(() => {
     // contradiction with no honest reading — refuse it here, where it is cheap
     // to fix, rather than shipping a bucket whose name lies again.
     assertSystemDataIsWritable(cfg.name, cfg.managedBy, cfg.userActions);
+    // [#9138 — #8772 ruling, Direction 2] A `controlled_by_parent` object's
+    // `master_detail` reference is forced `required: true` (an explicit
+    // `required: false` throws, loudly) so the unsafe shape cannot be newly
+    // declared. Raw `.parse()`/`.safeParse()` stay tolerant for metadata at
+    // rest — see the function's docblock.
+    const forcedFields = forceCbpMasterDetailRequired(cfg.name, cfg.sharingModel, cfg.fields);
     const withDefaults = {
       ...cfg,
+      ...(forcedFields === cfg.fields ? {} : { fields: forcedFields }),
       label: cfg.label ?? snakeCaseToLabel(cfg.name as string),
     };
     // [ADR-0079] `ObjectSchemaBase.parse` here is the alias-normalizing override

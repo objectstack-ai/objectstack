@@ -67,7 +67,7 @@ const result = ApprovalDecision.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **approvers** | `{ type: Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'field' \| 'expression' \| … +4 more>; value?: string; resolveAs?: Enum<'user' \| 'department' \| 'position' \| 'team'>; group?: string; … }[]` | ✅ | Allowed approvers for this node |
+| **approvers** | `{ type: Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'field' \| 'expression' \| …>; value?: string; resolveAs?: Enum<'user' \| 'department' \| 'position' \| 'team'>; group?: string; … }[]` | ✅ | Allowed approvers for this node |
 | **behavior** | `Enum<'first_response' \| 'unanimous' \| 'quorum' \| 'per_group'>` | optional (default: `"first_response"`) | How to combine multiple approvers |
 | **minApprovals** | `integer` | optional | Approvals required — total (quorum) or per group (per_group). Default 1 |
 | **lockRecord** | `boolean` | optional (default: `true`) | Lock the record from editing while pending |

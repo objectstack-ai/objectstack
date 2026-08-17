@@ -11,6 +11,14 @@ export * from './filter.zod';
 // drivers (#5499) inherit one answer instead of crashing (memory × BigInt) or
 // letting the BSON encoder edit the query (mongo × undefined → match-all).
 export * from './filter-comparand-type';
+// The comparand-SHAPE door (#5869, moved here by #9228) — the one
+// implementation of "a list operator takes a list" (`$in` / `$nin` need an
+// array, `$between` needs a [min, max] pair). It ran only at the engine's
+// lowering seam, so a caller that compiled a filter with `parseFilterAST` and
+// handed it straight to a driver met no gate; `@objectstack/objectql`'s
+// `assertListComparandShapes` now delegates here and `parseFilterAST` enforces
+// it for every direct driver caller too.
+export * from './filter-comparand-shape';
 // Canonical conformance cases for the filter logical combinators — the shared
 // standard the five independent FilterCondition backends are each checked
 // against, so they cannot drift apart again (#3774; the fifth — MongoDB's

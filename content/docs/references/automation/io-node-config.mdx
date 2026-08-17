@@ -96,8 +96,10 @@ const result = HttpConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **recipients** | `string \| string[]` | ✅ | Recipient user id(s) / audience selector(s); `{token}` templates resolve per run |
-| **title** | `string` | ✅ | Notification title |
-| **message** | `string` | optional | Notification body |
+| **title** | `string` | optional | Notification title, sent to every recipient verbatim (not localizable — use `template` for per-locale content). Either this or `template` is required; the two are mutually exclusive. |
+| **message** | `string` | optional | Notification body, sent verbatim like `title` (not localizable). Only valid with inline `title`, never with `template`. |
+| **template** | `string` | optional | Email template name (`sys_email_template.name`, e.g. `crm.large_deal_won`) — the localizable content path: the delivery path resolves `(name, recipient locale)` at delivery time and renders subject/body per recipient. Mutually exclusive with inline `title`/`message`, which are the non-localizable path. Read raw — no `{token}` interpolation. |
+| **templateData** | `Record<string, any>` | optional | Render context for the referenced template's `{{var}}` placeholders; values interpolate `{token}` templates per run. Only valid together with `template`. |
 | **channels** | `string \| string[]` | optional | Channels to fan out to (default: inbox) |
 | **topic** | `string` | optional | Event topic (default: "notify") |
 | **severity** | `Enum<'info' \| 'warning' \| 'critical'>` | optional | Severity forwarded to the messaging service |

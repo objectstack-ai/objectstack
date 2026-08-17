@@ -168,4 +168,131 @@ describe('inbox channel', () => {
         expect(data.findOnes).toHaveLength(0);
         expect(data.inserts[0].row.user_id).toBe('usr_42');
     });
+
+    // ── The localizable template path (#9225): a notify `template` reference
+    // rides in the payload; the channel consumes the email service's
+    // render-only face (`IEmailService.renderTemplate`) the way the email
+    // channel consumes `sendTemplate` — one resolver, two channels.
+    describe('notify template path (#9225)', () => {
+        /** A fake render-only email surface recording every renderTemplate call. */
+        function fakeRenderer(impl?: (input: any) => { subject: string; html: string; text: string }) {
+            const calls: any[] = [];
+            return {
+                calls,
+                email: {
+                    async send() { return {}; },
+                    async renderTemplate(input: any) {
+                        calls.push(input);
+                        if (impl) return impl(input);
+                        return {
+                            subject: `[${input.locale ?? 'no-locale'}] subject for ${input.template}`,
+                            html: '<p>html body</p>',
+                            text: 'text body',
+                        };
+                    },
+                },
+            };
+        }
+
+        const templateDelivery = (locale?: string) => delivery({
+            // The emit-time degraded fallback (title=topic, body='') that the
+            // renderer must REPLACE.
+            title: 'deal.won',
+            body: '',
+            payload: {
+                template: 'deal.won_email',
+                templateData: { deal: 'Acme' },
+                ...(locale ? { locale } : {}),
+            },
+        });
+
+        it('renders title/body_md through renderTemplate: subject → title, text → body_md', async () => {
+            const data = fakeData();
+            const r = fakeRenderer();
+            const ch = createInboxChannel({ getData: () => data.engine, getEmail: () => r.email });
+
+            const result = await ch.send(silentCtx(), templateDelivery('zh-CN'));
+
+            expect(result.ok).toBe(true);
+            expect(r.calls).toEqual([{
+                template: 'deal.won_email',
+                data: { deal: 'Acme' },
+                locale: 'zh-CN',
+            }]);
+            expect(data.inserts[0].row.title).toBe('[zh-CN] subject for deal.won_email');
+            expect(data.inserts[0].row.body_md).toBe('text body');
+        });
+
+        it('falls back to the deployment default locale when the payload names none', async () => {
+            const data = fakeData();
+            const r = fakeRenderer();
+            const ch = createInboxChannel({
+                getData: () => data.engine,
+                getEmail: () => r.email,
+                getDefaultTemplateLocale: () => 'ja-JP',
+            });
+
+            await ch.send(silentCtx(), templateDelivery());
+
+            expect(r.calls[0].locale).toBe('ja-JP');
+        });
+
+        it('fails LOUDLY (TEMPLATE_UNSUPPORTED) when no email service is registered', async () => {
+            const data = fakeData();
+            const ch = createInboxChannel({ getData: () => data.engine });
+
+            const result = await ch.send(silentCtx(), templateDelivery());
+
+            expect(result.ok).toBe(false);
+            expect(result.error).toMatch(/^TEMPLATE_UNSUPPORTED:/);
+            expect(result.error).toContain("no 'email' service is registered");
+            expect(data.inserts).toHaveLength(0);
+            // Wrong wiring, not a transient fault — never burn the retry schedule.
+            expect(ch.classifyError?.(result.error)).toBe('permanent');
+        });
+
+        it('fails LOUDLY when the registered email service has no renderTemplate()', async () => {
+            const data = fakeData();
+            const ch = createInboxChannel({
+                getData: () => data.engine,
+                getEmail: () => ({ async send() { return {}; } }),
+            });
+
+            const result = await ch.send(silentCtx(), templateDelivery());
+
+            expect(result.ok).toBe(false);
+            expect(result.error).toMatch(/^TEMPLATE_UNSUPPORTED:/);
+            expect(result.error).toContain('does not provide it');
+            expect(data.inserts).toHaveLength(0);
+        });
+
+        it('surfaces renderTemplate failure codes on the delivery row and grades them permanent', async () => {
+            const data = fakeData();
+            const r = fakeRenderer(() => {
+                throw new Error('TEMPLATE_NOT_FOUND: deal.won_email (locale=zh-CN)');
+            });
+            const ch = createInboxChannel({ getData: () => data.engine, getEmail: () => r.email });
+
+            const result = await ch.send(silentCtx(), templateDelivery('zh-CN'));
+
+            expect(result.ok).toBe(false);
+            expect(result.error).toMatch(/^TEMPLATE_NOT_FOUND:/);
+            expect(data.inserts).toHaveLength(0);
+            expect(ch.classifyError?.(result.error)).toBe('permanent');
+            // The general grading is untouched: a plain insert failure stays retryable.
+            expect(ch.classifyError?.(new Error('db down'))).toBe('retryable');
+        });
+
+        it('never consults the renderer for a non-template delivery', async () => {
+            const data = fakeData();
+            const r = fakeRenderer();
+            const ch = createInboxChannel({ getData: () => data.engine, getEmail: () => r.email });
+
+            await ch.send(silentCtx(), delivery());
+
+            expect(r.calls).toHaveLength(0);
+            expect(data.inserts[0].row.title).toBe('Deal closed');
+            expect(data.inserts[0].row.body_md).toBe('Acme signed 🎉');
+        });
+    });
 });

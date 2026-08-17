@@ -75,7 +75,13 @@ const baseRun = (): SuspendedRun => ({
     nodeId: 'approve_step',
     variables: { $runId: 'run_abc', pause: { snapshot: { nested: { value: 42 }, arr: [1, 2, 3] } } },
     steps: [{ nodeId: 'start', nodeType: 'start', status: 'success', startedAt: '2026-01-01T00:00:00.000Z' }],
-    context: { object: 'crm_deal', userId: 'u1', organizationId: 'org_1', record: { id: 'd1', amount: 100 } } as any,
+    // [cloud#1395] `tenantId`, NOT `organizationId`. This fixture used to spell
+    // it `organizationId` — a key `AutomationContext` does not declare and no
+    // producer writes — and `serialize()` carried a matching consumer-side alias
+    // limb, so this assertion passed against a path production never takes. The
+    // fixture now speaks the declared contract, which is what makes
+    // `organization_id: 'org_1'` below evidence about the real writer.
+    context: { object: 'crm_deal', userId: 'u1', tenantId: 'org_1', record: { id: 'd1', amount: 100 } } as any,
     startedAt: '2026-01-01T00:00:00.000Z',
     startTime: 1735689600000,
     correlation: 'areq_1',
@@ -539,5 +545,80 @@ describe('ObjectStoreSuspendedRunStore — trigger attribution columns (#7533)',
         });
         expect(hits).toHaveLength(1);
         expect(hits[0].id).toBe('run_r6');
+    });
+});
+
+// ─── Organization attribution on the row (cloud#1395) ────────────────────────
+//
+// The finding this pins was measured from UNDER the wall, on a walled
+// single-database HotCRM SaaS boot (cloud#1338's `verify-hotcrm-saas.mjs`,
+// check `a4`): `sys_automation_run` carried `organization_id = NULL` on 31 of
+// 31 rows while every one of them described a record owned by a specific
+// customer — on a boot where `sys_audit_log` (1669 rows) was correctly
+// attributed. That negative control is the whole reason this is a defect and
+// not "platform tables do not carry an organization", so it is restated in
+// every comment here and must stay restated.
+//
+// These assertions read the persisted CELL for the same reason the #7533 group
+// above does: the column is what a wall filters on, and what an inbox query
+// filters by. A value that round-trips through the mapper but never reaches the
+// cell is invisible to both.
+describe('ObjectStoreSuspendedRunStore — organization attribution (cloud#1395)', () => {
+    it('takes the organization from the DECLARED `tenantId`, and reads no other spelling', async () => {
+        const engine = createFakeEngine();
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+
+        await store.save({ ...baseRun(), context: { object: 'crm_deal', tenantId: 'org_1' } as any });
+        expect(engine.rows.get('run_abc').organization_id).toBe('org_1');
+    });
+
+    it('⛔ does NOT read a `context.organizationId` — the key is undeclared and has no producer', async () => {
+        const engine = createFakeEngine();
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+
+        // `AutomationContext` declares `tenantId` and not `organizationId`, and
+        // no trigger surface writes the latter. A consumer-side alias for it
+        // would be a second de-facto contract (PD #12) — and was worse than
+        // inert here, because the only test covering this column fed it, so the
+        // column's sole coverage exercised a path production cannot reach.
+        // Falsifiability: restore the alias limb in `serialize()` and this goes
+        // red, which is the point of asserting the ABSENCE rather than trusting
+        // the removal.
+        await store.save({ ...baseRun(), context: { object: 'crm_deal', organizationId: 'org_1' } as any });
+        expect(engine.rows.get('run_abc').organization_id).toBeNull();
+    });
+
+    // ⛔ PINNED DEFECT — this is cloud#1395 IN THE SHAPE MEASURED, not a
+    // specification of desired behaviour. It asserts what the writer does
+    // today: a run whose trigger carried no acting tenant persists NO
+    // organization, even though `trigger_object` / `trigger_record_id` on the
+    // very same row name a record that belongs to one.
+    //
+    // The schedule, time-relative and api triggers set no tenant AT ALL — by
+    // construction, since a scheduled sweep has no single acting organization —
+    // so this is not an edge case, it is every run those triggers produce.
+    //
+    // ⛔ When the write side is fixed, this test must FAIL and be rewritten to
+    // assert the organization resolved from the trigger record. Do not "repair"
+    // it to keep it green; a pinned defect that quietly adapts to the fix is the
+    // unfalsifiable green this whole line of work exists to prevent. Its sibling
+    // pin is check `a4` in cloud's `verify-hotcrm-saas.mjs`, which carries the
+    // same instruction and must be promoted in the same change.
+    it('PINNED: a tenant-less trigger context persists organization_id = NULL beside a record that HAS an organization', async () => {
+        const engine = createFakeEngine();
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+
+        // The shape a schedule / api trigger produces: a real triggering record,
+        // carrying its own `organization_id`, and no tenant on the context.
+        await store.save({
+            ...baseRun(),
+            context: { object: 'crm_deal', record: { id: 'd1', organization_id: 'org_1' } } as any,
+        });
+
+        const row = engine.rows.get('run_abc');
+        expect(row.trigger_record_id, 'the row names the record it is about').toBe('d1');
+        // …and stores no organization for it. Both halves asserted together:
+        // the NULL alone would be satisfiable by a row that describes nothing.
+        expect(row.organization_id, 'PINNED DEFECT cloud#1395 — fix this and PROMOTE the assertion').toBeNull();
     });
 });

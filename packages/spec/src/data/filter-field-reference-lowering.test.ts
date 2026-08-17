@@ -150,14 +150,32 @@ describe('[#7597] equality triples with a `{ $field }` comparand', () => {
     // vocabulary means a fifth `$eq` spelling entering `AST_OPERATOR_MAP`
     // cannot re-open the defect at a name this file never heard of.
     const offenders: string[] = [];
+    // [#9228] The LIST-shaped operators never reach the "what did it lower to"
+    // question any more: a `{ $field }` comparand is not an array, and the
+    // #5869 shape door now runs inside `parseFilterAST` rather than only at the
+    // engine's lowering seam — where this same input has been refused since
+    // #6209, so nothing that used to execute stops executing. Recorded in its
+    // own list rather than swallowed by a bare `catch`: a spelling that starts
+    // refusing when it used to lower is a change this pin must SHOW.
+    const refused: string[] = [];
     for (const op of VALID_AST_OPERATORS) {
-      const lowered = parseFilterAST(['amount', op, REF]) as Record<string, unknown>;
+      let lowered: Record<string, unknown> | undefined;
+      try {
+        lowered = parseFilterAST(['amount', op, REF]) as Record<string, unknown>;
+      } catch {
+        refused.push(op);
+        continue;
+      }
       const spec = lowered?.amount;
       if (spec && typeof spec === 'object' && !Array.isArray(spec)) {
         const keys = Object.keys(spec as Record<string, unknown>);
         if (keys.length === 1 && keys[0] === '$field') offenders.push(op);
       }
     }
+    expect(
+      refused.sort(),
+      'the list-shaped operators, and only those, refuse a non-array comparand at this face',
+    ).toEqual(['between', 'in', 'nin', 'not_in', 'notin']);
     expect(offenders, 'these spellings lower a `{ $field }` comparand to a bare, unimplemented field spec').toEqual([]);
   });
 });

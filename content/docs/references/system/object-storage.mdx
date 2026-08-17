@@ -68,7 +68,7 @@ const result = AccessControlConfigSchema.parse(data);
 | **pathStyle** | `boolean` | optional (default: `false`) | Use path-style URLs (for S3-compatible providers) |
 | **versioning** | `boolean` | optional (default: `false`) | Enable object versioning |
 | **encryption** | `{ enabled: boolean; algorithm: Enum<'AES256' \| 'aws:kms' \| 'azure:kms' \| 'gcp:kms'>; kmsKeyId?: string }` | optional | Server-side encryption configuration |
-| **accessControl** | `{ acl: Enum<'private' \| 'public_read' \| 'public_read_write' \| 'authenticated_read' \| … +2 more>; allowedOrigins?: string[]; allowedMethods?: Enum<'GET' \| 'PUT' \| 'POST' \| 'DELETE' \| 'HEAD'>[]; allowedHeaders?: string[]; … }` | optional | Access control configuration |
+| **accessControl** | `{ acl: Enum<'private' \| 'public_read' \| 'public_read_write' \| 'authenticated_read' \| …>; allowedOrigins?: string[]; allowedMethods?: Enum<'GET' \| 'PUT' \| 'POST' \| 'DELETE' \| 'HEAD'>[]; allowedHeaders?: string[]; … }` | optional | Access control configuration |
 | **lifecyclePolicy** | `{ enabled: boolean; rules: object[] }` | optional | Lifecycle policy configuration |
 | **multipartConfig** | `{ enabled: boolean; partSize: number; maxParts: number; threshold: number; … }` | optional | Multipart upload configuration |
 | **tags** | `Record<string, string>` | optional | Bucket tags for organization |

@@ -136,7 +136,7 @@ export const MongoConfigSchema = lazySchema(() => strictObject(
     placeholderFreeDeep(z.record(z.string(), z.unknown()), 'options'),
     'options',
   ).optional()
-    .describe('Extra MongoClient options (replicaSet, tls, timeouts, …; credential material is refused — bind secrets via the connection form / external.credentialsRef)'),
+    .describe('Extra MongoClient options (replicaSet, tls, timeouts, …). Only `auth.password` is refused inline — bind it via the connection form / external.credentialsRef. `proxyPassword`, `tlsCertificateKeyFilePassword`, `key`, and `passphrase` are accepted and stored at rest in cleartext; they\'re redacted only when the datasource is read back, not refused at write.'),
 })
   .describe('MongoDB Connection Configuration')
   .superRefine((cfg, ctx) => {

@@ -11,6 +11,11 @@ Manage object schemas, metadata types, UI views, and installed packages over RES
 
 Retrieve and manage object schemas, metadata types, and UI views. Always available — provided by the kernel.
 
+A type segment these routes cannot recognise, but which reaches for a metadata type the
+platform declares, is refused `400 INVALID_REQUEST` rather than served — see
+[unrecognised type spelling](/docs/api/error-catalog#invalid_request--unrecognised-type-spelling)
+in the error catalog for the envelope and the correction it names.
+
 ### `GET /meta`
 
 List all registered metadata types.
