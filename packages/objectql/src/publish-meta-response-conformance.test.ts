@@ -349,3 +349,186 @@ describe('publishMetaItem response conforms to PublishMetaItemResponseSchema (#7
         ).rejects.toMatchObject({ status: 403 });
     });
 });
+
+/**
+ * #9176 — the conditional `advisories` field on the PUBLISH door, both
+ * directions. The mirror of the #4717 block in
+ * `save-meta-response-conformance.test.ts`, which is the stated precedent:
+ * the #4463 gate runs on BOTH write doors (D1 — a draft→active promotion is
+ * gated exactly as a direct active save), and until #9176 only the save door
+ * put the advisory half on its response; the promotion call site received the
+ * gate's return and discarded it. Studio's designer takes draft-then-publish
+ * on every edit, so the discarded half was the one its authors would see.
+ *
+ * These drive the SHIPPED rule registry (`@objectstack/lint`'s
+ * `AUTHORING_RULES`, filtered to the runtime surface) through the shipped
+ * `publishMetaItem`. Nothing here is stubbed: the finding below is produced by
+ * `lintFlowPatterns`, the same rule `os lint` runs, reached through the same
+ * `evaluateRuntimeAuthoringGate` a Studio publish reaches.
+ */
+describe('publishMetaItem carries the runtime authoring gate\'s advisories (#9176 — #4463 D3)', () => {
+    /**
+     * The reachable success-with-advisories case, verbatim from the save
+     * door's #4717 measurement: a nightly sweep whose ONLY defect is a
+     * `delete_record` node declaring `multi: true` with no `filter`.
+     * `lintFlowPatterns` raises `flow-multi-write-unfiltered` at
+     * `severity: 'warning'`, so the gate's `errors` set is empty, the
+     * promotion is NOT refused, and before #9176 the finding was computed at
+     * the promotion call site and thrown away.
+     *
+     * `runAs: 'system'` is load-bearing, not decoration: without it
+     * `flow-runas-unscoped` fires at `severity: 'error'` and the publish
+     * becomes a 422 — a refusal wearing an advisory's clothes, which would
+     * make this case pass for the wrong reason.
+     *
+     * Env-wide (`org: null`), not org-scoped: the registry declares
+     * `allowOrgOverride: false` for `flow`, so an org-scoped draft is refused
+     * 403 NOT_OVERRIDABLE long before the authoring gate runs.
+     */
+    const advisoryFlow = () => ({
+        name: 'nightly_purge',
+        label: 'Nightly Purge',
+        type: 'autolaunched',
+        status: 'active',
+        runAs: 'system',
+        nodes: [
+            { id: 'start', type: 'start', label: 'Start' },
+            {
+                id: 'purge',
+                type: 'delete_record',
+                label: 'Purge',
+                config: { objectName: 'audit_logs', multi: true },
+            },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'purge' }],
+    });
+
+    /** The same flow with the bulk write bounded — no finding of any severity. */
+    const cleanFlow = () => {
+        const flow = advisoryFlow();
+        (flow.nodes[1] as any).config.filter = [{ field: 'created_at', operator: 'lt', value: '2020-01-01' }];
+        return flow;
+    };
+
+    it('a publish whose draft\'s only defect is advisory succeeds AND reports the finding', async () => {
+        const p = await makeProtocol();
+        const raw: any = await stageAndPublish(p, {
+            type: 'flow', name: 'nightly_purge', item: advisoryFlow(), org: null,
+        });
+
+        // The promotion succeeded — this rides a 2xx, which is the whole
+        // point of the advisory half. (The gate throws on its gating half, so
+        // reaching this line at all is the "still a 200" assertion; the REST
+        // route maps a clean return to 200 and a throw to its `status`.)
+        expect(raw.success).toBe(true);
+
+        // The finding reached the caller, with the id and severity the rule
+        // emits. Asserting the RULE ID rather than just a non-empty array: an
+        // array of the wrong findings is a different defect from an empty one.
+        expect(raw.advisories).toHaveLength(1);
+        expect(raw.advisories[0].rule).toBe('flow-multi-write-unfiltered');
+        expect(raw.advisories[0].severity).toBe('warning');
+        expect(raw.advisories[0].where).toContain('nightly_purge');
+
+        // …and it survives the DECLARED parse. This is the assertion that
+        // goes red if `PublishMetaItemResponseSchema.advisories` is removed,
+        // or if either side renames the key: a plain `z.object` STRIPS what
+        // it does not declare, so the field would vanish silently rather
+        // than fail.
+        expect(strippedKeys(raw)).toEqual([]);
+        const parsed = PublishMetaItemResponseSchema.parse(raw);
+        expect(parsed.advisories).toEqual(raw.advisories);
+
+        // Every element key the declaration promises is really carried — a
+        // narrower element schema would strip inside the array without
+        // changing its length.
+        expect(Object.keys(parsed.advisories![0]!).sort())
+            .toEqual(['hint', 'message', 'path', 'rule', 'severity', 'where']);
+    });
+
+    /**
+     * The constraint most likely to be broken by a well-meaning refactor:
+     * "zero advisories must not change the response bytes" (the #4717 ruling,
+     * point 2, carried to this door). Emitting `advisories: []` would satisfy
+     * every OTHER assertion in this file — the spec declares the key, so
+     * nothing is stripped and `strippedKeys` stays `[]` — which is exactly
+     * why this has to be pinned on the raw object's KEY SET and not through
+     * the parse.
+     */
+    it('zero advisories changes nothing: the key is absent, not empty', async () => {
+        const p = await makeProtocol();
+        const raw: any = await stageAndPublish(p, {
+            type: 'flow', name: 'bounded_purge', item: cleanFlow(), org: null,
+        });
+
+        expect(raw.success).toBe(true);
+        expect('advisories' in raw).toBe(false);
+        expect(raw.advisories).toBeUndefined();
+        // Byte-for-byte: the serialized response of a clean publish carries
+        // no trace of the field. `JSON.stringify` is the wire, and the wire
+        // is the promise being made to existing callers.
+        expect(JSON.stringify(raw)).not.toContain('advisories');
+        expect(PublishMetaItemResponseSchema.safeParse(raw).success).toBe(true);
+    });
+
+    /**
+     * The gated half is unchanged, and it is asserted on its ENVELOPE — `code`
+     * AND `status` — not on the bare fact of a throw. A `toThrow()` here would
+     * prove nothing: only the envelope can tell the refusal apart from any
+     * other failure, and the refusal is what must NOT have moved when the
+     * success path grew a channel. The draft SAVE succeeds (D1 — drafts are
+     * never gated); the PROMOTION is where the gate refuses.
+     */
+    it('the gating half still refuses the promotion with the 422 envelope, unchanged', async () => {
+        const p = await makeProtocol();
+        const brokenApproval = {
+            name: 'leave_approval',
+            label: 'Leave Approval',
+            type: 'autolaunched',
+            status: 'active',
+            runAs: 'system',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                {
+                    id: 'approve',
+                    type: 'approval',
+                    label: 'Approve',
+                    config: { approvers: [{ type: 'expression', value: 'record.owner ==' }] },
+                },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'approve' }],
+        };
+
+        // Staging the draft succeeds — a draft save is never gated (D1).
+        await (p as any).saveMetaItem({
+            type: 'flow', name: 'leave_approval', item: brokenApproval, mode: 'draft',
+        });
+        // Promoting it is where the gate runs, and it refuses with the same
+        // envelope the save door's direct-active refusal carries.
+        await expect(
+            (p as any).publishMetaItem({ type: 'flow', name: 'leave_approval' }),
+        ).rejects.toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+    });
+
+    /**
+     * ⚠️ GUARD, NOT EVIDENCE — green in BOTH directions, and labelled so on
+     * purpose (the save door's #4717 dispatch asked for this variant to be
+     * MEASURED rather than reasoned about, and the measurement carries over).
+     *
+     * The pre-existing conformance cases above publish clean `view` bodies,
+     * for which the gate raises nothing, so the conditional key is absent and
+     * `strippedKeys` is `[]` whether or not the spec declares `advisories`.
+     * This case states that fact as an assertion so the next reader does not
+     * mistake those cases' green for coverage of the new field: the existing
+     * gate CANNOT go red to report a missing or misspelled declaration, which
+     * is precisely why the two directional cases above exist.
+     */
+    it('GUARD (green either way): a clean view publish is untouched by the new field', async () => {
+        const p = await makeProtocol();
+        const raw: any = await stageAndPublish(p);
+
+        expect('advisories' in raw).toBe(false);
+        expect(strippedKeys(raw)).toEqual([]);
+        expect(Object.keys(raw).sort()).toEqual(['message', 'seq', 'success', 'version']);
+    });
+});

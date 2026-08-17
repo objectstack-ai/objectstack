@@ -3816,10 +3816,12 @@ export class ObjectStackProtocolImplementation implements
      *
      * [#4717] Throws on the gating half, RETURNS the advisory half. Advisories
      * do not block anything, so the only honest place for them is the 2xx the
-     * write earns — `saveMetaItem` attaches them to its response, and the only
-     * other caller (the draft→active promotion in `publishMetaItem`) simply
-     * ignores the value, which is why adding this channel could not change what
-     * either door does.
+     * write earns — `saveMetaItem` attaches them to its response, and since
+     * #9176 the draft→active promotion does the same: `promoteDraftForPublish`
+     * hands the findings out and `publishMetaItem` attaches them, so both
+     * write doors report what D1 makes both of them measure. (The batch route
+     * `publishPackageDrafts` still discards its per-draft findings — its
+     * response face is a different contract.)
      * Returns an empty array on every early return: no rules ran, so there is
      * nothing to report, and "clean" is told apart from "nothing ran" by the
      * gate's own `rulesRun`, not by this.
@@ -13668,6 +13670,15 @@ export class ObjectStackProtocolImplementation implements
          * closed on the spec side.
          */
         projectionApplied?: MutationProjectionOutcome;
+        /**
+         * [#9176] Present ONLY when the #4463 runtime authoring gate raised at
+         * least one non-blocking finding against the draft body this promotion
+         * carried to `active` — an empty array is never emitted, so a clean
+         * publish's response bytes are unchanged (the #4717 discipline, one
+         * door over). Every entry is `warning`/`info` by construction: an
+         * `error` finding refuses the promotion as the 422 instead.
+         */
+        advisories?: RuntimeAuthoringIssue[];
     }> {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. This is the
         // SEVENTH `/meta` entry point, and until #8769 it was the only one that
@@ -13751,7 +13762,7 @@ export class ObjectStackProtocolImplementation implements
         // site has no transaction of its own, so recording it in the `catch` is
         // where it always effectively landed; what changed is that the helper no
         // longer assumes that on behalf of the batch route too.
-        const { singularType, orgId, result } = await this.promoteDraftForPublish(request)
+        const { singularType, orgId, advisories, result } = await this.promoteDraftForPublish(request)
             .catch(async (err: unknown) => {
                 await this.recordPendingDenialAudit(err);
                 throw err;
@@ -13794,11 +13805,17 @@ export class ObjectStackProtocolImplementation implements
             seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[] };
             materializeApplied?: PublishMaterializeResult;
             projectionApplied?: MutationProjectionOutcome;
+            advisories?: RuntimeAuthoringIssue[];
         } = {
             success: true,
             version: result.version,
             seq: result.seq,
             message: `Published draft — type=${request.type}, name=${request.name} [seq=${result.seq}]`,
+            // [#9176] Omitted-when-empty, never `advisories: []` — a clean
+            // publish's response bytes are unchanged, and absence means
+            // "nothing to report", never "the gate did not run" (#4717's
+            // ruling, point 2, carried to this door).
+            ...(advisories.length > 0 ? { advisories } : {}),
         };
         const effects = await this.runPublishSideEffects({
             singularType,
@@ -13867,6 +13884,17 @@ export class ObjectStackProtocolImplementation implements
     }): Promise<{
         singularType: string;
         orgId: string | null;
+        /**
+         * [#9176] The #4463 gate's advisory half for this promotion — the
+         * non-blocking findings `assertRuntimeAuthoringRules` RETURNS (its
+         * gating half throws before this method resolves). Empty when the
+         * gate raised nothing or did not run (no draft, package-author
+         * channel); `publishMetaItem` attaches it to its response only when
+         * non-empty, exactly as `saveMetaItem` does one door over. The batch
+         * caller (`publishPackageDrafts`) deliberately does not read it —
+         * its response face is a different contract.
+         */
+        advisories: RuntimeAuthoringIssue[];
         result: { version: string; seq: number; item: MetadataItem; packageId: string | null };
     }> {
         const singularType = PLURAL_TO_SINGULAR[request.type] ?? request.type;
@@ -13924,8 +13952,13 @@ export class ObjectStackProtocolImplementation implements
             { type: singularType, name: request.name, org: orgId ?? 'env' } as Parameters<typeof repo.get>[0],
             { state: 'draft' },
         );
-        if (draftForGate) {
-            this.assertRuntimeAuthoringRules({
+        // [#9176] The gate's return is its advisory half (#4717): captured and
+        // handed out so `publishMetaItem` can attach it to the 2xx this
+        // promotion is about to earn, exactly as `saveMetaItem` attaches its
+        // own. Held in a local, never on `this` — the gate is per-write and
+        // two concurrent publishes must not read each other's findings.
+        const runtimeAdvisories: RuntimeAuthoringIssue[] = draftForGate
+            ? this.assertRuntimeAuthoringRules({
                 type: singularType,
                 name: request.name,
                 state: 'active',
@@ -13934,8 +13967,8 @@ export class ObjectStackProtocolImplementation implements
                 // it the draft door would be a bypass for this refusal alone,
                 // which is the exact hole #4463 D1 closed for the other 26.
                 organizationId: orgId,
-            });
-        }
+            })
+            : [];
 
         const artifactBacked = this.isArtifactBacked(singularType, request.name);
         const intent: 'override-artifact' | 'runtime-only' = artifactBacked
@@ -13958,7 +13991,7 @@ export class ObjectStackProtocolImplementation implements
                 // present-and-undefined for the historical resolution to hold.
                 ...('packageId' in request ? { packageId: request.packageId ?? null } : {}),
             });
-            return { singularType, orgId, result };
+            return { singularType, orgId, advisories: runtimeAdvisories, result };
         } catch (err: any) {
             if (err instanceof ConflictError) {
                 const conflict: any = new Error(

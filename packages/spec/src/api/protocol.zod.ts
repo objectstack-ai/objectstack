@@ -539,10 +539,10 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
     + '422 `invalid_metadata` envelope instead of here. A caller that ignores '
     + 'this key behaves exactly as before. Runtime-only: the CLI surfaces the '
     + 'same findings on its own stdout, and a Studio / MCP / AI author has no '
-    + 'CLI at all, which is the gap #4463 exists to close. NOTE the door '
-    + 'asymmetry — `POST /meta/:type/:name/publish` does not carry this field '
-    + 'yet (its declaration landed separately as #7294); the gate runs on both '
-    + 'doors, only the save door reports.',
+    + 'CLI at all, which is the gap #4463 exists to close. The gate runs on '
+    + 'both write doors (#4463 D1), and both report: '
+    + '`POST /meta/:type/:name/publish` carries the same key on '
+    + '`PublishMetaItemResponseSchema` (#9176).',
   ),
   message: z.string().optional(),
 }));
@@ -584,6 +584,15 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
  * than thrown. So `success: true` on the envelope does not mean the data plane
  * caught up — a caller that needs it live must read the receipt's own
  * `success`, which is why every receipt carries one.
+ *
+ * **`advisories` is the fourth conditional key** (#9176, mirroring #4717 one
+ * door over): the #4463 runtime authoring gate runs on BOTH write doors by
+ * D1 — a draft→active promotion is gated exactly as a direct active save —
+ * and its non-blocking findings ride the 2xx of whichever door earned it.
+ * Until #9176 only the save door reported; the promotion call site received
+ * the gate's advisory return and discarded it, which mattered precisely
+ * because Studio's designer takes draft-then-publish on every edit, so the
+ * one door its authors actually use was the one that said nothing.
  */
 export const PublishMetaItemResponseSchema = lazySchema(() => z.object({
   success: z.boolean().describe(
@@ -651,6 +660,24 @@ export const PublishMetaItemResponseSchema = lazySchema(() => z.object({
     + 'draft→active promotion. Present ONLY when a projector is registered for '
     + 'this metadata type. Best-effort — a projector failure is reported here '
     + 'and logged, never thrown.',
+  ),
+  advisories: z.array(RuntimeAuthoringIssueSchema).optional().describe(
+    'Non-gating findings from the #4463 runtime authoring gate — the same '
+    + 'shared author-time rules `os validate` / `os build` / `os lint` run, '
+    + 'applied to the DRAFT body this promotion carried to `active` (#9176, '
+    + 'the same key `SaveMetaItemResponseSchema` carries, because the gate '
+    + 'runs on both write doors by #4463 D1). The promotion SUCCEEDED; these '
+    + 'are what the gate has to say about it anyway. Present ONLY when at '
+    + 'least one advisory was raised — an empty array is never emitted, so a '
+    + 'clean publish\'s response bytes are unchanged and absence means '
+    + '"nothing to report", never "the gate did not run". Advisory by '
+    + 'construction: every entry has `severity` `warning` or `info`, because '
+    + 'an `error` finding refuses the promotion and arrives as the 422 '
+    + '`invalid_metadata` envelope instead of here. A caller that ignores '
+    + 'this key behaves exactly as before. This door is the one Studio\'s '
+    + 'designer takes on every edit (draft save, then publish), and a Studio '
+    + '/ MCP / AI author has no CLI at all — which is the gap #4463 exists '
+    + 'to close.',
   ),
   message: z.string().optional().describe(
     'Human-readable receipt, e.g. `Published draft — type=view, name=cases '
