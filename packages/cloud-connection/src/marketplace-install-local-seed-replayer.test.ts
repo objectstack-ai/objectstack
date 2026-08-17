@@ -372,7 +372,8 @@ describe('#9070 — install-local registers the per-org seed replayer, not just 
             withSampleData: false,
         } as any);
 
-        const { rawApp, harness } = freshHarness();
+        // No route call on this path — rehydrate runs off `kernel:ready` alone.
+        const { harness } = freshHarness();
         const plugin = new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: dir });
         await plugin.start(harness.ctx as any);
         await harness.fire();
