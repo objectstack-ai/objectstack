@@ -11,6 +11,10 @@
 // ratchets completeness over a CURATED table of HTTP/transport entry points
 // (`discover()`: 15 probes over 11 named source files) — a new ungated route
 // there is UNCLASSIFIED, a deleted guard is STALE, and either breaks CI.
+// [#9083] Classification itself is state-gated for the transport tripwires: a
+// discovered TRANSPORT-WIRED key may be covered ONLY by an `enforced` row, so
+// silencing that particular red costs an enforcement site rather than a
+// `covers` append on a row that records an absence.
 //
 // [#8711] That completeness is over ROUTES, not over primitives: a primitive
 // enforced by a predicate inside an existing resolver adds no entry point, so
@@ -59,6 +63,11 @@ export interface AuthzPrimitive {
    * `discover()`. A discovered HTTP entry point with no covering row fails CI as
    * UNCLASSIFIED; a `covers` key no longer in source fails as STALE. See
    * authz-conformance.test.ts (#2567 anonymous-deny surface enumeration).
+   *
+   * [#9083] Covering is state-gated for one key family: a `TRANSPORT-WIRED`
+   * key may appear here ONLY on a row whose `state` is `enforced` (which then
+   * owes an `enforcement` site). Any other state is refused — see
+   * `checkTransportWiredAdmission` in the companion test.
    */
   covers?: string[];
   /** Why it is experimental/removed, or a roadmap pointer. */
@@ -163,9 +172,15 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   // transport tripwires in authz-conformance.test.ts) blocks wiring a client
   // transport without the identity story — in CI, not in an adversarial
   // review after the fact.
+  //
+  // [#9083] "Blocks" is load-bearing only since #9083. The ratchet made the
+  // wired transport UNCLASSIFIED, but ANY row could then classify it — the
+  // absence-recording row below included — so the identity story was one
+  // `covers` append away from being optional. The admission rule in the
+  // companion test now requires the classifying row to be `enforced`.
   { id: 'realtime-delivery-authz', summary: 'realtime delivery fan-out has NO per-recipient authorization — trusted server-internal subscribers only (#2992 surface 2)', state: 'experimental',
     covers: ['realtime:in-memory-realtime-adapter.ts:publish(trusted-fan-out)'],
-    note: 'Surface posture: system (trusted-implicit), pre-wiring — no end-user transport exists (handleUpgrade unimplemented, no REST subscribe route, client RealtimeAPI is a placeholder); the only subscribers are server-internal plugins (webhook auto-enqueuer, knowledge sync). Structural defect: Subscription carries no principal, matchesSubscription filters only by object+eventTypes (RealtimeSubscriptionOptions.filter is declared but never read), and the engine publishes the FULL after-row — so any future external subscriber would receive record bodies cross-tenant that its own find would hide. ADMISSION REQUIREMENT before any WebSocket/SSE/subscribe transport ships: per-recipient RLS/FLS/tenant re-check on delivery (subscription carries the subscriber ExecutionContext) OR id-only payload + client re-fetch. The transport tripwire probes in authz-conformance.test.ts turn a wired transport into an UNCLASSIFIED surface → red CI until this row is upgraded with the enforcement site.' },
+    note: 'Surface posture: system (trusted-implicit), pre-wiring — no end-user transport exists (handleUpgrade unimplemented, no REST subscribe route, client RealtimeAPI is a placeholder); the only subscribers are server-internal plugins (webhook auto-enqueuer, knowledge sync). Structural defect: Subscription carries no principal, matchesSubscription filters only by object+eventTypes (RealtimeSubscriptionOptions.filter is declared but never read), and the engine publishes the FULL after-row — so any future external subscriber would receive record bodies cross-tenant that its own find would hide. ADMISSION REQUIREMENT before any WebSocket/SSE/subscribe transport ships: per-recipient RLS/FLS/tenant re-check on delivery (subscription carries the subscriber ExecutionContext) OR id-only payload + client re-fetch. The transport tripwire probes in authz-conformance.test.ts turn a wired transport into an UNCLASSIFIED surface → red CI. [#9083] Clearing that red by classifying the new key HERE is refused: checkTransportWiredAdmission rejects a TRANSPORT-WIRED key covered by any row that is not `enforced`, and checkLedger separately requires an `enforced` row to name an enforcement site — the two compose into the admission requirement above. Before #9083 this note promised a gate that did not exist: appending the tripwire key to this row was measured green with ZERO authorization written (and the `removed` state admitted the identical exit), which is the quiet one-line exit that reads as compliance. The honest path out of the red is to write the per-recipient re-check, then classify the wired key on a NEW `enforced` row naming that site; this row keeps recording the pre-wiring fan-out posture and its `publish(trusted-fan-out)` pin, which stay accurate exactly as long as every subscriber is server-internal.' },
 
   // ── ADR-0096 — MCP execution-surface identity admission (#3167). The MCP
   // server exposes ObjectStack tool execution over two transports with DIFFERENT
