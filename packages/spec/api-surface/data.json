@@ -632,6 +632,7 @@
     "apiExposureDenialReason (function)",
     "asciiCaseInsensitiveContains (function)",
     "asciiCaseInsensitiveRegexSource (function)",
+    "assertListComparandShapes (function)",
     "bareDateRangePresetComparandMessage (function)",
     "canServeApiOperation (function)",
     "canonicalAstOperator (function)",

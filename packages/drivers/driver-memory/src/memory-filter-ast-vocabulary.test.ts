@@ -77,10 +77,36 @@ describe('InMemoryDriver filter vocabulary ↔ VALID_AST_OPERATORS', () => {
     expect(VALID_AST_OPERATORS.size).toBeGreaterThan(0);
   });
 
+  /**
+   * [#9228] Which `$` operator an authoring spelling lowers to, derived by
+   * LOWERING one rather than by hand.
+   *
+   * `valueFor` used to name the membership spellings in a literal list, and it
+   * named three of the four: `notin` (and, had it been in the vocabulary, any
+   * later spelling) fell through to the scalar default. That handed the driver
+   * `{ name: { $nin: 'alpha' } }` — a shape the declared contract forbids —
+   * which mingo silently coerced until 7.2.3 and answers with a raw
+   * `TypeError: b.filter is not a function` from 7.2.4 on. The accident was
+   * load-bearing: it was the one probe covering the shape hole #9228 closed.
+   * Deriving the value from the spec's own lowering closes the CLASS instead of
+   * the instance — a membership spelling added to `AST_OPERATOR_MAP` tomorrow
+   * gets a list here without anyone remembering to edit this line.
+   *
+   * The probe uses a two-element array, which is legal for all three list
+   * operators, so it never trips the shape door it is used to satisfy.
+   */
+  const loweredOperatorOf = (op: string): string | undefined => {
+    const lowered = parseFilterAST([['probe', op, ['a', 'b']]]) as Record<string, unknown> | undefined;
+    const spec = lowered?.probe;
+    if (spec === null || typeof spec !== 'object' || Array.isArray(spec)) return undefined;
+    return Object.keys(spec).find((key) => key.startsWith('$'));
+  };
+
   /** A representative value per operator, so each one is actually exercised. */
   const valueFor = (op: string): unknown => {
-    if (op === 'in' || op === 'nin' || op === 'not_in') return ['alpha'];
-    if (op === 'between') return [0, 100];
+    const lowered = loweredOperatorOf(op);
+    if (lowered === '$in' || lowered === '$nin') return ['alpha'];
+    if (lowered === '$between') return [0, 100];
     if (/null|empty/.test(op)) return true;
     if (/contains|like|startswith|starts_with|endswith|ends_with/.test(op)) return 'alp';
     return 'alpha';
@@ -140,6 +166,29 @@ describe('InMemoryDriver filter vocabulary ↔ VALID_AST_OPERATORS', () => {
     expect(err.status).toBe(400);
     expect(err.message).toContain('[min, max]');
   });
+
+  it.each([['in'], ['nin'], ['not_in'], ['notin']])(
+    '[#9228] refuses a scalar comparand on %s instead of letting it reach mingo',
+    async (op) => {
+      // The escape this card closed. `valueFor` above hands every membership
+      // spelling a list now, so nothing in this suite produces the shape any
+      // more — which is exactly why it is pinned HERE, deliberately, rather
+      // than left to the accident that used to cover it.
+      //
+      // Before #9228 the shape reached `Query.compile` and answered two ways
+      // depending on a transitive dependency's minor version: mingo <= 7.2.2
+      // coerced it and returned rows; mingo >= 7.2.3 threw
+      // `TypeError: b.filter is not a function` — no `code`, no `status`, no
+      // field name — which is why BOTH envelope halves are asserted and not
+      // just "it throws". A bare `toThrow()` here passed on 7.2.4 while the
+      // defect was wide open.
+      const err = await refusalOf(() => findAuthored([['name', op, 'alpha']]));
+      expect(err.code).toBe('INVALID_FILTER');
+      expect(err.status).toBe(400);
+      expect(err.message).toContain('requires an ARRAY');
+      expect(err.message).toContain('name');
+    },
+  );
 
   it('still honours a well-formed logical node', async () => {
     const rows = await findAuthored(['or', ['name', '=', 'alpha'], ['name', '=', 'beta']]);
