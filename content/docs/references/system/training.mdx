@@ -105,7 +105,7 @@ Organizational training plan per ISO 27001:2022 A.6.3
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `true`) | Enable training management |
-| **courses** | `{ id: string; title: string; description: string; category: Enum<'security_awareness' \| 'data_protection' \| 'incident_response' \| … +7 more>; … }[]` | ✅ | Training courses |
+| **courses** | `{ id: string; title: string; description: string; category: Enum<'security_awareness' \| 'data_protection' \| 'incident_response' \| …>; … }[]` | ✅ | Training courses |
 | **recertificationIntervalDays** | `number` | optional (default: `365`) | Default recertification interval in days |
 | **trackCompletion** | `boolean` | optional (default: `true`) | Track training completion for compliance |
 | **gracePeriodDays** | `number` | optional (default: `30`) | Grace period in days after certification expiry |

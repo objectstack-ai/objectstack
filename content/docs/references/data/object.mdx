@@ -121,7 +121,7 @@ const result = ApiMethod.parse(data);
 | **systemFields** | `false \| { tenant?: boolean; audit?: boolean }` | optional | Opt out of, or selectively disable, registry-level system-field auto-injection. |
 | **datasource** | `string` | optional (default: `"default"`) | Target Datasource ID. "default" is the primary DB. |
 | **external** | `{ remoteName?: string; remoteSchema?: string; writable?: boolean; columnMap?: Record<string, string>; … }` | optional | Remote table binding for federated (external) objects. |
-| **fields** | `Record<string, { name?: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| … +42 more>; description?: string; … }>` | ✅ | Field definitions map. Keys must be snake_case identifiers. |
+| **fields** | `Record<string, { name?: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; description?: string; … }>` | ✅ | Field definitions map. Keys must be snake_case identifiers. |
 | **indexes** | `{ name?: string; fields: string[]; unique?: boolean \| 'global' \| 'organization' }[]` | optional | Database performance indexes |
 | **fieldGroups** | `{ key: string; label: string; icon?: string; description?: string; … }[]` | optional | Ordered list of field groups (array order = display order). See ObjectFieldGroupSchema. |
 | **tenancy** | `{ enabled: boolean; tenantField?: string; organizationField?: string }` | optional | Multi-tenancy configuration for SaaS applications |
@@ -191,7 +191,7 @@ const result = ApiMethod.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **extend** | `string` | ✅ | Target object name (FQN) to extend |
-| **fields** | `Record<string, { name?: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| … +42 more>; description?: string; … }>` | optional | Fields to add/override |
+| **fields** | `Record<string, { name?: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; description?: string; … }>` | optional | Fields to add/override |
 | **label** | `string` | optional | Override label for the extended object |
 | **pluralLabel** | `string` | optional | Override plural label for the extended object |
 | **description** | `string` | optional | Override description for the extended object |

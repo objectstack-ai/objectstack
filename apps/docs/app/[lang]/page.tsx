@@ -18,10 +18,10 @@ const mono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: {
-    absolute: 'ObjectStack — A complete business system in 16k tokens',
+    absolute: 'ObjectStack — Apps small enough for AI to hold whole.',
   },
   description:
-    'ObjectStack compresses an entire business app — data model, UI, workflows, permissions — into typed metadata an AI agent can hold in context, reason about, and refactor whole; a complete CRM is under 2,000 lines. That metadata is your business ontology — an open, versioned definition you own. Strict TypeScript, Zod, and a validation gate catch the agent\'s mistakes at authoring time, and the runtime derives the database, REST API, UI, and MCP server, enforcing permissions and audit on every call.',
+    'ObjectStack turns the whole app — data model, UI, workflows, permissions — into typed metadata: a complete CRM in under 150k tokens, one context window. Agents read it whole, reason it whole, refactor it whole. The business logic alone — every object, workflow and permission — is under 100k tokens; the UI adds just 50k more. That metadata is your business ontology — an open, versioned definition you own. Strict TypeScript, Zod, and a validation gate catch the agent\'s mistakes at authoring time, and the runtime derives the database, REST API, UI, and MCP server, enforcing permissions and audit on every call.',
 };
 
 const VOCABULARY: { tag: string; title: string; copy: string }[] = [
@@ -114,19 +114,25 @@ export default function HomePage() {
               className="mt-5 text-[2.6rem]/[1.06] font-bold tracking-tight text-balance md:text-6xl/[1.04]"
               style={{ fontFamily: 'var(--l-display)' }}
             >
-              A complete business system{' '}
+              Apps small enough{' '}
               <span className="block bg-gradient-to-r from-indigo-500 to-purple-500 bg-clip-text text-transparent dark:from-indigo-400 dark:to-purple-400">
-                in 16k tokens.
+                for AI to hold whole.
               </span>
             </h1>
             <p className="mt-6 max-w-xl text-lg text-fd-muted-foreground text-pretty">
-              ObjectStack compresses an entire app — data model, UI, workflows, permissions —
-              into typed metadata an AI agent can hold in context, reason about, and refactor
-              whole; a complete CRM is under 2,000 lines. That metadata is your business
-              ontology — an open, versioned definition you own. Strict TypeScript, Zod schemas,
-              and a validation gate catch the agent's mistakes at authoring time, and the
-              runtime derives the database, REST API, UI, and MCP server — permissions and
-              audit enforced on every call.
+              ObjectStack turns the whole app — data model, UI, workflows, permissions — into
+              typed metadata: a complete CRM in under 150k tokens, one context window. Agents
+              read it whole, reason it whole, refactor it whole.
+            </p>
+            <p className="mt-4 max-w-xl text-lg text-fd-muted-foreground text-pretty">
+              The business logic alone — every object, workflow and permission — is under 100k
+              tokens; the UI adds just 50k more.
+            </p>
+            <p className="mt-4 max-w-xl text-base text-fd-muted-foreground text-pretty">
+              That metadata is your business ontology — an open, versioned definition you own.
+              Strict TypeScript, Zod schemas, and a validation gate catch the agent's mistakes
+              at authoring time, and the runtime derives the database, REST API, UI, and MCP
+              server — permissions and audit enforced on every call.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link

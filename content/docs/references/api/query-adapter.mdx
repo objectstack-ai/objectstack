@@ -71,7 +71,7 @@ const result = ODataQueryAdapterSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **operatorMappings** | `{ operator: string; rest?: string; odata?: string }[]` | optional | Custom operator mappings |
 | **rest** | `{ filterStyle: Enum<'bracket' \| 'dot' \| 'flat' \| 'rsql'>; pagination?: object; sorting?: object; fieldsParam: string }` | optional | REST query adapter configuration |
-| **odata** | `{ version: Enum<'v2' \| 'v4'>; usePrefix: boolean; stringFunctions?: Enum<'contains' \| 'startswith' \| 'endswith' \| 'tolower' \| 'toupper' \| 'trim' \| … +3 more>[]; expand?: object }` | optional | OData query adapter configuration |
+| **odata** | `{ version: Enum<'v2' \| 'v4'>; usePrefix: boolean; stringFunctions?: Enum<'contains' \| 'startswith' \| 'endswith' \| 'tolower' \| 'toupper' \| 'trim' \| …>[]; expand?: object }` | optional | OData query adapter configuration |
 
 
 ---

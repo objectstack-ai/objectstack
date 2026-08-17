@@ -67,10 +67,41 @@ export const SysAutomationRun = ObjectSchema.create({
   fields: {
     id: Field.text({ label: 'Run ID', required: true, readonly: true, group: 'System' }),
 
+    // ⚠️ MEASURED DEFECT, cloud#1395 — read this before trusting the column.
+    //
+    // The value is resolved from the ACTING CONTEXT (`AutomationContext.
+    // tenantId`) and from nothing else, so it is NULL for every run whose
+    // trigger carries no acting organization — which is all of them on the
+    // schedule, time-relative and api triggers, none of which sets a tenant, by
+    // construction: a scheduled sweep has no one acting organization. On a
+    // walled single-database HotCRM SaaS boot this measured 31 of 31 rows
+    // org-less, each one naming a `trigger_object` / `trigger_record_id` that
+    // DOES belong to a specific customer.
+    //
+    // ⛔ Do NOT read that as "platform tables do not carry an organization".
+    // The negative control on the same boot refutes it: `sys_audit_log` (1669
+    // rows) was correctly attributed throughout, because its writer resolves the
+    // organization from the RECORD the row is about and falls back to the
+    // session only when the record has none (plugin-audit
+    // `resolveRecordOrganizationField`, #8707 honouring #8287's ruling). Three
+    // platform side tables, two answers — that disagreement is the defect, not
+    // the column.
+    //
+    // Which column a side-table row should take its organization from is an
+    // open contract question on cloud#1395: the audit writer's resolver is
+    // scope-pinned to audit stamping by the #8778 ruling, so a second consumer
+    // needs its own. Pinned meanwhile by `suspended-run-store.test.ts`
+    // ('PINNED: a tenant-less trigger context…') and by check `a4` in cloud's
+    // `verify-hotcrm-saas.mjs`; both must be PROMOTED, never repaired, when the
+    // write side is fixed.
     organization_id: Field.lookup('sys_organization', {
       label: 'Organization',
       required: false,
       group: 'System',
+      // ⛔ String unchanged on purpose — same reason as
+      // `sys_approval_request.organization_id`: it is extracted into the
+      // generated i18n bundles, so the reword rides the write-side fix and its
+      // regeneration pass rather than arriving as a silent bundle drift here.
       description: 'Tenant that owns this run (propagated from the trigger context)',
     }),
 
