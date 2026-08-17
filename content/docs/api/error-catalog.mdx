@@ -526,8 +526,10 @@ if (!res.success) showToast(res.error);
 `/meta` refusals carry codes registered to `@objectstack/metadata-protocol` in the
 [error-code ledger](/docs/references/api/error-code-ledger), not the standard catalog
 above — so their status is published here rather than inherited from a category. This
-section documents the **type-spelling** refusal the `/meta` request boundary raises. It
-is not a complete inventory of `/meta` errors.
+section documents the two **type-boundary** refusals the `/meta` request boundary raises:
+the type-spelling refusal, and the unmintable-type refusal that guards writes. Both answer
+`INVALID_REQUEST` with `400`, so the code and the status cannot tell them apart — only the
+message can. It is not a complete inventory of `/meta` errors.
 
 ### `INVALID_REQUEST` — unrecognised type spelling
 
@@ -571,10 +573,86 @@ boundary is what keeps one type to one key.
 
 ⛔ **Not this error:** a segment that reaches for no declared type — `/meta/fieldz`, or
 a plugin-registered kind such as `theme` — is not a misspelling of anything the platform
-declares, so this rule stays silent and the request continues down the plugin path. A
-**write** whose segment is not a metadata type at all is refused separately: same
-`INVALID_REQUEST` code and `400` status, different message (*"… is not a metadata
-type"*). Tell the two apart by the message, not the code.
+declares, so this rule stays silent. On a **read** the request continues down the plugin
+path; on a **write** it meets the separate unmintable-type refusal documented immediately
+below, which carries the same `INVALID_REQUEST` code and `400` status and differs only in
+its message. Tell the two apart by the message, not the code.
+
+### `INVALID_REQUEST` — unmintable metadata type
+
+**HTTP Status:** 400  
+**Cause:** A **write** addresses a `:type` segment that is not a metadata type at all —
+not a misspelling of a declared type, but a name the platform has no type for.
+`PUT /meta/fieldz/showcase_task.title` is refused because nothing declares `fieldz`, and
+since `additionalTypes` was retired a plugin cannot declare one either — so the write
+would mint a `sys_metadata` namespace under `type='fieldz'` that nothing reads and nothing
+serves.
+
+**Fix:** Address a real metadata type; `GET /api/v1/meta/types` lists the ones the
+deployment carries. Unlike the spelling refusal above, this message names no replacement —
+the segment reaches for no declared type, so there is nothing to suggest.
+See the [Metadata API](/docs/api/metadata-api).  
+**Retry:** `no_retry` — replaying the same request against the same deployment returns the
+same `400`. ⚠️ That is stability, not determinism: the verdict is not a pure function of
+the type segment, and the exemptions below decide whether it fires at all.
+
+`PUT /api/v1/meta/fieldz/showcase_task.title` answers `400` with:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "INVALID_REQUEST",
+    "message": "[invalid_request] 'fieldz' is not a metadata type. The platform declares no such type, and since #8586 retired 'additionalTypes' a plugin cannot declare one either — so this write would mint a sys_metadata namespace under type='fieldz' that nothing reads and nothing serves. Address a real metadata type; GET /api/v1/meta/types lists the ones this deployment carries.",
+    "httpStatus": 400
+  }
+}
+```
+
+<Callout type="warn">
+**Two shapes reach this door and are served, not refused** — neither of them visible in
+the message, so a caller who does not read this entry finds them by collision:
+
+1. **Compound arity.** A `name` containing `/` exempts the request, because at that arity
+   the `:type` segment carries an **object** name rather than a type claim:
+   `PUT /meta/lead/views/all_leads` is `type='lead'`, `name='views/all_leads'`, and no
+   static contract can enumerate the objects a deployment carries. Residue, stated rather
+   than hidden: `PUT /meta/fieldz/a/b` is therefore **accepted** — at that arity `fieldz`
+   is a claim about an object, not about a metadata type. The exemption is the **arity**,
+   not the name: `PUT /meta/lead/all_leads` is still refused.
+2. **Pre-existing namespace.** If `sys_metadata` already holds rows under that type key,
+   the write proceeds. The **store** decides this, never the caller — the probe runs only
+   after the static verdict has already fired, and it asks whether the *namespace* exists,
+   not whether your item does. This is what keeps rows minted before this refusal existed
+   editable by the tooling that copies and re-saves them.
+
+⇒ **The same segment can be refused on one deployment and served on another, depending on
+stored state.** A `400` here is a statement about *this* deployment, not a portable
+verdict about the type name — so do not cache it as one, and do not treat a colleague's
+successful `PUT` as evidence that yours will be served.
+</Callout>
+
+**It is write-scoped.** The verdict runs on the one entry point that *mints* a namespace
+and nowhere else. Reads of an unrecognised type still answer — the live type set
+legitimately holds keys the static contract does not, and refusing reads would answer
+`400` for types this same service advertises through `GET /meta/types`. Rows already
+stored under an unrecognised type stay **deletable** for the opposite reason: refusing to
+delete them would strand the accumulation permanently instead of letting an operator clear
+it.
+
+**Why it is refused rather than passed through.** A namespace nothing reads and nothing
+serves is not a harmless extra key — it accumulates silently, and every row in it is
+invisible to the tooling that lists, validates and ships metadata. Refusing at the mint
+door is what stops the first row from being written; the exemptions above are what keep
+that refusal from stranding the rows written before it existed.
+
+⛔ **Not this error:** a segment that *misspells a type the platform declares* —
+`/meta/viewes` for `view` — is the spelling refusal documented above, which can name the
+replacement. And if the namespace probe fails for any reason *other* than `sys_metadata`
+not being provisioned yet, the request answers `503` rather than this `400`: a deployment
+whose metadata store is unreachable is not told its type does not exist. An
+**unprovisioned** store is the one read failure that does not escalate — it counts as "no
+rows", and this `400` stands.
 
 ---
 
