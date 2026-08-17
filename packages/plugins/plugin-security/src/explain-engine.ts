@@ -27,6 +27,7 @@ import {
 } from '@objectstack/core';
 import { matchesFilterCondition } from '@objectstack/formula';
 import { BUILTIN_IDENTITY_PLATFORM_ADMIN, ORGANIZATION_ADMIN_GRANTS } from '@objectstack/spec';
+import type { FieldMaskingRule } from '@objectstack/spec/data';
 import type { PermissionSet } from '@objectstack/spec/security';
 import type {
   AuthzPosture,
@@ -174,6 +175,28 @@ export interface ExplainEngineDeps {
     object: string,
     fieldRequiredPermissions: Record<string, string[]>,
   ) => Record<string, { readable?: boolean; editable?: boolean }>;
+  /**
+   * [#9127] The middleware's EFFECTIVE partial-mask set for this caller — the
+   * `partialRules` argument enforcement hands `FieldMasker.maskResults`, after
+   * the explicit-deny exclusion. Keyed by field, valued by the rule that will
+   * be applied.
+   *
+   * REQUIRED, deliberately. The field-mask decision has three outcomes
+   * (deleted / partially masked / served whole) and the binary
+   * {@link getFieldMask} can express only two, so an engine wired without this
+   * would report a partially-masked field as fully hidden and a gate-less
+   * rule field as fully readable — the exact misreport this dep exists to
+   * close. An optional dep would have let a new embedder re-open it silently;
+   * a required one makes the omission a compile error.
+   *
+   * Supply the enforcement composition, never a re-derivation of it: explain's
+   * module contract is that it "matches enforcement by construction".
+   */
+  getPartialMaskRules: (
+    sets: PermissionSet[],
+    object: string,
+    delegatorSets: PermissionSet[] | null,
+  ) => Promise<Record<string, FieldMaskingRule>>;
   /**
    * Configured additive baseline set NAMES (default `['member_default']`), for
    * attribution.
@@ -502,6 +525,17 @@ export function intersectFieldMasks(
     out[k] = { readable: ar && br, editable: ae && be };
   }
   return out;
+}
+
+/**
+ * [#9127] Render a `maskingRule` for the report. PRESENTATION ONLY — it never
+ * decides whether the rule applies (that is enforcement's call, arriving via
+ * `deps.getPartialMaskRules`); it only names the rule the caller's masked
+ * value was produced by, so an admin reading "why is this `138****5678`" gets
+ * the preset or the explicit span instead of a bare field name.
+ */
+function describeMaskingRule(rule: FieldMaskingRule): string {
+  return typeof rule === 'string' ? rule : `keepHead ${rule.keepHead}, keepTail ${rule.keepTail}`;
 }
 
 /** D1-equivalent OWD reading (mirrors plugin-sharing's effectiveSharingModel). */
@@ -1013,12 +1047,42 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   const mask = delegatorSets
     ? intersectFieldMasks(agentMask, deps.getFieldMask(delegatorSets, object, secMeta.fieldRequiredPermissions))
     : agentMask;
-  const hidden = Object.entries(mask).filter(([, p]) => p?.readable === false).map(([f]) => f);
+  // [#9127] The field-mask decision has THREE outcomes, not two — hidden
+  // (key deleted), PARTIALLY masked (key served, value replaced by the
+  // field's `maskingRule`), and readable. `deps.getPartialMaskRules` is the
+  // enforcement composition verbatim, never a second derivation of it: the
+  // binary mask below cannot express the middle state, and reading it alone
+  // is what made this layer call a partially-masked field fully hidden and a
+  // gate-less rule field fully readable.
+  //
+  // The hidden/partial split is `FieldMasker.maskResults`' own: it deletes a
+  // field when the binary mask denies it AND no rule applies, so a rule that
+  // survived the explicit-deny exclusion always demotes `hidden` to `partial`
+  // — including the capability-gated case, where the mask says `readable:
+  // false` precisely because the unmask gate is what the rule softens.
+  const partialRules = await deps.getPartialMaskRules(sets, object, delegatorSets);
+  const partial = Object.keys(partialRules);
+  const hidden = Object.entries(mask)
+    .filter(([f, p]) => p?.readable === false && !(f in partialRules))
+    .map(([f]) => f);
+  const listFields = (fields: string[], label: (f: string) => string): string =>
+    `[${fields.slice(0, 25).map(label).join(', ')}${fields.length > 25 ? ', …' : ''}]`;
+  const maskNarrows = hidden.length > 0 || partial.length > 0;
   layers.push({
     layer: 'fls',
-    verdict: hidden.length > 0 ? 'narrows' : 'not_applicable',
-    detail: hidden.length > 0
-      ? `${hidden.length} field(s) masked from responses: [${hidden.slice(0, 25).join(', ')}${hidden.length > 25 ? ', …' : ''}]` +
+    verdict: maskNarrows ? 'narrows' : 'not_applicable',
+    detail: maskNarrows
+      ? [
+          hidden.length > 0
+            ? `${hidden.length} field(s) masked from responses: ${listFields(hidden, (f) => f)}`
+            : null,
+          partial.length > 0
+            ? `${partial.length} field(s) PARTIALLY masked — the key is still served, its value ` +
+              `replaced: ${listFields(partial, (f) => `${f} (${describeMaskingRule(partialRules[f])})`)}`
+            : null,
+        ]
+          .filter((s): s is string => s !== null)
+          .join('; ') +
         (delegatorSets ? ' (intersection of agent + delegator masks, D10).' : '.')
       : 'No field-level masking applies.',
     contributors: [],

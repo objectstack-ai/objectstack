@@ -122,6 +122,12 @@ function makeStubEngine() {
             getPackage: () => undefined,
             registerItem: () => {},
             registerObject: () => {},
+            // [#9190] `getMetaItems({ type: 'app' })` decorates each app with
+            // its contributed nav groups. The double gained this the day a
+            // reference scan first read `app` — identity is the right stub,
+            // because the fold under test is about the TYPE KEY a read used,
+            // not about nav contribution.
+            applyNavContributions: (app: unknown) => app,
         },
     };
     return { engine, tables, reads, items };
@@ -434,37 +440,49 @@ describe('#9157 — findReferencesToMeta', () => {
     });
 
     it('CONTROL: a manifest-PRESENT plural still resolves its real dependents', async () => {
+        // [#9190] The fixture moved from `dashboard.widgets[].view` to
+        // `app.navigation[].viewName`, and the move is the point rather than a
+        // detail: `DashboardSchema` declares no `view` property anywhere, so
+        // the old fixture agreed with the old hand-curated path table and BOTH
+        // described a document the platform cannot store. `AppSchema.navigation`
+        // is real, and the site the walk uses for it is derived from that
+        // schema.
         const { engine, items } = makeStubEngine();
-        items.dashboard = [{ name: 'sales_dash', label: 'Sales', widgets: [{ id: 'w1', view: 'all_leads' }] }];
+        items.app = [{ name: 'sales_app', label: 'Sales', navigation: [{ viewName: 'all_leads' }] }];
         const p = new ObjectStackProtocolImplementation(engine);
 
         const res = await p.findReferencesToMeta({ type: PRESENT_PLURAL, name: 'all_leads' });
 
         expect(res.references).toEqual([
-            { type: 'dashboard', name: 'sales_dash', label: 'Sales', path: 'widgets[].view', kind: 'dashboard widget' },
+            { type: 'app', name: 'sales_app', label: 'Sales', path: 'navigation[].viewName', kind: 'app viewName' },
         ]);
     });
 
-    it('the manifest-ABSENT class is NOT closed here, and that is stated rather than implied', async () => {
-        // ⚠️ Honest scope pin. The card's `translations` example claims this verb
-        // answers `{ references: [] }` for a manifest-absent type — true, and the
-        // fold does not change it: every `REFERENCE_PATHS` key (`object`, `view`,
-        // `tool`, `skill`, `flow`, `dashboard`, `page`) is manifest-PRESENT, so
-        // `translation` has no registry entry either. This method's own doc calls
-        // an unregistered target a legitimate no-hit rather than an error.
+    it('[#9190] the manifest-ABSENT residue #9157 pinned here is CLOSED, and both spellings reach the same real hits', async () => {
+        // ⚠️ This pin has MOVED, deliberately. #9157 asserted that
+        // `translation` answers `{ references: [] }` whichever spelling you use
+        // — true then, because the hand-curated table had no `translation` key
+        // and this method's doc called that a legitimate no-hit. #9190 closed
+        // it the way the ruling required: by DERIVATION, not by adding a key.
+        // `DocSchema.translations` is a real, schema-declared reference site, so
+        // the walk finds it without anyone having written `translation` down.
         //
-        // Closing it is a `REFERENCE_PATHS` COVERAGE question, not a spelling
-        // one, and it is a different card. Asserted so a reader cannot over-read
-        // this PR's claim, and so the day `translation` gains a matcher this
-        // test goes red and asks to be re-read.
-        const { engine } = makeStubEngine();
+        // What #9157 owns is UNCHANGED and is what this test still proves: the
+        // two spellings fold to one answer. What changed is that the answer is
+        // no longer vacuously empty, so the test can prove the fold on a
+        // non-trivial result — which is a stronger assertion than the empty one
+        // it replaces.
+        const { engine, items } = makeStubEngine();
+        items.doc = [{ name: 'intro', label: 'Intro', translations: { greeting: { title: 'Hallo' } } }];
         const p = new ObjectStackProtocolImplementation(engine);
 
         const viaPlural = await p.findReferencesToMeta({ type: OVERLAY_ABSENT_PLURAL, name: 'greeting' });
         const viaCanonical = await p.findReferencesToMeta({ type: OVERLAY_ABSENT_TYPE, name: 'greeting' });
 
-        expect(viaPlural.references).toEqual([]);
-        expect(viaCanonical.references).toEqual([]);
+        expect(viaCanonical.references).toEqual([
+            { type: 'doc', name: 'intro', label: 'Intro', path: 'translations{key}', kind: 'doc translations' },
+        ]);
+        expect(viaPlural.references).toEqual(viaCanonical.references);
     });
 
     it('CONTROL: a spelling that reaches for no declared type is served, not refused', async () => {

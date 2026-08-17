@@ -9597,7 +9597,17 @@ export class ObjectQL implements IObjectQLEngine {
                const roWhenPreviousParent = repointsMaster
                    ? await this.resolveMasterDetailParent(updateSchema, null, priorRecord)
                    : undefined;
-               hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger, roWhenParent) as any;
+               // [#9107] `suppliedValues` — the SAME entry snapshot the static
+               // strip below consumes, now feeding the conditional one too, so
+               // both strips answer "did the CALLER write this key?" from one
+               // fact. Before this the conditional strip judged the post-hook
+               // payload, which gave a `readonlyWhen`-locked field no
+               // server-side write path at all: a hook derived the value and
+               // the strip deleted it, `isSystem` or not. The API-boundary lock
+               // is unchanged — a caller cannot make its own value look
+               // hook-written (see `ReadonlyWhenStripOptions`) — and `isSystem`
+               // is still NOT an exemption here, unlike the static strip below.
+               hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger, roWhenParent, { supplied: suppliedValues }) as any;
                reportDroppedFields(preRoWhen, hookContext.input.data as Record<string, unknown>, 'readonly_when');
                // [#2948] Enforce STATIC `readonly` on the write path for
                // non-system callers (system writes legitimately set read-only
@@ -9766,7 +9776,11 @@ export class ObjectQL implements IObjectQLEngine {
                        ? await this.resolveMasterDetailParents(updateSchema, null, priorRows)
                        : undefined;
                if (payloadHasReadonlyWhen) {
-                   hookContext.input.data = stripReadonlyWhenFieldsMulti(updateSchema as any, preRoWhenMulti, priorRows, this.logger, parentForRow) as any;
+                   // [#9107] Same entry snapshot, same authorship gate as the
+                   // by-id branch above — "both call sites" is the #3106 /
+                   // #4441 shape that gets missed, and a bulk write must not
+                   // reach a different verdict about who wrote a key.
+                   hookContext.input.data = stripReadonlyWhenFieldsMulti(updateSchema as any, preRoWhenMulti, priorRows, this.logger, parentForRow, { supplied: suppliedValues }) as any;
                    reportDroppedFields(preRoWhenMulti, hookContext.input.data as Record<string, unknown>, 'readonly_when');
                }
                // [#2948] Same static-`readonly` write guard on the bulk path —
