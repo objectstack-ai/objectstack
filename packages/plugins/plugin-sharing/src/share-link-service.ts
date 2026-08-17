@@ -23,6 +23,15 @@ import type { Expression } from '@objectstack/spec';
 // server-side validation and hook-condition gates evaluate predicates through.
 // See `assertEligible` for why this and not `compileCelToFilter`.
 import { ExpressionEngine } from '@objectstack/formula';
+// [#8489] The declared-field binding CONTRACT, imported rather than re-derived.
+// This file used to carry its own `bindDeclaredFields` — a hand-written mirror
+// whose own doc comment named what it was a copy of, which is exactly how a
+// second copy of a contract goes stale behind a convention. `@objectstack/objectql`
+// is a runtime `dependencies` entry here (not dev), and the canonical helper is
+// published from the lean `./core` entry, so there is no structural reason to
+// keep a copy. `declared-fields.ts`'s doc comment is the canonical statement of
+// the rule; this seam defers to it instead of restating it.
+import { materializeDeclaredFields } from '@objectstack/objectql/core';
 import type { SharingEngine } from './sharing-service.js';
 import {
   deleteRowsForDeletedRecords,
@@ -105,29 +114,6 @@ function getPolicy(schema: any): {
   };
 }
 
-/**
- * [#7861] Bind the candidate record's DECLARED fields before evaluating, so a
- * predicate over a field the driver simply did not return is not a fault.
- *
- * The same materialisation the two server-side CEL gates in `@objectstack/objectql`
- * do (`materializeDeclaredFields`, behind the validation and hook-condition
- * evaluators). It matters more here than there: several drivers omit NULL
- * columns entirely, so `record.status == 'published'` on a row whose `status`
- * is null would fault — and this gate FAILS CLOSED, so a fault is a refusal.
- * Without this, an eligibility policy would refuse links for exactly the rows
- * whose field is empty rather than judging them. Declared-and-absent therefore
- * binds to `null`, which is what the row means; an UNdeclared key still faults,
- * because that one really is an author typo.
- */
-function bindDeclaredFields(record: Record<string, unknown>, schema: any): Record<string, unknown> {
-  const declared = schema?.fields;
-  if (!declared || typeof declared !== 'object') return record;
-  const bound: Record<string, unknown> = { ...record };
-  for (const name of Object.keys(declared)) {
-    if (!(name in bound)) bound[name] = null;
-  }
-  return bound;
-}
 
 /** Parse `expiresAt` as either an ISO string or a relative duration like "7d", "24h", "30m". */
 function normaliseExpiresAt(input: string | null | undefined, maxDays: number): string | null {
@@ -270,8 +256,24 @@ function assertEligible(
     );
   }
 
+  // [#7861 / #8489] Bind the candidate record's DECLARED fields before
+  // evaluating, so a predicate over a field the driver simply did not return is
+  // not a fault. It matters more on this seam than on the others: several
+  // drivers omit NULL columns entirely, so `record.status == 'published'` on a
+  // row whose `status` is empty would fault — and this gate FAILS CLOSED, so a
+  // fault is a refusal. Without the binding, an eligibility policy would refuse
+  // links for exactly the rows whose field is empty rather than judging them.
+  //
+  // The RULE itself (declared-and-absent binds to `null`; an UNdeclared key
+  // still faults, because that one really is an author typo; `undefined` in an
+  // own key counts as absent, because CEL reads it exactly as it reads no key
+  // at all) is stated once, in `declared-fields.ts`. Do not restate it here.
+  //
+  // The spread is load-bearing: the canonical helper materialises IN PLACE and
+  // returns the same reference, while `record` is the row the caller just read
+  // out of `engine.find`. Copying keeps this gate a pure read of it.
   const verdict = ExpressionEngine.evaluate<unknown>(expr, {
-    record: bindDeclaredFields(record, schema),
+    record: materializeDeclaredFields({ ...record }, schema?.fields),
   });
   if (!verdict.ok) {
     throw makeError(
