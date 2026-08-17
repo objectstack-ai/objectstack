@@ -1284,7 +1284,7 @@ const PAGE_COMPONENT = {
             'app:launcher', 'nav:menu', 'nav:breadcrumb', 'global:search',
             'global:notifications', 'user:profile', 'ai:chat_window', 'ai:suggestion',
             'element:text', 'element:number', 'element:image', 'element:divider',
-            'element:button', 'element:filter', 'element:form', 'element:record_picker',
+            'element:button', 'element:form', 'element:record_picker',
             'element:text_input',
           ],
         },

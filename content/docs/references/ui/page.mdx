@@ -105,7 +105,7 @@ Interface-level page configuration (Airtable parity)
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| 'page:card' \| 'page:section' \| 'record:details' \| 'record:highlights' \| 'record:related_list' \| 'record:activity' \| 'record:chatter' \| 'record:discussion' \| 'record:path' \| 'record:alert' \| 'record:quick_actions' \| 'record:reference_rail' \| 'record:history' \| 'app:launcher' \| 'nav:menu' \| 'nav:breadcrumb' \| 'global:search' \| 'global:notifications' \| 'user:profile' \| 'ai:chat_window' \| 'ai:suggestion' \| 'element:text' \| 'element:number' \| 'element:image' \| 'element:divider' \| 'element:button' \| 'element:filter' \| 'element:form' \| 'element:record_picker' \| 'element:text_input'> \| string` | ✅ | Component Type (Standard enum or custom string) |
+| **type** | `Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| 'page:card' \| 'page:section' \| 'record:details' \| 'record:highlights' \| 'record:related_list' \| 'record:activity' \| 'record:chatter' \| 'record:discussion' \| 'record:path' \| 'record:alert' \| 'record:quick_actions' \| 'record:reference_rail' \| 'record:history' \| 'app:launcher' \| 'nav:menu' \| 'nav:breadcrumb' \| 'global:search' \| 'global:notifications' \| 'user:profile' \| 'ai:chat_window' \| 'ai:suggestion' \| 'element:text' \| 'element:number' \| 'element:image' \| 'element:divider' \| 'element:button' \| 'element:form' \| 'element:record_picker' \| 'element:text_input'> \| string` | ✅ | Component Type (Standard enum or custom string) |
 | **id** | `string` | optional | Unique instance ID |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **properties** | `Record<string, any>` | optional (default: `{}`) | Component props passed to the widget. See component.zod.ts for schemas. |
@@ -157,7 +157,6 @@ Interface-level page configuration (Airtable parity)
 * `element:image`
 * `element:divider`
 * `element:button`
-* `element:filter`
 * `element:form`
 * `element:record_picker`
 * `element:text_input`
@@ -173,7 +172,7 @@ Interface-level page configuration (Airtable parity)
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Region name (e.g. "sidebar", "main", "header") |
 | **width** | `Enum<'small' \| 'medium' \| 'large' \| 'full'>` | optional |  |
-| **components** | `{ type: Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| … +30 more> \| string; id?: string; label?: string \| Record<string, string>; properties?: Record<string, any>; … }[]` | ✅ | Components in this region |
+| **components** | `{ type: Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| … +29 more> \| string; id?: string; label?: string \| Record<string, string>; properties?: Record<string, any>; … }[]` | ✅ | Components in this region |
 
 
 ---

@@ -34,8 +34,6 @@
     "ui/ElementButtonProps:iconPosition = \"left\"",
     "ui/ElementButtonProps:size = \"medium\"",
     "ui/ElementButtonProps:variant = \"primary\"",
-    "ui/ElementFilterProps:layout = \"inline\"",
-    "ui/ElementFilterProps:showSearch = true",
     "ui/ElementFormProps:mode = \"create\"",
     "ui/ElementImageProps:fit = \"cover\"",
     "ui/ElementMetadataViewerProps:detail = \"business\"",

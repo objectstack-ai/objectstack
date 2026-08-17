@@ -1625,19 +1625,50 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 }));
 
+/**
+ * One prescription for every retired `element:filter` key — the retirement is
+ * ELEMENT-grain (#9220), so all six keys carry the same story and differ only
+ * in the fully-qualified key that heads the string (house style, rule 1).
+ */
+const elementFilterRetired = (key: string): string =>
+  '`element:filter` property `' + key + '` was removed in @objectstack/spec 17 '
+  + '(#9220, ADR-0049) — the whole `element:filter` element is retired: no renderer for it '
+  + 'ever shipped in objectui, framework or cloud (Studio\'s designer palette lists it as a '
+  + 'no-renderer exclusion), so every key on this element was a capability claim nothing '
+  + 'kept. Delete the `element:filter` component; list surfaces own their filtering — use a '
+  + "view's `userFilters` quick-filter bar or the list toolbar's filter builder. "
+  + 'Run `os migrate meta --from 17` to rewrite existing sources automatically.';
+
+/**
+ * RETIRED at element grain (#9220, ADR-0049 enforce-or-remove). `element:filter`
+ * never had a renderer anywhere: objectui registers none (its
+ * `renderers/basic/elements.tsx` header deferred it to "owning plugins" that
+ * never materialized), Studio's designer palette lists it as a no-renderer
+ * exclusion ("list surfaces own filtering"), and the 2026-06 page-liveness
+ * audit already recorded it rendering "Unknown component type". Every key was
+ * therefore a capability claim nothing kept — the same declared-but-unread
+ * shape #9198 retired per-key on the two input elements, one grain wider.
+ *
+ * The schema (and its `ComponentPropsMap` row) stays exported so the #5068
+ * props gate keeps DISPATCHING on `type: 'element:filter'` and refusing every
+ * authored key with the prescription — deleting the row would demote the type
+ * to an unregistered custom string the gate deliberately skips, turning a loud
+ * retirement back into a silent no-op. A bare node with empty `properties`
+ * parses clean (the open `type` union accepts any string, so a node-level
+ * refusal is not expressible here); the migration strips the keys and leaves
+ * exactly that bare, inert node.
+ */
 export const ElementFilterPropsSchema = lazySchema(() => strictObject({
   surface: 'this `element:filter`',
   history: PROPS_HISTORY,
   guidanceSets: COMPONENT_LEVEL_GUIDANCE,
 }, {
-  object: z.string().describe('Object to filter'),
-  fields: z.array(z.string()).describe('Filterable field names'),
-  targetVariable: z.string().optional().describe('Page variable to store filter state'),
-  layout: z.enum(['inline', 'dropdown', 'sidebar'])
-    .optional().default('inline').describe('Filter display layout'),
-  showSearch: z.boolean().optional().default(true).describe('Show search input'),
-  /** ARIA accessibility */
-  aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
+  object: retiredKey(elementFilterRetired('object')),
+  fields: retiredKey(elementFilterRetired('fields')),
+  targetVariable: retiredKey(elementFilterRetired('targetVariable')),
+  layout: retiredKey(elementFilterRetired('layout')),
+  showSearch: retiredKey(elementFilterRetired('showSearch')),
+  aria: retiredKey(elementFilterRetired('aria')),
 }));
 
 export const ElementFormPropsSchema = lazySchema(() => strictObject({
@@ -2307,6 +2338,10 @@ export const ComponentPropsMap = {
 
   // Interactive Elements
   'element:button': ElementButtonPropsSchema,
+  // RETIRED at element grain (#9220) — the row STAYS so the #5068 props gate
+  // keeps dispatching on the type and refusing every authored key with the
+  // prescription; deleting it would demote `element:filter` to an unregistered
+  // custom string the gate deliberately skips. See the schema's own header.
   'element:filter': ElementFilterPropsSchema,
   'element:form': ElementFormPropsSchema,
   'element:record_picker': ElementRecordPickerPropsSchema,

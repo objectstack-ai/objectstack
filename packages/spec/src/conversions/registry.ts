@@ -6793,9 +6793,16 @@ const elementInputTargetVariableRemoved: MetadataConversion = {
                   properties: { inputType: 'email', targetVariable: 'contact_email' },
                 },
                 { type: 'element:record_picker', properties: { object: 'showcase_project', targetVariable: 'selected_id' } },
-                // `targetVariable` on `element:filter` is a DIFFERENT surface,
-                // outside #9198's disposition — untouched here.
-                { type: 'element:filter', properties: { object: 'a', fields: ['status'], targetVariable: 'active_filter' } },
+                // Negative control: a `targetVariable` on a type OUTSIDE this
+                // conversion's dispatch proves the strip is scoped by the
+                // component TYPE, not by the key name. It was originally an
+                // `element:filter` row ("a DIFFERENT surface, outside #9198's
+                // disposition") — #9220 then retired that element at element
+                // grain and its conversion strips every `element:filter` key,
+                // so the control moved to an open-union custom type, which no
+                // conversion may ever touch (the #5068 gate's deliberate-skip
+                // class). Same assertion, one hop further out.
+                { type: 'custom:legacy_input', properties: { targetVariable: 'active_filter' } },
                 // Nested one container down (#6775) — the walk descends.
                 {
                   type: 'page:card',
@@ -6840,7 +6847,7 @@ const elementInputTargetVariableRemoved: MetadataConversion = {
                   properties: { inputType: 'email' },
                 },
                 { type: 'element:record_picker', properties: { object: 'showcase_project' } },
-                { type: 'element:filter', properties: { object: 'a', fields: ['status'], targetVariable: 'active_filter' } },
+                { type: 'custom:legacy_input', properties: { targetVariable: 'active_filter' } },
                 {
                   type: 'page:card',
                   properties: {
@@ -6866,8 +6873,155 @@ const elementInputTargetVariableRemoved: MetadataConversion = {
         },
       ],
     },
-    // One per stripped key — the filter element keeps its (out-of-scope) key.
+    // One per stripped key — the custom-typed control keeps its key.
     expectedNotices: 4,
+  },
+};
+
+/**
+ * `element:filter` — the whole element retired (protocol 18, #9220, ADR-0049
+ * enforce-or-remove at ELEMENT grain).
+ *
+ * #9198 retired `targetVariable` per-key on the two input elements and left
+ * this element's copy alone because the finding was wider than one key:
+ * measured at retirement time (objectstack @2f65b1b42, objectui @5ffcc14; cloud
+ * per the card's recorded sweep), NO renderer or behavior reader of
+ * `element:filter` exists anywhere. objectui registers no renderer (its
+ * `renderers/basic/elements.tsx` header deferred the element to "owning
+ * plugins" that never materialized), Studio's designer palette carries it as a
+ * no-renderer PALETTE_EXCLUSIONS entry ("list surfaces own filtering
+ * (userFilters / filter builder)"), and the 2026-06 page-liveness audit
+ * recorded it rendering "Unknown component type". Every key was a capability
+ * claim nothing kept — per-key retirement would have been the wrong grain, so
+ * all six authorable keys are tombstoned together and this conversion strips
+ * them together.
+ *
+ * Pure lossless deletes — no key ever had an effect to lose. The component
+ * node itself is NOT removed: the open `type` union tolerates a bare inert
+ * node (nothing rendered it before either), and deleting authored page nodes
+ * is a layout decision a mechanical conversion must not make. The
+ * prescription tells the author to delete the component and use the list
+ * surface's own filtering instead.
+ */
+const elementFilterRemoved: MetadataConversion = {
+  id: 'element-filter-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface:
+    'page.component.element:filter.object / page.component.element:filter.fields / '
+    + 'page.component.element:filter.targetVariable / page.component.element:filter.layout / '
+    + 'page.component.element:filter.showSearch / page.component.element:filter.aria',
+  summary:
+    "the whole 'element:filter' element retired (#9220 — no renderer for it ever shipped in "
+    + 'any repo, so every key was a capability claim nothing kept; list surfaces own their '
+    + "filtering via a view's userFilters / the list filter builder). All six props are "
+    + 'stripped; the bare node stays, inert as it always was',
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      if (component.type !== 'element:filter') return component;
+      const properties = component.properties;
+      if (!isDict(properties)) return component;
+      const stripped = stripKeys(
+        properties,
+        ['object', 'fields', 'targetVariable', 'layout', 'showSearch', 'aria'],
+        emit,
+        `${path}.properties`,
+      );
+      if (stripped === properties) return component;
+      return { ...component, properties: stripped };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'order_board',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'element:filter',
+                  properties: {
+                    object: 'order',
+                    fields: ['status', 'priority'],
+                    targetVariable: 'active_filter',
+                    layout: 'sidebar',
+                    showSearch: true,
+                  },
+                },
+                // Key overlap on a DIFFERENT type rides through untouched —
+                // `object` is also an `element:form` prop, and the strip
+                // dispatches on the component type, not the key name.
+                { type: 'element:form', properties: { object: 'order' } },
+                // Nested one container down (#6775) — the walk descends.
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Orders',
+                    children: [
+                      { type: 'element:filter', properties: { object: 'order', fields: ['status'] } },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        // The named-slot shape, on a slotted record page.
+        {
+          name: 'order_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            side: [
+              {
+                type: 'element:filter',
+                properties: { object: 'order', fields: ['status'], aria: { label: 'Order filter' } },
+              },
+            ],
+          },
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'order_board',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                { type: 'element:filter', properties: {} },
+                { type: 'element:form', properties: { object: 'order' } },
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Orders',
+                    children: [
+                      { type: 'element:filter', properties: {} },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'order_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            side: [
+              { type: 'element:filter', properties: {} },
+            ],
+          },
+        },
+      ],
+    },
+    // One per stripped key: 5 on the top-level node, 2 on the nested one,
+    // 3 on the slotted one. The `element:form` neighbor is untouched.
+    expectedNotices: 10,
   },
 };
 
@@ -6943,7 +7097,12 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     appHiddenToUnpublished,
     actionGlobalNavLocationRemoved,
   ],
-  18: [fieldMalformedScalePrecisionRemoved, recordChatterPositionVocabulary, elementInputTargetVariableRemoved],
+  18: [
+    fieldMalformedScalePrecisionRemoved,
+    recordChatterPositionVocabulary,
+    elementInputTargetVariableRemoved,
+    elementFilterRemoved,
+  ],
 };
 
 /** Flattened, deterministic list of every conversion the loader knows about. */
