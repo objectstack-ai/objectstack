@@ -171,10 +171,14 @@ const PROBES: ReadonlyArray<{ file: string; re: RegExp; key: (m: RegExpExecArray
   //
   // packages/rest/src has ZERO realtime refs today (#2992). The original
   // single probe here watched for a route literal containing `/realtime`,
-  // and that spelling is one the project's own documentation contradicts:
-  // `content/docs/protocol/kernel/realtime-protocol.mdx` names the planned
-  // transports as WebSocket (`/ws`) and SSE (`/api/v1/stream`), NEITHER of
-  // which contains `/realtime`. Mounting either produced no key, no
+  // and that spelling is one the project's own documentation contradicts: the
+  // "Real-Time Protocols" protocol page (under the protocol/kernel docs
+  // section) names the planned transports as WebSocket (`/ws`) and SSE
+  // (`/api/v1/stream`), NEITHER of which contains `/realtime`. That page is
+  // cited by TITLE rather than by path on purpose — `check:cross-package-test-inputs`
+  // scans this file's source TEXT and cannot tell a prose mention from a real
+  // read, so spelling the path here would declare an input this test does not
+  // have. Mounting either transport produced no key, no
   // UNCLASSIFIED surface and no red CI, while the one documented path the
   // pattern did match — `/api/v1/realtime/events` — is the debug/event-log
   // endpoint that carries no subscription fan-out. The guard was aimed at the
