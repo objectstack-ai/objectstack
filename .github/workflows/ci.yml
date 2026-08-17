@@ -1444,3 +1444,161 @@ jobs:
         with:
           path: packages/console/dist
           key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}
+
+  # ── The queue's single required context (#9283 / #9318) ───────────────────
+  #
+  # THE NAME IS THE CONTRACT. Branch protection and the merge queue match a
+  # required check BY CHECK-RUN NAME, and a job's check-run name is its `name:`
+  # value. `name: CI` here is therefore the required-context literal, not a
+  # label: renaming this job silently detaches whatever branch protection lists
+  # — the identical trap `temporal-conformance` records above ("the name IS the
+  # required check, so renaming it would silently drop the gate"). Since #6865
+  # that half is asserted rather than only written down: this literal is pinned
+  # by `check:required-contexts`, so a rename fails in the ESLint job instead of
+  # in the queue.
+  #
+  # ── Why this job exists: two incidents, opposite failure modes ─────────────
+  #
+  #   - #9283: `Temporal Conformance (live PG + MySQL)` failed and the PR merged
+  #     anyway, because that job's name was not in the required set. The
+  #     maintainer's ruling was Option A — the full suite SHOULD block the merge
+  #     queue — and the required set then had to name every gate job one by one,
+  #     a list that drifts every time a gate is added or renamed.
+  #   - The first fix attempt registered the required check as `CI`, which is
+  #     this WORKFLOW's name (line 1) and matched no check run at all. A
+  #     workflow name is not a check-run name. The context sat permanently
+  #     "Expected", green merge groups timed out, and NOTHING merged for ~1h45m
+  #     on 2026-08-17 (11:29Z until the maintainer removed the entry ~13:15Z).
+  #     The failure mode had flipped from "red merges anyway" to "green cannot
+  #     merge".
+  #
+  # This job makes that name real. One context — `CI` — covers every gate below
+  # it, so the required set stops being a hand-maintained roster of job names:
+  # adding a gate to `needs:` here extends the queue's protection with no
+  # settings change, which is the durable form of the #9283 ruling.
+  #
+  # ⛔ Sequencing, recorded because it is what the second incident cost: this
+  # job must be LIVE ON `main` before `CI` goes back into the required set, and
+  # only the maintainer can make that settings change (no agent seat can read or
+  # write Settings → Rulesets — the API answers 403; see
+  # scripts/check-required-contexts.mjs).
+  #
+  # ── What it needs, and what it deliberately does not ──────────────────────
+  #
+  # `needs:` lists the jobs that carry a GATE VERDICT, plus `filter`:
+  #
+  #   test-gate · dogfood-gate · temporal-conformance · build-core ·
+  #   build-docs · console-pin
+  #
+  # `filter` is included because it is not merely plumbing here: if `filter`
+  # itself fails, every downstream `if:` evaluates against EMPTY outputs (see
+  # THE FILTER CONTRACT, #4928), so no scheduling decision in the run was
+  # actually made and a green roll-up would certify a run whose shape nobody
+  # chose. `test-gate` and `dogfood-gate` already read `needs.filter.result` for
+  # that reason; this makes it true for the run as a whole.
+  #
+  # The sharded matrices (`test`, `dogfood`, `dogfood-verify`) are deliberately
+  # ABSENT. Their verdicts reach this job through their aggregate gates, which
+  # COUNT per-shard attestations instead of reading one aggregate word — and
+  # #6082 measured both directions of what reading that word does: run
+  # 31120902911 painted a false red off the undocumented `abandoned`, and run
+  # 31114735713 had that same value SWALLOW a shard's real `failure`. Listing
+  # the matrices here would reintroduce exactly that read, one level up.
+  #
+  # ── Why the results are read explicitly ───────────────────────────────────
+  #
+  # `if: always()` is load-bearing twice over. Without it, a needed job that
+  # fails makes this job SKIP, and a skipped required context publishes nothing
+  # (permanent pending — the #3622 deadlock) or reads as green; and a docs-only
+  # PR, where every core gate is legitimately `skipped` by `filter`, must still
+  # publish a green `CI` or nothing could ever merge. Default `needs:`
+  # propagation cannot express that, which is why the verdict is computed from
+  # `needs.*.result` in the step below rather than left to GitHub.
+  #
+  # The verdict table:
+  #
+  #   success   → pass. The gate ran and was green.
+  #   skipped   → pass. `filter` said this run does not touch that surface; the
+  #               aggregate gates apply #4928's own guard to their skips.
+  #   failure   → FAIL.
+  #   cancelled → FAIL. This diverges on purpose from the shard gates, which
+  #               pass `cancelled` for #3668's reason (a superseded push cancels
+  #               the in-flight matrix, and failing there reds a SHA nobody is
+  #               merging). At whole-gate level the same word means the gate
+  #               never reached a verdict at all, and on a `merge_group` build
+  #               it means the queue build was dropped — neither is something a
+  #               green `CI` may certify. The superseded-SHA cost is unchanged:
+  #               a newer run publishes newer contexts on the newer SHA.
+  #   anything  → FAIL, loudly, naming the value. Runners really do produce
+  #   else        undocumented lifecycle values (`abandoned`, #6082), and the
+  #               maintainer REJECTED whitelisting one as a pass on 2026-08-07:
+  #               a discarded job is not moot while the queue is still consuming
+  #               the run's verdicts, so passing it publishes green over a gate
+  #               that never ran. A false red costs a re-run; a false green
+  #               merges unverified code.
+  #
+  # An empty `needs` context is a failure too, never a pass: a roll-up that read
+  # nothing has verified nothing (#4690).
+  ci-rollup:
+    name: CI
+    needs:
+      - filter
+      - test-gate
+      - dogfood-gate
+      - temporal-conformance
+      - build-core
+      - build-docs
+      - console-pin
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      # No checkout: the whole input is the `needs` context, which the runner
+      # already has. Cost is a few seconds of one ubuntu-latest runner per run.
+      - name: Roll up every gate verdict
+        env:
+          # The whole context, so this step covers whatever `needs:` above
+          # lists — one roster to maintain instead of two that can disagree.
+          OS_NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+
+          if ! command -v jq >/dev/null 2>&1; then
+            echo "::error::jq is unavailable on this runner, so no gate verdict could be read. Refusing to publish a green CI over an unread roll-up (#4690)."
+            exit 1
+          fi
+
+          verdicts="$(printf '%s' "$OS_NEEDS" | jq -r 'to_entries[] | "\(.key) \(.value.result // "«absent»")"' | sort)"
+
+          if [ -z "$verdicts" ]; then
+            echo "::error::the needs context is empty — this roll-up read no gate verdicts at all, so it cannot report success (#4690)."
+            exit 1
+          fi
+
+          failed=0
+          while read -r job result; do
+            case "$result" in
+              success|skipped)
+                printf '  ok   %-24s %s\n' "$job" "$result"
+                ;;
+              failure|cancelled)
+                printf '  FAIL %-24s %s\n' "$job" "$result"
+                echo "::error::gate '$job' concluded '$result' — CI is red."
+                failed=1
+                ;;
+              *)
+                printf '  FAIL %-24s %s (unrecognised)\n' "$job" "$result"
+                echo "::error::gate '$job' concluded '$result', which is not one of success/skipped/failure/cancelled. Treating an unrecognised runner lifecycle value as a PASS would publish a green required context over a gate that never ran (#6082); failing closed instead."
+                failed=1
+                ;;
+            esac
+          done <<< "$verdicts"
+
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::CI roll-up failed — see the per-gate lines above."
+            exit 1
+          fi
+
+          echo "✓ CI: every gate this run scheduled is green (skips counted as pass)."

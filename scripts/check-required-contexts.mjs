@@ -211,6 +211,25 @@ export const REQUIRED_CONTEXTS = [
     carries: 'the live-server datetime conformance axis (#3912/#3942)',
   },
   {
+    workflow: 'ci.yml',
+    job: 'ci-rollup',
+    context: 'CI',
+    // Enrolled AHEAD of the settings change, deliberately, and this is the one
+    // row where that ordering is the point. #9283's ruling (Option A — the full
+    // suite blocks the queue) was first applied by registering `CI`, which is
+    // ci.yml's WORKFLOW name and matched no check run: the context sat
+    // permanently "Expected" and nothing merged for ~1h45m on 2026-08-17. The
+    // roll-up job makes the name real, and the maintainer re-adds `CI` to the
+    // required set only AFTER this lands. Until then the row is inert, which
+    // this registry's header already licenses ("adding a row here does NOT make
+    // a context required … a pin that is merely inert, never wrong") — while
+    // the pin it buys is live from day one: the whole point of the roll-up is
+    // that one stable string survives every job rename beneath it, so that
+    // string is exactly what must not move unnoticed.
+    authorized: '#9283 maintainer ruling (Option A, 2026-08-17) implemented by #9318; the settings entry is the maintainer step that follows this merge',
+    carries: 'every gate job in ci.yml, rolled up — the single required context that replaces the per-job roster the queue used to need',
+  },
+  {
     workflow: 'adr-merge-approval.yml',
     job: 'adr-merge-approval',
     context: 'ADR maintainer approval',
