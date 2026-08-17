@@ -1740,7 +1740,22 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
    */
   limit: z.number().int().positive().optional()
     .describe('Max records offered — synonym of the component-level `dataSource.limit`, which takes precedence when both are set (renderer default 50)'),
-  targetVariable: z.string().optional().describe('Page variable to bind selected record ID(s)'),
+  /**
+   * REMOVED (#9198). ADR-0049 enforce-or-remove: a declarative hint with zero
+   * readers — the live binding runs the other direction, resolved from the
+   * page variable whose `source` names this component's `id`
+   * ({@link PageVariableSchema}), so authoring only `targetVariable` bound
+   * nothing while reporting success.
+   */
+  targetVariable: retiredKey(
+    '`element:record_picker` property `targetVariable` was removed in @objectstack/spec 17 '
+    + '(#9198, ADR-0049) — it was a declarative hint no renderer ever read: the live binding '
+    + "runs the other direction, resolved from the page variable whose `source` names this "
+    + "component's `id`, so authoring only `targetVariable` bound nothing while reporting "
+    + 'success. Delete the key; to bind the picked record id, declare it on the variable — '
+    + "`variables: [{ name: '<var>', type: 'record_id', source: '<this component id>' }]`. "
+    + 'Run `os migrate meta --from 17` to rewrite existing sources automatically.',
+  ),
   placeholder: I18nLabelSchema.optional().describe('Placeholder text'),
   /** Shown in place of the row list when the query returns nothing. */
   emptyText: I18nLabelSchema.optional().describe('Text shown when the query returns no records (default "No records")'),
@@ -1807,8 +1822,23 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
   required: z.boolean().optional().default(false).describe('Mark the field as required'),
   disabled: z.boolean().optional().default(false).describe('Disable the input'),
   description: I18nLabelSchema.optional().describe('Helper text shown below the input'),
-  targetVariable: z.string().optional()
-    .describe('Page variable this input writes to. Declarative hint; the live binding resolves via the variable whose `source` equals this component id (see PageVariableSchema).'),
+  /**
+   * REMOVED (#9198). ADR-0049 enforce-or-remove: the key's own describe text
+   * already called it a "declarative hint" that the live binding does not use
+   * — the binding resolves from the page variable whose `source` names this
+   * component's `id` ({@link PageVariableSchema}). Zero readers anywhere; an
+   * author who wrote only `targetVariable` and no variable `source` got an
+   * input that wrote nothing, with a success receipt (the ADR-0078 shape).
+   */
+  targetVariable: retiredKey(
+    '`element:text_input` property `targetVariable` was removed in @objectstack/spec 17 '
+    + '(#9198, ADR-0049) — it was a declarative hint no renderer ever read: the live binding '
+    + "runs the other direction, resolved from the page variable whose `source` names this "
+    + "component's `id`, so authoring only `targetVariable` bound nothing while reporting "
+    + 'success. Delete the key; to bind the typed value, declare it on the variable — '
+    + "`variables: [{ name: '<var>', type: 'string', source: '<this component id>' }]`. "
+    + 'Run `os migrate meta --from 17` to rewrite existing sources automatically.',
+  ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 }));

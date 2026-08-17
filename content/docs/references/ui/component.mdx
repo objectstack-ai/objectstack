@@ -149,7 +149,7 @@ const result = AIChatWindowProps.parse(data);
 | **filter** | `any` | optional | Filter criteria for available records |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Row order — synonym of the component-level `dataSource.sort`, which takes precedence when both are set |
 | **limit** | `integer` | optional | Max records offered — synonym of the component-level `dataSource.limit`, which takes precedence when both are set (renderer default 50) |
-| **targetVariable** | `string` | optional | Page variable to bind selected record ID(s) |
+| **targetVariable** | `never` | optional | [REMOVED] `element:record_picker` property `targetVariable` was removed in @objectstack/spec 17 (#9198, ADR-0049) — it was a declarative hint no renderer ever read: the live binding runs the other direction, resolved from the page variable whose `source` names this component's `id`, so authoring only `targetVariable` bound nothing while reporting success. Delete the key; to bind the picked record id, declare it on the variable — `variables: [{ name: '<var>', type: 'record_id', source: '<this component id>' }]`. Run `os migrate meta --from 17` to rewrite existing sources automatically. |
 | **placeholder** | `string \| Record<string, string>` | optional | Placeholder text |
 | **emptyText** | `string \| Record<string, string>` | optional | Text shown when the query returns no records (default "No records") |
 | **displayField** | `never` | optional | [REMOVED] `element:record_picker` property `displayField` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0087 D2) — it was a required declaration no renderer ever read, while the renderer honoured `labelField` for the same thing and defaulted to `name`. Rename the key to `labelField`; the value (a field name) is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
@@ -173,7 +173,7 @@ const result = AIChatWindowProps.parse(data);
 | **required** | `boolean` | optional (default: `false`) | Mark the field as required |
 | **disabled** | `boolean` | optional (default: `false`) | Disable the input |
 | **description** | `string \| Record<string, string>` | optional | Helper text shown below the input |
-| **targetVariable** | `string` | optional | Page variable this input writes to. Declarative hint; the live binding resolves via the variable whose `source` equals this component id (see PageVariableSchema). |
+| **targetVariable** | `never` | optional | [REMOVED] `element:text_input` property `targetVariable` was removed in @objectstack/spec 17 (#9198, ADR-0049) — it was a declarative hint no renderer ever read: the live binding runs the other direction, resolved from the page variable whose `source` names this component's `id`, so authoring only `targetVariable` bound nothing while reporting success. Delete the key; to bind the typed value, declare it on the variable — `variables: [{ name: '<var>', type: 'string', source: '<this component id>' }]`. Run `os migrate meta --from 17` to rewrite existing sources automatically. |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 

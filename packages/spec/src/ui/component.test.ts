@@ -979,11 +979,9 @@ describe('Interactive Elements — element:record_picker', () => {
       valueField: 'id',
       label: 'Account',
       filter: { status: 'active' },
-      targetVariable: 'selected_account',
       placeholder: 'Search accounts...',
       emptyText: 'No accounts',
     });
-    expect(props.targetVariable).toBe('selected_account');
     expect(props.labelField).toBe('name');
     expect(props.valueField).toBe('id');
     expect(props.label).toBe('Account');
@@ -1039,6 +1037,15 @@ describe('Interactive Elements — element:record_picker', () => {
     expect(props).not.toHaveProperty('displayField');
     expect(props).not.toHaveProperty('searchFields');
     expect(props).not.toHaveProperty('multiple');
+    expect(props).not.toHaveProperty('targetVariable');
+  });
+
+  // #9198 tombstone — `targetVariable` was a declarative hint with zero
+  // readers; the live binding is the page variable whose `source` names this
+  // component's `id` (ADR-0049 enforce-or-remove).
+  it('rejects the retired `targetVariable` with its prescription', () => {
+    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', targetVariable: 'selected_id' }))
+      .toThrow(/`targetVariable`.*removed.*Delete the key/s);
   });
 
   // ── #6276 — the flat `sort` / `limit` shorthands ─────────────────────────
@@ -1140,11 +1147,22 @@ describe('Interactive Elements — element:text_input', () => {
       required: true,
       disabled: false,
       description: 'We never share it',
-      targetVariable: 'email',
     });
     expect(props.inputType).toBe('email');
     expect(props.required).toBe(true);
-    expect(props.targetVariable).toBe('email');
+  });
+
+  // #9198 tombstone — `targetVariable` was a declarative hint with zero
+  // readers; the live binding is the page variable whose `source` names this
+  // component's `id` (ADR-0049 enforce-or-remove).
+  it('rejects the retired `targetVariable` with its prescription', () => {
+    expect(() => ElementTextInputPropsSchema.parse({ targetVariable: 'email' }))
+      .toThrow(/`targetVariable`.*removed.*Delete the key/s);
+  });
+
+  it('does not materialize the retired `targetVariable` on a clean parse', () => {
+    const props = ElementTextInputPropsSchema.parse({});
+    expect(props).not.toHaveProperty('targetVariable');
   });
 
   it('should accept all input types', () => {

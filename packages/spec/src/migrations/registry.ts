@@ -4877,8 +4877,20 @@ const step18: MigrationStep = {
     '`bottom`/`right`/`left`; the mechanical conversion rewrites the old spellings ' +
     '(`sidebar` → `right`, `inline` → `bottom`, `drawer` → `right`), and the three ' +
     'schema defaults (`position`, `collapsible`, `defaultCollapsed`) are dropped per ' +
-    'the `maxVisible` principle — renderer fallbacks stay the renderer\'s facts.',
-  conversionIds: ['field-malformed-scale-precision-removed', 'record-chatter-position-vocabulary'],
+    'the `maxVisible` principle — renderer fallbacks stay the renderer\'s facts. ' +
+    'It also retires `targetVariable` on `element:text_input` and ' +
+    '`element:record_picker` (#9198, ADR-0049 enforce-or-remove): a declarative hint ' +
+    'with zero readers in any repo — the live binding runs the other direction, ' +
+    'resolved from the page variable whose `source` names the component\'s `id` ' +
+    '(PageVariableSchema) — so an author who wrote only `targetVariable` got an input ' +
+    'that wrote nothing, with a success receipt. The mechanical conversion strips the ' +
+    'key from old sources (pure lossless delete — it never had an effect to lose); ' +
+    'the tombstone\'s prescription says how to declare the binding that works.',
+  conversionIds: [
+    'field-malformed-scale-precision-removed',
+    'record-chatter-position-vocabulary',
+    'element-input-target-variable-removed',
+  ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
@@ -6141,6 +6153,48 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // The prescription reaches authors through the tombstone (`tsc` + the parse)
     // and the D3 semantic entry `metadata-plugin-additional-types-retired`.
     'kernel/MetadataPluginConfig:additionalTypes',
+    // #9198 — ADR-0049 enforce-or-remove. `targetVariable` on
+    // `element:record_picker` was a declarative hint with zero readers: the picker
+    // writes the selected record id through the reverse binding — the page
+    // variable whose `source` names this component's `id` (PageVariableSchema;
+    // `usePageVariableBinding(schema?.id)` in objectui's console renderer) — and
+    // nothing anywhere read this key. Measured (objectstack-ai/objectui#3834,
+    // re-verified at retirement time): zero production readers in objectui,
+    // framework and cloud; the only repo-wide hits were the reverse-parity gate's
+    // exemption block and spec's own accept tests. Same silent-no-op hazard and
+    // same disposition as the `element:text_input` twin registered beside this
+    // entry, and as the #5775 record-picker inert keys one shape over.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // Sources are rewritten by the D2 conversion
+    // `element-input-target-variable-removed`.
+    'ui/ElementRecordPickerProps:targetVariable',
+    // #9198 — ADR-0049 enforce-or-remove. `targetVariable` on `element:text_input`
+    // was a declarative hint with zero readers: its own describe text said the
+    // live binding "resolves via the variable whose `source` equals this component
+    // id" (PageVariableSchema), and that reverse lookup
+    // (`usePageVariableBinding(schema?.id)` in objectui's console renderer) is the
+    // only binding mechanism that exists. Measured (objectstack-ai/objectui#3834,
+    // re-verified at retirement time): no production reader in objectui, framework
+    // or cloud — the only repo-wide hits were the reverse-parity gate's exemption
+    // block (which cites the origin card) and spec's own accept tests. An author
+    // who wrote `targetVariable` and skipped the variable's `source` got an input
+    // that wrote nothing, with a success receipt — the ADR-0078 silent-no-op
+    // shape, on the exact surface AI authors write from. Same disposition as its
+    // sibling inert hint (objectui#3829, settled by retirement in objectui
+    // PR #4794).
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // Sources are rewritten by the D2 conversion
+    // `element-input-target-variable-removed` (a page component IS a stack
+    // collection member, unlike the `kernel/Manifest:loading` family).
+    'ui/ElementTextInputProps:targetVariable',
     // </os-generated retired-key:18>
   ],
 };
