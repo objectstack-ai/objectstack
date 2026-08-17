@@ -339,6 +339,7 @@
     "InjectedColumnProvenance (type)",
     "InjectedSystemColumnPlan (interface)",
     "InlineGridColumn (type)",
+    "InlineGridColumnParsed (type)",
     "InlineGridColumnSchema (const)",
     "InstantValue (type)",
     "InstantValueSchema (const)",

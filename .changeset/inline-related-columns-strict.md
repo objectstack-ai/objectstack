@@ -33,6 +33,10 @@ every cell blank (the objectui#3951 failure, reachable from the authoring side).
   object is refused with a prescription pointing at the child fields.
 
 Migration: respell `{ field: 'x' }` inline-grid columns as `{ name: 'x' }`;
-replace related-list column objects with the child field name string. The one
-in-repo usage (`examples/app-showcase` invoice line items) is migrated in this
-change.
+replace related-list column objects with the child field name string — or run
+`os migrate meta`, which rewrites both mechanically (registered conversion
+`field-column-lists-canonicalized`, protocol 18). The one in-repo usage
+(`examples/app-showcase` invoice line items) is migrated in this change.
+
+<!-- adr-0087: registered field-column-lists-canonicalized -->
+

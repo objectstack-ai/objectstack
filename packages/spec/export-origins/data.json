@@ -339,6 +339,7 @@
     "InjectedColumnProvenance": "src/data/injected-system-column-provenance.ts#InjectedColumnProvenance (type)",
     "InjectedSystemColumnPlan": "src/data/injected-system-columns.ts#InjectedSystemColumnPlan (interface)",
     "InlineGridColumn": "src/data/field.zod.ts#InlineGridColumn (type)",
+    "InlineGridColumnParsed": "src/data/field.zod.ts#InlineGridColumnParsed (type)",
     "InlineGridColumnSchema": "src/data/field.zod.ts#InlineGridColumnSchema (const)",
     "InstantValue": "src/data/field-value.zod.ts#InstantValue (type)",
     "InstantValueSchema": "src/data/field-value.zod.ts#InstantValueSchema (const)",
