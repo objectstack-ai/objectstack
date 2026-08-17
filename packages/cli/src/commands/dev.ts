@@ -16,6 +16,7 @@ import {
   assessArtifactStaleness,
   formatMtimeGap,
 } from '../utils/dev-restart.js';
+import { childEnvWithResolvedArtifact } from '../utils/internal-artifact-channel.js';
 import { readEnvWithDeprecation, isMcpServerEnabled } from '@objectstack/types';
 import type { ResolvedProjectDatabaseUrl } from '@objectstack/runtime';
 
@@ -327,10 +328,18 @@ export default class Dev extends Command {
         fs.mkdirSync(path.dirname(resolvedDb.url.replace(/^file:/, '')), { recursive: true });
       }
       const effectiveDb = resolvedDb.url;
+      // `dev` always has a resolved artifact by this point (it compiled one, or
+      // was handed one with `--artifact`, or is pointing at the canonical
+      // `<cwd>/dist/objectstack.json`), so the decision is unconditionally
+      // `resolved` — exactly as unconditional as the `OS_ARTIFACT_PATH` write
+      // it replaces. What changed is the channel: the resolved path travels on
+      // the CLI's own `OS_INTERNAL_ARTIFACT_PATH`, so an `OS_ARTIFACT_PATH`
+      // seen by a downstream `objectstack.config.ts` means an operator set it.
+      // The operator's own value is inherited verbatim, and `dev`'s ladder
+      // above still honours it on the rung it has always occupied.
       const localEnv: NodeJS.ProcessEnv = {
-        ...process.env,
+        ...childEnvWithResolvedArtifact(process.env, { kind: 'resolved', path: artifactPath }),
         OS_ENVIRONMENT_ID: environmentId,
-        OS_ARTIFACT_PATH: artifactPath,
         OS_SEED_ADMIN: seedAdmin ? '1' : '0',
         ...(seedAdmin && flags['admin-email'] ? { OS_SEED_ADMIN_EMAIL: flags['admin-email'] } : {}),
         ...(seedAdmin && flags['admin-password'] ? { OS_SEED_ADMIN_PASSWORD: flags['admin-password'] } : {}),
