@@ -188,7 +188,8 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
-        "$TURBO_ROOT$/content/**"
+        "$TURBO_ROOT$/content/**",
+        "$TURBO_ROOT$/scripts/sync-template-versions.mjs"
       ]
     },
     "test:e2e": {
