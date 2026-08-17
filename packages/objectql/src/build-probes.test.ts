@@ -187,6 +187,9 @@ describe('publishPackageDrafts — probes ride the response (ADR-0038 L3)', () =
     vi.spyOn(protocol as any, 'promoteDraftForPublish').mockImplementation(async (req: any) => ({
       singularType: req.type,
       orgId: null,
+      // [#9176/#9343] The real helper always returns the advisory half; the
+      // batch door reads it per published[] element.
+      advisories: [],
       result: { version: 'h', seq: 1, item: { body: ITEMS[`${req.type} ${req.name}`] ?? { name: req.name } }, packageId: null },
     }));
     vi.spyOn(protocol as any, 'runPublishSideEffects').mockResolvedValue({});

@@ -3804,9 +3804,9 @@ export class ObjectStackProtocolImplementation implements
      * write earns — `saveMetaItem` attaches them to its response, and since
      * #9176 the draft→active promotion does the same: `promoteDraftForPublish`
      * hands the findings out and `publishMetaItem` attaches them, so both
-     * write doors report what D1 makes both of them measure. (The batch route
-     * `publishPackageDrafts` still discards its per-draft findings — its
-     * response face is a different contract.)
+     * write doors report what D1 makes both of them measure. [#9343] The batch
+     * route `publishPackageDrafts` reports them too, per `published[]` element
+     * — one gate, two doors, one receipt vocabulary.
      * Returns an empty array on every early return: no rules ran, so there is
      * nothing to report, and "clean" is told apart from "nothing ran" by the
      * gate's own `rulesRun`, not by this.
@@ -13880,9 +13880,10 @@ export class ObjectStackProtocolImplementation implements
          * gating half throws before this method resolves). Empty when the
          * gate raised nothing or did not run (no draft, package-author
          * channel); `publishMetaItem` attaches it to its response only when
-         * non-empty, exactly as `saveMetaItem` does one door over. The batch
-         * caller (`publishPackageDrafts`) deliberately does not read it —
-         * its response face is a different contract.
+         * non-empty, exactly as `saveMetaItem` does one door over. [#9343]
+         * The batch caller (`publishPackageDrafts`) reads it too and attaches
+         * it to the matching `published[]` element, same omitted-when-empty
+         * discipline — per the maintainer's ruling, no parallel top-level map.
          */
         advisories: RuntimeAuthoringIssue[];
         result: { version: string; seq: number; item: MetadataItem; packageId: string | null };
@@ -14281,7 +14282,27 @@ export class ObjectStackProtocolImplementation implements
         success: boolean;
         publishedCount: number;
         failedCount: number;
-        published: Array<{ type: string; name: string; version: string }>;
+        published: Array<{
+            type: string;
+            name: string;
+            version: string;
+            /**
+             * [#9343] The #4463 runtime authoring gate's non-blocking findings
+             * for THIS draft's promotion — the same element shape and the same
+             * omitted-when-empty discipline as
+             * `PublishMetaItemResponseSchema.advisories` on the single-item
+             * door (#9176), riding each `published[]` element per the
+             * maintainer's ruling (no parallel top-level map). Present ONLY
+             * when the gate raised at least one finding against this draft —
+             * an empty array is never emitted, so an advisory-free batch's
+             * response bytes are unchanged. Advisory by construction: every
+             * entry is `warning`/`info`, because an `error` finding refuses
+             * the promotion and — the batch being all-or-nothing (ADR-0067
+             * D2) — aborts the whole batch as `failed[]` instead;
+             * `failed[]` elements never carry this key.
+             */
+            advisories?: RuntimeAuthoringIssue[];
+        }>;
         failed: Array<{ type: string; name: string; error: string; code?: string }>;
         /** Aggregate result of materializing every published `seed` (absent when no seeds). */
         seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[] };
@@ -14563,7 +14584,7 @@ export class ObjectStackProtocolImplementation implements
             };
         }
 
-        const published: Array<{ type: string; name: string; version: string }> = [];
+        const published: Array<{ type: string; name: string; version: string; advisories?: RuntimeAuthoringIssue[] }> = [];
         const failed: Array<{ type: string; name: string; error: string; code?: string; issues?: Array<{ path: string; message: string; code?: string }> }> = [];
 
         // Structure first, seeds LAST — a seed's rows can only land after its
@@ -14673,6 +14694,14 @@ export class ObjectStackProtocolImplementation implements
             version: string;
             seq: number;
             /**
+             * [#9343] The #4463 gate's advisory half for this promotion,
+             * captured from `promoteDraftForPublish`'s return inside Phase 1
+             * so Phase 2 can attach it to this draft's `published[]` element.
+             * Empty = the gate raised nothing (or did not run) — the element
+             * then carries no `advisories` key at all.
+             */
+            advisories: RuntimeAuthoringIssue[];
+            /**
              * [#8400] The scope the draft was PROMOTED IN — `d.organizationId`,
              * not the request's active org. `listDrafts` surfaces env-wide
              * (`organization_id IS NULL`) drafts to a non-null-org caller and
@@ -14718,7 +14747,7 @@ export class ObjectStackProtocolImplementation implements
                             const draft = await seedRepo.get(ref, { state: 'draft' });
                             if (draft?.body) seedBodies.push(draft.body);
                         }
-                        const { singularType, result } = await this.promoteDraftForPublish({
+                        const { singularType, advisories, result } = await this.promoteDraftForPublish({
                             // [#8908] The stored spelling, FOLDED — this route's
                             // boundary, the analogue of `canonicalizeMetaRequestType`
                             // on the six `/meta` entry points. Every row that
@@ -14764,6 +14793,7 @@ export class ObjectStackProtocolImplementation implements
                             packageId: result.packageId,
                             version: result.version,
                             seq: result.seq,
+                            advisories,
                             draftOrgId,
                         });
                         if (typeof result.seq === 'number') publishedSeqs.push(result.seq);
@@ -14991,7 +15021,14 @@ export class ObjectStackProtocolImplementation implements
         }
 
         for (const p of promoted) {
-            published.push({ type: p.d.type, name: p.d.name, version: p.version });
+            // [#9343] Omitted-when-empty, never `advisories: []` — the #4717
+            // discipline every advisory-carrying door follows: an advisory-free
+            // element's bytes are unchanged, and absence means "nothing to
+            // report", never "the gate did not run".
+            published.push({
+                type: p.d.type, name: p.d.name, version: p.version,
+                ...(p.advisories.length > 0 ? { advisories: p.advisories } : {}),
+            });
             try {
                 const eff = await this.runPublishSideEffects({
                     singularType: p.singularType,
