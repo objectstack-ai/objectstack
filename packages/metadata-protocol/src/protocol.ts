@@ -16246,12 +16246,23 @@ export class ObjectStackProtocolImplementation implements
         // Reverse apply order so artifacts that depend on others (e.g. a view on
         // a new object) are removed before the thing they reference.
         for (const it of [...items].reverse()) {
-            // Which limb this item takes, bound ONCE (#9174): the pre-flight
-            // below and the `else if` further down must never drift apart —
-            // a gate that guards a limb it no longer describes is worse than
-            // no gate, because it reads as covered.
-            const willRestore = it.existedBefore
-                && it.prevVersion !== null && it.prevVersion !== undefined;
+            // The version this item restores to, or `null` when it does not take
+            // the restore limb at all — bound ONCE (#9174), because the pre-flight
+            // below and the `else if` further down must never drift apart: a gate
+            // that guards a limb it no longer describes is worse than no gate,
+            // since it reads as covered.
+            //
+            // A `const` local rather than a hoisted boolean, deliberately, and this
+            // is a compiler fact rather than taste: `it.prevVersion` is a MUTABLE
+            // property, so TypeScript does not carry a narrowing on it through an
+            // aliased boolean, and `repo.restoreVersion(ref, it.prevVersion, …)`
+            // below stops compiling (`TS2345: 'number | null' is not assignable to
+            // 'number'`). Measured — the DTS build caught it while all 1651 package
+            // tests stayed green, because vitest transpiles without type-checking.
+            const restoreToVersion: number | null =
+                it.existedBefore && it.prevVersion !== null && it.prevVersion !== undefined
+                    ? it.prevVersion
+                    : null;
 
             // ═══ [#9174] The AT-REST spelling pre-flight, on the RESTORE limb ══
             //
@@ -16336,7 +16347,7 @@ export class ObjectStackProtocolImplementation implements
             // registry entry lands correctly (pinned, one file over, in
             // `protocol.object-registry-write-through-spelling.test.ts`). Refusing
             // it would be a wire-visible change for rows that are not this defect.
-            if (willRestore && isNonCanonicalStoredType(it.type)) {
+            if (restoreToVersion !== null && isNonCanonicalStoredType(it.type)) {
                 const canonical = canonicalMetaType(it.type);
                 failed.push({
                     type: it.type,
@@ -16476,7 +16487,7 @@ export class ObjectStackProtocolImplementation implements
                     // caller skipped the heal entirely while answering success.
                     await this.restoreArtifactRegistryView(it.type, it.name, itemOrgId);
                     reverted.push({ type: it.type, name: it.name, action: 'removed' });
-                } else if (willRestore) {
+                } else if (restoreToVersion !== null) {
                     // Edited an existing artifact → restore the pre-commit body.
                     //
                     // [#6563] The write INTENT is derived per item, exactly as the
@@ -16521,7 +16532,7 @@ export class ObjectStackProtocolImplementation implements
                     // the shape that ends in a `catch {}` swallowing a real outage
                     // (#4867). Per ITEM, because a batch mixes bindings.
                     const restorePackageId = await this.resolveOverlayPackageBinding(it.type, it.name, itemOrgId);
-                    const restored = await repo.restoreVersion(ref, it.prevVersion, {
+                    const restored = await repo.restoreVersion(ref, restoreToVersion, {
                         actor,
                         source: 'protocol.revertCommit',
                         message: `revert commit ${request.commitId}`,

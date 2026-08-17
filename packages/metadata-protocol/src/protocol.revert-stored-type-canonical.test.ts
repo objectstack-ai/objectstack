@@ -77,20 +77,33 @@
 // touches none of them.
 //
 // ---------------------------------------------------------------------------
-// Ablation directions, predicted BEFORE running (results in the PR body)
+// Ablation directions, predicted BEFORE running — and what actually happened
 // ---------------------------------------------------------------------------
-//   1. Ship state                                     predicted GREEN
-//   2. The pre-flight block deleted                   predicted RED in §1 only
-//      (this leg IS the pre-fix measurement quoted above)
-//   3. `willRestore &&` dropped from the gate — i.e.
-//      the soft-remove limb refused too                predicted RED in §2
-//      (proves §2 is a real constraint, not decoration)
+//   1. Ship state                      predicted GREEN -> GREEN (10/10)
+//   2. The pre-flight block deleted    predicted RED §1 -> RED, 6 failed
+//      ⚠️ BROADER than predicted, and the prediction was the wrong shape: §4
+//      goes red with §1, because a gate that refuses nothing lets the item back
+//      into `reverted[]` and therefore into the append-only revert commit. That
+//      is the leg's own point, so it is recorded as observed rather than
+//      trimmed to the prediction. §2 and §3 stayed GREEN, which is the half
+//      that matters: removing the gate changes nothing about the soft-remove
+//      limb or about the rows that are not this defect.
+//      This leg IS the pre-fix measurement quoted above.
+//      ⚠️ It also ran RED-but-unreadable the first time, on eight tests, for a
+//      reason that had nothing to do with the ablation — see `spyWarn` below.
+//   3. `restoreToVersion !== null &&` dropped
+//      from the gate — the soft-remove limb
+//      refused too                     predicted RED §2 -> RED, exactly 1
+//      failed: "removes a commit-created non-canonical row and reports
+//      success". The obvious simplification, and this is its price.
 //   4. Predicate swapped to the complete
-//      `canonicalMetaType(t) !== t`                    predicted RED in §3
-//      (proves the narrow at-rest predicate is load-bearing: `objects` folds
-//       in the manifest map and is NOT this defect)
+//      `canonicalMetaType(t) !== t`    predicted RED §3 -> RED, exactly 1
+//      failed: "a manifest-PRESENT plural is NOT refused". The narrow at-rest
+//      predicate is load-bearing — `views`/`objects` fold in the manifest map,
+//      so those rows revert AND register correctly today and are not this
+//      defect.
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PLURAL_TO_SINGULAR, canonicalMetaUrlType } from '@objectstack/spec/shared';
 // [#5619] The producer's OWN write-verb dispatch decisions, imported from
 // `@objectstack/metadata-core` and NOT from `@objectstack/objectql`: objectql
@@ -312,13 +325,30 @@ const storedBody = (rows: Map<string, Row>, type: string, name: string): any => 
     return undefined;
 };
 
+/**
+ * Silence and observe `console.warn` — the channel this card is about.
+ *
+ * ⛔ Restored from `afterEach`, never from the test body. A body-tail
+ * `mockRestore()` is skipped the moment an assertion above it throws, so the
+ * spy survives into the NEXT test and accumulates its calls — measured here
+ * while running ablation 2: four tests that have nothing to do with the
+ * ablation went red on warnings emitted by earlier ones, and the ablation
+ * direction was unreadable until this was fixed. A leg that cannot be read is
+ * a leg that was not run.
+ */
+const spyWarn = () => vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+afterEach(() => {
+    vi.restoreAllMocks();
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // 1. The RESTORE limb is refused, by name, on the wire
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('[#9174] revertCommit refuses a non-canonical stored type on the restore limb', () => {
     it('answers a wire-visible `failed[].code` and restores nothing', async () => {
-        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const warn = spyWarn();
         const { protocol, registeredItems, serveCommit } = makeProtocol();
         await seedRowVerbatim(protocol, {
             type: 'fields', name: 'showcase_task.title', body: bodyAt('showcase_task.title', 'V1'),
@@ -342,11 +372,10 @@ describe('[#9174] revertCommit refuses a non-canonical stored type on the restor
         expect(res.reverted).toEqual([]);
         // An item the operator asked to undo was not undone.
         expect(res.success).toBe(false);
-        warn.mockRestore();
     });
 
     it('names the row, the canonical type, and what to do about it', async () => {
-        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const warn = spyWarn();
         const { protocol, serveCommit } = makeProtocol();
         await seedRowVerbatim(protocol, {
             type: 'translations', name: 'legacy_bundle', body: bodyAt('legacy_bundle', 'V1'),
@@ -370,11 +399,10 @@ describe('[#9174] revertCommit refuses a non-canonical stored type on the restor
         // …and the pointer that the migrate door cannot fix it either (#8957),
         // so the operator does not bounce between two doors.
         expect(text).toContain('_migrate-stored');
-        warn.mockRestore();
     });
 
     it('leaves the row at rest untouched and the registry unwritten — and emits no warning', async () => {
-        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const warn = spyWarn();
         const { protocol, registeredItems, rows, serveCommit } = makeProtocol();
         await seedRowVerbatim(protocol, {
             type: 'fields', name: 'showcase_task.title', body: bodyAt('showcase_task.title', 'V1'),
@@ -398,11 +426,10 @@ describe('[#9174] revertCommit refuses a non-canonical stored type on the restor
         // asserted as "not one warning from this call", so a RENAMED warning
         // cannot slip past a substring match.
         expect(warn).not.toHaveBeenCalled();
-        warn.mockRestore();
     });
 
     it('carries the caller’s spelling into `failed[]` UNFOLDED (#9161)', async () => {
-        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const warn = spyWarn();
         const { protocol, serveCommit } = makeProtocol();
         await seedRowVerbatim(protocol, { type: 'fields', name: 'a.b', body: bodyAt('a.b', 'V1') });
         await seedRowVerbatim(protocol, { type: 'fields', name: 'a.b', body: bodyAt('a.b', 'V2') });
@@ -416,7 +443,6 @@ describe('[#9174] revertCommit refuses a non-canonical stored type on the restor
         // the ledger keys, and the same reasoning holds for the receipt.
         expect(res.failed[0].type).toBe('fields');
         expect(res.failed[0].name).toBe('a.b');
-        warn.mockRestore();
     });
 });
 
@@ -430,7 +456,7 @@ describe('[#9174] revertCommit refuses a non-canonical stored type on the restor
 
 describe('[#9174] the soft-remove limb keeps reverting, and says so', () => {
     it('removes a commit-created non-canonical row and reports success', async () => {
-        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const warn = spyWarn();
         const { protocol, rows, serveCommit } = makeProtocol();
         await seedRowVerbatim(protocol, {
             type: 'fields', name: 'legacy_only', body: bodyAt('legacy_only', 'V1'),
@@ -448,7 +474,6 @@ describe('[#9174] the soft-remove limb keeps reverting, and says so', () => {
         // and the one action that makes this residue smaller.
         expect(storedBody(rows, 'fields', 'legacy_only')).toBeUndefined();
         expect(warn).not.toHaveBeenCalled();
-        warn.mockRestore();
     });
 });
 
@@ -458,7 +483,7 @@ describe('[#9174] the soft-remove limb keeps reverting, and says so', () => {
 
 describe('[#9174] the pre-flight fires on exactly the at-rest class', () => {
     it('a canonical type still reverts and still registers under its own key', async () => {
-        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const warn = spyWarn();
         const { protocol, registeredItems, rows, serveCommit } = makeProtocol();
         await seedRowVerbatim(protocol, { type: 'view', name: 'grid', body: bodyAt('grid', 'V1') });
         await seedRowVerbatim(protocol, { type: 'view', name: 'grid', body: bodyAt('grid', 'V2') });
@@ -475,11 +500,10 @@ describe('[#9174] the pre-flight fires on exactly the at-rest class', () => {
         // than a harness that never registers anything.
         expect(registeredItems).toEqual([{ type: 'view', name: 'grid' }]);
         expect(warn).not.toHaveBeenCalled();
-        warn.mockRestore();
     });
 
     it('a manifest-PRESENT plural is NOT refused — it is not this defect', async () => {
-        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const warn = spyWarn();
         const { protocol, registeredItems, serveCommit } = makeProtocol();
         // External dependency of the verdict, pinned rather than assumed: the
         // manifest fold resolves `views`, so the restore limb hands the
@@ -498,7 +522,6 @@ describe('[#9174] the pre-flight fires on exactly the at-rest class', () => {
         expect(res.failed).toEqual([]);
         expect(res.reverted).toEqual([{ type: 'views', name: 'legacy_grid', action: 'restored' }]);
         expect(registeredItems).toEqual([{ type: 'view', name: 'legacy_grid' }]);
-        warn.mockRestore();
     });
 
     it('the fold-map disagreement the gate rests on is real', () => {
@@ -521,7 +544,7 @@ describe('[#9174] the pre-flight fires on exactly the at-rest class', () => {
 
 describe('[#9174] a refused item touches no ledger key and stops no neighbour', () => {
     it('is absent from the append-only revert commit, which records only what was reverted', async () => {
-        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const warn = spyWarn();
         const { protocol, commitLedger, auditLedger, serveCommit } = makeProtocol();
         await seedRowVerbatim(protocol, { type: 'fields', name: 'a.b', body: bodyAt('a.b', 'V1') });
         await seedRowVerbatim(protocol, { type: 'fields', name: 'a.b', body: bodyAt('a.b', 'V2') });
@@ -538,11 +561,10 @@ describe('[#9174] a refused item touches no ledger key and stops no neighbour', 
         // failures, and a row minted only for this class would need the type
         // FOLDED to be readable — the one move #9161 rules out here.
         expect(auditLedger).toEqual([]);
-        warn.mockRestore();
     });
 
     it('reverts the neighbours of a refused item and reports the mix honestly', async () => {
-        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const warn = spyWarn();
         const { protocol, rows, commitLedger, serveCommit } = makeProtocol();
         await seedRowVerbatim(protocol, { type: 'view', name: 'grid', body: bodyAt('grid', 'V1') });
         await seedRowVerbatim(protocol, { type: 'view', name: 'grid', body: bodyAt('grid', 'V2') });
@@ -566,6 +588,5 @@ describe('[#9174] a refused item touches no ledger key and stops no neighbour', 
         expect(JSON.parse(String(commitLedger[0].items))).toEqual([
             { type: 'view', name: 'grid', existedBefore: true, prevVersion: null },
         ]);
-        warn.mockRestore();
     });
 });
