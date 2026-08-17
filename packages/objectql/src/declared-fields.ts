@@ -85,6 +85,46 @@
  * `!= null` back is harmless but redundant; adding it INSTEAD of the leaf
  * `has()` is the mistake this table exists to prevent.
  *
+ * ### Three further measurements the two-level table above does not reach
+ *
+ * All three surfaced while migrating the showcase specimens (#8990's second
+ * half, PR #9280) and are recorded here because each one is a shape the
+ * paragraph above reads as already covered, and is not.
+ *
+ * **1. A three-level path needs `has()` at EVERY level — the leaf alone is not
+ * enough.** "Guard the leaf" subsumes the parent's `!= null`, but it does not
+ * subsume the parent's `has()`: skipping an intermediate level faults on the
+ * level that was skipped.
+ *
+ * | predicate                                                            | `{}` | `{r: null}` | `{r: {}}` | `{r: {p: null}}` | `{r: {p: {s: 9}}}` |
+ * |:---------------------------------------------------------------------|:-----|:------------|:----------|:-----------------|:-------------------|
+ * | `has(record.r) && has(record.r.p.s) && record.r.p.s == 9`            | `false` | FAULT `No such key: p` | FAULT `No such key: p` | `false` | `true` |
+ * | `has(record.r) && has(record.r.p) && has(record.r.p.s) && record.r.p.s == 9` | `false` | `false` | `false` | `false` | `true` |
+ *
+ * So the rule generalises as: one `has()` per SEGMENT of the path, not one for
+ * the root and one for the leaf.
+ *
+ * **2. A leaf used for ORDERING still needs its own `!= null`.** The leaf
+ * `has()` proves the key is present; it says nothing about the value, and the
+ * equality exception below does not extend to `<` `<=` `>` `>=`. This is the
+ * nested twin of the operator rule, and it is why the guard cannot be chosen
+ * from the path's shape alone:
+ *
+ * | predicate                                                    | `{l: {}}` | `{l: {lat: null}}` | `{l: {lat: 41}}` |
+ * |:--------------------------------------------------------------|:----------|:-------------------|:-----------------|
+ * | `has(record.l) && has(record.l.lat) && record.l.lat > 40.0`  | `false` | FAULT `no such overload: dyn<null> > double` | `true` |
+ * | `has(record.l) && has(record.l.lat) && record.l.lat != null && record.l.lat > 40.0` | `false` | `false` | `true` |
+ *
+ * **3. Indexing faults on an EMPTY list, not only on a null one.** `!= null`
+ * is not the guard for `[0]` — a projected-but-empty list is a live shape on
+ * this face (a multi-relation with nothing linked), and the index is checked
+ * against the size, not against nullness:
+ *
+ * | predicate                                                        | `{a: 'x', b: null}` | `{a: 'x', b: []}` | `{a: 'x', b: ['x']}` |
+ * |:-------------------------------------------------------------------|:--------------------|:------------------|:---------------------|
+ * | `has(record.a) && has(record.b) && record.b != null && record.a == record.b[0]` | `false` | FAULT `No such key: index out of bounds, index 0 >= size undefined` | `true` |
+ * | `… && record.b != null && record.b.size() > 0 && record.a == record.b[0]` | `false` | `false` | `true` |
+ *
  * One measured exception, recorded so the platform's existing predicates are
  * not misread: a bare EQUALITY against a literal never faults on a null value
  * — CEL compares heterogeneously and answers `false` — so `has(record.a) &&
