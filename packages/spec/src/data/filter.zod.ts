@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { assertListComparandShapes } from './filter-comparand-shape';
 import { normalizeFilterComparandTypes } from './filter-comparand-type';
 import { bareDateRangePresetComparandMessage, isDateRangePresetName } from './date-range-presets';
 
@@ -1854,10 +1855,22 @@ function convertComparison(node: [string, string, unknown]): FilterCondition {
  * If the input is already a FilterCondition object (not an array), it is returned as-is.
  * If the input is `null` or `undefined`, it is returned as-is.
  *
- * ## This is the comparand-type door (#7872)
+ * ## This is the comparand SHAPE door (#5869) and TYPE door (#7872)
+ *
+ * [#9228] Whatever this function returns has first passed
+ * {@link assertListComparandShapes}: `$in` / `$nin` carry an ARRAY and
+ * `$between` a `[min, max]` pair, or the call is refused with the
+ * `INVALID_FILTER` / 400 envelope. That gate used to run only at the engine's
+ * lowering seam, so a caller that lowered a filter here and handed it straight
+ * to a driver (`InMemoryDriver.find()` — an embedder, and this repo's own
+ * driver conformance suites) met nothing: the shape was carried by mingo's
+ * coercion of a non-array `$in`/`$nin` operand until mingo 7.2.3 removed it,
+ * and from 7.2.4 on it escapes as a raw third-party `TypeError` with no `code`
+ * and no `status`. Shape first, then type — the same order the engine's own
+ * seam applies, so one input gets one verdict whichever door it came in by.
  *
  * Whatever this function returns — the lowered AST form or the object
- * passthrough — has passed {@link normalizeFilterComparandTypes} first: every
+ * passthrough — has then passed {@link normalizeFilterComparandTypes}: every
  * LITERAL comparand is one of the accepted six types
  * (`string | number | bigint | boolean | null | Date`), an exact-range
  * `bigint` has been narrowed to its number (copy-on-write, so the object
@@ -1882,9 +1895,16 @@ function convertComparison(node: [string, string, unknown]): FilterCondition {
  * parseFilterAST({ status: "active" })
  * // → { status: "active" }
  */
-export function parseFilterAST(filter: unknown): FilterCondition | undefined {
+export function parseFilterAST(filter: unknown, context?: string): FilterCondition | undefined {
   const lowered = lowerFilterAST(filter);
-  return lowered === undefined ? undefined : normalizeFilterComparandTypes(lowered);
+  if (lowered === undefined) return undefined;
+  // [#9228] `context` is the optional caller prefix (`find('deal')`) both doors
+  // already take — the engine's #5346 refusal-wording contract. It is passed
+  // through rather than minted here so the engine's array branch keeps the
+  // exact message it has pinned since #6209, now that the shape gate refuses
+  // one step earlier than the engine's own call to it.
+  assertListComparandShapes(lowered, context);
+  return normalizeFilterComparandTypes(lowered, context);
 }
 
 /**
