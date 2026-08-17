@@ -11,9 +11,9 @@
 // `rewriteProjectIdentity` is not exported (and cannot be imported directly:
 // index.ts calls `program.parse()` at module scope — see
 // template-consistency.test.ts's comment on the same constraint), so this
-// exercises the real CLI end to end via `tsx`, the same no-build pattern
-// `packages/spec/scripts/dist-freshness.test.ts` uses to run a TS entrypoint
-// as a subprocess without depending on a prior `pnpm build`.
+// exercises the real CLI end to end via `tsx`, the same no-build pattern the
+// spec package's dist-freshness test uses to run a TS entrypoint as a
+// subprocess without depending on a prior `pnpm build`.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
