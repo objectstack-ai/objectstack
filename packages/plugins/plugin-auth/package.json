@@ -34,7 +34,7 @@
     "@objectstack/rest": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
-    "better-auth": "1.7.0-rc.2",
+    "better-auth": "1.7.0-rc.5",
     "jose": "^6.2.5"
   },
   "devDependencies": {
