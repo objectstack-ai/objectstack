@@ -276,7 +276,17 @@ const CROSS_PACKAGE_TEST_INPUTS = {
   'create-objectstack': {
     // src/template-consistency.test.ts reads doc frontmatter by repo-relative
     // path to decide which templates are internal.
-    globs: ['content/**'],
+    //
+    // `sync-template-versions.mjs` is named in a comment rather than read, the
+    // same shape as `check-nul-bytes.mjs` above and settled the same way: a
+    // mention forces a declaration, and declaring the file is cheaper than
+    // rewording prose to dodge the scanner. Here the coupling is real on top of
+    // being cheap — that script STAMPS the three per-template version surfaces
+    // (`package.json` @objectstack/* ranges, `objectstack.config.ts`
+    // `engines.protocol`, `objectstack.manifest.json` `specVersion`) that the
+    // ratchets in that test assert, so a change to the stamper is exactly the
+    // change those ratchets exist to catch (#9264).
+    globs: ['content/**', 'scripts/sync-template-versions.mjs'],
   },
 };
 

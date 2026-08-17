@@ -73,6 +73,20 @@ import { CLOUD_CONNECTION_UI_BUNDLE } from './cloud-connection-ui.js';
 
 const CLOUD_CONNECTION_PREFIX = '/api/v1/cloud-connection';
 
+/**
+ * The one message every `ENVIRONMENT_NOT_FOUND` refusal on this surface carries.
+ *
+ * `ApiErrorSchema.message` is REQUIRED, and eight exits here used to emit
+ * `error: { code }` alone — so `body.error.message` read `undefined` on the
+ * wire. That is the #3843 class exactly, and the Console had already grown the
+ * consumer-side accommodation it produces: `CloudConnectionPanel` displays
+ * `body?.error?.message ?? body?.error?.code`, i.e. it shows a machine code to a
+ * human because the readable half was never sent. One constant rather than eight
+ * literals, because the condition is one condition: the request did not resolve
+ * to an environment.
+ */
+const ENVIRONMENT_NOT_FOUND_MESSAGE = 'Could not resolve an environment for this request host.';
+
 export interface CloudConnectionPluginConfig {
     /** Control-plane base URL. Default: `OS_CLOUD_URL` (read lazily at kernel:ready). */
     controlPlaneUrl?: string;
@@ -211,7 +225,7 @@ export class CloudConnectionPlugin implements Plugin {
                 const stored = this.store.read();
                 const runtimeId = stored?.runtimeId;
                 if (!environmentId && !this.cfg.singleEnvironment) {
-                    return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND' } }, 404);
+                    return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND', message: ENVIRONMENT_NOT_FOUND_MESSAGE } }, 404);
                 }
                 // A single-env runtime with no env id and no credential is
                 // simply not bound yet — valid state, not an error.
@@ -263,7 +277,7 @@ export class CloudConnectionPlugin implements Plugin {
                     environmentId = String(body?.environment_id ?? body?.environmentId ?? '').trim() || undefined;
                 }
                 if (!environmentId && !this.cfg.singleEnvironment) {
-                    return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND' } }, 404);
+                    return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND', message: ENVIRONMENT_NOT_FOUND_MESSAGE } }, 404);
                 }
                 const session = await resolveSession(environmentId ?? '', c.req.raw);
                 if (!session?.userId) return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to this environment to connect a cloud account.' } }, 401);
@@ -318,11 +332,11 @@ export class CloudConnectionPlugin implements Plugin {
                     environmentId = String(body?.environment_id ?? body?.environmentId ?? '').trim() || undefined;
                 }
                 if (!environmentId && !this.cfg.singleEnvironment) {
-                    return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND' } }, 404);
+                    return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND', message: ENVIRONMENT_NOT_FOUND_MESSAGE } }, 404);
                 }
                 const session = await resolveSession(environmentId ?? '', c.req.raw);
-                if (!session?.userId) return c.json({ success: false, error: { code: 'UNAUTHENTICATED' } }, 401);
-                if (!cloudUrl) return c.json({ success: false, error: { code: 'CLOUD_UNCONFIGURED' } }, 503);
+                if (!session?.userId) return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to this environment.' } }, 401);
+                if (!cloudUrl) return c.json({ success: false, error: { code: 'CLOUD_UNCONFIGURED', message: 'No cloud control plane configured.' } }, 503);
 
                 const deviceCode = String(body?.device_code ?? body?.deviceCode ?? '').trim();
                 if (!deviceCode) return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'device_code is required' } }, 400);
@@ -340,7 +354,27 @@ export class CloudConnectionPlugin implements Plugin {
                         // are non-terminal; everything else is terminal.
                         const errCode = String(tok?.error ?? `device/token ${tokResp.status}`);
                         const pending = errCode === 'authorization_pending' || errCode === 'slow_down';
-                        return c.json({ success: pending, data: { pending }, error: pending ? undefined : { code: errCode } }, pending ? 200 : 400);
+                        if (pending) return c.json({ success: true, data: { pending: true } }, 200);
+                        // The upstream RFC 8628 spelling (`expired_token`,
+                        // `access_denied`, …) is NOT a member of the closed
+                        // `ApiErrorSchema.code` vocabulary, so stamping it into
+                        // `code` emitted a body that fails its own contract. It
+                        // rides `declaredCode` instead — the open, producer-
+                        // authored channel ADR-0112 declares for exactly this
+                        // (a code the serving side's ledger does not know) —
+                        // while `code` carries the registered member. Nothing is
+                        // lost: the verbatim spelling still reaches the caller.
+                        return c.json({
+                            success: false,
+                            // Retained on the failure body too: the Console polls
+                            // this route and reads `body?.data?.pending` first.
+                            data: { pending: false },
+                            error: {
+                                code: 'DEVICE_CODE_FAILED',
+                                declaredCode: errCode,
+                                message: `Device authorization failed: ${errCode}`,
+                            },
+                        }, 400);
                     }
                     // Persist the binding through the control plane. The
                     // registration claim rides along (ADR
@@ -396,10 +430,10 @@ export class CloudConnectionPlugin implements Plugin {
             rawApp.post(`${CLOUD_CONNECTION_PREFIX}/unbind`, async (c: any) => {
                 const environmentId = await resolveEnvironmentId(c);
                 if (!environmentId && !this.cfg.singleEnvironment) {
-                    return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND' } }, 404);
+                    return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND', message: ENVIRONMENT_NOT_FOUND_MESSAGE } }, 404);
                 }
                 const session = await resolveSession(environmentId ?? '', c.req.raw);
-                if (!session?.userId) return c.json({ success: false, error: { code: 'UNAUTHENTICATED' } }, 401);
+                if (!session?.userId) return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to this environment.' } }, 401);
 
                 // Revoke cloud-side FIRST (the oscc_ bearer self-identifies;
                 // env-keyed bindings name the environment), then clear the
@@ -441,7 +475,7 @@ export class CloudConnectionPlugin implements Plugin {
             // control plane using the env→cloud service credential.
             rawApp.post(`${CLOUD_CONNECTION_PREFIX}/install`, async (c: any) => {
                 const environmentId = await resolveEnvironmentId(c);
-                if (!environmentId) return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND' } }, 404);
+                if (!environmentId) return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND', message: ENVIRONMENT_NOT_FOUND_MESSAGE } }, 404);
 
                 // Local authz: require a valid env session. (TODO: tighten to an
                 // explicit env-admin role check; today only owners/admins obtain
@@ -493,7 +527,7 @@ export class CloudConnectionPlugin implements Plugin {
                     // env-scoped; a registration-only runtime tracks installs
                     // locally (LocalManifestSource). Report not-installed.
                     if (this.cfg.singleEnvironment) return c.json({ success: true, data: { installed: false } });
-                    return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND' } }, 404);
+                    return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND', message: ENVIRONMENT_NOT_FOUND_MESSAGE } }, 404);
                 }
 
                 const session = await resolveSession(environmentId, c.req.raw);
@@ -555,7 +589,7 @@ export class CloudConnectionPlugin implements Plugin {
                     if (this.cfg.singleEnvironment) {
                         return c.json({ success: true, data: { packages: [], total: 0, connected: Boolean(credential()) } });
                     }
-                    return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND' } }, 404);
+                    return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND', message: ENVIRONMENT_NOT_FOUND_MESSAGE } }, 404);
                 }
 
                 const session = await resolveSession(environmentId, c.req.raw);
@@ -592,7 +626,7 @@ export class CloudConnectionPlugin implements Plugin {
             rawApp.get(`${CLOUD_CONNECTION_PREFIX}/org-packages`, async (c: any) => {
                 const environmentId = await resolveEnvironmentId(c);
                 if (!environmentId && !this.cfg.singleEnvironment) {
-                    return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND' } }, 404);
+                    return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND', message: ENVIRONMENT_NOT_FOUND_MESSAGE } }, 404);
                 }
 
                 const session = await resolveSession(environmentId ?? '', c.req.raw);

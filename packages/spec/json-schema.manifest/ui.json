@@ -83,6 +83,7 @@
     "ui/KanbanConfig",
     "ui/ListChartConfig",
     "ui/ListColumn",
+    "ui/ListMapConfig",
     "ui/ListView",
     "ui/NavigationArea",
     "ui/NavigationConfig",

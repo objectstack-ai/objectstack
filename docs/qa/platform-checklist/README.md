@@ -281,7 +281,8 @@ smoke) ∪ any item whose `source` cites a PR in the release. The tracking issue
 sweep links here and hosts discussion; results stay OUT of the repo — every run files
 one `qa-run` GitHub issue as its record (text only: the verdict table + a reproduction
 rule per failure, never screenshots; `runs/` is git-ignored), and a run that finds a real
-regression carries the `bug` label so it triages straight from that issue. Item text,
+regression extracts it into its own standalone card at close-out (RUNNER.md, extraction
+obligation — the run issue itself stays `qa-run`-only, excluded from triage). Item text,
 fixtures learned, and new traps discovered flow **back into the ledger** as revisions —
 that is the accumulation the one-off checklists never had.
 

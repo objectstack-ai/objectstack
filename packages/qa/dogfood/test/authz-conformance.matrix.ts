@@ -11,14 +11,19 @@
 // ratchets completeness over a CURATED table of HTTP/transport entry points
 // (`discover()`: 15 probes over 11 named source files) — a new ungated route
 // there is UNCLASSIFIED, a deleted guard is STALE, and either breaks CI.
+// [#9083] Classification itself is state-gated for the transport tripwires: a
+// discovered TRANSPORT-WIRED key may be covered ONLY by an `enforced` row, so
+// silencing that particular red costs an enforcement site rather than a
+// `covers` append on a row that records an absence.
 //
 // [#8711] That completeness is over ROUTES, not over primitives: a primitive
 // enforced by a predicate inside an existing resolver adds no entry point, so
 // it can be neither UNCLASSIFIED nor STALE. Measured against the rows below:
-// 43 of 50 carry no `covers` key at all (7 rows, 9 keys, every one an
-// HTTP/transport pin), and 37 of the file's 43 `enforced` rows are exactly
-// that in-resolver shape — the ADR-0049/#8613 `active` rows among them (see
-// their own block further down) are the normal case, not an exception. Of the
+// 44 of 51 carry no `covers` key at all (7 rows, 9 keys, every one an
+// HTTP/transport pin), and 38 of the file's 44 `enforced` rows are exactly
+// that in-resolver shape — the ADR-0049/#8613 `active` rows and the ADR-0091
+// grant-validity-window row among them (see their own blocks further down)
+// are the normal case, not an exception. Of the
 // 9 `covers` keys that DO exist, 5 are GATE pins tied to the enforcement call
 // itself, not merely a function name — delete `shouldDenyAnonymous` from
 // `/actions`, `/automation` or `/packages`, or drop the MCP context-threading
@@ -59,6 +64,11 @@ export interface AuthzPrimitive {
    * `discover()`. A discovered HTTP entry point with no covering row fails CI as
    * UNCLASSIFIED; a `covers` key no longer in source fails as STALE. See
    * authz-conformance.test.ts (#2567 anonymous-deny surface enumeration).
+   *
+   * [#9083] Covering is state-gated for one key family: a `TRANSPORT-WIRED`
+   * key may appear here ONLY on a row whose `state` is `enforced` (which then
+   * owes an `enforcement` site). Any other state is refused — see
+   * `checkTransportWiredAdmission` in the companion test.
    */
   covers?: string[];
   /** Why it is experimental/removed, or a roadmap pointer. */
@@ -163,9 +173,15 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   // transport tripwires in authz-conformance.test.ts) blocks wiring a client
   // transport without the identity story — in CI, not in an adversarial
   // review after the fact.
+  //
+  // [#9083] "Blocks" is load-bearing only since #9083. The ratchet made the
+  // wired transport UNCLASSIFIED, but ANY row could then classify it — the
+  // absence-recording row below included — so the identity story was one
+  // `covers` append away from being optional. The admission rule in the
+  // companion test now requires the classifying row to be `enforced`.
   { id: 'realtime-delivery-authz', summary: 'realtime delivery fan-out has NO per-recipient authorization — trusted server-internal subscribers only (#2992 surface 2)', state: 'experimental',
     covers: ['realtime:in-memory-realtime-adapter.ts:publish(trusted-fan-out)'],
-    note: 'Surface posture: system (trusted-implicit), pre-wiring — no end-user transport exists (handleUpgrade unimplemented, no REST subscribe route, client RealtimeAPI is a placeholder); the only subscribers are server-internal plugins (webhook auto-enqueuer, knowledge sync). Structural defect: Subscription carries no principal, matchesSubscription filters only by object+eventTypes (RealtimeSubscriptionOptions.filter is declared but never read), and the engine publishes the FULL after-row — so any future external subscriber would receive record bodies cross-tenant that its own find would hide. ADMISSION REQUIREMENT before any WebSocket/SSE/subscribe transport ships: per-recipient RLS/FLS/tenant re-check on delivery (subscription carries the subscriber ExecutionContext) OR id-only payload + client re-fetch. The transport tripwire probes in authz-conformance.test.ts turn a wired transport into an UNCLASSIFIED surface → red CI until this row is upgraded with the enforcement site.' },
+    note: 'Surface posture: system (trusted-implicit), pre-wiring — no end-user transport exists (handleUpgrade unimplemented, no REST subscribe route, client RealtimeAPI is a placeholder); the only subscribers are server-internal plugins (webhook auto-enqueuer, knowledge sync). Structural defect: Subscription carries no principal, matchesSubscription filters only by object+eventTypes (RealtimeSubscriptionOptions.filter is declared but never read), and the engine publishes the FULL after-row — so any future external subscriber would receive record bodies cross-tenant that its own find would hide. ADMISSION REQUIREMENT before any WebSocket/SSE/subscribe transport ships: per-recipient RLS/FLS/tenant re-check on delivery (subscription carries the subscriber ExecutionContext) OR id-only payload + client re-fetch. The transport tripwire probes in authz-conformance.test.ts turn a wired transport into an UNCLASSIFIED surface → red CI. [#9083] Clearing that red by classifying the new key HERE is refused: checkTransportWiredAdmission rejects a TRANSPORT-WIRED key covered by any row that is not `enforced`, and checkLedger separately requires an `enforced` row to name an enforcement site — the two compose into the admission requirement above. Before #9083 this note promised a gate that did not exist: appending the tripwire key to this row was measured green with ZERO authorization written (and the `removed` state admitted the identical exit), which is the quiet one-line exit that reads as compliance. The honest path out of the red is to write the per-recipient re-check FIRST, then classify the wired key on an `enforced` row naming that site — either this row upgraded (at which point its summary stops recording an absence and must be rewritten) or a new row beside it, leaving this one to carry the pre-wiring fan-out posture and its `publish(trusted-fan-out)` pin. Both are admissible; what the rule forbids is classifying the key while the classifying row still says no authorization exists.' },
 
   // ── ADR-0096 — MCP execution-surface identity admission (#3167). The MCP
   // server exposes ObjectStack tool execution over two transports with DIFFERENT
@@ -269,6 +285,25 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   { id: 'position-active', summary: '`sys_position.active` — a deactivated position grants nothing, and its name cannot resolve the grant one layer down (ADR-0049 / #8613)', state: 'enforced',
     enforcement: 'core/security/resolve-authz-context.ts step 6a — isRowActive gates BOTH halves, and only both hold it: (i) only ACTIVE position ids collect their `sys_position_permission_set` linkage, so a deactivated position carries no bound set; (ii) the deactivated NAME is dropped from `grants.positions`, because resolvePermissionSetsForContext requests positions as permission-set NAMES and a name left standing resolves the same grant one layer down',
     note: 'Only a name whose `sys_position` row is EXPLICITLY deactivated is dropped — a name with no row at all (`org_owner`, a membership-derived role, the built-in `everyone` audience anchor) has no flag to read and is untouched. Deliberately NOT a blanket revocation of the sets themselves: a set held via BOTH a deactivated position AND a direct user grant still resolves, since the direct grant is a different grant (resolve-authz-context.test.ts pins exactly that case). Symmetrically, the WRITE gates and blast-radius reads in plugin-security (assertAudienceAnchorBindingGate, setsBoundToPosition, the delegated-admin surfaces) stay UNFILTERED on purpose — dropping a deactivated row there would make a refused binding permitted, narrow a delegate\'s boundary, and make a deactivated position unmanageable. Unit-proven in core/security/resolve-authz-context.test.ts (a deactivated position stops granting its sets; an active one still grants; an absent column grants; the 0/1 shape deactivates; deactivating ONE position leaves the others granting) + core/security/row-active.test.ts. Not HIGH_RISK for the same reason as `permission-set-active`.' },
+
+  // ── ADR-0091 D1/D2 — grant validity windows (#8811) ───────────────────
+  //
+  // The sibling of the `active` switch above, and enforced at the same seam
+  // for the same stated reason: a grant that is supposed to lapse on a date,
+  // but only lapses when a cleanup job runs, is an unenforced security
+  // property (ADR-0049). `valid_from` / `valid_until` are therefore read at
+  // RESOLUTION time by one shared predicate, `isGrantActive`
+  // (@objectstack/core), so no reader can drift from another — the same
+  // one-predicate discipline `isRowActive` gets above.
+  //
+  // The window is half-open `[from, until)` in UTC: absent/null bounds mean
+  // unbounded (pre-ADR-0091 rows behave exactly as before), and a bound that
+  // is PRESENT but unparseable DISABLES the grant — fail-closed, deliberately
+  // unlike API-key `isExpired`, because a grant row is standing authority
+  // rather than a single credential.
+  { id: 'grant-validity-window', summary: '`valid_from` / `valid_until` on a grant row — a grant outside its half-open window resolves to nothing, at resolution time and with no cleanup job (ADR-0091 D1/D2)', state: 'enforced',
+    enforcement: 'core/security/grant-validity.ts isGrantActive — ONE half-open [valid_from, valid_until) predicate (UTC; absent bound = unbounded; a PRESENT but unparseable bound fails CLOSED), applied by every reader that turns a window-carrying row into authority: core/security/resolve-authz-context.ts step 4 (sys_user_position) and step 6 (sys_user_permission_set, dropped BEFORE any derivation so an expired admin_full_access cannot yield platform_admin either); plugin-security/explain-engine.ts buildContextForUser (plus isGrantExpired for the dedicated "expired" contributor state); plugin-sharing/position-graph.ts PositionGraphService.expandPositionUsers; plugin-security/delegated-admin-gate.ts held-scope resolution; plugin-auth/last-admin-guard.ts administrator-standing reads; plugin-approvals/approval-service.ts lookupActiveDelegation (sys_approval_delegation); runtime/domains/keys.ts membership check',
+    note: '[#8811] NO `covers`, and — exactly like the two `active` rows above — that is a statement about the RATCHET rather than an omission: `discover()` enumerates HTTP entry points from a curated per-file probe table, and a predicate inside an existing resolver adds no entry point, so this primitive could never have surfaced as UNCLASSIFIED or STALE during any period it was inert. Per the #8711 ruling (2026-08-15) the invariant\'s advertised SCOPE is narrowed to what the ratchet can check; this row is owed under the hand-maintained half the file header still states. WHAT IS AND IS NOT WINDOW-FILTERED — measured at the call sites, not taken from the filing: the columns are declared on exactly THREE objects (sys_user_position, sys_user_permission_set, sys_approval_delegation), and on all three EVERY authorization-resolution seam applies the predicate, which is what makes this row `enforced` rather than partial. Two reads deliberately do NOT filter and neither is a live hole: (i) `sys_member` carries no window columns at all, so the resolver\'s membership call (which builds accessible_org_ids) is FORWARD-LOOKING, and the org-administration role projection beside it is NOT window-filtered (#8802) — both are no-ops until the columns exist, and last-admin-guard.ts\'s MEMBER standing-key notes already record that the resolver is where the two halves must be reconciled FIRST if they ever land; (ii) plugin-approvals\' own expandPositionUsers projects user_id alone by the #8710 ruling, because approval ROUTING is not grant resolution — that note explicitly forbids "fixing" it with a filter. ⛔ #8802 is a defect IN the enforcement, not in this ledger: it does not change this row\'s state, and closing it leaves the row exactly as owed. Predicate unit-pinned in core/security/grant-validity.test.ts (half-open boundaries, seconds-vs-ms epoch, fail-closed on garbage, camelCase spellings); the resolver halves in core/security/resolve-authz-context.test.ts "grant validity windows (ADR-0091 D1/D2)". Deliberately NOT in HIGH_RISK for the same reason as the `active` rows — that list marks primitives guarding object DATA through a sibling HTTP entry point, and this one guards grant DERIVATION. Unlike those rows an end-to-end proof already EXISTS and is merely unclaimed by this ledger: delegation-of-duty.dogfood.test.ts boots a real stack and asserts the delegate STOPS resolving the delegated sys_user_position at valid_until through the real resolveAuthzContext. It is not cited here because the #7976 mutual-attribution contract requires that file to name this row back (a `// authz-row:` header line), an edit outside this card\'s declared file surface — filed as a follow-up.' },
 
   // ── Experimental — declared, NOT enforced (ADR-0049/0056 D8) ───────────
   { id: 'field-encryption', summary: 'at-rest field encryption', state: 'experimental',

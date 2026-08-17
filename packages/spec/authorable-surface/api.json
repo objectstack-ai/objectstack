@@ -1259,6 +1259,7 @@
     "api/PresignedUrlResponse:error",
     "api/PresignedUrlResponse:meta",
     "api/PresignedUrlResponse:success",
+    "api/PublishMetaItemResponse:advisories",
     "api/PublishMetaItemResponse:materializeApplied",
     "api/PublishMetaItemResponse:message",
     "api/PublishMetaItemResponse:projectionApplied",

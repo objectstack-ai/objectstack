@@ -435,6 +435,292 @@ const DISPATCHER_DOMAINS = {
   },
 };
 
+// ── The plugin-mounted Hono routes: the THIRD surface ────────────────────────
+
+/**
+ * Surface 3 — a plugin that mounts its OWN Hono routes and answers with
+ * `c.json(body, status)` (#9267).
+ *
+ * Neither scan above can see these. They do not write to a response object
+ * (surface 1) and they do not return `{ status, body }` for a central sender
+ * (surface 2): they call the Hono context directly, from a plugin entry point
+ * that is not named `*-routes.ts`. So they were outside this gate for as long as
+ * it has existed — `cloud-connection` appeared nowhere in this file — while
+ * `packages/cloud-connection` alone hand-builds ~80 response bodies.
+ *
+ * That blind spot cost something real, twice. `UNIQUE_SCOPE_CONFIRMATION_REQUIRED`
+ * reached a wire unregistered for as long as the gate was green, because the
+ * body passed through neither the dispatcher's `errorFromThrown` nor
+ * `packages/rest`'s responders (#9223 named the door, #9246 registered the
+ * code). And eight refusals on `/api/v1/cloud-connection/*` emitted
+ * `error: { code }` with no `message` at all — `ApiErrorSchema.message` is
+ * REQUIRED — until #9267 measured them. The Console had already grown the
+ * consumer-side accommodation that produces: it displays
+ * `body?.error?.message ?? body?.error?.code`, showing a machine code to a human
+ * because the readable half was never sent.
+ *
+ * ## What is counted, and what is deliberately NOT
+ *
+ * The `rest-server.ts` lesson (#7295, maintainer ruling 2026-08-10) applies here
+ * in full: these files are hot — `marketplace-install-local-plugin.ts` changed
+ * twice in one day — so pinning how many bodies they build would go red for
+ * every route added, and the pressure would be to raise the number rather than
+ * fix anything. So the TOTAL write-site count is reported and never asserted.
+ *
+ * What IS pinned is the count of bodies that DEPART from the declared envelope.
+ * Those numbers move only when a non-conforming body is added or removed — which
+ * is precisely the guarded event — so an ordinary edit cannot move them, and
+ * every one of them ticks DOWN only, like the dialect ratchets above.
+ *
+ *   unenveloped         — a literal body with no `success` key at all. The whole
+ *                         body is off-envelope, so its stray keys are NOT also
+ *                         counted below: one defect, one number.
+ *   errorWithoutMessage — `success: false` whose `error` literal has no
+ *                         `message`, so `body.error.message` reads `undefined`.
+ *                         The #3843 class, one key in from the bare string.
+ *   errorCodeNotString  — `error.code` is a NUMERIC literal (the HTTP status
+ *                         written into the semantic slot). `ApiErrorSchema.code`
+ *                         is a string enum, so such a body fails its own
+ *                         contract while looking nested and correct.
+ *   strayKeys           — a body that DOES carry `success` but also a top-level
+ *                         key outside `success`/`data`/`error`/`meta` — the
+ *                         general form of the duplicate-payload drift (#4038).
+ *   stringError         — `error` is a bare string (the pre-#3675 dialect).
+ *   siblingCode         — `code` beside `error` rather than inside it (#7035).
+ *
+ * ## Relayed bodies are not counted, on purpose
+ *
+ * Every counter reads an OBJECT LITERAL. A `c.json(upstreamBody, status)` that
+ * relays a control plane's own answer is invisible to all six, which is the
+ * correct answer rather than a gap: this gate governs the bodies this repo
+ * BUILDS, not the bytes it passes through — the same reasoning that makes a
+ * dispatcher domain's passthrough "kind 2" rather than drift.
+ *
+ * ## Discovery is by BEHAVIOUR, not by filename
+ *
+ * `discoverHonoRoutes()` parses every non-test file under `packages/` and keeps
+ * the ones that actually write a Hono context response. That is deliberate and
+ * it is the lesson of this gate's own history: surface 1 discovers by the
+ * `*-routes.ts` convention, and so `rest-server.ts` — the largest
+ * response-emitting file in the repo — sat unaudited for as long as the gate
+ * existed, until it was named by hand (#7295); #8884 closed the same
+ * "module outside the naming convention" gap. A plugin mounting Hono routes
+ * follows no naming convention at all, so a name-based surface here would have
+ * to be extended by hand for every new plugin — and the one nobody remembered to
+ * add is exactly the one that drifts.
+ *
+ * A discovered file absent from the table is an ERROR, never a default.
+ */
+const HONO_CONTEXT_RECEIVERS = new Set(['c', 'ctx']);
+
+const PLUGIN_ROUTE_MODULES = {
+  // ── Conformant ──────────────────────────────────────────────────────────
+  //
+  // Every hand-built body these emit is the declared envelope. They still build
+  // their own — there is no shared Hono sender to route through — so the zeros
+  // here mean "nothing you build departs from the contract", not "you build
+  // nothing". That is a weaker claim than surface 1's `responses: 0`, and it is
+  // the strongest one a hot, sender-less surface can honestly carry.
+  'packages/cloud-connection/src/cloud-connection-plugin.ts': {},
+  'packages/cloud-connection/src/marketplace-install-local-plugin.ts': {},
+  'packages/cloud-connection/src/marketplace-proxy-plugin.ts': {},
+  'packages/plugins/plugin-webhooks/src/webhook-outbox-plugin.ts': {},
+
+  // ── Ratchet: real, tracked, NOT blessed ─────────────────────────────────
+  //
+  // Measured by #9267 when this surface was added, not chosen. Each entry names
+  // the issue that will drive it to zero; every number ticks DOWN only. These
+  // are the finding this surface was worth adding for — none of them was
+  // visible to any check in the repo before it.
+  'packages/cloud-connection/src/runtime-config-plugin.ts': {
+    unenveloped: 1,
+    ratchet: '#9364 (envelope /api/v1/runtime/config)',
+    note: 'the discovery payload the Console SPA reads BARE before first paint (objectui `app-shell/src/runtime-config.ts` reads body.cloudUrl / body.features / body.branding off the top level) — enveloping it is a cross-repo breaking wire change, deliberately not done in #9267',
+  },
+  'packages/plugins/plugin-hono-server/src/current-user-endpoints.ts': {
+    unenveloped: 9,
+    ratchet: '#9364 (envelope the bare plugin-route payloads)',
+    note: 'nine `{ authenticated, userId, … }` bodies with no `success` flag — the same bare-payload class as runtime-config, read directly by the Console',
+  },
+  'packages/plugins/plugin-hono-server/src/adapter.ts': {
+    unenveloped: 4,
+    stringError: 4,
+    siblingCode: 1,
+    ratchet: '#9364 (convert the adapter refusals onto the declared envelope)',
+    note: 'the adapter\'s own refusals — `{ error: \'Not found\' }` 404, `{ error: \'No response from handler\' }` 500, `{ error: \'Fallback handler failed\' }` 500, and the 405 that adds `code`/`method`/`path`/`allowed` beside `error`. The pre-#3675 dialect and its #7035 sibling, alive at a door no scan reached',
+  },
+  'packages/adapters/hono/src/index.ts': {
+    unenveloped: 2,
+    errorCodeNotString: 1,
+    ratchet: '#9364 (envelope the hono adapter bodies)',
+    note: 'two `{ data }` discovery bodies with no `success`, plus a shared `errorJson` writing the HTTP status into `error.code` — a number where ApiErrorSchema declares a string enum',
+  },
+  'packages/cli/src/commands/serve.ts': {
+    unenveloped: 1,
+    stringError: 1,
+    ratchet: '#9364 (envelope the serve host-resolution refusal)',
+    note: 'the unbound-hostname 404 — `{ error: \'environment_not_found\', message, hostname }`, a bare-string error with two stray top-level keys',
+  },
+  'packages/plugins/plugin-auth/src/auth-plugin.ts': {
+    unenveloped: 3,
+    ratchet: '#9364 (envelope the bare plugin-route payloads)',
+    note: 'three `{ hasOwner: … }` bodies from `/bootstrap-status`, polled by the Account SPA before any credential exists — the same bare-payload class as runtime-config. The rest of this file\'s ~46 bodies are better-auth\'s own wire format, relayed rather than built, and so are invisible to these counters by design',
+  },
+  'packages/triggers/trigger-api/src/plugin.ts': {},
+};
+
+/**
+ * Count the ways one plugin-route module's hand-built Hono bodies depart from
+ * the declared envelope.
+ *
+ * Only `<ctx>.json(<objectLiteral>, …)` is judged — see the header on why
+ * relayed bodies are deliberately invisible here.
+ *
+ * @param {string} source TypeScript source text.
+ * @returns {{bodies: number, unenveloped: number, errorWithoutMessage: number, errorCodeNotString: number, strayKeys: number, stringError: number, siblingCode: number, sites: Record<string, string[]>}}
+ */
+export function scanHonoRouteSource(source, fileName = 'plugin.ts') {
+  const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
+  const found = {
+    bodies: 0,
+    unenveloped: 0, errorWithoutMessage: 0, errorCodeNotString: 0,
+    strayKeys: 0, stringError: 0, siblingCode: 0,
+    sites: {
+      unenveloped: [], errorWithoutMessage: [], errorCodeNotString: [],
+      strayKeys: [], stringError: [], siblingCode: [],
+    },
+  };
+  const line = (node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+  const hit = (key, node) => { found[key] += 1; found.sites[key].push(`${fileName}:${line(node)}`); };
+
+  const visit = (node) => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === 'json' &&
+      ts.isIdentifier(node.expression.expression) &&
+      HONO_CONTEXT_RECEIVERS.has(node.expression.expression.text)
+    ) {
+      found.bodies += 1;
+      const arg = node.arguments[0];
+      // A relayed body (an identifier, a call, a member access) is not one this
+      // repo built — see the header.
+      if (arg && ts.isObjectLiteralExpression(arg)) {
+        const topKeys = new Set();
+        let errorInit;
+        let successInit;
+        for (const prop of arg.properties) {
+          if (ts.isShorthandPropertyAssignment(prop)) { topKeys.add(prop.name.text); continue; }
+          if (ts.isSpreadAssignment(prop)) continue;
+          if (!ts.isPropertyAssignment(prop) || !ts.isIdentifier(prop.name)) continue;
+          topKeys.add(prop.name.text);
+          if (prop.name.text === 'error') errorInit = prop.initializer;
+          if (prop.name.text === 'success') successInit = prop.initializer;
+        }
+
+        // A body with no `success` at all is wholly off-envelope. Counted ONCE
+        // here rather than again per stray key: one defect, one number.
+        if (!topKeys.has('success')) {
+          hit('unenveloped', node);
+        } else if ([...topKeys].some((k) => !['success', 'data', 'error', 'meta'].includes(k))) {
+          hit('strayKeys', node);
+        }
+
+        if (errorInit) {
+          // The pre-#3675 dialect: `error` is a bare string.
+          if (
+            ts.isStringLiteral(errorInit) || ts.isTemplateExpression(errorInit) ||
+            ts.isNoSubstitutionTemplateLiteral(errorInit)
+          ) hit('stringError', node);
+
+          // The #7035 dialect: `code` beside `error` rather than inside it.
+          if (topKeys.has('code')) hit('siblingCode', node);
+
+          if (ts.isObjectLiteralExpression(errorInit)) {
+            const errKeys = new Map();
+            for (const p of errorInit.properties) {
+              // A shorthand `{ code }` stands for `code: code` — record the
+              // implied identifier, or the status-carrying form below is
+              // invisible in exactly the spelling that ships it.
+              if (ts.isShorthandPropertyAssignment(p)) { errKeys.set(p.name.text, p.name); continue; }
+              if (ts.isPropertyAssignment(p) && ts.isIdentifier(p.name)) errKeys.set(p.name.text, p.initializer);
+            }
+            // `message` is REQUIRED by ApiErrorSchema. Only judged where the
+            // producer declared a failure — a conditional `error` on a body
+            // whose `success` is computed is not a failure body statically.
+            const declaresFailure = successInit && successInit.kind === ts.SyntaxKind.FalseKeyword;
+            if (declaresFailure && !errKeys.has('message')) hit('errorWithoutMessage', node);
+
+            // `error.code` carrying the HTTP STATUS rather than a semantic code.
+            // Two syntactically decidable forms, and no others — a guess about
+            // what an arbitrary expression evaluates to is not something a
+            // source scan can honestly make:
+            //   1. a numeric literal:  `error: { code: 404 }`
+            //   2. the SAME identifier that is passed as this call's status
+            //      argument: `c.json({ error: { message, code } }, code)`. That
+            //      one is the shape `packages/adapters/hono` ships, and the
+            //      shorthand is why a value-blind scan sees nothing wrong.
+            const codeInit = errKeys.get('code');
+            const statusArg = node.arguments[1];
+            if (codeInit && ts.isNumericLiteral(codeInit)) {
+              hit('errorCodeNotString', node);
+            } else if (
+              codeInit && ts.isIdentifier(codeInit) &&
+              statusArg && ts.isIdentifier(statusArg) &&
+              statusArg.text === codeInit.text
+            ) {
+              hit('errorCodeNotString', node);
+            }
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return found;
+}
+
+/** The counters a plugin-route module is held to. All tick DOWN only. */
+const PLUGIN_ROUTE_COUNTERS = {
+  unenveloped: 'the body carries no `success` flag at all — `unwrapResponse` hands it to callers raw',
+  errorWithoutMessage: '`error` has no `message`, so `body.error.message` reads `undefined`',
+  errorCodeNotString: '`error.code` is a number — ApiErrorSchema declares a string enum there',
+  strayKeys: 'a top-level key outside `success`/`data`/`error`/`meta` — the payload belongs under `data`',
+  stringError: '`error` is a bare string, so `body.error.message` reads `undefined`',
+  siblingCode: '`code` sits beside `error` rather than inside it, so `body.error.code` reads `undefined`',
+};
+
+/**
+ * Files that write a Hono context response, found by parsing rather than by
+ * name — see the header on why.
+ *
+ * Files already audited as surface 1 are excluded so no module is governed by
+ * two tables at once.
+ */
+function discoverHonoRoutes() {
+  const out = [];
+  const skip = new Set(['node_modules', 'dist', 'build', '.turbo', '.next', 'coverage']);
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir)) {
+      if (skip.has(entry)) continue;
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) { walk(full); continue; }
+      if (!entry.endsWith('.ts') || entry.endsWith('.d.ts')) continue;
+      if (entry.includes('.test.') || entry.includes('.conformance.')) continue;
+      const rel = relative(ROOT, full).split(sep).join('/');
+      if (MODULES[rel]) continue;
+      const source = readFileSync(full, 'utf8');
+      // Cheap text pre-filter, then the AST decides. The pre-filter can only
+      // over-select (a mention in a comment), never under-select a real call.
+      if (!source.includes('.json(')) continue;
+      if (scanHonoRouteSource(source, rel).bodies > 0) out.push(rel);
+    }
+  };
+  walk(join(ROOT, 'packages'));
+  return out.sort();
+}
+
 /**
  * Count the envelope-relevant facts in one module's source.
  *
@@ -833,6 +1119,74 @@ function audit() {
     }
   }
 
+  // ── The plugin-mounted Hono routes (#9267) ────────────────────────────────
+  const honoRoutes = discoverHonoRoutes();
+
+  for (const file of honoRoutes) {
+    const declared = PLUGIN_ROUTE_MODULES[file];
+    if (!declared) {
+      problems.push(
+        `${file}\n    NOT DECLARED. This file writes Hono responses (\`c.json(…)\`), so it is a\n` +
+        `    plugin-route module — add it to PLUGIN_ROUTE_MODULES in\n` +
+        `    scripts/check-route-envelope.mjs. If every body it BUILDS is the declared\n` +
+        `    envelope, declare {}. If some are not, declare the CURRENT counts plus a\n` +
+        `    \`ratchet\` naming the issue that will fix them, and a \`note\` saying what they\n` +
+        `    are — never leave a response-emitting module unaudited.`,
+      );
+      continue;
+    }
+    if (declared.exempt) continue;
+
+    const got = scanHonoRouteSource(readFileSync(join(ROOT, file), 'utf8'), file);
+
+    for (const [key, what] of Object.entries(PLUGIN_ROUTE_COUNTERS)) {
+      const want = declared[key] ?? 0;
+      if (got[key] === want) continue;
+      const sites = got.sites[key].map((s) => s.slice(s.lastIndexOf(':') + 1)).join(', ') || '(none)';
+      problems.push(
+        got[key] > want
+          ? `${file}\n    ${key}: found ${got[key]}, declared ${want} — a NEW non-conforming body.\n` +
+            `    ${what}.\n` +
+            `    Emit the envelope BaseResponseSchema declares —\n` +
+            `    { success: false, error: { code, message } } — with \`code\` a member of the\n` +
+            `    ADR-0112 vocabulary. Raising the declared number is not the fix.\n` +
+            (declared.ratchet ? `    (ratchet for ${declared.ratchet})\n` : '') +
+            `    Lines: ${sites}`
+          : `${file}\n    ${key}: found ${got[key]}, declared ${want} — ${want - got[key]} fewer than pinned.\n` +
+            `    That is progress, and banking it is the other half of the ratchet: lower the\n` +
+            `    declared number to ${got[key]} in PLUGIN_ROUTE_MODULES so the ground cannot be\n` +
+            `    given back` + (got[key] === 0 ? ` (and drop the \`ratchet\`/\`note\` if this was the last one)` : '') + `.\n` +
+            (declared.ratchet ? `    (ratchet for ${declared.ratchet})\n` : '') +
+            `    Lines: ${sites}`,
+      );
+    }
+
+    const pinned = Object.keys(PLUGIN_ROUTE_COUNTERS).reduce((n, k) => n + (declared[k] ?? 0), 0);
+    if (pinned > 0 && !declared.ratchet) {
+      problems.push(
+        `${file}\n    pins ${pinned} non-conforming body/bodies with no \`ratchet\`.\n` +
+        `    A pinned count is tracked drift, not a blessing — name the issue that will\n` +
+        `    drive it to zero.`,
+      );
+    }
+    if (pinned > 0 && !declared.note) {
+      problems.push(
+        `${file}\n    pins ${pinned} non-conforming body/bodies with no \`note\`.\n` +
+        `    Say what they are, so the next reader can tell tracked drift from a shape\n` +
+        `    somebody decided was fine.`,
+      );
+    }
+  }
+
+  for (const file of Object.keys(PLUGIN_ROUTE_MODULES)) {
+    if (!honoRoutes.includes(file)) {
+      problems.push(
+        `${file}\n    declared in PLUGIN_ROUTE_MODULES but no longer writes a Hono response —\n` +
+        `    moved, deleted, or converted? Update the table.`,
+      );
+    }
+  }
+
   if (problems.length) {
     console.error('✗ Route-envelope conformance (#3843)\n');
     for (const p of problems) console.error('  ' + p + '\n');
@@ -879,6 +1233,27 @@ function audit() {
   );
   for (const [name, m] of dRatcheted) {
     console.log(`  ⚠ ratchet ${m.ratchet}: ${DISPATCHER_DOMAIN_DIR}/${name} — ${m.note}`);
+  }
+
+  const pEntries = Object.entries(PLUGIN_ROUTE_MODULES);
+  const pRatcheted = pEntries.filter(([, m]) => m.ratchet);
+  const pExempt = pEntries.filter(([, m]) => m.exempt);
+  const totalBodies = honoRoutes.reduce(
+    (n, f) => n + scanHonoRouteSource(readFileSync(join(ROOT, f), 'utf8'), f).bodies, 0,
+  );
+  console.log(
+    `✓ Plugin-mounted Hono routes — ${honoRoutes.length} module(s) audited, ` +
+    `${totalBodies} hand-built body/bodies (count reported, NOT pinned): ` +
+    `${honoRoutes.length - pRatcheted.length - pExempt.length} conformant, ` +
+    `${pRatcheted.length} ratcheted, ${pExempt.length} exempt`,
+  );
+  for (const [file, m] of pRatcheted) {
+    const counts = Object.keys(PLUGIN_ROUTE_COUNTERS)
+      .filter((k) => m[k]).map((k) => `${k} ${m[k]}`).join(', ');
+    console.log(`  ⚠ ratchet ${m.ratchet}: ${file} (${counts}; ticks down only) — ${m.note}`);
+  }
+  for (const [file, m] of pExempt) {
+    console.log(`  – exempt: ${file} — ${m.exempt}`);
   }
 }
 
@@ -1039,6 +1414,90 @@ function selfTest() {
   // A nested `response` key inside a payload is not a response assignment.
   d = scanDomainSource(`return { handled: true, response: deps.success({ response: { status: 'queued' } }) };`);
   assert(d.handBuilt === 0, `a data field named response must not count → ${JSON.stringify(d)}`);
+
+  // ── Plugin-mounted Hono routes (#9267) ────────────────────────────────────
+  // Every case below is a shape measured in the repo when this surface was
+  // added, not an invented one.
+
+  // The conformant body: nothing to report, and the write site is still seen.
+  let p = scanHonoRouteSource(`
+    return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in.' } }, 401);
+  `);
+  assert(
+    p.bodies === 1 && p.unenveloped === 0 && p.errorWithoutMessage === 0 &&
+    p.strayKeys === 0 && p.stringError === 0 && p.siblingCode === 0 && p.errorCodeNotString === 0,
+    `a conformant Hono body must report nothing → ${JSON.stringify(p)}`,
+  );
+
+  // The #9267 finding itself: `error` with no `message`. ApiErrorSchema requires
+  // it, so `body.error.message` read `undefined` on eight cloud-connection exits.
+  p = scanHonoRouteSource(`return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND' } }, 404);`);
+  assert(p.errorWithoutMessage === 1, `a message-less error not caught → ${JSON.stringify(p)}`);
+
+  // A body with no `success` at all — counted ONCE, not again per stray key.
+  p = scanHonoRouteSource(`return c.json({ cloudUrl, features, branding });`);
+  assert(
+    p.unenveloped === 1 && p.strayKeys === 0,
+    `a bare payload must count once as unenveloped → ${JSON.stringify(p)}`,
+  );
+
+  // …while a body that IS trying to be an envelope and leaks a key counts as
+  // strayKeys, not unenveloped. The two are exclusive on purpose.
+  p = scanHonoRouteSource(`return c.json({ success: true, data: link, link });`);
+  assert(
+    p.strayKeys === 1 && p.unenveloped === 0,
+    `a leaked payload key must count as strayKeys → ${JSON.stringify(p)}`,
+  );
+
+  // Both pre-existing dialects reach this door too.
+  p = scanHonoRouteSource(`return c.json({ error: 'Not found' }, 404);`);
+  assert(p.stringError === 1 && p.unenveloped === 1, `bare-string error at this door → ${JSON.stringify(p)}`);
+  p = scanHonoRouteSource(`return c.json({ error: 'Method Not Allowed', code: 'METHOD_NOT_ALLOWED', method }, 405);`);
+  assert(p.siblingCode === 1, `sibling code at this door → ${JSON.stringify(p)}`);
+
+  // `error.code` carrying the HTTP STATUS. The literal form…
+  p = scanHonoRouteSource(`return c.json({ success: false, error: { message, code: 404 } }, 404);`);
+  assert(p.errorCodeNotString === 1, `a numeric error.code not caught → ${JSON.stringify(p)}`);
+  // …and the SHORTHAND form that actually ships (packages/adapters/hono). This
+  // is the case a value-blind scan misses: `code` reads like a semantic code and
+  // is the status argument. Pinned because dropping the shorthand handling in
+  // `errKeys` silently returns this counter to zero.
+  p = scanHonoRouteSource(`
+    const errorJson = (c, message, code = 500) => c.json({ success: false, error: { message, code } }, code);
+  `);
+  assert(p.errorCodeNotString === 1, `the shorthand status-as-code not caught → ${JSON.stringify(p)}`);
+  // NEGATIVE: a `code` identifier that is NOT this call's status is an ordinary
+  // semantic code passed in a variable — the common conformant spelling.
+  p = scanHonoRouteSource(`return c.json({ success: false, error: { message, code } }, 400);`);
+  assert(p.errorCodeNotString === 0, `a semantic code in a variable counted → ${JSON.stringify(p)}`);
+
+  // NEGATIVE: a RELAYED body is not one this repo built — see the header.
+  p = scanHonoRouteSource(`return c.json(upstreamJson, resp.status);`);
+  assert(
+    p.bodies === 1 && p.unenveloped === 0,
+    `a relayed body must be counted as a site but judged as nothing → ${JSON.stringify(p)}`,
+  );
+
+  // NEGATIVE: `c.req.json()` READS a request — the bug the regex predecessor had.
+  p = scanHonoRouteSource(`const body = await c.req.json();`);
+  assert(p.bodies === 0, `a request read must not count as a body → ${JSON.stringify(p)}`);
+
+  // NEGATIVE: prose quoting any of these is not a code path. The table above
+  // quotes several, and must not move anyone's count.
+  p = scanHonoRouteSource(`
+    /* was: c.json({ error: 'Not found' }, 404) — see #9267 */
+    // return c.json({ hasOwner: true });
+    return c.json({ success: true, data });
+  `);
+  assert(
+    p.bodies === 1 && p.stringError === 0 && p.unenveloped === 0,
+    `commented-out Hono bodies counted → ${JSON.stringify(p)}`,
+  );
+
+  // NEGATIVE: `res.json(...)` is surface 1's shape, not this one — the two
+  // scans must not both claim the same write site.
+  p = scanHonoRouteSource(`res.status(404).json({ error: 'nope' });`);
+  assert(p.bodies === 0, `a res.json write must not enter surface 3 → ${JSON.stringify(p)}`);
 
   console.log('✓ check-route-envelope self-test passed');
 }

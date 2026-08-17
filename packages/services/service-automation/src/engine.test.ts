@@ -665,6 +665,82 @@ describe('AutomationEngine', () => {
             expect(result.error).toContain('No suspended run');
         });
 
+        // [#8684] A STALE suspension — the row is real, but what it points at is
+        // gone — is classified by the ENGINE, not guessed at the transport.
+        // Nothing ran, so it is not a business rejection; it is the same
+        // terminal, unresumable class as a missing suspension and a transport
+        // answers it 404. Left code-less, these two exits were indistinguishable
+        // at the route from a run that ran and failed, which is what forced the
+        // route to either answer HTTP 200 for both or sniff the result for
+        // `summary`/`durationMs` — the tolerant-consumer shape PD #12 forbids.
+        //
+        // Asserting `code` (the classification) alongside the message (the part
+        // that tells an operator WHICH of the two it was); a bare
+        // `success === false` would pass for either exit and for a failed run.
+        it('should report a resume whose flow was deregistered as RUN_NOT_FOUND', async () => {
+            const captured: { runId?: unknown } = {};
+            registerPausingNode(captured);
+            engine.registerFlow('vanishing_flow', {
+                name: 'vanishing_flow',
+                label: 'Vanishing Flow',
+                type: 'autolaunched',
+                nodes: [
+                    { id: 'start', type: 'start', label: 'Start' },
+                    { id: 'pause', type: 'pause_node', label: 'Pause' },
+                    { id: 'end', type: 'end', label: 'End' },
+                ],
+                edges: [
+                    { id: 'e1', source: 'start', target: 'pause' },
+                    { id: 'e2', source: 'pause', target: 'end' },
+                ],
+            });
+
+            const paused = await engine.execute('vanishing_flow');
+            expect(paused.status).toBe('paused');
+            engine.unregisterFlow('vanishing_flow');
+
+            const resumed = await engine.resume(paused.runId!);
+            expect(resumed.success).toBe(false);
+            expect(resumed.code).toBe('RUN_NOT_FOUND');
+            expect(resumed.error).toContain("Flow 'vanishing_flow' not found for run");
+        });
+
+        it('should report a resume whose suspended node was edited away as RUN_NOT_FOUND', async () => {
+            const captured: { runId?: unknown } = {};
+            registerPausingNode(captured);
+            const nodes = [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'pause', type: 'pause_node', label: 'Pause' },
+                { id: 'end', type: 'end', label: 'End' },
+            ];
+            engine.registerFlow('edited_flow', {
+                name: 'edited_flow', label: 'Edited Flow', type: 'autolaunched',
+                nodes,
+                edges: [
+                    { id: 'e1', source: 'start', target: 'pause' },
+                    { id: 'e2', source: 'pause', target: 'end' },
+                ],
+            });
+
+            const paused = await engine.execute('edited_flow');
+            expect(paused.status).toBe('paused');
+            // The author republishes the flow without the node the run is
+            // parked on — the pause can never continue.
+            engine.registerFlow('edited_flow', {
+                name: 'edited_flow', label: 'Edited Flow', type: 'autolaunched',
+                nodes: [
+                    { id: 'start', type: 'start', label: 'Start' },
+                    { id: 'end', type: 'end', label: 'End' },
+                ],
+                edges: [{ id: 'e1', source: 'start', target: 'end' }],
+            });
+
+            const resumed = await engine.resume(paused.runId!);
+            expect(resumed.success).toBe(false);
+            expect(resumed.code).toBe('RUN_NOT_FOUND');
+            expect(resumed.error).toContain("Suspended node 'pause' no longer exists in flow 'edited_flow'");
+        });
+
         it('should opt-in screen node into suspend via config.waitForInput', async () => {
             const kernel = new LiteKernel();
             kernel.use(new AutomationServicePlugin());

@@ -9,6 +9,7 @@ import { bundleRequire } from 'bundle-require';
 import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
 import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
+import { readInternalArtifactPath } from '../utils/internal-artifact-channel.js';
 import {
   resolveDriverType,
   resolveStorageDefinition,
@@ -956,7 +957,19 @@ export default class Serve extends Command {
     // fragment. It is resolved here, before anything else looks for an
     // artifact, and it wins over every local lookup:
     //
-    //   --artifact  >  OS_ARTIFACT_URL  >  OS_ARTIFACT_PATH  >  <cwd>/dist/…
+    //   --artifact  >  OS_ARTIFACT_URL  >  OS_INTERNAL_ARTIFACT_PATH
+    //               >  OS_ARTIFACT_PATH  >  <cwd>/dist/…
+    //
+    // `OS_INTERNAL_ARTIFACT_PATH` is the CLI's private parent-to-child channel:
+    // an `os start` / `os dev` supervisor resolved an artifact through its own
+    // ladder and is handing the answer down. It sits BELOW the reference (a
+    // supervisor that saw OS_ARTIFACT_URL resolves nothing and sends nothing,
+    // and `os dev` sends its answer unconditionally, so the reference has to
+    // keep outranking it) and ABOVE the operator's OS_ARTIFACT_PATH (which the
+    // supervisor no longer overwrites on the way down, so only a higher rung
+    // keeps `--artifact` beating an exported OS_ARTIFACT_PATH the way it does
+    // today). See `utils/internal-artifact-channel.ts` for why the CLI stopped
+    // writing the operator's knob at all.
     //
     // Beating OS_ARTIFACT_PATH is not a nicety, it is the acceptance
     // criterion: the official runtime image sets
@@ -1018,7 +1031,11 @@ export default class Serve extends Command {
 
     if (configMissing && !pinnedArtifact) {
       const { resolveDefaultArtifactPath } = await import('@objectstack/runtime');
-      const artifactSource = resolveDefaultArtifactPath();
+      // A supervising `os start` / `os dev` passes its already-resolved answer
+      // as the explicit override — the same position `OS_ARTIFACT_PATH` used to
+      // occupy when the supervisor wrote it, so a named-but-missing artifact is
+      // still a loud refusal rather than a silent empty boot.
+      const artifactSource = resolveDefaultArtifactPath(readInternalArtifactPath());
       if (!artifactSource) {
         // Quick-start mode: `objectstack start` lets the user boot an
         // empty kernel with no config and no artifact, then install apps
@@ -1246,7 +1263,15 @@ export default class Serve extends Command {
             // what stops the loader from fetching the URL a second time — a pin
             // that verifies one response while a different response boots would
             // verify nothing.
-            ...(pinnedArtifact ? { artifactPath: pinnedArtifact.localPath } : {}),
+            // Same reasoning one rung down: when no reference is in play, a
+            // supervisor's resolved answer is handed over explicitly instead of
+            // being re-derived from the environment.
+            ...(pinnedArtifact
+              ? { artifactPath: pinnedArtifact.localPath }
+              : (() => {
+                const internal = readInternalArtifactPath();
+                return internal ? { artifactPath: internal } : {};
+              })()),
           });
           // [#4002] `api` merges per key — see mergeBootConfig. A shallow spread
           // let the boot builder's two scoping keys wipe the author's whole `api`
@@ -1765,7 +1790,11 @@ export default class Serve extends Command {
         if (!hasMetadataPlugin) {
           try {
             const { resolveDefaultArtifactPath } = await import('@objectstack/runtime');
-            const hmrArtifactPath = resolveDefaultArtifactPath();
+            // `os dev` is the only caller that reaches here, and it is a
+            // supervisor: read its channel, or the artifact this HMR watcher
+            // polls would silently drift to `<cwd>/dist/objectstack.json`
+            // whenever `os dev --artifact <elsewhere>` was used.
+            const hmrArtifactPath = resolveDefaultArtifactPath(readInternalArtifactPath());
             if (hmrArtifactPath && !/^https?:\/\//i.test(hmrArtifactPath)) {
               const { MetadataPlugin } = await import('@objectstack/metadata');
               // Mirror the standalone stack's dev config exactly
@@ -3413,9 +3442,11 @@ export default class Serve extends Command {
       } catch { /* no seeds ran — nothing to show */ }
 
       // ── Clean startup summary ──────────────────────────────────────
+      // #8978 — the Config:/Artifact: row must name what actually booted,
+      // never `relativeConfig` unconditionally (see resolveBannerConfigRow).
       printServerReady({
         port,
-        configFile: relativeConfig,
+        ...resolveBannerConfigRow({ relativeConfig, useArtifactFallback, pinnedArtifact }),
         isDev,
         pluginCount: loadedPlugins.length,
         pluginNames: loadedPlugins,
@@ -4100,6 +4131,43 @@ export function describeRegisteredDriver(kernel: any): { label: string; url: str
     return { label, url: url ?? (name.endsWith('.memory') ? '(in-memory)' : '(unknown)') };
   }
   return null;
+}
+
+/**
+ * Decide what the ready banner's `Config:`/`Artifact:` row should say
+ * (#8978).
+ *
+ * `relativeConfig` is derived from `args.config` at the top of `run()`,
+ * before the artifact-fallback branch is decided, and was being handed to
+ * {@link printServerReady} unconditionally. On an `OS_ARTIFACT_URL` boot
+ * the `objectstack.config.ts` in cwd is deliberately never executed — the
+ * boot diagnostics say so plainly a few lines above the banner — yet the
+ * banner still named it. On the plain artifact-fallback path (no config
+ * authored, booting from `OS_ARTIFACT_PATH` or the `<cwd>/dist/objectstack.json`
+ * convention) the row named a config file that does not exist on disk at
+ * all. Both are the same defect: the row is the surface an operator reads
+ * to answer "what is this container actually running", and naming what
+ * did NOT boot points them at the wrong app (cloud#1292).
+ *
+ * - `pinnedArtifact` set (OS_ARTIFACT_URL, #8368) → report it. `.display`
+ *   is already resolved and already redacted for a pre-signed URL by the
+ *   resolver, so it is safe to print as-is.
+ * - `useArtifactFallback` set with no `pinnedArtifact` (OS_ARTIFACT_PATH,
+ *   the `dist/objectstack.json` convention, or an empty/quick-start boot)
+ *   → no config was read and there is no safely-redacted display in hand
+ *   here (OS_ARTIFACT_PATH may itself be a credentialed URL) — omit the
+ *   row rather than name a nonexistent file or risk leaking a secret.
+ * - Neither set → the ordinary config-boot path; report `relativeConfig`
+ *   exactly as before.
+ */
+export function resolveBannerConfigRow(opts: {
+  relativeConfig: string;
+  useArtifactFallback: boolean;
+  pinnedArtifact?: { display: string };
+}): { configFile?: string; artifactSource?: string } {
+  if (opts.pinnedArtifact) return { artifactSource: opts.pinnedArtifact.display };
+  if (opts.useArtifactFallback) return {};
+  return { configFile: opts.relativeConfig };
 }
 
 /**

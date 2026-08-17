@@ -209,6 +209,8 @@
     "ListColumn (type)",
     "ListColumnParsed (type)",
     "ListColumnSchema (const)",
+    "ListMapConfig (type)",
+    "ListMapConfigSchema (const)",
     "ListView (type)",
     "ListViewParsed (type)",
     "ListViewSchema (const)",

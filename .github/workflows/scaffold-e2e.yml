@@ -230,12 +230,42 @@ jobs:
         # The unpublished-version window is the one degradation, and it is
         # evidenced rather than blanket. The install step above carries the
         # fallback that rewrites unresolvable `@objectstack/*` ranges to
-        # `latest`; relocating that fallback into the scaffolder is a separate
-        # design (#9117), so this step cannot borrow it. When the scaffolder's
-        # install leaves no CLI behind, the registry is asked whether the
-        # emitted range was satisfiable at all: unsatisfiable ⇒ that known
-        # window, warn and skip; satisfiable ⇒ the scaffolder's install path is
-        # itself broken, which is a real defect and fails.
+        # `latest`; that fallback lives in THIS WORKFLOW rather than in the
+        # shipped scaffolder, so this step — whose whole point is to run the
+        # scaffolder's OWN install — cannot borrow it.
+        #
+        # WHY IT STILL LIVES HERE, RECORDED RATHER THAN TRIBAL (#9149).
+        # Relocating the fallback into the scaffolder would remove this
+        # degradation outright. It was considered and DECLINED at triage on
+        # 2026-08-17: `create-objectstack` is a PUBLISHED package, so a fallback
+        # that rewrites a real user's dependency ranges to `latest` is a
+        # user-visible public-surface expansion, not CI scaffolding — and a user
+        # scaffolding during a release window arguably wants a resolvable pin,
+        # not a floating tag. Reopening it needs a decision card answering
+        # #9149's three questions: where the rewrite belongs, whether `latest`
+        # is right for a real user at all, and what happens to the release-time
+        # stamping that rides the same step (`engines.protocol`, and since #9264
+        # `specVersion` too — see scripts/sync-template-versions.mjs). Until
+        # such a card is ruled, the degradation stays ON PURPOSE, and this
+        # pointer is why a reader finds that out here instead of rediscovering
+        # it.
+        #
+        # WHAT THE DEGRADATION IS NOT ALLOWED TO SWALLOW. The registry answer is
+        # classified THREE ways, not two. "npm says no version matches" and "npm
+        # could not be reached" both surface as an empty string, and both used
+        # to take the skip — so a registry outage could silently present itself
+        # as the known window and carry the leg green. Now:
+        #   * unreachable registry           ⇒ ::error:: — an unclassifiable
+        #     answer is never evidence of the window, so it is never skipped.
+        #   * reachable, range unsatisfiable ⇒ the known window ⇒ warn, and
+        #     assert the DEGRADED shape rather than nothing at all: with no
+        #     resolvable CLI the scaffolder pins nothing, so the template's own
+        #     `latest` tag must survive untouched. A tag that is neither
+        #     `latest` nor a resolved version means the scaffolder invented one
+        #     with nothing to resolve — a real defect this window must not hide.
+        #   * reachable, range satisfiable   ⇒ the scaffolder's install path is
+        #     itself broken ⇒ ::error::. Unchanged: this is the branch that
+        #     still catches a genuinely broken scaffolder install.
         run: |
           cd "$RUNNER_TEMP"
           node "$GITHUB_WORKSPACE/packages/create-objectstack/bin/create-objectstack.js" pinned-probe --skip-skills
@@ -243,10 +273,27 @@ jobs:
 
           if [ ! -f node_modules/@objectstack/cli/package.json ]; then
             RANGE=$(node -p "require('./package.json').devDependencies['@objectstack/cli']")
+
+            # Asked WITHOUT the range first, so an unreachable registry cannot
+            # masquerade as "that version is not published yet" and take the
+            # skip below. Both failures read as an empty string; only this
+            # rangeless probe tells them apart.
+            if [ -z "$(npm view "@objectstack/cli" version 2>/dev/null)" ]; then
+              echo "::error::cannot reach @objectstack/cli on the registry at all, so the emitted range '$RANGE' cannot be classified. An unreachable registry is NOT evidence of the unpublished-version window; refusing to skip the pinned-shape assertion on an answer this job cannot interpret."
+              exit 1
+            fi
+
             if [ -z "$(npm view "@objectstack/cli@$RANGE" version 2>/dev/null)" ]; then
-              echo "::warning::no @objectstack/cli matching '$RANGE' is on the registry — the unpublished-version window the install step's fallback exists for; the pinned-shape assertion is SKIPPED for this run"
+              echo "::warning::no @objectstack/cli matching '$RANGE' is on the registry — the unpublished-version window the install step's fallback exists for (that fallback lives in this workflow, not the scaffolder; #9149 records why). Pin-EQUALITY is SKIPPED for this run; the degraded shape is still asserted below."
+              TAG=$(sed -n 's|^FROM ghcr\.io/objectstack-ai/objectstack:||p' Dockerfile)
+              if [ "$TAG" != "latest" ]; then
+                echo "::error::the scaffolder resolved no @objectstack/cli (nothing on the registry satisfies '$RANGE'), so it must leave the template's runtime tag at 'latest' — but the emitted Dockerfile FROM tag is '${TAG:-<none>}'. A tag invented with nothing to resolve is a real defect, not the unpublished-version window."
+                exit 1
+              fi
+              echo "degraded shape as expected: no resolvable CLI, FROM tag left at 'latest'"
               exit 0
             fi
+
             echo "::error::the scaffolder ran its own install but left no node_modules/@objectstack/cli behind, though the registry does satisfy '$RANGE' — its install path is broken, so the Dockerfile pin can never run for a real user"
             exit 1
           fi

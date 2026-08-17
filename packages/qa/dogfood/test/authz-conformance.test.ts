@@ -15,6 +15,15 @@
 // classified by a matrix row. A new ungated route (or a removed/stale
 // `covers` key) then fails CI as UNCLASSIFIED / STALE — the surface can't
 // silently regress.
+//
+// #9083 — classification is not unconditional. `checkLedger` asks a
+// non-`enforced` row for nothing but a `note`, so a row in ANY state could
+// classify a discovered surface and clear the red. For the transport
+// tripwires that made the gate's stated promise false: a wired realtime
+// transport could be signed off by the very row recording that no
+// per-recipient authorization exists. `checkTransportWiredAdmission` closes
+// it, and `checkAuthzLedger` — not `checkLedger` — is what every assertion in
+// this file drives.
 
 import { describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'node:url';
@@ -41,6 +50,19 @@ const ATTRIBUTION_MARKER = 'authz-row';
 const scanProofCandidates = (): string[] =>
   readdirSync(HERE).filter((f) => f.endsWith('.dogfood.test.ts'));
 const ATTRIBUTION = { marker: ATTRIBUTION_MARKER, scan: scanProofCandidates } as const;
+
+// ── #9083 — the TRANSPORT-WIRED vocabulary ────────────────────────────────
+//
+// A transport tripwire mints a key carrying this marker. The marker is the
+// channel `checkTransportWiredAdmission` (below) keys on, so it is spelled in
+// exactly ONE place and every tripwire key is built through `tripwireKey` — a
+// probe that hand-rolled the suffix could drift out of the rule's sight
+// silently, which is the failure mode a source-scanned vocabulary always has.
+//
+// ⚠️ Adding a transport tripwire? Mint its key with `tripwireKey`. A tripwire
+// whose key does not carry the marker is NOT held to the admission rule.
+const TRANSPORT_WIRED_MARKER = 'TRANSPORT-WIRED';
+const tripwireKey = (surface: string): string => `${surface}(${TRANSPORT_WIRED_MARKER})`;
 
 // ── #2567 ratchet — static enumeration of anonymous-deny HTTP entry points ──
 //
@@ -120,32 +142,37 @@ const PROBES: ReadonlyArray<{ file: string; re: RegExp; key: (m: RegExpExecArray
   // UNCLASSIFIED surface → red CI with this checklist: add per-recipient
   // RLS/FLS/tenant re-check on delivery (or switch to id-only payloads),
   // THEN register the enforcement site in a matrix row covering the new key.
+  //
+  // [#9083] That last step is now MECHANICAL, not merely written down here:
+  // `checkTransportWiredAdmission` below refuses a TRANSPORT-WIRED key
+  // classified by a row that is not `enforced`, so the shortest path from red
+  // back to green runs through an enforcement site rather than around it.
   {
     file: 'packages/services/service-realtime/src/in-memory-realtime-adapter.ts',
     re: /handleUpgrade\s*\(/g,
-    key: () => 'realtime:in-memory-realtime-adapter.ts:handleUpgrade(TRANSPORT-WIRED)',
+    key: () => tripwireKey('realtime:in-memory-realtime-adapter.ts:handleUpgrade'),
   },
   {
     file: 'packages/services/service-realtime/src/realtime-service-plugin.ts',
     re: /handleUpgrade\s*\(|new\s+WebSocketServer|text\/event-stream/g,
-    key: () => 'realtime:realtime-service-plugin.ts:transport(TRANSPORT-WIRED)',
+    key: () => tripwireKey('realtime:realtime-service-plugin.ts:transport'),
   },
   {
     file: 'packages/runtime/src/http-dispatcher.ts',
     re: /async\s+handle(Realtime|Upgrade|Subscribe)\w*\s*\(/g,
-    key: (m) => `realtime:http-dispatcher.ts:handle${m[1]}(TRANSPORT-WIRED)`,
+    key: (m) => tripwireKey(`realtime:http-dispatcher.ts:handle${m[1]}`),
   },
   {
     file: 'packages/client/src/realtime-api.ts',
     re: /new\s+WebSocket\b|new\s+EventSource\b/g,
-    key: () => 'realtime:client/realtime-api.ts:transport(TRANSPORT-WIRED)',
+    key: () => tripwireKey('realtime:client/realtime-api.ts:transport'),
   },
   // packages/rest/src has ZERO realtime refs today (#2992) — a `/realtime`
   // route literal appearing there is a subscribe endpoint. Same tripwire.
   {
     file: 'packages/rest/src/rest-server.ts',
     re: /['"`][^'"`]*\/realtime[^'"`]*['"`]/g,
-    key: () => 'realtime:rest-server.ts:route(TRANSPORT-WIRED)',
+    key: () => tripwireKey('realtime:rest-server.ts:route'),
   },
 
   // ── ADR-0096 / #3167 — MCP execution-surface identity pins ─────────────
@@ -189,6 +216,63 @@ function discoverAnonymousDenySurfaces(): Set<string> {
   return found;
 }
 
+// ── #9083 — a wired transport is admitted ONLY by an `enforced` row ───────
+//
+// The defect this closes, measured on `origin/main` before the fix: the
+// tripwire note promised the gate "holds out for the enforcement site", and it
+// did not. `checkLedger` requires an `enforcement` site only when
+// `state === 'enforced'`, while a row's `covers` keys classify a discovered
+// surface REGARDLESS of state. So wiring a real client transport
+// (`new EventSource(...)` in packages/client/src/realtime-api.ts) went red as
+// UNCLASSIFIED — and appending that one tripwire key to the EXPERIMENTAL
+// `realtime-delivery-authz` row, whose own summary records that there is NO
+// per-recipient authorization, turned CI green again with zero authorization
+// written. Measured both ways: `experimental` and `removed` each admitted the
+// exit identically (15/15 green), because the only thing `checkLedger` asks of
+// a non-enforced row is a `note`.
+//
+// The rule, deliberately narrow (it keys on the TRANSPORT-WIRED marker, not on
+// `covers` in general): a tripwire key may be classified ONLY by an `enforced`
+// row. `checkLedger`'s existing enforced-has-site invariant then supplies the
+// second half for free — an `enforced` row with no `enforcement` string is
+// already a problem — so this rule and that one COMPOSE into the promise the
+// note makes, rather than restating it.
+//
+// Why here and not in `checkLedger`: TRANSPORT-WIRED is this ledger's OWN
+// vocabulary, minted by the probe table 40 lines up. `checkLedger` is the
+// shared ADR-0060 helper backing five other conformance ledgers, none of which
+// has transport tripwires; teaching it this marker would leak one ledger's
+// vocabulary into all of them.
+function checkTransportWiredAdmission(rows: readonly AuthzPrimitive[]): string[] {
+  const problems: string[] = [];
+  for (const r of rows) {
+    for (const c of r.covers ?? []) {
+      if (!c.includes(TRANSPORT_WIRED_MARKER) || r.state === 'enforced') continue;
+      problems.push(
+        `${r.id}: a ${TRANSPORT_WIRED_MARKER} surface cannot be classified by a '${r.state}' row — ${c}. ` +
+          'A wired end-user transport is admitted only by an `enforced` row naming its per-recipient ' +
+          'delivery authorization site (RLS/FLS/tenant re-check with the subscriber ExecutionContext, or ' +
+          'id-only payloads + client re-fetch). Write that enforcement FIRST, then classify the key on the ' +
+          'enforced row — classifying it here silences the tripwire with no authorization written (#9083).',
+      );
+    }
+  }
+  return problems;
+}
+
+/**
+ * This ledger's full gate: the shared ADR-0060 invariants plus the #9083
+ * TRANSPORT-WIRED admission rule. Every assertion in this file drives THIS,
+ * not `checkLedger` directly, so no case can pass against a weaker gate than
+ * the one CI runs.
+ */
+function checkAuthzLedger(
+  rows: readonly AuthzPrimitive[],
+  opts: Parameters<typeof checkLedger>[1],
+): string[] {
+  return [...checkLedger(rows, opts), ...checkTransportWiredAdmission(rows)];
+}
+
 const HIGH_RISK = [
   'owd-private', 'owd-public-read', 'controlled-by-parent', 'anonymous-deny', 'default-profile',
   // #2567 — every anonymous-deny HTTP surface is high-risk: it guards the
@@ -221,7 +305,7 @@ const HIGH_RISK = [
 
 describe('ADR-0056 D10 — authorization conformance matrix', () => {
   it('is a sound conformance ledger (ADR-0060 checkLedger) + the #2567 surface ratchet holds', () => {
-    const problems = checkLedger(AUTHZ_CONFORMANCE, {
+    const problems = checkAuthzLedger(AUTHZ_CONFORMANCE, {
       proofRoot: HERE, // proofs are dogfood test files alongside this one
       highRisk: HIGH_RISK,
       // The ratchet: every discovered PROBES entry point must be classified
@@ -248,7 +332,7 @@ describe('#2567 — anonymous-deny surface ratchet bites', () => {
   });
 
   it('the real matrix + real discover is sound (baseline lock)', () => {
-    const problems = checkLedger(AUTHZ_CONFORMANCE, opts(() => discoverAnonymousDenySurfaces()));
+    const problems = checkAuthzLedger(AUTHZ_CONFORMANCE, opts(() => discoverAnonymousDenySurfaces()));
     expect(problems).toEqual([]);
   });
 
@@ -259,13 +343,13 @@ describe('#2567 — anonymous-deny surface ratchet bites', () => {
     const m = clone();
     const row = m.find((r) => r.id === 'anonymous-deny-meta')!;
     row.covers = [];
-    const problems = checkLedger(m, opts(() => discoverAnonymousDenySurfaces()));
+    const problems = checkAuthzLedger(m, opts(() => discoverAnonymousDenySurfaces()));
     expect(problems.some((p) => /UNCLASSIFIED surface/.test(p) && /meta:/.test(p))).toBe(true);
   });
 
   it('(b) a NEW ungated route appearing in source → UNCLASSIFIED surface failure', () => {
     const fake = 'data:hono-plugin.ts:DELETE /data/fake';
-    const problems = checkLedger(
+    const problems = checkAuthzLedger(
       AUTHZ_CONFORMANCE,
       opts(() => new Set([...discoverAnonymousDenySurfaces(), fake])),
     );
@@ -276,14 +360,14 @@ describe('#2567 — anonymous-deny surface ratchet bites', () => {
     const m = clone();
     const row = m.find((r) => r.id === 'anonymous-deny-meta')!;
     row.covers = [...(row.covers ?? []), 'meta:http-dispatcher.ts:handleRemovedThing'];
-    const problems = checkLedger(m, opts(() => discoverAnonymousDenySurfaces()));
+    const problems = checkAuthzLedger(m, opts(() => discoverAnonymousDenySurfaces()));
     expect(problems.some((p) => /STALE covers/.test(p) && /handleRemovedThing/.test(p))).toBe(true);
   });
 
   // ── #2992 — the latent-surface pins bite too ──────────────────────────
   it('(d) wiring a realtime transport (tripwire key appears) → UNCLASSIFIED surface failure (#2992)', () => {
     const fake = 'realtime:in-memory-realtime-adapter.ts:handleUpgrade(TRANSPORT-WIRED)';
-    const problems = checkLedger(
+    const problems = checkAuthzLedger(
       AUTHZ_CONFORMANCE,
       opts(() => new Set([...discoverAnonymousDenySurfaces(), fake])),
     );
@@ -295,7 +379,7 @@ describe('#2567 — anonymous-deny surface ratchet bites', () => {
     const threaded = 'mcp:domains/mcp.ts:buildMcpBridge(context-threaded)';
     // Baseline sanity: the HTTP `/mcp` handler threads the caller EC today.
     expect(discoverAnonymousDenySurfaces().has(threaded)).toBe(true);
-    const problems = checkLedger(
+    const problems = checkAuthzLedger(
       AUTHZ_CONFORMANCE,
       opts(() => new Set([...discoverAnonymousDenySurfaces()].filter((k) => k !== threaded))),
     );
@@ -306,7 +390,7 @@ describe('#2567 — anonymous-deny surface ratchet bites', () => {
     const stdio = 'mcp:plugin.ts:stdio-principal-bound';
     // Baseline sanity: the stdio path resolves an API-key principal today.
     expect(discoverAnonymousDenySurfaces().has(stdio)).toBe(true);
-    const problems = checkLedger(
+    const problems = checkAuthzLedger(
       AUTHZ_CONFORMANCE,
       opts(() => new Set([...discoverAnonymousDenySurfaces()].filter((k) => k !== stdio))),
     );
@@ -323,12 +407,123 @@ describe('#2567 — anonymous-deny surface ratchet bites', () => {
       // the surface has regressed to its pre-#5569 state, which is the whole
       // point of the pin.
       expect(discoverAnonymousDenySurfaces().has(gate), `${gate} must be in source`).toBe(true);
-      const problems = checkLedger(
+      const problems = checkAuthzLedger(
         AUTHZ_CONFORMANCE,
         opts(() => new Set([...discoverAnonymousDenySurfaces()].filter((k) => k !== gate))),
       );
       expect(problems.some((p) => /STALE covers/.test(p) && p.includes(gate))).toBe(true);
     }
+  });
+});
+
+// ── #9083 — the TRANSPORT-WIRED admission rule bites ──────────────────────
+//
+// This block is the filer's two-leg reverse verification, mechanised: leg 1
+// (wiring a transport reds CI as UNCLASSIFIED) is case (i); leg 2 (appending
+// the key to the absence-recording row turns it green again) is case (j),
+// which must now STAY red. Each case that asserts a refusal also asserts that
+// bare `checkLedger` — the gate as it shipped before #9083 — accepts the very
+// same ledger, so none of them can pass for an unrelated reason. If that
+// paired assertion ever inverts, this rule has stopped being the thing that
+// holds and these cases are testing something else.
+describe('#9083 — a wired transport is admitted only by an `enforced` row', () => {
+  const clone = (): AuthzPrimitive[] => JSON.parse(JSON.stringify(AUTHZ_CONFORMANCE));
+  const opts = (discover: () => Iterable<string>) => ({
+    proofRoot: HERE,
+    highRisk: HIGH_RISK,
+    discover,
+    attribution: ATTRIBUTION,
+  });
+  // The exact key the filer's `new EventSource('/api/v1/stream')` minted.
+  const WIRED = tripwireKey('realtime:client/realtime-api.ts:transport');
+  const wiredDiscover = () => new Set([...discoverAnonymousDenySurfaces(), WIRED]);
+
+  it('the real matrix declares no TRANSPORT-WIRED key today (non-vacuity)', () => {
+    // Every case below is about a key that does not exist yet. If the ledger
+    // ever legitimately classifies one, this expectation is the place that
+    // says so out loud rather than letting the block quietly go vacuous.
+    const declared = AUTHZ_CONFORMANCE.flatMap((r) => r.covers ?? []).filter((c) =>
+      c.includes(TRANSPORT_WIRED_MARKER),
+    );
+    expect(declared).toEqual([]);
+    expect(checkTransportWiredAdmission(AUTHZ_CONFORMANCE)).toEqual([]);
+  });
+
+  it('(i) leg 1 — wiring a transport is an UNCLASSIFIED surface (unchanged by #9083)', () => {
+    // The tripwire's original property must survive the new rule: a wired
+    // transport nobody has classified is still red, for the same reason.
+    const problems = checkAuthzLedger(AUTHZ_CONFORMANCE, opts(wiredDiscover));
+    expect(problems.some((p) => p.includes('UNCLASSIFIED surface') && p.includes(WIRED))).toBe(true);
+  });
+
+  it('(j) leg 2 — appending the key to the EXPERIMENTAL realtime row stays red', () => {
+    const m = clone();
+    const row = m.find((r) => r.id === 'realtime-delivery-authz')!;
+    expect(row.state).toBe('experimental');
+    row.covers = [...(row.covers ?? []), WIRED];
+
+    // The defect, pinned: the pre-#9083 gate accepted exactly this ledger —
+    // a live client transport, "NO per-recipient authorization" in the row's
+    // own summary, and a green build.
+    expect(checkLedger(m, opts(wiredDiscover))).toEqual([]);
+
+    // …and the composed gate refuses it, naming the row and the remedy.
+    const problems = checkAuthzLedger(m, opts(wiredDiscover));
+    expect(
+      problems.some(
+        (p) => p.startsWith('realtime-delivery-authz:') && p.includes(TRANSPORT_WIRED_MARKER),
+      ),
+      problems.join('\n'),
+    ).toBe(true);
+  });
+
+  it('(k) the `removed` state admits no exit either — all three states measured', () => {
+    // `removed` is the third AuthzState and was measured to admit the identical
+    // exit (green, zero authorization written), so the rule keys on "not
+    // enforced" rather than on "experimental".
+    const m = clone();
+    const row = m.find((r) => r.id === 'agent-visibility')!;
+    expect(row.state).toBe('removed');
+    row.covers = [...(row.covers ?? []), WIRED];
+
+    expect(checkLedger(m, opts(wiredDiscover))).toEqual([]);
+    expect(
+      checkAuthzLedger(m, opts(wiredDiscover)).some((p) => p.startsWith('agent-visibility:')),
+    ).toBe(true);
+  });
+
+  it('(l) an `enforced` row naming its enforcement site DOES admit the key', () => {
+    // The rule makes the gate stricter, not impassable: the admission path the
+    // note promises has to actually work, or the next author has no way out
+    // except deleting the tripwire.
+    const m = clone();
+    m.push({
+      id: 'realtime-delivery-recipient-authz',
+      summary: 'per-recipient RLS/FLS/tenant re-check on realtime delivery',
+      state: 'enforced',
+      enforcement:
+        'service-realtime/in-memory-realtime-adapter.ts — delivery re-checks each subscriber ExecutionContext before fan-out',
+      covers: [WIRED],
+    });
+    expect(checkAuthzLedger(m, opts(wiredDiscover))).toEqual([]);
+  });
+
+  it('(m) an `enforced` row with NO enforcement site does not admit it (composition)', () => {
+    // The second half comes from `checkLedger`'s own enforced-has-site
+    // invariant. This case is what proves the two rules COMPOSE into the
+    // note's promise — flipping the state alone must not be a way through.
+    const m = clone();
+    m.push({
+      id: 'realtime-delivery-recipient-authz',
+      summary: 'per-recipient re-check — state flipped, site never written',
+      state: 'enforced',
+      covers: [WIRED],
+    });
+    const problems = checkAuthzLedger(m, opts(wiredDiscover));
+    expect(
+      problems.some((p) => /enforced but names no enforcement site/.test(p)),
+      problems.join('\n'),
+    ).toBe(true);
   });
 });
 
@@ -348,7 +543,7 @@ describe('#7976 — row ↔ proof attribution is mutual', () => {
     // vacuous pass because the rows stopped carrying proofs.
     const cited = AUTHZ_CONFORMANCE.filter((r) => r.proof);
     expect(cited.length, 'the matrix must still cite proofs').toBeGreaterThanOrEqual(20);
-    expect(checkLedger(AUTHZ_CONFORMANCE, opts())).toEqual([]);
+    expect(checkAuthzLedger(AUTHZ_CONFORMANCE, opts())).toEqual([]);
   });
 
   it('a row re-pointed at a proof that does NOT claim it fails, NAMING the row', () => {
@@ -356,7 +551,7 @@ describe('#7976 — row ↔ proof attribution is mutual', () => {
     // pre-#7976 existence check was perfectly happy with this citation.
     const m = clone();
     m.find((r) => r.id === 'rls-read')!.proof = 'flow-runas.dogfood.test.ts';
-    const problems = checkLedger(m, opts());
+    const problems = checkAuthzLedger(m, opts());
     expect(problems.some((p) => p.startsWith('rls-read:') && /does not claim this row/.test(p))).toBe(true);
   });
 
@@ -365,13 +560,13 @@ describe('#7976 — row ↔ proof attribution is mutual', () => {
     // (PR #7975). Borrowing the sibling's credibility is the thing that must fail.
     const m = clone();
     m.find((r) => r.id === 'rls-by-id-write')!.proof = 'controlled-by-parent.dogfood.test.ts';
-    const problems = checkLedger(m, opts());
+    const problems = checkAuthzLedger(m, opts());
     expect(problems.some((p) => p.startsWith('rls-by-id-write:') && /does not claim this row/.test(p))).toBe(true);
   });
 
   it('a claim naming a row the ledger does not have is an ORPHAN', () => {
     const m = clone().filter((r) => r.id !== 'flow-run-as');
-    const problems = checkLedger(m, opts());
+    const problems = checkAuthzLedger(m, opts());
     expect(
       problems.some((p) => p.includes('flow-runas.dogfood.test.ts') && /orphaned claim/.test(p)),
     ).toBe(true);
@@ -381,7 +576,7 @@ describe('#7976 — row ↔ proof attribution is mutual', () => {
     // The row still exists and its proof still exists — only the pairing broke.
     const m = clone();
     m.find((r) => r.id === 'flow-run-as')!.proof = undefined;
-    const problems = checkLedger(m, opts());
+    const problems = checkAuthzLedger(m, opts());
     expect(problems.some((p) => /attribution is not mutual/.test(p) && p.includes('flow-run-as'))).toBe(true);
   });
 
@@ -390,9 +585,9 @@ describe('#7976 — row ↔ proof attribution is mutual', () => {
     // leaves its stale claim behind, silently. With it, the same edit is loud.
     const m = clone();
     m.find((r) => r.id === 'owd-private')!.proof = undefined;
-    const unscanned = checkLedger(m, { proofRoot: HERE, attribution: { marker: ATTRIBUTION_MARKER } });
+    const unscanned = checkAuthzLedger(m, { proofRoot: HERE, attribution: { marker: ATTRIBUTION_MARKER } });
     expect(unscanned.some((p) => p.includes('showcase-private-owd.dogfood.test.ts'))).toBe(false);
-    const scanned = checkLedger(m, opts());
+    const scanned = checkAuthzLedger(m, opts());
     expect(
       scanned.some((p) => p.includes('showcase-private-owd.dogfood.test.ts') && /not mutual/.test(p)),
     ).toBe(true);

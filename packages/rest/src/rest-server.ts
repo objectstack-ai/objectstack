@@ -2862,13 +2862,36 @@ export class RestServer {
      * kernel we can check the SHAPE; the single-env provider answers existence
      * only, which is the dominant case (the dispatcher's own service-aware
      * discovery covers the wrong-shape case).
+     *
+     * [#9120] The first of those two paths goes through
+     * {@link resolveRequestEnvironmentId} — THE shared entry point, like every
+     * other consumer that needs the request's environment. It used to re-derive
+     * one here (`params.environmentId`, else `defaultEnvironmentIdProvider`),
+     * which is the same chain minus the host's ADR-0006 `kernel-resolver` seam
+     * and the legacy hostname / `X-Environment-Id` steps. On a hostname-routed
+     * multi-tenant host neither of the two inputs it read is present — the
+     * `/discovery` route is unscoped, and the default provider is
+     * `createSingleEnvironmentPlugin`'s wiring — so the probe fell through to
+     * `serviceExistsProvider` and answered for the HOST kernel: `routes.mcp`
+     * advertised for an environment whose route 501s, or withheld from one that
+     * would have served it. `resolveRegisteredServices` was never exposed to
+     * this because its kernel arrives as `ctx.__kernel`, set downstream of the
+     * shared entry point — so routing through it is what makes the parity this
+     * doc-comment claims actually hold. Single-environment boots are unaffected:
+     * the default provider is step 3 of the shared chain.
      */
     private async probeMcpServeable(req: any): Promise<boolean | null> {
         try {
-            let environmentId: string | undefined = req?.params?.environmentId;
-            if ((!environmentId || environmentId === ':environmentId') && this.defaultEnvironmentIdProvider) {
-                try { environmentId = this.defaultEnvironmentIdProvider() || undefined; } catch { /* ignore */ }
-            }
+            // An unsubstituted route pattern is the ABSENCE of an id, not an id.
+            // The shared entry point short-circuits on any truthy explicit
+            // value, so the placeholder must be normalised away before it — or
+            // `getOrCreate(':environmentId')` would go looking for a kernel
+            // named after the pattern.
+            const routeParam: string | undefined = req?.params?.environmentId;
+            const environmentId = await this.resolveRequestEnvironmentId(
+                routeParam === ':environmentId' ? undefined : routeParam,
+                req,
+            );
             if (environmentId && environmentId !== 'platform' && this.kernelManager) {
                 const kernel: any = await this.kernelManager.getOrCreate(environmentId);
                 if (kernel && typeof kernel.getServiceAsync === 'function') {

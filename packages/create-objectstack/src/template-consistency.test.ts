@@ -72,46 +72,128 @@ const REPO_READ_ENV: NodeJS.ProcessEnv = (() => {
   return env;
 })();
 
-describe('blank template package.json', () => {
-  const templatePkg = JSON.parse(
-    fs.readFileSync(
-      path.join(pkgRoot, 'src', 'templates', 'blank', 'package.json'),
-      'utf8',
-    ),
-  );
+// ── Declared version surfaces, per bundled template (#9264) ─────────────────
+//
+// Every bundled template declares the platform it targets in THREE places, and
+// each one is committed to git, shipped in the tarball and copied into every
+// scaffolded project. `scripts/sync-template-versions.mjs` re-stamps all three
+// at version time; these ratchets are the CI half, because that script runs on
+// a changesets/action release PR that gets no CI at all.
+//
+// The template list is DISCOVERED, not written down — the same directory walk
+// the sync script and `check-template-manifests.ts` both use. A hand-kept list
+// is precisely what failed here: coverage of one key in one file is how
+// `specVersion` sat at `^6.0.0` while `engines.protocol` tracked every major up
+// to `^17`, eleven majors of drift behind a green sync run.
+const TEMPLATES_DIR = path.join(pkgRoot, 'src', 'templates');
+const bundledTemplates = fs
+  .readdirSync(TEMPLATES_DIR, { withFileTypes: true })
+  .filter((e) => e.isDirectory() && e.name !== 'node_modules' && e.name !== 'dist')
+  .map((e) => e.name)
+  .sort();
 
-  it('pins every @objectstack/* dep to the current major', () => {
-    const allDeps = { ...templatePkg.dependencies, ...templatePkg.devDependencies };
-    const stackDeps = Object.entries(allDeps).filter(([name]) =>
-      name.startsWith('@objectstack/'),
-    );
-    expect(stackDeps.length).toBeGreaterThan(0);
-    for (const [name, range] of stackDeps) {
-      const match = /^\^(\d+)\./.exec(String(range));
-      expect(match, `${name} range "${range}" must be ^<major>.x`).not.toBeNull();
+describe('bundled template declared version surfaces', () => {
+  // Vacuous-green guard: describe.each over an empty list is a silent pass, and
+  // "the templates directory moved" must not read as "every template is clean".
+  it('discovers at least one bundled template', () => {
+    expect(
+      bundledTemplates.length,
+      `no template directories under ${path.relative(pkgRoot, TEMPLATES_DIR)} — ` +
+        'the per-template ratchets below would all pass vacuously',
+    ).toBeGreaterThan(0);
+  });
+
+  describe.each(bundledTemplates)('%s', (template) => {
+    const templateDir = path.join(TEMPLATES_DIR, template);
+    const readTemplateFile = (name: string) =>
+      fs.readFileSync(path.join(templateDir, name), 'utf8');
+
+    it('package.json pins every @objectstack/* dep to the current major', () => {
+      const templatePkg = JSON.parse(readTemplateFile('package.json'));
+      const allDeps = { ...templatePkg.dependencies, ...templatePkg.devDependencies };
+      const stackDeps = Object.entries(allDeps).filter(([name]) =>
+        name.startsWith('@objectstack/'),
+      );
+      expect(stackDeps.length).toBeGreaterThan(0);
+      for (const [name, range] of stackDeps) {
+        const match = /^\^(\d+)\./.exec(String(range));
+        expect(match, `${name} range "${range}" must be ^<major>.x`).not.toBeNull();
+        expect(
+          Number(match![1]),
+          `${name} pins ^${match![1]}.x but create-objectstack is v${ownMajor} — ` +
+            'bump the template with the release (scaffold-time sync only fixes ' +
+            'generated projects, not this committed baseline)',
+        ).toBe(ownMajor);
+      }
+    });
+
+    // NOTE the file: this stamp lives in `objectstack.config.ts`, inside the
+    // `defineStack({ manifest: … })` literal. It is NOT in
+    // `objectstack.manifest.json` — the two were conflated in this suite's own
+    // naming and in the sync script's log strings, and that conflation is part
+    // of how the sibling key below went unwatched for eleven majors.
+    it("objectstack.config.ts stamps engines.protocol at the scaffolder's major (ADR-0087 D1)", () => {
+      const config = readTemplateFile('objectstack.config.ts');
+      const match = /engines:\s*\{\s*protocol:\s*'\^(\d+)'\s*\}/.exec(config);
+      expect(
+        match,
+        `${template}/objectstack.config.ts must stamp engines.protocol (ADR-0087 D1)`,
+      ).not.toBeNull();
       expect(
         Number(match![1]),
-        `${name} pins ^${match![1]}.x but create-objectstack is v${ownMajor} — ` +
-          'bump the template with the release (scaffold-time sync only fixes ' +
-          'generated projects, not this committed baseline)',
+        `${template} stamps engines.protocol '^${match![1]}' but create-objectstack is v${ownMajor} — ` +
+          'scripts/sync-template-versions.mjs re-stamps this at version time; keep them in lockstep',
       ).toBe(ownMajor);
-    }
-  });
-});
+    });
 
-describe('blank template manifest engines.protocol (ADR-0087 D1)', () => {
-  it('stamps the current protocol major so the handshake covers fresh scaffolds', () => {
-    const config = fs.readFileSync(
-      path.join(pkgRoot, 'src', 'templates', 'blank', 'objectstack.config.ts'),
-      'utf8',
-    );
-    const match = /engines:\s*\{\s*protocol:\s*'\^(\d+)'\s*\}/.exec(config);
-    expect(match, 'template manifest must stamp engines.protocol (ADR-0087 D1)').not.toBeNull();
-    expect(
-      Number(match![1]),
-      `template stamps engines.protocol '^${match![1]}' but create-objectstack is v${ownMajor} — ` +
-        'scripts/sync-template-versions.mjs re-stamps this at version time; keep them in lockstep',
-    ).toBe(ownMajor);
+    // The key #9264 is about. Required by TemplateManifestSchema, read by the
+    // template registry, and copied verbatim into every scaffolded project —
+    // `create-objectstack` rewrites name/displayName/namespace and drops
+    // description, and has never touched this one.
+    it('objectstack.manifest.json declares specVersion at the current @objectstack/spec range', () => {
+      const manifest = JSON.parse(readTemplateFile('objectstack.manifest.json'));
+      expect(
+        typeof manifest.specVersion,
+        `${template}/objectstack.manifest.json must declare specVersion — it is REQUIRED by ` +
+          'TemplateManifestSchema (packages/spec/src/cloud/template-manifest.zod.ts)',
+      ).toBe('string');
+
+      const match = /^\^(\d+)\.\d+\.\d+$/.exec(manifest.specVersion);
+      expect(
+        match,
+        `specVersion "${manifest.specVersion}" must be a ^<major>.0.0 package range — it is the ` +
+          'compatible @objectstack/spec range, not the protocol major that engines.protocol carries',
+      ).not.toBeNull();
+      expect(
+        Number(match![1]),
+        `${template} declares specVersion "${manifest.specVersion}" but create-objectstack is ` +
+          `v${ownMajor} — scripts/sync-template-versions.mjs re-stamps this at version time`,
+      ).toBe(ownMajor);
+    });
+
+    // The invariant that makes the two files one fact rather than two: the
+    // manifest's declared spec range and the dependency a scaffolded project
+    // actually installs must agree. Either alone can be self-consistently
+    // stale; only comparing them catches a stamp that covered one and not the
+    // other, which is the exact failure this card is about.
+    it('specVersion agrees with the @objectstack/spec dependency the template installs', () => {
+      const manifest = JSON.parse(readTemplateFile('objectstack.manifest.json'));
+      const templatePkg = JSON.parse(readTemplateFile('package.json'));
+      const specDep =
+        templatePkg.dependencies?.['@objectstack/spec'] ??
+        templatePkg.devDependencies?.['@objectstack/spec'];
+
+      expect(
+        specDep,
+        `${template}/package.json must depend on @objectstack/spec for its manifest's ` +
+          'specVersion to be checkable against something',
+      ).toBeDefined();
+      expect(
+        manifest.specVersion,
+        `${template} declares specVersion "${manifest.specVersion}" but installs ` +
+          `@objectstack/spec "${specDep}" — one fact written twice, and they disagree`,
+      ).toBe(specDep);
+    });
   });
 });
 

@@ -71,7 +71,7 @@ import {
 } from './local-manifest-source.js';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
-import type { IHttpServer, IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { IHttpServer, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
 
 const ROUTE_BASE = '/api/v1/marketplace/install-local';
 
@@ -437,11 +437,23 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * Merge `datasets` onto the SHARED `seed-datasets` service via the runtime's
      * register-once-then-mutate helper (#3453), so THIS package's seeds accumulate
      * alongside every config app's and every other package's rather than clobbering
-     * them — the per-org replayer (AppPlugin) replays the whole union on the next
+     * them — a per-org replayer replays the whole union on the next
      * `sys_organization` insert. Resolved lazily through `@objectstack/runtime` and
      * guarded exactly like {@link recordSeedSummary}: a runtime that predates the
      * helper — or a test that mocks the module without it — falls back to an
      * equivalent inline merge. Returns the post-merge total for the log line.
+     *
+     * ⚠️ [#9070] This merge is only half of the contract, and the missing half used
+     * to be assumed rather than provided: the docblock said "the per-org replayer
+     * (AppPlugin)" as if one always existed. It does not. `registerSeedReplayerOnce`
+     * lives in AppPlugin's seeder path, so on a host runtime that declares no seed
+     * data of its own — `objects: []`, no `data`, which is precisely the shape a
+     * marketplace install targets — `seed-datasets` ends up populated and
+     * `seed-replayer` absent. The middleware then finds datasets, finds no replayer,
+     * logs `datasets present but no replayer registered`, and every organization
+     * founded after the install boots EMPTY. The merge landed and the consumer never
+     * did. {@link registerSeedReplayerIntoKernel} is that consumer; the two are
+     * called together so the split cannot recur.
      */
     private mergeSeedDatasetsIntoKernel = async (ctx: PluginContext, datasets: any[]): Promise<number> => {
         try {
@@ -465,16 +477,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      */
     private mergeSeedDatasetsInline = (ctx: PluginContext, datasets: any[]): number => {
         const c = ctx as any;
-        const read = (): any[] | undefined => {
-            if (typeof c?.getService === 'function') {
-                try { const v = c.getService('seed-datasets'); if (Array.isArray(v)) return v; } catch { /* absent */ }
-            }
-            if (typeof c?.kernel?.getService === 'function') {
-                try { const v = c.kernel.getService('seed-datasets'); if (Array.isArray(v)) return v; } catch { /* absent */ }
-            }
-            return undefined;
-        };
-        const current = read();
+        const current = this.readSharedSeedDatasets(ctx);
         const list: any[] = Array.isArray(current) ? current : [];
         list.push(...datasets);
         if (!Array.isArray(current)) {
@@ -482,6 +485,138 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             else if (typeof c?.registerService === 'function') c.registerService('seed-datasets', list);
         }
         return list.length;
+    };
+
+    /**
+     * Read the LIVE shared `seed-datasets` array, or `undefined` when nothing has
+     * registered one yet. Resolution order is load-bearing and mirrors the runtime
+     * helper: the context's OWN resolver first — a standard `PluginContext` has no
+     * `.kernel` handle at all, which is exactly why the old `(ctx as any).kernel`
+     * read was always `undefined` (#3453) — with the raw-kernel handle second for
+     * the rare embedding that passes a bare kernel as `ctx`. Both throw when the
+     * service is unregistered; swallowed and reported as absent.
+     */
+    private readSharedSeedDatasets = (ctx: PluginContext): any[] | undefined => {
+        const c = ctx as any;
+        if (typeof c?.getService === 'function') {
+            try { const v = c.getService('seed-datasets'); if (Array.isArray(v)) return v; } catch { /* absent */ }
+        }
+        if (typeof c?.kernel?.getService === 'function') {
+            try { const v = c.kernel.getService('seed-datasets'); if (Array.isArray(v)) return v; } catch { /* absent */ }
+        }
+        return undefined;
+    };
+
+    /**
+     * [#9070] Register the per-organization `seed-replayer` callable alongside the
+     * dataset merge, through the runtime's `registerSeedReplayerOnce` helper.
+     *
+     * This is the consumer half of {@link mergeSeedDatasetsIntoKernel}. Without it a
+     * walled deployment installs an app and then hands every organization founded
+     * afterwards an EMPTY copy of it: the org-scoping middleware reads
+     * `seed-datasets`, finds the union it needs, finds no `seed-replayer`, and does
+     * nothing. The installer's own organization is the only one that ever gets rows,
+     * and it gets them from the install-time inline seed rather than from the replay.
+     *
+     * Register-ONCE is the whole safety argument, and it belongs to the helper rather
+     * than to a caller-side "is there one already?" test: a host that already has a
+     * replayer (any `AppPlugin` app with seed data) keeps it, and the incumbent reads
+     * the same live shared list, so it replays this package's datasets too. Nothing
+     * is displaced and nothing is duplicated — which is why this can be called
+     * unconditionally on both the install and the rehydrate path.
+     *
+     * Guarded exactly like {@link mergeSeedDatasetsIntoKernel}: an older runtime
+     * build — or a test that mocks `@objectstack/runtime` without the helper, which
+     * five sibling suites in this package do — falls back to the inline equivalent.
+     * The fallback is not decoration: a silent no-op there would restore the very
+     * defect this method exists to close, and it would be invisible.
+     *
+     * Returns `true` when it newly registered, `false` when a replayer was already
+     * present, so the caller can log "reused" rather than "registered".
+     */
+    private registerSeedReplayerIntoKernel = async (ctx: PluginContext): Promise<boolean> => {
+        const replayer = this.buildSeedReplayer(ctx);
+        try {
+            const mod: any = await import('@objectstack/runtime');
+            if (typeof mod?.registerSeedReplayerOnce === 'function') {
+                return mod.registerSeedReplayerOnce(ctx, replayer) === true;
+            }
+        } catch { /* fall through to the inline registration below */ }
+        return this.registerSeedReplayerInline(ctx, replayer);
+    };
+
+    /**
+     * Fallback for {@link registerSeedReplayerIntoKernel}, mirroring the runtime's
+     * `registerSeedReplayerOnce` byte for byte in behaviour: probe first, register
+     * only on absence, and treat a lost check→register race (the duplicate-register
+     * throw) as "already present". Best-effort throughout — a replay concern must
+     * never tear down an install.
+     */
+    private registerSeedReplayerInline = (ctx: PluginContext, replayer: unknown): boolean => {
+        const c = ctx as any;
+        const alreadyRegistered = (): boolean => {
+            if (typeof c?.getService === 'function') {
+                try { if (c.getService('seed-replayer') !== undefined) return true; } catch { /* absent */ }
+            }
+            if (typeof c?.kernel?.getService === 'function') {
+                try { if (c.kernel.getService('seed-replayer') !== undefined) return true; } catch { /* absent */ }
+            }
+            return false;
+        };
+        if (alreadyRegistered()) return false;
+        try {
+            if (typeof c?.kernel?.registerService === 'function') { c.kernel.registerService('seed-replayer', replayer); return true; }
+            if (typeof c?.registerService === 'function') { c.registerService('seed-replayer', replayer); return true; }
+        } catch { /* concurrent register — treat as already present */ }
+        return false;
+    };
+
+    /**
+     * The `(organizationId) => Promise<summary>` callable registered above — the
+     * narrow surface the org-scoping middleware invokes on a `sys_organization`
+     * insert, so that package never has to import `@objectstack/runtime`.
+     *
+     * Two properties it must have, both learned from the AppPlugin replayer it
+     * mirrors (`packages/runtime/src/app-plugin.ts`):
+     *
+     *   • It reads the LIVE shared list on every call, never a snapshot captured
+     *     when the closure was built. An organization founded after a LATER
+     *     marketplace install must still replay that install's seeds — the whole
+     *     point of accumulating one union (#3453).
+     *   • `errors` is the loader's ERROR ARRAY, not a count. The consumer reports
+     *     `summary?.errors?.length` and samples `summary?.errors?.slice(0, 5)`;
+     *     handing it a number makes both read as "0 error(s)" through optional
+     *     chaining — a machine-readable summary that lies about a failed replay
+     *     rather than one that reports it.
+     *
+     * Never throws: a composition gap (no objectql/metadata) answers the zero
+     * summary and says so once, exactly like the AppPlugin replayer, leaving the
+     * middleware's own fallbacks to decide what to do about it.
+     */
+    private buildSeedReplayer = (ctx: PluginContext) => {
+        const empty = () => ({ inserted: 0, updated: 0, skipped: 0, errors: [] as any[] });
+        return async (organizationId: string) => {
+            if (!organizationId) return empty();
+            const datasetsNow = this.readSharedSeedDatasets(ctx);
+            if (!Array.isArray(datasetsNow) || datasetsNow.length === 0) return empty();
+            // Both slots' declared contracts, not `any` (#4127/#4251): these
+            // lookups are NEW code, so they carry the contract rather than
+            // riding this file's grandfathered entry in
+            // `scripts/slot-lookup-baseline.json` — the same spelling the
+            // session-resolver below uses for `objectql`. Split declaration and
+            // lookup is the FOURTH erasure shape, and an untyped `let` erases
+            // the slot just as `const ql: any = …` does.
+            let ql: IObjectQLEngine | undefined;
+            let metadata: IMetadataService | undefined;
+            try { ql = ctx.getService<IObjectQLEngine>('objectql'); } catch { /* no data engine */ }
+            try { metadata = ctx.getService<IMetadataService>('metadata'); } catch { /* no metadata service */ }
+            if (!ql || !metadata) {
+                ctx.logger?.warn?.(`[MarketplaceInstallLocal] seed-replayer: objectql/metadata unavailable — org ${organizationId} not seeded`);
+                return empty();
+            }
+            const s = await this.runInlineSeed(ctx, datasetsNow, organizationId);
+            return { inserted: s.inserted, updated: s.updated, skipped: s.skipped, errors: s.errorList };
+        };
     };
 
     private handleInstall = async (c: any, ctx: PluginContext): Promise<Response> => {
@@ -1270,13 +1405,36 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             } catch (err: any) {
                 ctx.logger?.warn?.(`[MarketplaceInstallLocal] failed to merge seed-datasets: ${err?.message ?? err}`);
             }
+            // [#9070] …and register the CONSUMER of that merge, right here, so the
+            // two cannot land apart again. Merging seeds onto a kernel with no
+            // `seed-replayer` is a no-op with a success log: every organization
+            // founded after this install boots empty. Register-once means a host
+            // that already has a replayer is untouched (that is what the helper is
+            // for), and the incumbent replays this package's datasets anyway
+            // because it re-reads the same shared list. Runs on the rehydrate path
+            // too (`seedNow: false`), which is where a restarted runtime gets its
+            // replayer back.
+            try {
+                const registered = await this.registerSeedReplayerIntoKernel(ctx);
+                ctx.logger?.info?.(
+                    registered
+                        ? `[MarketplaceInstallLocal] registered per-org seed-replayer for ${appId}`
+                        : `[MarketplaceInstallLocal] per-org seed-replayer already registered — reused for ${appId}`,
+                );
+            } catch (err: any) {
+                ctx.logger?.warn?.(`[MarketplaceInstallLocal] failed to register seed-replayer: ${err?.message ?? err}`);
+            }
         }
 
         // ── 3. Optional immediate seed ───────────────────────────────────
-        // Always seed inline via SeedLoaderService — don't rely on the
-        // `seed-replayer` registered by AppPlugin since (a) it isn't
-        // registered when the host runtime has no AppPlugin app with
-        // seed data, and (b) its closure may use stale datasets. In
+        // Always seed inline via SeedLoaderService — don't route the
+        // install's OWN seed through the `seed-replayer` service, since
+        // (a) whoever registered it may be a foreign source (AppPlugin,
+        // or step 2's registration on an earlier install) and (b) its
+        // closure may use stale datasets. Note the replayer is now
+        // guaranteed to EXIST by step 2 (#9070) — that guarantee is
+        // about future organizations, and does not make it the right
+        // instrument for seeding the caller's own org right now. In
         // multi-tenant mode we pass `organizationId` so the loader
         // writes tenant-scoped rows the same way AppPlugin's
         // single-tenant branch + SecurityPlugin's per-org replay do.
@@ -1328,7 +1486,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         ctx: PluginContext,
         datasets: any[],
         organizationId?: string,
-    ): Promise<{ inserted: number; updated: number; skipped: number; errors: number; droppedRefs: number; errorSample?: string }> => {
+    ): Promise<{ inserted: number; updated: number; skipped: number; errors: number; errorList: any[]; droppedRefs: number; errorSample?: string }> => {
         const ql: any = ctx.getService('objectql');
         let metadata: any;
         try { metadata = ctx.getService('metadata'); } catch { /* none */ }
@@ -1354,6 +1512,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             updated: result.summary.totalUpdated,
             skipped: result.summary.totalSkipped ?? 0,
             errors: result.errors.length,
+            // [#9070] The raw array beside the count. The per-org replayer's
+            // consumer reports `errors.length` and samples `errors.slice(0, 5)`;
+            // a count handed to it reads as "0 error(s)" through its optional
+            // chaining. Every other caller here wants the count, so both ship.
+            errorList: Array.isArray(result.errors) ? result.errors : [],
             // Reference fields dropped from rows that WERE written (#3932) —
             // invisible in every row count, so carried explicitly.
             droppedRefs: result.summary.totalReferencesDropped ?? 0,

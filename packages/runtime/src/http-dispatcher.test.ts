@@ -429,14 +429,106 @@ describe('HttpDispatcher', () => {
         });
 
         // A run that resumed and then FAILED is not an authorization answer —
-        // it keeps the ordinary success-envelope shape.
-        it('should not 403 an ordinary failed resume', async () => {
+        // and since #8684 it is not a 200 either.
+        //
+        // This assertion used to demand the ordinary success envelope
+        // (`body.data.success === false`), which is exactly the double envelope
+        // #3962 ruled out for `/actions`: a caller that branches on the HTTP
+        // status alone read a failed run as a successful one. #8684 inherits that
+        // ruling for this route and IS the documented decision that flipped this
+        // pin — the same way #3962's own checklist flipped
+        // `actions-validation-envelope.test.ts`. The 403 half of the name is
+        // unchanged and still the point: a failed run is not an authorization
+        // answer.
+        it('should not 403 an ordinary failed resume — it answers 400 FLOW_FAILED', async () => {
             mockAutomationService.resume.mockResolvedValue({ success: false, error: 'node blew up' });
             const result = await dispatcher.handleAutomation(
                 'flow_a/runs/run_1/resume', 'POST', { inputs: {} }, AUTHED_CALLER(),
             );
             expect(result.response?.status).not.toBe(403);
-            expect(result.response?.body?.data?.success).toBe(false);
+            expect(result.response?.status).toBe(400);
+            expect(result.response?.body?.error?.code).toBe('FLOW_FAILED');
+            expect(result.response?.body?.error?.message).toBe('node blew up');
+            // The double envelope is gone, not merely re-labelled: there is no
+            // inner `data` for a status-blind caller to misread.
+            expect(result.response?.body?.data).toBeUndefined();
+            expect(result.response?.body?.success).toBe(false);
+        });
+
+        // [#8684] The WIRE SHAPE of that 400, pinned field by field rather than
+        // by status alone — this is the single point where the consumer contract
+        // can be silently lost. objectui reads the flow author's own failure text
+        // from `error.details.errorMessage` and from nowhere else (module header
+        // of `packages/app-shell/src/utils/flowResponse.ts`, PR #4899): the
+        // ADR-0112 envelope has no `data`, so a producer that builds its message
+        // out of `result.error` alone drops the author's words while every status
+        // assertion stays green. The live `/actions` producer
+        // (`action-execution.ts`) does exactly that; this route does not.
+        it('should carry the flow-authored errorMessage and the run summary in the 400 details', async () => {
+            mockAutomationService.resume.mockResolvedValue({
+                success: false,
+                error: "Node 'create_opportunity' failed: Amount must be greater than zero",
+                errorMessage: 'We could not create the opportunity — check the amount and try again.',
+                durationMs: 45,
+                summary: { selected: 0, acted: 0, skipped: 0, unmeasured: 0, nodes: [
+                    { nodeId: 'create_opportunity', nodeType: 'create_record', status: 'failure', runs: 1, failures: 1 },
+                ] },
+            });
+            const result = await dispatcher.handleAutomation(
+                'flow_a/runs/run_1/resume', 'POST', { inputs: { amount: 0 } }, AUTHED_CALLER(),
+            );
+            expect(result.response?.status).toBe(400);
+            expect(result.response?.body?.error?.code).toBe('FLOW_FAILED');
+            // The raw node error stays the human-readable message …
+            expect(result.response?.body?.error?.message)
+                .toMatch(/Node 'create_opportunity' failed/);
+            // … and the author's message is NOT folded into it, nor dropped.
+            expect(result.response?.body?.error?.details?.errorMessage)
+                .toBe('We could not create the opportunity — check the amount and try again.');
+            // Which node failed survives the envelope change.
+            expect(result.response?.body?.error?.details?.summary?.nodes?.[0]?.status).toBe('failure');
+            // `code` is promoted out of `details` into the declared field, never
+            // duplicated in both (`error-envelope.ts`).
+            expect(result.response?.body?.error?.details?.code).toBeUndefined();
+        });
+
+        // [#8684] The other half of the producer-first split: an exit where
+        // nothing ran because the suspension is STALE — the flow was
+        // deregistered, or the node was edited away under a live pause. The
+        // engine now reports both under `RUN_NOT_FOUND`, so they answer 404
+        // (terminal, unresumable) instead of being mislabelled a business
+        // rejection. The route reads the engine's classification; it does not
+        // infer one from the shape of the result.
+        it('should answer 404 when the suspension is stale rather than the run having failed', async () => {
+            mockAutomationService.resume.mockResolvedValue({
+                success: false, code: 'RUN_NOT_FOUND',
+                error: "Suspended node 'collect' no longer exists in flow 'flow_a'",
+            });
+            const result = await dispatcher.handleAutomation(
+                'flow_a/runs/run_1/resume', 'POST', { inputs: {} }, AUTHED_CALLER(),
+            );
+            expect(result.response?.status).toBe(404);
+            expect(result.response?.body?.error?.message).toMatch(/no longer exists in flow/);
+            expect(result.response?.body?.error?.code).not.toBe('FLOW_FAILED');
+        });
+
+        // [#8684] `INVALID_SIGNAL` / `INVALID_SCREEN_INPUT` are refusals the
+        // engine makes BEFORE consuming the suspension, so the pause is still
+        // live and the caller can correct the submission and retry. They must
+        // keep their own codes: the console treats only `FLOW_FAILED` as terminal
+        // (PR #4899), so folding a retryable refusal into it would close the
+        // wizard on a submission the user could have fixed.
+        it('should keep INVALID_SCREEN_INPUT distinct from FLOW_FAILED', async () => {
+            mockAutomationService.resume.mockResolvedValue({
+                success: false, code: 'INVALID_SCREEN_INPUT',
+                error: "Invalid screen input: Unknown screen field \"nickname\" — declared fields: 'full_name'",
+            });
+            const result = await dispatcher.handleAutomation(
+                'flow_a/runs/run_1/resume', 'POST', { inputs: { nickname: 'ada' } }, AUTHED_CALLER(),
+            );
+            expect(result.response?.status).toBe(400);
+            expect(result.response?.body?.error?.code).not.toBe('FLOW_FAILED');
+            expect(result.response?.body?.error?.message).toMatch(/Unknown screen field/);
         });
 
         // #3853 follow-up: the reserved-name rule lives in the ENGINE, at the one
