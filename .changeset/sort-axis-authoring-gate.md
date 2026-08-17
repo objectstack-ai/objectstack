@@ -4,6 +4,19 @@
 
 feat(lint): refuse a list-view `sort` that names a formula field, or no field at all, at authoring time (#9257)
 
+<!-- adr-0087: not-required (already-registered engine-find-formula-order-by-refused)
+This rule refuses no shape the runtime accepts — it moves an EXISTING refusal
+earlier. `engine-find-formula-order-by-refused` (semantic, protocol 17) already
+registers the condition and carries the identical FROM → TO prescription
+("denormalise the value onto the object — a stored field, written when the
+source changes — and sort by that", with `summary` explicitly unaffected); the
+FROM → TO block below restates that entry's remedy for the list-view position
+rather than prescribing a second, different one. The `sort-field-unknown` half
+is covered by `assertSortFieldsExist` (#6994), a REST ingress refusal already
+shipped. Nothing authorable is renamed, retired or tombstoned, and no
+`sys_metadata` row changes shape, so there is no new conversion to register —
+what changes is only WHEN the author is told. -->
+
 **BREAKING** accept-set narrowing on a published authoring surface, shipped as
 `minor` under the same lockstep launch-window convention the sibling
 `filter-preset-comparand` refusal used. Measured against the shipped corpus
