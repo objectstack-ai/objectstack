@@ -83,8 +83,10 @@ describe('#3918 follow-up — /actions surfaces code + fields on a validation fa
 
         expect(response.status).toBe(400);
         // The semantic code is promoted into `error.code` (#3971); `fields`
-        // stay in `details`.
+        // stay in `details`. A REGISTERED code is already in `error.code`, so
+        // no `declaredCode` sibling appears — presence means demotion (#9106).
         expect(response.body.error.code).toBe('VALIDATION_FAILED');
+        expect(response.body.error.declaredCode).toBeUndefined();
         expect(response.body.error.details).toMatchObject({ fields: FIELDS });
     });
 
@@ -116,13 +118,32 @@ describe('#3918 follow-up — /actions surfaces code + fields on a validation fa
         expect(response.body.error.details).toBeUndefined();
     });
 
-    it('carries a code without fields when that is all the error had', async () => {
+    /**
+     * [#9106] The pinned witness to the TENANT-AUTHORED limb, re-homed under
+     * the demote rule (maintainer ruling 2026-08-16). `DUPLICATE` is a metadata
+     * app's OWN spelling — authored at runtime, enumerable by no ledger — so it
+     * must NOT reach `error.code`, which is a closed vocabulary at every door.
+     * It is not dropped either: #7867's capability is preserved, and the
+     * author's code crosses the sandbox and reaches the wire in
+     * `error.declaredCode`, the open author-authored channel. Apps branch on
+     * enum codes; app-specific spellings ride `declaredCode`.
+     *
+     * ⛔ Do not "fix" a red here by registering `DUPLICATE` in
+     * `ERROR_CODE_LEDGER` — registering one tenant spelling closes nothing
+     * (the next app picks a different string) and promotes it into the
+     * platform vocabulary. See `SANDBOX_AUTHORED_LIMB` in
+     * `../dispatcher-error-vocabulary.ts`.
+     */
+    it('demotes an author-thrown code to `declaredCode` — `error.code` stays closed (#9106)', async () => {
         const response = await invoke(
             new SandboxError("action 'x' threw: pick another", 'pick another', { code: 'DUPLICATE' }),
         );
 
         expect(response.status).toBe(400);
         expect(response.body.error.message).toBe('pick another');
-        expect(response.body.error.code).toBe('DUPLICATE');
+        // The closed member the 400 derives — never the author's spelling.
+        expect(response.body.error.code).toBe('VALIDATION_ERROR');
+        // The author's spelling still reaches the wire, in the open channel.
+        expect(response.body.error.declaredCode).toBe('DUPLICATE');
     });
 });

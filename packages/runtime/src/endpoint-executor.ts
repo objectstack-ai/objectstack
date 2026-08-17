@@ -49,10 +49,10 @@ import type { ApiEndpointMatch, IAutomationService } from '@objectstack/spec/con
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { serviceUnavailableMessage } from '@objectstack/spec/system';
-import { INTERNAL_ERROR_MESSAGE, looksLikeInternalErrorLeak } from '@objectstack/types';
+import { INTERNAL_ERROR_MESSAGE, looksLikeInternalErrorLeak, resolveThrownHttpError, demotedDeclaredCode } from '@objectstack/types';
 import { apiErrorResponse } from './error-envelope.js';
 import { isServiceServeable } from './service-serveable.js';
-import { validationFailure, validationFailureDetails, VALIDATION_FAILED_STATUS } from './validation-failure.js';
+import { validationFailure } from './validation-failure.js';
 import { buildAutomationContext } from './domains/automation.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 
@@ -284,32 +284,28 @@ function sanitizeMessage(message: string, httpStatus: number): string {
 /**
  * A THROWN failure from a delegated pipeline → the existing error envelope.
  *
- * A restatement of `HttpDispatcher.errorFromThrown` (`http-dispatcher.ts:530`)
- * over this module's answer type rather than the dispatcher's private one: same
- * status precedence (`.status` → `.statusCode` → validation ⇒ 400 → fallback),
- * same `details` assembly (`code`, `issues`, then `fields[]` last so
- * `VALIDATION_FAILED` wins for an error matched by `name` alone), same 5xx
- * sanitisation. No new envelope shape and no new code vocabulary: `code` is the
- * producer's own or is derived from the status by `buildApiError`.
+ * [#9106] No longer a restatement of `HttpDispatcher.errorFromThrown` — a
+ * DELEGATION to the same shared resolver that exit and the REST door call
+ * (`resolveThrownHttpError`, `@objectstack/types`): same status precedence
+ * (`.status` → `.statusCode` → validation ⇒ 400 → fallback), same `details`
+ * assembly (non-string `code` as context, `issues`, `fields[]`), and — the
+ * #9106 ruling — the same closed `error.code`: the resolver's narrowed `code`
+ * is what reaches the declared field, and a producer's unregistered spelling
+ * rides the wire's `declaredCode` sibling instead (presence means demotion).
+ * This matters HERE because a delegated pipeline runs tenant-authored hooks —
+ * the same author-thrown limb `domains/actions.ts` serves. The 5xx
+ * sanitisation stays this module's (a boundary property, not the throw's).
  */
 export function endpointErrorAnswer(e: any, fallbackStatus = 500): EndpointExecutionAnswer {
-    const validation = validationFailureDetails(e);
-    const status =
-        typeof e?.status === 'number' ? e.status
-        : typeof e?.statusCode === 'number' ? e.statusCode
-        : validation ? VALIDATION_FAILED_STATUS
-        : fallbackStatus;
-    const issues = Array.isArray(e?.issues) ? e.issues : undefined;
-    const details =
-        issues || e?.code || validation
-            ? {
-                ...(e?.code ? { code: e.code } : {}),
-                ...(issues ? { issues } : {}),
-                ...(validation ?? {}),
-            }
-            : undefined;
-    const message = sanitizeMessage(e?.message ?? String(e), status);
-    return apiErrorResponse({ message, httpStatus: status, details });
+    const thrown = resolveThrownHttpError(e, fallbackStatus);
+    const declaredCode = demotedDeclaredCode(thrown);
+    return apiErrorResponse({
+        message: sanitizeMessage(thrown.message, thrown.status),
+        httpStatus: thrown.status,
+        code: thrown.code,
+        details: thrown.details,
+        ...(declaredCode !== undefined ? { extra: { declaredCode } } : {}),
+    });
 }
 
 /** The 501 answer for a declaration this runtime cannot delegate. */
