@@ -167,11 +167,56 @@ const PROBES: ReadonlyArray<{ file: string; re: RegExp; key: (m: RegExpExecArray
     re: /new\s+WebSocket\b|new\s+EventSource\b/g,
     key: () => tripwireKey('realtime:client/realtime-api.ts:transport'),
   },
-  // packages/rest/src has ZERO realtime refs today (#2992) — a `/realtime`
-  // route literal appearing there is a subscribe endpoint. Same tripwire.
+  // ── #9084 — the rest-server tripwire, keyed off MECHANICS ──────────────
+  //
+  // packages/rest/src has ZERO realtime refs today (#2992). The original
+  // single probe here watched for a route literal containing `/realtime`,
+  // and that spelling is one the project's own documentation contradicts:
+  // `content/docs/protocol/kernel/realtime-protocol.mdx` names the planned
+  // transports as WebSocket (`/ws`) and SSE (`/api/v1/stream`), NEITHER of
+  // which contains `/realtime`. Mounting either produced no key, no
+  // UNCLASSIFIED surface and no red CI, while the one documented path the
+  // pattern did match — `/api/v1/realtime/events` — is the debug/event-log
+  // endpoint that carries no subscription fan-out. The guard was aimed at the
+  // least dangerous of the three documented paths and blind to the two that
+  // actually deliver events to end users.
+  //
+  // Two probes, because the two channels were MEASURED to be complementary
+  // rather than alternatives (the `#9084` block at the bottom of this file
+  // pins the measurement; on the sample there, neither arm catches a single
+  // spelling the other does):
+  //
+  //  (1) MECHANICS — the act of wiring, regardless of naming. This is the
+  //      property the other four tripwires already have and this one lacked:
+  //      they watch `handleUpgrade`, `new WebSocketServer`,
+  //      `text/event-stream`, `new WebSocket` / `new EventSource`. A transport
+  //      mounted at `/live`, `/events` or any other unforeseen spelling still
+  //      has to perform one of these acts somewhere.
+  //  (2) PATHS — retained and widened, NOT traded away. Mechanics alone has
+  //      its own blind spot: a route mounted here whose handler delegates the
+  //      SSE write or the upgrade to a helper in another module shows no
+  //      mechanical marker in THIS file at all, and only the path names it.
+  //      `/realtime` is kept verbatim so no coverage the incumbent had is
+  //      lost, and `/ws` + `/stream` (plus the neighbouring spellings a router
+  //      realistically takes) are added.
+  //
+  // ⚠️ The path arm keys on the route SUFFIX, never on the documented full
+  // path. Measured: every `path:` value in rest-server.ts is composed
+  // (`` `${basePath}/discovery` ``, `` `${metaPath}/types` ``) and every
+  // verbatim `/api/v1/...` string in the file lives in a COMMENT — so a probe
+  // widened to the documented literal `/api/v1/stream` would have stayed just
+  // as blind as the one it replaced.
   {
     file: 'packages/rest/src/rest-server.ts',
-    re: /['"`][^'"`]*\/realtime[^'"`]*['"`]/g,
+    re: /handleUpgrade\s*\(|new\s+WebSocketServer\b|new\s+WebSocket\b|new\s+EventSource\b|upgradeWebSocket\b|WebSocketPair\b|Sec-WebSocket-|text\/event-stream|streamSSE\s*\(/g,
+    key: () => tripwireKey('realtime:rest-server.ts:transport'),
+  },
+  {
+    file: 'packages/rest/src/rest-server.ts',
+    // Word-boundary lookaheads on `ws`/`stream` keep the file's 31 unrelated
+    // response-streaming references (and paths like `/workspaces`) out: they
+    // are matched only as a whole route segment, never as a prefix.
+    re: /['"`][^'"`]*(?:\/realtime|\/(?:websockets?|ws)(?![\w-])|\/(?:streams?|sse)(?![\w-]))[^'"`]*['"`]/g,
     key: () => tripwireKey('realtime:rest-server.ts:route'),
   },
 
@@ -524,6 +569,146 @@ describe('#9083 — a wired transport is admitted only by an `enforced` row', ()
       problems.some((p) => /enforced but names no enforcement site/.test(p)),
       problems.join('\n'),
     ).toBe(true);
+  });
+});
+
+// ── #9084 — the rest-server tripwire catches what it was widened for ──────
+//
+// The reverse verification, mechanised. A widened guard never shown to catch
+// the thing it was widened for is not a fix, and "it reads zero on the real
+// file" is worth nothing on its own — a pattern that matches NOTHING reads
+// zero too. So every zero asserted here is paired with a planted control that
+// proves the same pattern fires, and the defect itself is pinned by running
+// the INCUMBENT pattern over the identical sample.
+//
+// Each spelling below is written the way rest-server.ts really registers a
+// route (`path: `${basePath}/x``) or writes a content type
+// (`res.header('Content-Type', ...)`), not as an idealised literal.
+describe('#9084 — the rest-server.ts transport tripwire keys off mechanics', () => {
+  const REST_SERVER = 'packages/rest/src/rest-server.ts';
+  const restProbes = PROBES.filter((p) => p.file === REST_SERVER && p.key({} as RegExpExecArray).includes(TRANSPORT_WIRED_MARKER));
+  const MECHANICS = restProbes.find((p) => p.key({} as RegExpExecArray).includes(':transport('))!;
+  const ROUTES = restProbes.find((p) => p.key({} as RegExpExecArray).includes(':route('))!;
+
+  // The pattern as it shipped before #9084 — a route literal containing
+  // `/realtime`, and nothing else. Restated here (not imported) because it is
+  // the DEFECT being pinned, not a thing this file should keep using.
+  const INCUMBENT = /['"`][^'"`]*\/realtime[^'"`]*['"`]/g;
+
+  const hits = (re: RegExp, text: string): string[] => {
+    re.lastIndex = 0;
+    const out: string[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) out.push(m[0]);
+    return out;
+  };
+  const fires = (text: string): boolean =>
+    hits(MECHANICS.re, text).length > 0 || hits(ROUTES.re, text).length > 0;
+
+  // The two transports the protocol page documents as planned, plus the
+  // neighbouring spellings a router realistically takes, plus the mechanical
+  // acts a transport cannot avoid performing.
+  const DOCUMENTED = {
+    'WebSocket route (/ws)': "this.routeManager.register({ method: 'GET', path: `${basePath}/ws`, handler: h });",
+    'SSE route (/api/v1/stream)': "this.routeManager.register({ method: 'GET', path: `${basePath}/stream`, handler: h });",
+  };
+  const NEIGHBOURING = {
+    'plural /streams': 'path: `${basePath}/streams`,',
+    '/sse': 'path: `${basePath}/sse`,',
+    '/websocket': 'path: `${basePath}/websocket`,',
+    "single-quoted '/ws'": "app.get('/ws', handler);",
+    'the incumbent /realtime, still covered': 'path: `${basePath}/realtime/events`,',
+  };
+  const MECHANICAL = {
+    'SSE content-type write': "res.header('Content-Type', 'text/event-stream');",
+    'WS handshake': 'this.realtime.handleUpgrade(req, socket, head);',
+    'ws server': 'const wss = new WebSocketServer({ noServer: true });',
+    'hono upgradeWebSocket': "app.get('/live', upgradeWebSocket(() => ({})));",
+    'Workers WebSocketPair': 'const pair = new WebSocketPair();',
+    'hono streamSSE helper': 'return streamSSE(c, async (stream) => {});',
+    'raw handshake header': "res.setHeader('Sec-WebSocket-Accept', accept);",
+    'client-side constructor': 'const es = new EventSource(url);',
+  };
+
+  it('reads ZERO on the real rest-server.ts today (the pre-wiring baseline)', () => {
+    const src = readFileSync(join(REPO_ROOT, REST_SERVER), 'utf8');
+    expect(hits(MECHANICS.re, src)).toEqual([]);
+    expect(hits(ROUTES.re, src)).toEqual([]);
+    // …and the surface walk agrees: no rest-server tripwire key is minted.
+    const discovered = [...discoverAnonymousDenySurfaces()].filter((k) =>
+      k.startsWith('realtime:rest-server.ts:'),
+    );
+    expect(discovered).toEqual([]);
+  });
+
+  it('CONTROL — that zero is meaningful: every documented transport fires', () => {
+    // Without this case the zero above is unfalsifiable. A pattern matching
+    // nothing at all would satisfy it just as well.
+    for (const [label, line] of Object.entries({ ...DOCUMENTED, ...NEIGHBOURING, ...MECHANICAL })) {
+      expect(fires(line), `${label} must mint a tripwire key: ${line}`).toBe(true);
+    }
+  });
+
+  it('the DEFECT is pinned: the incumbent /realtime-only pattern is blind to both documented transports', () => {
+    // This is the card's finding, kept executable. If someone narrows the
+    // probes back toward a single path spelling, this case is what says so.
+    for (const [label, line] of Object.entries(DOCUMENTED)) {
+      expect(hits(INCUMBENT, line), `incumbent was blind to ${label}`).toEqual([]);
+      expect(fires(line), `widened probe must catch ${label}`).toBe(true);
+    }
+    // The only documented path it did match is the debug/event-log endpoint,
+    // which carries no subscription fan-out — and that coverage is retained.
+    const debugEndpoint = 'path: `${basePath}/realtime/events`,';
+    expect(hits(INCUMBENT, debugEndpoint).length).toBe(1);
+    expect(fires(debugEndpoint)).toBe(true);
+  });
+
+  it('the two arms are COMPLEMENTARY, not alternatives (why both are kept)', () => {
+    // Measured, not assumed: on this sample neither arm catches a single
+    // spelling the other does. Dropping either one re-opens a blind spot.
+    for (const line of Object.values({ ...DOCUMENTED, ...NEIGHBOURING })) {
+      expect(hits(ROUTES.re, line).length).toBeGreaterThan(0);
+      expect(hits(MECHANICS.re, line)).toEqual([]);
+    }
+    for (const line of Object.values(MECHANICAL)) {
+      expect(hits(MECHANICS.re, line).length).toBeGreaterThan(0);
+      expect(hits(ROUTES.re, line)).toEqual([]);
+    }
+  });
+
+  it('does not fire on the unrelated response-streaming code already in the file', () => {
+    // rest-server.ts carries ~31 occurrences of the substring "stream" (xlsx
+    // export piping, chunked responses). A tripwire that reddened CI on those
+    // would be pressure to weaken it back, so the boundaries are pinned.
+    for (const line of [
+      "const { PassThrough } = await import('node:stream');",
+      "res.header('Content-Type', 'text/csv; charset=utf-8');",
+      'new ExcelJS.stream.xlsx.WorkbookWriter({ stream: passthrough });',
+      'path: `${basePath}/workspaces`,',
+      'path: `${basePath}/streaming-imports`,',
+      '// on this route the streaming CHUNK size, not the page number',
+      'path: `${basePath}/data/:object`,',
+    ]) {
+      expect(fires(line), `must not fire on: ${line}`).toBe(false);
+    }
+  });
+
+  it('a wired transport still lands as an UNCLASSIFIED surface under the #9083 rule', () => {
+    // The widening has to reach the OUTCOME, not just mint a string: both new
+    // keys must still be refused admission by the composed gate.
+    for (const surface of ['realtime:rest-server.ts:transport', 'realtime:rest-server.ts:route']) {
+      const wired = tripwireKey(surface);
+      const problems = checkAuthzLedger(AUTHZ_CONFORMANCE, {
+        proofRoot: HERE,
+        highRisk: HIGH_RISK,
+        discover: () => new Set([...discoverAnonymousDenySurfaces(), wired]),
+        attribution: ATTRIBUTION,
+      });
+      expect(
+        problems.some((p) => p.includes('UNCLASSIFIED surface') && p.includes(wired)),
+        problems.join('\n'),
+      ).toBe(true);
+    }
   });
 });
 
