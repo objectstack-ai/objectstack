@@ -470,6 +470,19 @@ export const ERROR_CODE_LEDGER = {
     'PLUGIN_REGISTER_FAILED',
     'RESEED_NO_ROWS',                // reseed ran but wrote nothing
     'RESEED_SKIPPED',                // reseed declined to run; message carries why
+    // [#9246] ADR-0120 D5e posture gate: the marketplace install seam stops an
+    // install that declares installation-wide (`'global'`) unique constraints
+    // under the `isolated` tenancy posture, 409, until the caller confirms them
+    // (`marketplace-install-local-plugin.ts`; message + machine-readable
+    // per-index `details.findings`). Emitted by the plugin's OWN Hono route —
+    // the `plugin-route` door #9223 surfaced — and READ off the wire:
+    // `packages/cli/src/commands/package/install.ts` branches on the literal to
+    // print the per-index decision list. Reported by the #8087
+    // dispatcher-vocabulary gate once #9223 taught the scan to see a constant
+    // in an object literal (`GLOBAL_UNIQUE_CONFIRMATION_REQUIRED`,
+    // `packages/types/src/unique-scope-install-gate.ts`); the ledger is
+    // door-agnostic.
+    'UNIQUE_SCOPE_CONFIRMATION_REQUIRED',
   ],
   '@objectstack/service-settings': [
     'INTERNAL',

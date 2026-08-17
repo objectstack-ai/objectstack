@@ -189,29 +189,15 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // ERR_HOOK_TARGET_REBIND, FIELD_VISIBILITY_UNRESOLVED) and #8846 registered
     // all seven in ERROR_CODE_LEDGER, so their rows ratcheted out — a
     // registered code is skipped by the scan, and a `pending-registration` row
-    // whose code is registered fails the gate in the other direction. A future
-    // unswept producer lands here as an `unclassified-site` finding and gets a
-    // new row (then a spec-lane registration, then the row comes out again). ──
-
-    // ── pending registration, found by #9223's widened scan ────────────────
-    {
-        code: 'UNIQUE_SCOPE_CONFIRMATION_REQUIRED',
-        file: 'packages/cloud-connection/src/marketplace-install-local-plugin.ts',
-        shape: 'objlitconst',
-        door: 'plugin-route',
-        verdict: 'pending-registration',
-        why:
-            'Returned as `error.code` by the marketplace install seam when the ADR-0120 D5e posture gate ' +
-            'stops an install, and READ off the wire: `packages/cli/src/commands/package/install.ts` ' +
-            "branches on `res.body?.error?.code === 'UNIQUE_SCOPE_CONFIRMATION_REQUIRED'` to print the " +
-            'per-index decision list. That the seam speaks REGISTERED vocabulary is measurable rather ' +
-            'than assumed: every sibling code in the same file (PLUGIN_MANIFEST_INVALID, ' +
-            'MARKETPLACE_UNAVAILABLE, INVALID_REQUEST, RESOURCE_NOT_FOUND, CLOUD_FETCH_FAILED, …) is in ' +
-            'the ledger already, which is why the scan never reported them — this one member is the gap. ' +
-            'Invisible until #9223 for one reason only: it is stamped through a constant ' +
-            '(GLOBAL_UNIQUE_CONFIRMATION_REQUIRED, `packages/types/src/unique-scope-install-gate.ts`) in ' +
-            'an object literal, the shape `objlit` could not see. ⇒ the spec lane registers it.',
-    },
+    // whose code is registered fails the gate in the other direction. The loop
+    // has since run a second full cycle: #9223's widened scan reported
+    // UNIQUE_SCOPE_CONFIRMATION_REQUIRED at the marketplace install seam's
+    // `plugin-route` door (stamped through a constant in an object literal, the
+    // shape `objlit` could not see), and #9246 registered it under
+    // `@objectstack/cloud-connection`, ratcheting that row out the same way. A
+    // future unswept producer lands here as an `unclassified-site` finding and
+    // gets a new row (then a spec-lane registration, then the row comes out
+    // again). ──
 
     // ── runtime-pinned: an interpolated family, checked where it can be ─────
     {

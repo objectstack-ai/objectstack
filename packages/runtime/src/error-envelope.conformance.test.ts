@@ -246,11 +246,13 @@ describe('#8087 — every code the dispatcher door can emit is parsed against Ap
         // emptied this list; [#9223] widening the scan to see a `code: CONST`
         // in an object literal re-populated it with one member —
         // UNIQUE_SCOPE_CONFIRMATION_REQUIRED, at the marketplace install seam's
-        // `plugin-route` door — which is the loop working, not a regression.
-        // PENDING_AT_DISPATCHER_DOOR stays empty because that code never passes
-        // through this door, so the per-code drives below remain vacuous BY
-        // DESIGN; the suite does not go quiet with them, since the seven
-        // registered codes are driven POSITIVELY in the '#8846 discharge' case.
+        // `plugin-route` door — and #9246 registered that one too, ratcheting
+        // its row out and emptying the list again: the loop working, twice
+        // over. PENDING_AT_DISPATCHER_DOOR is empty whenever the pending list
+        // is, so the per-code drives below are vacuous until a new unswept
+        // producer lands BY DESIGN; the suite does not go quiet with them,
+        // since the seven registered codes are driven POSITIVELY in the
+        // '#8846 discharge' case.
         // Spread: both lists are `readonly string[]`, and `arrayContaining`
         // takes a mutable one — passing the frozen list straight in is a tsc
         // error that only the TEST_DEBT ratchet would have caught.
