@@ -6940,16 +6940,39 @@ export class ObjectQL implements IObjectQLEngine {
    *  — by the child object they aggregate and by the parent object that owns
    *  them — resolving the child→parent FK field. One scan, two views of the
    *  identical descriptor objects, so the two indexes can never disagree about
-   *  which roll-ups exist. */
+   *  which roll-ups exist.
+   *
+   *  [#9154] The registry read PROPAGATES. It used to be
+   *  `try { (registry as any).getAllObjects?.() ?? [] } catch { [] }`, which
+   *  answered a read that could not run with an invented *"no object declares a
+   *  roll-up"* — the same shape #8895 ruled on (*discriminate or propagate*)
+   *  and #9002 removed from the two delete-cascade seams, and there is no
+   *  benign failure class to discriminate here either: an unreadable registry
+   *  is never truthfully "no roll-ups". An empty index means
+   *  {@link recomputeSummaries} recomputes nothing after every insert / update
+   *  / delete, so every parent summary field keeps a stale value while every
+   *  write reports success and nothing is logged.
+   *
+   *  Both halves of the swallow are gone, not just the `catch`: the optional
+   *  call `?.()` absorbed a registry that does not implement `getAllObjects` at
+   *  all — the same structural omission a test double really did ship, and one
+   *  that is invisible precisely because it never throws. A plain call fails
+   *  loudly on it.
+   *
+   *  ⚠️ This is a STRUCTURAL close, not a live defect: `SchemaRegistry`'s
+   *  `getAllObjects()` is a walk over in-memory `Map`s calling `resolveObject()`
+   *  — which returns `undefined` on every failure branch it models — over a
+   *  fold that is spreads and comparisons. No I/O, no driver, no `throw` on the
+   *  measured path. The pin lives in
+   *  `engine-summary-index-registry-read-failure.test.ts`. */
   private buildSummaryIndex(): {
     byChild: Map<string, SummaryDescriptor[]>;
     byParent: Map<string, SummaryDescriptor[]>;
   } {
     const index = new Map<string, SummaryDescriptor[]>();
     const byParent = new Map<string, SummaryDescriptor[]>();
-    let objects: any[] = [];
-    try { objects = (this._registry as any).getAllObjects?.() ?? []; } catch { objects = []; }
-    for (const parent of objects) {
+    const objects: ServiceObject[] = this._registry.getAllObjects();
+    for (const parent of objects as any[]) {
       const fields = parent?.fields;
       if (!fields || typeof fields !== 'object' || Array.isArray(fields)) continue;
       for (const [summaryField, def] of Object.entries(fields)) {
@@ -7005,6 +7028,36 @@ export class ObjectQL implements IObjectQLEngine {
    * Ensure both roll-up indexes are present and current. Split out of
    * {@link getSummaryDescriptors} so the parent-side view (#5749) shares the
    * exact same staleness rule instead of re-deriving one.
+   *
+   * ## [#9154] A failed build leaves NO cache entry — *a poisoned cache entry
+   * must not survive the read that poisoned it*
+   *
+   * This is the limb that made the swallow removed from
+   * {@link buildSummaryIndex} worse than its two #9002 siblings. Those invented
+   * an answer ONCE, per delete. Here the answer is MEMOIZED and stamped with the
+   * registry's current `objectRevision` — so one failed read did not degrade one
+   * write, it installed an empty index that every subsequent write then read as
+   * a measured answer. And `objectRevision` moves only on a metadata MUTATION
+   * (`registerObject`, `unregisterObject`, `unregisterObjectsByPackage`,
+   * `removeObjectOverlay`, `invalidate`, `invalidateAll`, `reset`) — never on a
+   * data write. A steady-state deployment performs none of those, so the
+   * invented emptiness outlived its cause for the whole process lifetime,
+   * ending only at a restart or at an unrelated publish. The failure was not
+   * "briefly wrong"; it was wrong until an unrelated event.
+   *
+   * Two things hold the invariant, and both are load-bearing — do not reorder:
+   *
+   *  1. the build runs to completion into a LOCAL before anything is published
+   *     to `this`, so a throw cannot leave a half-written pair of indexes, and
+   *     the revision stamp is written LAST — an unstamped failure is retried on
+   *     the very next call rather than being remembered as an answer;
+   *  2. the `catch` below clears whatever was cached and resets the stamp before
+   *     rethrowing. Behaviourally that is a no-op today (nothing reads the
+   *     fields without coming through here first, and the stale entry would be
+   *     rebuilt anyway) — it is here so the guarantee is stated in code instead
+   *     of resting on the survey in (1). ⛔ It swallows nothing: the error is
+   *     rethrown unchanged, and `engine-summary-index-registry-read-failure.test.ts`
+   *     pins both the propagation and the retry.
    */
   private ensureSummaryIndexes(): void {
     // Rebuild whenever the REGISTRY's object set has moved since the index was
@@ -7020,7 +7073,17 @@ export class ObjectQL implements IObjectQLEngine {
     const revision = (this._registry as unknown as { objectRevision?: number })?.objectRevision;
     const stale = typeof revision === 'number' && revision !== this.summaryIndexRevision;
     if (!this.summaryIndex || !this.summaryIndexByParent || stale) {
-      const built = this.buildSummaryIndex();
+      let built: { byChild: Map<string, SummaryDescriptor[]>; byParent: Map<string, SummaryDescriptor[]> };
+      try {
+        built = this.buildSummaryIndex();
+      } catch (err) {
+        // [#9154] Nothing measured came back, so nothing is remembered — not
+        // even the entry that was already here, which the staleness test above
+        // has just judged out of date. The next call rebuilds from scratch.
+        this.invalidateSummaryIndex();
+        this.summaryIndexRevision = -1;
+        throw err;
+      }
       this.summaryIndex = built.byChild;
       this.summaryIndexByParent = built.byParent;
       if (typeof revision === 'number') this.summaryIndexRevision = revision;
