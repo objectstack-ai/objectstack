@@ -822,8 +822,10 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // POST /:name/runs/:runId/resume → resume a paused run (screen-flow
         // runtime / ADR-0019). Body `{ inputs }` = a screen node's collected
         // values, applied as bare flow variables; `output`/`branchLabel` also
-        // forwarded for approval-style resumes. Returns the next paused
-        // `{ screen }` (multi-screen) or the completed result.
+        // forwarded for approval-style resumes. The outer envelope is a CLOSED
+        // set — exactly the four keys below — and an unknown top-level key is
+        // refused (#8796). Returns the next paused `{ screen }` (multi-screen)
+        // or the completed result.
         //
         // The signal is built key-by-key from the JSON body on purpose (#3801):
         // the engine gates a suspension whose node declares
@@ -862,6 +864,53 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         if (parts[1] === 'runs' && parts[2] && parts[3] === 'resume' && m === 'POST') {
             if (typeof automationService.resume === 'function') {
                 const b = (body && typeof body === 'object') ? body : {};
+                // [#8796] The outer envelope is a CLOSED SET (maintainer ruling
+                // 2026-08-15, Option A): an unknown top-level key is refused,
+                // located, naming the offending key(s) AND the accepted set —
+                // the closed-parameter-set policy (Route & surface ownership
+                // rule 5) applied to a request body, and the declared=enforced
+                // treatment #4477 gave the INNER bag, one level up. Until now
+                // the assembly below read the keys it knows and silently
+                // dropped the rest, so `{"nodeId":"ask","values":{…}}` — no
+                // key of which this route reads — was answered 200
+                // `success:true` with the submission treated as EMPTY: the run
+                // completed and the submitted value never reached the flow. A
+                // caller that guesses `values` instead of `inputs` now gets a
+                // correction at authoring time instead of silence.
+                //
+                // The refusal WRAPS #3801's field-by-field signal assembly, it
+                // never replaces it with a body spread — the service-authority
+                // marker stays unforgeable exactly as before.
+                //
+                // Deliberately BEFORE the `resume()` call: nothing reaches the
+                // engine until the body is legal (#3899, the same ordering the
+                // toggle arm above enforces), so this refusal composes AHEAD
+                // of every engine verdict — a body that is both malformed and
+                // unauthorized answers the envelope 400 and the suspension is
+                // never consulted, let alone consumed.
+                //
+                // Thrown as the duck-typed validation failure both dispatcher
+                // error exits map to 400 `VALIDATION_FAILED` + `fields[]`
+                // (#3918) — the same wire shape the toggle arm's closed set
+                // answers. NOT `FLOW_FAILED` (#8684, a few lines down): the
+                // console treats 400 `FLOW_FAILED` as terminal (the engine
+                // consumed the suspension and ran — objectui PR #4899), while
+                // this refusal leaves the suspension intact and the caller can
+                // retry with a corrected body. It sits with `INVALID_SIGNAL` /
+                // `INVALID_SCREEN_INPUT` on the retryable side.
+                const RESUME_BODY_KEYS = ['inputs', 'variables', 'output', 'branchLabel'];
+                const unknownKeys = Object.keys(b).filter((k) => !RESUME_BODY_KEYS.includes(k));
+                if (unknownKeys.length > 0) {
+                    const accepted = RESUME_BODY_KEYS.map((k) => `\`${k}\``).join(', ');
+                    throw validationFailure(
+                        `Unknown key${unknownKeys.length > 1 ? 's' : ''} ${unknownKeys.map((k) => `\`${k}\``).join(', ')} — the resume body accepts ${accepted}`,
+                        unknownKeys.map((k) => ({
+                            field: k,
+                            code: 'unknown_field',
+                            message: `not a resume body key — the resume body accepts ${accepted}`,
+                        })),
+                    );
+                }
                 const inputs = (b.inputs ?? b.variables);
                 const signal: any = {};
                 if (inputs && typeof inputs === 'object') signal.variables = inputs;
