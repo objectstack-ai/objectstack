@@ -4,17 +4,20 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)
 ![Tests](https://img.shields.io/badge/tests-6%2C507%20passing-brightgreen.svg)
 
-> ## A complex CRM system in 170k tokens.
+> ## Apps small enough for AI to hold whole.
 >
-> ObjectStack compresses an entire app — data model, UI, workflows,
-> permissions — into typed metadata an AI agent can hold in context, reason
-> about, and refactor whole ([a complete CRM is under 170k
-> tokens](#why-the-mistakes-dont-ship)). That metadata is your **business
-> ontology** — an open, versioned definition of your objects, permissions, and
-> flows that you own, not code scattered across a framework. Strict TypeScript,
-> Zod schemas, and a validation gate catch the agent's mistakes at authoring
-> time; the runtime derives the database, REST API, UI, and MCP server, and
-> enforces permissions and audit on every call.
+> ObjectStack turns the whole app — data model, UI, workflows, permissions —
+> into typed metadata: a complete CRM in under 150k tokens, one context window.
+> Agents read it whole, reason it whole, refactor it whole.
+>
+> The business logic alone — every object, workflow and permission — is under
+> 100k tokens; the UI adds just 50k more.
+>
+> That metadata is your **business ontology** — an open, versioned definition of
+> your objects, permissions, and flows that you own, not code scattered across a
+> framework. Strict TypeScript, Zod schemas, and a validation gate catch the
+> agent's mistakes at authoring time; the runtime derives the database, REST API,
+> UI, and MCP server, and enforces permissions and audit on every call.
 
 `Fits in an agent's context` · `Typed, validated, governed` · `Self-host anywhere` · Apache-2.0
 
