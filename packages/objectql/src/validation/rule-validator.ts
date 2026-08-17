@@ -508,11 +508,89 @@ function readonlyWhenBindings(
 }
 
 /**
+ * Options shared by the single-id and bulk `readonlyWhen` strips.
+ *
+ * ## `supplied` — the key discipline, and why the lock survives it (#9107)
+ *
+ * The conditional strip runs AFTER the before-phase hooks, so by the time it
+ * looks at a key, "the caller wrote this" and "this key is in the payload" are
+ * two different facts. Until #9107 only the second was asked, and — unlike the
+ * static `readonly` strip, which has had the discipline since #5591 — the
+ * conditional one had no `isSystem` exemption either. A field locked by a TRUE
+ * predicate therefore had NO server-side write path at all: a `beforeUpdate`
+ * hook computed it and the strip deleted the computation; a cron or plugin
+ * wrote it with `{ context: { isSystem: true } }` and the strip deleted that
+ * too. The derived-field pattern and a conditional form lock could not coexist
+ * on one field, and the failure was silent behind an HTTP 200 (the measured
+ * downstream shape: a hook-derived maintenance date that never moved, feeding a
+ * scheduler that regenerated the same plan on every scan).
+ *
+ * So `supplied` is the CALLER's payload as snapshotted at ENGINE ENTRY, before
+ * any middleware or hook ran, and a key is judged only when it is still the
+ * caller's — the identical two-part test `stripReadonlyFields` applies:
+ *
+ *  1. the key is an OWN property of `supplied` (a key a hook ADDED is not), and
+ *  2. the payload still holds the caller's VALUE by `Object.is` (a key a hook
+ *     OVERWROTE now carries a platform value, not a forgery).
+ *
+ * ⚠️ **This does not weaken the lock at the API boundary, and the reason is
+ * that a caller cannot reach the exempt side of either test.** To be treated as
+ * hook-written, a value must differ from what arrived at engine entry — which
+ * only server code can arrange. A client that echoes the locked key back does
+ * not launder it: either no hook touched it (test 2 holds, it is stripped) or a
+ * hook overwrote it (the value that persists is the HOOK's, and the client's is
+ * gone regardless). What changed is who may write the column — the server's own
+ * trusted hooks — not whether a caller may. `isSystem` is deliberately still NOT
+ * an exemption here: a state lock that any system-context write could bypass
+ * would not be a state lock (#4889's frozen paid-invoice lines are built on it).
+ *
+ * ABSENT `supplied` means "treat the whole payload as caller-supplied" — the
+ * pre-#9107 behaviour, and the fail-SAFE default: a call site that has no entry
+ * snapshot to offer cannot tell a hook write from a forgery, and must assume the
+ * forgery. Forgetting to pass it can only over-strip, never open a lock.
+ */
+interface ReadonlyWhenStripOptions {
+  /**
+   * The caller's payload as it arrived at engine entry — before middleware and
+   * before the before-phase hooks. Omit to judge every key in the payload.
+   */
+  supplied?: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * Is this key still the CALLER's to be judged? (#9107 — see
+ * {@link ReadonlyWhenStripOptions}.) Shared by the single-id and bulk strips so
+ * the two can never disagree about what "caller-supplied" means, and written to
+ * be textually parallel with the same test inside {@link stripReadonlyFields}.
+ */
+function isCallerSuppliedValue(
+  data: Record<string, unknown>,
+  supplied: Readonly<Record<string, unknown>>,
+  name: string,
+): boolean {
+  // Own-property, never `in`: a field name is `^[a-z_][a-z0-9_]*$`, which
+  // admits `constructor` / `valueOf` — inherited from `Object.prototype` on any
+  // plain snapshot, so `in` would call a hook stamp caller-supplied and strip
+  // it (the trap #5591 names on the static strip, one function over).
+  if (!Object.prototype.hasOwnProperty.call(supplied, name)) return false;
+  // ...and it must still BE the caller's value. `Object.is`, not `===`, on
+  // purpose: `===` reports NaN !== NaN, which would read a caller-forged NaN as
+  // "a hook rewrote it" and KEEP the forgery — the one input where the loose
+  // operator inverts the verdict.
+  return Object.is(data[name], supplied[name]);
+}
+
+/**
  * Strip fields whose `readonlyWhen` CEL predicate is TRUE for the (merged)
  * record from an UPDATE payload — the field is locked, so an incoming change is
  * ignored (the persisted value is kept) rather than rejected. Returns the same
  * object when nothing is locked, else a shallow copy with the locked keys
  * removed.
+ *
+ * Only keys the CALLER supplied at engine entry are judged (#9107) — a value a
+ * hook derived or overwrote is a server value and survives. See
+ * {@link ReadonlyWhenStripOptions} for the two-part test and for why the lock
+ * at the API boundary is unchanged by it.
  *
  * `parent` (#4889) is the master-detail header row, bound for a detail object
  * so a `parent.<field>` predicate — the documented "once the header invoice is
@@ -533,13 +611,20 @@ export function stripReadonlyWhenFields(
   previous: Record<string, unknown> | undefined | null,
   logger?: EvaluateRulesOptions['logger'],
   parent?: ParentBinding,
+  options?: ReadonlyWhenStripOptions,
 ): Record<string, unknown> | undefined | null {
   const fields = objectSchema?.fields;
   if (!fields || !data) return data;
+  const supplied = options?.supplied ?? data;
   const view = readonlyWhenBindings(data, previous, fields);
   let result = data;
   for (const [name, def] of Object.entries(fields)) {
     if (!def?.readonlyWhen || !(name in data)) continue;
+    // [#9107] Asked BEFORE the predicate runs, not after: a hook-written value
+    // is not this strip's business at all, so there is nothing to evaluate and
+    // nothing to warn about — including the unbound-root LOCKED branch, whose
+    // fail-CLOSED verdict exists to protect against an unjudgeable CALLER write.
+    if (!isCallerSuppliedValue(data, supplied, name)) continue;
     if (isReadonlyWhenLocked(def, view.merged, view.previous, name, logger, parent)) {
       if (result === data) result = { ...data };
       delete (result as Record<string, unknown>)[name];
@@ -743,6 +828,11 @@ export function hasReadonlyWhenInPayload(
  * `readonlyWhen` field is actually in the payload, so a batch that touches none
  * still pays nothing.
  *
+ * Only keys the CALLER supplied at engine entry are judged (#9107), off the SAME
+ * entry snapshot the single-id strip uses — one payload, one authorship, so a
+ * bulk write cannot reach a different verdict about who wrote a key than a
+ * one-row write does. See {@link ReadonlyWhenStripOptions}.
+ *
  * Returns the same object when nothing is stripped, else a shallow copy with the
  * locked keys removed.
  */
@@ -752,9 +842,11 @@ export function stripReadonlyWhenFieldsMulti(
   priorRows: ReadonlyArray<Record<string, unknown>> | undefined | null,
   logger?: EvaluateRulesOptions['logger'],
   parentForRow?: (row: Record<string, unknown> | undefined) => ParentBinding,
+  options?: ReadonlyWhenStripOptions,
 ): Record<string, unknown> | undefined | null {
   const fields = objectSchema?.fields;
   if (!fields || !data) return data;
+  const supplied = options?.supplied ?? data;
   const rows = priorRows ?? [];
   // Built lazily: a payload writing no `readonlyWhen` field never reaches the
   // `.some()` below, and then no row view is materialised at all.
@@ -763,6 +855,9 @@ export function stripReadonlyWhenFieldsMulti(
   let result = data;
   for (const [name, def] of Object.entries(fields)) {
     if (!def?.readonlyWhen || !(name in data)) continue;
+    // [#9107] Same authorship gate as the single-id strip, asked before any row
+    // is judged — a hook-written key is exempt for the whole batch, not per row.
+    if (!isCallerSuppliedValue(data, supplied, name)) continue;
     const lockedInSomeRow = rowViews().some((view, i) =>
       isReadonlyWhenLocked(
         def,
