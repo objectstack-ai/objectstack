@@ -8,6 +8,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 // (#5286).
 import { ObjectSchema, ObjectCapabilities, IndexSchema, ObjectFieldGroupSchema, ObjectExternalBindingSchema, ObjectAccessConfigSchema, LifecycleSchema, TenancyConfigSchema, isTenancyDisabled, resolveCrudAffordances, type ServiceObject } from './object.zod';
 import { resolveInjectedSystemColumns } from './injected-system-columns';
+import { Field } from './field.zod';
 import type { StateMachineValidation } from './validation.zod';
 
 describe('ObjectCapabilities', () => {
@@ -1213,6 +1214,134 @@ describe('ObjectSchema.create()', () => {
       });
       expect(obj.validations).toEqual([]);
     });
+  });
+});
+
+// ============================================================================
+// controlled_by_parent × master_detail — the builder forces `required: true`
+// (#9138 — #8772 maintainer ruling, Direction 2 / ADR-0055)
+// ============================================================================
+
+describe('ObjectSchema.create() forces a required master_detail under controlled_by_parent (#9138)', () => {
+  it('forces required: true when `required` is omitted on the master reference', () => {
+    const obj = ObjectSchema.create({
+      name: 'cbp_line',
+      sharingModel: 'controlled_by_parent',
+      fields: {
+        parent: { type: 'master_detail', reference: 'cbp_header' },
+        note: { type: 'text' },
+      },
+    });
+    const fields = obj.fields as Record<string, { required?: boolean }>;
+    expect(fields.parent.required).toBe(true);
+    // Scope: only the master reference is forced — sibling fields keep the
+    // ordinary default (required: false).
+    expect(fields.note.required).toBe(false);
+  });
+
+  it('preserves an explicit required: true and the rest of the field config', () => {
+    const obj = ObjectSchema.create({
+      name: 'cbp_line_explicit',
+      sharingModel: 'controlled_by_parent',
+      fields: {
+        parent: Field.masterDetail('cbp_header', {
+          label: 'Header',
+          required: true,
+          deleteBehavior: 'cascade',
+        }),
+      },
+    });
+    const parent = (obj.fields as Record<string, Record<string, unknown>>).parent;
+    expect(parent.required).toBe(true);
+    expect(parent.deleteBehavior).toBe('cascade');
+    expect(parent.label).toBe('Header');
+  });
+
+  it('forces the Field.masterDetail helper shape too (the helper omits required)', () => {
+    const obj = ObjectSchema.create({
+      name: 'cbp_line_helper',
+      sharingModel: 'controlled_by_parent',
+      fields: { parent: Field.masterDetail('cbp_header', { label: 'Header' }) },
+    });
+    expect((obj.fields as Record<string, { required?: boolean }>).parent.required).toBe(true);
+  });
+
+  it('REFUSES an explicit required: false, loudly, naming object + field + the fix', () => {
+    let message = '';
+    try {
+      ObjectSchema.create({
+        name: 'cbp_bad',
+        sharingModel: 'controlled_by_parent',
+        fields: {
+          parent: { type: 'master_detail', reference: 'cbp_header', required: false },
+        },
+      });
+      throw new Error('expected ObjectSchema.create to refuse required: false under controlled_by_parent');
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).not.toContain('expected ObjectSchema.create to refuse');
+    expect(message).toContain("ObjectSchema.create('cbp_bad')");
+    expect(message).toContain('`parent`');
+    expect(message).toContain('required: false');
+    expect(message).toContain('controlled_by_parent');
+    // The message carries the prescription, not just the verdict.
+    expect(message).toContain('Remove `required: false`');
+    expect(message).toContain('change its `sharingModel`');
+  });
+
+  it('forces EVERY master_detail reference under the object, not just the first', () => {
+    // The prose contract is "exactly one required master_detail", but nothing
+    // enforces the count today (#7474 owns the zero-reference case at publish);
+    // forcing each declared reference keeps every candidate safe rather than
+    // silently blessing only the first.
+    const obj = ObjectSchema.create({
+      name: 'cbp_multi',
+      sharingModel: 'controlled_by_parent',
+      fields: {
+        a: { type: 'master_detail', reference: 'master_a' },
+        b: { type: 'master_detail', reference: 'master_b' },
+      },
+    });
+    const fields = obj.fields as Record<string, { required?: boolean }>;
+    expect(fields.a.required).toBe(true);
+    expect(fields.b.required).toBe(true);
+  });
+
+  it('leaves master_detail on a NON-controlled_by_parent object alone (scope pin)', () => {
+    const omitted = ObjectSchema.create({
+      name: 'plain_line',
+      fields: { parent: { type: 'master_detail', reference: 'plain_header' } },
+    });
+    expect((omitted.fields as Record<string, { required?: boolean }>).parent.required).toBe(false);
+
+    const explicit = ObjectSchema.create({
+      name: 'plain_line_explicit',
+      sharingModel: 'private',
+      fields: { parent: { type: 'master_detail', reference: 'plain_header', required: false } },
+    });
+    expect((explicit.fields as Record<string, { required?: boolean }>).parent.required).toBe(false);
+  });
+
+  it('raw .parse()/.safeParse() stay TOLERANT of the old shape — metadata at rest keeps loading', () => {
+    // The other half of the #8772 ruling: the narrowing is authoring-time
+    // only. Stored metadata rehydrated through the schema (never through the
+    // builder) must keep loading, UNREWRITTEN — runtime tolerance for existing
+    // installs stays with the security gate, and the lint rule stays `warning`
+    // until the v18 card (#9139) promotes it.
+    const atRest = {
+      name: 'cbp_stored',
+      sharingModel: 'controlled_by_parent',
+      fields: {
+        parent: { type: 'master_detail', reference: 'cbp_header', required: false },
+      },
+    };
+    const result = ObjectSchema.safeParse(atRest);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const fields = (result.data as { fields: Record<string, { required?: boolean }> }).fields;
+      expect(fields.parent.required).toBe(false);
+    }
   });
 });
 
