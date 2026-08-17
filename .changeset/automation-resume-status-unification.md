@@ -1,7 +1,7 @@
 ---
-'@objectstack/service-automation': major
-'@objectstack/runtime': major
-'@objectstack/client': major
+'@objectstack/service-automation': minor
+'@objectstack/runtime': minor
+'@objectstack/client': minor
 ---
 
 **BREAKING** — `POST /api/v1/automation/:name/runs/:runId/resume` answers real HTTP
