@@ -325,6 +325,72 @@ export function extractCheckInvocations(workflowText, workflowFile) {
   return out;
 }
 
+/**
+ * A workflow's OWN declaration that it deliberately has no check family to
+ * discover — a whole-line comment anywhere in the workflow text:
+ *
+ *   # dispatch-gates: no-check-families -- <reason>
+ *
+ * ## Why a marker IN the workflow, never a list in this script (#9187)
+ *
+ * `checkFamilyCoverageGaps` below turns "a paths-filtered workflow discovers
+ * zero check families" from a silent omission into a CI failure — but one
+ * real case (`scaffold-e2e.yml`: an install/build/boot/docker pipeline, not a
+ * named local verification) is not a bug, it is a workflow that genuinely has
+ * none. The tempting fix is a hardcoded exemption list ([`scaffold-e2e.yml`])
+ * in THIS file — which reinstalls the exact failure this whole family exists
+ * to retire: a second copy of a fact that belongs on the thing it describes,
+ * silently drifting from it (the workflow gets renamed or a real gap gets
+ * added beside the exempted one, and the list says nothing). A marker the
+ * workflow carries is instead read fresh every run, same as `paths:` and
+ * every `run:` step above — nothing to remember to update here.
+ *
+ * The reason is REQUIRED (not just the marker) — an opt-out with no reason
+ * reads identically to a placeholder nobody will ever revisit, and is exactly
+ * the shape a reviewer cannot tell apart from "forgot to name a family".
+ */
+const NO_CHECK_FAMILIES_MARKER = /^[ \t]*#[ \t]*dispatch-gates:[ \t]*no-check-families[ \t]*--[ \t]*(\S.*)$/m;
+
+export function declaredNoCheckFamiliesReason(workflowText) {
+  const m = NO_CHECK_FAMILIES_MARKER.exec(workflowText);
+  return m ? m[1].trim() : null;
+}
+
+/**
+ * The workflows (by filename) that violate the #9187 coverage invariant:
+ *
+ *   Every workflow that declares a `paths:` filter either discovers at least
+ *   one check family, or carries a `declaredNoCheckFamiliesReason`.
+ *
+ * ## Why scoped to paths-filtered workflows, not all of them
+ *
+ * The harm this closes is specific, not general: a `paths:` filter is CI
+ * SCHEDULING a job for a SUBSET of PRs, and #9171 taught this tool to read
+ * that schedule as a match key. A workflow with no `paths:` filter runs on
+ * every PR regardless — it discriminates nothing, so a card touching it
+ * derives no MORE from a family than it already would from every other
+ * unfiltered job, and `residueLines`' "unfiltered" bucket already surfaces
+ * that count honestly rather than as a silent absence. Widening this guard to
+ * every workflow would fold that already-accounted-for bucket into a false
+ * positive, and would also flag every zero-check workflow that is not a
+ * verification job at all (release/publish/nightly-smoke pipelines) — the
+ * "22 leads is the same as none" trap one level down. Measured on this tree
+ * (#9187): 6 of the 25 workflow files declare a `paths:` filter; 4 of those 6
+ * already discover a family, and the remaining 2 (`docs-drift-check.yml`,
+ * `scaffold-e2e.yml`) are the whole known blast radius — one fixed by naming
+ * its self-test through a `check:` script, one exempted by the marker above.
+ */
+export function checkFamilyCoverageGaps(workflowEntries) {
+  const out = [];
+  for (const { file, text } of workflowEntries) {
+    if (extractTriggerPaths(text).length === 0) continue;
+    if (extractCheckInvocations(text, file).length > 0) continue;
+    if (declaredNoCheckFamiliesReason(text)) continue;
+    out.push(file);
+  }
+  return out;
+}
+
 /** Resolve a `check:x` script name to the script files it runs, via a package.json `scripts` map. */
 export function resolveCheckToFiles(checkName, scriptsMap) {
   const cmd = scriptsMap[checkName];
@@ -2420,6 +2486,83 @@ function selfTest() {
   // — a count alone stays green if one is dropped and another added.
   t('check:engine-double-contract is a live family, so naming it in the table is not a guess', liveFamilies.has('check:engine-double-contract'));
   t('check:where-matcher is a live family too — the gate the prose never named', liveFamilies.has('check:where-matcher'));
+
+  // ── The check-family coverage guard (#9187) ───────────────────────────────
+  //
+  // `docs-drift-check.yml` declared a `paths:` filter and ran a real self-test
+  // (`node scripts/docs-audit/affected-docs.mjs --self-test`) that discovery
+  // could never see, because the naming convention every OTHER family follows
+  // — `check:NAME` or `check-NAME.mjs` — is enforced nowhere: the tree just
+  // happened to comply 103 times running up to this card. This section rules
+  // it normative: a paths-filtered workflow with no discovered family is now
+  // a CI failure, not a lead nobody could see. Fixture cases pin the shape;
+  // the live case at the end pins it against the real tree, the same pairing
+  // the census guard above uses.
+  const noFamilyWf = [
+    'name: X',
+    'on:',
+    '  pull_request:',
+    '    paths:',
+    "      - 'packages/**'",
+    'jobs:',
+    '  j:',
+    '    steps:',
+    '      - name: Self-test the mapper',
+    '        run: node scripts/some-mapper.mjs --self-test',
+  ].join('\n');
+  t(
+    'a paths-filtered workflow discovering no check family is a coverage gap',
+    checkFamilyCoverageGaps([{ file: 'x.yml', text: noFamilyWf }]).includes('x.yml'),
+  );
+  const familyWf = noFamilyWf.replace(
+    'node scripts/some-mapper.mjs --self-test',
+    'pnpm check:some-mapper',
+  );
+  t(
+    'a paths-filtered workflow that DOES discover a family is not a gap',
+    checkFamilyCoverageGaps([{ file: 'x.yml', text: familyWf }]).length === 0,
+  );
+  const unfilteredNoFamilyWf = [
+    'name: X',
+    'on:',
+    '  pull_request: {}',
+    'jobs:',
+    '  j:',
+    '    steps:',
+    '      - name: Self-test the mapper',
+    '        run: node scripts/some-mapper.mjs --self-test',
+  ].join('\n');
+  t(
+    'an UNFILTERED workflow with no family is not a gap — it runs on every PR regardless, the residue bucket already accounts for it',
+    checkFamilyCoverageGaps([{ file: 'x.yml', text: unfilteredNoFamilyWf }]).length === 0,
+  );
+  t(
+    'the declared opt-out reads its reason back',
+    declaredNoCheckFamiliesReason('# dispatch-gates: no-check-families -- e2e build, no named verification (#9187)\n')
+      === 'e2e build, no named verification (#9187)',
+  );
+  t('no marker present reads as no declared reason', declaredNoCheckFamiliesReason('# just a comment\n') === null);
+  t('the marker with no reason text does not count as declared', declaredNoCheckFamiliesReason('# dispatch-gates: no-check-families\n') === null);
+  const exemptedWf = noFamilyWf.replace(
+    'jobs:',
+    '# dispatch-gates: no-check-families -- fixture, not a real verification step\njobs:',
+  );
+  t(
+    "a paths-filtered, zero-family workflow carrying the marker is NOT a gap — the declared opt-out this card's route requires",
+    checkFamilyCoverageGaps([{ file: 'x.yml', text: exemptedWf }]).length === 0,
+  );
+
+  // The live guard: every REAL paths-filtered workflow either discovers a
+  // family or declares why not. This is what actually fails CI the day a new
+  // paths-filtered workflow adds an undiscoverable verification step and
+  // forgets both halves of the fix.
+  const liveWfDir = join(ROOT, '.github/workflows');
+  const liveWorkflowEntries = readdirSync(liveWfDir)
+    .filter((f) => /\.ya?ml$/.test(f))
+    .map((file) => ({ file, text: readFileSync(join(liveWfDir, file), 'utf8') }));
+  t('the live tree has at least one paths-filtered workflow (the guard is not vacuous)', liveWorkflowEntries.some((e) => extractTriggerPaths(e.text).length > 0));
+  const liveGaps = checkFamilyCoverageGaps(liveWorkflowEntries);
+  t(`every real paths-filtered workflow discovers a check family or declares why not (gaps: ${liveGaps.join(', ') || 'none'})`, liveGaps.length === 0);
 
   // ── The residue accounting (#8632) ────────────────────────────────────────
   //

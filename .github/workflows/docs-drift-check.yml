@@ -46,8 +46,15 @@ jobs:
       # Self-test first, so a regression that widened an exclusion into dropping real
       # implementation changes — or collapsed nested packages into their container
       # again (#4162) — fails loudly here instead of quietly skewing this comment.
+      #
+      # Run through the `check:docs-drift-mapper` package.json script, not the raw
+      # `node` invocation: scripts/pm/dispatch-gates.mjs only discovers a check
+      # family from a `check:NAME` / `check-NAME.mjs` shape, and this step's own
+      # `paths:` filter above used to give that derivation nothing to attach to —
+      # this was the one paths-filtered workflow contributing zero of the
+      # discovered families (#9187). Same command, now named so it is found.
       - name: Self-test the change → docs mapper
-        run: node scripts/docs-audit/affected-docs.mjs --self-test
+        run: pnpm check:docs-drift-mapper
 
       - name: Compute affected docs
         id: affected
