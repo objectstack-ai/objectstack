@@ -497,7 +497,7 @@ not-reachable 是设计非故障(维护者 2026-08-11 裁定)⛔ 不复测;**接
 **ACCEPT 之后的路径分叉(动手之前先分,不是事后对照)。** 翻 ready / 挂 auto-merge / 入队前,先
 取一次 PR 的路径面(`get_files`,⛔ 不看报告自述)。路径面**一条命中** `docs/adr/**`、
 `.claude/skills/**` 或 `skills/**` ⇒ ACCEPT 换终局三件套:① 复核结论照常写在 issue 上(不能
-合 ≠ 不复核);② PR 留给维护者 —— ⛔ 不合并不入队不挂auto-merge,必须**看得见地悬着**;③ 轮次报
+合 ≠ 不复核;条款①技能面 PR 的复核席本身须跑在契约复审档位 —— 以 dispatch-gates 常量 `CONTRACT_REVIEW_TIER` 为准,档位单源不写模型名);② PR 留给维护者 —— ⛔ 不合并不入队不挂auto-merge,必须**看得见地悬着**;③ 轮次报
 告单列「awaiting a human merge」(「等人来合」与「被忘了」在 GitHub 上长得一模一样)。混
 合 diff 一条命中就分叉,⛔ 不按比例判;要拆就让 dev 单独开 PR;已入队才读到本条 ⇒ 撤回只有
 转 draft。路径面干净的才转 ready → 入队(队列是唯一被认可的落地路径,⛔ 永不队列

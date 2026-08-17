@@ -1910,6 +1910,115 @@
           "ref": "claude/issue-7680-package-capability-doctrine"
         }
       ]
+    },
+    {
+      "id": "access-security.no-active-org-session-semantics",
+      "title": "A session with no active organization is a LEGAL state with fail-closed semantics: tenant-scoped reads resolve to nothing, tenant-scoped writes are refused loudly naming the missing org, and nothing is ever NULL-stamped",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "api",
+      "personas": [
+        "a freshly signed-up user on their FIRST session (structurally predates their sys_member row)",
+        "a user removed from their organization",
+        "seeded admin (control — has an active organization)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a tenancy-walled deployment (ADR-0095 Layer 0 active on at least one tenant-scoped object) — confirm the posture before scoring, since on an unwalled deployment every clause here is vacuous",
+          "the ability to complete a signup and use the resulting first session before the membership reconciler settles, OR to remove a member and reuse their live session"
+        ],
+        "knownGaps": [
+          "The state is timing-derived on the signup path (better-auth defers the membership write past the signup transaction, ADR-0093), so reproducing it by racing signup is flaky. The DURABLE reproduction is the removed-member path, or a multi-organization deployment whose reconciler binds nobody (ADR-0093 D1 `no-target-org`). Record WHICH producer the run used — a clause proven only on a racy producer is weaker evidence and must say so.",
+          "No stock showcase fixture is known to configure `invite-only` or SSO-JIT-pending; those two producers are blocked(fixture) unless the run configures them."
+        ]
+      },
+      "steps": [
+        "establish the state and PROVE it: obtain a session whose `activeOrganizationId` is null, and cite the evidence (session row / session endpoint payload) — do not infer the state from the symptom you are about to test",
+        "read a tenant-scoped object over the data API with that session",
+        "write (create) a row on a tenant-scoped object with that session",
+        "immediately read back, as the SAME caller, anything the write may have produced",
+        "query the underlying table as admin for rows whose tenant column is NULL, before and after the write attempt",
+        "repeat the read and the write against a NON-tenant-scoped object to bound the blast radius",
+        "sign in and out with the state in force, then inspect the audit ledger rows the session produced (plugin-audit auth-session-audit login/logout)",
+        "run the same read+write as the control admin persona to show the refusal is state-derived, not a blanket denial"
+      ],
+      "acceptance": [
+        {
+          "clause": "tenant-scoped READS resolve to nothing — an empty result set, NOT an error: Layer 0's deny sentinel (RLS_DENY_FILTER) yields zero rows and a 200",
+          "oracle": "api",
+          "verify": "GET returns 200 with an empty collection; a 4xx/5xx here is a FAIL (the read side is deliberately not an error path)",
+          "evidence": "status + body"
+        },
+        {
+          "clause": "tenant-scoped WRITES are refused LOUDLY with a 4xx whose message NAMES the missing active organization — not a generic denial, not a 500",
+          "oracle": "api",
+          "verify": "status is 4xx; the error `code` is drawn from the CLOSED ADR-0112 vocabulary (an invented code is a FAIL of D3) and the message text names the missing active organization",
+          "evidence": "status + full error envelope, quoted"
+        },
+        {
+          "clause": "⛔ NO silent NULL stamping, anywhere: the refused write leaves NO row behind, and no subsystem writes a row whose tenant column is NULL because the caller had no organization to supply",
+          "oracle": "api",
+          "verify": "the admin-side NULL-tenant row count is IDENTICAL before and after the attempt; a row that appears and is invisible to its own creator is the #8208 defect and is a P0 FAIL",
+          "evidence": "both row counts + the diff"
+        },
+        {
+          "clause": "the refusal does not fall OPEN in the other direction: an org-scoped permission holder with no active organization reads and writes NOTHING across tenants (the #8158 class — `scope: 'org'` grants nothing when there is no org)",
+          "oracle": "api",
+          "verify": "as the stateless caller holding an org-scoped permission (e.g. manage_sharing), attempt a cross-tenant read and write; both must be empty/refused, never another tenant's rows",
+          "evidence": "responses + a cross-check that another tenant's rows exist and were not returned"
+        },
+        {
+          "clause": "the audit carve-out is paid for by ORDERING, not by an exemption: audit rows from a first session carry a real tenant — no audit row is NULL-tenanted and therefore permanently invisible to RLS readers (#8245)",
+          "oracle": "api",
+          "verify": "read the login/logout audit rows the session produced as a tenant-scoped reader; they must be visible. A row present in the raw table but invisible to every RLS reader is a FAIL even though nothing errored",
+          "evidence": "raw rows + the RLS-scoped read of the same rows"
+        },
+        {
+          "clause": "the state is LEGAL, not a crash: the session authenticates, non-tenant-scoped surfaces still work, and nothing 500s",
+          "oracle": "api",
+          "verify": "the session's whoami/session endpoint answers 200; a read on a non-tenant-scoped object succeeds; no 5xx anywhere in the run",
+          "evidence": "the response set"
+        },
+        {
+          "clause": "three subsystems agree — sharing, the Layer 0 wall + write path, and the audit ledger give the SAME answer for the SAME state (this item exists because they once gave three contradictory ones on the same working day)",
+          "oracle": "api",
+          "verify": "the run record states each subsystem's observed behavior side by side; any disagreement is the finding, whichever way it leans",
+          "evidence": "the three-way comparison table"
+        }
+      ],
+      "negative": [
+        "fell OPEN: an org-scoped holder with no active organization reading or writing another tenant's rows (#8158) — P0",
+        "fell CLOSED SILENTLY: an HTTP-created record stamped organization_id NULL and immediately invisible to its own creator (#8208) — P0, and the reason the NULL-count clause is measured rather than inferred",
+        "wrote INVISIBLE rows: audit rows carrying a NULL tenant, permanently unreadable through RLS (#8245)",
+        "a 500 or an unhandled rejection on any of the three paths — the state is declared legal, so crashing is a defect",
+        "a refusal whose message does NOT name the missing active organization: it is indistinguishable from an ordinary permission denial and sends the debugger to the wrong layer",
+        "an error code invented for this refusal instead of drawn from the ADR-0112 closed vocabulary"
+      ],
+      "traps": ["auth-state-leak", "eventual-consistency"],
+      "source": [
+        "ADR-0123 (an authenticated session with no active organization — reads resolve to nothing, tenant-scoped writes refused loudly), accepted 2026-08-13",
+        "ADR-0095 D1/W1/W2 (Layer 0 independent always-first AND-composed tenant filter)",
+        "ADR-0105 D1/D2 (posture spectrum, group union wall, empty/absent scope → deny)",
+        "ADR-0093 D1/D2 (membership reconciler; session.create.before resolving activeOrganizationId from sys_member)",
+        "ADR-0112 D3 (closed error-code vocabulary this refusal draws from)",
+        "ADR-0049 (a declared wall the write path does not meet is the defect)",
+        "#8247 (the ruling), from #8158 (fell open) · #8208 (fell closed silently) · #8245 (wrote invisible rows)",
+        "PR #8471 (ADR-0123 + enforcement)",
+        "@objectstack/plugin-security security-plugin.ts step 3.7 + tenant-layer.ts (computeTenantLayer0Filter, RLS_DENY_FILTER)",
+        "@objectstack/plugin-auth auth-manager.ts composeDatabaseHooks + reconcile-membership.ts",
+        "@objectstack/plugin-audit auth-session-audit.ts (login/logout rows)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-17",
+          "change": "new — the ADR-0123 tenant-semantics wall had ZERO checklist coverage. Neither ratchet could see it: no new metadata kind (it is new behavior across the already-mapped permission/object kinds) and no new enum member. Authored P0 because the ADR records three independently measured production-shaped defects in three subsystems for one state, two of which are silent (a row invisible to its own creator; audit rows invisible to every RLS reader) and therefore invisible to any test that only asserts 'no error'",
+          "ref": "#9299"
+        }
+      ]
     }
   ]
 }

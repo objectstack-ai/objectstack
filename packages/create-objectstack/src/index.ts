@@ -24,6 +24,15 @@
  *   - objectstack.config.ts     manifest.id and manifest.name string literals
  *   - README.md                 first H1
  *
+ * The template's own `manifest.description` is DROPPED from both
+ * objectstack.manifest.json and objectstack.config.ts rather than carried
+ * over unrewritten (#9263): it describes the bundled template ("Minimal
+ * ObjectStack environment — a clean slate for building."), not the project
+ * being scaffolded, and there is nothing but the project name to derive a
+ * replacement from — which would only restate `name`/`displayName`. `os
+ * validate` already omits the description line entirely when the field is
+ * absent, so this is a clean landing rather than a placeholder.
+ *
  * Then we run `<pm> install` — and only afterwards can the Dockerfile's runtime
  * image tag be pinned, because the template carries a caret range and the tag
  * has to name the @objectstack/cli version npm actually resolved (#9017). With
@@ -164,7 +173,17 @@ function rewriteProjectIdentity(
     }
   }
 
-  // objectstack.manifest.json — set .name, .displayName, .namespace
+  // objectstack.manifest.json — set .name, .displayName, .namespace, and DROP
+  // .description (#9263). The template ships a generic line describing
+  // ITSELF ("Minimal ObjectStack environment — a clean slate for building."),
+  // not the project being scaffolded, and there is nothing but the project
+  // name to derive a replacement from — a name-derived sentence would be a
+  // bare restatement of `name`/`displayName` (e.g. "Support Desk — an
+  // ObjectStack environment.") and add no information the manifest doesn't
+  // already show. Measured against `os validate`'s printer
+  // (packages/cli/src/commands/validate.ts), which already skips the
+  // description line entirely when the field is absent — so dropping the key
+  // here is a clean, already-supported landing rather than a placeholder.
   const manifestPath = path.join(targetDir, 'objectstack.manifest.json');
   if (fs.existsSync(manifestPath)) {
     try {
@@ -172,6 +191,7 @@ function rewriteProjectIdentity(
       m.name = projectName;
       m.displayName = title;
       if ('namespace' in m) m.namespace = namespace;
+      delete m.description;
       fs.writeFileSync(manifestPath, JSON.stringify(m, null, 2) + '\n');
     } catch {
       // ignore
@@ -179,13 +199,21 @@ function rewriteProjectIdentity(
   }
 
   // objectstack.config.ts — rewrite manifest.id, manifest.name, manifest.namespace
-  // string literals. Conservative: only touches the first occurrence of each key.
+  // string literals, and DROP the manifest.description line for the same
+  // reason as above (#9263). Conservative: only touches the first occurrence
+  // of each key, and the description removal is anchored to the start of its
+  // own line so it cannot bleed into an unrelated `description:` elsewhere in
+  // the file. Checked against the shipped template (the only one this
+  // scaffolder bundles): `objectstack.config.ts` carries exactly one
+  // `description:`, inside `manifest` — the same single-occurrence property
+  // the pre-existing `name:`/`namespace:`/`id:` regexes above already rely on.
   const configPath = path.join(targetDir, 'objectstack.config.ts');
   if (fs.existsSync(configPath)) {
     let cfg = fs.readFileSync(configPath, 'utf8');
     cfg = cfg.replace(/(\bid:\s*)(['"`])[^'"`]*\2/, `$1$2${projectName}$2`);
     cfg = cfg.replace(/(\bnamespace:\s*)(['"`])[^'"`]*\2/, `$1$2${namespace}$2`);
     cfg = cfg.replace(/(\bname:\s*)(['"`])[^'"`]*\2/, `$1$2${title}$2`);
+    cfg = cfg.replace(/^[ \t]*description:\s*(['"`])[^'"`]*\1,?\r?\n/m, '');
     fs.writeFileSync(configPath, cfg);
   }
 

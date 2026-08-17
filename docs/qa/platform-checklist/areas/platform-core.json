@@ -1058,6 +1058,111 @@
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "initial — launcher active+hidden filter and isDefault→landing proven at the metadata layer, with the AppManagementPage toggle recorded as a client-only stub (expected-fail probe) rather than faked", "ref": "claude/platform-test-checklist-ocwugl" }
       ]
+    },
+    {
+      "id": "platform-core.docs-audience-gate",
+      "title": "Documentation audience gating (book + doc): the tree endpoint and the doc read layer gate on ONE semantics — public/org/permissionSet, fail-closed — and an unclaimed doc never leaks through a public book",
+      "since": "v14.1",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "anonymous (no session)",
+        "authenticated member who does NOT hold the gating permission set",
+        "authenticated member who DOES hold the gating permission set",
+        "seeded admin"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "at least one authored `book` and its `doc` corpus in an installed package (the showcase ships package docs; `deriveImplicitPackageBook` covers a package with docs but no authored book)",
+          "a session for each of the four personas above"
+        ],
+        "knownGaps": [
+          "Stock showcase seeds are not known to author a book with `audience: { permissionSet: '<name>' }` NOR one with `audience: 'public'`. Verify against the installed corpus FIRST (GET /api/v1/meta/book and read each item's `audience`). If neither gated nor public books exist, the permissionSet and public clauses are blocked(fixture) and MUST be recorded as such — do NOT score them from the `org` default alone, which is the one audience every authenticated caller passes and therefore proves nothing about the gate.",
+          "Authoring a book/doc at runtime to create the fixture is acceptable only if the run records that it did so and tears it down; the audience is read off the stored row, so a runtime-authored book exercises the same resolver."
+        ]
+      },
+      "steps": [
+        "enumerate the installed corpus: GET <api>/meta/book and GET <api>/meta/doc as admin; record every book's `name` and `audience`, and which docs each book claims",
+        "for a book whose audience is `org` (or unset — the §3.6 default): GET <api>/meta/book/<name>/tree anonymously, then as a plain authenticated member",
+        "for a book whose audience is `public` (if one exists): GET the tree anonymously",
+        "for a book whose audience is `{ permissionSet: <set> }` (if one exists): GET the tree as a holder and as a non-holder",
+        "GET <api>/meta/book/<a-package-id-that-is-not-a-book-name>/tree — the implicit per-package book path (§6.4)",
+        "compare the ENTRIES of a tree fetched as admin vs as a lesser persona for the same book — the per-entry doc-audience filter, not just the book-level gate",
+        "identify a doc claimed by NO authored book (an orphan landing in the synthetic Uncategorized group) and check whether it appears in a `public` book's tree",
+        "repeat one tree fetch with a locale header (e.g. Accept-Language: zh-CN) against a doc carrying `translations`, and once with a repeated `?package=` query parameter"
+      ],
+      "acceptance": [
+        {
+          "clause": "the book-level audience gate refuses with the CORRECT distinction: anonymous against a non-public book is 401 UNAUTHENTICATED, an authenticated non-holder against a permissionSet-gated book is 403 PERMISSION_DENIED — never a bare 404, never an empty 200 tree",
+          "oracle": "api",
+          "verify": "status + error envelope `code` on each refusal; an empty-but-200 tree where a refusal is due is a FAIL (it makes a gate indistinguishable from an empty book)",
+          "evidence": "status line + envelope body per persona/book pair"
+        },
+        {
+          "clause": "`audience` vocabulary holds all three ways: `public` serves anonymously; `org`/unset serves any authenticated principal and refuses anonymous; `{ permissionSet }` serves a holder and refuses a non-holder",
+          "oracle": "api",
+          "verify": "one tree fetch per (audience kind × persona) cell that the fixture supports; cells the fixture cannot supply are recorded blocked(fixture), not passed",
+          "evidence": "the cell matrix with status per cell"
+        },
+        {
+          "clause": "the permissionSet branch FAILS CLOSED when holdings cannot be resolved — an unresolvable/absent `permissionSets` denies rather than allows (ADR-0049); an unknown future audience shape also denies",
+          "oracle": "test",
+          "verify": "run the spec's own pin for audienceAllows (packages/spec/src/system/book.zod.ts) and cite the case asserting `permissionSets: undefined` → false; if no such case exists, that ABSENCE is the finding — record it and file to FOLLOW-UPS rather than ticking",
+          "evidence": "test output naming the fail-closed case"
+        },
+        {
+          "clause": "gating is TWO-LAYERED: passing the book gate does not reveal every entry — the tree's entries are additionally filtered by each doc's effective audience, so a lesser persona's tree is a subset of admin's and contains no entry that would refuse on fetch",
+          "oracle": "api",
+          "verify": "diff the entry sets; then fetch EVERY entry the lesser persona's tree offers as that persona — each must resolve, none may 401/403 (a nav entry that refuses on click is the exact defect this filter exists to prevent)",
+          "evidence": "entry-set diff + the per-entry fetch statuses"
+        },
+        {
+          "clause": "an UNCLAIMED doc (synthetic Uncategorized orphan) is never exposed through a public book — orphans are a rendering convenience, not an authored membership claim, and an unclaimed doc defaults to `org`",
+          "oracle": "api",
+          "verify": "the orphan doc's name is absent from the anonymous fetch of any public book's tree, and fetching it directly anonymously refuses",
+          "evidence": "tree body + the direct-fetch status"
+        },
+        {
+          "clause": "an unknown book name resolves as the implicit per-package book rather than 404, and that implicit book's audience is `org` (so it refuses anonymous)",
+          "oracle": "api",
+          "verify": "GET the tree for a package id; expect a resolved tree for an authenticated caller and a 401 for anonymous",
+          "evidence": "both responses"
+        },
+        {
+          "clause": "doc locale resolution runs on the tree path: a doc carrying `translations` renders its localized label under a locale header, while a book's OWN inline translations are refused at authoring (retired in 17.0.0, #4667) — the near-neighbour trap",
+          "oracle": "api",
+          "verify": "localized label present in the tree under the locale header; separately, parse a book carrying inline `translations` and confirm the refusal names `doc.translations` as the live alternative",
+          "evidence": "the localized tree entry + the refusal text"
+        }
+      ],
+      "negative": [
+        "a non-public book that serves a tree to an anonymous caller — the fell-open direction, P1",
+        "a public book that leaks docs it does not claim — the orphan-group leak the resolver deliberately excludes",
+        "a refusal that discloses existence/shape (e.g. an error body echoing the book's group structure or doc names)",
+        "a 404 where a 401/403 is due: it hides the gate behind a not-found and makes the two states indistinguishable to a client",
+        "a repeated `?package=` query parameter that is silently coalesced instead of refused (refuseRepeatedQueryParams)"
+      ],
+      "traps": ["auth-state-leak", "cache-staleness"],
+      "source": [
+        "ADR-0046 §6 (documentation spine), §6.2.1 (membership is DERIVED), §6.4 (implicit per-package book), §6.7 (read-layer audience gating)",
+        "ADR-0090 (audience vocabulary)",
+        "ADR-0049 (fail closed — unresolvable holdings deny)",
+        "packages/spec/src/system/book.zod.ts — audienceAllows / resolveDocAudiences / docAudienceAllows / resolveBookClaimedDocs / deriveImplicitPackageBook / resolveBookTree (UNCATEGORIZED_KEY exclusion)",
+        "packages/rest/src/rest-server.ts — GET <metaPath>/book/:name/tree (audience gate, per-entry filter, resolveDocLocale, refuseRepeatedQueryParams)",
+        "#2774 (feat(security)!: enforce book audience at the REST read layer)",
+        "packages/spec/liveness/book.json + doc.json (the ledgers whose coverage.json waivers this item retires)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-17",
+          "change": "new — authored to RETIRE the `book` and `doc` coverage waivers, which claimed these kinds are 'display-only, no independent runtime behavior to gate beyond serving'. Grounding disproved that: the read layer runs a three-member audience vocabulary with an ADR-0049 fail-closed branch, a two-layer gate (book, then per-entry doc audience union), a deliberate orphan-group non-leak rule, an implicit-package-book fallback, and locale resolution. That is an access-control surface, tested here like every other one. Capability predates the ledger baseline (landed at spec 14.1.0, #2774) — never authored until now, which is itself the finding",
+          "ref": "#9299"
+        }
+      ]
     }
   ]
 }

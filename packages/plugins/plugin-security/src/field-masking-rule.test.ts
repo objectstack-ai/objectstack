@@ -341,4 +341,51 @@ describe('SecurityPlugin — maskingRule middleware enforcement (#8993)', () => 
     const readable = await svc.getReadableFields('contact', { userId: 'u1', positions: [], permissions: [] });
     expect(readable).not.toContain('phone');
   });
+
+  // -------------------------------------------------------------------------
+  // [#9127] explain ↔ enforcement, on THIS fixture. The suites above pin what
+  // the caller actually receives; these pin that `explain` says the same thing
+  // about the same (caller, object) pair. Same harness, same permission sets,
+  // same schema — so a future change that moves one channel without the other
+  // fails here rather than shipping an access report that contradicts the
+  // access. That is the module contract's own claim: explain "matches
+  // enforcement by construction".
+  // -------------------------------------------------------------------------
+  const explainFlsFor = async (sets: PermissionSet[], fallback: string, permissions: string[] = []) => {
+    const h = harnessFor(sets, fallback);
+    await h.plugin.init(h.ctx); await h.plugin.start(h.ctx);
+    const svc: any = h.ctx.registerService.mock.calls.find((c: any[]) => c[0] === 'security')?.[1];
+    const decision = await svc.explain(
+      { object: 'contact', operation: 'read' },
+      { userId: 'u1', positions: [], permissions },
+    );
+    return decision.layers.find((l: any) => l.layer === 'fls');
+  };
+
+  it('explain reports the partially masked fields the read path actually serves masked', async () => {
+    const fls = await explainFlsFor([setNoCap], 'msk_member');
+    // The enforcement test above serves this caller `138****5678` / `***…1234`
+    // — the keys ARE present, so neither may be reported deleted.
+    expect(fls.verdict).toBe('narrows');
+    expect(fls.detail).not.toContain('masked from responses');
+    expect(fls.detail).toContain('PARTIALLY masked');
+    expect(fls.detail).toContain('phone (phone)');
+    expect(fls.detail).toContain('bank (bank_account)');
+  });
+
+  it('explain drops the gated field from the masked set once the caller holds the unmask capability', async () => {
+    const fls = await explainFlsFor([setWithCap], 'msk_pii', ['msk_pii']);
+    // Enforcement serves `phone` whole and `bank` masked for this caller.
+    expect(fls.detail).not.toContain('phone');
+    expect(fls.detail).toContain('bank (bank_account)');
+  });
+
+  it('explain reports an explicit permission-set DENY as HIDDEN, not partially masked', async () => {
+    const fls = await explainFlsFor([setFieldDeny], 'msk_deny');
+    // Enforcement DELETES the key for this caller (a rule never widens an
+    // explicit deny), so the report must say deleted — not "value replaced".
+    expect(fls.detail).toContain('masked from responses');
+    expect(fls.detail).toContain('phone');
+    expect(fls.detail).not.toContain('phone (phone)');
+  });
 });

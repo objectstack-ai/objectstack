@@ -26,7 +26,9 @@
       ]
     },
     "book": {
-      "waived": "docs-shaped content kind (display-only, ADR-0033 exemption class). The console DOES ship a docs/book reader (objectui apps/console DocPage/BookPage) — but the kind is authored-content-as-data with no independent runtime behavior to gate beyond serving; parse coverage exists via the spec's own tests. Waived for behavior, not for lack of a surface."
+      "items": [
+        "platform-core.docs-audience-gate"
+      ]
     },
     "dashboard": {
       "items": [
@@ -48,7 +50,9 @@
       ]
     },
     "doc": {
-      "waived": "docs-shaped content kind (display-only, ADR-0033 exemption class) — same posture as `book`: a reader surface exists in the console, but there is no runtime behavior to assert beyond serving."
+      "items": [
+        "platform-core.docs-audience-gate"
+      ]
     },
     "email_template": {
       "items": [

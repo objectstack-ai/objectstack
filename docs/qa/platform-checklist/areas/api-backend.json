@@ -1037,6 +1037,272 @@
           "ref": "claude/platform-test-checklist-ocwugl"
         }
       ]
+    },
+    {
+      "id": "api-backend.filter-comparand-conformance",
+      "title": "Filter comparand conformance: only the accepted comparand TYPES pass the where-door, a bigint past the exact-integer limit is refused, and a dotted head is classified rather than guessed",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["seeded admin"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "an object with a scalar field, a relation (lookup/master-detail) field, and — if the showcase ships one — a formula/virtual field, so all three dotted-head classes are reachable"
+        ],
+        "knownGaps": [
+          "If no formula/virtual field exists on a filterable object in the stock seeds, the `virtual` head class is blocked(fixture) — record it rather than scoring the class from the relation case."
+        ]
+      },
+      "steps": [
+        "read ACCEPTED_FILTER_COMPARAND_TYPES in packages/spec/src/data/filter-comparand-type.ts and enumerate the current members — the variants matrix below is pinned to that export, so a mismatch is a validator failure, not a judgement call",
+        "for EACH accepted comparand type, issue a data-API read whose `where` carries a comparand of that type against a compatible field, and record the answer set",
+        "issue a read whose comparand is a type NOT in the accepted set (e.g. a plain object, an array where the operator takes a scalar, undefined, a function-shaped value) and capture the refusal",
+        "probe the bigint boundary: a bigint comparand at FILTER_COMPARAND_BIGINT_EXACT_LIMIT (2n**53n) and one past it",
+        "issue reads with dotted filter heads of each class — a relation head, a virtual/formula head, and a scalar head (a dot on a field that is not traversable) — and record how each is classified",
+        "cross-check the SAME filters through a second door (the engine/objectql path or a view filter) so the refusal is proven at the contract, not at one transport"
+      ],
+      "acceptance": [
+        {
+          "clause": "every member of ACCEPTED_FILTER_COMPARAND_TYPES is accepted at the where-door and returns a known answer set — the matrix is exhaustive over the pinned export, not a sample",
+          "oracle": "api",
+          "verify": "one request per member; each returns 200 and the answer set reconciles against a directly-computed expectation",
+          "evidence": "per-member request + answer set"
+        },
+        {
+          "clause": "a comparand whose type is NOT in the accepted set is REFUSED with a located, prescriptive error — never coerced, never silently dropped, never answered as if the clause were absent",
+          "oracle": "api",
+          "verify": "status is 4xx and the message names the offending path and the accepted set (ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE exists precisely so the refusal can quote it); an unrefused bad comparand that returns 200 with a FULL table is the dangerous direction — a dropped predicate silently widens the result set",
+          "evidence": "status + message + the returned row count vs the unfiltered count"
+        },
+        {
+          "clause": "the bigint exact-integer limit is enforced at the boundary: a value inside the limit is accepted, one past it is refused rather than silently losing precision",
+          "oracle": "api",
+          "verify": "both requests; the past-limit case must refuse — a 200 whose comparand was rounded is a silent-wrong-answer FAIL",
+          "evidence": "both responses"
+        },
+        {
+          "clause": "a dotted filter head is CLASSIFIED (relation | virtual | scalar | null) and each class is handled per contract — a scalar head with a dot is refused rather than treated as a relation traversal",
+          "oracle": "api",
+          "verify": "one request per reachable class; classifyDottedFilterHead in packages/spec/src/data/filter-dotted-head.ts is the contract, and the observed behavior must match its classification",
+          "evidence": "per-class request + observed handling"
+        },
+        {
+          "clause": "the refusal is a CONTRACT-level refusal, not a transport quirk: the same bad comparand is refused through a second door with the same code",
+          "oracle": "api",
+          "verify": "compare the two doors' error codes; a comparand refused at REST but accepted through the engine is a FAIL of the single-contract property",
+          "evidence": "both refusals side by side"
+        }
+      ],
+      "negative": [
+        "a rejected predicate that is DROPPED rather than refused — the request answers 200 over an unfiltered set, which reads as success and silently leaks every row the filter was supposed to exclude (the load-bearing negative for this item)",
+        "a comparand coerced across types (string '5' silently becoming number 5) where the contract refuses it — coercion at the filter door is how an authored filter stops meaning what it says",
+        "a past-limit bigint answered with a rounded comparand",
+        "a dotted head on a scalar field traversed as if it were a relation"
+      ],
+      "variants": [
+        "string",
+        "number",
+        "bigint",
+        "boolean",
+        "null",
+        "Date"
+      ],
+      "enumSource": {
+        "file": "packages/spec/src/data/filter-comparand-type.ts",
+        "export": "ACCEPTED_FILTER_COMPARAND_TYPES",
+        "expect": 6
+      },
+      "traps": ["silent-coercion"],
+      "source": [
+        "packages/spec/src/data/filter-comparand-type.ts (ACCEPTED_FILTER_COMPARAND_TYPES, ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE, FILTER_COMPARAND_BIGINT_EXACT_LIMIT, isAcceptedFilterComparand, normalizeFilterComparandTypes)",
+        "packages/spec/src/data/filter-comparand-shape.ts",
+        "packages/spec/src/data/filter-comparand-type-conformance.ts",
+        "packages/spec/src/data/filter-dotted-head.ts (classifyDottedFilterHead, DottedFilterHeadClass)",
+        "packages/spec/src/data/filter-subtree-provenance.ts",
+        "packages/spec/src/migrations/entries/semantic/18.engine-dotted-filter-refused.ts",
+        "packages/spec/src/migrations/entries/semantic/17.engine-dotted-projection-refused.ts",
+        "packages/spec/src/migrations/entries/semantic/17.engine-find-formula-filter-refused.ts"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-17",
+          "change": "new — the comparand-typing contract landed as a cluster of seven spec modules plus three semantic migrations at 17.0.0-rc.6 and had no item. api-backend.query-contract-matrix covers OPERATORS ('every filter operator gives known answers') but says nothing about the TYPE of the right-hand side, which is where the silent-widening failure lives. Variants pinned to ACCEPTED_FILTER_COMPARAND_TYPES so a seventh accepted type flags the matrix stale",
+          "ref": "#9299"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.date-range-preset-matrix",
+      "title": "Every date-range preset resolves to its declared macro window, and a bare preset name used as a raw comparand is refused with the prescription",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": ["seeded admin"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "an object with a date/datetime field carrying rows spread across the preset windows (today, this week, last quarter, last 90 days) so each preset has a distinguishable answer set"
+        ],
+        "knownGaps": [
+          "Stock seeds are unlikely to place rows in every one of the 13 windows. Presets whose window contains no seeded row prove only that the window RESOLVED, not that it selected correctly — the run must record which presets were answer-discriminating and which were merely well-formed. Seeding rows at known offsets during the run is the honest way to close this; record it if done.",
+          "Presets are relative to run time, so a run near a period boundary (month/quarter/year rollover, or a run spanning midnight) can legitimately shift an answer set. Capture the run's clock alongside the results."
+        ]
+      },
+      "steps": [
+        "read DATE_RANGE_PRESETS and DATE_RANGE_PRESET_MACRO_WINDOWS in packages/spec/src/data/date-range-presets.ts and enumerate the current members",
+        "record the run's wall clock and timezone BEFORE issuing any request — every expectation below is derived from it",
+        "for EACH preset, issue a data-API read filtered by that preset against the date field and capture the answer set",
+        "for each preset, independently compute the expected window from DATE_RANGE_PRESET_MACRO_WINDOWS and the recorded clock, then reconcile the answer set against a direct comparison-operator query over that literal window",
+        "issue a read whose comparand is the BARE preset name as a raw string (e.g. where: { created: 'today' }) and capture the refusal",
+        "issue a read with an unknown preset name and capture the refusal"
+      ],
+      "acceptance": [
+        {
+          "clause": "every preset resolves and returns the SAME answer set as an explicit literal-window query computed from the same clock — the preset is a macro, not an approximation",
+          "oracle": "api",
+          "verify": "per preset: preset query answer set === literal-window query answer set; any divergence is a FAIL naming the preset",
+          "evidence": "per-preset answer-set pair"
+        },
+        {
+          "clause": "the matrix is exhaustive over DATE_RANGE_PRESETS — all pinned members exercised, none sampled away",
+          "oracle": "api",
+          "verify": "the run record lists one row per pinned member; a member with no row is blocked, not passed",
+          "evidence": "the 13-row table"
+        },
+        {
+          "clause": "a BARE preset name used as a raw comparand is REFUSED with the prescription telling the author the correct spelling — not treated as a literal string comparison that silently matches nothing",
+          "oracle": "api",
+          "verify": "status 4xx and the message matches bareDateRangePresetComparandMessage; a 200 with zero rows is the FAIL mode (it is indistinguishable from a correct empty answer)",
+          "evidence": "status + message"
+        },
+        {
+          "clause": "an unknown preset name is refused rather than resolving to an empty or unbounded window",
+          "oracle": "api",
+          "verify": "status 4xx; specifically NOT a 200 over the full table, which would be an unbounded window",
+          "evidence": "status + returned row count vs unfiltered count"
+        }
+      ],
+      "negative": [
+        "a bare preset name answered as a literal string comparison returning 200 + zero rows — silently correct-looking and completely wrong",
+        "an unknown preset resolving to an unbounded window (full table) instead of refusing",
+        "two presets returning identical answer sets where the seeded data should distinguish them (e.g. this_month === last_month) — a sign the window is not actually being computed"
+      ],
+      "variants": [
+        "today",
+        "yesterday",
+        "this_week",
+        "last_week",
+        "this_month",
+        "last_month",
+        "this_quarter",
+        "last_quarter",
+        "this_year",
+        "last_year",
+        "last_7_days",
+        "last_30_days",
+        "last_90_days"
+      ],
+      "enumSource": {
+        "file": "packages/spec/src/data/date-range-presets.ts",
+        "export": "DATE_RANGE_PRESETS",
+        "expect": 13
+      },
+      "traps": ["clock-skew", "timezone-boundary"],
+      "source": [
+        "packages/spec/src/data/date-range-presets.ts (DATE_RANGE_PRESETS, DATE_RANGE_PRESET_MACRO_WINDOWS, isDateRangePresetName, bareDateRangePresetComparandMessage)",
+        "packages/spec/src/migrations/entries/semantic/18.filter-preset-ordering-comparand-refused.ts",
+        "packages/spec/src/data/temporal-comparand.ts + packages/core/src/utils/temporal-comparand.ts",
+        "packages/objectql/src/temporal-comparand-door.ts"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-17",
+          "change": "new — DATE_RANGE_PRESETS landed at 17.0.0 (2026-08-15) with 13 members and no matrix item; the enum is exported as a const array so it is enumSource-pinnable, closing it against a 14th preset landing unnoticed. The bare-preset-comparand refusal is authored as its own clause because the spec ships a dedicated message for it, which means the failure mode was observed rather than imagined",
+          "ref": "#9299"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.retired-def-refusal",
+      "title": "A retired metadata DEFINITION (whole schema type withdrawn) refuses at every authoring door — distinct from a retired key, and the door that must not fall through to 'unknown type, ignored'",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "build",
+      "personas": ["seeded admin", "build-time author (no session)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a scratch authoring source tree (os build target) plus a live boot for the metadata-write door"
+        ],
+        "knownGaps": [
+          "Some retired defs were removed by ADR-0087 Route 3 ('no tombstone, no D2 conversion — this table plus the D3 semantic entry are the declaration', e.g. data/ExternalDataSource per #8075). For those, the correct behavior may be the GENERIC unknown-type refusal rather than a def-specific prescription. The run must read each sampled entry's route BEFORE deciding what a pass looks like — scoring a Route-3 def against a prescription it was never given is a false fail, and scoring it against 'anything 4xx' is a false pass."
+        ]
+      },
+      "steps": [
+        "enumerate packages/spec/src/migrations/entries/retired-defs/ and record the count and the version prefixes present (the registry currently carries entries at both the current major and the next)",
+        "sample at least four entries spanning BOTH version prefixes and at least three different domains (e.g. data/, system/, identity/, ui/)",
+        "for each sampled def, read its entry file and record which ADR-0087 route retired it and whether a prescription was authored",
+        "author a stack that declares metadata of each sampled retired type and run os build",
+        "attempt the same through the runtime metadata-write door (POST/PUT /meta/<type>) against a live boot",
+        "as a control, author metadata of a type that was NEVER declared (a typo'd/invented type name) and compare its refusal to the retired-def refusals"
+      ],
+      "acceptance": [
+        {
+          "clause": "every sampled retired definition is REFUSED at os build — non-zero exit, never a green build that silently drops the whole metadata family",
+          "oracle": "build",
+          "verify": "exit code non-zero per sampled def; a green build with the family absent from the artifact is the P1 FAIL (it is the shape that debugs from the far end)",
+          "evidence": "exit codes + the build output per def"
+        },
+        {
+          "clause": "the refusal is DISTINGUISHABLE from the generic unknown-type refusal wherever a prescription was authored — an author who used a real, now-retired type is told what replaced it, not merely that the type is unknown",
+          "oracle": "build",
+          "verify": "diff each retired-def refusal against the control (invented type) refusal; for entries whose ADR-0087 route authored a prescription, the texts must differ and the retired one must name the successor. For Route-3 entries with no prescription by design, an identical generic refusal is the CORRECT answer — record which route each sampled def took",
+          "evidence": "the refusal texts side by side + the route per def"
+        },
+        {
+          "clause": "the runtime metadata-write door refuses the same types as the build door — a type refused at build that a live POST /meta accepts is a two-door disagreement and a FAIL",
+          "oracle": "api",
+          "verify": "status per sampled type at the runtime door; compare with the build verdict",
+          "evidence": "the per-door verdict table"
+        },
+        {
+          "clause": "the sample spans both version prefixes present in the registry, so the mechanism is proven for the retirements already staged for the NEXT major and not only for those of the shipped one",
+          "oracle": "build",
+          "verify": "the run record lists each sampled def with its version prefix; a single-prefix sample does not satisfy this clause",
+          "evidence": "the sample table"
+        }
+      ],
+      "negative": [
+        "a retired definition that parses CLEAN and is silently dropped from the artifact — the whole-family version of the silent-strip defect, and worse than the key-level case because an entire metadata family goes missing",
+        "a retired definition refused with a bare 'unknown type' where a prescription WAS authored — the author is sent to look for a typo instead of to the successor",
+        "a build refusal that the runtime metadata-write door does not honor (or the reverse)",
+        "a refusal that names the wrong successor, which is worse than naming none"
+      ],
+      "source": [
+        "ADR-0087 (retirement registries and conversion routes)",
+        "ADR-0049 (enforce-or-remove)",
+        "packages/spec/src/migrations/entries/retired-defs/ (the registry this item samples)",
+        "packages/spec/src/migrations/entries/semantic/ (the D3 declarations that accompany Route-3 removals, e.g. 17.external-lookup-message-queue-families-retired, 18.identity-api-key-schema-retired)",
+        "#8075 (the external-lookup census whose fork (b) retired data/ExternalDataSource, ExternalFieldMapping, ExternalLookup whole)",
+        "sibling item api-backend.enforce-or-remove-authoring-gates (retired KEYS — this item is the DEFINITION-level door it does not reach)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-17",
+          "change": "new — api-backend.enforce-or-remove-authoring-gates samples the retired-KEY registries and explicitly requires three key-level surfaces, but nothing exercised the retired-DEF registry, which is a materially different door: a withdrawn KEY loses one property, a withdrawn DEFINITION loses an entire metadata family, and the fall-through failure mode ('unknown type, ignored') is different from the strip-mode failure the key item guards. The registry has grown substantially since the ledger was built and now carries entries for the next major as well as the current one",
+          "ref": "#9299"
+        }
+      ]
     }
   ]
 }

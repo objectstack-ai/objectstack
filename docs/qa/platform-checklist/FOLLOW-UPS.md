@@ -1,4 +1,8 @@
-# Follow-ups — open items from the capability-coverage sweep (2026-08-08)
+# Follow-ups — open items from the capability-coverage sweeps
+
+Standing decision register, one section per sweep (append, never rewrite — a resolved
+row stays with its resolution so the next sweep can see what was already decided).
+Sections §1–§4 are the **2026-08-08** sweep; §5 is the **2026-08-17** re-audit (R4).
 
 Decision register from the capability-coverage sweep. The gap items found by the
 five-angle sweep have all been authored into `areas/*.json` (checklist grew 84 → 170
@@ -67,3 +71,68 @@ these to the showcase would make them runnable:
 - The checklist itself (`areas/*.json`, `coverage.json`, `README.md`, `RUNNER.md`,
   `scripts/check-platform-checklist.mjs`) ships in this branch; this file carries the
   decisions that remain with the maintainer.
+
+## 5. Sweep 2026-08-17 (R4) — re-audit against the window since the 2026-08-08 ledger
+
+Ledger 182 → 190 items; `coverage.json` 28 mapped / 2 waived → **30 mapped / 0 waived**.
+
+### 5a. Docs drift (PD#10 class)
+
+| # | drift | evidence | captured in |
+|---|---|---|---|
+| E1 | **Stale defect note in `packages/spec/liveness/doc.json`.** Its `_note` records "DocSchema declares no `tags`, yet the book-side `include: { tag }` rule and the REST corpus both expect one — the tag rule can currently never match". That defect is **fixed**: `DocSchema` now declares `tags` (`packages/spec/src/system/doc.zod.ts:126`, with the history spelled out in the surrounding comment). The ledger note now describes a bug that no longer exists, which is the same failure class this sweep is correcting in `SWEEP.md`. Outside this card's file surface (`docs/qa/platform-checklist/**`), so it is reported, not edited. | `packages/spec/liveness/doc.json` `_note` vs `packages/spec/src/system/doc.zod.ts:111-127` | — (liveness ledger prose, not a checklist item) |
+
+### 5b. Checked and CLEAN (recorded so the next sweep does not re-derive it)
+
+- **The blank template's `dev` script omits `--ui`, and that is CORRECT — the console is
+  served anyway.** This sweep first read `"dev": "objectstack dev"` against the
+  quick-start's `npx os dev --ui` and inferred that a newcomer running `npm run dev`
+  would land on a server with no console. **Source-checking the chain refuted it**, and
+  the refutation is recorded here because the inference is an easy one to make twice:
+  - `packages/cli/src/commands/serve.ts:221` — `ui: Flags.boolean({ …, default: true,
+    allowNo: true })`. The console is **default-ON** at `serve`; `--no-ui` is the off
+    switch.
+  - `packages/cli/src/commands/dev.ts:370` — `...(flags.ui ? ['--ui'] : [])`. `dev` only
+    ever **adds** `--ui`; it never forwards `--no-ui`. With `dev.ts:69` declaring `ui`
+    with no `default`, an unflagged `dev` spawns `serve` with no ui flag at all, so
+    serve's own default takes over — on.
+  - `content/docs/deployment/cli.mdx:139` says it outright: "`--ui` | Force Console UI on
+    (**already on by default in dev**)", and `:196` documents `--ui / --no-ui … (default
+    on)`.
+
+  So `--ui` on `dev` is a **no-op forwarder**, there is no divergence between the
+  template script and quick-start, and the newcomer is not stranded. What made the wrong
+  reading tempting is `dev.ts:69`'s own flag description ("Enable the bundled Console
+  portal at /_console/"), which reads like the mechanism when it is only a forwarder —
+  not worth a change on its own, but worth knowing before inferring from it.
+  `cli.scaffold-console-first-paint` clause 3 now asserts the two invocations **agree**,
+  with a difference between them as the failure.
+- **No published doc prescribes a retired scaffolder template.** Grepped all of
+  `content/docs/` for `todo` / `compliance` / `content` / `contracts` / `procurement` as
+  `-t` / `--template` operands: zero hits. Every documented invocation is a bare
+  `npx create-objectstack my-app`, which resolves to `blank`, the only entry in
+  `TEMPLATES`. The delisting is cleanly reflected on the docs side.
+- **`npm run validate` and `npx os validate` are the same binary** (the blank template's
+  `validate` script is `objectstack validate`), so the spelling difference between
+  `cli.scaffold-first-run` and the quick-start is not a divergence.
+- **The first-run *commands* are covered** by `cli.scaffold-first-run` (P1, CI-automated)
+  and `studio-authoring.first-run-loop` (P0). Only the seam between them was open, and
+  that is now `cli.scaffold-console-first-paint`. No duplicates were authored.
+
+### 5c. For the maintainer
+
+- **Both surviving coverage waivers were stale** (`book`, `doc`) and are retired in this
+  PR — see `SWEEP.md` "Discipline". Running total: 6 of 6 waivers ever written turned out
+  stale. Worth considering whether a waiver should carry a mandatory re-audit date.
+- **Cost figures in the corrected `SWEEP.md` sentence are this run's own measurements**,
+  which came out higher than the ones supplied with the card (validator ~0.12–0.18 s vs
+  ~80 ms; `pnpm check:platform-checklist` ~2.9 s wall vs 0.165 s). The container was under
+  load from a parallel cold monorepo install, and the `pnpm` wrapper's startup dominates
+  the wall figure. The corrected text therefore records the *direct-node* cost (~0.25 s
+  for self-test + validator) and explicitly warns that timing through `pnpm` measures the
+  wrapper — a durable statement rather than a number that goes stale.
+- **No security-sensitive finding to withhold from this PR.** The two highest-severity
+  items authored (`access-security.no-active-org-session-semantics`,
+  `integration-system.datasource-credential-refusal-matrix`) assert guards that are
+  already shipped and already public in their ADRs/issues; nothing here discloses an
+  unfixed hole.

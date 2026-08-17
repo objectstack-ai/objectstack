@@ -65,7 +65,7 @@
  */
 
 import { execFileSync, execSync, spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -383,7 +383,14 @@ function fixtureSelfTest() {
     console.log(`  ${cond ? '✓' : '✗'} ${label}`);
   };
 
-  /** Run the real script inside the fixture, with the stub gate in the given state. */
+  /**
+   * Run the real script inside the fixture, with the stub gate in the given state.
+   *
+   * ⚠️ This WRITES `package.json` into the fixture worktree, and it is called while
+   * a merge is in progress. That is only safe because the stub is kept out of the
+   * index — see the `info/exclude` note below, and #9258 for what it cost when it
+   * was not.
+   */
   const runHook = (gate, args = []) => {
     writeFileSync(
       join(dir, 'package.json'),
@@ -406,6 +413,34 @@ function fixtureSelfTest() {
     git(['config', 'user.name', 'os-regen fixture']);
     git(['config', 'core.hooksPath', '/dev/null']); // the fixture drives the script itself
     const gitDir = git(['rev-parse', '--absolute-git-dir']).trim();
+
+    // `package.json` here is the HARNESS's gate stub — `runHook` rewrites it to flip
+    // the stub `check:spec-changes` between passing and failing — not part of the
+    // two-commit scenario under test. It must therefore never enter the index, and
+    // this repo-local exclude is what keeps that true: the `git add -A` on `side2`
+    // below otherwise sweeps the stub into a commit, and from that point on every
+    // `runHook` call made DURING a merge leaves a tracked file whose stat data no
+    // longer matches the index entry the merge just recorded.
+    //
+    // `git merge --abort` is a `reset --merge`, which refuses to discard a tracked
+    // file that is not up to date — so the fixture crashed there, and crashed only
+    // SOMETIMES, because git compares mtime at one-second granularity: the abort
+    // survived exactly when the rewrite happened to land in the same wall-clock
+    // second as the merge's index write, and failed when it landed in the next one.
+    // The stub's CONTENT is identical either way; the file is only ever stat-dirty,
+    // which is why nothing in the fixture's own assertions could see it coming.
+    //
+    // Measured on #9258: two crashes in five CI runs across four PRs that never
+    // touched this script; reproduced 10/10 by delaying the rewrite past a second
+    // boundary, and 0/10 at that same delay with this exclude in place.
+    //
+    // `.git/info/exclude` and not a `.gitignore`: the latter would itself be a
+    // tracked file inside the merges under test, changing the scenario to protect
+    // the harness. `mkdirSync` because a custom `init.templateDir` need not ship
+    // `info/`, and a fixture that guards against flakiness may not add one.
+    mkdirSync(join(gitDir, 'info'), { recursive: true });
+    appendFileSync(join(gitDir, 'info', 'exclude'), '\n# the self-test gate stub (#9258) — never track it\npackage.json\n');
+
     const marker = join(gitDir, PENDING_MARKER);
     const pendingPath = 'packages/spec/spec-changes.json'; // a real REGEN_ARTIFACTS entry
     const write = (f, c) => writeFileSync(join(dir, f), c);
@@ -452,6 +487,13 @@ function fixtureSelfTest() {
     const second = runHook('stale');
     check('a SECOND merge cannot defer on top of an outstanding deferral', second.code === 1);
     check('  …so the exemption stays one commit deep', /one commit deep/.test(second.out));
+    // The invariant that keeps the abort below deterministic, asserted where it is
+    // load-bearing rather than left to the accident that used to hold it (#9258).
+    // Deliberately a state assertion and not a retry: if the stub is in the index,
+    // `merge --abort` fails on a coin flip, so only the state is reportable — the
+    // symptom is not. It covers every `git add` above, not just the one that broke.
+    check('  …with the gate stub still OUT of the index, so `merge --abort` cannot trip on it',
+      git(['ls-files', '--', 'package.json']).trim() === '');
     git(['merge', '--abort']);
 
     // The push is the other event that can follow a merge: it must not carry an

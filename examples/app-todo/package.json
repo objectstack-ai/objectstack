@@ -35,7 +35,7 @@
     "@objectstack/core": "workspace:*",
     "@objectstack/service-automation": "workspace:*",
     "@objectstack/trigger-record-change": "workspace:*",
-    "tsx": "^4.23.1",
+    "tsx": "^4.23.12",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   }

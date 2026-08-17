@@ -6,11 +6,28 @@ executable by the AI session itself. Expected cadence: before each major release
 after any large platform surface lands.
 
 This is the AI-participation half of keeping the checklist current. The other half is
-automatic and needs no human at all: `scripts/check-platform-checklist.mjs` (CI, every
-PR) fails when a new metadata **kind** is unmapped (coverage ratchet) or a spec **enum**
-grows a value a matrix item was pinned against (`enumSource` freshness ratchet). Those
-catch drift on the PR that causes it. This sweep catches the harder class — a whole
-surface or behavior nobody wrote an item for — which no deterministic gate can find.
+**mechanical but still operator-triggered**: `scripts/check-platform-checklist.mjs` fails
+when a new metadata **kind** is unmapped (coverage ratchet) or a spec **enum** grows a
+value a matrix item was pinned against (`enumSource` freshness ratchet).
+
+⚠️ Those ratchets are **NOT wired into per-PR CI** — by maintainer decision they run on a
+periodic **manual** cadence (see this dir's [README.md](./README.md) "Operating cadence",
+and the recorded note at `.github/workflows/lint.yml:426`). So they do **not** catch drift
+on the PR that causes it; they catch it at the **next manual run**. Do not read a green
+ledger as "drift is already gated" — between runs, an unmapped kind or a grown enum sits
+undetected on `main`, which is precisely why a sweep must re-derive from source rather
+than trust the last green check. Cost is not the reason it stays out of CI: measured
+2026-08-17 on a 190-item ledger, the validator alone is ~0.12–0.18 s and the full
+`pnpm check:platform-checklist` (selector self-test + validator) is ~0.25 s of actual
+work, zero-dependency and token-free — the `pnpm` wrapper's own startup dominates any
+figure you measure through it, so time the scripts directly if the number matters. The
+reason is PR independence: the checklist is a QA ledger, not a code gate, so an unrelated
+PR is never blocked by checklist drift.
+
+This sweep catches the harder class — a whole surface or behavior nobody wrote an item
+for — which no deterministic gate can find. Note what that leaves uncovered even in
+principle: **new behavior inside an existing kind** is invisible to BOTH ratchets (no new
+kind, no new enum member), so it is found only here.
 
 ## What a sweep is
 
@@ -58,6 +75,14 @@ single reader would not have covered.
   corrected them against source rather than parroting.
 - **Stale waivers are the highest-value find.** Four of six coverage waivers turned out
   false (api/datasource/mapping/hook all ship stock fixtures). Re-audit every waiver
-  each sweep — a waiver is a claim that ages.
+  each sweep — a waiver is a claim that ages. **Confirmed again 2026-08-17**: the two
+  waivers that survived that sweep (`book`, `doc`) were *also* false. Both claimed the
+  kinds are "display-only, no independent runtime behavior to gate beyond serving"; the
+  REST read layer in fact runs a three-member audience vocabulary with an ADR-0049
+  fail-closed branch, a two-layer gate (book audience, then per-entry doc-audience
+  union), a deliberate orphan-group non-leak rule, and locale resolution — an
+  access-control surface. `coverage.json` now carries **zero** waivers. Running total:
+  **6 of 6** waivers ever written turned out stale, which is the strongest argument in
+  this file for auditing them against the runtime rather than against their own prose.
 - **Defects found while grounding go to FOLLOW-UPS.md as expected-fail probes**, not
   silent passes; security-sensitive ones are not filed publicly without the maintainer.
