@@ -94,13 +94,6 @@ afterEach(async () => {
   }
 });
 
-/**
- * A real backend behind the real service.
- *
- * Only the verbs `ShareLinkService` actually calls are exposed; `getSchema` is
- * the in-memory registry read the engine performs, so the policy the service
- * reads is the object's declared one.
- */
 interface BootOptions {
   /**
    * The object definition the DRIVER is initialised from, when it must differ
@@ -118,6 +111,13 @@ interface BootOptions {
   shapeRow?: (row: any) => any;
 }
 
+/**
+ * A real backend behind the real service.
+ *
+ * Only the verbs `ShareLinkService` actually calls are exposed; `getSchema` is
+ * the in-memory registry read the engine performs, so the policy the service
+ * reads is the object's declared one.
+ */
 async function boot(article: any = ARTICLE, options: BootOptions = {}) {
   const driver = new SqlDriver({
     client: 'better-sqlite3',
