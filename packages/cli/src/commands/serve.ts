@@ -3413,9 +3413,11 @@ export default class Serve extends Command {
       } catch { /* no seeds ran — nothing to show */ }
 
       // ── Clean startup summary ──────────────────────────────────────
+      // #8978 — the Config:/Artifact: row must name what actually booted,
+      // never `relativeConfig` unconditionally (see resolveBannerConfigRow).
       printServerReady({
         port,
-        configFile: relativeConfig,
+        ...resolveBannerConfigRow({ relativeConfig, useArtifactFallback, pinnedArtifact }),
         isDev,
         pluginCount: loadedPlugins.length,
         pluginNames: loadedPlugins,
@@ -4100,6 +4102,43 @@ export function describeRegisteredDriver(kernel: any): { label: string; url: str
     return { label, url: url ?? (name.endsWith('.memory') ? '(in-memory)' : '(unknown)') };
   }
   return null;
+}
+
+/**
+ * Decide what the ready banner's `Config:`/`Artifact:` row should say
+ * (#8978).
+ *
+ * `relativeConfig` is derived from `args.config` at the top of `run()`,
+ * before the artifact-fallback branch is decided, and was being handed to
+ * {@link printServerReady} unconditionally. On an `OS_ARTIFACT_URL` boot
+ * the `objectstack.config.ts` in cwd is deliberately never executed — the
+ * boot diagnostics say so plainly a few lines above the banner — yet the
+ * banner still named it. On the plain artifact-fallback path (no config
+ * authored, booting from `OS_ARTIFACT_PATH` or the `<cwd>/dist/objectstack.json`
+ * convention) the row named a config file that does not exist on disk at
+ * all. Both are the same defect: the row is the surface an operator reads
+ * to answer "what is this container actually running", and naming what
+ * did NOT boot points them at the wrong app (cloud#1292).
+ *
+ * - `pinnedArtifact` set (OS_ARTIFACT_URL, #8368) → report it. `.display`
+ *   is already resolved and already redacted for a pre-signed URL by the
+ *   resolver, so it is safe to print as-is.
+ * - `useArtifactFallback` set with no `pinnedArtifact` (OS_ARTIFACT_PATH,
+ *   the `dist/objectstack.json` convention, or an empty/quick-start boot)
+ *   → no config was read and there is no safely-redacted display in hand
+ *   here (OS_ARTIFACT_PATH may itself be a credentialed URL) — omit the
+ *   row rather than name a nonexistent file or risk leaking a secret.
+ * - Neither set → the ordinary config-boot path; report `relativeConfig`
+ *   exactly as before.
+ */
+export function resolveBannerConfigRow(opts: {
+  relativeConfig: string;
+  useArtifactFallback: boolean;
+  pinnedArtifact?: { display: string };
+}): { configFile?: string; artifactSource?: string } {
+  if (opts.pinnedArtifact) return { artifactSource: opts.pinnedArtifact.display };
+  if (opts.useArtifactFallback) return {};
+  return { configFile: opts.relativeConfig };
 }
 
 /**
