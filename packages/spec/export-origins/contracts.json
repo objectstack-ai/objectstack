@@ -231,6 +231,8 @@
     "RecordShare": "src/contracts/sharing-service.ts#RecordShare (interface)",
     "RecordShareRecipientType": "src/contracts/sharing-service.ts#RecordShareRecipientType (type)",
     "RemoteTable": "src/contracts/external-datasource-service.ts#RemoteTable (interface)",
+    "RenderTemplateInput": "src/contracts/email-service.ts#RenderTemplateInput (interface)",
+    "RenderTemplateResult": "src/contracts/email-service.ts#RenderTemplateResult (interface)",
     "ReportFormat": "src/contracts/report-service.ts#ReportFormat (type)",
     "ReportQuery": "src/contracts/report-service.ts#ReportQuery (interface)",
     "ReportRunResult": "src/contracts/report-service.ts#ReportRunResult (interface)",

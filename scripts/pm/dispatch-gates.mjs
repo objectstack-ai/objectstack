@@ -325,6 +325,72 @@ export function extractCheckInvocations(workflowText, workflowFile) {
   return out;
 }
 
+/**
+ * A workflow's OWN declaration that it deliberately has no check family to
+ * discover — a whole-line comment anywhere in the workflow text:
+ *
+ *   # dispatch-gates: no-check-families -- <reason>
+ *
+ * ## Why a marker IN the workflow, never a list in this script (#9187)
+ *
+ * `checkFamilyCoverageGaps` below turns "a paths-filtered workflow discovers
+ * zero check families" from a silent omission into a CI failure — but one
+ * real case (`scaffold-e2e.yml`: an install/build/boot/docker pipeline, not a
+ * named local verification) is not a bug, it is a workflow that genuinely has
+ * none. The tempting fix is a hardcoded exemption list ([`scaffold-e2e.yml`])
+ * in THIS file — which reinstalls the exact failure this whole family exists
+ * to retire: a second copy of a fact that belongs on the thing it describes,
+ * silently drifting from it (the workflow gets renamed or a real gap gets
+ * added beside the exempted one, and the list says nothing). A marker the
+ * workflow carries is instead read fresh every run, same as `paths:` and
+ * every `run:` step above — nothing to remember to update here.
+ *
+ * The reason is REQUIRED (not just the marker) — an opt-out with no reason
+ * reads identically to a placeholder nobody will ever revisit, and is exactly
+ * the shape a reviewer cannot tell apart from "forgot to name a family".
+ */
+const NO_CHECK_FAMILIES_MARKER = /^[ \t]*#[ \t]*dispatch-gates:[ \t]*no-check-families[ \t]*--[ \t]*(\S.*)$/m;
+
+export function declaredNoCheckFamiliesReason(workflowText) {
+  const m = NO_CHECK_FAMILIES_MARKER.exec(workflowText);
+  return m ? m[1].trim() : null;
+}
+
+/**
+ * The workflows (by filename) that violate the #9187 coverage invariant:
+ *
+ *   Every workflow that declares a `paths:` filter either discovers at least
+ *   one check family, or carries a `declaredNoCheckFamiliesReason`.
+ *
+ * ## Why scoped to paths-filtered workflows, not all of them
+ *
+ * The harm this closes is specific, not general: a `paths:` filter is CI
+ * SCHEDULING a job for a SUBSET of PRs, and #9171 taught this tool to read
+ * that schedule as a match key. A workflow with no `paths:` filter runs on
+ * every PR regardless — it discriminates nothing, so a card touching it
+ * derives no MORE from a family than it already would from every other
+ * unfiltered job, and `residueLines`' "unfiltered" bucket already surfaces
+ * that count honestly rather than as a silent absence. Widening this guard to
+ * every workflow would fold that already-accounted-for bucket into a false
+ * positive, and would also flag every zero-check workflow that is not a
+ * verification job at all (release/publish/nightly-smoke pipelines) — the
+ * "22 leads is the same as none" trap one level down. Measured on this tree
+ * (#9187): 6 of the 25 workflow files declare a `paths:` filter; 4 of those 6
+ * already discover a family, and the remaining 2 (`docs-drift-check.yml`,
+ * `scaffold-e2e.yml`) are the whole known blast radius — one fixed by naming
+ * its self-test through a `check:` script, one exempted by the marker above.
+ */
+export function checkFamilyCoverageGaps(workflowEntries) {
+  const out = [];
+  for (const { file, text } of workflowEntries) {
+    if (extractTriggerPaths(text).length === 0) continue;
+    if (extractCheckInvocations(text, file).length > 0) continue;
+    if (declaredNoCheckFamiliesReason(text)) continue;
+    out.push(file);
+  }
+  return out;
+}
+
 /** Resolve a `check:x` script name to the script files it runs, via a package.json `scripts` map. */
 export function resolveCheckToFiles(checkName, scriptsMap) {
   const cmd = scriptsMap[checkName];
@@ -1093,15 +1159,16 @@ export function reachesMetadataFormModule(path, modulePaths) {
  *     output for every card in the tree;
  *   - `check:i18n` walks `packages/` at runtime for files NAMED
  *     `i18n-extract.config.ts` and re-extracts each owning package's bundles.
- *     Its source is worse than silent: the path-ish literals it does carry are
- *     its CLI prerequisite and stale-dist checks (`packages/cli/dist/commands/
- *     i18n/extract.js`, `packages/spec/dist`, measured — eleven hints, none of
- *     them the population). So it matches nothing AND, having hints, never
- *     reaches the "undetermined" bucket either: before this entry existed, an
- *     edit to `packages/services/service-messaging/src/objects/` — which
- *     regenerates that package's four bundles — printed the gate in NEITHER
- *     half of the output. A gate the derivation cannot mention at all is the
- *     one shape this script must not produce; it cost a PR a CI round.
+ *     Its source names only three hints (measured, post-#9144): the shared
+ *     walk module (SURFACE_MODULE) and the two metadata-registry coupling
+ *     constants below — none of them the OWNING-PACKAGE population this entry
+ *     answers for. So it still matches nothing on an ordinary object/field
+ *     edit AND, having hints, never reaches the "undetermined" bucket either:
+ *     before this entry existed, an edit to
+ *     `packages/services/service-messaging/src/objects/` — which regenerates
+ *     that package's four bundles — printed the gate in NEITHER half of the
+ *     output. A gate the derivation cannot mention at all is the one shape
+ *     this script must not produce; it cost a PR a CI round.
  *
  * No per-card gate list derived from paths can ever name these, however the
  * derivation improves.
@@ -1184,6 +1251,32 @@ export function reachesMetadataFormModule(path, modulePaths) {
  * asks the configs' own documented flags whether any package still commits that
  * baseline. The day the last one opts out, no form module can move a committed
  * bundle and this entry stops firing on its own.
+ *
+ * ## Why there is no THIRD i18n entry, for the type-registry edge (#9144)
+ *
+ * `walkMetadataForms` has a second edge the SECOND entry above does not reach:
+ * `DEFAULT_METADATA_TYPE_REGISTRY` (packages/spec/src/kernel/metadata-plugin.
+ * zod.ts) supplies `metadataForms.<type>.label`/`.description` for EVERY
+ * registry entry, including form-less types, and `METADATA_FORM_REGISTRY`
+ * itself (packages/spec/src/system/metadata-form-registry.ts, the map, not
+ * the `*.form.ts` leaves it points at) decides which types get section/field
+ * labels at all. Editing either moves the same bundles PR #9113 paid for —
+ * but unlike the `.form.ts` leaves, neither file carries a filename the
+ * `.form.ts` convention (or any convention) distinguishes, so a KIND entry
+ * here would need to invent one for exactly two files.
+ *
+ * That is not the same shape as the two entries above: this is not a
+ * runtime-enumerated population at all, it is two SPECIFIC, KNOWN files —
+ * the shape `SURFACE_MODULE` and `check-type-check-coverage.mjs`'s
+ * `ROOT_PROGRAM_COUPLED_SCRIPT` already use. So it is closed there instead:
+ * `check-i18n-bundles.mjs` declares both paths as bare module-body coupling
+ * constants (`METADATA_TYPE_REGISTRY_MODULE` / `METADATA_FORM_REGISTRY_
+ * MODULE`), which the ORDINARY path-literal derivation now reads directly off
+ * that gate's own source — no `CHANGE_KIND_GATES` entry, no `matches`
+ * function, nothing here to keep in sync. See that pair's doc comment in
+ * check-i18n-bundles.mjs for the full reasoning, and this file's own
+ * self-test for the live pins that keep the constants honest as the coupling
+ * they are: manual, per-file, and silently rottable if nothing watched it.
  *
  * ## How these entries stay honest
  *
@@ -1451,7 +1544,10 @@ export function residueLines({ discovered, matched, undetermined, silent, unfilt
  *     `claude-fable-5`. That is judged from the card's CONTENT — what the change
  *     does to the contract — and a path cannot answer it. An ordinary-looking
  *     surface (one package's source file) is the NORMAL shape of a clause-②
- *     card.
+ *     card. The closest a path can honestly get is SUSPICION:
+ *     SUSPECT_TIER_GLOBS below marks the contract surface itself, and `--tier`
+ *     prints a hint for it — never a verdict. The enforcement lives one step
+ *     later, in the PM skill's enqueue gate over the PR's ACTUAL diff.
  *
  * A path derivation that pretended to cover clause ② would produce the failure
  * this whole file is written against, one level up: a "no mandate" line read as
@@ -1492,9 +1588,10 @@ export function residueLines({ discovered, matched, undetermined, silent, unfilt
  *
  * ## One measured side effect of putting a path in a MODULE BODY
  *
- * Comment masking cannot reach a module-body string, so this glob is now a
- * watch hint of this file's own source: measured, `extractWatchHints` yields 5
- * hints here against 4 on the base, the new one being the glob itself. It is
+ * Comment masking cannot reach a module-body string, so this glob — and the
+ * suspect glob below — is a watch hint of this file's own source: measured,
+ * `extractWatchHints` yields 6 hints here against 4 on the base, the new ones
+ * being the globs themselves. They are
  * inert today because no check family resolves to THIS file — the gate that
  * covers it is `check:pm-dispatch-gates`, which resolves to
  * `check-dispatch-gates.mjs` and matches this file through that file's one
@@ -1518,6 +1615,43 @@ export const MANDATORY_TIER_GLOBS = [
   },
 ];
 
+/**
+ * Clause ②'s single source of truth for the CONTRACT-REVIEW tier: the tier a
+ * card that changes contract accept/reject behaviour or widens the public
+ * surface must be dispatched at, and the tier the `needs:contract-review`
+ * re-review sub-round must itself be running at (its opening self-check reads
+ * this). Declared HERE and only here, as a constant, so a model upgrade is a
+ * one-line change in one file. The review label deliberately names WHAT is
+ * reviewed, never a model (maintainer, 2026-08-16: 「needs:fable-review 这个标
+ * 签不好,下次模型升级怎么办」), and the PM skill's prose points at this
+ * constant instead of spelling a model name.
+ */
+export const CONTRACT_REVIEW_TIER = 'claude-fable-5';
+
+/**
+ * The globs that make a surface a clause-② SUSPECT — a HINT, never a verdict.
+ *
+ * Clause ② is judged from a card's CONTENT; no path predicate can decide it
+ * (the docblock above MANDATORY_TIER_GLOBS says why pretending otherwise would
+ * recreate the incident class this file exists against). What a path CAN say
+ * is where such cards normally land: `packages/spec/src/**` is the contract
+ * surface itself — the error-code ledger and the `*.zod.ts` contract schemas
+ * live there, and the measured incident shape (a below-tier dispatch flipping
+ * accept-to-reject behaviour in the ledger, the same hole passed three times
+ * in one day) sat exactly under it. So `--tier` prints a suspicion line for
+ * these paths: judge the tier from the card content as best you can, and
+ * whichever tier is dispatched, the PR's ACTUAL diff passes the clause-②
+ * enqueue gate before the card may enqueue — the diff is a fact; the card's
+ * semantics were a prediction. The gate itself lives in the PM skill
+ * (入队与落地); this output only points at it.
+ */
+export const SUSPECT_TIER_GLOBS = [
+  {
+    glob: 'packages/spec/src/**',
+    why: 'the contract surface (error-code ledger, *.zod.ts contract schemas) — the normal landing zone of a clause-② card',
+  },
+];
+
 /** The tier floor for a card with no mandate — the ruling's 最低下限. */
 export const TIER_FLOOR = 'sonnet';
 
@@ -1532,11 +1666,15 @@ export const TIER_DEFAULT = 'opus';
  * this file encodes no ordering over tiers, so choosing between them would be a
  * guess printed as a derivation.
  */
-export function deriveTier(paths, globs = MANDATORY_TIER_GLOBS) {
+export function deriveTier(paths, globs = MANDATORY_TIER_GLOBS, suspectGlobs = SUSPECT_TIER_GLOBS) {
   const hits = [];
+  const suspects = [];
   for (const p of paths) {
     for (const g of globs) {
       if (hintCovers(g.glob, p)) hits.push({ path: p, glob: g.glob, tier: g.tier, why: g.why });
+    }
+    for (const g of suspectGlobs) {
+      if (hintCovers(g.glob, p)) suspects.push({ path: p, glob: g.glob, why: g.why });
     }
   }
   const tiers = [...new Set(hits.map((h) => h.tier))];
@@ -1546,7 +1684,7 @@ export function deriveTier(paths, globs = MANDATORY_TIER_GLOBS) {
         'two globs cover it with different tiers and this script orders no tiers',
     );
   }
-  return { mandatory: hits.length > 0, tier: tiers[0] ?? null, hits, declared: globs.length };
+  return { mandatory: hits.length > 0, tier: tiers[0] ?? null, hits, suspects, declared: globs.length };
 }
 
 /**
@@ -1556,7 +1694,7 @@ export function deriveTier(paths, globs = MANDATORY_TIER_GLOBS) {
  * as anything else.
  */
 export function tierLines(result) {
-  const { mandatory, tier, hits, declared } = result;
+  const { mandatory, tier, hits, declared, suspects = [] } = result;
   if (mandatory !== hits.length > 0 || mandatory !== Boolean(tier)) {
     throw new Error(
       `tier verdict is self-contradictory: mandatory=${mandatory}, tier=${tier ?? 'none'}, ` +
@@ -1566,11 +1704,23 @@ export function tierLines(result) {
   const clause2 =
     '  Clause ② is NOT reachable from paths: a card that changes contract accept/reject behaviour or widens the public' +
     ' surface is fable-mandatory too, judged from the card CONTENT. This line is a FLOOR, never a clearance.';
+  // The suspicion tail prints only on a hit — unlike the clause-② note above,
+  // which prints always: "no suspicion" and "no suspect table" must not share a
+  // spelling, and the note is what keeps silence from reading as a clearance.
+  const suspicion = suspects.length === 0
+    ? []
+    : [
+        `  Clause ② SUSPECT surface — a hint, not a verdict: judge the tier from the card CONTENT as best you can` +
+          ` (a card changing contract accept/reject behaviour or widening the public surface is ${CONTRACT_REVIEW_TIER});` +
+          ` whichever tier is dispatched, the PR's actual diff passes the clause-② enqueue gate before the card may enqueue.`,
+        ...suspects.map((s) => `    - ${s.path} ⇢ '${s.glob}' — ${s.why}`),
+      ];
   if (!mandatory) {
     return [
       `Model tier — no path-derived mandate: the surface hits none of the ${declared} declared glob(s), derived here, not recalled.`,
       `  The tier stays the PM's per-card judgment call (floor ${TIER_FLOOR} · default ${TIER_DEFAULT} · ceiling fable).`,
       clause2,
+      ...suspicion,
     ];
   }
   return [
@@ -1579,6 +1729,7 @@ export function tierLines(result) {
     '  The only exit is the measured quota exemption (fable unavailable ⇒ opus, never lower), recorded with its reason' +
       " in the claim comment's `Container & model` line.",
     clause2,
+    ...suspicion,
   ];
 }
 
@@ -2154,10 +2305,15 @@ function selfTest() {
   // card editing the tool must still derive it.
   t('the dispatch-gates gate still reaches the tool it runs', covers(readHints('scripts/pm/check-dispatch-gates.mjs'), 'scripts/pm/dispatch-gates.mjs'));
   // And this file, the worst specimen in the card's table: the directory it
-  // really reads survives, the fixtures naming other packages do not.
+  // really reads survives, the fixtures naming other packages do not. The spec
+  // contract surface DOES hint now — via the declared module-body suspect glob
+  // (a real constant, not a fixture; inert for gate matching for the reason the
+  // MANDATORY_TIER_GLOBS docblock records) — so the fixture-masking claim is
+  // pinned on a path only fixtures name.
   const ownHints = readHints('scripts/pm/dispatch-gates.mjs');
   t('this tool still hints the workflow directory it reads', covers(ownHints, '.github/workflows/lint.yml'));
-  t('this tool no longer hints the spec paths its own fixtures name', !covers(ownHints, 'packages/spec/src/data/filter.zod.ts'));
+  t('this tool hints the spec contract surface via the DECLARED suspect glob', covers(ownHints, 'packages/spec/src/data/filter.zod.ts'));
+  t('this tool still does not hint the paths only its fixtures name', !covers(ownHints, 'packages/objectql/src'));
   // The LIVE trailing-dot specimen (#8534): this gate spells its own filename as
   // the last word of a sentence, in a module-body array element that comment
   // masking cannot reach, so the hint carried the period. Pinned live because
@@ -2229,6 +2385,32 @@ function selfTest() {
   // The shared module is a real file, so the two claims above are live rather
   // than a pair of matching strings.
   t('the declared shared module exists', existsSync(join(ROOT, SHARED)));
+
+  // The same shape again, for the TYPE-registry edge of walkMetadataForms
+  // (#9144) — two specific, known files rather than a runtime-enumerated
+  // population, so they are closed as coupling constants in
+  // check-i18n-bundles.mjs rather than a third CHANGE_KIND_GATES entry. Both
+  // directions pinned LIVE: delete either constant and this reddens instead
+  // of the derivation going silently blind on that edge again.
+  const TYPE_REGISTRY = 'packages/spec/src/kernel/metadata-plugin.zod.ts';
+  const FORM_REGISTRY = 'packages/spec/src/system/metadata-form-registry.ts';
+  const i18nGateHints = readHints('scripts/check-i18n-bundles.mjs');
+  t('the i18n gate declares the type-level metadata registry module', covers(i18nGateHints, TYPE_REGISTRY));
+  t('the i18n gate declares the form registry module too (not just its *.form.ts leaves)', covers(i18nGateHints, FORM_REGISTRY));
+  const typeRegistryVerdict = classifyEntry({ files: ['scripts/check-i18n-bundles.mjs'], hints: i18nGateHints }, [TYPE_REGISTRY]);
+  const formRegistryVerdict = classifyEntry({ files: ['scripts/check-i18n-bundles.mjs'], hints: i18nGateHints }, [FORM_REGISTRY]);
+  t(
+    'so a card editing the type registry is MATCHED through that constant, not dropped as silent',
+    typeRegistryVerdict.verdict === 'matched' && typeRegistryVerdict.hits[0]?.hint === TYPE_REGISTRY,
+  );
+  t(
+    'and a card editing the form registry module is MATCHED through its own constant',
+    formRegistryVerdict.verdict === 'matched' && formRegistryVerdict.hits[0]?.hint === FORM_REGISTRY,
+  );
+  // Both declared paths are real files, so the four claims above are live
+  // rather than a pair of matching strings.
+  t('the declared type registry module exists', existsSync(join(ROOT, TYPE_REGISTRY)));
+  t('the declared form registry module exists', existsSync(join(ROOT, FORM_REGISTRY)));
 
   // ── A family's OWN script files as match keys (#8509) ─────────────────────
   //
@@ -2421,6 +2603,83 @@ function selfTest() {
   t('check:engine-double-contract is a live family, so naming it in the table is not a guess', liveFamilies.has('check:engine-double-contract'));
   t('check:where-matcher is a live family too — the gate the prose never named', liveFamilies.has('check:where-matcher'));
 
+  // ── The check-family coverage guard (#9187) ───────────────────────────────
+  //
+  // `docs-drift-check.yml` declared a `paths:` filter and ran a real self-test
+  // (`node scripts/docs-audit/affected-docs.mjs --self-test`) that discovery
+  // could never see, because the naming convention every OTHER family follows
+  // — `check:NAME` or `check-NAME.mjs` — is enforced nowhere: the tree just
+  // happened to comply 103 times running up to this card. This section rules
+  // it normative: a paths-filtered workflow with no discovered family is now
+  // a CI failure, not a lead nobody could see. Fixture cases pin the shape;
+  // the live case at the end pins it against the real tree, the same pairing
+  // the census guard above uses.
+  const noFamilyWf = [
+    'name: X',
+    'on:',
+    '  pull_request:',
+    '    paths:',
+    "      - 'packages/**'",
+    'jobs:',
+    '  j:',
+    '    steps:',
+    '      - name: Self-test the mapper',
+    '        run: node scripts/some-mapper.mjs --self-test',
+  ].join('\n');
+  t(
+    'a paths-filtered workflow discovering no check family is a coverage gap',
+    checkFamilyCoverageGaps([{ file: 'x.yml', text: noFamilyWf }]).includes('x.yml'),
+  );
+  const familyWf = noFamilyWf.replace(
+    'node scripts/some-mapper.mjs --self-test',
+    'pnpm check:some-mapper',
+  );
+  t(
+    'a paths-filtered workflow that DOES discover a family is not a gap',
+    checkFamilyCoverageGaps([{ file: 'x.yml', text: familyWf }]).length === 0,
+  );
+  const unfilteredNoFamilyWf = [
+    'name: X',
+    'on:',
+    '  pull_request: {}',
+    'jobs:',
+    '  j:',
+    '    steps:',
+    '      - name: Self-test the mapper',
+    '        run: node scripts/some-mapper.mjs --self-test',
+  ].join('\n');
+  t(
+    'an UNFILTERED workflow with no family is not a gap — it runs on every PR regardless, the residue bucket already accounts for it',
+    checkFamilyCoverageGaps([{ file: 'x.yml', text: unfilteredNoFamilyWf }]).length === 0,
+  );
+  t(
+    'the declared opt-out reads its reason back',
+    declaredNoCheckFamiliesReason('# dispatch-gates: no-check-families -- e2e build, no named verification (#9187)\n')
+      === 'e2e build, no named verification (#9187)',
+  );
+  t('no marker present reads as no declared reason', declaredNoCheckFamiliesReason('# just a comment\n') === null);
+  t('the marker with no reason text does not count as declared', declaredNoCheckFamiliesReason('# dispatch-gates: no-check-families\n') === null);
+  const exemptedWf = noFamilyWf.replace(
+    'jobs:',
+    '# dispatch-gates: no-check-families -- fixture, not a real verification step\njobs:',
+  );
+  t(
+    "a paths-filtered, zero-family workflow carrying the marker is NOT a gap — the declared opt-out this card's route requires",
+    checkFamilyCoverageGaps([{ file: 'x.yml', text: exemptedWf }]).length === 0,
+  );
+
+  // The live guard: every REAL paths-filtered workflow either discovers a
+  // family or declares why not. This is what actually fails CI the day a new
+  // paths-filtered workflow adds an undiscoverable verification step and
+  // forgets both halves of the fix.
+  const liveWfDir = join(ROOT, '.github/workflows');
+  const liveWorkflowEntries = readdirSync(liveWfDir)
+    .filter((f) => /\.ya?ml$/.test(f))
+    .map((file) => ({ file, text: readFileSync(join(liveWfDir, file), 'utf8') }));
+  t('the live tree has at least one paths-filtered workflow (the guard is not vacuous)', liveWorkflowEntries.some((e) => extractTriggerPaths(e.text).length > 0));
+  const liveGaps = checkFamilyCoverageGaps(liveWorkflowEntries);
+  t(`every real paths-filtered workflow discovers a check family or declares why not (gaps: ${liveGaps.join(', ') || 'none'})`, liveGaps.length === 0);
+
   // ── The residue accounting (#8632) ────────────────────────────────────────
   //
   // Two properties, both of which the deleted prose lacked: it accounts for
@@ -2519,6 +2778,35 @@ function selfTest() {
   t(`every declared mandatory glob names a path this tree really has (dead: ${deadGlobs.map((g) => g.glob).join(', ') || 'none'})`, deadGlobs.length === 0);
   t('every declared glob carries the tier it mandates and a reason', MANDATORY_TIER_GLOBS.every((g) => g.glob && g.tier && g.why));
   t('the incident file is a real file, so the references case is a live claim and not a fixture', existsSync(join(ROOT, '.claude/skills/pm-dispatch/references/review-checklist.md')));
+
+  // ── Clause-② suspicion (the enqueue-gate card): hit / no hit / wording ────
+  //
+  // The wording cases are not decoration — the suspicion line is quoted into
+  // claim comments, and its one invariant is that a HINT must not be readable
+  // as a verdict (nor harden the no-mandate line into a clearance).
+  const suspectHit = fableOf(['packages/spec/src/api/error-code-ledger.zod.ts']);
+  t('a spec contract path is a clause-② SUSPECT, with its provenance recorded', suspectHit.suspects.length === 1 && suspectHit.suspects[0].glob === 'packages/spec/src/**');
+  t('a suspect is NOT a mandate — suspicion must not harden into a path verdict', suspectHit.mandatory === false && suspectHit.tier === null);
+  const suspectRendered = tierLines(suspectHit).join('\n');
+  t('the suspicion rendering says SUSPECT and names the offending path', suspectRendered.includes('SUSPECT') && suspectRendered.includes('packages/spec/src/api/error-code-ledger.zod.ts'));
+  t('the suspicion rendering is a hint, not a verdict, in those words', suspectRendered.includes('a hint, not a verdict'));
+  t('the suspicion rendering sends the seat to the card CONTENT for the tier call', suspectRendered.includes('judge the tier from the card CONTENT'));
+  t('the suspicion rendering routes EVERY dispatch through the enqueue gate on the ACTUAL diff', suspectRendered.includes('whichever tier is dispatched') && suspectRendered.includes('enqueue gate'));
+  t('the suspicion rendering names the contract-review tier from its single-source constant', suspectRendered.includes(CONTRACT_REVIEW_TIER));
+  const noSuspicion = fableOf(['packages/runtime/src/kernel.ts']);
+  t('an ordinary non-contract surface raises no suspicion', noSuspicion.suspects.length === 0);
+  t('no suspicion ⇒ no suspect line — absence and clearance must not share a spelling with a hit', !tierLines(noSuspicion).join('\n').includes('SUSPECT'));
+  const mandatedAndSuspect = fableOf(['.claude/skills/pm-dispatch/SKILL.md', 'packages/spec/src/data/filter.zod.ts']);
+  t('a mandated surface still prints its suspect paths — the enqueue gate reads diffs, not dispatch tiers', mandatedAndSuspect.mandatory && mandatedAndSuspect.suspects.length === 1 && tierLines(mandatedAndSuspect).join('\n').includes('SUSPECT'));
+  t('a verdict built without a suspects field still renders (suspicion defaults empty)', tierLines({ mandatory: false, tier: null, hits: [], declared: 1 }).length === 3);
+  // Same liveness guards as the mandatory table: dead data reading as
+  // protection is the incident class itself.
+  const deadSuspects = SUSPECT_TIER_GLOBS.filter(
+    (g) => !existsSync(join(ROOT, g.glob.replace(/\*\*?/g, '').replace(/\/+$/, ''))),
+  );
+  t(`every declared suspect glob names a path this tree really has (dead: ${deadSuspects.map((g) => g.glob).join(', ') || 'none'})`, deadSuspects.length === 0);
+  t('the suspect table is not empty and every entry carries its reason', SUSPECT_TIER_GLOBS.length > 0 && SUSPECT_TIER_GLOBS.every((g) => g.glob && g.why));
+  t('the contract-review tier constant is a non-empty model id — the single source the PM skill points at', typeof CONTRACT_REVIEW_TIER === 'string' && CONTRACT_REVIEW_TIER.length > 0);
 
   let failed = 0;
   for (const [name, cond] of cases) {

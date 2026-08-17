@@ -320,6 +320,12 @@ interface CbpRelation {
    * For every other declarable shape it is `false` and the gate keeps
    * answering, because validation does not cover the same ground there — see
    * the stand-down site for what a bare hand-over would mint.
+   *
+   * ⛔ [#9137] Do not widen this predicate to `true` for `readonly`/`system`, or
+   * to drop the `master_detail`+`required` condition, until #8772's ramp
+   * completes (#9138 builder-force + #9139 lint-at-v18). See the freeze note at
+   * the stand-down site (below, in {@link SecurityPlugin.assertControlledByParentWrite})
+   * for why.
    */
   omissionRefusedByValidation: boolean;
 }
@@ -5190,18 +5196,52 @@ export class SecurityPlugin implements Plugin {
       // every later by-id write through the stored-row leg below. The residual
       // envelope asymmetry is confined to exactly those shapes.
       //
-      // [#8959] ⛔ "Confined" is NOT a publish-time bound, and this comment used
-      // to claim it was. #8772 *proposes* a lint that would refuse these shapes;
-      // it is open and unruled, so nothing refuses them at publish today and any
-      // app can newly author one. Measured against the lint as it stands:
-      // `master_detail` with no `required` draws `severity: 'warning'` from
-      // `relationship/master-detail-required`, and only `error` findings fail a
-      // build; `required` + `readonly` and `required` + `system` draw nothing at
-      // all — no rule in `packages/lint/src/data-model-rules.ts` reads either
-      // flag. A freshly authored detail therefore reaches this branch and its
-      // 422, which makes the residue a live surface rather than a shrinking
-      // legacy tail. Whether that is acceptable is #8772's to rule; this comment
-      // may not presume an answer in either direction.
+      // [#8959, re-measured 2026-08-16] "Confined" is still NOT a publish-time
+      // bound today, though the reason has moved on from #8959's finding. #8772
+      // has since been RULED (2026-08-16, comment 5306089973) — it is no longer
+      // "open and unruled" — but the ramp it ordered has two code legs and
+      // neither has landed yet: Direction 2 (the authoring builder forces
+      // `required: true` under `controlled_by_parent`, #9138) is dispatchable
+      // now but not yet merged; Direction 1 (`relationship/master-detail-required`
+      // promoted `warning` → `error`, scoped to `controlled_by_parent`, #9139) is
+      // deliberately held for the **v18** boundary (`main` is still 17.x as of
+      // this note). So the lint measured by #8959 is unchanged: `master_detail`
+      // with no `required` still draws only `severity: 'warning'`, and
+      // `required` + `readonly` / `required` + `system` still draw nothing at
+      // all (`packages/lint/src/data-model-rules.ts`). A freshly authored detail
+      // therefore still reaches this branch and its `422` — the residue is a
+      // live, newly-authorable surface, not a shrinking legacy tail, until BOTH
+      // #9138 and #9139 land. Re-check this paragraph before trusting it; once
+      // both have landed it is the one that goes stale next.
+      //
+      // ⛔ [#9137] FREEZE NOTE — maintainer ruling on #8772, Direction 4,
+      // "immediately": until the two legs above both land, this `if` is the
+      // SOLE ENFORCEMENT POINT for the same three authorable
+      // `controlled_by_parent` master-reference shapes — `master_detail` with no
+      // `required`; `required: true` + `readonly`; `required: true` + `system`.
+      // They are the last three rows of #8772's five-shape measurement table,
+      // and exactly the three shapes `record-validator.ts` skips before its
+      // required check ever runs (`if (def.system || def.readonly) continue;`,
+      // insert-mode :993 / update-mode :1003) — `record-validator.ts` never
+      // throws on any of them, so nothing downstream of this gate would refuse
+      // the insert either.
+      //
+      // Do NOT move this gate, weaken it, or stand it down further for these
+      // three shapes — concretely: do not widen `omissionRefusedByValidation`
+      // (declared above) to admit any of them, and do not otherwise make this
+      // `if` return for them. This is not a hypothetical to pre-empt: the
+      // absent-master insert route #8688 proposed has ALREADY LANDED, and
+      // landed correctly narrowed to exactly the one shape validation covers —
+      // the `if (operation === 'insert' && rel.omissionRefusedByValidation)
+      // return;` two lines below IS that landing. The freeze is about not
+      // WIDENING an already-conditional stand-down, not about blocking a change
+      // that has not happened. Standing this gate down for any of the three
+      // would mint a detail row whose master FK is null — a row the
+      // `controlled_by_parent` read filter (`fk IN (readable masters)`) can
+      // never match, so unreadable by anyone, and answering `422
+      // MISSING_REQUIRED_FIELD` on every later by-id write forever after, since
+      // no payload the caller could send would restore a field the request
+      // never carried in the first place.
       //
       // Only the INSERT shape hands over. The stored-row shape (a by-id write
       // whose persisted FK is null) keeps its 422: the caller sent no such

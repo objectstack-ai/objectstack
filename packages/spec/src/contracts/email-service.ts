@@ -185,6 +185,53 @@ export interface SendTemplateInput {
 }
 
 /**
+ * Input for IEmailService.renderTemplate() — the render-only subset of
+ * {@link SendTemplateInput}: everything template resolution + rendering
+ * needs, nothing the delivery pipeline reads.
+ */
+export interface RenderTemplateInput {
+  /**
+   * Template identifier (matches `sys_email_template.name`), e.g.
+   * `'auth.password_reset'`.
+   */
+  template: string;
+  /** Render context — placeholders in subject/body are resolved against this object. */
+  data?: Record<string, unknown>;
+  /**
+   * Preferred BCP-47 locale. Resolution is the SAME ladder as
+   * {@link SendTemplateInput.locale} — exact match, then `'en-US'`, then
+   * (no-locale calls only) the bundle's deterministic single-locale answer.
+   */
+  locale?: string;
+  /**
+   * Reference timezone (IANA name) for rendering `datetime` holes —
+   * `{{ ts | datetime }}` (ADR-0053 Phase 2). Same semantics as
+   * {@link SendTemplateInput.timezone}.
+   */
+  timezone?: string;
+}
+
+/**
+ * Outcome of IEmailService.renderTemplate() — the rendered content of the
+ * resolved `sys_email_template` row, mirroring what the row itself carries:
+ * a subject, an HTML body, and a plain-text body (the row's `body_text`
+ * when present, otherwise derived from the rendered HTML). Consumers pick
+ * the face they need — an email composer uses `html`/`text`, an in-app
+ * inbox row uses `subject`/`text`.
+ */
+export interface RenderTemplateResult {
+  /** Rendered subject line. */
+  subject: string;
+  /** Rendered HTML body (`sys_email_template.body_html`). */
+  html: string;
+  /**
+   * Rendered plain-text body — the row's `body_text` when declared,
+   * otherwise derived from the rendered HTML.
+   */
+  text: string;
+}
+
+/**
  * Email service contract.
  */
 export interface IEmailService {
@@ -209,4 +256,23 @@ export interface IEmailService {
    * - `MISSING_VARIABLES`  — declared `required` variables absent from `data`.
    */
   sendTemplate(input: SendTemplateInput): Promise<SendEmailResult>;
+
+  /**
+   * Resolve a named template from `sys_email_template` and render its
+   * subject/body against `input.data` — WITHOUT sending anything. Strictly
+   * render-only: no delivery, no queueing, no `sys_email` row. One resolver,
+   * many channels (#9225): the same locale ladder + `{{var}}` renderer
+   * (ADR-0053 format filters included) that `sendTemplate` delivers through,
+   * exposed so non-email consumers (e.g. the messaging inbox channel) render
+   * localized template content instead of duplicating the resolver.
+   *
+   * Locale resolution is the ladder on {@link SendTemplateInput.locale}.
+   *
+   * Errors (same vocabulary as `sendTemplate`, since resolution is shared):
+   * - `TEMPLATE_NOT_FOUND` — no row matches `(name, locale|en-US)`, and (for a
+   *   call that named no locale) the name carries no rows at all.
+   * - `TEMPLATE_INACTIVE`  — row exists but `active=false`.
+   * - `MISSING_VARIABLES`  — declared `required` variables absent from `data`.
+   */
+  renderTemplate(input: RenderTemplateInput): Promise<RenderTemplateResult>;
 }

@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
-import { looksLikeInternalErrorLeak, declaresServerFault, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
+import { looksLikeInternalErrorLeak, declaresServerFault, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, demotedDeclaredCode } from '@objectstack/types';
 import { DispatcherErrorCode } from '@objectstack/spec/api';
 import type { IAuthService, IMetadataService } from '@objectstack/spec/contracts';
 import type { CounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
@@ -521,20 +521,34 @@ function errorResponseBase(err: any, res: any, securityHeaders?: Record<string, 
         declaresServerFault(err) || (httpStatus >= 500 && looksLikeInternalErrorLeak(raw))
             ? INTERNAL_ERROR_MESSAGE
             : raw || 'Internal Server Error';
-    // [#3842] A thrown error's own `.code` finally has somewhere to go. This
-    // exit used to drop it outright — `HttpDispatcher.errorFromThrown` at least
-    // parked it in `details` — because `error.code` was occupied by the status.
-    // Both exits now put it in the declared field, so the same SDK method
-    // reports the same code whichever one answered. `validation` last, so
-    // `VALIDATION_FAILED` wins for an error matched by `name` alone, exactly as
-    // it does in `errorFromThrown`.
+    // [#3842] A thrown error's own `.code` finally has somewhere to go — the
+    // declared field, so the same SDK method reports the same code whichever
+    // exit answered. [#9106] WHICH spelling goes there is the shared resolver's
+    // answer, not this exit's: `error.code` is a closed vocabulary at every
+    // door (maintainer ruling 2026-08-16), so the resolver's narrowed `code` is
+    // passed explicitly — for a registered code that IS the producer's own
+    // spelling, for a validation shape it is `VALIDATION_FAILED`, exactly the
+    // answers this exit's details-promotion used to produce — and an
+    // unregistered spelling rides the wire's `declaredCode` sibling instead
+    // (presence means demotion; the tenant-authored limb #9106 measured). The
+    // resolver's status chain is byte-identical to `httpStatus` above (status →
+    // statusCode → validation 400 → 500), so the two reads cannot disagree. A
+    // non-string `.code` (a driver errno) stays in `details`, as context.
+    const thrown = resolveThrownHttpError(err, 500);
+    const declaredCode = demotedDeclaredCode(thrown);
     const details =
-        err?.code || validation
-            ? { ...(err?.code ? { code: err.code } : {}), ...(validation ?? {}) }
+        (err?.code && typeof err.code !== 'string') || validation
+            ? { ...(err?.code && typeof err.code !== 'string' ? { code: err.code } : {}), ...(validation ?? {}) }
             : undefined;
     res.json({
         success: false,
-        error: buildApiError({ message, httpStatus, details }),
+        error: buildApiError({
+            message,
+            httpStatus,
+            code: thrown.code,
+            details,
+            ...(declaredCode !== undefined ? { extra: { declaredCode } } : {}),
+        }),
     });
 }
 

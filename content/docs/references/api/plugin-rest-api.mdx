@@ -207,7 +207,7 @@ const result = ErrorHandlingConfigSchema.parse(data);
 | **enabled** | `boolean` | optional (default: `true`) | Enable REST API plugin |
 | **basePath** | `string` | optional (default: `"/api"`) | Base path for all API routes |
 | **version** | `string` | optional (default: `"v1"`) | API version identifier |
-| **routes** | `{ prefix: string; service: string; category: Enum<'discovery' \| 'metadata' \| 'data' \| 'batch' \| 'permission' \| 'analytics' \| … +6 more>; methods?: string[]; … }[]` | ✅ | Route registrations |
+| **routes** | `{ prefix: string; service: string; category: Enum<'discovery' \| 'metadata' \| 'data' \| 'batch' \| 'permission' \| 'analytics' \| …>; methods?: string[]; … }[]` | ✅ | Route registrations |
 | **validation** | `{ enabled: boolean; mode: Enum<'strict' \| 'permissive' \| 'strip'>; validateBody: boolean; validateQuery: boolean; … }` | optional | Request validation configuration |
 | **responseEnvelope** | `{ enabled: boolean; includeMetadata: boolean; includeTimestamp: boolean; includeRequestId: boolean; … }` | optional | Response envelope configuration |
 | **errorHandling** | `{ enabled: boolean; includeStackTrace: boolean; logErrors: boolean; exposeInternalErrors: boolean; … }` | optional | Error handling configuration |
@@ -249,7 +249,7 @@ const result = ErrorHandlingConfigSchema.parse(data);
 | **service** | `string` | ✅ | Core service name (metadata, data, auth, etc.) |
 | **category** | `Enum<'discovery' \| 'metadata' \| 'data' \| 'batch' \| 'permission' \| 'analytics' \| 'automation' \| 'ui' \| 'realtime' \| 'notification' \| 'ai' \| 'i18n'>` | ✅ | Primary category for this route group |
 | **methods** | `string[]` | optional | Protocol method names implemented |
-| **endpoints** | `{ method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; path: string; handler: string; category: Enum<'discovery' \| 'metadata' \| 'data' \| 'batch' \| 'permission' \| 'analytics' \| … +6 more>; … }[]` | optional | Endpoint definitions |
+| **endpoints** | `{ method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; path: string; handler: string; category: Enum<'discovery' \| 'metadata' \| 'data' \| 'batch' \| 'permission' \| 'analytics' \| …>; … }[]` | optional | Endpoint definitions |
 | **middleware** | `{ name: string; type: Enum<'authentication' \| 'authorization' \| 'logging' \| 'validation' \| 'transformation' \| 'error' \| 'custom'>; enabled: boolean; order: integer; … }[]` | optional | Middleware stack for this route group |
 | **authRequired** | `boolean` | optional (default: `true`) | Whether authentication is required by default |
 | **documentation** | `{ title?: string; description?: string; tags?: string[] }` | optional | Documentation metadata for this route group |
@@ -282,7 +282,7 @@ const result = ErrorHandlingConfigSchema.parse(data);
 | **timestamp** | `string` | ✅ | ISO 8601 timestamp |
 | **adapter** | `string` | ✅ | Adapter name (e.g. "hono", "express", "nextjs") |
 | **summary** | `{ total: integer; implemented: integer; stub: integer; planned: integer }` | ✅ |  |
-| **entries** | `{ path: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; category: Enum<'discovery' \| 'metadata' \| 'data' \| 'batch' \| 'permission' \| 'analytics' \| … +6 more>; handlerStatus: Enum<'implemented' \| 'stub' \| 'planned'>; … }[]` | ✅ | Per-endpoint coverage entries |
+| **entries** | `{ path: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; category: Enum<'discovery' \| 'metadata' \| 'data' \| 'batch' \| 'permission' \| 'analytics' \| …>; handlerStatus: Enum<'implemented' \| 'stub' \| 'planned'>; … }[]` | ✅ | Per-endpoint coverage entries |
 
 
 ---

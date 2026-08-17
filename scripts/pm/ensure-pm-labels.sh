@@ -39,6 +39,15 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   gh label create pm:epic             -R "$R" -c 5319e7 -d "Parent delegated to a dedicated epic PM (session + territory in the parent's own body) — other PMs never dispatch into its subtree" 2>/dev/null || true
 done
 
+# needs:contract-review — the clause-② enqueue gate's re-review chain (SKILL.md
+# 入队与落地): a PR whose ACTUAL diff touches the contract surface but was
+# dispatched below the contract-review tier waits outside the queue under this
+# label until the review sub-round clears it. Named consumers: the enqueue gate
+# and the triage sub-round's label query. Main repo only — the contract surface
+# (packages/spec) lives here. The label names WHAT is reviewed, never a model;
+# the tier's single source is CONTRACT_REVIEW_TIER in scripts/pm/dispatch-gates.mjs.
+gh label create needs:contract-review -R objectstack-ai/objectstack -c d93f0b -d "Clause-② enqueue gate: contract-surface diff dispatched below the contract-review tier — blocked from enqueue until the review sub-round clears it" 2>/dev/null || true
+
 # Routing labels exist only on the main backlog repo, and mark SEAM cards only
 # (file-at-destination ruling: pure sibling-repo fixes live in the target repo).
 gh label create repo:objectui -R objectstack-ai/objectstack -c fbca04 -d "Seam card: cross-repo ordering with objectui is the substance (pure objectui fixes live in objectui)" 2>/dev/null || true

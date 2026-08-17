@@ -6373,7 +6373,51 @@ export class ObjectStackProtocolImplementation implements
             note: string | null;
         }>;
     }> {
-        const singular = PLURAL_TO_SINGULAR[request.type] ?? request.type;
+        // [#9157] #4432 / #7894 — CANONICAL TYPE KEY, and the first of the three
+        // READ verbs to get it. See {@link canonicalMetaType}.
+        //
+        // `auditMetaItem` serves `GET /api/v1/meta/:type/:name/audit`
+        // (`rest-route-ledger.ts:180`, caller-supplied `:type`) and derived its
+        // key from `PLURAL_TO_SINGULAR` — the MANIFEST-COLLECTION map #7894
+        // moved this boundary off. The one-line replacement #8769
+        // (`publishMetaItem`), #8819 (`rollbackMetaItem`) and #8868
+        // (`diffMetaItem`) each made on a write verb.
+        //
+        // Ruled by the maintainer on 2026-08-16 (#9180 step ①): the `/meta`
+        // type segment is singular, always. What the fold reaches here,
+        // measured rather than assumed:
+        //
+        //  • the `where.type` of the `sys_metadata_audit` read below. For the
+        //    four MANIFEST-ABSENT types (`field`, `seed`, `external_catalog`,
+        //    `translation` — legitimately absent from the manifest map because
+        //    they are not stack collections) the plural stayed plural all the
+        //    way into that `where`, matched no row, and this method answered
+        //    `{ events: [] }` for an item that HAS an audit trail. Not a
+        //    refusal and not an error: the empty-accumulator shape (#8896)
+        //    delivered to an operator who is reading the protection log right
+        //    before a rename or a delete.
+        //  • the #7894 boundary REFUSAL, which never ran on this verb: it lives
+        //    INSIDE `canonicalizeMetaRequestType`, so an unrecognised spelling
+        //    of a declared type (`viewes`) was forwarded to the plugin path and
+        //    answered 200-empty instead of 400 naming `view` / `views`.
+        //
+        // ⚠️ What it does NOT do, stated because the filing card claimed
+        // otherwise and the claim was measured false: it does not refuse
+        // `views`. `metaUrlSpellingRefusal('views')` is `null` — a RECOGNISED
+        // plural is in `META_URL_TO_SINGULAR` and therefore FOLDS. Retiring the
+        // recognised plural spellings themselves is #9180 step ③, deliberately
+        // not bundled here.
+        //
+        // Placed before the `try` on purpose: the catch below answers
+        // `{ events: [] }` for an unprovisioned table, and a caller error
+        // swallowed into that shape is exactly the 200-empty this closes.
+        request = canonicalizeMetaRequestType(request);
+        // Canonical by construction from the fold above. NOT a second fold —
+        // the `PLURAL_TO_SINGULAR` lookup that used to stand here is what #7894
+        // removed from this boundary. The binding survives under its own name
+        // because the read below consumes it as "the key the row is stored
+        // under", the shape {@link diffMetaItem} keeps.
+        const singular = request.type;
         const limit = Math.min(
             Math.max(1, request.limit ?? 100),
             500,
@@ -13497,7 +13541,40 @@ export class ObjectStackProtocolImplementation implements
         sinceSeq?: number;
         limit?: number;
     }): Promise<{ events: import('@objectstack/metadata-core').MetadataEvent[] }> {
-        const singularType = PLURAL_TO_SINGULAR[request.type] ?? request.type;
+        // [#9157] #4432 / #7894 — CANONICAL TYPE KEY. See {@link canonicalMetaType}
+        // and the twin comment on {@link auditMetaItem}; #9180 step ① routes all
+        // three read verbs, and this one is where the manifest map was doing the
+        // most damage.
+        //
+        // `historyMetaItem` serves `GET /api/v1/meta/:type/:name/history`
+        // (`rest-route-ledger.ts:178`). The plural was not merely a wrong key
+        // here — it was a door AROUND the gate immediately below, measured on
+        // `origin/main`:
+        //
+        //   `translation` declares `allowOrgOverride: true`, so the singular
+        //   passes `isOverlayAllowed` and reads real `sys_metadata_history`
+        //   rows. `translations` is MANIFEST-ABSENT, so the old line left it
+        //   plural; `isOverlayAllowed('translations')` is false, and
+        //   `isRuntimeCreateAllowed('translations')` then returns TRUE through
+        //   its no-static-registry-entry arm — the PLUGIN path, which every
+        //   gate is permissive toward by construction. So the plural sailed
+        //   past the gate and asked the repository for `type='translations'`,
+        //   which no row carries, and the endpoint answered `{ events: [] }`
+        //   about an item with a full change log.
+        //
+        //   `fields` inverts the same asymmetry: singular `field` declares
+        //   neither flag and is REFUSED by the gate (early `{ events: [] }`,
+        //   zero engine calls), while the plural passed it and issued a real
+        //   `sys_metadata_history` read keyed `'fields'`. Same body, opposite
+        //   path — which is why the pins assert the KEY the repository was
+        //   asked for and not only the body.
+        //
+        // The fold is placed ABOVE the gate deliberately: a misspelling
+        // (`viewes`) must be refused 400 naming `view` / `views`, not silently
+        // absorbed by the early return.
+        request = canonicalizeMetaRequestType(request);
+        // Canonical by construction from the fold above — NOT a second fold.
+        const singularType = request.type;
         if (!ObjectStackProtocolImplementation.isOverlayAllowed(singularType)
             && !ObjectStackProtocolImplementation.isRuntimeCreateAllowed(singularType)) {
             return { events: [] };
@@ -17904,7 +17981,36 @@ export class ObjectStackProtocolImplementation implements
             kind: string;
         }>;
     }> {
-        const singularTarget = PLURAL_TO_SINGULAR[request.type] ?? request.type;
+        // [#9157] #4432 / #7894 — CANONICAL TYPE KEY. See {@link canonicalMetaType}
+        // and the twin comments on {@link auditMetaItem} / {@link historyMetaItem}.
+        // Third and last of the read verbs #9180 step ① routes.
+        //
+        // `findReferencesToMeta` serves `GET /api/v1/meta/:type/:name/references`
+        // (`rest-route-ledger.ts:151`). ⚠️ What this fold buys HERE is narrower
+        // than on the two verbs above, and the difference is stated rather than
+        // implied because a future reader will otherwise assume symmetry:
+        //
+        //  • The REFUSAL is the whole wire-visible change. `viewes` used to miss
+        //    `REFERENCE_PATHS` and answer 200 `{ references: [] }` — read by an
+        //    operator as "nothing depends on this", immediately before the
+        //    rename or delete this panel exists to gate (ADR-0110 D3). It is now
+        //    400, naming `view` / `views`.
+        //  • The manifest-ABSENT class changes NOTHING here, measured rather
+        //    than assumed: every {@link REFERENCE_PATHS} key (`object`, `view`,
+        //    `tool`, `skill`, `flow`, `dashboard`, `page`) is manifest-PRESENT,
+        //    so the old map already folded each of them. `translations` folded
+        //    to `translation` answers `{ references: [] }` exactly as
+        //    `translations` did, because `translation` is not a registry key
+        //    either — which this method's own doc calls a legitimate no-hit
+        //    rather than an error. Closing THAT gap is a `REFERENCE_PATHS`
+        //    coverage question and not a spelling one; it is not this card.
+        //
+        // ⛔ Do not "improve" this by teaching `REFERENCE_PATHS` a plural key.
+        // That is the spelling-tolerant lookup one layer down which
+        // {@link canonicalMetaType} has rejected since #4432.
+        request = canonicalizeMetaRequestType(request);
+        // Canonical by construction from the fold above — NOT a second fold.
+        const singularTarget = request.type;
         const targetName = request.name;
         const matchers = REFERENCE_PATHS[singularTarget];
         if (!matchers || matchers.length === 0) {

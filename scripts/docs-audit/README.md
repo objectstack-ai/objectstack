@@ -9,8 +9,8 @@ The system has four parts, layered cheapest-and-earliest first:
 
 ## 1. `affected-docs.mjs` — change → docs mapping (the linchpin)
 
-Maps a set of `packages/**` changes to the hand-written docs that reference the
-affected packages, so an audit can be scoped to what actually changed.
+Maps a set of `packages/**` changes to the hand-written docs that **name something the
+change touched**, so an audit can be scoped to what actually changed.
 
 ```bash
 # docs affected by changes on this branch vs origin/main
@@ -22,15 +22,114 @@ node scripts/docs-audit/affected-docs.mjs --json origin/main
 # every hand-written doc (full audit scope)
 node scripts/docs-audit/affected-docs.mjs --all
 
-# pin the change classifiers + package-root derivation (needs no repo state; CI runs this before the mapping)
+# pin the classifiers, package-root and anchor derivations (needs no repo state; CI runs this before the mapping)
 node scripts/docs-audit/affected-docs.mjs --self-test
 ```
 
-Heuristic: a doc is *affected* by a changed package `P` if it mentions `P`'s npm
-name (`@objectstack/<x>`) or repo path (`P`'s directory, e.g.
-`packages/services/service-automation`). Over-inclusion is preferred over misses; the
-periodic **full** audit (part 4) is the backstop for docs that describe a package
-without naming it.
+**Derivation (#9192): a doc is *affected* when it NAMES something the change touched.**
+Not when it mentions the changed package — that predicate is a dependency-graph proxy
+answering a semantic question, and it was measured wrong in *both* directions on PR #9191
+(three read verbs in `@objectstack/metadata-protocol`): 3 pages listed of which 1 was
+relevant, while the 2 pages that actually document the changed surface —
+`api/client-sdk.mdx` and `kernel/contracts/metadata-service.mdx` — were absent, because
+they document it through the **SDK** surface, which does not depend on the implementing
+package at all.
+
+Over-inclusion is not free, and that is the correction. A wrong-both-ways advisory trains
+its reader to skip it, and then it fails on the PR where it is right — the same bill
+exclusion 1 below already paid. The derivation is therefore **precision-first**: a shorter
+right list beats a longer noisy one.
+
+Three anchor kinds, each exact:
+
+| anchor | what it is | how it is derived |
+|:--|:--|:--|
+| `symbol` | a documentable declaration the diff touched | the top-level declaration, or a member of a top-level **container** (class / interface / type / enum / schema object), enclosing each changed line — on **both** sides of the diff, so a removed export still anchors the pages naming it |
+| `route` | a wire path the change touched | a path literal on a changed line, plus every route whose **registrar handler** references a changed symbol |
+| `sdk` | the client method bound to an anchor route | the declared `route` ⟷ `client` rows in the repo's route ledgers |
+
+The `route` and `sdk` hops are what carry the derivation across the surface boundary the
+package graph cannot cross: `auditMetaItem` (changed) → `GET /api/v1/meta/:type/:name/audit`
+(`rest-server.ts` registrar) → `meta.getAudit` (`rest-route-ledger.ts`) → the token
+`api/client-sdk.mdx` actually contains.
+
+**A local variable is not documentable surface.** That one rule is what drops the measured
+false positive: `const singular = request.type;` inside a method body is not an anchor, so
+`kernel/services-checklist.mdx` — whose only `singular` is a service *slot name* — is no
+longer listed. A `const` object **is** a container (its keys are metadata property names,
+which docs do name); a function body is not.
+
+### Two guards, and both publish what they removed
+
+The first build of this derivation was, on some PRs, *noisier* than the proxy it replaced
+(134 rows where the old tool gave 26). Two guards fixed that, and both run **before** the
+route bridge — a name left in the set does not merely add a noisy row, it mints noisy route
+and SDK anchors from every registrar handler that mentions it:
+
+1. **Shape** — an anchor must be code-shaped (camelCase / PascalCase / snake_case /
+   dotted). `label`, `object`, `start`, `locale` and `sections` all arrived as real
+   declarations and matched 82, 113, 43, 13 and 10 of 178 pages; confining them to code
+   spans does not help, because those words live in code spans too. Reported as
+   `weakAnchorsDropped`. The recall cost is a genuinely lowercase export (`parse`, `mask`).
+2. **Corpus share** — an anchor matching more than 15% of the corpus is a hub term, not an
+   identifier. `ObjectQL` is code-shaped, genuinely changed, and named by 59 of 178 pages;
+   it cannot tell an author which page to re-read. Reported as `overbroadAnchors`, with the
+   count that condemned it.
+
+Plus a cap on the route bridge itself: a symbol wired into more than 3 routes is a
+cross-cutting helper, and "which routes mention this name" then answers *every* route.
+Reported as `crossCuttingSymbols`. `SCREAMING_SNAKE` constants are kept out of the bridge
+entirely — a data table is consulted by handlers, it is not their implementation.
+
+### What it cannot see is reported, never implied
+
+`anchorlessChanges` lists changed files that yielded no anchor at all; a non-empty value
+means the list is incomplete **by a known amount**, and an empty `docs` beside it must
+never be read as "no page documents this change". The superseded coarse set is still
+computed and emitted as `packageMentionDocs`, labelled — an audit that deliberately wants
+the wide net can still ask for it, and keeping it visible is how a reader tells a *narrow*
+list from a *blind* one. The PR comment renders all of this in a collapsed section, because
+the failure #9192 records was never the tool lying — it was the tool never signalling its
+own limits at the point of use.
+
+### Measured, before and after
+
+Ten real PRs, each re-derived at its own merge base with its own docs corpus. `docs` rows:
+
+| PR / commit | old (package-mention) | new (anchor) |
+|:--|--:|--:|
+| #9191 — the three metadata read verbs (the filing card's specimen) | 4 | **3** |
+| `0668f02a6` fix(rest): closed `ErrorCode` union on the error responder | 26 | 14 |
+| `75b7c240a` feat(spec): `master_detail` + `controlled_by_parent` | 113 | 32 |
+| `07ad42463` fix(cli): `os meta resync` skip-count explanation | 22 | **0** |
+| `7a537ce90` feat(spec): strict top-level stack keys | 113 | 13 |
+| `445ae4deb` fix(auth): auth emails follow the deployment locale | 13 | 3 |
+| `30b1c636a` feat(spec): register 9 REST wire codes | 113 | 4 |
+| `650cd3daa` fix(objectql): delete-cascade registry reads | 14 | **0** |
+| `3851f87f0` feat(spec,plugin-security): partial field masking | 116 | 19 |
+| `d5156b965` refactor(metadata-protocol): drop dead `objects` tolerances | 4 | 4 |
+
+The #9191 row reads 4 where the filing card says "the bot listed three pages": `docs` is
+the full set and the comment partitions `content/docs/releases/v9.mdx` into its own
+read-only section (#6893), so 3 editable rows + 1 release-owned row = 4.
+
+On #9191 the change is qualitative, not just smaller: all three previously-listed pages
+are gone and the two pages the filing card measured as *missing* are back, each with the
+anchor that put it there (`getAudit`/`getReferences` for `client-sdk.mdx`, `getHistory`
+for `metadata-service.mdx`).
+
+The two zeroes are the honest shape of the trade, not a bug: `07ad42463` derives
+`MetaResync` and `resyncSkipExplanationLine`, and no hand-written page names either, so the
+run says so and points at the coarse set — where the old tool's 22 rows were every page
+mentioning `@objectstack/cli`. A CLI **command name** (`os meta resync`) is exactly the
+recall class the shape guard costs us: it is a lowercase word, so it cannot anchor.
+
+**Cost** (the card's open question): the anchor derivation reads the same 178-page corpus
+the old one did, plus the 18 route-registrar/ledger sources (~875 KB) and one `git show`
+per changed file per side. Measured end-to-end on the ten PRs above, `node affected-docs.mjs`
+went from 85-195 ms to 114-582 ms. The heaviest case is the widest diff; every case stays
+well under a second, against a job that already spends seconds checking out the repo and
+setting up Node. It is the right default for every PR.
 
 **How a changed file maps to its package:** the package root is the **deepest ancestor
 directory with a `package.json`**, resolved from the filesystem — never a hand-kept
@@ -88,8 +187,8 @@ stale are dropped before the changed-package roots are derived:
 
 The excluded counts are reported in the summary line and as `testFilesSkipped` /
 `scriptFilesSkipped` / `devOnlyManifestsSkipped` in `--json`, so the narrowing is never
-silent. `--self-test` pins the classifiers *and* the package-root derivation against
-paths that must and must not match (`commands/test.ts` is implementation;
+silent. `--self-test` pins the classifiers, the package-root derivation *and* the anchor
+derivation against inputs that must and must not match (`commands/test.ts` is implementation;
 `foo.conformance.test.ts` is not; a container directory must never come out as a package
 root; `dependencies` is never dev-only).
 
@@ -196,9 +295,17 @@ out of an in-memory copy and requires that check to go red.
 ## 2. CI gate — `.github/workflows/docs-drift-check.yml`
 
 On any PR that touches `packages/**`, runs `affected-docs.mjs` against the base branch
-and posts/updates a single advisory PR comment listing the docs that reference the
-changed code. **Never fails the build** — it only flags drift at the source, before it
-lands on `main`. Reviewers (or an on-demand audit run) decide whether to re-verify.
+and posts/updates a single advisory PR comment listing the docs that name something the
+change touched — each row carrying **the anchor that put it there**, so a wrong row is
+reportable rather than merely annoying. **Never fails the build** — it only flags drift at
+the source, before it lands on `main`. Reviewers (or an on-demand audit run) decide whether
+to re-verify.
+
+The comment also carries a collapsed **"What this run could not see"** section:
+anchorless files, cross-cutting symbols, over-broad anchors, and the coarse
+package-mention count. That is the point-of-use half of #9192 — every one of the three
+derived-list failures in that shift was caught only because a dev widened the probe past
+what the tool offered, never because the tool signalled its own limits where it was read.
 
 ### The comment forks release-owned pages into a read-only section (#6893)
 

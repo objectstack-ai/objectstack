@@ -76,15 +76,19 @@
  * change DEFERRED by the #8211 adjudication (option B) until a specific code
  * has a measured victim.
  *
- * One rule, two doors (#8087): registration here is the ADMISSION door — what
- * the vocabulary may contain. The DISPATCHER door is ruled (#8087, option
- * B-as-a-gate, maintainer 2026-08-12) to parse every body it emits against the
- * closed vocabulary; until that gate lands, `resolveThrownHttpError`
- * (`@objectstack/types`, PR #8088) carries `code` (narrowed) / `declaredCode`
- * (verbatim) across the gap. Both doors state the same rule: a code either IS
- * the standard member for its condition, or it is registered here — and if it
- * merely re-spells a standard member, that registration is a recorded waiver,
- * never drift.
+ * One rule, two doors (#8087, completed by #9106): registration here is the
+ * ADMISSION door — what the vocabulary may contain. The DISPATCHER door is
+ * gated (#8087, option B-as-a-gate, maintainer 2026-08-12:
+ * `check:dispatcher-error-vocabulary` sweeps its producers) and, since the
+ * #9106 ruling (maintainer 2026-08-16), NARROWS exactly as the REST door
+ * always has: `resolveThrownHttpError` (`@objectstack/types`) answers `code`
+ * (a member of this union) for `error.code` at BOTH doors, and a producer's
+ * unregistered spelling is demoted to the wire's `declaredCode` — the open,
+ * author-authored channel `ApiErrorSchema` declares for it. Both doors state
+ * the same rule: a code either IS the standard member for its condition, or it
+ * is registered here — and if it merely re-spells a standard member, that
+ * registration is a recorded waiver, never drift. A code registered NOWHERE
+ * (a tenant app's own spelling) still reaches the wire, in `declaredCode`.
  *
  * A code emitted by several packages is listed once per emitting package —
  * the union dedupes; the per-package rows are provenance, not identity.

@@ -50,7 +50,7 @@ Interface-level page configuration (Airtable parity)
 | **source** | `string` | optional | Source object name for the page |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | optional | Columns shown by the page. Blank = all object fields. Defined directly on the page (no view inheritance). |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Default sort order for the page, defined directly on the page. |
-| **filterBy** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| … +15 more>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Always-on page filter (base filter). |
+| **filterBy** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Always-on page filter (base filter). |
 | **levels** | `integer` | optional | Number of hierarchy levels to display |
 | **sourceView** | `string` | optional | @deprecated Legacy named-view inheritance. Define columns/sort/filterBy on the page instead. |
 | **appearance** | `{ showDescription: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
@@ -105,7 +105,7 @@ Interface-level page configuration (Airtable parity)
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| 'page:card' \| 'page:section' \| 'record:details' \| 'record:highlights' \| 'record:related_list' \| 'record:activity' \| 'record:chatter' \| 'record:discussion' \| 'record:path' \| 'record:alert' \| 'record:quick_actions' \| 'record:reference_rail' \| 'record:history' \| 'app:launcher' \| 'nav:menu' \| 'nav:breadcrumb' \| 'global:search' \| 'global:notifications' \| 'user:profile' \| 'ai:chat_window' \| 'ai:suggestion' \| 'element:text' \| 'element:number' \| 'element:image' \| 'element:divider' \| 'element:button' \| 'element:filter' \| 'element:form' \| 'element:record_picker' \| 'element:text_input'> \| string` | ✅ | Component Type (Standard enum or custom string) |
+| **type** | `Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| 'page:card' \| 'page:section' \| 'record:details' \| 'record:highlights' \| 'record:related_list' \| 'record:activity' \| 'record:chatter' \| 'record:discussion' \| 'record:path' \| 'record:alert' \| 'record:quick_actions' \| 'record:reference_rail' \| 'record:history' \| 'app:launcher' \| 'nav:menu' \| 'nav:breadcrumb' \| 'global:search' \| 'global:notifications' \| 'user:profile' \| 'ai:chat_window' \| 'ai:suggestion' \| 'element:text' \| 'element:number' \| 'element:image' \| 'element:divider' \| 'element:button' \| 'element:form' \| 'element:record_picker' \| 'element:text_input'> \| string` | ✅ | Component Type (Standard enum or custom string) |
 | **id** | `string` | optional | Unique instance ID |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **properties** | `Record<string, any>` | optional (default: `{}`) | Component props passed to the widget. See component.zod.ts for schemas. |
@@ -157,7 +157,6 @@ Interface-level page configuration (Airtable parity)
 * `element:image`
 * `element:divider`
 * `element:button`
-* `element:filter`
 * `element:form`
 * `element:record_picker`
 * `element:text_input`
@@ -173,7 +172,7 @@ Interface-level page configuration (Airtable parity)
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Region name (e.g. "sidebar", "main", "header") |
 | **width** | `Enum<'small' \| 'medium' \| 'large' \| 'full'>` | optional |  |
-| **components** | `{ type: Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| … +30 more> \| string; id?: string; label?: string \| Record<string, string>; properties?: Record<string, any>; … }[]` | ✅ | Components in this region |
+| **components** | `{ type: Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| …> \| string; id?: string; label?: string \| Record<string, string>; properties?: Record<string, any>; … }[]` | ✅ | Components in this region |
 
 
 ---

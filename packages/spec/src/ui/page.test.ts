@@ -680,10 +680,12 @@ describe('PageVariableSchema record_id type', () => {
             {
               id: 'account_picker',
               type: 'element:record_picker',
+              // The binding is carried by the VARIABLE's `source` above, not by
+              // any picker prop — `displayField` (#5775) and `targetVariable`
+              // (#9198) are both retired.
               properties: {
                 object: 'account',
-                displayField: 'name',
-                targetVariable: 'selected_id',
+                labelField: 'name',
               },
             },
           ],

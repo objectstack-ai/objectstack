@@ -722,7 +722,13 @@ function lowerWhereFilterArray<T extends object | undefined>(
   }
 
   // (2) The declared path.
-  const condition = parseFilterAST(where);
+  // [#9228] The context prefix is passed because `parseFilterAST` now runs the
+  // #5869 shape gate itself, one step before this branch could: a scalar `$nin`
+  // is refused DURING lowering. Handing it `${operation}('${object}')` is what
+  // keeps this branch's pinned `find('deal'): ` prefix on that refusal — and on
+  // the #7872 type door's, which `parseFilterAST` has always run and which used
+  // to answer this branch unprefixed.
+  const condition = parseFilterAST(where, `${operation}('${object}')`);
   if (condition === undefined) {
     // Unreachable by construction — `isFilterAST` accepted the shape, so
     // `parseFilterAST` has a lowering for it. Loud rather than silent because
@@ -734,11 +740,14 @@ function lowerWhereFilterArray<T extends object | undefined>(
       `unfiltered (#5158).`,
     );
   }
-  // [#5869] Door 2's half of the same check. `isFilterAST` vouched for the
-  // OPERATOR and `parseFilterAST` lowered it, but neither looks at the
-  // comparand — `['status', 'not_in', 'done']` lowers to `{status: {$nin:
-  // 'done'}}` and a scalar `$nin` is what reached the driver as a 500.
-  assertListComparandShapes(object, operation, condition);
+  // [#5869] Door 2's half of the same check USED to be a second
+  // `assertListComparandShapes(object, operation, condition)` call here.
+  // [#9228] moved the rule into `parseFilterAST` itself, which this branch
+  // calls three lines up with the same context — so the call became provably
+  // unreachable (nothing between the two can introduce a list operator) and is
+  // deleted rather than kept as a gate that reads live and never fires. The
+  // OBJECT branch above keeps its call: that `where` never passes
+  // `parseFilterAST` at all, which is the whole reason both branches exist.
   // [#8296] Same door as the object branch above, on the LOWERED condition —
   // the array sugar (`[['is_open','=',true]]`) names fields too, and a gate on
   // one branch would answer one mistake two ways depending on the spelling.

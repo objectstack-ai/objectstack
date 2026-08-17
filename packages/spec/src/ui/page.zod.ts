@@ -70,7 +70,12 @@ export const PageComponentType = z.enum([
   // Content Elements (Airtable Interface parity)
   'element:text', 'element:number', 'element:image', 'element:divider',
   // Interactive Elements (Phase B — Element Library)
-  'element:button', 'element:filter', 'element:form', 'element:record_picker', 'element:text_input'
+  // `element:filter` REMOVED (#9220, ADR-0049): retired at element grain — no
+  // renderer ever shipped anywhere. Dropping the enum value is de-advertisement
+  // only (the `type` union's open string arm still accepts any string); the
+  // LOUD half of the retirement is `ElementFilterPropsSchema`'s retiredKey
+  // tombstones, dispatched through the kept `ComponentPropsMap` row.
+  'element:button', 'element:form', 'element:record_picker', 'element:text_input'
 ]);
 
 /**

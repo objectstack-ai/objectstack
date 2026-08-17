@@ -86,7 +86,7 @@ const result = ResolvedSettingValueSchema.parse(data);
 | **writePermission** | `string` | optional (default: `"setup.write"`) | Permission required to write |
 | **category** | `string` | optional | Settings hub category |
 | **order** | `number` | optional | Display order |
-| **specifiers** | `{ type: Enum<'group' \| 'child_pane' \| 'info_banner' \| 'title_value' \| 'text' \| 'textarea' \| … +13 more>; id?: string; key?: string; label: string \| Record<string, string>; … }[]` | ✅ | Page contents (ordered) |
+| **specifiers** | `{ type: Enum<'group' \| 'child_pane' \| 'info_banner' \| 'title_value' \| 'text' \| 'textarea' \| …>; id?: string; key?: string; label: string \| Record<string, string>; … }[]` | ✅ | Page contents (ordered) |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Whole-manifest visibility. Grammar is NOT CEL: root `data` with one-level member access, `\|\|` `&&` `!`, `===` `!==` `==` `!=` `>=` `<=` `>` `<`, parentheses and string/number/bool/null literals, optionally wrapped in `${...}`; bare string or `{ dialect, source }` envelope. |
 | **featureFlag** | `string` | optional | Gate manifest visibility on a feature flag |
 | **beta** | `boolean` | optional | Show a Beta chip on the page |

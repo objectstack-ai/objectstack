@@ -130,8 +130,8 @@ A single step in a test scenario, consisting of an action and optional assertion
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Step name for identification in test reports |
 | **description** | `string` | optional | Human-readable description of what this step tests |
-| **action** | `{ type: Enum<'create_record' \| 'update_record' \| 'delete_record' \| 'read_record' \| … +4 more>; target: string; payload?: Record<string, any>; user?: string }` | ✅ | The action to execute in this step |
-| **assertions** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'is_null' \| 'not_null' \| … +5 more>; expectedValue: any }[]` | optional | Assertions to validate after the action completes |
+| **action** | `{ type: Enum<'create_record' \| 'update_record' \| 'delete_record' \| 'read_record' \| …>; target: string; payload?: Record<string, any>; user?: string }` | ✅ | The action to execute in this step |
+| **assertions** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'is_null' \| 'not_null' \| …>; expectedValue: any }[]` | optional | Assertions to validate after the action completes |
 | **capture** | `Record<string, string>` | optional | Map result fields to context variables, paths resolved against the response body root (e.g. `{ "newId": "data.id" }`) |
 
 

@@ -59,7 +59,10 @@
  * Those three are real reads and still cover three of the largest directories
  * in the tree, so a directly-wired gate would print MATCHED for every card
  * under them — a smaller fabrication than the fixture one, of the same kind.
- * The spec filter path from the incident above no longer matches at all.
+ * The spec filter path from the incident above no longer matches via fixtures;
+ * it matches again today through a declared module-body constant (the clause-②
+ * suspect glob), pinned as deliberate in the tool's own self-test and inert for
+ * gate matching for the same reason as the tier globs beside it.
  *
  * A separate gate file is also what the other two pm gates look like
  * (check-skill-line-ratchet.mjs, check-skill-id-lint.mjs). Its watch hints are

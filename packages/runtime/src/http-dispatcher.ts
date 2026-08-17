@@ -3,7 +3,7 @@
 import {
     ObjectKernel, getEnv, evaluateAuthGate, isAuthGateAllowlisted,
 } from '@objectstack/core';
-import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError } from '@objectstack/types';
+import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, demotedDeclaredCode } from '@objectstack/types';
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { CoreServiceName, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
 import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -711,13 +711,16 @@ export class HttpDispatcher {
      * delegates to has already answered the code question for both package
      * doors; every other call site still expresses its code the way it did (a
      * `details.code` to promote, or none at all and let the status derive one).
+     *
+     * [#9106] `extra` carries declared siblings of `code` (today only the
+     * demoted `declaredCode`); again only {@link errorFromThrown} passes it.
      */
-    private error(message: string, httpStatus: number = 500, details?: any, code?: string) {
+    private error(message: string, httpStatus: number = 500, details?: any, code?: string, extra?: Record<string, unknown>) {
         const safe =
             httpStatus >= 500 && looksLikeInternalErrorLeak(message)
                 ? INTERNAL_ERROR_MESSAGE
                 : message;
-        return apiErrorResponse({ message: safe, httpStatus, details, ...(code ? { code } : {}) });
+        return apiErrorResponse({ message: safe, httpStatus, details, ...(code ? { code } : {}), ...(extra ? { extra } : {}) });
     }
 
     /**
@@ -730,10 +733,10 @@ export class HttpDispatcher {
      * offending field. Falls back to `fallbackStatus` and behaves exactly like
      * `error()` for errors that carry neither.
      *
-     * [#3842] The error's own `.code` still travels as `details.code` from here,
-     * which is the carrier `buildApiError` promotes into `error.code` — so it
-     * ends up in the declared field without this method needing to know how the
-     * envelope is assembled.
+     * [#3842 → #9106] The error's own `.code` reaches the declared field only
+     * when the ledger knows it: the resolver's narrowed `code` is passed
+     * explicitly, and an unregistered spelling travels as the wire's
+     * `declaredCode` sibling instead (see the note inside the method).
      *
      * [#3918] A record-level `ValidationError` is the third structured shape,
      * and it used to fall through BOTH branches: it carries no `.status` (so a
@@ -760,21 +763,30 @@ export class HttpDispatcher {
      */
     private errorFromThrown(e: any, fallbackStatus = 500) {
         const thrown = resolveThrownHttpError(e, fallbackStatus);
-        // `declaredCode`, NOT the narrowed `code`: this door puts a producer's
-        // own string on the wire. The REST door takes the narrowed spelling
-        // because its own conformance suite parses its bodies against the
-        // ledger. Both spellings come from the one resolver, so the difference
-        // is a stated one; see its module note.
+        // [#9106] `code`, the NARROWED spelling — the same one the REST door
+        // has served since #8016, so the two doors now agree on `error.code`
+        // unconditionally (maintainer ruling 2026-08-16: `error.code` is a
+        // closed vocabulary at every door). A producer's unregistered spelling
+        // is not dropped: it rides the wire's `declaredCode`
+        // (`ApiErrorSchema.declaredCode`, the open author-authored channel),
+        // which is how a metadata app's own thrown code — the #7867 capability,
+        // measured as the tenant-authored limb no ledger can enumerate — still
+        // reaches the wire. Emitted only when the demote actually happened, so
+        // presence means demotion (see `demotedDeclaredCode`'s note).
         //
-        // [#8087] Ruled option B (maintainer, 2026-08-12): the verbatim spelling
-        // STAYS, and the set of producers emitting codes the ledger does not
-        // know is now measured and gated rather than named in a comment that
-        // rots — `./dispatcher-error-vocabulary.ts` carries the classified list
-        // and `pnpm check:dispatcher-error-vocabulary` fails on an unswept
-        // producer added later. `error-envelope.conformance.test.ts` drives
-        // every dispatcher-reachable member of that list through this method and
-        // parses the body, which is the "parse every body it emits" half.
-        return this.error(thrown.message, thrown.status, thrown.details, thrown.declaredCode);
+        // [#8087] The producer sweep is unchanged by this: platform producers
+        // must still register — `./dispatcher-error-vocabulary.ts` carries the
+        // classified list and `pnpm check:dispatcher-error-vocabulary` fails on
+        // an unswept producer, whose semantic code would otherwise silently
+        // demote off the wire. `error-envelope.conformance.test.ts` drives
+        // every dispatcher-reachable member of that list through this method
+        // and parses the body against `ApiErrorSchema`, which now PASSES for
+        // every body this door emits — the "parse every body it emits" half.
+        const declaredCode = demotedDeclaredCode(thrown);
+        return this.error(
+            thrown.message, thrown.status, thrown.details, thrown.code,
+            declaredCode !== undefined ? { declaredCode } : undefined,
+        );
     }
 
 

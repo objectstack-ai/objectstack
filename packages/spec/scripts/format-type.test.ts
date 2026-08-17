@@ -774,14 +774,17 @@ describe('formatType — over-wide enums inside a shape summary are elided with 
     const rendered = formatType(BULK_ACTION_PARAMS, ctx());
     expect(rendered).toBe(
       "({ name: string; label?: string; help?: string; type: Enum<'text' | 'textarea' | " +
-        "'email' | 'url' | 'phone' | 'password' | 'secret' | … +42 more>; … } & " +
+        "'email' | 'url' | 'phone' | 'password' | 'secret' | …>; … } & " +
         'Record<string, any>)[]',
     );
-    // 7 shown + 42 hidden = the 49 the schema declares. The count is exact, so
-    // the cell says what it is instead of implying it is the whole vocabulary.
-    expect(7 + 42).toBe(FIELD_TYPES.length);
+    // 7 of the 49 the schema declares are spelled. The marker says THAT the cell
+    // is a sample; since #9182 it no longer says how big the vocabulary is —
+    // that magnitude lives on the row that actually prints the members, which is
+    // the only page position that can substantiate it.
+    expect(FIELD_TYPES.length).toBe(49);
+    expect(rendered.match(/'/g)!.length / 2).toBe(7);
     // The cell that motivated the issue, before and after.
-    expect(rendered.length).toBe(174);
+    expect(rendered.length).toBe(165);
   });
 
   it('elides through a WRAPPER reached from a summary — array of enum', () => {
@@ -799,8 +802,11 @@ describe('formatType — over-wide enums inside a shape summary are elided with 
       { type: 'object', properties: { codes: { type: 'array', items: { type: 'string', enum: ERROR_CODES } } } },
       ctx(),
     );
-    expect(rendered).toContain('… +258 more');
-    expect(3 + 258).toBe(ERROR_CODES.length);
+    expect(rendered).toContain('…>');
+    // The elision fired on a 261-member vocabulary; the cell no longer restates
+    // that cardinality (#9182), so the pin is that it was CUT, not by how much.
+    expect(ERROR_CODES.length).toBe(261);
+    expect(rendered).not.toContain('more');
     // Still an array OF the elided vocabulary, not an elided array.
     expect(rendered.endsWith('>[] }')).toBe(true);
     // Was 5000+ characters in one table cell.
@@ -814,7 +820,7 @@ describe('formatType — over-wide enums inside a shape summary are elided with 
     );
     expect(rendered).toBe(
       "{ k?: Enum<'v000000000' | 'v111111111' | 'v222222222' | 'v333333333' | " +
-        "'v444444444' | … +15 more> }",
+        "'v444444444' | …> }",
     );
   });
 
@@ -826,15 +832,24 @@ describe('formatType — over-wide enums inside a shape summary are elided with 
     // Bare numbers, and the marker is the only unquoted non-number in the cell.
     expect(rendered).toBe(
       '{ k?: Enum<0 | 1000 | 2000 | 3000 | 4000 | 5000 | 6000 | 7000 | 8000 | 9000 | ' +
-        '10000 | 11000 | … +28 more> }',
+        '10000 | 11000 | …> }',
     );
     expect(rendered).not.toContain("'");
   });
 
   it('leaves the key elision `…` and the openness marker doing their own jobs', () => {
     // Three different elisions can meet in one cell and must stay legible:
-    // `… +N more` (enum members), `…` (further live keys), `& Record` (undeclared
-    // keys). #5606's tombstone filter still runs BEFORE the key limit.
+    // `…` (enum members), `…` (further live keys), `& Record` (undeclared keys).
+    // #5606's tombstone filter still runs BEFORE the key limit.
+    //
+    // The first two are now the SAME token, which is the point rather than a
+    // collision (#9182): both sit inside a summary that is already a sample, and
+    // the key elision has never quantified what it withheld. A reader meeting
+    // `…` twice in this cell reads one rule — "there is more of this here" —
+    // instead of two notations that differ only in a number they cannot check
+    // against anything printed on the page. `& Record<string, any>` stays
+    // distinct because it states a different fact: the shape is OPEN, not
+    // sampled.
     const rendered = formatType(
       {
         type: 'object',
@@ -853,7 +868,7 @@ describe('formatType — over-wide enums inside a shape summary are elided with 
     );
     expect(rendered).toBe(
       "{ a: Enum<'text' | 'textarea' | 'email' | 'url' | 'phone' | 'password' | 'secret' | " +
-        '… +42 more>; b?: string; c?: string; d?: string; … } & Record<string, any>',
+        '…>; b?: string; c?: string; d?: string; … } & Record<string, any>',
     );
     expect(rendered).not.toContain('dead');
   });
@@ -871,8 +886,55 @@ describe('formatType — over-wide enums inside a shape summary are elided with 
       },
       ctx(),
     );
-    expect(rendered).toContain('… +15 more');
+    expect(rendered).toContain('…>');
     expect(rendered).toContain('Record<string, Enum<');
+  });
+});
+
+/**
+ * THE REGRESSION THIS BLOCK EXISTS TO STOP, stated as the measurement that
+ * motivated it (#9182).
+ *
+ * `+N more` is a function of a vocabulary's cardinality, so every page carrying
+ * the marker was rewritten whenever the vocabulary grew by one. Measured on
+ * `ApiError.code` (288 members) by registering a single error code and
+ * regenerating: **11 reference pages, 69 lines — 66 of them this marker**, and 9
+ * of the 11 pages (`analytics`, `auth`, `automation-api`, `batch`, `export`,
+ * `metadata`, `package-api`, `protocol`, `storage`) contained NOTHING ELSE,
+ * 100% of their changed lines being `+285 more` → `+286 more`.
+ *
+ * The ledger is a per-PR append, so that made any two PRs registering a code
+ * mutually exclusive by construction — and the generated pages produce no
+ * conflict markers when a merge drops one side, which is the silent-drop
+ * signature the regen driver is already known for. Re-adding the count here
+ * re-creates that serialization point, which is why it is pinned rather than
+ * left to the corpus to notice.
+ */
+describe('formatType — the in-shape marker is INVARIANT to vocabulary growth (#9182)', () => {
+  const inShape = (members: unknown[]) =>
+    formatType({ type: 'object', properties: { k: { type: 'string', enum: members } } }, ctx());
+
+  it('renders a byte-identical cell for a vocabulary that grew by one', () => {
+    expect(inShape(sized(31))).toBe(inShape(sized(30)));
+    expect(inShape(sized(30))).not.toContain('more');
+  });
+
+  it('still states that the cell is a sample — #5340 barred a SILENT prefix, not an unquantified one', () => {
+    // The distinction #5340 actually required is "7-member vocabulary" vs
+    // "first 7 of 49", and `…` carries it without a number: present when the
+    // body was cut, absent when the cell is complete.
+    expect(inShape(sized(30))).toContain('…');
+    expect(inShape(sized(2))).not.toContain('…');
+  });
+
+  it('keeps the count where the page prints the members to check it against', () => {
+    // `formatPropertyType` relocates the vocabulary into an `### Allowed Values`
+    // list directly below the table, so its count is verifiable by the reader —
+    // and that page is rewritten by a vocabulary change regardless, because it
+    // spells the vocabulary. Nothing about #9182 reaches this position.
+    const { cell, allowedValues } = formatPropertyType({ type: 'string', enum: sized(30) }, ctx());
+    expect(cell).toMatch(/… \+\d+ more>$/);
+    expect(allowedValues).toHaveLength(30);
   });
 });
 
@@ -948,10 +1010,17 @@ describe('formatType — the elision boundary (#5340)', () => {
 
   it('elides at the first width where the marker DOES pay for itself', () => {
     // 102 characters: 2 members hidden, 18 saved against a 12-character marker.
+    //
+    // The 12 characters are the QUANTIFIED marker's, and that is deliberate
+    // (#9182): the in-shape marker now prints as a bare `…`, but the guard is
+    // still measured against `… +N more` so that dropping the count changes the
+    // notation and never WHICH bodies elide. Judged against the short marker the
+    // boundary would move down, and the two `prints a body … whole` cases above
+    // — the ones that pin the refusal — would start eliding.
     expect(sized(7).map(m => `'${m}'`).join(' | ').length).toBe(102);
     expect(inShape(sized(7))).toBe(
       "{ k?: Enum<'v000000000' | 'v111111111' | 'v222222222' | 'v333333333' | " +
-        "'v444444444' | … +2 more> }",
+        "'v444444444' | …> }",
     );
   });
 
@@ -1284,7 +1353,7 @@ const PAGE_COMPONENT = {
             'app:launcher', 'nav:menu', 'nav:breadcrumb', 'global:search',
             'global:notifications', 'user:profile', 'ai:chat_window', 'ai:suggestion',
             'element:text', 'element:number', 'element:image', 'element:divider',
-            'element:button', 'element:filter', 'element:form', 'element:record_picker',
+            'element:button', 'element:form', 'element:record_picker',
             'element:text_input',
           ],
         },
@@ -1458,7 +1527,10 @@ describe('formatType — one shape level, whichever way down (#6374)', () => {
     // The corpus check that the budget is not a rewrite: 173 of the 215 pages
     // do not move at all. `BulkActionDef.params` (#5340's instance) and
     // `App.navigation` (#6226's) are both one level deep and both unchanged.
-    expect(formatType(BULK_ACTION_PARAMS, ctx()).length).toBe(174);
+    // 165 since #9182 dropped the count from the in-shape marker (was 174 — the
+    // 9 characters of `+42 more`). The cell's SHAPE is what this case pins, and
+    // it is unchanged: still one level, still the same seven members spelled.
+    expect(formatType(BULK_ACTION_PARAMS, ctx()).length).toBe(165);
     expect(formatType(INDEX_SCHEMA, ctx())).toBe(
       "{ name?: string; fields: string[]; unique?: boolean | 'global' | 'organization' }[]",
     );
