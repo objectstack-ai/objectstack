@@ -757,16 +757,15 @@
         ],
         "knownGaps": [
           "This item deliberately does NOT re-prove what two existing items already cover. The scaffold→install→validate→build→artifact-boot chain belongs to cli.scaffold-first-run (automated by .github/workflows/scaffold-e2e.yml); the console-on-a-populated-app half belongs to cli.dev-boot-contract, which drives examples/app-showcase. What is untested is the SEAM: the Console rendering against a freshly scaffolded BLANK project — one object, no seed data, and no seeded admin unless one is requested. Score only the seam; cite the two siblings for the halves.",
-          "Whether a blank scaffold has any loginable identity out of the box is exactly what clause 3 measures — do not assume either answer, and do not import showcase credentials to make the console open."
+          "Whether a blank scaffold has any loginable identity out of the box is exactly what clause 4 measures — do not assume either answer, and do not import showcase credentials to make the console open."
         ]
       },
       "steps": [
         "scaffold a fresh project exactly as the published docs instruct: `npx -y create-objectstack@latest qa-console-first-paint` (no -t flag — the docs never pass one), then `npm install`",
-        "read the scaffolded package.json and RECORD its scripts verbatim — the newcomer's most likely next command is `npm run dev`, and what that script expands to is part of the surface under test",
         "run the documented gate: `npx os validate; echo $?`",
-        "run `npm run dev` (the scaffold's own script) and probe http://localhost:3000/_console/ — record the status",
-        "stop; run the documented command `npx os dev --ui` and probe http://localhost:3000/_console/ again",
-        "for whichever invocation serves the console, load it in a browser and record what a newcomer sees: does it render, and is there any identity they can sign in with?",
+        "run `npm run dev` — the scaffold's OWN script, which is what a newcomer reaches for after `npm install` — and probe http://localhost:3000/_console/",
+        "load the console in a browser and record what a newcomer actually sees: does the shell render, and is there any identity they can sign in with?",
+        "stop; run the documented spelling `npx os dev --ui` and probe /_console/ again — the two must agree (see clause 3; `--ui` is a forwarder for a serve-side flag that is already default-on, so this is a no-op equivalence check, not a divergence hunt)",
         "capture the boot log for both invocations"
       ],
       "acceptance": [
@@ -783,10 +782,10 @@
           "evidence": "status + screenshot of the rendered console"
         },
         {
-          "clause": "the scaffold's OWN `dev` script and the documented command agree about the console, or the divergence is recorded as a defect — a newcomer who runs `npm run dev` (the script the scaffold ships) must not land on a server with no console while the docs send them to /_console/",
+          "clause": "the scaffold's OWN `dev` script serves the console with NO extra flag — `npm run dev` (bare `objectstack dev`) reaches /_console/ exactly as `os dev --ui` does",
           "oracle": "network",
-          "verify": "probe /_console/ under BOTH invocations and compare. Static reading of the blank template's package.json shows `dev` is bare `objectstack dev` while `--ui` is documented as what enables the portal — so a divergence is EXPECTED here; the run's job is to confirm it at runtime and record which side is wrong",
-          "evidence": "both probe statuses + the recorded script text"
+          "verify": "probe /_console/ under both invocations; both must serve. The console is default-ON downstream: `dev` spawns `serve` (packages/cli/src/commands/dev.ts:370) forwarding `--ui` only when set and never forwarding `--no-ui`, and serve declares `ui` with `default: true, allowNo: true` (packages/cli/src/commands/serve.ts:221) — so an unflagged `dev` lands on serve's own default. `--ui` on `dev` is a no-op forwarder, which is what content/docs/deployment/cli.mdx:139 means by 'Force Console UI on (already on by default in dev)'. A difference between the two invocations is the FAILURE here, not the expectation",
+          "evidence": "both probe statuses"
         },
         {
           "clause": "a newcomer can complete the documented visual check, or the run states precisely what stops them — the docs promise 'create a record, watch an action show/hide, confirm the nav and filters' on this project",
@@ -796,16 +795,19 @@
         }
       ],
       "negative": [
-        "the console 404s on a fresh scaffold under the documented command while working on the showcase — a first-run-only failure that every showcase-based test is blind to",
-        "`npm run dev` serving no console while the docs point at /_console/, with nothing telling the newcomer why (the statically-grounded suspicion this item exists to confirm)",
+        "the console 404s on a fresh scaffold while working on the showcase — a first-run-only failure that every showcase-based test is blind to",
+        "`npm run dev` and `os dev --ui` disagreeing about /_console/ — that would mean the forwarding in dev.ts:370 or the default in serve.ts:221 changed, and the newcomer path silently regressed",
+        "a future edit giving `dev` its own `ui` default of false, or forwarding `--no-ui`: either would strand the newcomer, and neither would be caught by any showcase-driven item",
         "os validate refusing on a pristine scaffold",
         "a console that returns 200 and paints nothing (white screen) — 200 is not the oracle here, the rendered DOM is"
       ],
       "traps": ["hydration-race", "first-boot-cold-start"],
       "source": [
         "content/docs/getting-started/quick-start.mdx ('How you verify' — `npx os validate` and `npx os dev --ui`, then open http://localhost:3000/_console/)",
-        "packages/create-objectstack/src/templates/blank/package.json (scripts.dev = `objectstack dev`, with no --ui)",
-        "packages/cli/src/commands/dev.ts (the --ui flag: 'Enable the bundled Console portal at /_console/')",
+        "packages/create-objectstack/src/templates/blank/package.json (scripts.dev = `objectstack dev`, with no --ui — correct, see the chain below)",
+        "packages/cli/src/commands/serve.ts:221 (`ui: Flags.boolean({ ..., default: true, allowNo: true })` — the console is default-ON here; `--no-ui` is the off switch)",
+        "packages/cli/src/commands/dev.ts:69 + :370 (dev declares `ui` with NO default and forwards `...(flags.ui ? ['--ui'] : [])` — it only ever ADDS the flag, never forwards --no-ui, so an unflagged dev inherits serve's default-on)",
+        "content/docs/deployment/cli.mdx:139 ('--ui | Force Console UI on (already on by default in dev)') and :196 ('--ui / --no-ui — Toggle Console UI at /_console/ (default on)')",
         "packages/create-objectstack/src/template-registry.ts (TEMPLATES = { blank } only; RETIRED_TEMPLATES named for a named refusal)",
         "sibling item cli.scaffold-first-run (scaffold→install→validate→build→`os start --artifact`→health/ready; automated by .github/workflows/scaffold-e2e.yml)",
         "sibling item cli.dev-boot-contract (os dev --ui + /_console/ sign-in, driven against examples/app-showcase)",
@@ -815,7 +817,7 @@
         {
           "revision": 1,
           "date": "2026-08-17",
-          "change": "new — angle-5 (docs claims) probe of the published first-run. Checked and CLEAN on the template question: no doc anywhere in content/docs/ prescribes a retired template (`todo`/`compliance`/`content`/`contracts`/`procurement`) and every documented invocation is a bare `npx create-objectstack my-app`, which resolves to the only catalog entry; `npm run validate` and `npx os validate` are the same binary, so that spelling difference is not a divergence either. What grounding DID surface is a seam between two existing items: the scaffold item boots headless via `os start --artifact`, the dev-boot item drives the console against the fully-populated showcase, and nobody drives the documented command against a fresh blank scaffold — where the scaffold's own `dev` script omits the very flag that enables the portal the docs send newcomers to",
+          "change": "new — angle-5 (docs claims) probe of the published first-run. Covers a real seam between two existing items: cli.scaffold-first-run boots the scaffold headless via `os start --artifact`, cli.dev-boot-contract drives the console against the fully-populated showcase, and nobody drives the console against a fresh BLANK scaffold — where there is no seed data and no seeded admin unless one is requested. Checked and CLEAN on three questions the sweep raised: no doc anywhere in content/docs/ prescribes a retired template (`todo`/`compliance`/`content`/`contracts`/`procurement`), every documented invocation is a bare `npx create-objectstack my-app` resolving to the only catalog entry, and `npm run validate` is the same binary as `npx os validate`. REFUTED during authoring, recorded here so it is not re-derived: the sweep first read the blank template's bare `\"dev\": \"objectstack dev\"` against the quick-start's `os dev --ui` and inferred that `npm run dev` would strand a newcomer with no console. Source-checking the chain disproves it — dev.ts:370 forwards `--ui` only when set and never forwards `--no-ui`, serve.ts:221 declares `ui` `default: true`, and cli.mdx:139 states outright that the console is 'already on by default in dev'. The bare script is CORRECT; `--ui` on `dev` is a no-op forwarder. Clause 3 accordingly asserts the two invocations AGREE, and a difference is the failure",
           "ref": "#9299"
         }
       ]

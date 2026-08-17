@@ -80,11 +80,33 @@ Ledger 182 → 190 items; `coverage.json` 28 mapped / 2 waived → **30 mapped /
 
 | # | drift | evidence | captured in |
 |---|---|---|---|
-| E1 | **The scaffold's own `dev` script cannot serve the console the quick-start sends newcomers to.** `content/docs/getting-started/quick-start.mdx` ("How you verify") instructs `npx os dev --ui` then open `http://localhost:3000/_console/`. The blank template ships `"dev": "objectstack dev"` — no `--ui` — and `--ui` is documented in the CLI as the flag that "Enable[s] the bundled Console portal at /_console/". A newcomer who runs `npm run dev` (the script the scaffold gives them) therefore lands on a server with no console, with nothing explaining why. Either the template script should carry `--ui` or the docs should tell them to use the flag explicitly — a maintainer call, not an agent's. | `packages/create-objectstack/src/templates/blank/package.json` · `packages/cli/src/commands/dev.ts:69` · `content/docs/getting-started/quick-start.mdx` | `cli.scaffold-console-first-paint` (clause 3, an expected-divergence probe — the run confirms it at runtime rather than ticking) |
-| E2 | **Stale defect note in `packages/spec/liveness/doc.json`.** Its `_note` records "DocSchema declares no `tags`, yet the book-side `include: { tag }` rule and the REST corpus both expect one — the tag rule can currently never match". That defect is **fixed**: `DocSchema` now declares `tags` (`packages/spec/src/data/../system/doc.zod.ts:126`, with the history spelled out in the surrounding comment). The ledger note now describes a bug that no longer exists, which is the same failure class this sweep is correcting in `SWEEP.md`. Outside this card's file surface (`docs/qa/platform-checklist/**`), so it is reported, not edited. | `packages/spec/liveness/doc.json` `_note` vs `packages/spec/src/system/doc.zod.ts:111-127` | — (liveness ledger prose, not a checklist item) |
+| E1 | **Stale defect note in `packages/spec/liveness/doc.json`.** Its `_note` records "DocSchema declares no `tags`, yet the book-side `include: { tag }` rule and the REST corpus both expect one — the tag rule can currently never match". That defect is **fixed**: `DocSchema` now declares `tags` (`packages/spec/src/system/doc.zod.ts:126`, with the history spelled out in the surrounding comment). The ledger note now describes a bug that no longer exists, which is the same failure class this sweep is correcting in `SWEEP.md`. Outside this card's file surface (`docs/qa/platform-checklist/**`), so it is reported, not edited. | `packages/spec/liveness/doc.json` `_note` vs `packages/spec/src/system/doc.zod.ts:111-127` | — (liveness ledger prose, not a checklist item) |
 
 ### 5b. Checked and CLEAN (recorded so the next sweep does not re-derive it)
 
+- **The blank template's `dev` script omits `--ui`, and that is CORRECT — the console is
+  served anyway.** This sweep first read `"dev": "objectstack dev"` against the
+  quick-start's `npx os dev --ui` and inferred that a newcomer running `npm run dev`
+  would land on a server with no console. **Source-checking the chain refuted it**, and
+  the refutation is recorded here because the inference is an easy one to make twice:
+  - `packages/cli/src/commands/serve.ts:221` — `ui: Flags.boolean({ …, default: true,
+    allowNo: true })`. The console is **default-ON** at `serve`; `--no-ui` is the off
+    switch.
+  - `packages/cli/src/commands/dev.ts:370` — `...(flags.ui ? ['--ui'] : [])`. `dev` only
+    ever **adds** `--ui`; it never forwards `--no-ui`. With `dev.ts:69` declaring `ui`
+    with no `default`, an unflagged `dev` spawns `serve` with no ui flag at all, so
+    serve's own default takes over — on.
+  - `content/docs/deployment/cli.mdx:139` says it outright: "`--ui` | Force Console UI on
+    (**already on by default in dev**)", and `:196` documents `--ui / --no-ui … (default
+    on)`.
+
+  So `--ui` on `dev` is a **no-op forwarder**, there is no divergence between the
+  template script and quick-start, and the newcomer is not stranded. What made the wrong
+  reading tempting is `dev.ts:69`'s own flag description ("Enable the bundled Console
+  portal at /_console/"), which reads like the mechanism when it is only a forwarder —
+  not worth a change on its own, but worth knowing before inferring from it.
+  `cli.scaffold-console-first-paint` clause 3 now asserts the two invocations **agree**,
+  with a difference between them as the failure.
 - **No published doc prescribes a retired scaffolder template.** Grepped all of
   `content/docs/` for `todo` / `compliance` / `content` / `contracts` / `procurement` as
   `-t` / `--template` operands: zero hits. Every documented invocation is a bare
