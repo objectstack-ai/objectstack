@@ -41,6 +41,15 @@
  * never wrote. See that module for why the other field-existence rules stay
  * advisory and this one does not.
  *
+ * `validateSortableFields` is the same reading one axis over (#9257): a list
+ * view's `sort` names a field, resolved against the object's declared fields.
+ * It gates for a stronger reason than its search sibling — the engine has no
+ * tolerance to describe here. An unknown sort name is refused at the REST
+ * ingress (`assertSortFieldsExist`, #6994) and a `formula` one by the engine
+ * itself (`assertOrderByIsMaterializable`, #7095), both `400 INVALID_SORT`; and
+ * because a view's declared sort is its FIRST fetch, the refusal is the whole
+ * view failing to load, every time, from an authoring typo made long before.
+ *
  * Rules that check SHAPE rather than reference (view containers, responsive
  * styles, seed replay safety, seed state machines, seed/security posture) stay
  * out — they answer a different question and have their own call sites.
@@ -56,6 +65,7 @@
 
 import { validateObjectReferences } from './validate-object-references.js';
 import { validateSearchableFields } from './validate-searchable-fields.js';
+import { validateSortableFields } from './validate-sortable-fields.js';
 import { validateActionNameRefs } from './validate-action-name-refs.js';
 import { validatePageFieldBindings } from './validate-page-field-bindings.js';
 import { validateChartBindings } from './validate-chart-bindings.js';
@@ -110,6 +120,13 @@ export interface ReferenceIntegrityRule {
 export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   { name: 'validateObjectReferences', run: validateObjectReferences },
   { name: 'validateSearchableFields', run: validateSearchableFields },
+  // [#9257] The same reading, one axis over: a list view's `sort` is a field
+  // name written in metadata, resolved against the object's declared fields. It
+  // gates (`error`) because the runtime does not tolerate a bad one at all —
+  // `assertSortFieldsExist` (#6994) and `assertOrderByIsMaterializable` (#7095)
+  // both answer `400 INVALID_SORT` — and a view's sort is its FIRST fetch, so
+  // the refusal is the whole view, on every load, traced to nothing.
+  { name: 'validateSortableFields', run: validateSortableFields },
   { name: 'validateActionNameRefs', run: validateActionNameRefs },
   { name: 'validatePageFieldBindings', run: validatePageFieldBindings },
   { name: 'validateChartBindings', run: validateChartBindings },
