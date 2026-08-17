@@ -159,7 +159,9 @@ export const ResolveTicketAction = defineAction({
   locations: ['record_header', 'list_item'],
   // Only offer "Resolve" on tickets that aren't already resolved or closed.
   // Predicates are CEL, record-scoped — `record.status`, never bare `status`.
-  visible: 'record.status != "resolved" && record.status != "closed"',
+  // `has()` guards the sparse list row: a list projects only the columns it
+  // shows, and CEL faults on an absent key (which hides the button silently).
+  visible: 'has(record.status) && record.status != "resolved" && record.status != "closed"',
   successMessage: 'Ticket resolved.',
   refreshAfter: true,
   ai: {

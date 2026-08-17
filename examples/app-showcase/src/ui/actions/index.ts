@@ -59,8 +59,18 @@ export const MarkDoneAction = defineAction({
   // `record.`-prefix: the ActionEngine evaluates a record-header action's
   // `visible` against `{ record, recordId, … }` with fail-closed semantics, so
   // a bare `done`/`status` throws (field not at top level) and silently hides
-  // the action. Single operand, too — the template path throws on `&&`/`||`.
-  visible: '!record.done',
+  // the action.
+  //
+  // #8990 — `has()` guards the SPARSE action face: this action reaches
+  // `list_item`, so its predicate binds a list row carrying only the view's
+  // `$select` projection, and CEL aborts with `No such key: done` on any task
+  // list that does not project the column (fail-closed, the button silently
+  // is not offered). The comparison is `!= true` rather than the older
+  // `!record.done` because a bare `!` on a projected-but-NULL column faults
+  // `no such overload: !null`, while `!=` against a literal never faults and
+  // still reads an unset `done` as "not done". `has()` alone is therefore the
+  // whole guard here. Rule: `packages/objectql/src/declared-fields.ts`.
+  visible: 'has(record.done) && record.done != true',
   // `record_section` so the Task Detail page's `record:quick_actions` bar
   // (which names this action) resolves it — the engine location-filters even
   // explicitly-named actions, mirroring the platform's own sys-user pages.
@@ -259,9 +269,12 @@ export const SubmitForSignoffAction = defineAction({
     capabilities: ['api.write'],
   },
   successMessage: 'Invoice submitted for finance + legal sign-off.',
-  // Only on invoices not yet sent. `record.`-prefixed single comparison, per the
+  // Only on invoices not yet sent. `record.`-prefixed comparison, per the
   // ActionEngine's fail-closed CEL evaluation (see MarkDoneAction's note).
-  visible: "record.status != 'sent'",
+  // #8990 — `has()` guards the sparse face this reaches via `list_item`; the
+  // `!=` against a literal never faults on a projected NULL, so `has()` alone
+  // is the whole guard.
+  visible: "has(record.status) && record.status != 'sent'",
   locations: ['list_item', 'record_header'],
   refreshAfter: true,
 });
@@ -362,8 +375,9 @@ export const ArchiveTaskAction = defineAction({
     capabilities: [],
   },
   successMessage: 'Task archived (demo — no data changed).',
-  // Disabled while the task is not done — visible either way.
-  disabled: 'record.done != true',
+  // Disabled while the task is not done — visible either way. #8990: `has()`
+  // for the sparse face; `!=` against a literal cannot fault, so no `!= null`.
+  disabled: 'has(record.done) && record.done != true',
   locations: ['record_header', 'record_section'],
   refreshAfter: false,
 });

@@ -10,8 +10,9 @@ import { definePage } from '@objectstack/spec/ui';
  * An interface (list) page over tasks currently `in_review` — the work
  * awaiting a decision — with a drawer to inspect each item. "Mark Done" is
  * deliberately NOT wired as a page-level `buttons:` toolbar entry: that
- * surface has no bound record, so `MarkDoneAction`'s `visible: '!record.done'`
- * expression has nothing to evaluate against and the button would render
+ * surface has no bound record, so `MarkDoneAction`'s `visible` predicate
+ * (`has(record.done) && record.done != true`, #8990) has nothing to evaluate
+ * against and the button would render
  * regardless of state. `MarkDoneAction.locations` already includes
  * `list_item`, so it correctly appears per-row (with that row's record bound)
  * instead. Tabs let the reviewer pivot to urgent or blocked work.

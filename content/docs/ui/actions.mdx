@@ -91,7 +91,7 @@ export const MarkDoneAction = defineAction({
     capabilities: ['api.write'],
   },
   successMessage: 'Task marked done.',
-  visible: '!record.done',
+  visible: 'has(record.done) && record.done != true',
   locations: ['list_item', 'record_header', 'record_section'],
   refreshAfter: true,
 });
@@ -276,10 +276,24 @@ is a spec proposal for a properly named key, not a values map under this one.
   Unset means no gate beyond object CRUD permissions. Referenced capabilities
   must exist — `os lint` checks that.
 - **`visible`** is a CEL predicate evaluated **fail-closed**: an expression
-  that throws hides the action silently. The rule that saves real debugging
-  time: always prefix record fields (`record.status != "closed"`, never a bare
-  `status`, which faults as an undeclared identifier). Compound `&&` / `||`
-  predicates are fully supported — see the
+  that throws hides the action silently. Two rules save real debugging time:
+
+  1. **Always prefix record fields** — `record.status != "closed"`, never a bare
+     `status`, which faults as an undeclared identifier.
+  2. **Guard with `has()`** — a record-scoped predicate on `list_item` binds a
+     LIST ROW, which carries only the columns that view projects. Reading a
+     field the list does not show aborts the expression with `No such key`, and
+     fail-closed means the button simply is not offered — indistinguishable from
+     the gate having said no. `has(record.x) && …` answers `false` instead.
+
+  Add `&& record.x != null` **only** when the value is then traversed
+  (`record.x.k`), called (`record.x.size()`), ordered (`<` `<=` `>` `>=`),
+  negated (`!record.x`) or used with `in` — those fault on a projected NULL. A
+  plain `==` / `!=` against a literal never does, so `has()` alone is the whole
+  guard there. Prefer the minimal form: an over-guarded predicate is the pattern
+  the next author copies.
+
+  Compound `&&` / `||` predicates are fully supported — see the
   [formulas guide](/docs/data-modeling/formulas) for CEL syntax.
 - **`requiresFeature`** ties visibility to a feature flag (compiled into a
   `visible` predicate).
