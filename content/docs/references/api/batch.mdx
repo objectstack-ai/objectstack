@@ -55,7 +55,7 @@ const result = BatchConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | optional | Record ID if operation succeeded |
 | **success** | `boolean` | ✅ | Whether this record was processed successfully |
-| **errors** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; message: string; category?: string; httpStatus?: integer; … }[]` | optional | Array of errors if operation failed. Branch on `errors[0].code` — an atomic batch that rolled back marks rows that were written then undone with code ROLLED_BACK and rows never reached with NOT_ATTEMPTED, while the causal row keeps its own error (#4793). A NON-atomic batch that stopped (the `continueOnError: false` default) marks its un-attempted tail with the same NOT_ATTEMPTED code — rows before the failure stay written and keep reporting success, since nothing was rolled back (#7539). |
+| **errors** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; category?: string; … }[]` | optional | Array of errors if operation failed. Branch on `errors[0].code` — an atomic batch that rolled back marks rows that were written then undone with code ROLLED_BACK and rows never reached with NOT_ATTEMPTED, while the causal row keeps its own error (#4793). A NON-atomic batch that stopped (the `continueOnError: false` default) marks its un-attempted tail with the same NOT_ATTEMPTED code — rows before the failure stay written and keep reporting success, since nothing was rolled back (#7539). |
 | **data** | `Record<string, any>` | optional | Full record data (if returnRecords=true) |
 | **index** | `number` | optional | Index of the record in the request array |
 | **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key'> }[]` | optional | Write-observability (#3407/#3431/#3455): caller-supplied fields LEGALLY stripped from THIS row before it was written — static `readonly` (#2948) / TRUE `readonlyWhen` (#3042) on update, or the #3043 create-ingress strip. Per-row because a batch can drop different fields on different rows (`readonlyWhen` is record-state-dependent). Present ONLY when ≥1 field was dropped for this row; the row still succeeded (success unchanged). A single response header cannot express per-row drops, so this body field is the canonical bulk channel — REST does not emit `X-ObjectStack-Dropped-Fields` for batches. Optional — omit-when-empty keeps the shape backward-compatible. |
@@ -122,7 +122,7 @@ const result = BatchConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
+| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; category?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **operation** | `Enum<'create' \| 'update' \| 'upsert' \| 'delete'>` | optional | Operation type that was performed |
 | **total** | `number` | ✅ | Total number of records in the batch |
