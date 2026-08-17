@@ -133,9 +133,30 @@ if ! grep -q "OBJECTSTACK_CLIENT_DIST" "${BUILD_ROOT}/apps/console/vite.config.t
   echo "  Bump .objectui-sha to a commit that includes the hook."
   exit 1
 fi
-if [[ ! -f "${CLIENT_PKG}/dist/index.mjs" ]]; then
-  echo "→ @objectstack/client dist missing — building it first..."
-  (cd "$CLIENT_PKG" && pnpm build)
+# Build the client THROUGH TURBO, not by shelling into the package. turbo.json
+# declares "build": { "dependsOn": ["^build"] }, and `cd packages/client && pnpm
+# build` bypasses exactly that guarantee. On a cold tree packages/spec/dist and
+# packages/core/dist do not exist yet, so the client's subpath imports
+# (@objectstack/spec/data, @objectstack/core/logger, ...) resolve to nothing and
+# the tsup DTS pass dies. `--filter=@objectstack/client` alone is enough — the
+# dependency closure comes from ^build, not from a `...` filter suffix (measured:
+# 32 build tasks in scope).
+#
+# Guard on the DECLARATION, not on dist/index.mjs: tsup writes the CJS/ESM
+# bundles BEFORE the DTS pass, so a client build that died in DTS still leaves
+# dist/index.mjs on disk. Keying the guard on it made a half-built client look
+# complete, so the next run skipped the build and carried on with a client dist
+# whose declarations were never generated. dist/index.d.ts is this package's
+# declared type entrypoint (package.json "types" and exports["."].types) and
+# only appears once the DTS pass has succeeded.
+#
+# Under OS_SKIP_DTS (see tsup.config.ts) there is legitimately no declaration,
+# so this guard re-fires on every run — harmless, because the turbo build it
+# guards is cached.
+CLIENT_DTS="${CLIENT_PKG}/dist/index.d.ts"
+if [[ ! -f "$CLIENT_DTS" ]]; then
+  echo "→ @objectstack/client dist absent or incomplete (no dist/index.d.ts) — building it and its deps first..."
+  (cd "$FRAMEWORK_ROOT" && pnpm exec turbo run build --filter=@objectstack/client)
 fi
 export OBJECTSTACK_CLIENT_DIST="$CLIENT_PKG"
 echo "→ Console will bundle @objectstack/client from ${CLIENT_PKG}"

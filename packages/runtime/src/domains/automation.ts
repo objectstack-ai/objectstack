@@ -845,7 +845,12 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         //                        declared field contract — a required field the
         //                        caller was asked for is missing, or an
         //                        undeclared key was sent (#4477)
-        //   RUN_NOT_FOUND      → 404, no such suspension — unresumable for good
+        //   RUN_NOT_FOUND      → 404, no such suspension — unresumable for good.
+        //                        Since #8684 the engine also reports the two
+        //                        STALE-suspension exits under this code (the flow
+        //                        deregistered, the suspended node edited away):
+        //                        same terminal class, same remedy, and the
+        //                        engine's message names which one it was
         //   STORE_UNAVAILABLE  → 503, the durable store is unreadable, so
         //                        existence is unknown; the same call is expected
         //                        to work once it recovers (#4420)
@@ -880,6 +885,50 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 }
                 if (result?.success === false && result.code === 'RESUME_IN_PROGRESS') {
                     return { handled: true, response: deps.error(result.error ?? 'Run is already being resumed', 409) };
+                }
+                // [#8684] TERMINAL RUN FAILURE → 400 `FLOW_FAILED`, inheriting
+                // #3962's ruling for `/actions` (maintainer, 2026-08-15): a
+                // business failure must not ride HTTP 200 inside a double
+                // envelope. It did here until now — `{success:true,data:{success:
+                // false,error:"Node 'x' failed: …"}}` — so a scripted or
+                // integration caller that branches on the HTTP status alone read
+                // a failed run as a successful one.
+                //
+                // Every arm above is a REFUSAL that left the suspension intact
+                // and can be retried; what reaches HERE consumed its pause and
+                // ran. Two engine exits produce it — the flow itself failed, or a
+                // subflow child failed terminally — and both are the "ran and was
+                // rejected" row, hence 400. The two NEVER-DISPATCHED exits are
+                // answered 404 by the `RUN_NOT_FOUND` arm above because the
+                // ENGINE classifies them (#8684, producer-first): this route
+                // never sniffs the result for `summary`/`durationMs` to tell the
+                // two classes apart, which is the tolerant-consumer shape PD #12
+                // forbids.
+                //
+                // `FLOW_FAILED` is the code `/actions` already answers for a flow
+                // that ran and rejected (`../action-execution.ts`), and the
+                // ADR-0112 ledger registers it to `@objectstack/runtime` — this
+                // door, not the engine's, is where the wire vocabulary is named.
+                //
+                // ⚠️ `errorMessage` is the flow AUTHOR's own failure text
+                // (`flow.errorMessage`, engine `resumeInternal`) and it travels in
+                // `details`, which is the one place the console reads it from
+                // (objectui `flowResponse.ts` / PR #4899 — no alias chain). The
+                // ADR-0112 envelope carries no `data`, so a producer that builds
+                // its message out of `result.error` alone drops the author's words
+                // silently; `/actions`'s producer does exactly that, and this
+                // deliberately does not copy it. `summary` rides along for the
+                // same reason it was on the 200 body: a failed run's per-node
+                // accounting is how a caller finds WHICH node failed.
+                if (result?.success === false) {
+                    return {
+                        handled: true,
+                        response: deps.error(result.error ?? 'Flow run failed', 400, {
+                            code: 'FLOW_FAILED',
+                            ...(result.errorMessage !== undefined ? { errorMessage: result.errorMessage } : {}),
+                            ...(result.summary !== undefined ? { summary: result.summary } : {}),
+                        }),
+                    };
                 }
                 return { handled: true, response: deps.success(result) };
             }

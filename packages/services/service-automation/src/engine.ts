@@ -3835,13 +3835,34 @@ export class AutomationEngine implements IAutomationService {
             if (!run) {
                 return { success: false, code: 'RUN_NOT_FOUND', error: `No suspended run '${runId}'` };
             }
+            // [#8684] The two NEVER-DISPATCHED exits, classified HERE rather than
+            // guessed at the transport. Both mean the suspension is real but can
+            // never continue — the flow it belongs to is no longer registered, or
+            // the node it parked on was edited away underneath it. Nothing ran,
+            // so neither is a business rejection: they are the same terminal
+            // "this pause is gone for good" class as a missing suspension, and a
+            // transport answers all three **404**.
+            //
+            // Code-less until now, which is what forced the route to either
+            // answer them 200 (the defect this card is about) or sniff the result
+            // for `summary`/`durationMs` to tell them from a run that ran and
+            // failed — the tolerant-consumer shape PD #12 forbids. The producer
+            // is the only component that knows, so it says so.
+            //
+            // Deliberately the EXISTING `RUN_NOT_FOUND` rather than a new code:
+            // the remedy is identical (this run is finished; start a new one),
+            // the consumer branches on the 404 STATUS and not on the code
+            // (objectui's `interpretFlowResponse`), and `error` below still names
+            // which of the three causes it was, verbatim on the wire. A distinct
+            // code would be vocabulary nothing reads — add one the day a caller
+            // needs to branch on the difference.
             const flow = this.flows.get(run.flowName);
             if (!flow) {
-                return { success: false, error: `Flow '${run.flowName}' not found for run '${runId}'` };
+                return { success: false, code: 'RUN_NOT_FOUND', error: `Flow '${run.flowName}' not found for run '${runId}'` };
             }
             const node = flow.nodes.find(n => n.id === run.nodeId);
             if (!node) {
-                return { success: false, error: `Suspended node '${run.nodeId}' no longer exists in flow '${run.flowName}'` };
+                return { success: false, code: 'RUN_NOT_FOUND', error: `Suspended node '${run.nodeId}' no longer exists in flow '${run.flowName}'` };
             }
 
             // #4354 — up-bubble: the child that just finished did work this run

@@ -1293,6 +1293,67 @@ describe('ObjectStackClient.automation', () => {
         expect(result.screen.nodeId).toBe('step2');
     });
 
+    // [#8684] BREAKING: a run that resumed and then FAILED used to resolve with
+    // `{ success: false, error }` under HTTP 200 — the double envelope #3962
+    // ruled out for `/actions` — so a caller that did not open the inner
+    // envelope read a failed run as a successful one. The route now answers 400
+    // `FLOW_FAILED`, and this SDK's `fetch` layer throws on every non-2xx before
+    // any unwrapping, so the call REJECTS. That is the whole SDK-side change:
+    // no new code, a changed contract, and this is the pin for it.
+    //
+    // Asserting the classification (`code` + `httpStatus`) and the author's
+    // message location, not merely that it throws: an SDK that rejected with a
+    // bare `Error` would satisfy `.rejects.toThrow()` while losing everything a
+    // caller branches on.
+    it('should reject with FLOW_FAILED when a resumed run fails', async () => {
+        const { client } = createMockClient({
+            success: false,
+            error: {
+                code: 'FLOW_FAILED',
+                message: "Node 'create_opportunity' failed: Amount must be greater than zero",
+                httpStatus: 400,
+                details: {
+                    errorMessage: 'We could not create the opportunity — check the amount and try again.',
+                    summary: { nodes: [{ nodeId: 'create_opportunity', status: 'failure' }] },
+                },
+            },
+        }, 400);
+
+        const err: any = await client.automation
+            .resume('my_flow', 'run_1', { inputs: { amount: 0 } })
+            .then(() => { throw new Error('expected the failed resume to reject'); }, (e) => e);
+
+        expect(err.code).toBe('FLOW_FAILED');
+        expect(err.httpStatus).toBe(400);
+        expect(err.message).toMatch(/Node 'create_opportunity' failed/);
+        // The flow author's own text keeps its one documented location — the
+        // ADR-0112 envelope has no `data`, and the console reads it from here.
+        expect(err.details?.errorMessage)
+            .toBe('We could not create the opportunity — check the amount and try again.');
+        expect(err.details?.summary?.nodes?.[0]?.status).toBe('failure');
+    });
+
+    // [#8684] The stale-suspension half: nothing ran, the pause is gone for
+    // good, so it rejects as a 404 rather than as a business rejection.
+    it('should reject with 404 when the suspension is stale', async () => {
+        const { client } = createMockClient({
+            success: false,
+            error: {
+                code: 'NOT_FOUND',
+                message: "Suspended node 'collect' no longer exists in flow 'my_flow'",
+                httpStatus: 404,
+            },
+        }, 404);
+
+        const err: any = await client.automation
+            .resume('my_flow', 'run_1', { inputs: {} })
+            .then(() => { throw new Error('expected the stale resume to reject'); }, (e) => e);
+
+        expect(err.httpStatus).toBe(404);
+        expect(err.code).not.toBe('FLOW_FAILED');
+        expect(err.message).toMatch(/no longer exists in flow/);
+    });
+
     it('should fetch the screen a paused run awaits', async () => {
         const { client, fetchMock } = createMockClient({
             success: true,

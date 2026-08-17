@@ -177,6 +177,18 @@
  * the whole guard, while on the sparse action face the key may genuinely be
  * absent and both halves are load-bearing. Same conjunction, one half of it
  * simply free once the record is total.
+ *
+ * @docs-rule
+ * This comment is a rule hand-written pages RESTATE, not just documentation of the
+ * function below it, so `scripts/docs-audit/affected-docs.mjs` derives doc anchors from
+ * the expressions written above whenever any line of this block changes — and names the
+ * pages restating them instead of reporting "no opinion" (#9282). Measured: the exported
+ * symbol matches zero pages and the coarse package-mention set matches fourteen, none of
+ * which restate this rule; the expressions match the three that do.
+ *
+ * The tag takes no argument and carries no anchor list — the anchors are read off the
+ * prose above, so this marker cannot drift from the rule it marks. Deleting the rule
+ * deletes it. ⛔ Do not pair it with a registry of pages: the pages are found, not listed.
  */
 export function materializeDeclaredFields<T extends Record<string, unknown>>(
   record: T,

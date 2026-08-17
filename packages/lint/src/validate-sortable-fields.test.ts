@@ -1,0 +1,298 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+import { describe, it, expect } from 'vitest';
+import { SEARCH_VIRTUAL_TYPES, COMPUTED_VALUE_TYPES } from '@objectstack/spec/data';
+import {
+  validateSortableFields,
+  checkSortDeclaration,
+  SORT_FIELD_UNKNOWN,
+  SORT_FIELD_UNSORTABLE,
+} from './validate-sortable-fields.js';
+import { indexObjectSearchTargets } from './validate-searchable-fields.js';
+
+/**
+ * The object the whole file judges against. It carries one field of each of the
+ * three COMPUTED types on purpose — that trio is the rule's whole risk surface,
+ * because the write contract groups them and STORAGE does not.
+ */
+const opportunityFields = {
+  name: { type: 'text', label: 'Name' },
+  amount: { type: 'currency', label: 'Amount' },
+  probability: { type: 'percent', label: 'Probability' },
+  stage: { type: 'select', label: 'Stage' },
+  // Virtual — computed on read, no stored column on any driver.
+  expected_revenue: { type: 'formula', label: 'Expected Revenue' },
+  // Stored: `table.float`, maintained by the engine. Sorts correctly.
+  open_task_count: { type: 'summary', label: 'Open Tasks' },
+  // Stored: `table.string`, engine-assigned. Sorts correctly.
+  opp_no: { type: 'autonumber', label: 'Opportunity No.' },
+};
+
+const withListView = (sort: unknown) => ({
+  objects: [
+    {
+      name: 'crm_opportunity',
+      fields: opportunityFields,
+      listViews: { pipeline: { type: 'grid', sort } },
+    },
+  ],
+});
+
+describe('validateSortableFields — the virtuality verdict (#9257)', () => {
+  it('flags a list-view sort naming a formula field', () => {
+    const findings = validateSortableFields(
+      withListView([{ field: 'expected_revenue', order: 'desc' }]),
+    );
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SORT_FIELD_UNSORTABLE);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].where).toBe('object "crm_opportunity" › listViews.pipeline');
+    // The index is part of the path so the author can go straight to the key.
+    expect(findings[0].path).toBe('objects[0].listViews.pipeline.sort[0]');
+    expect(findings[0].message).toContain('expected_revenue');
+    expect(findings[0].message).toContain("'formula'");
+    // The remedy is the engine door's own, so an author refused at authoring
+    // time and one refused at request time are sent the same way.
+    expect(findings[0].hint).toContain('Denormalise');
+    expect(findings[0].hint).toContain('400 INVALID_SORT');
+  });
+
+  it('flags it in the legacy string form too — the shape Zod cannot judge', () => {
+    // `ListViewSchema.sort` is `z.union([z.string(), Array<{field, order}>])`,
+    // so this parses clean and names a field that cannot be ordered by.
+    const findings = validateSortableFields(withListView('expected_revenue desc'));
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SORT_FIELD_UNSORTABLE);
+    expect(findings[0].path).toBe('objects[0].listViews.pipeline.sort');
+  });
+
+  it('reads the `-field` shorthand and the comma-separated multi-key string', () => {
+    const findings = validateSortableFields(withListView('stage asc, -expected_revenue'));
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SORT_FIELD_UNSORTABLE);
+    expect(findings[0].path).toBe('objects[0].listViews.pipeline.sort[1]');
+  });
+
+  it('flags every offending key, not just the first', () => {
+    const findings = validateSortableFields(
+      withListView([
+        { field: 'stage', order: 'asc' },
+        { field: 'expected_revenue', order: 'desc' },
+        { field: 'no_such_field', order: 'asc' },
+      ]),
+    );
+
+    expect(findings.map((f) => f.rule)).toEqual([SORT_FIELD_UNSORTABLE, SORT_FIELD_UNKNOWN]);
+    expect(findings.map((f) => f.path)).toEqual([
+      'objects[0].listViews.pipeline.sort[1]',
+      'objects[0].listViews.pipeline.sort[2]',
+    ]);
+  });
+});
+
+/**
+ * The second leg of the reverse verification, and the one that decides whether
+ * this rule is worth having: a gate that also refused `summary` / `autonumber`
+ * would reject metadata the runtime executes correctly.
+ *
+ * The trap is that the spec DOES group all three — `COMPUTED_VALUE_TYPES` is
+ * `formula` / `summary` / `autonumber` — but that set is the WRITE contract
+ * ("never client-written"), not a storage fact. `summary` is a `table.float`
+ * the engine maintains and `autonumber` a `table.string` it assigns; both have
+ * a real column and both sort. Only `formula` has none.
+ */
+describe('validateSortableFields — what it must NOT flag', () => {
+  it('does not flag a summary sort — a real stored column the engine maintains', () => {
+    expect(validateSortableFields(withListView([{ field: 'open_task_count', order: 'desc' }])))
+      .toEqual([]);
+  });
+
+  it('does not flag an autonumber sort — a real stored column the engine assigns', () => {
+    expect(validateSortableFields(withListView([{ field: 'opp_no', order: 'asc' }])))
+      .toEqual([]);
+  });
+
+  it('pins the predicate boundary the two cases above stand on', () => {
+    // If this ever fails, the two assertions above stopped meaning anything:
+    // the rule reads `SEARCH_VIRTUAL_TYPES`, and its distance from
+    // `COMPUTED_VALUE_TYPES` is the entire reason those two sorts stay legal.
+    expect([...SEARCH_VIRTUAL_TYPES]).toEqual(['formula']);
+    expect([...COMPUTED_VALUE_TYPES].sort()).toContain('summary');
+    expect([...COMPUTED_VALUE_TYPES].sort()).toContain('autonumber');
+  });
+
+  it('does not flag an ordinary stored field', () => {
+    expect(validateSortableFields(withListView([{ field: 'amount', order: 'desc' }]))).toEqual([]);
+  });
+
+  it('does not flag a registry-injected system column', () => {
+    // `created_at` never appears in authored `fields` and is the single most
+    // common ordering in the platform's own list views. Flagging it would be
+    // the false finding ADR-0072 D1 warns about.
+    expect(validateSortableFields(withListView([{ field: 'created_at', order: 'desc' }])))
+      .toEqual([]);
+  });
+
+  it('says nothing about an object it cannot see', () => {
+    const findings = validateSortableFields({
+      objects: [
+        {
+          name: 'crm_opportunity',
+          fields: opportunityFields,
+          listViews: {
+            // Retargeted at an object no stack in view declares — a field map
+            // we cannot read cannot be judged.
+            partner: {
+              data: { provider: 'object', object: 'billing_invoice' },
+              sort: [{ field: 'whatever', order: 'asc' }],
+            },
+          },
+        },
+      ],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('says nothing about an object that declares no field map', () => {
+    // External / datasource-introspected: columns resolve at runtime.
+    const findings = validateSortableFields({
+      objects: [
+        { name: 'ext_orders', datasource: 'erp', listViews: { all: { sort: 'total desc' } } },
+      ],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('ignores a declaration that names no field, and an absent one', () => {
+    expect(validateSortableFields(withListView(undefined))).toEqual([]);
+    expect(validateSortableFields(withListView(''))).toEqual([]);
+    expect(validateSortableFields(withListView([]))).toEqual([]);
+    // Shape errors belong to the schema, not to a reference rule.
+    expect(validateSortableFields(withListView([{ order: 'desc' }]))).toEqual([]);
+    expect(validateSortableFields(withListView([42]))).toEqual([]);
+  });
+});
+
+describe('validateSortableFields — the existence verdict', () => {
+  it('flags a sort naming no field at all, and suggests the near miss', () => {
+    const findings = validateSortableFields(withListView([{ field: 'amont', order: 'desc' }]));
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SORT_FIELD_UNKNOWN);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].message).toContain('Did you mean "amount"?');
+    expect(findings[0].message).toContain('400 INVALID_SORT');
+  });
+
+  it('judges a dotted path on its HEAD, exactly as the ingress gate does', () => {
+    // Unknown head → the unknown verdict, with the relation-crossing remedy.
+    const unknownHead = validateSortableFields(
+      withListView([{ field: 'account.name', order: 'asc' }]),
+    );
+    expect(unknownHead).toHaveLength(1);
+    expect(unknownHead[0].rule).toBe(SORT_FIELD_UNKNOWN);
+    expect(unknownHead[0].hint).toContain('never a related record');
+    // A KNOWN head is left to the ingress gate's own dotted verdict — see the
+    // module note on why this rule does not add a third finding for it.
+    expect(validateSortableFields(withListView([{ field: 'stage.label', order: 'asc' }])))
+      .toEqual([]);
+  });
+});
+
+describe('validateSortableFields — the surfaces it walks', () => {
+  const fields = { name: { type: 'text' }, score: { type: 'formula' } };
+
+  it('walks a defineView aggregate\'s default list', () => {
+    const findings = validateSortableFields({
+      objects: [{ name: 'crm_lead', fields }],
+      views: [
+        {
+          name: 'lead_views',
+          objectName: 'crm_lead',
+          list: { type: 'grid', sort: [{ field: 'score', order: 'desc' }] },
+        },
+      ],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].where).toBe('view "lead_views" › list');
+    expect(findings[0].path).toBe('views[0].list.sort[0]');
+  });
+
+  it('walks a defineView aggregate\'s named list views', () => {
+    const findings = validateSortableFields({
+      objects: [{ name: 'crm_lead', fields }],
+      views: [
+        {
+          name: 'lead_views',
+          object: 'crm_lead',
+          listViews: { hot: { type: 'grid', sort: 'score desc' } },
+        },
+      ],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].where).toBe('view "lead_views" › listViews.hot');
+    expect(findings[0].path).toBe('views[0].listViews.hot.sort');
+  });
+
+  it('honors a list view\'s own `data.object` binding over the container\'s', () => {
+    const findings = validateSortableFields({
+      objects: [
+        { name: 'crm_lead', fields: { name: { type: 'text' } } },
+        { name: 'crm_task', fields: { due_at: { type: 'datetime' }, age: { type: 'formula' } } },
+      ],
+      views: [
+        {
+          name: 'lead_views',
+          objectName: 'crm_lead',
+          listViews: {
+            tasks: {
+              data: { provider: 'object', object: 'crm_task' },
+              sort: [{ field: 'age', order: 'desc' }],
+            },
+          },
+        },
+      ],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('crm_task');
+  });
+
+  it('returns nothing for an empty stack', () => {
+    expect(validateSortableFields({})).toEqual([]);
+  });
+});
+
+describe('checkSortDeclaration — the shared core', () => {
+  it('resolves against the same object index the search axis uses', () => {
+    const stack = { objects: [{ name: 'crm_opportunity', fields: opportunityFields }] };
+    const findings = checkSortDeclaration(
+      [{ field: 'expected_revenue', order: 'desc' }],
+      'crm_opportunity',
+      indexObjectSearchTargets(stack),
+      'page "pipeline"',
+      'pages[0].sort',
+      'page sort',
+    );
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SORT_FIELD_UNSORTABLE);
+    expect(findings[0].where).toBe('page "pipeline"');
+    expect(findings[0].message).toContain('page sort');
+  });
+
+  it('says nothing when the caller cannot name an object', () => {
+    expect(
+      checkSortDeclaration(
+        [{ field: 'anything', order: 'asc' }],
+        undefined,
+        indexObjectSearchTargets({ objects: [] }),
+        'somewhere',
+        'x.sort',
+        'sort',
+      ),
+    ).toEqual([]);
+  });
+});

@@ -3222,6 +3222,32 @@ export class ObjectStackClient {
        * ({@link ObjectStackClient.approvals}: `approve` / `reject` / `recall`),
        * which authorizes the decision and records it first. This call answers
        * **403** for one and changes nothing.
+       *
+       * **BREAKING since #8684 — a failed run REJECTS instead of resolving.**
+       * A run that resumed and then failed used to come back as a resolved
+       * `{ success: false, error, summary }`, riding HTTP 200, so a caller that
+       * did not open the inner envelope read a failed run as a successful one.
+       * The route now answers **400** `FLOW_FAILED` (inheriting #3962's ruling
+       * for `/actions`), and every non-2xx throws out of this SDK's `fetch`
+       * layer before any unwrapping — so this promise now **rejects**:
+       *
+       * ```ts
+       * try { await client.automation.resume(flow, runId, { inputs }); }
+       * catch (err: any) {
+       *   err.code;                    // 'FLOW_FAILED'
+       *   err.httpStatus;              // 400
+       *   err.message;                 // the node failure, verbatim
+       *   err.details?.errorMessage;   // the flow author's `errorMessage`
+       *   err.details?.summary;        // per-node accounting of the failed run
+       * }
+       * ```
+       *
+       * A **stale** suspension (the flow deregistered, or the node edited away
+       * under a live pause) rejects with **404** rather than 400: nothing ran,
+       * and the pause is gone for good. The refusals that leave the suspension
+       * intact keep their own codes and stay retryable — `INVALID_SIGNAL` /
+       * `INVALID_SCREEN_INPUT` (400), `RESUME_IN_PROGRESS` (409),
+       * `STORE_UNAVAILABLE` (503).
        */
       resume: async <T = any>(
           flowName: string,
@@ -5351,7 +5377,11 @@ export class ScopedProjectClient {
      * Resume a run suspended at a `screen` / `wait` node with the collected
      * input (ADR-0019 durable pause). Mirrors the unscoped
      * `client.automation.resume` — including its refusal (403) to resume an
-     * `approval` pause, which belongs to the approvals API (#3801).
+     * `approval` pause, which belongs to the approvals API (#3801), and its
+     * **breaking #8684 behaviour**: a run that resumed and then failed now
+     * REJECTS with `400` `FLOW_FAILED` (author text on
+     * `err.details.errorMessage`) instead of resolving with an inner
+     * `{ success: false }` under HTTP 200. See that method for the full shape.
      */
     resume: async <T = any>(
       flowName: string,

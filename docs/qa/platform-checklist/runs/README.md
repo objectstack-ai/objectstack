@@ -14,9 +14,10 @@ durable, **text-only** report (pass or fail alike):
 - the issue **body** hosts the per-clause verdict table (pass / partial / fail / blocked)
   and the scope — the selector that chose the items + the `revision` each ran against;
 - **every `fail` carries a reproduction rule** in that same issue — ordered steps / API
-  calls (method · path · body) / the ref-targeted selector path + expected-vs-actual —
-  and the issue gains the `bug` label (a real regression may additionally get its own
-  linked issue) so it triages straight from the run;
+  calls (method · path · body) / the ref-targeted selector path + expected-vs-actual;
+  the run issue itself stays `qa-run`-only (protocol carrier, excluded from the triage
+  sweep) — at close-out each product defect is extracted into its own standalone card
+  (RUNNER.md, extraction obligation), and that card is what triages;
 - **screenshots are never part of the report** — they are live judgment aids that die
   with the run environment, described in one line of text, never attached or linked.
 

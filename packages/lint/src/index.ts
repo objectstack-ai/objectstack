@@ -359,6 +359,23 @@ export type {
   SearchableFieldRole,
 } from './validate-searchable-fields.js';
 
+// [#9257] The SORT-axis twin of the rule above, judging the same spec storage
+// predicate over a list view's declared `sort`. The runtime refuses both
+// verdicts with `400 INVALID_SORT` (`assertSortFieldsExist` #6994 at the REST
+// ingress, `assertOrderByIsMaterializable` #7095 in the engine); this is the
+// authoring-time half, which is what makes the refusal traceable back to the
+// declaration that caused it.
+export {
+  validateSortableFields,
+  checkSortDeclaration,
+  SORT_FIELD_UNKNOWN,
+  SORT_FIELD_UNSORTABLE,
+} from './validate-sortable-fields.js';
+export type {
+  SortableFieldFinding,
+  SortableFieldSeverity,
+} from './validate-sortable-fields.js';
+
 export { validateActionNameRefs, ACTION_NAME_UNDEFINED } from './validate-action-name-refs.js';
 export type { ActionNameRefFinding, ActionNameRefSeverity } from './validate-action-name-refs.js';
 

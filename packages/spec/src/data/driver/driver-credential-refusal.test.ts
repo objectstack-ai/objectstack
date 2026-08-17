@@ -808,17 +808,30 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
     }
   });
 
-  it('the COMPOSED branch (no `url`) is out of scope — discrete fields + binding stay accepted', () => {
+  it('the COMPOSED branch is #9147\'s arm, never this one — a composed config reports neither #9041 nor a `config.url` path', () => {
     // With no `url` the discrete `username` is live and the factory
     // interpolates the bound secret into the URI it composes (#8696's other
-    // branch), so there is no contradictory pair to refuse.
-    const result = parse({
+    // branch), so a composed config that NAMES a user has no contradictory
+    // pair at all …
+    const named = parse({
       name: 'events',
       driver: 'mongodb',
       config: { database: 'events', host: 'mongo.internal', username: 'svc' },
       external: { ...BOUND },
     });
-    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+    expect(named.success, JSON.stringify(named.error?.issues)).toBe(true);
+    // … and one that does not is judged by #9147's own message, with #9041's
+    // URL prescription (which would name a fix this branch cannot take) kept
+    // out. The two arms partition the input; they never both fire.
+    const unnamed = parse({
+      name: 'events',
+      driver: 'mongodb',
+      config: { database: 'events', host: 'mongo.internal' },
+      external: { ...BOUND },
+    });
+    expect(unnamed.success).toBe(false);
+    expect(unnamed.error!.issues.some((i) => i.message.includes('#9041'))).toBe(false);
+    expect(unnamed.error!.issues.some((i) => i.path.join('.') === 'config.url')).toBe(false);
   });
 
   it('an empty-string `credentialsRef` is not a binding — mirrors the connect path\'s truthy check', () => {
@@ -879,6 +892,22 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
     expect(result.error!.issues.some((i) => i.message.includes('#9040'))).toBe(true);
   });
 
+  it('an empty `config.url` is the COMPOSED branch, not this one — a live discrete username is not refused', () => {
+    // The over-refusal #9147 corrected while redrawing this boundary. At
+    // connect `buildMongoUrl` opens `if (explicit) return explicit;`, so an
+    // empty `url` falls through and composes from the discrete fields — where
+    // `username: 'svc'` makes the bound secret live. Judging it as a "url
+    // naming no user" rejected, at publish, a datasource that connects
+    // authenticated. The arms split on truthiness, as the factory does.
+    const result = parse({
+      name: 'events',
+      driver: 'mongodb',
+      config: { url: '', database: 'events', host: 'mongo.internal', username: 'svc' },
+      external: { ...BOUND },
+    });
+    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+  });
+
   it('composes with the #8082 userinfo refusal the other way: a password-bearing URL has a USER', () => {
     // `user:password@host` violates #8082, but its userinfo NAMES a user — so
     // this refusal correctly stays out and the author gets exactly the #8082
@@ -892,5 +921,205 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
     expect(result.success).toBe(false);
     expect(result.error!.issues.some((i) => i.message.includes('#8082'))).toBe(true);
     expect(result.error!.issues.some((i) => i.message.includes('#9041'))).toBe(false);
+  });
+});
+
+/**
+ * The COMPOSED-branch twin of the pair above (#9147) — `external.credentialsRef`
+ * bound while the mongo `config` authors no `url` and names no `username`.
+ *
+ * Same silent discard, one branch over, and the branches were measured to agree
+ * on this input before either was refused — so this inherits #9041's ruling
+ * rather than re-opening it. What does NOT carry over is the remedy: with no
+ * `url` the discrete `config.username` is the live field, so the fix is
+ * `config.username`, and #9041's "add the username to the URL's userinfo" would
+ * name a fix this branch cannot take.
+ *
+ * The mechanism, measured against `default-datasource-driver-factory.ts`: with
+ * no `url`, `buildMongoUrl` composes the URI and the bound secret's only route
+ * into it is the userinfo written beside a username (`const auth = user ? … :
+ * ''`); `buildMongoAuth`, the DSN branch's route, returns early on `!url`. So a
+ * falsy `username` leaves the secret with nowhere to go.
+ *
+ * Envelope note (same as the #8082/#9040/#9041 pins above): the zod issue's
+ * `code` and its pathed location are the whole envelope at this layer — every
+ * schema refusal is wrapped uniformly by the publish door (metadata-protocol's
+ * `422 INVALID_METADATA`, whose `issues[]` carry these codes verbatim).
+ */
+describe('datasource — bound credentialsRef + composed mongo config naming no username refused (#9147)', () => {
+  const BOUND = { credentialsRef: 'sys_secret:01J9ZK4T2N' } as const;
+  /** The composed branch's minimum viable target — no `url`, so the URI is built. */
+  const COMPOSED = { database: 'events', host: 'mongo.internal' } as const;
+  const parse = (ds: Record<string, unknown>) => DatasourceSchema.safeParse(ds);
+  const refusalOf = (ds: Record<string, unknown>) => {
+    const result = parse(ds);
+    if (result.success) return undefined;
+    return result.error.issues.find(
+      (i) => i.path.join('.') === 'config.username' && i.message.includes('#9147'),
+    );
+  };
+
+  // ── the newly-refused conjunction ─────────────────────────────────────────
+
+  it('refuses the pair, pathed at `config.username`, naming BOTH fixes and prescribing neither', () => {
+    const issue = refusalOf({
+      name: 'events',
+      driver: 'mongodb',
+      config: { ...COMPOSED },
+      external: { ...BOUND },
+    });
+    expect(issue, 'refusal must be pathed at `config.username`').toBeDefined();
+    expect(issue!.code).toBe('custom');
+    // Both valid authoring fixes named, neither prescribed.
+    expect(issue!.message).toContain('add `username` to `config`');
+    expect(issue!.message).toContain('remove the `external.credentialsRef` binding');
+    // And the mechanism, so the author is told WHY the pair cannot work.
+    expect(issue!.message).toContain('silent no-op');
+    // The remedy that does NOT apply here must not be copied in: on this branch
+    // there is no URL to put a userinfo in, and a refusal naming an
+    // inapplicable fix is worse than no refusal (the pre-#4410
+    // `belongsInConfig` defect, documented in datasource.zod.ts).
+    expect(issue!.message).not.toContain('mongodb://user@host/db');
+    expect(issue!.message).not.toContain('add the username to the URL');
+  });
+
+  it('judges a legacy `driver: mongo` row identically (alias-resolved, like #9041 and the #9040 read path)', () => {
+    expect(refusalOf({
+      name: 'events',
+      driver: 'mongo',
+      config: { ...COMPOSED },
+      external: { ...BOUND },
+    })).toBeDefined();
+  });
+
+  it('an EMPTY-STRING `username` is refused too — it is the same silent no-op, and the prescription must land somewhere enforced', () => {
+    // Deliberate asymmetry with #9041's present-but-empty carve-out: there
+    // `MongoClient` throws on the empty userinfo forms, so the shape is
+    // already loud. Here nothing throws — `username: ''` is falsy at
+    // `buildMongoUrl`'s `user ?` test, composes the same userinfo-free URI and
+    // connects anonymously. Accepting it would leave this refusal prescribing
+    // `config.username` while the platform still accepted the one spelling of
+    // `config.username` that keeps the binding silent.
+    expect(refusalOf({
+      name: 'events',
+      driver: 'mongodb',
+      config: { ...COMPOSED, username: '' },
+      external: { ...BOUND },
+    })).toBeDefined();
+  });
+
+  it('an empty `config.url` routes HERE, not to #9041 — the arms split on the factory\'s own branch test', () => {
+    const result = parse({
+      name: 'events',
+      driver: 'mongodb',
+      config: { url: '', ...COMPOSED },
+      external: { ...BOUND },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.some((i) => i.message.includes('#9147'))).toBe(true);
+    expect(result.error!.issues.some((i) => i.message.includes('#9041'))).toBe(false);
+  });
+
+  // ── the fence: each single condition absent is still ACCEPTED ─────────────
+
+  it('near-miss ① `url` present (naming a user) — the discrete `username` is superseded, nothing to refuse', () => {
+    const ds = {
+      name: 'events',
+      driver: 'mongodb',
+      config: { url: 'mongodb://app@db.internal:27017/app' },
+      external: { ...BOUND },
+    };
+    const result = parse(ds);
+    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+    // Byte-identical across parses — this refusal changed nothing on this path.
+    expect(DatasourceSchema.parse(ds)).toEqual(result.data);
+  });
+
+  it('near-miss ① `url` present naming NO user — exactly ONE refusal fires, and it is #9041\'s', () => {
+    // The arms partition the input: the author must never receive two messages
+    // prescribing different fixes for one datasource.
+    const result = parse({
+      name: 'events',
+      driver: 'mongodb',
+      config: { url: 'mongodb://db.internal:27017/app' },
+      external: { ...BOUND },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.some((i) => i.message.includes('#9041'))).toBe(true);
+    expect(result.error!.issues.some((i) => i.message.includes('#9147'))).toBe(false);
+  });
+
+  it('near-miss ② a discrete `username` present — the branch where the bound secret is LIVE (#8696)', () => {
+    const ds = {
+      name: 'events',
+      driver: 'mongodb',
+      config: { ...COMPOSED, username: 'svc' },
+      external: { ...BOUND },
+    };
+    const result = parse(ds);
+    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+    expect(result.data!.config).toEqual(ds.config);
+    expect(DatasourceSchema.parse(ds)).toEqual(result.data);
+  });
+
+  it('near-miss ③ no binding — a composed anonymous datasource is a legal intent', () => {
+    const ds = { name: 'events', driver: 'mongodb', config: { ...COMPOSED } };
+    const result = parse(ds);
+    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+    expect(DatasourceSchema.parse(ds)).toEqual(result.data);
+  });
+
+  it('near-miss ③ an empty-string `credentialsRef` is not a binding — mirrors the connect path\'s truthy check', () => {
+    // `DatasourceConnectionService` resolves the ref under `if (credentialsRef)`,
+    // so an empty ref binds nothing there and is not a binding here either.
+    expect(refusalOf({
+      name: 'events',
+      driver: 'mongodb',
+      config: { ...COMPOSED },
+      external: { credentialsRef: '' },
+    })).toBeUndefined();
+  });
+
+  it('fence — the postgres arm is NOT widened to: a composed pg config with no username + binding stays accepted', () => {
+    // #8873 measured `pg` receiving the bound password regardless of the DSN
+    // naming a user, so the mongo mechanism does not transfer to it on this
+    // branch any more than it did on the URL branch.
+    const result = parse({
+      name: 'warehouse',
+      driver: 'postgres',
+      schemaMode: 'external',
+      config: { database: 'analytics', host: 'wh.internal' },
+      external: { ...BOUND, allowWrites: false },
+    });
+    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+  });
+
+  it('a non-string `username` is the config gate\'s finding, not this one', () => {
+    const result = parse({
+      name: 'events',
+      driver: 'mongodb',
+      config: { ...COMPOSED, username: 42 },
+      external: { ...BOUND },
+    });
+    expect(result.success).toBe(false);
+    // The driver-config parse reports the type error at the same path; this
+    // refusal stays silent rather than judging a value with no branch to predict.
+    expect(result.error!.issues.some((i) => i.path.join('.') === 'config.username')).toBe(true);
+    expect(result.error!.issues.some((i) => i.message.includes('#9147'))).toBe(false);
+  });
+
+  it('composes with the #9040 passthrough refusal — one artefact, both findings, own paths', () => {
+    const result = parse({
+      name: 'events',
+      driver: 'mongodb',
+      config: { ...COMPOSED, options: { auth: { username: 'app', password: 'hunter2' } } },
+      external: { ...BOUND },
+    });
+    expect(result.success).toBe(false);
+    const paths = result.error!.issues.map((i) => i.path.join('.'));
+    expect(paths).toContain('config.username');
+    expect(paths).toContain('config.options.auth.password');
+    expect(result.error!.issues.some((i) => i.message.includes('#9147'))).toBe(true);
+    expect(result.error!.issues.some((i) => i.message.includes('#9040'))).toBe(true);
   });
 });

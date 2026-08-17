@@ -88,7 +88,7 @@ node scripts/checklist-select.mjs <selector> --json
 运行发现该项的 `steps` 写错了(路由搬家、键改名、过期路径还需要清 localStorage)——
 这是清单在起作用。那是一次清单**编辑**:在 **worktree** 里做(PD#11):修订该项、递
 增 `revision`、追加一条 `history`、保持 `node scripts/check-platform-checklist.mjs`
-绿,落在任务分支上。运行中发现的产品缺陷进 `FOLLOW-UPS.md`(或立成 issue),作为
+绿,落在任务分支上。运行中发现的产品缺陷按 §4 收束抽取成独立卡;条款侧可记
 expected-fail 探针 —— 永不在真实缺陷上把条款打成绿。
 
 ## 4. 结果 issue —— 一次运行一张 GitHub issue,纯文本
@@ -103,8 +103,8 @@ expected-fail 探针 —— 永不在真实缺陷上把条款打成绿。
 用 `issue_write`(github MCP)立单:
 
 - **标题** —— `QA run · <selector> · <framework-sha[:8]> · <date>`
-- **标签** —— 恒带 `qa-run`;任何条款失败就加 `bug`(P0/P1 再加 `regression`),让
-  真实缺陷直接从运行 issue 可分诊,不必再立第二张。
+- **标签** —— 只带 `qa-run`,⛔ 不挂 `bug`/priority 等工作标签:run 记录是协议载体、
+  不入分诊 sweep,⛔ 不是可派发单元;工作标签随抽取出的缺陷卡走(RUNNER 抽取义务条款)。
 - **正文**,按此顺序:
   - **环境指纹** —— framework sha、`.objectui-sha`、端口、db、seed、时间戳。
   - **范围** —— 选择器 + 每项所对的 `revision`。
@@ -114,6 +114,10 @@ expected-fail 探针 —— 永不在真实缺陷上把条款打成绿。
     body)/ ref 定位的 selector 路径,足以在全新启动上重新命中,外加 oracle 的
     expected-vs-actual。足够让人或全新 agent 不靠你的截图复现。
   - 派生的整项判定 + fixture 缺口清单(如有)。
+- **收束抽取(RUNNER 抽取义务条款)** —— 运行中发现的每个产品缺陷,收束报告时逐个抽
+  取为独立 issue:标题自含、复现与机制条目化、指回本 run issue 取全量证据;缺陷卡不
+  挂 `qa-run`,正常进分诊首触。清单准确性发现与 fixture 缺口归波次锚卡(sweep 跟踪
+  issue)收口,⛔ 不抽取;环境阻塞记录在案即可。
 
 同一份逐条款表 + 环境准备与测试的耗时之比,回报给维护者(chat),并链接已立的 issue。
 
