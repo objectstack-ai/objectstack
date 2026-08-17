@@ -68,7 +68,22 @@ export type CodeStampShape =
     /** `readonly code = CONST` — the same, through a resolved constant. */
     | 'classconst'
     /** `code: 'X'` in an object literal. */
-    | 'objlit';
+    | 'objlit'
+    /**
+     * [#9223] `code: CONST` in an object literal — the same indirection
+     * `classconst` follows, in the shape that stamps most of this repo's codes.
+     * Missing from the scan until #9223, which is why the rows carrying it were
+     * all added at once: `objlit` demanded a quoted literal, so a constant in an
+     * object literal matched NOTHING and was not even reported as unresolved.
+     */
+    | 'objlitconst'
+    /**
+     * [#9223] `` code: `A_${x}_B` `` — a code built by interpolation. No source
+     * scan can evaluate one, so the gate reports it under its FAMILY identity
+     * (`${…}` → `*`, e.g. `APPROVAL_*_FAILED`) and a row must classify it. The
+     * only verdict that can honestly cover a family is `runtime-pinned`.
+     */
+    | 'objlittemplate';
 
 /**
  * Where the stamped code can end up. `dispatcher` is the door this card is
@@ -86,7 +101,15 @@ export type CodeStampShape =
  * reachability question this table answers. Both were spelled `sendError` until
  * #9098; that collision is what let the door's hole read as closed.
  */
-export type CodeDoor = 'dispatcher' | 'rest' | 'none';
+ *
+ * [#9223] `plugin-route` is a THIRD door, surfaced by the widened scan: a plugin
+ * that mounts its own Hono routes answers refusals with its own `c.json({
+ * success: false, error: { code, message } })` and passes through neither the
+ * dispatcher's `errorFromThrown` nor `packages/rest`'s doors. The envelope is
+ * still an ADR-0112 `error.code` on a wire with a live reader, so a code that
+ * reaches it is a registration question exactly like the other two.
+ */
+export type CodeDoor = 'dispatcher' | 'rest' | 'plugin-route' | 'none';
 
 export type CodeVerdict =
     /**
@@ -114,7 +137,25 @@ export type CodeVerdict =
      * `MONGODB_MULTI_TENANT_UNSUPPORTED` was UNregistered by #8035 for exactly
      * this reason, and "host boot matching is not wire vocabulary".
      */
-    | 'boot-refusal';
+    | 'boot-refusal'
+    /**
+     * [#9223] The site builds its code by INTERPOLATION, so no source scan can
+     * say which codes it produces or whether they are registered — and a named
+     * test does that job at runtime instead, by enumerating the family and
+     * parsing each member against the closed union.
+     *
+     * This is the one verdict that does not decide reachability; it records a
+     * DIVISION OF LABOUR, and it is deliberately hard to misuse:
+     * `check-dispatcher-error-vocabulary` refuses it on any shape other than
+     * `objlittemplate` (on a literal it would be an exemption from the registry
+     * check — the very hole this gate exists to close) and fails when the
+     * {@link UnregisteredCodeSite.pin} file does not exist.
+     *
+     * ⛔ Not a place to park a template nobody checks. If no runtime pin covers
+     * the family, the fix is to stamp a LITERAL code per branch — then the scan
+     * checks it like any other and the door can narrow it.
+     */
+    | 'runtime-pinned';
 
 export interface UnregisteredCodeSite {
     /** The literal as it is stamped. */
@@ -126,6 +167,13 @@ export interface UnregisteredCodeSite {
     readonly verdict: CodeVerdict;
     /** Why this verdict — the evidence, not a restatement of the verdict. */
     readonly why: string;
+    /**
+     * [#9223] Required by `runtime-pinned`, meaningless otherwise: the
+     * repo-relative test that does at runtime what the scan cannot do
+     * statically. The gate checks that this file EXISTS — a deleted pin would
+     * otherwise leave the row asserting a guarantee nothing provides.
+     */
+    readonly pin?: string;
 }
 
 /**
@@ -145,6 +193,48 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // whose code is registered fails the gate in the other direction. A future
     // unswept producer lands here as an `unclassified-site` finding and gets a
     // new row (then a spec-lane registration, then the row comes out again). ──
+
+    // ── pending registration, found by #9223's widened scan ────────────────
+    {
+        code: 'UNIQUE_SCOPE_CONFIRMATION_REQUIRED',
+        file: 'packages/cloud-connection/src/marketplace-install-local-plugin.ts',
+        shape: 'objlitconst',
+        door: 'plugin-route',
+        verdict: 'pending-registration',
+        why:
+            'Returned as `error.code` by the marketplace install seam when the ADR-0120 D5e posture gate ' +
+            'stops an install, and READ off the wire: `packages/cli/src/commands/package/install.ts` ' +
+            "branches on `res.body?.error?.code === 'UNIQUE_SCOPE_CONFIRMATION_REQUIRED'` to print the " +
+            'per-index decision list. That the seam speaks REGISTERED vocabulary is measurable rather ' +
+            'than assumed: every sibling code in the same file (PLUGIN_MANIFEST_INVALID, ' +
+            'MARKETPLACE_UNAVAILABLE, INVALID_REQUEST, RESOURCE_NOT_FOUND, CLOUD_FETCH_FAILED, …) is in ' +
+            'the ledger already, which is why the scan never reported them — this one member is the gap. ' +
+            'Invisible until #9223 for one reason only: it is stamped through a constant ' +
+            '(GLOBAL_UNIQUE_CONFIRMATION_REQUIRED, `packages/types/src/unique-scope-install-gate.ts`) in ' +
+            'an object literal, the shape `objlit` could not see. ⇒ the spec lane registers it.',
+    },
+
+    // ── runtime-pinned: an interpolated family, checked where it can be ─────
+    {
+        code: 'APPROVAL_*_FAILED',
+        file: 'packages/rest/src/rest-server.ts',
+        shape: 'objlittemplate',
+        door: 'rest',
+        verdict: 'runtime-pinned',
+        pin: 'packages/rest/src/rest-approvals-wire-codes.test.ts',
+        why:
+            "Three approvals route factories (`decisionRoute`, `flowMoveRoute`, `threadRoute`) spell the " +
+            'terminal 500 catch\'s code as a template — `` `APPROVAL_${action.toUpperCase()}_FAILED` `` and ' +
+            'two siblings — so the family, not a literal, is what exists in source. #8885 registered all ' +
+            'nine codes the family produces, and its pin is what keeps that true: it enumerates the ' +
+            'registered `POST /approvals/requests/:id/<action>` routes and asserts the code each catch arm ' +
+            "would generate parses against ApiErrorSchema's closed union, mirroring the production " +
+            "template exactly (single-occurrence `.replace('-', '_')` included). So a tenth action route " +
+            'whose generated code nobody registers fails THERE, mechanically. This row records that ' +
+            'division of labour instead of letting the scan imply it checked something it cannot: #9223 ' +
+            'widened the scan enough to SEE the template, and seeing it is what makes the pin an ' +
+            'accounted-for half rather than a local habit in one package.',
+    },
 
     // ── sandbox-authored: outside any ledger, by design ────────────────────
     // (no source site — the producer is tenant code; see SANDBOX_AUTHORED_LIMB)
@@ -186,6 +276,61 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'that body is returned untouched as `result`. So the string never lands in an ADR-0112 ' +
             '`error.code`. This is the row that shows why verdicts are DECLARED: it is written exactly ' +
             'like FLOW_FAILED and a documented catch one layer up makes it unreachable.',
+    },
+    {
+        code: 'YOU_ARE_NOT_ALLOWED_TO_DELETE_THIS_MEMBER',
+        file: 'packages/plugins/plugin-auth/src/auth-manager.ts',
+        shape: 'objlitconst',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            "better-auth's own APIError vocabulary — the vendor's `YOU_ARE_NOT_ALLOWED_TO_*` family, " +
+            'thrown as `new APIError(\'FORBIDDEN\', { message, code })` so the remove-member guard\'s ' +
+            'refusal SET stays byte-for-byte the vendor\'s (see the contract note in ' +
+            '`remove-member-permission-guard.ts`; only the envelope differs). It cannot reach this door, ' +
+            'by the same route the IMPERSONATION_ROTATION_FAILED row documents and re-verified here: ' +
+            '`domains/auth.ts` catches everything the auth service throws and answers ' +
+            '`deps.error(INTERNAL_ERROR_MESSAGE, 500)` — unconditionally, never `errorFromThrown` (#5085). ' +
+            'So the string never lands in an ADR-0112 `error.code`.',
+    },
+    {
+        code: 'OS_METADATA_CONVERTED',
+        file: 'packages/spec/src/conversions/apply.ts',
+        shape: 'objlitconst',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'The ADR-0087 D4 conversion-notice vocabulary, not an error vocabulary at all: ' +
+            '`applyConversions` PASSES this code to an `onNotice` callback in a structured ' +
+            'ConversionNotice, and the loader, `validate` and the MCP deprecations surface consume that ' +
+            'shape. Nothing is thrown and no envelope is built. Same class as the INVALID_SCREEN_INPUT ' +
+            'row — a result envelope that merely spells itself `code`.',
+    },
+    {
+        code: 'OS_METADATA_CONVERSION_CONFLICT',
+        file: 'packages/spec/src/conversions/apply.ts',
+        shape: 'objlitconst',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'The conflict twin of the OS_METADATA_CONVERTED row: handed to `onConflict` when a rename ' +
+            "target is a live name owned by something else, so the conversion refuses to rewrite it and " +
+            'surfaces a loud diagnostic instead (ADR-0078: never silent). A callback payload, not a ' +
+            'thrown error and not a response body.',
+    },
+    {
+        code: 'ERR_BULK_PER_ROW_HOOK_LIMIT',
+        file: 'packages/spec/src/data/bulk-write-hook-conformance.ts',
+        shape: 'objlitconst',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'The declaring source rules on this itself, in the doc comment on the constant: ' +
+            '"Deliberately an `ERR_`-prefixed operational code on the thrown error\'s own property bag, ' +
+            'NOT an ADR-0112 wire code … minting a member of it by side effect is the exact ' +
+            '`declared != enforced` shape that vocabulary exists to prevent." It is RETURNED in a ' +
+            '`BulkPerRowHookBudgetVerdict` by a function documented pure and total (no throw); the engine ' +
+            'raises, the contract decides.',
     },
     {
         code: 'SQLITE_ERROR',
