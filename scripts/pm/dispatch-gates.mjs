@@ -2039,8 +2039,14 @@ function selfTest() {
   t('the named form still ends its block body at the `env:` key', !compactNames.includes('check:phantom-classic'));
   t('the step after a compact block body is not swallowed by it', compactNames.includes('check:after-compact'));
   const compactTexts = runCommandTexts(compactWf);
+  // Indexed reads are defaulted rather than asserted-then-dereferenced: under a
+  // parser that drops the compact form entirely there is no element 2, and a
+  // bare `compactTexts[2].split(…)` THROWS out of the whole self-test — the
+  // reverse-verification run for this card hit exactly that and got one stack
+  // trace where it needed a list of named failures. A gate that cannot say
+  // which case broke is a worse gate, even when it is correctly red.
   t('one command text per compact step too', compactTexts.length === 5);
-  t('a compact block body keeps both of its lines', compactTexts[2].split('\n').filter((l) => l.trim()).length === 2);
+  t('a compact block body keeps both of its lines', (compactTexts[2] ?? '').split('\n').filter((l) => l.trim()).length === 2);
   t('a compact one-liner yields its command verbatim', compactTexts[1] === 'pnpm --filter @objectstack/spec check:compact-one-liner');
   // A `-` that is not a list marker must not be read as one: `-run:` is a key
   // named `-run`, and `- name:` is a step whose `run:` comes later on its own
