@@ -16,10 +16,15 @@
  * fails CI. That friction is the point."
  *
  * The dispatcher door had no such friction. `HttpDispatcher.errorFromThrown`
- * puts `resolveThrownHttpError(e).declaredCode` — the producer's own string,
+ * put `resolveThrownHttpError(e).declaredCode` — the producer's own string,
  * un-narrowed — into `error.code`, and its conformance suite parsed only the
  * handful of cases it drove. Three suites pinned bodies `ApiErrorSchema` would
- * reject and CI stayed green.
+ * reject and CI stayed green. Since #9106 the door NARROWS (`error.code` takes
+ * the resolver's closed `code`; an unregistered spelling rides the wire's
+ * `declaredCode`), so the failure this gate catches changed shape without
+ * getting smaller: an unswept producer's semantic code no longer breaks the
+ * schema — it silently DEMOTES off `error.code` until registered, which is
+ * still a real emitter hiding, and still this gate's job to report.
  *
  * The maintainer ruling of 2026-08-12 chose option B **delivered as a gate**:
  * parse every body the door emits, then register what the gate reports. This is
@@ -74,7 +79,8 @@
  *     dropped: a deriver that goes quietly blind is the same failure one layer
  *     down.
  *   - The sandbox limb is OUT of this scan's reach by construction — a metadata
- *     app's action code is authored at runtime, not in this repo. See
+ *     app's action code is authored at runtime, not in this repo. Ruled by
+ *     #9106: demoted to the wire's `declaredCode` at the door. See
  *     `SANDBOX_AUTHORED_LIMB` in the declaration file.
  */
 

@@ -75,6 +75,17 @@ function expectConformantError(response: { status: number; body: any } | undefin
     expect(body.error.details?.code).toBeUndefined();
     expect(body.error.details?.type).toBeUndefined();
 
+    // [#9106] `declaredCode` means demotion: when present it is a producer
+    // spelling the closed vocabulary does NOT contain — never a second copy of
+    // `code`, never a registered member. Asserted for every body so a branch
+    // that starts emitting it redundantly (two spellings of one fact on every
+    // refusal) fails here rather than shipping.
+    if (body.error.declaredCode !== undefined) {
+        expect(typeof body.error.declaredCode).toBe('string');
+        expect(body.error.declaredCode).not.toBe(body.error.code);
+        expect(ErrorCode.safeParse(body.error.declaredCode).success).toBe(false);
+    }
+
     return body.error;
 }
 
@@ -244,35 +255,25 @@ describe('#8087 — every code the dispatcher door can emit is parsed against Ap
     });
 
     for (const code of PENDING_AT_DISPATCHER_DOOR) {
-        it(`'${code}' reaches the wire verbatim, and ApiErrorSchema rejects it on \`code\` alone`, () => {
+        it(`'${code}' is DEMOTED off \`error.code\` until its ledger row lands (#9106)`, () => {
             const response = emitFor(code, 500);
 
-            // Verbatim — option B was ruled, so the door does NOT narrow. A
-            // failure here means someone quietly implemented option A.
-            expect(response.body.error.code).toBe(code);
+            // [#9106] The door narrows now (maintainer ruling 2026-08-16:
+            // `error.code` is a closed vocabulary at every door): the
+            // unregistered spelling rides the wire's `declaredCode`, and the
+            // closed slot takes the status-derived member. So an unswept
+            // producer's body PARSES — what it loses is its semantic code,
+            // silently absent from `error.code` until registration. That
+            // silent demotion is exactly why a pending-registration row is a
+            // debt the gate carries to the spec lane, not a curiosity.
+            expect(response.body.error.code).toBe(standardErrorCodeForHttpStatus(response.status));
+            expect(response.body.error.declaredCode).toBe(code);
 
-            // The body is STRUCTURALLY conformant — right envelope, status
-            // mirrored, `details` context only — so the one thing standing
-            // between it and its declared schema is the missing ledger row.
-            // That is precisely the claim handed to #8846.
-            expect(envelopeViolations(response.body)).toEqual([]);
-            expect(response.body.success).toBe(false);
-            expect(response.body.error.httpStatus).toBe(response.status);
-
-            const parsed = ApiErrorSchema.safeParse(response.body.error);
-            expect(parsed.success).toBe(false);
-            // Rejected on `code` and nothing else — an entry that failed for a
-            // second reason would be a different defect wearing this one's label.
-            expect([...new Set((parsed.error?.issues ?? []).map((i) => i.path.join('.')))]).toEqual(['code']);
-
-            // MEASURED while writing this: the damage is not confined to the
-            // nested error object. `BaseResponseSchema` embeds `ApiErrorSchema`,
-            // so the WHOLE response body fails to parse — one unregistered
-            // string invalidates the envelope every consumer validates against,
-            // for the same single reason and no other.
-            const envelope = BaseResponseSchema.safeParse(response.body);
-            expect(envelope.success).toBe(false);
-            expect([...new Set((envelope.error?.issues ?? []).map((i) => i.path.join('.')))]).toEqual(['error.code']);
+            // Fully conformant — right envelope, status mirrored, and the
+            // declared schema accepts it (`declaredCode` is a declared
+            // `ApiErrorSchema` field, the open author-authored channel).
+            const error = expectConformantError(response);
+            expect(error.declaredCode).toBe(code);
         });
     }
 
@@ -332,18 +333,25 @@ describe('#8087 — every code the dispatcher door can emit is parsed against Ap
         }
     });
 
-    it('records the sandbox limb as open rather than pretending the door is closed', () => {
+    it('demotes the sandbox limb to `declaredCode` — the door is closed WITHOUT dropping the author code (#9106)', () => {
         // `SandboxError` carries a metadata app's OWN `.code` across the QuickJS
         // boundary on purpose (#7867), and `domains/actions.ts` serves it through
-        // `errorFromThrown`. So this door's vocabulary has a limb authored by
-        // tenants at runtime, which no ledger can enumerate — the honest bound on
-        // what "closed" can mean here, and the reason the witness below is NOT
-        // re-spelled to a registered code.
+        // `errorFromThrown`. So this door's vocabulary had a limb authored by
+        // tenants at runtime, which no ledger can enumerate. The #9106 ruling
+        // (maintainer 2026-08-16) closed it by DEMOTION: the author's spelling
+        // rides `error.declaredCode` — the open, author-authored channel — and
+        // `error.code` takes the closed member the status derives. #7867's
+        // capability is preserved: the code still crosses the sandbox and still
+        // reaches the wire.
         const witness = SANDBOX_AUTHORED_LIMB.witness;
         expect(ErrorCode.safeParse(witness).success).toBe(false);
-        expect(emitFor(witness, 400).body.error.code).toBe(witness);
-        // It is deliberately absent from the registration hand-off: registering
-        // it would close nothing, since the next app picks a different string.
+        const response = emitFor(witness, 400);
+        const error = expectConformantError(response);
+        expect(error.code).toBe(standardErrorCodeForHttpStatus(400));
+        expect(error.declaredCode).toBe(witness);
+        // It stays absent from the registration hand-off (fenced off from
+        // #8846): registering one tenant spelling would close nothing, since
+        // the next app picks a different string.
         expect(PENDING_LEDGER_REGISTRATION).not.toContain(witness);
     });
 

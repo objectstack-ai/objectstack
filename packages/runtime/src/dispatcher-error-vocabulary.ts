@@ -12,11 +12,15 @@
  * point."
  *
  * The dispatcher door did not have that friction. `HttpDispatcher.errorFromThrown`
- * puts `resolveThrownHttpError(e).declaredCode` — the producer's own string,
+ * put `resolveThrownHttpError(e).declaredCode` — the producer's own string,
  * verbatim and un-narrowed — straight into `error.code`, and its conformance
  * suite parsed only the cases it happened to drive. So a producer emitting a
  * code the ledger does not know produced a body that could never satisfy the
- * schema it claims to satisfy, and nothing noticed.
+ * schema it claims to satisfy, and nothing noticed. (Since #9106 the door
+ * NARROWS — `error.code` takes the resolver's closed `code`, the unregistered
+ * spelling rides the wire's `declaredCode` — so such a body now parses; what
+ * an unswept producer loses instead is its semantic code, silently demoted
+ * off `error.code` until registered. The sweep below is what notices.)
  *
  * The maintainer ruling of 2026-08-12 chose **option B delivered as a gate**:
  * parse every body the door emits, then register what the gate reports —
@@ -83,7 +87,8 @@ export type CodeVerdict =
     /**
      * Authored OUTSIDE the platform — a metadata app's action code, carried
      * across the sandbox boundary deliberately (#7867). No ledger can enumerate
-     * it; see the note on `SANDBOX_AUTHORED_LIMB` below.
+     * it; since #9106 it is demoted to the wire's `declaredCode` at the door
+     * rather than reaching `error.code`. See `SANDBOX_AUTHORED_LIMB` below.
      */
     | 'sandbox-authored'
     /**
@@ -237,33 +242,33 @@ export const PENDING_AT_DISPATCHER_DOOR: readonly string[] = Object.freeze(
 );
 
 /**
- * ## The limb no ledger can close, measured while building this gate
+ * ## The limb no ledger can close — measured while building this gate, RULED
+ * ## by #9106
  *
  * `SandboxError` carries a user action's own `.code` across the QuickJS
  * boundary on purpose — "Author-thrown structured errors get the same
  * treatment; nothing here is objectql-specific"
  * (`sandbox/error-passthrough.test.ts`) — and `domains/actions.ts` serves that
- * error through `errorFromThrown`, so the string lands in `error.code`
- * verbatim. `domains/actions-validation-envelope.test.ts` pins exactly that,
- * end to end, with `DUPLICATE`.
+ * error through `errorFromThrown`. So the dispatcher door's vocabulary has a
+ * limb authored by TENANTS, in metadata apps, at runtime. Registration cannot
+ * close it: the ledger would have to enumerate strings that do not exist when
+ * CI runs.
  *
- * So the dispatcher's `error.code` has a limb whose vocabulary is authored by
- * TENANTS, in metadata apps, at runtime. Registration cannot close it: the
- * ledger would have to enumerate strings that do not exist when CI runs. This
- * is not an argument for option C (ruled inadmissible — the closure is
- * load-bearing for every platform producer, and the six rows above are exactly
- * what it catches); it is a bound on what "closed" can mean at THIS door, and
- * it post-dates the ruling.
+ * The maintainer ruling (#9106, 2026-08-16) closed it the way the REST door
+ * always was: `error.code` is a closed vocabulary at every door, and an
+ * author-thrown code that is not an `ErrorCode` member is DEMOTED to the
+ * wire's `declaredCode` at the door. The #7867 capability is preserved — the
+ * author's code still crosses the sandbox and still reaches the wire, in the
+ * open, author-authored channel `ApiErrorSchema.declaredCode` declares.
+ * `domains/actions-validation-envelope.test.ts` pins the demote end to end,
+ * with `DUPLICATE`.
  *
- * ⛔ Deliberately NOT decided here — deciding it means either narrowing the
- * sandbox boundary or declaring a second, non-ledger vocabulary for
- * author-thrown codes, and both are contract-shaped. Reported to #8087 /
- * #8846 rather than guessed at.
- *
- * `DUPLICATE` is the pinned witness, so it is named here rather than left as an
- * un-owned literal in a test — and it is deliberately NOT re-spelled to a
- * registered code, because re-spelling it would delete the only evidence in the
- * repo that this limb is open.
+ * `DUPLICATE` is the pinned witness, so it is named here rather than left as
+ * an un-owned literal in a test — re-homed under the demote rule by the #9106
+ * ruling, and deliberately NOT registered (fenced off from #8846):
+ * registering it would close nothing, since the next app picks a different
+ * string, and it would falsely promote one tenant spelling into the platform
+ * vocabulary every consumer branches on.
  */
 export const SANDBOX_AUTHORED_LIMB = Object.freeze({
     witness: 'DUPLICATE',

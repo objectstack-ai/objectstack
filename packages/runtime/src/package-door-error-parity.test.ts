@@ -29,10 +29,10 @@
  * `@objectstack/types`: `resolveThrownHttpError`. Each door is pinned to that
  * function from its own side, and the halves compose —
  *
- *   REST door  == resolveThrownHttpError.code          (packages/rest/src/package-routes-coded-error-mapping.test.ts)
- *   dispatcher == resolveThrownHttpError.declaredCode  (this file)
+ *   REST door  == resolveThrownHttpError.code  (packages/rest/src/package-routes-coded-error-mapping.test.ts)
+ *   dispatcher == resolveThrownHttpError.code  (this file; `.declaredCode` until #9106)
  *   status: the SAME field on both
- *   ⇒ same status always, same code for every registered code
+ *   ⇒ same status AND same code, always
  *
  * — with each half independently falsifiable: a door that grows a second
  * mapping of its own turns its own half red. Comparing to the shared rule is
@@ -40,10 +40,13 @@
  * about hand-written literals only ever agree about the shapes someone thought
  * to enumerate, which is how the divergence arose in the first place.
  *
- * The two code spellings are one function's two outputs, not two rules. They
- * differ only for a code outside `StandardErrorCode ∪ ERROR_CODE_LEDGER`, which
- * this door emits verbatim and the REST door cannot — that difference is
- * pinned explicitly at the bottom of this file, with the reason.
+ * [#9106] The two code spellings are one function's two outputs, not two
+ * rules — and since the 2026-08-16 ruling they no longer diverge on any wire's
+ * `error.code`: a code outside `StandardErrorCode ∪ ERROR_CODE_LEDGER` is
+ * DEMOTED at this door exactly as at the REST door, and the verbatim spelling
+ * rides the wire's `declaredCode` sibling instead (the open, author-authored
+ * channel `ApiErrorSchema` declares). The demote is pinned explicitly at the
+ * bottom of this file.
  *
  * ## What is deliberately NOT asserted: the message
  *
@@ -119,48 +122,50 @@ describe('#8016 — the dispatcher package door answers the shared mapping', () 
             expect(ApiErrorSchema.safeParse((response.body as any).error).success).toBe(true);
 
             expect({ status: response.status, code: (response.body as any).error.code })
-                .toEqual({ status: expected.status, code: expected.declaredCode ?? expected.code });
+                .toEqual({ status: expected.status, code: expected.code });
+            // Every shape here carries a REGISTERED code (or none) — no demote,
+            // so no `declaredCode` sibling appears (#9106: presence means
+            // demotion).
+            expect((response.body as any).error.declaredCode).toBeUndefined();
         });
     }
 
     /**
-     * The one place the two doors' codes differ, pinned so it stays a stated
-     * difference rather than a drift.
+     * The place the two doors' codes USED to differ — now the pin on the
+     * demote that removed the difference (#9106, maintainer ruling
+     * 2026-08-16: `error.code` is a closed vocabulary at every door).
      *
-     * This door puts a producer's code on the wire verbatim. The REST door
-     * cannot: `@objectstack/types`' `sendError` takes the closed `ErrorCode`,
-     * and that door's conformance suite parses its bodies against the ledger, so
-     * an unregistered code there is a failing test rather than a wire answer.
+     * An unregistered code cannot reach `error.code` through either door: the
+     * REST door's `sendError` takes the closed `ErrorCode`, and this door now
+     * serves the resolver's narrowed `code` too. The producer's verbatim
+     * spelling is not dropped — it rides the wire's `declaredCode` sibling,
+     * the open author-authored channel `ApiErrorSchema` declares, which is how
+     * the #7867 sandbox passthrough capability survives the closure (a
+     * metadata app's own thrown code still reaches the wire).
      *
-     * The STATUS agrees either way, which is what #8016 was about.
-     *
-     * [#8087] The three codes this comment used to name are no longer one list.
-     * The maintainer ruled option B — keep the verbatim spelling, and make the
-     * set of unregistered producers a MEASURED, gated one instead of a
-     * hand-maintained sentence that goes stale (this one had):
-     *
-     *   - `FLOW_FAILED` has a real producer and is awaiting a ledger entry
-     *     (#8846); it stays verbatim, which is the whole point of option B.
-     *   - `STORAGE_FAILURE` had no producer anywhere — two fixtures invented it
-     *     — so it was collapsed to a registered code rather than registered.
-     *   - `DUPLICATE` is AUTHOR-thrown: it crosses the sandbox boundary from a
-     *     metadata app's own action code, so no ledger can enumerate it.
-     *
-     * `packages/runtime/src/dispatcher-error-vocabulary.ts` is the live list and
-     * `pnpm check:dispatcher-error-vocabulary` keeps it honest. The vehicle
-     * below stays a deliberately unregistered string, because what this case
-     * pins is the SPELLING DIFFERENCE, not any particular producer.
+     * History: #8087 first ruled the verbatim spelling stays and gated the
+     * producer set (`dispatcher-error-vocabulary.ts`,
+     * `pnpm check:dispatcher-error-vocabulary`); #8846 registered every
+     * platform producer the gate found; #9106 then ruled the remaining,
+     * unregisterable TENANT-AUTHORED limb demoted — completing the closure.
+     * The vehicle below stays a deliberately unregistered string, because what
+     * this case pins is the DEMOTE, not any particular producer.
      */
-    it('an unregistered code reaches this door verbatim, and the narrowed spelling differs', () => {
+    it('an unregistered code is demoted: the narrowed spelling in `error.code`, the verbatim one in `declaredCode`', () => {
         const error = thrown('dialect', { status: 409, code: 'PACKAGE_IS_HAUNTED' });
         const resolved = resolveThrownHttpError(error, 500);
         const response = errorFromThrown(error, 500);
 
         expect(resolved.declaredCode).toBe('PACKAGE_IS_HAUNTED');
         expect(resolved.code).toBe('RESOURCE_CONFLICT');
-        expect((response.body as any).error.code).toBe('PACKAGE_IS_HAUNTED');
+        expect((response.body as any).error.code).toBe('RESOURCE_CONFLICT');
+        expect((response.body as any).error.declaredCode).toBe('PACKAGE_IS_HAUNTED');
         // The half that must never differ.
         expect(response.status).toBe(resolved.status);
+        // And the demoted body satisfies its declared schema — the property an
+        // unregistered code could never have before #9106.
+        expect(ApiErrorSchema.safeParse((response.body as any).error).success).toBe(true);
+        expect(envelopeViolations(response.body)).toEqual([]);
     });
 
     it('the shapes really do produce different answers', () => {
