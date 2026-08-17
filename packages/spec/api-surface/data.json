@@ -338,6 +338,8 @@
     "IndexSchema (const)",
     "InjectedColumnProvenance (type)",
     "InjectedSystemColumnPlan (interface)",
+    "InlineGridColumn (type)",
+    "InlineGridColumnSchema (const)",
     "InstantValue (type)",
     "InstantValueSchema (const)",
     "JSONValidation (type)",

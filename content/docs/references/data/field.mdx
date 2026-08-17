@@ -14,8 +14,8 @@ Field Type Enum
 ## TypeScript Usage
 
 ```typescript
-import { CurrencyConfigSchema, CurrencyValueSchema, FieldSchema, FieldMaskingKeepSchema, FieldMaskingRuleSchema, FieldType, LocationCoordinatesSchema, SelectOptionSchema, UniqueScopeSchema } from '@objectstack/spec/data';
-import type { CurrencyConfig, CurrencyValue, Field, FieldMaskingKeep, FieldMaskingRule, FieldType, LocationCoordinates, SelectOption, UniqueScope } from '@objectstack/spec/data';
+import { CurrencyConfigSchema, CurrencyValueSchema, FieldSchema, FieldMaskingKeepSchema, FieldMaskingRuleSchema, FieldType, InlineGridColumnSchema, LocationCoordinatesSchema, SelectOptionSchema, UniqueScopeSchema } from '@objectstack/spec/data';
+import type { CurrencyConfig, CurrencyValue, Field, FieldMaskingKeep, FieldMaskingRule, FieldType, InlineGridColumn, LocationCoordinates, SelectOption, UniqueScope } from '@objectstack/spec/data';
 
 // Validate data
 const result = CurrencyConfigSchema.parse(data);
@@ -79,11 +79,11 @@ const result = CurrencyConfigSchema.parse(data);
 | **deleteBehavior** | `Enum<'set_null' \| 'cascade' \| 'restrict'>` | optional (default: `"set_null"`) | What happens if referenced record is deleted |
 | **inlineEdit** | `boolean \| Enum<'grid' \| 'form'>` | optional | Edit these child records inline within the parent's form (atomic master-detail). true = auto-pick grid/form by child shape; 'grid' = editable line-item grid; 'form' = list + per-row full form. |
 | **inlineTitle** | `string` | optional | Title for the inline master-detail grid |
-| **inlineColumns** | `any[]` | optional | Explicit columns for the inline grid (derived from the child object when omitted) |
+| **inlineColumns** | `{ name: string; label?: string; type?: Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| 'lookup' \| 'file'>; width?: number; … }[]` | optional | Explicit columns for the inline grid (derived from the child object when omitted). Each entry is a strict, name-keyed column (`{ name, label?, type?, … }` — objectui GridColumn, #3951); identity-only entries (`{ name }`) hydrate everything else from the child object's fields. Unknown keys and the retired `field` spelling are refused at parse. |
 | **inlineAmountField** | `string` | optional | Numeric child field summed for the inline grid total |
 | **relatedList** | `boolean \| 'primary'` | optional | Show this child collection as a related list on the parent's detail page (read-side mirror of inlineEdit). false = suppress; true/absent = shown (stacked under the shared "Related" tab); 'primary' = core relationship, promoted to its own tab. Prominence intent, not a layout switch (ADR-0085). |
 | **relatedListTitle** | `string` | optional | Title for the detail-page related list |
-| **relatedListColumns** | `any[]` | optional | Explicit columns for the detail-page related list (derived from the child object when omitted) |
+| **relatedListColumns** | `string[]` | optional | Explicit columns for the detail-page related list, as child field names (e.g. ['name', 'status']); derived from the child object (highlightFields → field walk) when omitted. Strings only — labels, cell types and formatting always derive from the child object's field definitions; column objects are refused at parse. |
 | **relatedListFilter** | `any` | optional | Declarative default filter for the detail-page related list: AND-composed with the parent-relationship condition `{ [referenceField]: parentId }` — an authored constraint, never a user-editable suggestion. The related-list tab badge count honors the same composed filter, so counts match the visible rows. Canonical Query-DSL FilterCondition (the same dialect as a query `where`), e.g. `{ status: { $ne: 'deleted' } }` to hide soft-deleted children. |
 | **displayField** | `string` | optional | Field shown as each candidate's label in the picker/popover (defaults to the referenced object's name/title). |
 | **descriptionField** | `string` | optional | Secondary field shown under the label in the quick-select popover. |
@@ -272,6 +272,36 @@ Allowed Values: `phone`, `id_card`, `bank_account`, `email`, `name`
 * `progress`
 * `tags`
 * `vector`
+
+
+---
+
+## InlineGridColumn
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Child field this column shows — the key the grid reads and writes on each row object (objectui GridColumn.name, #3951). The retired `field` spelling is refused. |
+| **label** | `string` | optional | Column header; defaults to the child field's label via hydration. |
+| **type** | `Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| 'lookup' \| 'file'>` | optional | Cell control, derived from the child field's type when omitted. Declaring it opts the column out of schema hydration — supply the extras (options / reference / …) yourself. |
+| **width** | `number` | optional | Fixed column width in px; omitted columns use type-based role sizing (text flexes, numeric/date/select stay fixed). |
+| **required** | `boolean` | optional | Cell is flagged inline-invalid while empty. Computed columns are never required. |
+| **options** | `{ label: string; value: string }[]` | optional | Select-cell options for `type: 'select'`; derived from the child field's options when the column declares no `type`. |
+| **prefix** | `string` | optional | Currency symbol rendered inside a `currency` cell (default '¥'). |
+| **step** | `number` | optional | Input step for numeric cells. |
+| **reference** | `string` | optional | Referenced object for `type: 'lookup'` cells; derived from the child lookup field when the column declares no `type`. |
+| **displayField** | `string` | optional | Label field shown for a picked lookup record. |
+| **idField** | `string` | optional | Id field stored for a picked lookup record. |
+| **multiple** | `boolean` | optional | Multi-value column: multi-record lookup, or multi-file upload cell. |
+| **accept** | `string[]` | optional | Accepted MIME types / extensions for a `file` cell's picker (e.g. ['image/*', '.pdf']); omit to accept anything. |
+| **defaultHidden** | `boolean` | optional | Collapsed into the grid's column chooser by default (not dropped); required columns are never default-hidden. |
+| **computed** | `boolean` | optional | Read-only computed column, recomputed live from sibling cells via `expr` and written back into the row. |
+| **expr** | `string` | optional | Arithmetic expression for a computed column — a BARE string over `+ - * / %`, parentheses, numeric literals and field refs (`record.qty` or `qty`), evaluated by the grid's own safe evaluator. Deliberately NOT a CEL Expression envelope; `{ dialect, source }` is refused here. |
+| **scale** | `integer` | optional | Decimal places to round a computed numeric/currency result to. |
+| **autofill** | `boolean` | optional | For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable. |
+| **readonlyWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — the cell is read-only when TRUE, evaluated per row against the row as `record` plus the header as `parent` (e.g. P`parent.status == 'paid'`). |
+| **requiredWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`. |
 
 
 ---

@@ -96,6 +96,7 @@
     "data/HookEvent",
     "data/ImportFieldMapping",
     "data/Index",
+    "data/InlineGridColumn",
     "data/InstantValue",
     "data/JSONValidation",
     "data/Lifecycle",

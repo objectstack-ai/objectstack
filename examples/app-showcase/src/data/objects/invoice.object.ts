@@ -204,20 +204,23 @@ export const InvoiceLine = ObjectSchema.create({
        * `defaultHidden`), so all seven stay default-visible and `receipt`'s
        * visibility stops depending on a tie-break it happens to be losing.
        *
-       * Bare `{ field }` entries on purpose: `hydrateColumns` fills label, type,
-       * options, lookup target, `readonlyWhen`/`requiredWhen` and the computed
-       * `expression` from the schema, so labels stay translatable and the
-       * columns cannot drift from the field definitions above. `position` is
-       * absent because it is the grid's drag-reorder sort field, never a cell.
+       * Identity-only `{ name }` entries on purpose: `hydrateColumns` fills
+       * label, type, options, lookup target, `readonlyWhen`/`requiredWhen` and
+       * the computed `expression` from the schema, so labels stay translatable
+       * and the columns cannot drift from the field definitions above.
+       * (`name` is the grid's column identity since objectui#3951 — the
+       * retired `field` spelling this block originally used is now refused at
+       * parse, #9227.) `position` is absent because it is the grid's
+       * drag-reorder sort field, never a cell.
        */
       inlineColumns: [
-        { field: 'product' },
-        { field: 'description' },
-        { field: 'service_start' },
-        { field: 'quantity' },
-        { field: 'unit_price' },
-        { field: 'receipt' },
-        { field: 'amount' },
+        { name: 'product' },
+        { name: 'description' },
+        { name: 'service_start' },
+        { name: 'quantity' },
+        { name: 'unit_price' },
+        { name: 'receipt' },
+        { name: 'amount' },
       ],
     }),
     // Catalog lookup. Picking a product auto-fills `description` + `unit_price`
