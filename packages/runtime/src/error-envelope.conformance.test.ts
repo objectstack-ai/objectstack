@@ -242,12 +242,15 @@ describe('#8087 — every code the dispatcher door can emit is parsed against Ap
         );
 
     it('drives a code from the derivation rather than a list written by hand', () => {
-        // #8846 registered every code the first derivation reported, so the
-        // pending list is EMPTY now and the per-code rejection drives below
-        // are vacuous BY DESIGN — that emptiness is the discharged state, not
-        // a broken wiring. The suite does not go quiet with it: the seven
-        // registered codes are driven POSITIVELY in the '#8846 discharge' case
-        // below, and a future pending row re-populates the loop on its own.
+        // #8846 registered every code the FIRST derivation reported, which
+        // emptied this list; [#9223] widening the scan to see a `code: CONST`
+        // in an object literal re-populated it with one member —
+        // UNIQUE_SCOPE_CONFIRMATION_REQUIRED, at the marketplace install seam's
+        // `plugin-route` door — which is the loop working, not a regression.
+        // PENDING_AT_DISPATCHER_DOOR stays empty because that code never passes
+        // through this door, so the per-code drives below remain vacuous BY
+        // DESIGN; the suite does not go quiet with them, since the seven
+        // registered codes are driven POSITIVELY in the '#8846 discharge' case.
         // Spread: both lists are `readonly string[]`, and `arrayContaining`
         // takes a mutable one — passing the frozen list straight in is a tsc
         // error that only the TEST_DEBT ratchet would have caught.
@@ -360,8 +363,33 @@ describe('#8087 — every code the dispatcher door can emit is parsed against Ap
             expect(site.why.length, `${site.code} at ${site.file} carries no evidence`).toBeGreaterThan(40);
             // A site that reaches a door must be on its way to a ledger row;
             // anything else must say which non-wire vocabulary it belongs to.
-            if (site.door !== 'none') expect(site.verdict).toBe('pending-registration');
-            else expect(site.verdict).not.toBe('pending-registration');
+            //
+            // [#9223] One exception, and it is about what a SOURCE SCAN can
+            // know rather than about reachability: a code built by template
+            // interpolation reaches the `rest` door and yet has no literal to
+            // register, so `runtime-pinned` names the test that enumerates the
+            // family at runtime. It stays out of PENDING_LEDGER_REGISTRATION
+            // deliberately — a family identity like `APPROVAL_*_FAILED` can
+            // never be registered, and parking it in that list would hand
+            // #8846 a debt nobody can discharge.
+            if (site.door !== 'none') {
+                expect(['pending-registration', 'runtime-pinned']).toContain(site.verdict);
+            } else {
+                expect(site.verdict).not.toBe('pending-registration');
+            }
+        }
+    });
+
+    it('[#9223] every runtime-pinned row names its runtime half, and only a template may', () => {
+        // The declaration-side half of the same guard the gate enforces on the
+        // scan side. `runtime-pinned` is the one verdict that does not decide
+        // reachability, so it is the one that could become an exemption from
+        // the registry check — on a literal it would be exactly that.
+        for (const site of UNREGISTERED_CODE_SITES.filter((s) => s.verdict === 'runtime-pinned')) {
+            expect(site.shape, `${site.code} is runtime-pinned but spells a literal`).toBe('objlittemplate');
+            expect(site.pin, `${site.code} is runtime-pinned with no pin`).toBeTruthy();
+            expect(site.code, `${site.code} is not a template family identity`).toContain('*');
+            expect(PENDING_LEDGER_REGISTRATION).not.toContain(site.code);
         }
     });
 });

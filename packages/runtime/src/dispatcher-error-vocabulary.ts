@@ -100,7 +100,6 @@ export type CodeStampShape =
  * — so a code stamped on a thrown value and passed through remains exactly the
  * reachability question this table answers. Both were spelled `sendError` until
  * #9098; that collision is what let the door's hole read as closed.
- */
  *
  * [#9223] `plugin-route` is a THIRD door, surfaced by the widened scan: a plugin
  * that mounts its own Hono routes answers refusals with its own `c.json({
