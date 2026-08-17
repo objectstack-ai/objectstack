@@ -348,7 +348,7 @@ afterEach(() => {
 
 describe('[#9174] revertCommit refuses a non-canonical stored type on the restore limb', () => {
     it('answers a wire-visible `failed[].code` and restores nothing', async () => {
-        const warn = spyWarn();
+        spyWarn();
         const { protocol, registeredItems, serveCommit } = makeProtocol();
         await seedRowVerbatim(protocol, {
             type: 'fields', name: 'showcase_task.title', body: bodyAt('showcase_task.title', 'V1'),
@@ -375,7 +375,7 @@ describe('[#9174] revertCommit refuses a non-canonical stored type on the restor
     });
 
     it('names the row, the canonical type, and what to do about it', async () => {
-        const warn = spyWarn();
+        spyWarn();
         const { protocol, serveCommit } = makeProtocol();
         await seedRowVerbatim(protocol, {
             type: 'translations', name: 'legacy_bundle', body: bodyAt('legacy_bundle', 'V1'),
@@ -429,7 +429,7 @@ describe('[#9174] revertCommit refuses a non-canonical stored type on the restor
     });
 
     it('carries the caller’s spelling into `failed[]` UNFOLDED (#9161)', async () => {
-        const warn = spyWarn();
+        spyWarn();
         const { protocol, serveCommit } = makeProtocol();
         await seedRowVerbatim(protocol, { type: 'fields', name: 'a.b', body: bodyAt('a.b', 'V1') });
         await seedRowVerbatim(protocol, { type: 'fields', name: 'a.b', body: bodyAt('a.b', 'V2') });
@@ -503,7 +503,7 @@ describe('[#9174] the pre-flight fires on exactly the at-rest class', () => {
     });
 
     it('a manifest-PRESENT plural is NOT refused — it is not this defect', async () => {
-        const warn = spyWarn();
+        spyWarn();
         const { protocol, registeredItems, serveCommit } = makeProtocol();
         // External dependency of the verdict, pinned rather than assumed: the
         // manifest fold resolves `views`, so the restore limb hands the
@@ -544,7 +544,7 @@ describe('[#9174] the pre-flight fires on exactly the at-rest class', () => {
 
 describe('[#9174] a refused item touches no ledger key and stops no neighbour', () => {
     it('is absent from the append-only revert commit, which records only what was reverted', async () => {
-        const warn = spyWarn();
+        spyWarn();
         const { protocol, commitLedger, auditLedger, serveCommit } = makeProtocol();
         await seedRowVerbatim(protocol, { type: 'fields', name: 'a.b', body: bodyAt('a.b', 'V1') });
         await seedRowVerbatim(protocol, { type: 'fields', name: 'a.b', body: bodyAt('a.b', 'V2') });
@@ -564,7 +564,7 @@ describe('[#9174] a refused item touches no ledger key and stops no neighbour', 
     });
 
     it('reverts the neighbours of a refused item and reports the mix honestly', async () => {
-        const warn = spyWarn();
+        spyWarn();
         const { protocol, rows, commitLedger, serveCommit } = makeProtocol();
         await seedRowVerbatim(protocol, { type: 'view', name: 'grid', body: bodyAt('grid', 'V1') });
         await seedRowVerbatim(protocol, { type: 'view', name: 'grid', body: bodyAt('grid', 'V2') });
