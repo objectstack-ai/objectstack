@@ -58,6 +58,8 @@ type RestServerArgs = {
   defaultEnvironmentIdProvider?: () => string | undefined;
   requestEnvResolver?: RestRequestEnvResolver;
   kernelManager?: { getOrCreate: (id: string) => Promise<any> };
+  /** Single-env service-existence probe — answers for the HOST kernel. */
+  serviceExistsProvider?: (name: string) => boolean;
 };
 
 /** Build a RestServer with only the seams under test wired. */
@@ -88,7 +90,7 @@ function buildRest(args: RestServerArgs = {}) {
     undefined, // i18nServiceProvider
     undefined, // analyticsServiceProvider
     undefined, // settingsServiceProvider
-    undefined, // serviceExistsProvider
+    args.serviceExistsProvider,
     undefined, // securityServiceProvider
     args.requestEnvResolver,
   );
@@ -200,6 +202,204 @@ describe('resolveRequestEnvironmentId (D11④ seam)', () => {
     const resolved = await (rest as any).resolveProtocol(undefined, mockReq());
     expect(kernelManager.getOrCreate).toHaveBeenCalledWith('resolver-env');
     expect(resolved).toBe(perEnvProtocol);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// probeMcpServeable — the NINTH consumer of the shared entry point (#9120)
+//
+// `/discovery`'s `mcp` advertisement is computed from this probe. It used to
+// re-derive the environment itself (`req.params.environmentId`, else
+// `defaultEnvironmentIdProvider`), so it saw neither the host's ADR-0006
+// `kernel-resolver` seam nor the legacy hostname / `X-Environment-Id` chain.
+// On a hostname-routed multi-tenant host neither of its two inputs is present
+// — the route is unscoped and the default provider is `createSingleEnvironment
+// Plugin`'s wiring — so it fell through to `serviceExistsProvider`, which
+// answers for the HOST kernel. Both misadvertisement directions were reachable
+// from there; single-environment boots were correct throughout, which is why
+// every pin below is written on the multi-tenant shape.
+// ---------------------------------------------------------------------------
+
+/** A kernel whose `mcp` slot holds a service of the shape `/mcp` needs. */
+function kernelWithMcp() {
+  return { getServiceAsync: vi.fn().mockResolvedValue({ handleHttpRequest: () => undefined }) };
+}
+/** A kernel with no `mcp` service at all — `/mcp` would 501 here. */
+function kernelWithoutMcp() {
+  return { getServiceAsync: vi.fn().mockResolvedValue(undefined) };
+}
+
+describe('probeMcpServeable (D11④ seam, ninth consumer)', () => {
+  /**
+   * A hostname-routed multi-tenant host: the injected resolver answers for the
+   * request, and NO `defaultEnvironmentIdProvider` is registered — that is
+   * single-environment wiring, and its absence is what left the old derivation
+   * with nothing but the host-wide `serviceExistsProvider`.
+   */
+  function multiTenantHost(envKernel: any, hostHasMcp: boolean) {
+    const getOrCreate = vi.fn().mockResolvedValue(envKernel);
+    const { rest } = buildRest({
+      requestEnvResolver: { resolveRequestEnvironmentId: vi.fn().mockResolvedValue('tenant-b') },
+      kernelManager: { getOrCreate },
+      serviceExistsProvider: () => hostHasMcp,
+    });
+    return { getOrCreate, probe: (req: any) => (rest as any).probeMcpServeable(req) };
+  }
+
+  it('answers for the REQUEST environment when the host kernel serves mcp and that environment does not', async () => {
+    const { probe, getOrCreate } = multiTenantHost(kernelWithoutMcp(), true);
+
+    // The over-advertisement direction #4024 was filed to close: the host says
+    // yes, the request's own kernel would 501. `false` withholds `routes.mcp`.
+    await expect(probe(mockReq())).resolves.toBe(false);
+    expect(getOrCreate).toHaveBeenCalledWith('tenant-b');
+  });
+
+  it('answers for the REQUEST environment when it serves mcp and the host kernel does not', async () => {
+    const { probe, getOrCreate } = multiTenantHost(kernelWithMcp(), false);
+
+    // The other direction: a confident `false` computed against the wrong
+    // kernel withholds a route that would have served (`mcpServeable !== false`
+    // fails open only for `null`).
+    await expect(probe(mockReq())).resolves.toBe(true);
+    expect(getOrCreate).toHaveBeenCalledWith('tenant-b');
+  });
+
+  it('reaches the request environment through the legacy hostname chain when no resolver is injected', async () => {
+    const getOrCreate = vi.fn().mockResolvedValue(kernelWithMcp());
+    const { rest } = buildRest({
+      envRegistry: legacyRegistry(),
+      kernelManager: { getOrCreate },
+      serviceExistsProvider: () => false,
+    });
+
+    await expect((rest as any).probeMcpServeable(mockReq())).resolves.toBe(true);
+    expect(getOrCreate).toHaveBeenCalledWith('legacy-env');
+  });
+
+  it('follows X-Environment-Id, which the hand-rolled derivation never read', async () => {
+    const getOrCreate = vi.fn().mockResolvedValue(kernelWithMcp());
+    const { rest } = buildRest({
+      envRegistry: {
+        resolveByHostname: vi.fn().mockResolvedValue(null),
+        resolveById: vi.fn().mockImplementation(async (id: string) => (id === 'header-env' ? {} : null)),
+      },
+      kernelManager: { getOrCreate },
+      serviceExistsProvider: () => false,
+    });
+
+    await expect(
+      (rest as any).probeMcpServeable(mockReq({ 'x-environment-id': 'header-env' })),
+    ).resolves.toBe(true);
+    expect(getOrCreate).toHaveBeenCalledWith('header-env');
+  });
+
+  it('keeps the single-environment answer unchanged (default provider → that kernel)', async () => {
+    const getOrCreate = vi.fn().mockResolvedValue(kernelWithoutMcp());
+    const { rest } = buildRest({
+      defaultEnvironmentIdProvider: () => 'default-env',
+      kernelManager: { getOrCreate },
+      serviceExistsProvider: () => true,
+    });
+
+    // Correct before this change and correct after: the shared entry point's
+    // step 3 IS the default provider, so single-env boots keep their answer.
+    await expect((rest as any).probeMcpServeable(mockReq())).resolves.toBe(false);
+    expect(getOrCreate).toHaveBeenCalledWith('default-env');
+  });
+
+  it("keeps the 'platform' guard — the reserved id is never handed to getOrCreate", async () => {
+    const getOrCreate = vi.fn().mockResolvedValue(kernelWithMcp());
+    const { rest } = buildRest({
+      kernelManager: { getOrCreate },
+      serviceExistsProvider: (name: string) => name === 'mcp',
+    });
+
+    // `platform` is a virtual id, not a row in the environments table.
+    await expect(
+      (rest as any).probeMcpServeable({ ...mockReq(), params: { environmentId: 'platform' } }),
+    ).resolves.toBe(true);
+    expect(getOrCreate).not.toHaveBeenCalled();
+  });
+
+  it('never mistakes the literal ":environmentId" placeholder for an environment', async () => {
+    const getOrCreate = vi.fn().mockResolvedValue(kernelWithMcp());
+    const { rest } = buildRest({
+      requestEnvResolver: { resolveRequestEnvironmentId: vi.fn().mockResolvedValue('tenant-b') },
+      kernelManager: { getOrCreate },
+      serviceExistsProvider: () => false,
+    });
+
+    // An unsubstituted route pattern is the absence of an id, not an id — the
+    // shared entry point short-circuits on any truthy explicit value, so the
+    // placeholder must be normalised away before it is passed in.
+    await expect(
+      (rest as any).probeMcpServeable({ ...mockReq(), params: { environmentId: ':environmentId' } }),
+    ).resolves.toBe(true);
+    expect(getOrCreate).toHaveBeenCalledWith('tenant-b');
+    expect(getOrCreate).not.toHaveBeenCalledWith(':environmentId');
+  });
+
+  it('keeps the serviceExistsProvider fallback when no environment resolves at all', async () => {
+    const getOrCreate = vi.fn().mockResolvedValue(kernelWithMcp());
+    const { rest } = buildRest({
+      kernelManager: { getOrCreate },
+      serviceExistsProvider: (name: string) => name === 'mcp',
+    });
+
+    await expect((rest as any).probeMcpServeable(mockReq())).resolves.toBe(true);
+    expect(getOrCreate).not.toHaveBeenCalled();
+  });
+
+  it('still reports null ("cannot probe") when nothing in either path can answer', async () => {
+    const { rest } = buildRest({ kernelManager: { getOrCreate: vi.fn() } });
+    await expect((rest as any).probeMcpServeable(mockReq())).resolves.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// /discovery end to end — the advertisement the probe feeds, driven through
+// the real handler so the `req` it receives is the one the route was given.
+// ---------------------------------------------------------------------------
+
+describe('/discovery mcp advertisement (#9120)', () => {
+  function driveDiscovery(args: RestServerArgs) {
+    const { rest, server } = buildRest(args);
+    rest.registerRoutes();
+    const route = server.get.mock.calls.find((c: any[]) => c[0] === '/api/v1/discovery');
+    expect(route, 'GET /api/v1/discovery must be registered').toBeDefined();
+    const res = {
+      json: vi.fn(),
+      status: vi.fn().mockReturnThis(),
+      send: vi.fn(),
+      setHeader: vi.fn(),
+      headersSent: false,
+    };
+    return async (req: any) => {
+      await route![1](req, res);
+      expect(res.json).toHaveBeenCalledTimes(1);
+      return res.json.mock.calls[0][0];
+    };
+  }
+
+  it('withholds routes.mcp when the request environment cannot serve it, though the host kernel can', async () => {
+    const discovery = await driveDiscovery({
+      requestEnvResolver: { resolveRequestEnvironmentId: vi.fn().mockResolvedValue('tenant-b') },
+      kernelManager: { getOrCreate: vi.fn().mockResolvedValue(kernelWithoutMcp()) },
+      serviceExistsProvider: () => true,
+    })(mockReq());
+
+    expect(discovery.routes.mcp).toBeUndefined();
+  });
+
+  it('advertises routes.mcp when the request environment serves it, though the host kernel does not', async () => {
+    const discovery = await driveDiscovery({
+      requestEnvResolver: { resolveRequestEnvironmentId: vi.fn().mockResolvedValue('tenant-b') },
+      kernelManager: { getOrCreate: vi.fn().mockResolvedValue(kernelWithMcp()) },
+      serviceExistsProvider: () => false,
+    })(mockReq());
+
+    expect(discovery.routes.mcp).toBe('/api/v1/mcp');
   });
 });
 
