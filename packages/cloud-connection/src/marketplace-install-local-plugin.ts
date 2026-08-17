@@ -25,7 +25,11 @@
  *            the kernel's `manifest` service. Returns the installed entry.
  *
  *   GET    /api/v1/marketplace/install-local
- *          → lists currently installed marketplace packages
+ *          → lists currently installed marketplace packages. Requires an
+ *            authenticated principal (anonymous → 401); `installedBy` and
+ *            `storageDir` are served only to a `manage_metadata` holder
+ *            (#9011). The four routes above require `manage_metadata`
+ *            outright (#8976).
  *
  *   DELETE /api/v1/marketplace/install-local/:manifestId
  *          → removes the cached manifest. Kernel must be restarted to fully
@@ -791,8 +795,51 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * is explicitly NOT made here. What the fix removes is the case where a
      * short list was served with `success: true` and nobody, anywhere, could
      * have known.
+     *
+     * ## [#9011] Authenticated floor + field narrowing — the posture, ruled
+     *
+     * #8976 gated the four MUTATING doors and left this read as the only
+     * anonymous door on the surface: `handleList` opened on `this.readAll()`,
+     * resolved no identity at all, and served the whole ledger with `200` to
+     * anyone who could reach the port — including `installedBy` (a platform
+     * user id, enumerated across every install) and `storageDir` (an absolute
+     * filesystem path on the host). Maintainer ruling 2026-08-16, Option 3:
+     *
+     *   caller                                items  total  installedBy  storageDir
+     *   anonymous                              ——     ——        ——           ——      → 401
+     *   authenticated, no `manage_metadata`    ✔      ✔         ✘            ✘       → 200
+     *   authenticated, `manage_metadata`       ✔      ✔         ✔            ✔       → 200
+     *
+     * **Why a floor and not the write doors' 403.** The console's Setup →
+     * "Installed Apps" page is a real, signed-in consumer that ships to
+     * non-operator users; demanding `manage_metadata` for the whole read would
+     * have withdrawn a shipped page rather than closed a hole. What is genuinely
+     * operator-grade is not "which packages are installed" — it is **who
+     * installed them and where they live on this host**, so those two fields,
+     * and only those two, follow the capability the write doors demand.
+     *
+     * **Omitted, not nulled.** A narrowed caller's entry simply has no
+     * `installedBy` key. `null` would be a claim about the ledger (installed by
+     * nobody) instead of a fact about the caller, and the console already
+     * renders that line conditionally.
+     *
+     * ⛔ The mount stays unconditional — cloud#1287 moved it out of the
+     * `marketplaceUrl` ternary precisely so air-gapped boxes stop 404ing. The
+     * answer to an unauthorized read is a refusal, never an absent route.
+     *
+     * Identity comes from {@link resolveInstallPrincipal} — the SAME resolver
+     * the four mutating doors use, not a second session read. Two auth
+     * mechanisms in one file is how the next gap gets created, and this file has
+     * already produced one.
      */
     private handleList = async (c: any, ctx: PluginContext): Promise<Response> => {
+        // Before the ledger is touched, exactly as the mutating doors refuse
+        // before any work: a refused caller must not be able to learn what is
+        // installed from timing or from a downstream storage error.
+        const principal = await this.resolveInstallPrincipal(c, ctx);
+        if (!principal) return this.refuseUnauthenticated(c);
+        const operator = principal.systemPermissions.includes(INSTALL_LOCAL_CAPABILITY);
+
         const { entries, skipped } = this.readAll();
         this.warnSkippedLedgerEntries(ctx, skipped, 'it is MISSING from the installed-apps list served to the console');
         return c.json({
@@ -804,11 +851,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     manifestId: e.manifestId,
                     version: e.version,
                     installedAt: e.installedAt,
-                    installedBy: e.installedBy,
                     withSampleData: e.withSampleData ?? false,
+                    ...(operator ? { installedBy: e.installedBy } : {}),
                 })),
                 total: entries.length,
-                storageDir: this.storageDir,
+                ...(operator ? { storageDir: this.storageDir } : {}),
             },
         }, 200);
     };
@@ -1455,6 +1502,22 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
+     * [#9011] The ONE `401` this plugin issues — every door, one literal.
+     *
+     * The five routes now share an authenticated floor but NOT a capability
+     * requirement (the four writes demand `manage_metadata`; the read narrows
+     * two fields instead), so the "nobody is authenticated" refusal is the one
+     * answer they must give identically. Extracted rather than copied: a client
+     * branching on `UNAUTHENTICATED` must not have to learn which door it
+     * knocked on, and an envelope duplicated per handler is exactly how this
+     * file's five routes drifted apart on authorization in the first place.
+     */
+    private refuseUnauthenticated = (c: any): Response => c.json({
+        success: false,
+        error: { code: 'UNAUTHENTICATED', message: 'Authentication required.' },
+    }, 401);
+
+    /**
      * [#8976] The shared refusal for the four mutating routes: 401 when nobody
      * is authenticated, 403 when somebody is but holds no authoring capability,
      * otherwise the acting `userId`.
@@ -1479,15 +1542,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         action: string,
     ): Promise<{ ok: true; userId: string } | { ok: false; response: Response }> => {
         const principal = await this.resolveInstallPrincipal(c, ctx);
-        if (!principal) {
-            return {
-                ok: false,
-                response: c.json({
-                    success: false,
-                    error: { code: 'UNAUTHENTICATED', message: 'Authentication required.' },
-                }, 401),
-            };
-        }
+        if (!principal) return { ok: false, response: this.refuseUnauthenticated(c) };
         if (!principal.systemPermissions.includes(INSTALL_LOCAL_CAPABILITY)) {
             ctx.logger?.warn?.(
                 `[MarketplaceInstallLocal] refused ${action} for ${principal.userId} — `

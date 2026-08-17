@@ -170,14 +170,73 @@ const BLOCK_SCALAR_HEADER = /^[|>][+-]?\d*$/;
  * Measured both ways on this tree: stripping changes no family's discovery
  * today (every gate named in a body comment is also really invoked somewhere).
  * It is here so that stops being luck.
+ *
+ * ## Why the COMPACT step form is read, and what `indent` must count (#9203)
+ *
+ * A step with no `name:` may be written as a compact block-sequence entry —
+ * the list dash and the key on one line:
+ *
+ *   - run: pnpm check:something
+ *
+ * That is ordinary YAML and an ordinary Actions step, but `run:` there is not
+ * preceded by whitespace alone, so a matcher anchored on `^[ \t]*run:` never
+ * saw the line and the step contributed NOTHING to the derivation — the same
+ * shape as the block-scalar bug above: not matched, and not "undetermined"
+ * either, because a family that is never discovered has no entry to fall into.
+ * Latent rather than live when it was fixed: both compact steps in this tree
+ * (`showcase-smoke.yml`) run `pnpm install` and `pnpm turbo run build`, so no
+ * `check:*` family was hidden — the shape was one workflow edit away from
+ * hiding one.
+ *
+ * The regex widening is the easy half. The load-bearing half is what `indent`
+ * counts, because the block-scalar walk below uses it to decide where a body
+ * ENDS, and a compact step puts its own sibling keys in the columns the dash
+ * occupies:
+ *
+ *   - run: |
+ *       pnpm check:real
+ *     env:
+ *       NOTE: "... pnpm check:not-run-here ..."
+ *
+ * Counting only the leading whitespace makes `env:` deeper than the key, so
+ * the walk swallows the rest of the mapping into the command text — and every
+ * gate NAMED in a swallowed `env:`/`with:` value is then discovered as one the
+ * step RUNS. That trades a missing lead for a fabricated one, which is the
+ * strictly worse direction (see the "22 leads is the same as none" note in the
+ * header): a gap costs a dev one CI round, an invention costs every dev whose
+ * surface brushes it.
+ *
+ * So `indent` is the COLUMN OF THE `run` KEY — leading whitespace plus the
+ * `- ` marker when there is one. Settled by measurement against a real YAML
+ * parser rather than by inspection, in both directions:
+ *
+ *   - over-consumption: parsing the fixture above, counting whitespace only
+ *     discovers 9 commands where YAML says 8, the extra one being the gate
+ *     named in the `env:` value; counting the key column discovers exactly the
+ *     8 the parser reports, for every step form in one file;
+ *   - truncation: a body indented AT or BELOW the key column is not a body
+ *     this walk should keep — under `- run: |` at key column 8, bodies at
+ *     column 7 and 8 are YAML *errors* (ParserError / ScannerError) and only
+ *     9-and-deeper parse. The `> keyColumn` comparison is therefore the YAML
+ *     rule itself, not an approximation of it, and cannot cut a valid body
+ *     short.
+ *
+ * The same reading also makes the two step forms behave identically, which is
+ * the point: for `- run:` the key sits at the column `run` starts on, exactly
+ * as it does for the `name:`/`run:` form, where this walk has always been
+ * right.
  */
 export function runCommandTexts(workflowText) {
   const lines = workflowText.split('\n');
   const out = [];
   for (let i = 0; i < lines.length; i++) {
-    const m = /^([ \t]*)run:[ \t]*(.*)$/.exec(lines[i]);
+    const m = /^([ \t]*)(-[ \t]+)?run:[ \t]*(.*)$/.exec(lines[i]);
     if (!m) continue;
-    const [, indent, inline] = m;
+    const [, lead, dash, inline] = m;
+    // The column `run` starts on — the dash of a compact entry is INDENTATION
+    // for the mapping it opens, so it counts. See the header block above for
+    // the measurement that settles this.
+    const keyColumn = lead.length + (dash ? dash.length : 0);
     if (!BLOCK_SCALAR_HEADER.test(inline.trim())) {
       out.push(inline.trim());
       continue;
@@ -192,7 +251,7 @@ export function runCommandTexts(workflowText) {
         body.push('');
         continue;
       }
-      if (/^[ \t]*/.exec(lines[j])[0].length <= indent.length) break;
+      if (/^[ \t]*/.exec(lines[j])[0].length <= keyColumn) break;
       body.push(lines[j]);
     }
     out.push(body.filter((l) => !/^[ \t]*#/.test(l)).join('\n'));
@@ -1935,6 +1994,64 @@ function selfTest() {
   t('one command text per run step', texts.length === 4);
   t('a block body keeps its lines joined', texts[0].split('\n').filter((l) => l.trim()).length === 2);
   t('a one-line run yields its command verbatim', texts[3] === 'node scripts/check-nul-bytes.mjs');
+
+  // The compact step form (#9203): `- run: …`, a block-sequence entry with the
+  // key on the dash line. Before it was read, every command in a step written
+  // this way was invisible to the derivation.
+  //
+  // The `env:` values are the load-bearing part of the fixture, not padding.
+  // They name gates the steps do NOT run, positioned exactly where a body walk
+  // that mis-reads `indent` swallows them — the compact one sits in the columns
+  // the `- ` marker occupies, which is the only place the two candidate
+  // readings disagree. Pinning the classic form's `env:` too keeps the two step
+  // shapes asserted against the same trap, so a future edit cannot fix one
+  // reading by breaking the other.
+  const compactWf = [
+    'jobs:',
+    '  smoke:',
+    '    steps:',
+    '      - name: Classic block, sibling key after the body',
+    '        run: |',
+    '          pnpm check:classic-body',
+    '        env:',
+    '          NOTE: "we do not run pnpm check:phantom-classic here"',
+    '      - run: pnpm --filter @objectstack/spec check:compact-one-liner',
+    '      - run: |',
+    '          pnpm check:compact-body',
+    '          node scripts/check-compact-direct.mjs',
+    '        env:',
+    '          NOTE: "we do not run pnpm check:phantom-compact here"',
+    '      - run: node scripts/check-compact-tail.mjs',
+    '      - name: Back to the named form',
+    '        run: pnpm check:after-compact',
+  ].join('\n');
+  const compactInvs = extractCheckInvocations(compactWf, 'showcase-smoke.yml');
+  const compactNames = compactInvs.map((i) => i.check);
+  // Leg 1 — the form is now REACHED. Each of these was zero before #9203.
+  t('a compact `- run:` one-liner is discovered, with its filter', compactInvs.some((i) => i.check === 'check:compact-one-liner' && i.filter === '@objectstack/spec'));
+  t('a compact `- run: |` block body is discovered', compactNames.includes('check:compact-body'));
+  t('a direct script in a compact block body is discovered', compactNames.includes('scripts/check-compact-direct.mjs'));
+  t('a compact step after a compact block body still parses', compactNames.includes('scripts/check-compact-tail.mjs'));
+  // Leg 2 — the widening bought no over-consumption. `indent` counts the `- `,
+  // so a compact block body ends at its own sibling keys exactly as the named
+  // form's does; both directions of the mis-read fabricate a gate here.
+  t('a compact block body ends at the `env:` key of its own step', !compactNames.includes('check:phantom-compact'));
+  t('the named form still ends its block body at the `env:` key', !compactNames.includes('check:phantom-classic'));
+  t('the step after a compact block body is not swallowed by it', compactNames.includes('check:after-compact'));
+  const compactTexts = runCommandTexts(compactWf);
+  // Indexed reads are defaulted rather than asserted-then-dereferenced: under a
+  // parser that drops the compact form entirely there is no element 2, and a
+  // bare `compactTexts[2].split(…)` THROWS out of the whole self-test — the
+  // reverse-verification run for this card hit exactly that and got one stack
+  // trace where it needed a list of named failures. A gate that cannot say
+  // which case broke is a worse gate, even when it is correctly red.
+  t('one command text per compact step too', compactTexts.length === 5);
+  t('a compact block body keeps both of its lines', (compactTexts[2] ?? '').split('\n').filter((l) => l.trim()).length === 2);
+  t('a compact one-liner yields its command verbatim', compactTexts[1] === 'pnpm --filter @objectstack/spec check:compact-one-liner');
+  // A `-` that is not a list marker must not be read as one: `-run:` is a key
+  // named `-run`, and `- name:` is a step whose `run:` comes later on its own
+  // line (already covered above, but the negative half needs its own pin).
+  t('a bare `-run:` is not read as a compact step', runCommandTexts('      -run: pnpm check:not-a-step').length === 0);
 
   // #7440: the printed line must be runnable as-is. The three shapes come from
   // the same three fixtures above, so the sample workflow and the print site

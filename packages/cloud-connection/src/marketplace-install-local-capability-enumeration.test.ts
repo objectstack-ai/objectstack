@@ -45,9 +45,12 @@
  * the day it is added — before anyone has to notice it lacks a gate.
  *
  * ⚠️ The `GET` listing is deliberately NOT in this family. It is a read, and
- * this card's ruling is about the four mutating doors; its own posture is a
- * separate question tracked separately, and silently folding it in here would
- * decide it by accident.
+ * this card's ruling is about the four mutating doors; silently folding it in
+ * here would have decided its posture by accident. That posture has since been
+ * ruled on separately (#9011: authenticated floor, with `installedBy` and
+ * `storageDir` narrowed to `manage_metadata` holders) and is pinned in
+ * `marketplace-install-local-list-posture.test.ts` — so the filter below still
+ * means "not this family", never "ungated".
  *
  * ## Rejection cases assert the ENVELOPE (ADR-0112) AND the absence of effect
  *
@@ -296,6 +299,11 @@ describe('#8976 — the mutating install-local doors are enumerated, not recited
     it('mounts the read listing too — so the filter above is a CHOICE, not an empty set', async () => {
         // Without this, a refactor that stopped mounting the GET would leave the
         // assertion above passing while silently proving less than it claims.
+        // The listing's OWN posture lives in
+        // `marketplace-install-local-list-posture.test.ts` (#9011); ⛔ the fix
+        // for an unauthorized read there is a refusal, never an unmounted route
+        // — cloud#1287 made this mount unconditional so air-gapped boxes stop
+        // 404ing, and this assertion is what keeps that true.
         const { rawApp } = await mount('capable', dir);
         expect(rawApp.routes.has(`GET ${ROUTE_BASE}`)).toBe(true);
     });
