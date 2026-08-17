@@ -71,7 +71,7 @@ import {
 } from './local-manifest-source.js';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
-import type { IHttpServer, IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { IHttpServer, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
 
 const ROUTE_BASE = '/api/v1/marketplace/install-local';
 
@@ -599,10 +599,17 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             if (!organizationId) return empty();
             const datasetsNow = this.readSharedSeedDatasets(ctx);
             if (!Array.isArray(datasetsNow) || datasetsNow.length === 0) return empty();
-            let ql: any;
-            let metadata: any;
-            try { ql = ctx.getService('objectql'); } catch { /* absent */ }
-            try { metadata = ctx.getService('metadata'); } catch { /* absent */ }
+            // Both slots' declared contracts, not `any` (#4127/#4251): these
+            // lookups are NEW code, so they carry the contract rather than
+            // riding this file's grandfathered entry in
+            // `scripts/slot-lookup-baseline.json` — the same spelling the
+            // session-resolver below uses for `objectql`. Split declaration and
+            // lookup is the FOURTH erasure shape, and an untyped `let` erases
+            // the slot just as `const ql: any = …` does.
+            let ql: IObjectQLEngine | undefined;
+            let metadata: IMetadataService | undefined;
+            try { ql = ctx.getService<IObjectQLEngine>('objectql'); } catch { /* no data engine */ }
+            try { metadata = ctx.getService<IMetadataService>('metadata'); } catch { /* no metadata service */ }
             if (!ql || !metadata) {
                 ctx.logger?.warn?.(`[MarketplaceInstallLocal] seed-replayer: objectql/metadata unavailable — org ${organizationId} not seeded`);
                 return empty();
