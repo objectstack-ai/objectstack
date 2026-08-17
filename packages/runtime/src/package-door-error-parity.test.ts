@@ -128,9 +128,30 @@ describe('#8016 — the dispatcher package door answers the shared mapping', () 
      * difference rather than a drift.
      *
      * This door puts a producer's code on the wire verbatim. The REST door
-     * cannot: `@objectstack/types`' `sendError` takes the closed `ErrorCode`,
-     * and that door's conformance suite parses its bodies against the ledger, so
-     * an unregistered code there is a failing test rather than a wire answer.
+     * cannot — but ONLY for the codes its own handlers DECIDE, and that
+     * distinction is the correction #9098 landed here.
+     *
+     * The sentence this paragraph used to carry ("the REST door cannot:
+     * `@objectstack/types`' `sendError` takes the closed `ErrorCode`") named a
+     * real, strict function and drew a false conclusion from it. `packages/rest`
+     * had a SECOND exported `sendError` — its own sanitizing responder, typed
+     * `error: any` — and that was the one its route modules reached for. So the
+     * strictness cited here was never on the path being described, and the door
+     * read as closed while an author could put any spelling at all on the wire
+     * (`FIELD_VISIBILITY_UNRESOLVED` did, and a gate sweep found it, not this
+     * pin). #9098 renamed the responder to `sendThrownError` so the two cannot
+     * be conflated again, and added `sendDeclaredFault` — `code: ErrorCode` —
+     * as the typed author-side door.
+     *
+     * What is true now, stated per path:
+     *   - AUTHOR-decided refusals: narrowed at COMPILE time, at both REST
+     *     doors — `sendDeclaredFault` (flat dialect) and `@objectstack/types`'
+     *     `sendError` (nested). An unregistered code is a build failure.
+     *   - THROWN errors: NOT narrowed, deliberately and symmetrically with this
+     *     door. `sendThrownError` passes a caught error's `code` through
+     *     verbatim; narrowing that is an ADR-0112 public-contract decision, not
+     *     an internal typing one. `check:dispatcher-error-vocabulary` is what
+     *     keeps that path honest, at both doors.
      *
      * The STATUS agrees either way, which is what #8016 was about.
      *

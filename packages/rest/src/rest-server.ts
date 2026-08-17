@@ -80,12 +80,16 @@ import {
     apiExposureDenialReason,
     DATA_ACTION_TO_API_OPERATION,
 } from '@objectstack/spec/data';
-// [#8013] The SHARED envelope writer (#3973), aliased: this module already has a
-// module-scope `sendError` of its own — the sanitizing responder that maps a
-// THROWN error onto a status — and the two are not interchangeable. This one
-// emits the declared `{ success: false, error: { code, message } }` for a refusal
-// the handler DECIDED, with `code` typed to the closed ADR-0112 vocabulary rather
-// than `string`. Adding a call site here moves no `check:route-envelope` count:
+// [#8013] The SHARED envelope writer (#3973), aliased. [#9098] The alias no
+// longer exists to dodge a NAME collision — the local responder this used to
+// collide with is `sendThrownError` now — it marks the ENVELOPE DIALECT, which
+// is the difference that actually matters and the one still open. This one
+// emits the declared, NESTED `{ success: false, error: { code, message } }` for
+// a refusal the handler DECIDED; `sendDeclaredFault` emits the same refusal in
+// this package's FLAT `{ error, code }` dialect (open finding #7035). Both type
+// `code` to the closed ADR-0112 vocabulary rather than `string`, so the choice
+// between them is about POSITION only, never strictness.
+// Adding a call site here moves no `check:route-envelope` count:
 // the body literal lives in `@objectstack/types` (the pinned `SHARED_BUILDER`),
 // and this file is audited `dialectOnly` for the two non-conforming dialects it
 // still emits — which this deliberately is not.
@@ -127,7 +131,8 @@ import { logError, logWarn } from './log.js';
 // surface `./rest-server.js` has always offered is byte-identical.
 import {
     mapDataError,
-    sendError,
+    sendThrownError,
+    sendDeclaredFault,
     sendFieldVisibilityFault,
     handleRouteError,
     logUnexpectedRouteError,
@@ -3277,7 +3282,7 @@ export class RestServer {
                 res.json(enriched);
             } catch (error: any) {
                 logError('[REST] openapi.json error:', error);
-                sendError(res, error);
+                sendThrownError(res, error);
             }
         };
 
@@ -4259,9 +4264,9 @@ export class RestServer {
                         });
                         if (!audienceAllows((book as any).audience, caller)) {
                             if (!caller.authenticated) {
-                                sendError(res, { code: 'UNAUTHENTICATED', message: 'This documentation requires sign-in', status: 401 });
+                                sendDeclaredFault(res, { code: 'UNAUTHENTICATED', message: 'This documentation requires sign-in', status: 401 });
                             } else {
-                                sendError(res, { code: 'PERMISSION_DENIED', message: 'This documentation is limited to holders of a permission set you do not have', status: 403 });
+                                sendDeclaredFault(res, { code: 'PERMISSION_DENIED', message: 'This documentation is limited to holders of a permission set you do not have', status: 403 });
                             }
                             return;
                         }
@@ -4694,8 +4699,10 @@ export class RestServer {
                                         // this `code`.
                                         //
                                         // Written through the shared `sendError`
-                                        // (`@objectstack/types`), aliased because this
-                                        // module has a local function of that name.
+                                        // (`@objectstack/types`), aliased to mark the
+                                        // envelope dialect — see the note at the import
+                                        // (#9098 removed the name collision that used
+                                        // to be the alias's reason).
                                         // That builder emits the DECLARED envelope
                                         // `{ success: false, error: { code, message } }`,
                                         // so the console reads `body.error.code` — the
@@ -4789,9 +4796,9 @@ export class RestServer {
                                 }
                                 if (!allowed) {
                                     if (!caller.authenticated) {
-                                        sendError(res, { code: 'UNAUTHENTICATED', message: 'This documentation requires sign-in', status: 401 });
+                                        sendDeclaredFault(res, { code: 'UNAUTHENTICATED', message: 'This documentation requires sign-in', status: 401 });
                                     } else {
-                                        sendError(res, { code: 'PERMISSION_DENIED', message: 'This documentation is limited to holders of a permission set you do not have', status: 403 });
+                                        sendDeclaredFault(res, { code: 'PERMISSION_DENIED', message: 'This documentation is limited to holders of a permission set you do not have', status: 403 });
                                     }
                                     return;
                                 }
@@ -8425,12 +8432,11 @@ export class RestServer {
          * `suggested-bindings` met two shapes inside one `security` family.
          *
          * Emitted through the SHARED builder (`sendError` from
-         * `@objectstack/types`, imported as `sendEnvelopeError` because this
-         * module has a local `sendError` of its own — the sanitizing responder
-         * for THROWN errors, a different thing). That is what makes this the
-         * reference shape by construction rather than a ninth local literal
-         * agreeing with the eight it replaced, and it types `code` to the
-         * closed vocabulary for free.
+         * `@objectstack/types`, imported as `sendEnvelopeError` — see the note
+         * at the import). That is what makes this the reference shape by
+         * construction rather than a ninth local literal agreeing with the
+         * eight it replaced, and it types `code` to the closed vocabulary for
+         * free.
          *
          * ⛔ Status codes are untouched: only the POSITION of `code` and
          * `message` moves. `detail` — the 400 arm's Zod-issue dump — moves to
@@ -8646,12 +8652,11 @@ export class RestServer {
          * #8073 (PR #8174) from the `/security/explain` pair.
          *
          * Emitted through the SHARED builder (`sendError` from
-         * `@objectstack/types`, imported as `sendEnvelopeError` because this
-         * module has a local `sendError` of its own — the sanitizing responder
-         * for THROWN errors, a different thing). That is what makes this the
-         * reference shape by construction rather than a tenth local literal
-         * agreeing with the nine it replaced, and it types `code` to the
-         * closed ADR-0112 vocabulary for free.
+         * `@objectstack/types`, imported as `sendEnvelopeError` — see the note
+         * at the import). That is what makes this the reference shape by
+         * construction rather than a tenth local literal agreeing with the nine
+         * it replaced, and it types `code` to the closed ADR-0112 vocabulary
+         * for free.
          *
          * ⛔ Status codes are untouched and no code VALUE moves: only the
          * POSITION of `code` and `message` changes.

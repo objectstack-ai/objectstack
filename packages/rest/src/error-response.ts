@@ -27,7 +27,8 @@
  *   resolution      {@link resolveErrorResponse} — the same answer WITHOUT
  *                   emitting it, so the logging decision and the responder can
  *                   never form two opinions (#4886).
- *   emission        `sendError` / `handleRouteError` — the doors a route catch
+ *   emission        `sendThrownError` / `sendDeclaredFault` / `handleRouteError`
+ *                   — the doors a route catch block and a deciding handler use.
  *                   block uses.
  *   log verdict     {@link isExpectedRouteError} and friends — whether a
  *                   response is a fault worth "[REST] Unhandled error".
@@ -54,6 +55,7 @@ import {
     INTERNAL_ERROR_MESSAGE,
 } from '@objectstack/types';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
+import type { ErrorCode } from '@objectstack/spec/api';
 import { logError } from './log.js';
 
 /**
@@ -113,7 +115,7 @@ function truncateClientMessage(message: string): string {
  * it is a function now only so the missing-relation branch above it cannot
  * drift into a second spelling of the same verdict. 500 is deliberately outside
  * `isExpectedDataStatus`, which is what buys the log line the silent 404 never
- * had — `handleRouteError` prints `[REST] Unhandled error` and `sendError`'s
+ * had — `handleRouteError` prints `[REST] Unhandled error` and `sendThrownError`'s
  * `logWithheldServerFault` (#5437) covers the routes that bypass it, so the
  * withheld driver text always lands somewhere an operator can read it.
  */
@@ -148,7 +150,7 @@ const DATA_STORE_FAULT = (): { status: number; body: Record<string, unknown> } =
  *    recorded that a negative from a keyword heuristic is not evidence of
  *    safety. The words still reach the operator: 500 is outside
  *    `isExpectedDataStatus`, so `handleRouteError` prints `[REST] Unhandled
- *    error` with the whole error, and `sendError`'s `logWithheldServerFault`
+ *    error` with the whole error, and `sendThrownError`'s `logWithheldServerFault`
  *    covers the routes that bypass it.
  *
  * `INTERNAL_ERROR` rather than {@link DATA_STORE_FAULT}'s `DATABASE_ERROR`, and
@@ -217,7 +219,7 @@ const UNCLASSIFIED_FAULT = (): { status: number; body: Record<string, unknown> }
  *
  * The words are not lost: 500 is outside `isExpectedDataStatus`, so
  * `handleRouteError` prints `[REST] Unhandled error` with the whole error, and
- * `sendError`'s `logWithheldServerFault` (#5437) covers the routes that bypass
+ * `sendThrownError`'s `logWithheldServerFault` (#5437) covers the routes that bypass
  * it — the same operator path {@link UNCLASSIFIED_FAULT} relies on.
  */
 const NATIVE_ERROR_NAME_RE =
@@ -434,7 +436,7 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // hooks reject sys_comment / sys_attachment inserts fail-closed when the
     // TARGET object's capability flag disallows them. 403 like
     // CLONE_DISABLED; surfaced by `code` because the generic data routes map
-    // through here (they never reach sendError's `.status` passthrough).
+    // through here (they never reach sendThrownError's `.status` passthrough).
     // `error.object` names the gated TARGET object (not the join table), so
     // prefer it.
     if (error?.code === 'FEEDS_DISABLED' || error?.code === 'FILES_DISABLED') {
@@ -561,7 +563,7 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     }
     // Generic passthrough for domain errors that already carry an explicit
     // HTTP status (e.g. plugin-sharing's record-scope denial: status 403 +
-    // code FORBIDDEN) — mirrors sendError's `.status` handling, which the
+    // code FORBIDDEN) — mirrors sendThrownError's `.status` handling, which the
     // generic data routes bypass by calling mapDataError directly (#2926 ⑦).
     // Placed AFTER the structured-code branches above (409s carry rich fields
     // this envelope would drop).
@@ -1030,20 +1032,83 @@ export function mapDataError(error: any, object?: string): { status: number; bod
 }
 
 /**
- * Centralized error responder for all REST handlers. Ensures raw driver
- * messages (SQLite/Postgres dumps, stack traces, unique-constraint
- * payloads with table names, etc.) never reach clients. Honors
- * structured errors that already carry an explicit `status` so callers
+ * The CLASSIFICATION door: a THROWN thing becomes a sanitized HTTP answer.
+ * Ensures raw driver messages (SQLite/Postgres dumps, stack traces,
+ * unique-constraint payloads with table names, etc.) never reach clients.
+ * Honors structured errors that already carry an explicit `status` so callers
  * can surface domain-specific codes (e.g. 422 from a metadata save
  * validator), and routes everything else through `mapDataError` so the
  * security / validation / SQL-leak / unknown-object envelopes apply
  * uniformly across CRUD, batch, metadata, UI and discovery routes.
+ *
+ * [#9098] Named `sendError` until this change, which was a collision with the
+ * SHARED envelope writer of the same name in `@objectstack/types` — a
+ * different arity, a different envelope dialect and a different strictness.
+ * The two were never interchangeable, and the collision was not cosmetic: the
+ * cross-door parity note in `packages/runtime` cited "`sendError`'s closed
+ * `ErrorCode` parameter" as the reason the REST door could not put an
+ * unregistered code on the wire, which is true of the `@objectstack/types`
+ * one and false of this one — so the door's real hole read as closed. Three
+ * separate comments in `rest-server.ts` had each been written to warn the
+ * reader off the same conflation. Prose had already failed; the names are
+ * different now.
+ *
+ * ⛔ `error` stays `any` DELIBERATELY. This parameter is a caught value — a
+ * driver error, a `TypeError`, anything a `catch` can bind — and narrowing
+ * what a thrown error may carry would change what the REST door is allowed to
+ * emit. That is a public-contract decision (ADR-0112), not an internal typing
+ * one; the dispatcher door's equivalent required a maintainer ruling. What
+ * #9098 closed is the AUTHOR-side hole: see {@link sendDeclaredFault}.
  */
-export function sendError(res: any, error: any, object?: string): void {
+export function sendThrownError(res: any, error: any, object?: string): void {
     const resolved = resolveErrorResponse(error, object);
     // [#5437] The client no longer reads a 5xx's own words; the operator must.
     logWithheldServerFault(error, resolved);
     res.status(resolved.status).json(resolved.body);
+}
+
+/**
+ * [#9098] The AUTHOR-side door: a refusal this repo's own code DECIDED, with
+ * `code` typed to the closed ADR-0112 vocabulary.
+ *
+ * ## The hole this closes
+ *
+ * A handler that decides a refusal does not throw — it constructs the answer.
+ * Until this function existed, the only way to emit one in the flat dialect
+ * was to hand an object literal to the classification door above, whose
+ * `error: any` accepts any spelling at all. So an author could put a fresh,
+ * unregistered `code` on the wire with no type error, no lint and no review
+ * signal — the body would then fail `ApiErrorSchema` (and, because
+ * `BaseResponseSchema` embeds it, the WHOLE body) at the only place anyone
+ * would notice: a client's parse. `FIELD_VISIBILITY_UNRESOLVED` shipped in
+ * exactly that state and was found by a gate sweep, not by the door.
+ *
+ * `code: ErrorCode` makes the same mistake a compile error at the call site.
+ * The five author-declared emissions this repo had are routed through here,
+ * and `packages/rest`'s `tsc --noEmit` compiles every one of them — so the
+ * narrowing is checked by the build rather than asserted by a comment.
+ *
+ * ## What it deliberately does NOT change
+ *
+ * The wire answer is byte-identical to what the classification door produced
+ * for the same literal: this delegates to {@link sendThrownError} rather than
+ * re-implementing the response, so the #5437 5xx prose-withholding, the #5423
+ * 4xx truncation and the FLAT `{ error, code }` dialect all still apply,
+ * unchanged and in one place.
+ *
+ * ⛔ In particular this is NOT a migration to the `@objectstack/types`
+ * envelope writer. That one emits the NESTED `{ success: false, error: { code,
+ * message } }` and applies no sanitization — routing these emissions through
+ * it would move the envelope POSITION (open finding #7035, deliberately out of
+ * #9098's scope) and would re-open the #5437 leak class by shipping a declared
+ * 5xx's own prose. Narrowing the vocabulary and moving the dialect are two
+ * separate decisions; this is only the first.
+ */
+export function sendDeclaredFault(
+    res: any,
+    fault: { code: ErrorCode; status: number; message: string },
+): void {
+    sendThrownError(res, fault);
 }
 
 /**
@@ -1059,9 +1124,16 @@ export function sendError(res: any, error: any, object?: string): void {
  *
  * 503 rather than 500: the condition is an unhealthy dependency and a retry is
  * the right client behaviour.
+ *
+ * [#9098] Emits through {@link sendDeclaredFault}, so `FIELD_VISIBILITY_UNRESOLVED`
+ * is now checked against the closed ADR-0112 vocabulary at COMPILE time. It was
+ * this call — an object literal handed to an `error: any` parameter — that put
+ * an unregistered code on the wire for as long as it did (#8885 registered it;
+ * this makes the next one impossible rather than merely findable). The wire
+ * answer is unchanged: 503, `code`, and the #5437-withheld prose.
  */
 export function sendFieldVisibilityFault(res: any, objectName: string): void {
-    sendError(res, {
+    sendDeclaredFault(res, {
         code: 'FIELD_VISIBILITY_UNRESOLVED',
         message: `Field visibility for object '${objectName}' could not be evaluated; the object schema is not being served.`,
         status: 503,
@@ -1079,7 +1151,7 @@ export function sendFieldVisibilityFault(res: any, objectName: string): void {
  * this issue was raised on is exactly the fault an operator must be able to
  * diagnose (the in-memory registry has already diverged from the database).
  *
- * `sendError` had no logging at all, so its 5xx band went from "the client can
+ * `sendThrownError` had no logging at all, so its 5xx band went from "the client can
  * read the driver error" straight to "nobody can" without this. The routes that
  * exit through `handleRouteError` already print the whole error object for a
  * genuine fault — this fires only in the gap that predicate leaves: 502/503,
@@ -1100,8 +1172,8 @@ function logWithheldServerFault(
 }
 
 /**
- * The wire response `sendError` would emit for a thrown route error, WITHOUT
- * emitting it. Split out of `sendError` so the logging decision
+ * The wire response `sendThrownError` would emit for a thrown route error,
+ * WITHOUT emitting it. Split out of `sendThrownError` so the logging decision
  * (`handleRouteError`) reads the exact status/body the client is about to get
  * instead of forming a second opinion that can drift from the responder — the
  * drift this whole seam exists to prevent (#4886).
@@ -1127,7 +1199,7 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
         // sibling branch stopped at 4xx *on purpose* — "5xx messages keep going
         // through the sanitizing heuristics below so internal/SQL details never
         // reach the client verbatim". Two opposite verdicts on one question,
-        // and every route that reports through `sendError` (metadata, UI,
+        // and every route that reports through `sendThrownError` (metadata, UI,
         // discovery, batch) got the permissive one: a declared 500 shorter than
         // `CLIENT_MESSAGE_MAX` was returned word for word, past `isSqlLeak`,
         // past `looksLikeInternalErrorLeak`, past `Internal data error`.
@@ -1302,7 +1374,7 @@ export function logUnexpectedRouteError(error: any, resolved: { status: number; 
 /**
  * The single door a route catch block should use: resolve the response once,
  * log it only if it is a real fault, then send it. Wire behaviour is identical
- * to a bare `sendError(res, error, object)` — this only decides whether the log
+ * to a bare `sendThrownError(res, error, object)` — this only decides whether the log
  * line is printed.
  */
 export function handleRouteError(res: any, error: any, object?: string): void {
