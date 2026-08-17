@@ -82,6 +82,11 @@
  *     app's action code is authored at runtime, not in this repo. Ruled by
  *     #9106: demoted to the wire's `declaredCode` at the door. See
  *     `SANDBOX_AUTHORED_LIMB` in the declaration file.
+ *   - [#9098] The scan answers "is this code registered", never "could an
+ *     unregistered one be written here tomorrow". The second question is the
+ *     DOOR TYPING half — see `checkDoorTyping` below, which is structural
+ *     rather than vocabulary and is why this gate's name now undersells it: it
+ *     guards both HTTP doors, not only the dispatcher.
  */
 
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
@@ -333,12 +338,102 @@ export function reconcile({ sites, declared, registered, unresolved }) {
 }
 
 // ---------------------------------------------------------------------------
+// The REST door's TYPING (#9098)
+// ---------------------------------------------------------------------------
+
+/**
+ * [#9098] The vocabulary half of this gate answers "is this code registered".
+ * It cannot answer "could an unregistered one be written here tomorrow" — and
+ * that second question is what the REST door failed.
+ *
+ * The history, because it is the whole argument for these three assertions:
+ * `packages/rest` exported a `sendError(res, error: any)` whose name collided
+ * with `@objectstack/types`' strict `sendError(res, status, code: ErrorCode,
+ * message)`. A cross-door parity note cited the strict one's closed parameter
+ * as the reason the REST door was safe; route modules used the loose one. The
+ * door read as closed for as long as anyone cared to look, and the hole was
+ * eventually found by this scan (`FIELD_VISIBILITY_UNRESOLVED`) rather than by
+ * the door. #9098 split the two responsibilities by name and typed the
+ * author-side one.
+ *
+ * Typing alone does not stay put — it is three keystrokes from `any`, and the
+ * scan above would go on passing because a code that IS registered is invisible
+ * to it. So the structure is pinned here:
+ *
+ *   ① the author-side door exists and narrows `code` to the closed `ErrorCode`;
+ *   ② nothing in that file re-exports the name `sendError`, so the collision
+ *      that hid the hole cannot be reintroduced;
+ *   ③ no author-declared literal is handed to the CLASSIFICATION door — that
+ *      parameter is `any` by design (narrowing a caught error's `code` is an
+ *      ADR-0112 contract decision, not this gate's), which is exactly why a
+ *      decided refusal must not travel through it.
+ *
+ * ⛔ An anchor this cannot find is a FINDING, never a pass — the same rule the
+ * header states for unresolvable constants. A structural gate that silently
+ * matches nothing is the failure it exists to prevent, one layer down.
+ */
+export const REST_DOOR_FILE = 'packages/rest/src/error-response.ts';
+
+/** Author-declared literal handed to the classification door. Flat object literal on purpose. */
+const DECIDED_THROUGH_THROWN_RE =
+  /\bsendThrownError\s*\(\s*[A-Za-z_$][\w$]*\s*,\s*\{[^{}]*\bcode\s*:\s*'([A-Za-z][A-Za-z0-9_]*)'/g;
+
+export function checkDoorTyping({ doorSource, files }) {
+  const findings = [];
+  const add = (text) => findings.push({ kind: 'door-typing', text });
+
+  if (doorSource === null || doorSource === undefined) {
+    add(`${REST_DOOR_FILE} could not be read — this gate's door-typing anchor moved. ` +
+        `Point REST_DOOR_FILE at the file that now owns the REST error doors.`);
+    return findings;
+  }
+  const stripped = stripComments(doorSource);
+
+  // ① the author-side door narrows to the closed vocabulary
+  const decl = /export\s+function\s+sendDeclaredFault\s*\(([\s\S]*?)\)\s*:\s*void/.exec(stripped);
+  if (!decl) {
+    add(`${REST_DOOR_FILE}: no \`export function sendDeclaredFault(...): void\` found. ` +
+        `That is the REST door's typed author-side responder (#9098); without it a decided ` +
+        `refusal has no narrowed door and an unregistered code reaches the wire silently.`);
+  } else if (!/\bcode\s*:\s*ErrorCode\b/.test(decl[1])) {
+    add(`${REST_DOOR_FILE}: \`sendDeclaredFault\` no longer types its \`code\` as \`ErrorCode\`. ` +
+        `The closed ADR-0112 union is the only thing making an unregistered code a BUILD failure ` +
+        `at this door — widening it re-opens #9098 while every test here stays green.`);
+  }
+
+  // ② the collision that hid the hole cannot come back
+  if (/export\s+(?:function|const)\s+sendError\b/.test(stripped)) {
+    add(`${REST_DOOR_FILE} exports \`sendError\` again. That name belongs to the SHARED strict ` +
+        `writer in \`@objectstack/types\`; a second one here is the #9098 collision, which is how ` +
+        `the door's own looseness came to be documented as strictness. Name the local doors ` +
+        `\`sendThrownError\` (caught values) and \`sendDeclaredFault\` (decided refusals).`);
+  }
+
+  // ③ decided refusals do not travel through the `any` door
+  for (const { rel, source } of files) {
+    if (!rel.startsWith('packages/rest/')) continue;
+    const s = stripComments(source);
+    DECIDED_THROUGH_THROWN_RE.lastIndex = 0;
+    for (const m of s.matchAll(DECIDED_THROUGH_THROWN_RE)) {
+      add(`${rel}: hands the author-declared code '${m[1]}' to \`sendThrownError\`, whose \`error\` ` +
+          `parameter is \`any\` by design (it takes CAUGHT values). A refusal this repo decides must ` +
+          `go through \`sendDeclaredFault\`, which narrows \`code\` to the closed union. Same wire ` +
+          `answer, checked at compile time.`);
+    }
+  }
+
+  findings.sort((a, b) => a.text.localeCompare(b.text));
+  return findings;
+}
+
+// ---------------------------------------------------------------------------
 // Self-test
 // ---------------------------------------------------------------------------
 
 function selfTest() {
   const fail = [];
-  const ok = (cond, what) => { if (!cond) fail.push(what); };
+  let cases = 0;
+  const ok = (cond, what) => { cases += 1; if (!cond) fail.push(what); };
 
   // Each published SHAPE matches what it claims to.
   const samples = {
@@ -487,12 +582,90 @@ function selfTest() {
     );
   }
 
+  // [#9098] Door typing. Each assertion is pinned in BOTH directions: the
+  // healthy shape passes, and the specific regression it names fails. A
+  // structural gate that only ever ran against a healthy tree would be a
+  // phantom check — it must be shown capable of failing.
+  {
+    const healthy = `
+      import type { ErrorCode } from '@objectstack/spec/api';
+      export function sendThrownError(res: any, error: any, object?: string): void {}
+      export function sendDeclaredFault(
+          res: any,
+          fault: { code: ErrorCode; status: number; message: string },
+      ): void { sendThrownError(res, fault); }
+      export function sendFieldVisibilityFault(res: any, o: string): void {
+          sendDeclaredFault(res, { code: 'FIELD_VISIBILITY_UNRESOLVED', message: o, status: 503 });
+      }`;
+    ok(
+      checkDoorTyping({ doorSource: healthy, files: [] }).length === 0,
+      'the healthy door shape produced a door-typing finding',
+    );
+
+    const widened = healthy.replace('code: ErrorCode;', 'code: string;');
+    ok(
+      checkDoorTyping({ doorSource: widened, files: [] }).some((f) => /no longer types/.test(f.text)),
+      'widening sendDeclaredFault\'s `code` to string did not fail',
+    );
+
+    const missing = healthy.replace(/export function sendDeclaredFault[\s\S]*?\): void \{[^}]*\}/, '');
+    ok(
+      checkDoorTyping({ doorSource: missing, files: [] }).some((f) => /no .*sendDeclaredFault/.test(f.text)),
+      'deleting the typed author-side door did not fail',
+    );
+
+    const collided = `${healthy}\nexport function sendError(res: any, error: any): void {}`;
+    ok(
+      checkDoorTyping({ doorSource: collided, files: [] }).some((f) => /collision/.test(f.text)),
+      'reintroducing the `sendError` collision did not fail',
+    );
+
+    // ③ both directions, and the CAUGHT-value call must stay legal.
+    const bypass = `sendThrownError(res, { code: 'SOMETHING_NEW', message: 'x', status: 400 });`;
+    ok(
+      checkDoorTyping({
+        doorSource: healthy,
+        files: [{ rel: 'packages/rest/src/some-routes.ts', source: bypass }],
+      }).some((f) => /SOMETHING_NEW/.test(f.text)),
+      'an author-declared literal sent through the `any` door did not fail',
+    );
+    ok(
+      checkDoorTyping({
+        doorSource: healthy,
+        files: [{ rel: 'packages/rest/src/some-routes.ts', source: `sendThrownError(res, error, object);` }],
+      }).length === 0,
+      'passing a CAUGHT error through the classification door was flagged — that is its job',
+    );
+    ok(
+      checkDoorTyping({
+        doorSource: healthy,
+        files: [{ rel: 'packages/rest/src/x.ts', source: `// sendThrownError(res, { code: 'IN_A_COMMENT' });` }],
+      }).length === 0,
+      'a commented-out bypass produced a door-typing finding',
+    );
+
+    // A missing door file is a FINDING, never a quiet pass.
+    ok(
+      checkDoorTyping({ doorSource: null, files: [] }).some((f) => /anchor moved/.test(f.text)),
+      'an unreadable door file passed quietly instead of failing',
+    );
+
+    // And the real file on disk satisfies all three.
+    ok(
+      existsSync(join(ROOT, REST_DOOR_FILE)),
+      `${REST_DOOR_FILE} does not exist — the door-typing anchor moved`,
+    );
+  }
+
   if (fail.length) {
     console.error('check-dispatcher-error-vocabulary --self-test FAILED:');
     for (const f of fail) console.error(`  - ${f}`);
     process.exit(1);
   }
-  console.log(`check-dispatcher-error-vocabulary --self-test: ${Object.keys(samples).length} shapes + 10 cases OK`);
+  console.log(
+    `check-dispatcher-error-vocabulary --self-test: ${Object.keys(samples).length} shapes ` +
+    `+ ${cases} assertions OK (vocabulary + #9098 door typing)`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -517,11 +690,21 @@ function main() {
   const declared = parseDeclaration(readFileSync(join(ROOT, DECLARATION), 'utf8'));
   const findings = reconcile({ sites, declared, registered, unresolved });
 
+  // [#9098] The door-typing half. `walkSources` skips the door file only if it
+  // is a test or the declaration — it is neither, so read it from the scanned
+  // set and fall back to disk rather than assuming either.
+  const doorEntry = files.find((f) => f.rel === REST_DOOR_FILE);
+  const doorAbs = join(ROOT, REST_DOOR_FILE);
+  const doorSource = doorEntry?.source ?? (existsSync(doorAbs) ? readFile(doorAbs) : null);
+  findings.push(...checkDoorTyping({ doorSource, files }));
+
   const pending = declared.filter((d) => d.verdict === 'pending-registration');
   const bounds =
     `  scope: ${files.length} non-test source files under ${SCAN_ROOT}/; ` +
     `${registered.size} registered codes (${ledger.size} ledger + ${standard.size} standard); ` +
     `${sites.length} unregistered code-stamping site(s) found; ${declared.length} classified.\n` +
+    `  door typing (#9098): ${REST_DOOR_FILE} checked for the typed author-side responder, the ` +
+    `absence of a second \`sendError\`, and decided refusals bypassing it.\n` +
     `  the sandbox limb (author-thrown codes from metadata-app action code) is outside this scan ` +
     `by construction — see SANDBOX_AUTHORED_LIMB in ${DECLARATION}.`;
 

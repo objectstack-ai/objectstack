@@ -72,9 +72,19 @@ export type CodeStampShape =
 
 /**
  * Where the stamped code can end up. `dispatcher` is the door this card is
- * about; `rest` is the direct-mount registrar, whose own `sendError` overload
- * (`packages/rest/src/error-response.ts`, `error: any`) does NOT narrow;
- * `none` means the value never reaches an HTTP error envelope at all.
+ * about; `rest` is the direct-mount registrar; `none` means the value never
+ * reaches an HTTP error envelope at all.
+ *
+ * [#9098] The `rest` door SPLIT, and the split is why this classification still
+ * earns its keep. Its author-side responder (`sendDeclaredFault`,
+ * `packages/rest/src/error-response.ts`) now takes `code: ErrorCode`, so a
+ * refusal this repo DECIDES is narrowed by the compiler and can never be a
+ * finding here. Its classification responder (`sendThrownError`, same file)
+ * still takes `error: any` — deliberately, since narrowing what a CAUGHT error
+ * may carry is an ADR-0112 contract decision rather than an internal typing one
+ * — so a code stamped on a thrown value and passed through remains exactly the
+ * reachability question this table answers. Both were spelled `sendError` until
+ * #9098; that collision is what let the door's hole read as closed.
  */
 export type CodeDoor = 'dispatcher' | 'rest' | 'none';
 

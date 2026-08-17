@@ -135,13 +135,48 @@ describe('#8016 — the dispatcher package door answers the shared mapping', () 
      * demote that removed the difference (#9106, maintainer ruling
      * 2026-08-16: `error.code` is a closed vocabulary at every door).
      *
-     * An unregistered code cannot reach `error.code` through either door: the
-     * REST door's `sendError` takes the closed `ErrorCode`, and this door now
-     * serves the resolver's narrowed `code` too. The producer's verbatim
-     * spelling is not dropped — it rides the wire's `declaredCode` sibling,
-     * the open author-authored channel `ApiErrorSchema` declares, which is how
-     * the #7867 sandbox passthrough capability survives the closure (a
-     * metadata app's own thrown code still reaches the wire).
+     * An unregistered code cannot reach `error.code` through either door THIS
+     * RESOLVER SERVES: the direct-mount package registrar answers through
+     * `@objectstack/types`' `sendError`, which takes the closed `ErrorCode`,
+     * and this door now serves the resolver's narrowed `code` too. The
+     * producer's verbatim spelling is not dropped — it rides the wire's
+     * `declaredCode` sibling, the open author-authored channel
+     * `ApiErrorSchema` declares, which is how the #7867 sandbox passthrough
+     * capability survives the closure (a metadata app's own thrown code still
+     * reaches the wire).
+     *
+     * ⚠️ [#9098] "Either door" is scoped deliberately, and the correction
+     * #9098 landed here is why the qualifier has to be written down.
+     *
+     * The sentence this paragraph used to carry ("the REST door cannot:
+     * `@objectstack/types`' `sendError` takes the closed `ErrorCode`") named a
+     * real, strict function and drew a false conclusion from it. `packages/rest`
+     * had a SECOND exported `sendError` — its own sanitizing responder, typed
+     * `error: any` — and that was the one its route modules reached for. So the
+     * strictness cited here was never on the path being described, and the door
+     * read as closed while an author could put any spelling at all on the wire
+     * (`FIELD_VISIBILITY_UNRESOLVED` did, and a gate sweep found it, not this
+     * pin). #9098 renamed the responder to `sendThrownError` so the two cannot
+     * be conflated again, and added `sendDeclaredFault` — `code: ErrorCode` —
+     * as the typed author-side door.
+     *
+     * What is true now, stated per path:
+     *   - AUTHOR-decided refusals: narrowed at COMPILE time, at both REST
+     *     doors — `sendDeclaredFault` (flat dialect) and `@objectstack/types`'
+     *     `sendError` (nested). An unregistered code is a build failure.
+     *   - THROWN errors at the two doors THIS resolver serves — the dispatcher
+     *     exits (this file) and the direct-mount package registrar: NARROWED,
+     *     since the #9106 ruling. #9098 recorded them as "not narrowed,
+     *     symmetrically with this door", which was true on 2026-08-16 and is
+     *     the half #9106 changed; the ADR-0112 public-contract decision that
+     *     paragraph said was required is exactly the ruling this file now pins.
+     *   - THROWN errors through `packages/rest`'s FLAT `sendThrownError`: still
+     *     passed through verbatim, and out of #9106's ruled scope (which named
+     *     the actions door and the resolver both doors above share). That path
+     *     puts `code` at the body's TOP level rather than in `error.code`, so
+     *     it is not the field this ruling closed, and its envelope position is
+     *     an open finding of its own (#7035).
+     *     `check:dispatcher-error-vocabulary` is what keeps it honest meanwhile.
      *
      * History: #8087 first ruled the verbatim spelling stays and gated the
      * producer set (`dispatcher-error-vocabulary.ts`,

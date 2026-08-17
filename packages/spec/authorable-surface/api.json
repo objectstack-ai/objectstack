@@ -131,7 +131,6 @@
     "api/ApiEndpoint:type",
     "api/ApiError:category",
     "api/ApiError:code",
-    "api/ApiError:declaredCode",
     "api/ApiError:details",
     "api/ApiError:httpStatus",
     "api/ApiError:message",
