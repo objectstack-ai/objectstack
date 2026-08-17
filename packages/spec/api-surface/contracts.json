@@ -231,6 +231,8 @@
     "RecordShare (interface)",
     "RecordShareRecipientType (type)",
     "RemoteTable (interface)",
+    "RenderTemplateInput (interface)",
+    "RenderTemplateResult (interface)",
     "ReportFormat (type)",
     "ReportQuery (interface)",
     "ReportRunResult (interface)",
