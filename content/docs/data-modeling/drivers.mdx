@@ -179,10 +179,11 @@ ObjectStack — is what makes them secrets:
 | `mongo` \| `mongodb` | `options.tlsCertificateKeyFilePassword` | TLS key-file passphrase |
 | `mongo` \| `mongodb` | `options.key` | TLS private key material (PEM) |
 | `mongo` \| `mongodb` | `options.passphrase` | TLS key passphrase |
+| `mongo` \| `mongodb` | `options.authMechanismProperties.AWS_SESSION_TOKEN` | AWS STS session token (`MONGODB-AWS` auth) |
 | `turso` \| `libsql` | `encryptionKey` | AES-256 key for the local database file |
 
 Unlike `password` / `authToken` (typed `never` in their schemas — the parse
-refuses them outright), these five keys are **writable**: the parse accepts
+refuses them outright), these six keys are **writable**: the parse accepts
 them, and they are stored **at rest in `sys_metadata` as plain text**, right
 alongside the rest of the datasource row. The protection that exists today is
 on the READ side only — every one of them is stripped before a datasource
@@ -193,15 +194,28 @@ record is ever served back over the admin API or shown in the Setup UI
 round-tripping through a read; it is not encryption at rest, and an operator
 with direct access to the metadata store can still read the plain-text value.
 
+`options.authMechanismProperties.AWS_SESSION_TOKEN` is writable for a
+different reason than the other five: it isn't refused at the write door
+because the MongoDB client **itself** throws on it under `authMechanism:
+'MONGODB-AWS'` (`MongoAPIError: AWS_SESSION_TOKEN cannot be provided…`,
+driver v7 requires AWS SDK-sourced credentials) — a spec-level refusal would
+just be naming a remedy the client already enforces — and under any other
+auth mechanism nothing reads it at all. Either way, a stored value is
+accepted, held in `sys_metadata` as plain text, and redacted on read exactly
+like the rest of this table.
+
 <Callout type="warn">
 **This is a deliberate, documented trade-off ([#9124](https://github.com/objectstack-ai/objectstack/issues/9124)), not an oversight.**
-The binder has exactly one named slot. Refusing these five keys at write time
-would remove the only way to configure an authenticated SOCKS5 proxy or a
-passphrase-protected TLS key — a capability the client genuinely honours, with
-no working refusal remedy. **Restart condition:** the first real deployment
-that needs an authenticated proxy or a passphrase-protected key converts this
-into named binder-slot support — one mechanism covering all five keys — rather
-than the current per-key accept-and-document posture.
+The binder has exactly one named slot. Refusing `proxyPassword`,
+`tlsCertificateKeyFilePassword`, `key`, `passphrase`, or turso's
+`encryptionKey` at write time would remove the only way to configure an
+authenticated SOCKS5 proxy, a passphrase-protected TLS key, or a
+locally-encrypted database file — a capability the client genuinely honours,
+with no working refusal remedy. (`AWS_SESSION_TOKEN` isn't part of that
+trade-off — see above.) **Restart condition:** the first real deployment
+that needs an authenticated proxy or a passphrase-protected key converts
+that group into named binder-slot support — one mechanism covering those
+five keys — rather than the current per-key accept-and-document posture.
 </Callout>
 
 ## Startup: a driver that cannot connect aborts the boot

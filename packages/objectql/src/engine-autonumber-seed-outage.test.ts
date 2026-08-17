@@ -41,6 +41,17 @@ vi.mock('./registry', () => {
   const instance: any = {
     getObject: vi.fn(),
     resolveObject: vi.fn((n: string) => instance.getObject(n)),
+    // [#9154] This double used to OMIT `getAllObjects`, and every test here
+    // passed anyway: the engine's roll-up summary index read it as
+    // `getAllObjects?.() ?? []`, so a double that does not model the method
+    // was indistinguishable from a registry with nothing in it — the write
+    // path silently skipped the insert-time roll-up seed (#5749) and the
+    // post-write recompute. With the optional call gone the omission is a
+    // hard `TypeError`, which is the point: the double now has to model the
+    // method the engine actually calls. Empty is the truthful body for THIS
+    // suite — it declares no `summary` field, so the roll-up index over it is
+    // empty either way, and now it says so instead of the engine inventing it.
+    getAllObjects: vi.fn(() => []),
     registerObject: vi.fn(),
     getObjectOwner: vi.fn(),
     registerNamespace: vi.fn(),
