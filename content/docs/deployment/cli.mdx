@@ -1054,11 +1054,22 @@ success forever. Pass **`--fail-on-empty`** to opt into the strict reading, wher
 an empty match exits 1 (#7848).
 
 The **record-shaped** action types — `create_record`, `read_record`,
-`update_record`, `delete_record`, `query_records` — address the Data Protocol at
-its default mount (`/api/v1/data`, i.e. `{apiPath}{crud.dataPrefix}`). A
-deployment that moves that mount by setting `api.apiPath` or `crud.dataPrefix` is
-out of reach for them; write those steps as `api_call`, which takes the path you
-give it. `run_script` has no adapter branch at all and fails by name.
+`update_record`, `delete_record`, `query_records` — **ask the server where the
+Data Protocol is mounted** instead of assuming it. Once per run, `os test`
+fetches `{apiBase}/discovery` and addresses whatever `routes.data` advertises,
+so a deployment that moves the mount with `crud.dataPrefix` is reached without
+you telling it anything. When the probe cannot answer, the run falls back to the
+convention `{apiPath}{crud.dataPrefix}` (`/api/v1/data`) and **says so**: a
+warning naming the mount it will address and the probe that failed, and the same
+statement appended to every 404 a record step gets — so a wrong mount reads as a
+wrong mount, not as your own URL mistake.
+
+One case survives that fallback by construction: setting **`api.apiPath`** moves
+the discovery document itself out from under the probe, and no fixed-path
+document reports the REST mount (`/.well-known/objectstack` advertises the
+dispatcher's own prefix, not this one). Against such a host, write those steps as
+`api_call`, which takes the path you give it. `run_script` has no adapter branch
+at all and fails by name.
 
 #### `os doctor`
 
