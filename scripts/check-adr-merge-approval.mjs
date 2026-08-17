@@ -1,9 +1,25 @@
 #!/usr/bin/env node
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// check-adr-merge-approval -- a PR whose diff touches docs/adr/** must not be
-// mergeable without an APPROVED review on it, and must not be sitting on an
-// armed auto-merge. Any account's approval counts; no account's arming does.
+// check-adr-merge-approval -- a PR whose diff touches a GOVERNED SURFACE must
+// not be mergeable without an APPROVED review on it, and must not be sitting on
+// an armed auto-merge. Any account's approval counts; no account's arming does.
+//
+// Two surfaces are governed, with IDENTICAL pass conditions and DISTINCT
+// wording (each red names the rule that governs its own surface):
+//
+//   docs/adr/**        -- an ADR is the recorded decision (Prime Directive #13),
+//                         and landing one is adopting a governance position.
+//   .claude/skills/**  -- the lane's own operating protocol: the repo-internal
+//                         agent playbooks every later dispatch reads. Added
+//                         2026-08-17 by maintainer ruling on #9319 decision 2
+//                         (see "The skill surface" below).
+//
+// The script keeps its original file name: the job name it reports under
+// ("ADR maintainer approval") is a required status context in the `main`
+// ruleset and is registered under that exact spelling in
+// scripts/check-required-contexts.mjs, so neither is renamed here. Renaming
+// either is a settings action no CI job can perform (#7022).
 //
 //   node scripts/check-adr-merge-approval.mjs               # gate mode (CI and local)
 //   node scripts/check-adr-merge-approval.mjs --pr 6671     # replay a PR via the live API
@@ -24,10 +40,10 @@
 //
 //   GUARANTEED (machine-enforced here)   | NOT guaranteed (convention only)
 //   -------------------------------------+----------------------------------------
-//   a docs/adr/** diff cannot reach a    | that the approver is the maintainer.
-//   mergeable state with no approving    | Any account with review rights on this
-//   review on the PR                     | repo -- INCLUDING an AI seat -- satisfies
-//                                        | this gate. That is the accepted cost of
+//   a GOVERNED diff (docs/adr/** or      | that the approver is the maintainer.
+//   .claude/skills/**) cannot reach a    | Any account with review rights on this
+//   mergeable state with no approving    | repo -- INCLUDING an AI seat -- satisfies
+//   review on the PR                     | this gate. That is the accepted cost of
 //                                        | the 2026-08-12 ruling, stated out loud.
 //   -------------------------------------+----------------------------------------
 //   the approval is CURRENT, not         | that the approver is not also the
@@ -35,10 +51,16 @@
 //   or DISMISSED revokes it and the      | who merges is the maintainer. This gate
 //   gate goes red again                  | reads STATE, never actors.
 //   -------------------------------------+----------------------------------------
-//   a docs/adr/** diff cannot reach a    | that auto-merge cannot be armed inside
+//   a GOVERNED diff cannot reach a       | that auto-merge cannot be armed inside
 //   mergeable state while auto-merge is  | the seconds before this gate re-runs and
 //   ARMED on the PR -- armed is RED,     | goes red. See "the window this does NOT
 //   approved or not (#8012)              | close" below; it needs the ruleset side.
+//   -------------------------------------+----------------------------------------
+//   a MIXED diff is judged by ONE path   | that a mixed PR gets split. The gate can
+//   hit, never by proportion: one file   | only refuse to let it merge unattended;
+//   under a governed prefix governs the  | splitting the governed files into their
+//   whole PR (Prime Directive #14's      | own PR remains the author's call.
+//   「一条命中就分叉」)                    |
 //
 // The 2026-08-12 ruling SUPERSEDES the account-identity proxy this file used
 // to implement. That proxy came from #6741 (maintainer, verbatim)
@@ -65,13 +87,52 @@
 // as fixtures in `--self-test`, pinned RED forever: they had no reviews at
 // all, so they stay red under the widened rule too.
 //
+// ## The skill surface (.claude/skills/**), added 2026-08-17
+//
+// Same control, second surface, ruled by the maintainer on #9319 decision 2
+// (2026-08-17, 「同意」 batch), verbatim:
+//
+// 「The `ADR maintainer approval` gate's path predicate extends to
+//   `.claude/skills/**`, making Prime Directive #14 enforced rather than
+//   declared (the ADR-0049 shape, applied to the lane's own protocol surface).
+//   The #8012 armed-auto-merge clause applies to the extended paths
+//   identically.」
+//
+// The measured bypass it answers (#9319, from PR #9238): a `.claude/skills/**`
+// PR -- whose own body said 「draft, awaiting a human merge」 -- was flipped
+// ready and enqueued by an unidentified seat, and the merge queue landed it on
+// `main` as 862eb14 with ZERO GitHub reviews of any kind. Content risk was low
+// and the merge was retroactively accepted (#9319 decision 1); the defect is
+// the CONTROL. Because all seats share one GitHub login, "which seat flipped
+// it" is not forensically answerable -- which is precisely why the ruling
+// chose a gate over an investigation: the identical act becomes mechanically
+// impossible instead of traceable after the fact. PR #9238's real capture is
+// pinned RED in `--self-test` alongside the 2026-08-08 ADR violations.
+//
+// Why this surface and not "any agent-facing file": the skill files are the
+// operating protocol every LATER dispatch reads, so a bad landing there
+// propagates into work nobody has started yet. That is the same
+// declared-must-be-enforced doctrine (ADR-0049) this repo applies to metadata,
+// pointed at the lane's own protocol.
+//
+// Deliberately NOT widened to the published `skills/` catalog in the same
+// stroke: the ruling names `.claude/skills/**`, and `skills/**` is a customer-
+// shipped catalog whose merge posture is a separate decision. The pm-dispatch
+// skill's ACCEPT fork already treats all three prefixes alike as CONVENTION;
+// only two of them are machine-enforced here, and that gap is stated rather
+// than quietly closed or quietly ignored.
+//
 // ## The decision rule
 //
-//   diff does not touch docs/adr/**  -> PASS, with ZERO API lookups
-//   diff touches docs/adr/**         -> PASS only if BOTH hold:
-//                                        (1) the PR's latest state-setting
+//   diff touches no governed prefix  -> PASS, with ZERO API lookups
+//   diff touches docs/adr/** and/or  -> PASS only if BOTH hold:
+//   .claude/skills/**                   (1) the PR's latest state-setting
 //                                            review is APPROVED, and
 //                                        (2) auto-merge is NOT armed on the PR
+//
+// One path hit is enough. A mixed diff (governed files plus anything else) is
+// gate-scoped in full -- proportion is not a question this gate asks, matching
+// Prime Directive #14's 「混合 diff 一条命中就分叉,⛔ 不按比例判」.
 //
 // "Latest state-setting" rather than "any APPROVED review has ever existed":
 // an unrevokable approval would be a one-way door -- approve once, force-push
@@ -81,7 +142,7 @@
 // CHANGES_REQUESTED from a SECOND reviewer revokes a first reviewer's
 // approval (red), and it takes a fresh approval -- from anyone -- to clear it.
 //
-// ## Clause (2): armed auto-merge is itself a RED state on docs/adr/** (#8012)
+// ## Clause (2): armed auto-merge is itself a RED state on a governed diff (#8012)
 //
 // Measured live on PR #7960 at ~11:15Z on 2026-08-12: an AI seat submitted an
 // approving review and then ENABLED AUTO-MERGE on the PR while this gate was
@@ -124,9 +185,14 @@
 // re-review and no admin. Contrast #8161, where the sole account that could
 // clear the gate was the one GitHub forbade from clearing it.
 //
-// Non-ADR PRs are untouched: arming auto-merge is ordinary, useful practice
+// Clause (2) governs the skill surface on exactly the same terms -- the #9319
+// ruling says so in one sentence (「The #8012 armed-auto-merge clause applies to
+// the extended paths identically」), and #9238 is the incident that makes it
+// concrete: an armed/enqueued skill PR is the state that landed unattended.
+//
+// Ungoverned PRs are untouched: arming auto-merge is ordinary, useful practice
 // here (the release PR runs on it) and the clean path still returns before any
-// lookup happens. Only docs/adr/** is governed.
+// lookup happens. Only docs/adr/** and .claude/skills/** are governed.
 //
 // ## The window this does NOT close, stated rather than assumed
 //
@@ -210,8 +276,59 @@ import { fileURLToPath } from 'node:url';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 
-/** The governed surface. A path prefix, matched against repo-relative paths. */
+/** The ADR surface. A path prefix, matched against repo-relative paths. */
 export const ADR_PATH_PREFIX = 'docs/adr/';
+
+/**
+ * The agent-skill surface, added by the #9319 decision-2 ruling (2026-08-17).
+ *
+ * `.claude/skills/` and NOT `skills/`: the published catalog at the repo root
+ * ships to customer projects and its merge posture is a separate decision the
+ * ruling did not make. A prefix, like the ADR one, so `.claude/skills-archive/`
+ * and `.claude/skillset.md` do NOT match -- the trailing slash is load-bearing
+ * and `--self-test` pins both near misses.
+ */
+export const SKILL_PATH_PREFIX = '.claude/skills/';
+
+/**
+ * Every governed surface, in report order. Identical pass conditions (an
+ * APPROVED standing and no armed auto-merge); DISTINCT `rule` text, so a red on
+ * a skills PR cites Prime Directive #14's human-merge reservation and a red on
+ * an ADR PR cites the ADR approval ruling -- an operator reading the failure is
+ * told which rule they are standing on, not a generic "governed path" scold.
+ *
+ * A table rather than an `if`: adding a third surface is one entry with its own
+ * wording, and every renderer, verdict field and self-test walks the table, so
+ * no surface can be added with the wording of another (#9319).
+ */
+export const GOVERNED_SURFACES = Object.freeze([
+  Object.freeze({
+    id: 'adr',
+    prefix: ADR_PATH_PREFIX,
+    glob: 'docs/adr/**',
+    what: 'an architecture decision record',
+    rule:
+      'The rule: 「门禁改成只要求「APPROVED review 存在」」/「不要指定具体的人」 (maintainer, 2026-08-12,\n' +
+      '    verbatim; #8161), enforcing the 「人工合并」 half of 「adr 只能由维护者自己确认,人工合并,\n' +
+      '    ai 不得擅自合并。」 (maintainer, 2026-08-08, verbatim; #6741). An accepted ADR IS the decision\n' +
+      '    (Prime Directive #13), so landing one adopts a governance position and "CI is green" carries no\n' +
+      '    information about whether it should be adopted.',
+  }),
+  Object.freeze({
+    id: 'skill',
+    prefix: SKILL_PATH_PREFIX,
+    glob: '.claude/skills/**',
+    what: "a repo-internal agent skill -- the lane's own operating protocol",
+    rule:
+      'The rule: Prime Directive #14 -- a skill-surface PR is merged by a human, by hand. ⛔ Never merge,\n' +
+      '    never add to the merge queue, never arm auto-merge on it. Machine-enforced here since the\n' +
+      '    2026-08-17 ruling on #9319 decision 2, verbatim: 「The `ADR maintainer approval` gate\'s path\n' +
+      "    predicate extends to `.claude/skills/**`, making Prime Directive #14 enforced rather than\n" +
+      '    declared」. The measured bypass: PR #9238 was flipped ready and landed by the merge queue with\n' +
+      '    ZERO reviews -- these files are what every LATER dispatch reads, so a bad landing here\n' +
+      '    propagates into work nobody has started yet.',
+  }),
+]);
 
 /** Review states that SET the reviewer's standing; COMMENTED/PENDING do not. */
 const STATE_SETTING = new Set(['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED']);
@@ -232,6 +349,32 @@ export const ARMING_NOT_JUDGED = 'arming-not-judged';
 /** @param {string[]} paths @returns {string[]} the paths under docs/adr/ */
 export function adrFilesIn(paths) {
   return paths.filter((p) => p.startsWith(ADR_PATH_PREFIX));
+}
+
+/** @param {string[]} paths @returns {string[]} the paths under .claude/skills/ */
+export function skillFilesIn(paths) {
+  return paths.filter((p) => p.startsWith(SKILL_PATH_PREFIX));
+}
+
+/**
+ * The governed slice of a diff, grouped by surface and carrying each surface's
+ * own wording. Surfaces with no hit are absent, so `matched.length === 0` IS
+ * the clean path -- there is no "governed but empty" state to mis-handle.
+ *
+ * @param {string[]} paths repo-relative changed paths
+ * @returns {{id: string, prefix: string, glob: string, what: string, rule: string, files: string[]}[]}
+ */
+export function governedFilesIn(paths) {
+  const list = Array.isArray(paths) ? paths : [];
+  return GOVERNED_SURFACES.map((surface) => ({
+    ...surface,
+    files: list.filter((p) => typeof p === 'string' && p.startsWith(surface.prefix)),
+  })).filter((surface) => surface.files.length > 0);
+}
+
+/** Every governed prefix, as a human-readable list for the verdict lines. */
+export function governedGlobs() {
+  return GOVERNED_SURFACES.map((s) => s.glob);
 }
 
 /**
@@ -326,9 +469,9 @@ export function armingFrom(pull) {
 }
 
 /**
- * The whole judgement. `getReviews` is a LAZY async thunk: on a diff that does
- * not touch docs/adr/** it is never invoked, which is how "PASS with zero API
- * lookups" is a structural property rather than a promise -- the self-test
+ * The whole judgement. `getReviews` is a LAZY async thunk: on a diff that
+ * touches NO governed prefix it is never invoked, which is how "PASS with zero
+ * API lookups" is a structural property rather than a promise -- the self-test
  * passes a thunk that throws, proving the clean path cannot look anything up.
  *
  * `getArming` is the same lazy shape for clause (2) and is MANDATORY -- either a
@@ -341,11 +484,16 @@ export function armingFrom(pull) {
  * told to disarm only to discover the approval is also missing is two round
  * trips for one verdict.
  *
+ * `surfaces` carries the matched governed surfaces WITH their files and their
+ * own rule wording, so every renderer is per-surface by construction; `files`
+ * is the flat union for callers that only need "what is gated here".
+ *
  * @param {object} input
  * @param {string[]} input.changedPaths repo-relative changed paths
  * @param {() => Promise<object[]>} input.getReviews lazy review-list fetch
  * @param {(() => Promise<{armed: boolean}>)|'arming-not-judged'} input.getArming
- * @returns {Promise<{ok: boolean, kind: string, reasons: string[], adrFiles: string[],
+ * @returns {Promise<{ok: boolean, kind: string, reasons: string[],
+ *   surfaces: {id: string, glob: string, rule: string, files: string[]}[], files: string[],
  *   checked: number, state?: string|null, approvals?: string[],
  *   arming?: {judged: boolean, armed: boolean|null, by: string|null, method: string|null}}>}
  */
@@ -359,9 +507,16 @@ export async function decide({ changedPaths, getReviews, getArming }) {
     );
   }
 
-  const adrFiles = adrFilesIn(changedPaths);
+  // ONE path hit governs the whole PR: `governedFilesIn` groups by surface and
+  // drops the surfaces with no hit, so a mixed diff (governed files + anything
+  // else) arrives here indistinguishable from a governed-only one. Proportion
+  // is never computed, because it is never a question (Prime Directive #14).
+  const surfaces = governedFilesIn(changedPaths);
+  const files = surfaces.flatMap((s) => s.files);
   const checked = changedPaths.length;
-  if (adrFiles.length === 0) return { ok: true, kind: 'no-adr-diff', reasons: [], adrFiles, checked };
+  if (surfaces.length === 0) {
+    return { ok: true, kind: 'no-governed-diff', reasons: [], surfaces, files, checked };
+  }
 
   const reviews = await getReviews();
   if (!Array.isArray(reviews)) {
@@ -393,7 +548,7 @@ export async function decide({ changedPaths, getReviews, getArming }) {
   if (state !== 'APPROVED') reasons.push('missing-approval');
 
   const ok = reasons.length === 0;
-  return { ok, kind: ok ? 'approved' : reasons.join('+'), reasons, adrFiles, checked, state, approvals, arming };
+  return { ok, kind: ok ? 'approved' : reasons.join('+'), reasons, surfaces, files, checked, state, approvals, arming };
 }
 
 /**
@@ -518,8 +673,10 @@ export function resolveDiffBase(root, env, event) {
 
 /**
  * `git diff --name-only` between `base` and HEAD plus the working tree.
- * `--no-renames` on purpose: a rename OUT of docs/adr/ must surface both
- * sides, so moving an ADR away is as gated as editing one. `-z` keeps paths
+ * `--no-renames` on purpose: a rename OUT of a governed prefix must surface
+ * both sides, so moving an ADR (or a skill) away is as gated as editing one --
+ * with renames collapsed, a `docs/adr/x.md` -> `docs/x.md` move would report
+ * only the destination and slip the gate entirely. `-z` keeps paths
  * verbatim (no quoting to unescape). Throws with git's own stderr on failure;
  * the caller turns that into exit 1 -- an uncomputable diff is not an empty
  * diff.
@@ -603,8 +760,6 @@ const fetchPull = ({ apiUrl, repo, token }, pull) =>
 
 // -- reporting ----------------------------------------------------------------
 
-const RULING = '「门禁改成只要求「APPROVED review 存在」」/「不要指定具体的人」 (maintainer, 2026-08-12, verbatim; #8161)';
-
 /** How the verdict describes the arming half, on both the green and red paths. */
 function armingSentence(arming, armingNote) {
   if (!arming || arming.judged !== true) {
@@ -613,22 +768,48 @@ function armingSentence(arming, armingNote) {
   return arming.armed ? 'auto-merge is ARMED' : 'auto-merge is OFF';
 }
 
-function reportVerdict(verdict, { source, armingNote = null }) {
-  if (verdict.ok && verdict.kind === 'no-adr-diff') {
-    console.log(
-      `✅  No files under ${ADR_PATH_PREFIX} in this diff (${verdict.checked} changed file(s), ${source}). ` +
+/** `• path` lines for one surface's file list. */
+const bullets = (files) => files.map((f) => `      • ${f}`).join('\n');
+
+/**
+ * The whole report, as text -- PURE, so `--self-test` asserts on the words an
+ * operator actually reads instead of on the verdict object alone.
+ *
+ * The wording requirement this function exists to hold (#9395): each governed
+ * surface names ITS OWN rule. A skills PR is refused citing Prime Directive
+ * #14's human-merge reservation; an ADR PR is refused citing the ADR approval
+ * ruling; a mixed PR gets both blocks, in table order. The shared reason blocks
+ * (arming, approval) below deliberately cite NEITHER rule -- the pass condition
+ * is identical for every surface, so the shared half must stay surface-neutral
+ * or the distinctness is decoration.
+ *
+ * @returns {{exitCode: number, stream: 'log'|'error', text: string}}
+ */
+export function renderVerdict(verdict, { source, armingNote = null }) {
+  const globs = governedGlobs().join(' / ');
+  if (verdict.ok && verdict.kind === 'no-governed-diff') {
+    return {
+      exitCode: 0,
+      stream: 'log',
+      text:
+        `✅  No files under ${globs} in this diff (${verdict.checked} changed file(s), ${source}). ` +
         'Neither reviews nor auto-merge state were consulted -- zero API lookups on the clean path.',
-    );
-    return 0;
+    };
   }
+
+  const surfaces = verdict.surfaces ?? [];
+  const counted = surfaces.map((s) => `${s.files.length} file(s) under ${s.glob}`).join(' + ');
+
   if (verdict.ok) {
     const who = (verdict.approvals ?? []).map((s) => `'${s}'`).join(', ');
-    console.log(
-      `✅  ${verdict.adrFiles.length} file(s) under ${ADR_PATH_PREFIX}; the PR's current review standing is ` +
+    return {
+      exitCode: 0,
+      stream: 'log',
+      text:
+        `✅  ${counted}; the PR's current review standing is ` +
         `APPROVED${who ? ` (approved by ${who})` : ''} and ${armingSentence(verdict.arming, armingNote)} (${source}).\n` +
-        verdict.adrFiles.map((f) => `      • ${f}`).join('\n'),
-    );
-    return 0;
+        surfaces.map((s) => bullets(s.files)).join('\n'),
+    };
   }
 
   const approvals = verdict.approvals ?? [];
@@ -640,12 +821,15 @@ function reportVerdict(verdict, { source, armingNote = null }) {
         `method: ${verdict.arming.method ?? '(unknown)'}).\n` +
         '\n    An armed auto-merge turns the next approving review into an UNATTENDED MERGE: the approval\n' +
         '    re-runs this gate, the gate goes green, and GitHub merges with nobody pressing a button. That\n' +
-        "    bypasses 「人工合并」 -- the second half of #6741's ruling -- while every check reports success.\n" +
-        '    Measured live on PR #7960 at 11:15Z on 2026-08-12 (#8012), disarmed by hand before it fired.\n' +
+        '    bypasses the human-merge reservation named above while every check reports success. Measured\n' +
+        '    twice: live on PR #7960 at 11:15Z on 2026-08-12, disarmed by hand before it fired (#8012), and\n' +
+        '    on PR #9238, which was flipped ready and landed by the merge queue with zero reviews (#9319).\n' +
         '\n    This is red WHETHER OR NOT the PR is approved. An approval does not make an armed auto-merge\n' +
         '    acceptable -- it is precisely the trigger the arming is waiting for.\n' +
         '\n    Fix: DISABLE auto-merge on this PR, then merge it in person once it is approved. Disabling it\n' +
-        '    re-runs this gate on its own (the `auto_merge_disabled` trigger), so nothing else is needed.',
+        '    re-runs this gate on its own (the `auto_merge_disabled` trigger), so nothing else is needed.\n' +
+        '    ⚠️ Already ENQUEUED? Disarming drops the arming but NOT queue membership -- converting the PR\n' +
+        '    back to draft is what removes it from the queue. Do both, then confirm from the remote.',
     );
   }
 
@@ -665,18 +849,32 @@ function reportVerdict(verdict, { source, armingNote = null }) {
   }
 
   const numbered = blocks.length > 1;
-  console.error(
-    `\n❌  This change touches ${ADR_PATH_PREFIX} and this PR is not in a mergeable state under the ADR rules.\n\n` +
-      verdict.adrFiles.map((f) => `      • ${f}`).join('\n') +
+  const surfaceBlocks = surfaces
+    .map((s) => `This PR touches ${s.what} (${s.glob}), ${s.files.length} file(s):\n\n${bullets(s.files)}\n\n    ${s.rule}`)
+    .join('\n\n    ');
+
+  return {
+    exitCode: 1,
+    stream: 'error',
+    text:
+      `\n❌  This PR touches ${surfaces.length} governed surface(s) (${counted}) and is not in a mergeable ` +
+      'state.\n\n    ' +
+      surfaceBlocks +
       '\n\n' +
       blocks.map((b, i) => `    ${numbered ? `[${i + 1}] ` : ''}${b}`).join('\n\n') +
-      '\n\n    The ruling being enforced: ' +
-      RULING +
-      '\n    Drafting and pushing this PR was fine and stays fine -- only the MERGE is gated. What this gate\n' +
+      '\n\n    One path hit governs the whole PR -- a mixed diff is never judged by proportion. If the rest\n' +
+      '    of this PR needs to land now, split the governed files into their own PR.\n' +
+      '    Drafting and pushing this PR was fine and stays fine -- only the MERGE is gated. What this gate\n' +
       '    does and does not guarantee is stated in full in the table at the head of\n' +
-      "    scripts/check-adr-merge-approval.mjs (#6741's 「维护者自己确认」/「人工合并」, #8012).",
-  );
-  return 1;
+      '    scripts/check-adr-merge-approval.mjs.',
+  };
+}
+
+function reportVerdict(verdict, options) {
+  const { exitCode, stream, text } = renderVerdict(verdict, options);
+  if (stream === 'error') console.error(text);
+  else console.log(text);
+  return exitCode;
 }
 
 // -- CLI ----------------------------------------------------------------------
@@ -757,7 +955,7 @@ async function main() {
         `    tried: ${base.tried.join(', ')}\n` +
         '    In CI, the checkout needs `fetch-depth: 0` (a shallow clone has no merge base); locally,\n' +
         '    `git fetch --no-tags origin main` and re-run. This is a failure, not a skip: a diff gate\n' +
-        '    with no diff would report "no ADR files touched" while having looked at nothing (#4928).',
+        '    with no diff would report "no governed files touched" while having looked at nothing (#4928).',
     );
     return 1;
   }
@@ -770,9 +968,16 @@ async function main() {
     return 1;
   }
 
+  // The governed surfaces this diff hits, named once for the log lines below.
+  // `decide()` recomputes it from the same paths -- this is for the operator's
+  // narration, never the verdict.
+  const touched = governedFilesIn(changedPaths)
+    .map((s) => s.glob)
+    .join(' + ');
+
   // Resolved once and shared by both lazy reads below, so a gated build costs
-  // one resolution and not one per clause. Reached only when the diff touches
-  // docs/adr/** -- the clean path returns before either thunk is invoked.
+  // one resolution and not one per clause. Reached only when the diff touches a
+  // governed prefix -- the clean path returns before either thunk is invoked.
   let resolvedPr = null;
   const resolvePrOnce = async () => {
     if (resolvedPr) return resolvedPr;
@@ -789,9 +994,9 @@ async function main() {
     }
     if (!pr) {
       throw new Error(
-        'this diff touches docs/adr/** but the pull request could not be resolved from the event payload,\n' +
+        `this diff touches ${touched} but the pull request could not be resolved from the event payload,\n` +
           "    the ref, the head commit subject, or the commit's associated PRs. Refusing to skip: an\n" +
-          '    unattributable ADR change is exactly what must not merge unreviewed.',
+          '    unattributable change to a governed surface is exactly what must not merge unreviewed.',
       );
     }
     if (env.GITHUB_ACTIONS === 'true' && !ctx.token) {
@@ -806,7 +1011,7 @@ async function main() {
 
   const getReviews = async () => {
     const pr = await resolvePrOnce();
-    console.log(`    docs/adr/** touched -- consulting reviews of PR #${pr.number} (resolved via ${pr.how}).`);
+    console.log(`    ${touched} touched -- consulting reviews of PR #${pr.number} (resolved via ${pr.how}).`);
     return fetchReviews(ctx, pr.number);
   };
 
@@ -823,7 +1028,7 @@ async function main() {
     ? ARMING_NOT_JUDGED
     : async () => {
         const pr = await resolvePrOnce();
-        console.log(`    docs/adr/** touched -- reading the auto-merge state of PR #${pr.number}.`);
+        console.log(`    ${touched} touched -- reading the auto-merge state of PR #${pr.number}.`);
         return armingFrom(await fetchPull(ctx, pr.number));
       };
 
@@ -847,13 +1052,20 @@ if (invokedDirectly && !process.argv.includes('--self-test')) {
 // `resolvePullNumber`, ...), never imitations. Every red-path fixture's
 // expected direction is stated in its comment BEFORE the assertion runs.
 
-/** Historical replay fixtures — the two measured violations (#6785).
+/** Historical replay fixtures — the three measured violations (#6785, #9319).
  *
- * Captured 2026-08-08 from the live GitHub API (`pulls/{n}/files`,
- * `pulls/{n}/reviews`) for the two docs/adr/** PRs merged by AI-seat
- * identities within an hour of the #6741 ruling. Both review lists really
- * were EMPTY — the PRs were merged with zero reviews of any kind, which is
- * the whole case for this gate. Predicted direction: RED, both, forever.
+ * Real captures from the live GitHub API (`pulls/{n}/files`,
+ * `pulls/{n}/reviews`), not hand-written imitations: the two docs/adr/** PRs
+ * merged by AI-seat identities within an hour of the #6741 ruling (captured
+ * 2026-08-08), and the .claude/skills/** PR the merge queue landed on
+ * 2026-08-17 (captured 2026-08-17, the day of the #9319 ruling). All three
+ * review lists really were EMPTY — every one of these merged with zero reviews
+ * of any kind, which is the whole case for this gate. Predicted direction: RED,
+ * all three, forever.
+ *
+ * #9238 is the load-bearing one for the widened predicate: under the pre-#9395
+ * rule it replayed GREEN (`no-adr-diff`, zero lookups) — it IS the diff that
+ * proved prose alone does not hold this surface.
  */
 const HISTORICAL_VIOLATIONS = [
   {
@@ -864,6 +1076,11 @@ const HISTORICAL_VIOLATIONS = [
   {
     pr: 6732, // merged 2026-08-08T14:38:56Z by `os-project-manager`, in draft state
     files: ['docs/adr/0079-record-display-name.md', 'scripts/check-adr-anchors.mjs'],
+    reviews: [],
+  },
+  {
+    pr: 9238, // landed by the merge queue on 2026-08-17 as 862eb14, zero reviews (#9319)
+    files: ['.claude/skills/pm-dispatch/SKILL.md', '.claude/skills/pm-dispatch/references/platform-readings.md'],
     reviews: [],
   },
 ];
@@ -889,11 +1106,11 @@ async function selfTest() {
 
   /** A reviews thunk that must never run — proves the zero-lookup clean path. */
   const forbiddenLookup = async () => {
-    throw new Error('getReviews was invoked on a diff that does not touch docs/adr/**');
+    throw new Error('getReviews was invoked on a diff that touches no governed prefix');
   };
   /** The same, for clause (2): the clean path must not read arming either. */
   const forbiddenArming = async () => {
-    throw new Error('the auto-merge state was read on a diff that does not touch docs/adr/**');
+    throw new Error('the auto-merge state was read on a diff that touches no governed prefix');
   };
 
   // Arming postures, spelled at every call site rather than defaulted — the
@@ -932,14 +1149,71 @@ async function selfTest() {
       'expected exactly the two docs/adr/ paths to match',
     );
 
+    // ── the SKILL surface, added 2026-08-17 (#9319 decision 2) ──────────────
+    // The prefix is `.claude/skills/` with the trailing slash load-bearing, and
+    // it is NOT the published `skills/` catalog. Both near misses are pinned
+    // because either one silently mis-scopes the gate: matching too little
+    // restores the #9238 hole, matching too much would gate every customer-
+    // facing skill PR under a ruling that never mentioned them.
+    assert(
+      'skill-prefix-matches-only-dot-claude-skills',
+      skillFilesIn([
+        '.claude/skills/pm-dispatch/SKILL.md',
+        '.claude/skills/deep/nested/reference.md',
+        '.claude/skills-archive/old.md',
+        '.claude/skillset.md',
+        '.claude/hooks/guard-shared-stash.sh',
+        'skills/objectstack-ui/SKILL.md',
+        'docs/adr/0001-x.md',
+      ]).length === 2,
+      'expected exactly the two .claude/skills/ paths to match',
+    );
+    assert(
+      'the-published-skills-catalog-is-NOT-governed',
+      skillFilesIn(['skills/objectstack-ui/SKILL.md']).length === 0 &&
+        governedFilesIn(['skills/objectstack-ui/SKILL.md']).length === 0,
+      'the ruling names .claude/skills/** only; skills/** is a separate, unmade decision',
+    );
+    assert(
+      'both-surfaces-are-declared-in-table-order',
+      GOVERNED_SURFACES.map((s) => s.prefix).join(',') === 'docs/adr/,.claude/skills/',
+      JSON.stringify(GOVERNED_SURFACES.map((s) => s.prefix)),
+    );
+    assert(
+      'each-surface-carries-its-own-rule-text',
+      new Set(GOVERNED_SURFACES.map((s) => s.rule)).size === GOVERNED_SURFACES.length &&
+        GOVERNED_SURFACES.every((s) => typeof s.rule === 'string' && s.rule.length > 0),
+      'two surfaces sharing one rule string would make the "distinct wording" requirement decoration',
+    );
+    // Grouping, not flattening: a mixed governed diff must arrive at the
+    // renderers as SEPARATE surfaces, or per-surface wording is unreachable.
+    {
+      const grouped = governedFilesIn(['docs/adr/0001-x.md', '.claude/skills/pm-dispatch/SKILL.md', 'package.json']);
+      assert(
+        'a-mixed-governed-diff-groups-by-surface',
+        grouped.length === 2 && grouped[0].id === 'adr' && grouped[1].id === 'skill' && grouped.every((s) => s.files.length === 1),
+        JSON.stringify(grouped.map((s) => [s.id, s.files])),
+      );
+    }
+
     // ── clean diff → GREEN with zero lookups (predicted: GREEN, thunk unused) ─
+    // The fixture deliberately includes `skills/` (the published catalog) and
+    // `.claude/hooks/`: the widening must not have swallowed the neighbours.
     {
       const v = await decide({
-        changedPaths: ['.github/workflows/adr-merge-approval.yml', 'scripts/check-adr-merge-approval.mjs', '.github/CODEOWNERS', 'package.json'],
+        changedPaths: [
+          '.github/workflows/adr-merge-approval.yml',
+          'scripts/check-adr-merge-approval.mjs',
+          '.github/CODEOWNERS',
+          'package.json',
+          'skills/objectstack-ui/SKILL.md',
+          '.claude/hooks/guard-main-checkout.sh',
+        ],
         getReviews: forbiddenLookup,
         getArming: forbiddenArming,
       });
-      assert('non-adr-diff-is-green-without-lookups', v.ok && v.kind === 'no-adr-diff', JSON.stringify(v));
+      assert('ungoverned-diff-is-green-without-lookups', v.ok && v.kind === 'no-governed-diff', JSON.stringify(v));
+      assert('an-ungoverned-verdict-names-no-surface', (v.surfaces ?? []).length === 0 && (v.files ?? []).length === 0, JSON.stringify(v.surfaces));
     }
 
     // ── ADR diff, no reviews at all → RED (predicted: RED) ──────────────────
@@ -957,6 +1231,165 @@ async function selfTest() {
         getArming: DISARMED,
       });
       assert('maintainer-approval-is-green', v.ok && v.kind === 'approved', JSON.stringify(v));
+    }
+
+    // ── THE WIDENED PATH CLASS: .claude/skills/** (#9395, ruling on #9319) ──
+    // Every ADR-surface behaviour, replayed on the skill surface. Directions
+    // predicted before running: identical to the ADR surface in every case —
+    // the ruling widened the PREDICATE, not the pass condition.
+    {
+      const skill = ['.claude/skills/pm-dispatch/SKILL.md'];
+
+      // no reviews → RED (predicted: RED). This is #9238's exact state.
+      const unreviewed = await decide({ changedPaths: skill, getReviews: async () => [], getArming: DISARMED });
+      assert('skills-diff-without-reviews-is-red', !unreviewed.ok && unreviewed.kind === 'missing-approval', JSON.stringify(unreviewed));
+      assert(
+        'a-skills-verdict-names-the-skill-surface',
+        (unreviewed.surfaces ?? []).length === 1 && unreviewed.surfaces[0].id === 'skill' && unreviewed.files.join() === skill.join(),
+        JSON.stringify(unreviewed.surfaces),
+      );
+
+      // approved + disarmed → GREEN (predicted: GREEN — the legitimate path;
+      // the gate must not make skill PRs unlandable, only unlandable-unattended)
+      const approvedDisarmed = await decide({
+        changedPaths: skill,
+        getReviews: async () => [review(HOTLONG, 'APPROVED', '2026-08-17T15:00:00Z')],
+        getArming: DISARMED,
+      });
+      assert('skills-diff-approved-and-disarmed-is-green', approvedDisarmed.ok && approvedDisarmed.kind === 'approved', JSON.stringify(approvedDisarmed));
+
+      // ⚠️ THE EMPTINESS PROOF FOR THE NEW PATH CLASS. Identical reviews and
+      // files; only the arming bit differs, and the verdicts must be opposite.
+      // Without clause (2) reaching the widened predicate, this pair is green
+      // twice — which is exactly the #9238 state (armed/enqueued + accepted).
+      const armedApprovedSkill = await decide({
+        changedPaths: skill,
+        getReviews: async () => [review(HOTLONG, 'APPROVED', '2026-08-17T15:00:00Z')],
+        getArming: ARMED_BY('os-zhuang'),
+      });
+      assert(
+        'skills-armed-clause-changes-a-verdict-that-would-otherwise-be-green',
+        armedApprovedSkill.ok === false && approvedDisarmed.ok === true,
+        `armed=${armedApprovedSkill.ok}, disarmed=${approvedDisarmed.ok} over identical reviews — clause (2) did not reach the skill surface`,
+      );
+      assert(
+        'skills-armed-and-approved-is-red-FOR-THE-ARMING-not-the-approval',
+        armedApprovedSkill.reasons.includes('auto-merge-armed') && !armedApprovedSkill.reasons.includes('missing-approval'),
+        JSON.stringify(armedApprovedSkill.reasons),
+      );
+
+      // The real captured armed payload, end to end on the skill surface
+      // (predicted: RED) — the parser and the widened predicate wired together.
+      const capturedArmedSkill = await decide({
+        changedPaths: skill,
+        getReviews: async () => [review(OS_ZHUANG, 'APPROVED', '2026-08-17T15:00:00Z')],
+        getArming: async () => armingFrom(CAPTURED_ARMED_PULL),
+      });
+      assert('a-real-captured-armed-payload-is-red-on-the-skill-surface', !capturedArmedSkill.ok && capturedArmedSkill.arming?.by === 'os-zhuang', JSON.stringify(capturedArmedSkill));
+
+      // MIXED DIFF: skills + ordinary files ⇒ gate-scoped in full (predicted:
+      // RED). Proportion is never asked — one path hit governs the PR.
+      const mixed = await decide({
+        changedPaths: ['package.json', 'packages/spec/src/index.ts', '.claude/skills/pm-dispatch/SKILL.md', 'README.md'],
+        getReviews: async () => [],
+        getArming: DISARMED,
+      });
+      assert('a-mixed-skills-diff-is-gate-scoped', !mixed.ok && mixed.kind === 'missing-approval', JSON.stringify(mixed));
+      assert(
+        'a-mixed-diff-gates-on-the-governed-files-only',
+        mixed.files.join() === '.claude/skills/pm-dispatch/SKILL.md' && mixed.checked === 4,
+        `expected 1 governed file out of 4 changed, got ${JSON.stringify(mixed.files)} of ${mixed.checked}`,
+      );
+      // A one-in-many mixed diff must be as red as a governed-only one: pinned
+      // by comparing the two verdicts' `ok`, so a future "proportion" rule
+      // (say, "governed files must be the majority") fails here.
+      assert(
+        'proportion-changes-no-verdict',
+        mixed.ok === unreviewed.ok,
+        `1-of-4 governed gave ok=${mixed.ok} while 1-of-1 gave ok=${unreviewed.ok} — a proportion crept in`,
+      );
+
+      // BOTH surfaces at once (predicted: RED, two surfaces in table order).
+      const both = await decide({
+        changedPaths: ['docs/adr/0001-x.md', '.claude/skills/pm-dispatch/SKILL.md'],
+        getReviews: async () => [],
+        getArming: DISARMED,
+      });
+      assert(
+        'a-diff-touching-both-surfaces-names-both',
+        !both.ok && (both.surfaces ?? []).map((s) => s.id).join() === 'adr,skill',
+        JSON.stringify((both.surfaces ?? []).map((s) => s.id)),
+      );
+    }
+
+    // ── the two surfaces fail with DISTINCT wording (#9395 acceptance) ───────
+    // Asserted on the rendered TEXT an operator reads, not on the verdict
+    // object: "each surface names its own rule" is a claim about words, and a
+    // claim about words that is only checked structurally is not checked.
+    // Predicted before running: the skills red cites Prime Directive #14 and
+    // never mentions the ADR glob; the ADR red cites the 2026-08-12 approval
+    // ruling and never mentions Prime Directive #14; the mixed red carries both.
+    {
+      const render = async (changedPaths) =>
+        renderVerdict(await decide({ changedPaths, getReviews: async () => [], getArming: DISARMED }), { source: 'self-test' });
+
+      const skillsRed = await render(['.claude/skills/pm-dispatch/SKILL.md']);
+      const adrRed = await render(['docs/adr/0001-x.md']);
+      const mixedRed = await render(['docs/adr/0001-x.md', '.claude/skills/pm-dispatch/SKILL.md']);
+
+      assert('a-skills-red-exits-1-on-stderr', skillsRed.exitCode === 1 && skillsRed.stream === 'error', JSON.stringify(skillsRed.exitCode));
+      assert('a-skills-red-cites-prime-directive-14', skillsRed.text.includes('Prime Directive #14'), skillsRed.text);
+      assert('a-skills-red-names-its-own-glob', skillsRed.text.includes('.claude/skills/**'), skillsRed.text);
+      assert('a-skills-red-names-the-9238-bypass', skillsRed.text.includes('#9238'), skillsRed.text);
+      assert(
+        'a-skills-red-does-NOT-cite-the-adr-rule',
+        !skillsRed.text.includes('docs/adr/**') && !skillsRed.text.includes('#6741'),
+        'the skill surface must not be refused in the ADR surface\'s words',
+      );
+
+      assert('an-adr-red-cites-the-adr-approval-ruling', adrRed.text.includes('#6741') && adrRed.text.includes('docs/adr/**'), adrRed.text);
+      assert(
+        'an-adr-red-does-NOT-cite-the-skill-rule',
+        !adrRed.text.includes('Prime Directive #14') && !adrRed.text.includes('.claude/skills/**'),
+        'the ADR surface must not be refused in the skill surface\'s words',
+      );
+
+      assert(
+        'a-mixed-red-carries-BOTH-rule-texts',
+        mixedRed.text.includes('Prime Directive #14') && mixedRed.text.includes('#6741'),
+        mixedRed.text,
+      );
+      assert(
+        'a-mixed-red-lists-both-surfaces-files',
+        mixedRed.text.includes('docs/adr/0001-x.md') && mixedRed.text.includes('.claude/skills/pm-dispatch/SKILL.md'),
+        mixedRed.text,
+      );
+
+      // The clean and green paths still render, and the clean one advertises
+      // BOTH globs (an operator reading "no files under docs/adr/**" on a repo
+      // that also gates skills would be misinformed).
+      const clean = renderVerdict(
+        await decide({ changedPaths: ['README.md'], getReviews: forbiddenLookup, getArming: forbiddenArming }),
+        { source: 'self-test' },
+      );
+      assert(
+        'the-clean-verdict-advertises-both-governed-globs',
+        clean.exitCode === 0 && clean.text.includes('docs/adr/**') && clean.text.includes('.claude/skills/**'),
+        clean.text,
+      );
+      const green = renderVerdict(
+        await decide({
+          changedPaths: ['.claude/skills/pm-dispatch/SKILL.md'],
+          getReviews: async () => [review(HOTLONG, 'APPROVED', '2026-08-17T15:00:00Z')],
+          getArming: DISARMED,
+        }),
+        { source: 'self-test' },
+      );
+      assert(
+        'a-green-skills-verdict-names-the-skill-glob-and-the-approver',
+        green.exitCode === 0 && green.text.includes('.claude/skills/**') && green.text.includes('hotlong'),
+        green.text,
+      );
     }
 
     // ── THE WIDENED RULE, pinned in the direction that used to be RED ───────
@@ -1258,12 +1691,24 @@ async function selfTest() {
       assert('unreadable-file-list-throws', threw, 'an unreadable file list must fail loud, not read as empty');
     }
 
-    // ── historical replay: the two measured violations (predicted: RED) ─────
+    // ── historical replay: the three measured violations (predicted: RED) ───
     for (const { pr, files, reviews } of HISTORICAL_VIOLATIONS) {
       const v = await decide({ changedPaths: files, getReviews: async () => reviews, getArming: DISARMED });
-      assert(`historical-pr-${pr}-is-red-under-this-gate`, !v.ok, `PR #${pr} merged with no maintainer approval must replay RED, got ${JSON.stringify(v)}`);
+      assert(`historical-pr-${pr}-is-red-under-this-gate`, !v.ok, `PR #${pr} merged with no approving review must replay RED, got ${JSON.stringify(v)}`);
     }
-    // The same two, had ANY account approved → GREEN (predicted: GREEN): pins
+    // ⚠️ #9238 specifically: it is red ONLY because of the widened predicate.
+    // Narrow the predicate back to the ADR prefix and this assertion fails
+    // while every other historical replay stays green — which is what makes
+    // this fixture an instrument for #9395 rather than one more ADR case.
+    {
+      const skillViolation = HISTORICAL_VIOLATIONS.find((h) => h.pr === 9238);
+      assert(
+        'historical-pr-9238-is-red-BECAUSE-of-the-widened-predicate',
+        adrFilesIn(skillViolation.files).length === 0 && governedFilesIn(skillViolation.files).length === 1,
+        `#9238 touches no ADR path; it must be governed by the skill surface alone, got ${JSON.stringify(governedFilesIn(skillViolation.files).map((s) => s.id))}`,
+      );
+    }
+    // The same three, had ANY account approved → GREEN (predicted: GREEN): pins
     // that the gate's red on the real history is ABOUT the missing approval,
     // not about ADR diffs being unmergeable per se. The approver here is the
     // AI seat that merged #6671 — under the pre-2026-08-12 rule this pair was

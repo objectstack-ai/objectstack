@@ -17,6 +17,7 @@ describe('reference-integrity suite — membership', () => {
     expect(REFERENCE_INTEGRITY_RULES.map((r) => r.name)).toEqual([
       'validateObjectReferences',
       'validateSearchableFields',
+      'validateSortableFields',
       'validateActionNameRefs',
       'validatePageFieldBindings',
       'validateChartBindings',
@@ -59,11 +60,22 @@ describe('reference-integrity suite — every member actually runs', () => {
         fields: {
           name: { type: 'text', label: 'Name' },
           locked: { type: 'boolean', label: 'Locked', readonly: true },
+          // validateSortableFields (#9257): a virtual field, so it is a REAL
+          // field name (existence passes) with no stored column behind it.
+          days_open: { type: 'formula', label: 'Days Open' },
         },
         // validateSearchableFields: `budget` is not a field on crm_lead, so the
         // ADR-0061 declaration is stale — the engine drops it and searches a
         // narrower set than the object declares.
         searchableFields: ['name', 'budget'],
+        // validateSortableFields (#9257): the built-in list view's declared
+        // ordering names that formula field. Nothing else in this stack can
+        // produce the finding, and the failure it stands for is the view's
+        // FIRST fetch answering 400 INVALID_SORT (#6994 / #7095) — so this
+        // member going silent is a whole view that never loads.
+        listViews: {
+          aging: { type: 'grid', sort: [{ field: 'days_open', order: 'desc' }] },
+        },
         permissions: {},
       },
       // validateNavObjectServability (#7912): an object the app puts in its
@@ -252,6 +264,7 @@ describe('reference-integrity suite — every member actually runs', () => {
 
     expect(rules).toContain('object-reference-unknown');
     expect(rules).toContain('searchable-field-unknown');
+    expect(rules).toContain('sort-field-unsortable');
     expect(rules).toContain('action-name-undefined');
     expect(rules).toContain('page-field-unknown');
     expect(rules).toContain('chart-measure-unknown');
@@ -280,6 +293,17 @@ describe('reference-integrity suite — every member actually runs', () => {
     // from this rule until it joined the suite, so a react page binding nothing
     // sailed through the build the way a readonly flow write did (#4394).
     expect(react?.severity).toBe('error');
+  });
+
+  it('carries a gating sort-field finding through the suite (#9257)', () => {
+    const findings = validateReferenceIntegrity(stack);
+    const sort = findings.find((f) => f.rule === 'sort-field-unsortable');
+    // Must reach the CLI as an ERROR on all three commands. A warning here
+    // would trade a loud authoring refusal for a `400 INVALID_SORT` the author
+    // cannot trace back to the declaration that caused it — which is the whole
+    // state this rule was added to end.
+    expect(sort?.severity).toBe('error');
+    expect(sort?.path).toBe('objects[0].listViews.aging.sort[0]');
   });
 
   it('carries a gating flow-template finding through the suite (#3810)', () => {

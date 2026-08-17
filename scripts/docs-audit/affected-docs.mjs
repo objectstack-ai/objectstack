@@ -49,6 +49,11 @@
 //             (`packages/cli/src/commands/meta/resync.ts` → `os meta resync`). Derived
 //             from the oclif filesystem convention, never from a curated table — see the
 //             `commandIdFor` block below for the derivation and the shapes it declines.
+//   rule    — an EXPRESSION a changed `@docs-rule` doc comment states. A module whose
+//             doc comment IS the canonical statement of a rule that pages restate in
+//             prose exports no symbol the restating pages name; the expressions the rule
+//             is written in are what they have in common. Derived from the block's own
+//             code spans, never authored as an anchor list — see `ruleAnchorsFromSource`.
 //
 // WHY `command` IS A KIND AND NOT A LOOSENING OF THE SHAPE GUARD (#9230). The shape guard
 // in §3b drops a single all-lowercase word because it cannot be told from the vocabulary
@@ -58,6 +63,30 @@
 // supplies by accident, so it is distinctive by CONSTRUCTION in the same way a
 // multi-segment wire path is, and it is admitted the same way — BESIDE the guard, never
 // through it. The guard is untouched for bare tokens and must stay that way.
+//
+// WHY `rule` EXISTS, AND WHY THE COARSE FALLBACK WAS MEASURED AND REJECTED (#9282). A
+// module can carry a rule that pages restate without exporting anything those pages name.
+// The measured specimen is `packages/objectql/src/declared-fields.ts`: 191 lines, 179 of
+// them one doc comment that is the canonical statement of the sparse-face guard rule, and
+// one exported function. A change confined to that comment derived NOTHING — the run said
+// "no opinion" while three pages restating the rule sat unlisted.
+//
+// The cheap close considered first was to fall back, for an anchorless file, to the coarse
+// package-mention set of that file's package. Measured on this specimen, that fallback is
+// WRONG IN BOTH DIRECTIONS — the exact failure the #9192 rewrite above exists to undo:
+//
+//   - it lists 14 pages, because 14 name `@objectstack/objectql` or `packages/objectql`;
+//   - and NOT ONE of them is one of the three that restate the rule. `automation/flows.mdx`,
+//     `protocol/objectui/actions.mdx` and `ui/actions.mdx` document the AUTHORING face and
+//     never name the implementing package at all.
+//
+// So the fallback is not merely noisy, it is 0-for-3 on recall on the one instance it was
+// proposed for; bounded width (14, not 140) does not rescue it. What the restating pages
+// DO share with the rule is the EXPRESSIONS the rule is written in — `record.x != null`,
+// `has(record.x) && record.x != null`. Those are what this kind anchors on, and they are
+// read off the block's own code spans, so nothing is authored twice and nothing can drift
+// from the rule: the marker lives INSIDE the block it describes, and dies with it. Measured
+// on the same specimen: 12 anchors, 7 pages, all three restating pages found.
 //
 // ⛔ Not claimed: that this class matters often. It is a BOUNDED precision improvement.
 // The #9192 sample measured ten PRs and exactly ONE missed for this reason — the worked
@@ -269,17 +298,22 @@ const isCodeShaped = (name) => /[A-Z]/.test(name.slice(1)) || name.includes('_')
 
 /**
  * Anchor kinds the shape guard does not judge, because their tokens are distinctive by
- * CONSTRUCTION rather than by spelling — both are multi-segment phrases carrying literals
- * prose cannot supply by accident (a wire path's static segments; a command phrase's
- * binary name and topic).
+ * CONSTRUCTION rather than by spelling — all three are multi-segment phrases carrying
+ * literals prose cannot supply by accident (a wire path's static segments; a command
+ * phrase's binary name and topic; a rule expression's operators).
  *
  * ⛔ This is an exemption BESIDE the guard, never a loosening OF it. `isCodeShaped` still
  * governs every single-token kind (`symbol`, `literal`, `sdk`) exactly as before: the
  * measured cost of neutralising it there is one PR going from 19 pages to 49, and `label`
  * / `object` matching 82 / 113 of 178 pages. Adding a kind here is only ever legitimate
  * for a token that cannot BE a bare lowercase word — check that before extending it.
+ *
+ * `rule` passes that check by CONSTRUCTION rather than by inspection: `isRuleExpression`
+ * admits a span only when it carries a comparison or logical operator, and a token
+ * carrying `&&` or `!=` is not a word. That predicate is what earns the exemption, so it
+ * is the thing to defend if this kind is ever loosened — not this set.
  */
-const PHRASE_ANCHOR_KINDS = new Set(['route', 'command']);
+const PHRASE_ANCHOR_KINDS = new Set(['route', 'command', 'rule']);
 
 /**
  * Where an oclif CLI keeps one source file per command, relative to its package root.
@@ -287,6 +321,144 @@ const PHRASE_ANCHOR_KINDS = new Set(['route', 'command']);
  * `dist/` mirrors `src/`, so this is that declaration expressed on the source side.
  */
 const OCLIF_COMMANDS_DIR = 'src/commands';
+
+/**
+ * The doc-comment tag that opts a block in as the canonical statement of a rule pages
+ * restate. Bare — it takes no argument, and any text after it is ignored.
+ *
+ * ⭐ THE TAG IS A MARKER, NOT A REGISTRY. It says "derive anchors from this block"; it
+ * never says WHICH. The anchors come from the block's own code spans, so an author cannot
+ * write one, cannot forget to update one, and cannot leave one behind: the marker lives
+ * inside the prose it describes and is deleted with it. That is the whole difference from
+ * the hand-kept registry of canonical-rule sites #9282 considered and rejected — a second
+ * source of truth beside the rule drifts from it silently (the same reason `packageRootOf`,
+ * `REGISTRAR_FILE_RE` and `commandIdFor` are all derived rather than listed).
+ *
+ * The opt-in itself is deliberate and is the only authored bit. Deriving from EVERY doc
+ * comment in `packages/**` would hand the corpus-share guard a flood to filter rather than
+ * a claim to check, and most doc comments describe an export the `symbol` kind already
+ * anchors. This kind is for the residue: a block that IS the surface.
+ */
+const DOCS_RULE_TAG = '@docs-rule';
+
+/**
+ * An operator that makes a code span an EXPRESSION rather than a name. `=>`, `->` and the
+ * `=` half of `<=` / `>=` are excluded from the bare `<` / `>` arm so an arrow function or
+ * a comparison already matched by the earlier alternatives cannot be counted twice.
+ */
+const RULE_EXPR_OPERATOR = /&&|\|\||==|!=|<=|>=|(?<![=!<>-])[<>](?![=>])/;
+
+/** A dotted or called identifier — the half that keeps bare operator soup out. */
+const RULE_EXPR_REFERENCE = /[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\s*\()/;
+
+/**
+ * Is this code span an expression the docs could restate?
+ *
+ * BOTH halves are load-bearing, and each one drops a measured class from the specimen
+ * block (`declared-fields.ts`, 72 spans):
+ *   - the OPERATOR half drops bare names — `visibleWhen`, `requiredWhen`, `readonlyWhen`,
+ *     `sys_approval_request`. Those are real surface, but they are the block's CALLER LIST
+ *     rather than its rule, and they are what took the specimen's page count from 7 to 27.
+ *     A genuine change to any of them anchors through the `symbol` kind on its own file.
+ *   - the REFERENCE half drops prose that a stray backtick pairs across two lines
+ *     (`" is uniformly TRUE (a materialised "`), plus table punctuation (`" | "`, `"<="`).
+ *
+ * Together they are also what lets `rule` sit in `PHRASE_ANCHOR_KINDS`: a span carrying
+ * `&&` or `!=` cannot be the bare lowercase word the shape guard exists to drop.
+ */
+function isRuleExpression(span) {
+  if (span.length < 4 || span.length > 120) return false;
+  return RULE_EXPR_OPERATOR.test(span) && RULE_EXPR_REFERENCE.test(span);
+}
+
+/**
+ * Every `/** … *\/` doc comment in a source text, as INCLUSIVE 0-based line ranges, each
+ * flagged with whether it carries `DOCS_RULE_TAG`.
+ *
+ * Line-based like every other probe here — this script is dependency-free by contract, so
+ * there is no parser to reach for. The cost is bounded because the tag is an opt-in: a
+ * mis-detected block that nobody tagged contributes nothing at all. An UNTERMINATED block
+ * (a truncated file, a `*\/` inside a string) runs to end-of-file rather than being
+ * dropped: over-reaching in an opted-in block costs recall precision, dropping it costs
+ * the whole anchor, and the corpus-share guard already prices the first.
+ */
+function docCommentBlocks(lines) {
+  const blocks = [];
+  let start = -1;
+  let tagged = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (start === -1) {
+      const open = line.indexOf('/**');
+      if (open === -1) continue;
+      start = i;
+      tagged = line.includes(DOCS_RULE_TAG);
+      if (line.indexOf('*/', open + 3) !== -1) {
+        blocks.push({ start, end: i, tagged });
+        start = -1;
+        tagged = false;
+      }
+      continue;
+    }
+    if (line.includes(DOCS_RULE_TAG)) tagged = true;
+    if (line.includes('*/')) {
+      blocks.push({ start, end: i, tagged });
+      start = -1;
+      tagged = false;
+    }
+  }
+  if (start !== -1) blocks.push({ start, end: lines.length - 1, tagged });
+  return blocks;
+}
+
+/**
+ * The rule expressions a changed line puts in play, plus whether a tagged block was
+ * touched at all. Returns `{ touched, spans }`.
+ *
+ * Scope is the WHOLE tagged block, not the changed line: the specimen's rule is stated
+ * across 179 lines of tables and prose, and a one-line refinement to any of them can make
+ * any page restating any part of it stale. Line-scoping measured that specimen down to
+ * zero anchors — the changed line's own span was `has()`, which is not an expression.
+ *
+ * `touched` is reported separately from `spans` because the two answer different
+ * questions, and conflating them is how a tool starts reading as "nothing to check": a
+ * tagged block that changed and yielded NO expression is a declared blind spot the caller
+ * must publish (`unanchoredRuleBlocks`), not an empty set to swallow.
+ *
+ * A change OUTSIDE every tagged block — the function body below the comment — yields
+ * `touched: false`. The rule's statement did not change, so the pages restating it did not
+ * go stale, and that file anchors through `symbol` exactly as it always did.
+ */
+function ruleAnchorsFromSource(text, changed) {
+  const lines = text.split('\n');
+  const spans = new Set();
+  let touched = false;
+  for (const { start, end, tagged } of docCommentBlocks(lines)) {
+    if (!tagged) continue;
+    if (!changed.some((n) => n - 1 >= start && n - 1 <= end)) continue;
+    touched = true;
+    for (let i = start; i <= end; i++) {
+      for (const m of lines[i].matchAll(/`([^`]+)`/g)) {
+        const span = m[1].trim();
+        if (isRuleExpression(span)) spans.add(span);
+      }
+    }
+  }
+  return { touched, spans };
+}
+
+/**
+ * A doc-side matcher for a rule expression: the span's tokens separated by run-of-the-mill
+ * horizontal whitespace, so a page that reformats `record.x  !=  null` still counts.
+ *
+ * Newlines are deliberately NOT whitespace, for the same reason `commandPatternFor` says
+ * so: allowing a line break would let two unrelated sentences straddle into a match.
+ */
+function rulePatternFor(span) {
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const body = span.trim().split(/\s+/).map(esc).join('[ \\t]+');
+  return new RegExp(`(?<![\\w$.-])${body}(?![\\w$-])`);
+}
 
 // Short-circuit before any git or filesystem work — the self-test needs no repo state.
 if (args.includes('--self-test')) {
@@ -1224,6 +1396,114 @@ function selfTest() {
     check('PHRASE_ANCHOR_KINDS', label, kind, want, PHRASE_ANCHOR_KINDS.has(kind));
   }
 
+  // ---- the rule-block anchor kind (#9282) -----------------------------------
+  // The recall class: a module whose DOC COMMENT is the surface. `declared-fields.ts`
+  // exports one function no restating page names, so a change to the rule it states
+  // derived nothing and the run reported "no opinion" — read by a reader as "nothing to
+  // check". Pinned here in three directions: the expressions that must now be derived,
+  // the CALLER-LIST names that must stay dropped (they took the specimen from 7 pages to
+  // 27), and the honest-failure property that made the defect filable at all.
+
+  // Block detection. The tag is an opt-in, so an untagged block must contribute nothing
+  // however well-formed it is.
+  const blockSource = [
+    '// Copyright',                                    // 0
+    '/**',                                             // 1
+    ' * An ordinary doc comment with `record.a != null` in it.',  // 2
+    ' */',                                             // 3
+    'export function untagged() {}',                   // 4
+    '/**',                                             // 5
+    ' * The rule.',                                    // 6
+    ' *',                                              // 7
+    ' * `has(record.x) && record.x != null` before any traversal.',  // 8
+    ' *',                                              // 9
+    ' * @docs-rule',                                   // 10
+    ' */',                                             // 11
+    'export function tagged() {',                      // 12
+    '  return 1;',                                     // 13
+    '}',                                               // 14
+  ].join('\n');
+  const blocks = docCommentBlocks(blockSource.split('\n'));
+  check('docCommentBlocks', 'both comment blocks are found', 'count', 2, blocks.length);
+  check('docCommentBlocks', 'an UNTAGGED block is not a rule block', 'block 1', false, blocks[0].tagged);
+  check('docCommentBlocks', 'a tag anywhere in the block tags it', 'block 2', true, blocks[1].tagged);
+  check('docCommentBlocks', 'the tagged range starts at its `/**`', 'start', 5, blocks[1].start);
+  check('docCommentBlocks', 'the tagged range ends at its `*/`', 'end', 11, blocks[1].end);
+  const oneLiner = docCommentBlocks(['/** @docs-rule `a.b != null` */', 'const x = 1;']);
+  check('docCommentBlocks', 'a single-line block opens and closes on one line', 'count', 1, oneLiner.length);
+  check('docCommentBlocks', 'a single-line block is not left open', 'end', 0, oneLiner[0]?.end);
+  const unterminated = docCommentBlocks(['/**', ' * @docs-rule', ' * truncated']);
+  check('docCommentBlocks', 'an UNTERMINATED block runs to EOF rather than vanishing', 'end', 2, unterminated[0]?.end);
+
+  // Whole-block scope, and only for a tagged block. Line-scoping measured the specimen
+  // down to ZERO: the changed line's own span was `has()`, which is not an expression.
+  const ruleAt = (src, lineNo) => ruleAnchorsFromSource(src, [lineNo]);
+  check('ruleAnchorsFromSource', 'a change ANYWHERE in a tagged block yields the whole block\'s expressions',
+    'line 7 (a blank comment line)', JSON.stringify(['has(record.x) && record.x != null']),
+    JSON.stringify([...ruleAt(blockSource, 7).spans]));
+  check('ruleAnchorsFromSource', 'the tag line itself is inside the block', 'line 11', true, ruleAt(blockSource, 11).touched);
+  check('ruleAnchorsFromSource', 'a change in an UNTAGGED block yields nothing', 'line 3', false, ruleAt(blockSource, 3).touched);
+  check('ruleAnchorsFromSource', 'the untagged block\'s expression is NOT borrowed by the tagged one',
+    'line 3', JSON.stringify([]), JSON.stringify([...ruleAt(blockSource, 3).spans]));
+  check('ruleAnchorsFromSource', 'a change to the FUNCTION BODY below is not a rule change — it anchors on the symbol as always',
+    'line 14', false, ruleAt(blockSource, 14).touched);
+  // The honest-failure half: a tagged block that changed and yielded nothing must be
+  // DISTINGUISHABLE from a file that carries no tag at all. `touched` is what the caller
+  // publishes as `unanchoredRuleBlocks`; collapsing it into the empty span set is how this
+  // tool would go back to reading as "nothing to check".
+  const emptyRule = ruleAnchorsFromSource(['/**', ' * @docs-rule', ' * Prose only, no spans.', ' */'].join('\n'), [3]);
+  check('ruleAnchorsFromSource', 'a tagged block with no expression still reports TOUCHED', 'touched', true, emptyRule.touched);
+  check('ruleAnchorsFromSource', 'and reports an empty span set beside it, not instead of it', 'spans', 0, emptyRule.spans.size);
+
+  // The expression predicate — the half that earns the PHRASE_ANCHOR_KINDS exemption.
+  // Left column: real spans from the specimen block. Right column: the specimen's own
+  // CALLER LIST and table punctuation, whose admission is what measured 27 pages.
+  const ruleExprCases = [
+    ['has(record.x) && record.x != null', true, 'the canonical guard — the #9282 specimen'],
+    ['record.x != null', true, 'the two-term half'],
+    ['has(record.v) && has(record.v.a) && record.v.a == true', true, 'the nested form'],
+    ['has(record.l) && has(record.l.lat) && record.l.lat > 40.0', true, 'the ordering form'],
+    ['record.done == true', true, 'an authored predicate'],
+    ['record.b.size() > 0', true, 'a method call plus a comparison'],
+
+    ['visibleWhen', false, 'a CALLER-LIST name is not the rule — it anchors through `symbol`'],
+    ['requiredWhen', false, 'ditto'],
+    ['readonlyWhen', false, 'ditto — these three took the specimen from 7 pages to 27'],
+    ['sys_approval_request', false, 'a snake_case name is still just a name'],
+    ['record.x', false, 'a bare reference has no operator'],
+    ['has()', false, 'the changed line of the measured edit — NOT an expression on its own'],
+    ['record.x.k', false, 'a traversal without an operator'],
+    [' is uniformly TRUE (a materialised ', false, 'prose a stray backtick paired across two lines'],
+    [' | ', false, 'table punctuation'],
+    ['<=', false, 'a bare operator with nothing to compare'],
+    ['(a) => a.b', false, 'an arrow is not a comparison — `=>` is excluded from the bare `>` arm'],
+  ];
+  for (const [span, want, label] of ruleExprCases) check('isRuleExpression', label, JSON.stringify(span), want, isRuleExpression(span));
+
+  // The doc-side matcher. It must find the three pages that RESTATE the rule and must not
+  // fire on a page that merely uses the words.
+  const ruleRe = rulePatternFor('has(record.x) && record.x != null');
+  const ruleMatchCases = [
+    ['use `has(record.x) && record.x != null` before any traversal', true, 'the restated rule in a code span'],
+    ['has(record.x)  &&  record.x  !=  null', true, 'reformatted horizontal whitespace'],
+    ['has(record.x) && record.x != nullable', false, 'a longer word is not the rule'],
+    ['has(record.x) && record.x != null\n', true, 'a trailing newline still ends the span'],
+    ['has(record.x) &&\nrecord.x != null', false, 'a line break is not intra-expression whitespace'],
+    ['has(record.y) && record.y != null', false, 'a different binding is a different expression'],
+  ];
+  for (const [text, want, label] of ruleMatchCases) {
+    check('rulePatternFor', label, JSON.stringify(text), want, ruleRe.test(text));
+  }
+  check('rulePatternFor', 'a two-term span does not match a longer identifier tail',
+    'record.xy != null', false, rulePatternFor('record.x != null').test('record.xy != null'));
+
+  // ⛔ The load-bearing half, exactly as #9230 pinned it for `command`: the exemption is
+  // BESIDE the shape guard, never a loosening OF it. A bare name lifted out of a rule
+  // block is still dropped by every single-token kind.
+  check('isCodeShaped', 'a caller-list name from a rule block is still prose-shaped', 'visibleWhen', true, isCodeShaped('visibleWhen'));
+  check('isCodeShaped', 'and a genuinely bare one still is not', 'record', false, isCodeShaped('record'));
+  check('PHRASE_ANCHOR_KINDS', 'a rule expression is distinctive by construction', 'rule', true, PHRASE_ANCHOR_KINDS.has('rule'));
+
   // String literals on a changed line: an identifier-shaped one is surface, English is not.
   const litLines = ["  if (rule === 'controlled_by_parent') return maskFieldValue(v);", "  fs.readFileSync(p, 'utf8');", "  logger.warn('ignore');"];
   const lits = literalAnchorsFromLines(litLines, [1, 2, 3]).literals;
@@ -1278,7 +1558,9 @@ const symbolAnchors = new Set();
 const routeAnchors = new Set();
 const literalAnchors = new Set();
 const commandAnchors = new Map(); // canonical phrase → { id, bins }
+const ruleAnchors = new Set();
 const unmappedCommandFiles = [];
+const unanchoredRuleBlocks = [];
 const anchorlessChanges = [];
 
 const readAt = (ref, file) => {
@@ -1299,13 +1581,25 @@ for (const f of implementationChanges) {
   const before = oldLines.length ? readAt(baseRef, f) : null;
   const after = newLines.length ? (readAt('HEAD', f) ?? (existsSync(join(repoRoot, f)) ? readFileSync(join(repoRoot, f), 'utf8') : null)) : null;
   let found = cmd?.token ? 1 : 0;
+  // Both sides again, and for the same reason a REMOVED export still anchors: DELETING a
+  // rule block is exactly when the pages restating it need re-reading.
+  let ruleBlockTouched = false;
+  let ruleSpansHere = 0;
   for (const [text, changed] of [[after, newLines], [before, oldLines]]) {
     if (!text) continue;
     for (const name of symbolAnchorsFromSource(text, changed)) { symbolAnchors.add(name); found++; }
     const { routes, literals } = literalAnchorsFromLines(text.split('\n'), changed);
     for (const r of routes) { routeAnchors.add(r); found++; }
     for (const l of literals) { literalAnchors.add(l); found++; }
+    const rule = ruleAnchorsFromSource(text, changed);
+    if (rule.touched) ruleBlockTouched = true;
+    for (const s of rule.spans) { ruleAnchors.add(s); ruleSpansHere++; found++; }
   }
+  // A tagged block that changed and produced nothing is a DECLARED blind spot, published
+  // like `unmappedCommandFiles` rather than left to be inferred from a gap. The file may
+  // still have anchored through `symbol`, so this is not the same statement as
+  // `anchorlessChanges` and is reported beside it, not instead of it.
+  if (ruleBlockTouched && !ruleSpansHere) unanchoredRuleBlocks.push(f);
   if (!found) anchorlessChanges.push(f);
 }
 
@@ -1366,6 +1660,11 @@ for (const name of [...symbolAnchors].sort()) {
   if (!/^[A-Z0-9_$]+$/.test(name)) bridgeSymbols.push(name);
 }
 for (const name of [...literalAnchors].sort()) admitAnchor('literal', name, symbolRe(name));
+// Rule expressions face the CORPUS-SHARE guard like everything else — only the shape guard
+// is skipped, and only because an operator-carrying span cannot be a bare lowercase word
+// (see `PHRASE_ANCHOR_KINDS`). A rule stated in terms broad enough to name a quarter of the
+// corpus is a hub term like any other, and is dropped and published in `overbroadAnchors`.
+for (const span of [...ruleAnchors].sort()) admitAnchor('rule', span, rulePatternFor(span));
 // Command phrases face the CORPUS-SHARE guard like everything else — only the shape guard
 // is skipped, and only because the token cannot be a bare lowercase word (see
 // `PHRASE_ANCHOR_KINDS`). A topic-level phrase broad enough to name a quarter of the docs
@@ -1491,13 +1790,16 @@ if (devOnlyManifestsSkipped > 0) skipNotes.push(`${devOnlyManifestsSkipped} pack
 const skipNote = skipNotes.length ? ` (${skipNotes.join('; ')})` : '';
 
 const anchorSummary = anchors.length
-  ? `${anchors.length} anchor(s) — ${symbolAnchors.size} symbol, ${routeAnchors.size} route, ${sdkAnchors.size} sdk, ${literalAnchors.size} literal, ${commandAnchors.size} command`
+  ? `${anchors.length} anchor(s) — ${symbolAnchors.size} symbol, ${routeAnchors.size} route, ${sdkAnchors.size} sdk, ${literalAnchors.size} literal, ${commandAnchors.size} command, ${ruleAnchors.size} rule`
   : 'no anchors derived';
 const anchorlessNote = anchorlessChanges.length
   ? `; ⚠️ ${anchorlessChanges.length} changed file(s) yielded no anchor — this run cannot see pages documenting them`
   : '';
 const unmappedCommandNote = unmappedCommandFiles.length
   ? `; ⚠️ ${unmappedCommandFiles.length} file(s) under a CLI commands dir yielded no command phrase (${unmappedCommandFiles.join(', ')})`
+  : '';
+const unanchoredRuleNote = unanchoredRuleBlocks.length
+  ? `; ⚠️ ${unanchoredRuleBlocks.length} changed ${DOCS_RULE_TAG} block(s) yielded no expression anchor (${unanchoredRuleBlocks.join(', ')})`
   : '';
 const overbroadNote = overbroadAnchors.length
   ? `; ${overbroadAnchors.length} over-broad anchor(s) dropped (${overbroadAnchors.join(', ')})`
@@ -1509,13 +1811,14 @@ const crossCuttingNote = crossCuttingSymbols.length
 emit(
   affected.map((a) => a.doc),
   changedPackages,
-  `${affected.length} docs name something this change touched (${anchorSummary}) across ${changedPackages.length} changed package(s) since ${sinceRef}${skipNote}${anchorlessNote}${unmappedCommandNote}${crossCuttingNote}${overbroadNote}`,
+  `${affected.length} docs name something this change touched (${anchorSummary}) across ${changedPackages.length} changed package(s) since ${sinceRef}${skipNote}${anchorlessNote}${unmappedCommandNote}${unanchoredRuleNote}${crossCuttingNote}${overbroadNote}`,
   affected,
   { testFilesSkipped, scriptFilesSkipped, devOnlyManifestsSkipped },
   {
     anchors: anchors.map((a) => ({ kind: a.kind, token: a.token })),
     anchorlessChanges,
     unmappedCommandFiles,
+    unanchoredRuleBlocks,
     crossCuttingSymbols,
     weakAnchorsDropped,
     overbroadAnchors,
@@ -1528,7 +1831,7 @@ function emit(docList, changedPackages, summary, detail, skipped = {}, anchorInf
   const {
     anchors: anchorList = [], anchorlessChanges: anchorless = [], crossCuttingSymbols: crossCutting = [],
     weakAnchorsDropped: weak = [], overbroadAnchors: overbroad = [], packageMentionDocs: coarse = [],
-    unmappedCommandFiles: unmappedCommands = [],
+    unmappedCommandFiles: unmappedCommands = [], unanchoredRuleBlocks: unanchoredRules = [],
   } = anchorInfo;
   if (asJson) {
     process.stdout.write(
@@ -1559,6 +1862,12 @@ function emit(docList, changedPackages, summary, detail, skipped = {}, anchorInf
           // have produced symbol anchors — and published for the same reason: the command
           // derivation declining a shape must be readable, never inferred from a gap.
           unmappedCommandFiles: unmappedCommands,
+          // Files whose changed `@docs-rule` block yielded no expression anchor (#9282).
+          // The marker fired and the derivation came back empty — published for the same
+          // reason as the field above: a tagged block is a CLAIM that pages restate this,
+          // so the tool coming back empty on one must be readable, never inferred from a
+          // gap. Such a file may still appear in `docs` via its `symbol` anchors.
+          unanchoredRuleBlocks: unanchoredRules,
           // The other declared narrowing: symbols wired into so many routes that the
           // route bridge would have answered "every route" instead of "this one".
           crossCuttingSymbols: crossCutting,

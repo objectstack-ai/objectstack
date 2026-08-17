@@ -3,12 +3,29 @@ name: ADR Merge Approval
 # Machine enforcement of the 2026-08-12 ruling (maintainer, verbatim):
 # 「门禁改成只要求「APPROVED review 存在」」/「不要指定具体的人」
 #
-# A PR whose diff touches docs/adr/** must carry an APPROVED review before it
-# is mergeable. The gate does NOT check WHO approved: any account with review
-# rights on this repo — including an AI seat — satisfies it, which is the
+# A PR whose diff touches a GOVERNED SURFACE must carry an APPROVED review
+# before it is mergeable. The gate does NOT check WHO approved: any account with
+# review rights on this repo — including an AI seat — satisfies it, which is the
 # accepted cost of the ruling and is stated in full in the guarantee table at
 # the head of scripts/check-adr-merge-approval.mjs. The approval must be
 # current: a later CHANGES_REQUESTED or DISMISSED revokes it.
+#
+# Two surfaces are governed, with identical pass conditions and distinct failure
+# wording (each red names its own rule):
+#
+#   docs/adr/**        — the ADR approval ruling above (#6741, #8161).
+#   .claude/skills/**  — Prime Directive #14's human-merge reservation, machine-
+#                        enforced since the 2026-08-17 ruling on #9319 decision
+#                        2, verbatim: 「The `ADR maintainer approval` gate's path
+#                        predicate extends to `.claude/skills/**`, making Prime
+#                        Directive #14 enforced rather than declared」. The
+#                        measured bypass it answers: PR #9238, a skills-only PR
+#                        whose own body said it was awaiting a human merge, was
+#                        flipped ready and landed on `main` by the merge queue
+#                        with ZERO reviews. The published `skills/` catalog is
+#                        deliberately NOT included — the ruling named
+#                        `.claude/skills/**`, and the catalog's merge posture is
+#                        a separate decision nobody has made.
 #
 # Second clause (#8012): the PR must ALSO not be sitting on an armed
 # auto-merge. Arming is not merging — it is a standing instruction to merge
@@ -34,8 +51,11 @@ name: ADR Merge Approval
 # different AI-operated seats merged docs/adr/** PRs within the following hour
 # (#6671, #6732; the full record and both replays live in
 # scripts/check-adr-merge-approval.mjs and its --self-test). Both had ZERO
-# reviews of any kind, so both stay red under the widened rule too. Drafting
-# ADR PRs stays open to every seat; only the merge is gated.
+# reviews of any kind, so both stay red under the widened rule too. The same
+# measurement repeated on the skill surface nine days later (#9238, landed by
+# the queue with zero reviews), which is why that surface is now gated here
+# too — all three replay RED in the self-test. Drafting stays open to every
+# seat on both surfaces; only the merge is gated.
 #
 # Deliberately NO `paths` filter, on either trigger — the same choice
 # changeset-presence.yml made in objectui (#3769) and for the same reason
@@ -43,8 +63,22 @@ name: ADR Merge Approval
 # context is never CREATED on a non-matching PR, and a required context that
 # never reports leaves the PR pending in the merge queue until the ruleset's
 # 60-minute timeout. This gate reports on every PR instead: the script reads
-# the diff and decides, and a diff that does not touch docs/adr/** passes
+# the diff and decides, and a diff that touches no governed prefix passes
 # with zero API lookups.
+#
+# ⚠️ That is ALSO why extending the predicate to `.claude/skills/**` (#9395)
+# needed NO trigger change here — verified, not assumed, in two directions:
+#   (a) structurally: no `paths`/`paths-ignore` filter exists on any trigger,
+#       so path membership cannot affect whether this workflow runs at all;
+#   (b) empirically: PR #9238 — a `.claude/skills/**`-ONLY diff — already
+#       produced a completed `ADR maintainer approval` check run (job
+#       95293672713, conclusion `success` via the zero-lookup clean path). The
+#       run existed before the widening; what changes is the script's verdict
+#       on it, never whether it reports. Adding a `paths` filter for the new
+#       prefix would REGRESS this into the never-reports failure above.
+# The `auto_merge_enabled` / `auto_merge_disabled` types below are likewise
+# path-agnostic, so the #8012 clause observes arming on the new surface on
+# exactly the same terms.
 #
 # This file is one of the enforcement surfaces .github/CODEOWNERS routes to
 # the maintainer: weakening or removing the gate is itself a governance
@@ -107,9 +141,10 @@ jobs:
     # spelling in scripts/check-required-contexts.mjs — renaming it here alone
     # leaves the ruleset waiting for a context that never reports, which hangs
     # the merge queue until the 60-minute timeout. The word "maintainer" now
-    # over-claims (see this file's header: any approver counts); correcting it
-    # is a settings action nobody in CI can perform, so it is tracked as
-    # follow-up work rather than done here.
+    # over-claims (see this file's header: any approver counts) and the word
+    # "ADR" now under-claims (the skill surface is gated too, #9395); both are
+    # settings actions nobody in CI can perform, so the name stays exactly as
+    # the ruleset spells it and the drift is tracked as follow-up work.
     name: ADR maintainer approval
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -129,11 +164,11 @@ jobs:
           node-version: '22'
 
       # A checkout, setup-node, and one `node` call over `git diff` — no
-      # install, no build. The self-test runs first (repo convention), then
-      # the gate. GITHUB_TOKEN is only read on the gated path (a docs/adr/**
-      # diff needs the PR's review list and arming state); the clean path does
-      # zero lookups.
-      - name: Require an APPROVED review and no armed auto-merge on docs/adr/** diffs
+      # install, no build (the script imports node builtins only). The self-test
+      # runs first (repo convention), then the gate. GITHUB_TOKEN is only read on
+      # the gated path (a governed diff needs the PR's review list and arming
+      # state); the clean path does zero lookups.
+      - name: Require an APPROVED review and no armed auto-merge on docs/adr/** and .claude/skills/** diffs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/check-adr-merge-approval.mjs --self-test && node scripts/check-adr-merge-approval.mjs
