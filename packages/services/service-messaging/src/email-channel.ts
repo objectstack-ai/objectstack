@@ -46,6 +46,21 @@ export interface EmailSenderSurface {
         data?: Record<string, unknown>;
         locale?: string;
     }): Promise<{ id?: string; status?: string; error?: string } | unknown>;
+    /**
+     * Structural mirror of `IEmailService.renderTemplate` (#9225) — resolves a
+     * `sys_email_template` bundle by `(template, locale)` with the same
+     * documented en-US ladder as `sendTemplate` and returns the rendered
+     * content WITHOUT sending. OPTIONAL for the same reason `sendTemplate` is:
+     * an older or third-party email implementation may not provide it, and a
+     * consumer that needs it (the inbox channel's template path) then fails
+     * LOUDLY on the delivery row rather than degrading silently
+     * (declared = enforced, ADR-0049).
+     */
+    renderTemplate?(input: {
+        template: string;
+        data?: Record<string, unknown>;
+        locale?: string;
+    }): Promise<{ subject: string; html: string; text: string }>;
 }
 
 export interface EmailChannelOptions {

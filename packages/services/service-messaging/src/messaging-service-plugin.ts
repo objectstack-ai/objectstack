@@ -123,8 +123,40 @@ export class MessagingServicePlugin implements Plugin {
             mandatoryTopics: this.options.mandatoryTopics,
         });
 
+        // Lazy `email` service resolver — shared by the email channel (send +
+        // sendTemplate) and the inbox channel's render-only template path
+        // (#9225): one resolver in plugin-email, two channels. Probed at
+        // delivery time (never captured at boot) so plugin init order and
+        // live service replacement don't matter.
+        const getEmail = () => {
+            try {
+                return ctx.getService<import('./email-channel.js').EmailSenderSurface>('email');
+            } catch {
+                return undefined;
+            }
+        };
+        // #9205 — the recipient locale for `sys_email_template` resolution
+        // on the notify template path. Probed lazily at delivery time (not
+        // captured at boot) so it tracks live `localization.locale` /
+        // stack-config changes; same ruled source as the auth emails
+        // (#8195: `II18nService.getDefaultLocale()`), because the platform
+        // has no per-user locale yet and no request exists at async
+        // delivery time. Both hops probed: `getService` throws for an
+        // unregistered service, and `getDefaultLocale` is optional on the
+        // contract — either missing leaves the locale unset, which lands
+        // the documented en-US default.
+        const getDefaultTemplateLocale = (): string | undefined => {
+            try {
+                const i18n = ctx.getService<{ getDefaultLocale?: () => string }>('i18n');
+                const locale = typeof i18n?.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
+                return typeof locale === 'string' && locale.trim() ? locale : undefined;
+            } catch {
+                return undefined;
+            }
+        };
+
         if (this.options.registerInbox) {
-            service.registerChannel(createInboxChannel({ getData }));
+            service.registerChannel(createInboxChannel({ getData, getEmail, getDefaultTemplateLocale }));
         }
 
         ctx.registerService('messaging', service);
@@ -212,32 +244,6 @@ export class MessagingServicePlugin implements Plugin {
         // dispatcher looks channels up dynamically, so registering after it is fine.
         if (typeof ctx.hook === 'function') {
             const templateStore = new NotificationTemplateStore({ getData });
-            const getEmail = () => {
-                try {
-                    return ctx.getService<import('./email-channel.js').EmailSenderSurface>('email');
-                } catch {
-                    return undefined;
-                }
-            };
-            // #9205 — the recipient locale for `sys_email_template` resolution
-            // on the notify template path. Probed lazily at delivery time (not
-            // captured at boot) so it tracks live `localization.locale` /
-            // stack-config changes; same ruled source as the auth emails
-            // (#8195: `II18nService.getDefaultLocale()`), because the platform
-            // has no per-user locale yet and no request exists at async
-            // delivery time. Both hops probed: `getService` throws for an
-            // unregistered service, and `getDefaultLocale` is optional on the
-            // contract — either missing leaves the locale unset, which lands
-            // `sendTemplate`'s documented en-US default.
-            const getDefaultTemplateLocale = (): string | undefined => {
-                try {
-                    const i18n = ctx.getService<{ getDefaultLocale?: () => string }>('i18n');
-                    const locale = typeof i18n?.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
-                    return typeof locale === 'string' && locale.trim() ? locale : undefined;
-                } catch {
-                    return undefined;
-                }
-            };
             ctx.hook('kernel:ready', async () => {
                 if (getEmail()) {
                     service.registerChannel(createEmailChannel({ getEmail, getData, store: templateStore, getDefaultTemplateLocale }));

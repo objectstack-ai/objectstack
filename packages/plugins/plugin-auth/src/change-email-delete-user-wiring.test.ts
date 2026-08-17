@@ -151,6 +151,11 @@ function createRecordingEmailService(failOn?: string) {
       }
       return { id: `email_${sent.length}`, status: 'sent' };
     },
+    // Render-only face (#9225) — nothing in these tests renders without
+    // sending, so the fake honestly refuses rather than inventing content.
+    async renderTemplate(input) {
+      throw new Error(`TEMPLATE_NOT_FOUND: ${input.template} (locale=en-US)`);
+    },
   };
   return { service, sent };
 }

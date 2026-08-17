@@ -6,6 +6,8 @@ import type {
   SendEmailInput,
   SendEmailResult,
   SendTemplateInput,
+  RenderTemplateInput,
+  RenderTemplateResult,
   NormalizedEmailMessage,
   EmailAddress,
   EmailDeliveryStatus,
@@ -1158,11 +1160,15 @@ export class EmailService implements IEmailService {
   }
 
   /**
-   * Render a named template from sys_email_template and deliver via
-   * send(). Looks up `(name, locale)` then falls back to
-   * `(name, {@link DEFAULT_TEMPLATE_LOCALE})`.
+   * Resolve `(template, locale)` and render subject/html/text — the ONE
+   * resolver + renderer behind both {@link sendTemplate} (which delivers the
+   * result) and {@link renderTemplate} (which only returns it, #9225). The
+   * resolved row rides along so `sendTemplate` can keep reading its envelope
+   * columns (`from_address`/`from_name`/`reply_to`).
    */
-  async sendTemplate(input: SendTemplateInput): Promise<SendEmailResult> {
+  private async resolveAndRenderTemplate(
+    input: RenderTemplateInput,
+  ): Promise<{ row: EmailTemplateRow; rendered: RenderTemplateResult }> {
     if (!input?.template) {
       throw new Error('VALIDATION_FAILED: template name is required');
     }
@@ -1240,6 +1246,32 @@ export class EmailService implements IEmailService {
     const text = row.body_text
       ? renderTemplate(row.body_text, data, renderOpts)
       : htmlToText(html);
+
+    return { row, rendered: { subject, html, text } };
+  }
+
+  /**
+   * Render a named template from sys_email_template WITHOUT sending —
+   * `IEmailService.renderTemplate` (#9225). Strictly render-only: the shared
+   * resolver above never touches the transport, the queue, persistence or
+   * the outbox; it only resolves `(name, locale)` per the documented ladder,
+   * validates required variables, and renders the `{{var}}` holes (ADR-0053
+   * format filters included).
+   */
+  async renderTemplate(input: RenderTemplateInput): Promise<RenderTemplateResult> {
+    const { rendered } = await this.resolveAndRenderTemplate(input);
+    return rendered;
+  }
+
+  /**
+   * Render a named template from sys_email_template and deliver via
+   * send(). Looks up `(name, locale)` then falls back to
+   * `(name, {@link DEFAULT_TEMPLATE_LOCALE})` — the shared
+   * {@link resolveAndRenderTemplate} ladder.
+   */
+  async sendTemplate(input: SendTemplateInput): Promise<SendEmailResult> {
+    const { row, rendered } = await this.resolveAndRenderTemplate(input);
+    const { subject, html, text } = rendered;
 
     const from: EmailAddress | undefined = input.from
       ?? (row.from_address
