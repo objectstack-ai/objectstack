@@ -26,7 +26,7 @@
   "dependencies": {
     "@better-auth/core": "1.7.0-rc.2",
     "@better-auth/oauth-provider": "1.7.0-rc.2",
-    "@better-auth/scim": "1.7.0-rc.1",
+    "@better-auth/scim": "1.7.0-rc.5",
     "@better-auth/sso": "1.7.0-rc.2",
     "@noble/hashes": "^2.2.0",
     "@objectstack/core": "workspace:*",
