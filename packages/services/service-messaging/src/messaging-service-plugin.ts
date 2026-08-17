@@ -219,10 +219,29 @@ export class MessagingServicePlugin implements Plugin {
                     return undefined;
                 }
             };
+            // #9205 — the recipient locale for `sys_email_template` resolution
+            // on the notify template path. Probed lazily at delivery time (not
+            // captured at boot) so it tracks live `localization.locale` /
+            // stack-config changes; same ruled source as the auth emails
+            // (#8195: `II18nService.getDefaultLocale()`), because the platform
+            // has no per-user locale yet and no request exists at async
+            // delivery time. Both hops probed: `getService` throws for an
+            // unregistered service, and `getDefaultLocale` is optional on the
+            // contract — either missing leaves the locale unset, which lands
+            // `sendTemplate`'s documented en-US default.
+            const getDefaultTemplateLocale = (): string | undefined => {
+                try {
+                    const i18n = ctx.getService<{ getDefaultLocale?: () => string }>('i18n');
+                    const locale = typeof i18n?.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
+                    return typeof locale === 'string' && locale.trim() ? locale : undefined;
+                } catch {
+                    return undefined;
+                }
+            };
             ctx.hook('kernel:ready', async () => {
                 if (getEmail()) {
-                    service.registerChannel(createEmailChannel({ getEmail, getData, store: templateStore }));
-                    ctx.logger.info('[messaging] email channel registered (renders sys_notification_template)');
+                    service.registerChannel(createEmailChannel({ getEmail, getData, store: templateStore, getDefaultTemplateLocale }));
+                    ctx.logger.info('[messaging] email channel registered (renders sys_notification_template; notify `template` refs resolve sys_email_template per recipient locale)');
                 }
             });
 

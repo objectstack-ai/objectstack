@@ -168,8 +168,27 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     recipients: {
                         description: 'Recipient user id(s) / audience selector(s)',
                     },
-                    title: { type: 'string', description: 'Notification title' },
-                    message: { type: 'string', description: 'Notification body' },
+                    title: {
+                        type: 'string',
+                        description: 'Notification title, sent verbatim (not localizable — use template for per-locale content). Either this or template is required; mutually exclusive with template.',
+                    },
+                    message: {
+                        type: 'string',
+                        description: 'Notification body, sent verbatim (not localizable). Only valid with inline title, never with template.',
+                    },
+                    // ── Localizable content path (#9205) ─────────────────────
+                    // Mirrors `NotifyConfigSchema.template`/`templateData`; the
+                    // mutual exclusion with title/message lives in the Zod
+                    // contract's superRefine (executed at parse time), matching
+                    // how requiredness is owned there rather than by the form.
+                    template: {
+                        type: 'string',
+                        description: 'Email template name (sys_email_template.name) — resolved by (name, recipient locale) at delivery time and rendered per recipient. Mutually exclusive with inline title/message.',
+                    },
+                    templateData: {
+                        type: 'object',
+                        description: 'Render context for the referenced template\'s {{var}} placeholders; values interpolate {token} templates per run. Only valid together with template.',
+                    },
                     channels: {
                         type: 'array', items: { type: 'string' },
                         description: 'Channels to fan out to (default: inbox)',
@@ -228,6 +247,14 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             // useless `[object Object]` (#3450). Serialize it readably instead.
             const title = stringifyForTemplate(interpolate(cfg.title ?? '', variables, context));
             const body = stringifyForTemplate(interpolate(cfg.message ?? '', variables, context));
+            // #9205 — the localizable content path. `template` is read RAW (a
+            // static metadata cross-reference, like `topic`/`channels`);
+            // `templateData` VALUES interpolate per run, so flow state can feed
+            // the template's `{{var}}` holes at delivery time.
+            const template = toStr(cfg.template);
+            const templateData = cfg.templateData
+                ? (interpolate(cfg.templateData, variables, context) as Record<string, unknown>)
+                : undefined;
             const channels = toStringList(cfg.channels);
             const topic = cfg.topic ? String(cfg.topic) : undefined;
             const severity = cfg.severity ? String(cfg.severity) : undefined;
@@ -246,7 +273,11 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             const source = resolveSource(cfg, variables, context);
             const actorId = toStr(interpolate(cfg.actorId, variables, context));
 
-            if (!title) return { success: false, error: 'notify: title is required' };
+            // With a `template` reference the content lives in the template
+            // bundle, resolved per recipient locale at delivery — no inline
+            // title to demand (the Zod contract already refused a node carrying
+            // NEITHER, and one carrying BOTH).
+            if (!title && !template) return { success: false, error: 'notify: title is required' };
             if (recipients.length === 0) {
                 // Name the templates that came up empty (framework#3582). The
                 // dominant cause is a cross-object hop — `{record.owner.manager}`
@@ -269,7 +300,7 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             const messaging = getMessaging();
             if (!messaging) {
                 ctx.logger.warn(
-                    `[notify] no messaging service registered; notification "${title}" not delivered`,
+                    `[notify] no messaging service registered; notification "${title || `template ${template}`}" not delivered`,
                 );
                 return {
                     success: true,
@@ -289,7 +320,21 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                 const result = await messaging.emit({
                     topic: topic ?? 'notify',
                     audience: recipients,
-                    payload: { ...(payload ?? {}), title, body, url: actionUrl },
+                    // Content rides in the payload per path (#9205): the inline
+                    // strings, or the template reference + its render context —
+                    // which the outbox snapshots onto each delivery row, so the
+                    // per-recipient-locale resolution happens at delivery time
+                    // in the channel (email-channel.ts reads payload.template).
+                    // On the template path no inline title/body keys are set:
+                    // channels without template support fall back to the topic,
+                    // which is the honest degraded rendering, not ''.
+                    payload: {
+                        ...(payload ?? {}),
+                        ...(template
+                            ? { template, ...(templateData !== undefined ? { templateData } : {}) }
+                            : { title, body }),
+                        url: actionUrl,
+                    },
                     severity,
                     source,
                     actorId,

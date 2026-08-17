@@ -31,6 +31,21 @@ export interface EmailSenderSurface {
         html?: string;
         text?: string;
     }): Promise<{ id?: string } | unknown>;
+    /**
+     * Structural mirror of `IEmailService.sendTemplate` (#9205) — resolves a
+     * `sys_email_template` bundle by `(template, locale)` with the documented
+     * en-US fallback ladder, renders it against `data`, and delivers. OPTIONAL
+     * because this is a structural view of a service resolved at runtime: an
+     * older or third-party email implementation may not provide it, and a
+     * delivery that needs it then fails LOUDLY on the delivery row rather than
+     * degrading to unlocalized content (declared = enforced, ADR-0049).
+     */
+    sendTemplate?(input: {
+        template: string;
+        to: string | string[];
+        data?: Record<string, unknown>;
+        locale?: string;
+    }): Promise<{ id?: string; status?: string; error?: string } | unknown>;
 }
 
 export interface EmailChannelOptions {
@@ -44,6 +59,20 @@ export interface EmailChannelOptions {
     userObject?: string;
     /** Locale used when the delivery carries none (default {@link DEFAULT_LOCALE}). */
     defaultLocale?: string;
+    /**
+     * The recipient locale for `sys_email_template` resolution (#9205) —
+     * probed lazily at delivery time so it tracks live settings changes.
+     *
+     * The measured source, and its limits, spelled out: the platform has no
+     * per-user locale today (`sys_user` carries no locale column; the
+     * 2026-08-13 ruling defers one until measured pull), and request-scoped
+     * locale (`Accept-Language` → `ExecutionContext.requestLocale`) does not
+     * exist at async delivery time. So "recipient locale" resolves to the
+     * deployment default — `II18nService.getDefaultLocale()`, the same ruled
+     * source the auth emails use (#8195) — and a per-user locale, when it
+     * lands, plugs in here.
+     */
+    getDefaultTemplateLocale?(): string | undefined;
 }
 
 const EMAIL_SHAPE = (s: string): boolean => {
@@ -65,6 +94,13 @@ const EMAIL_SHAPE = (s: string): boolean => {
  * `sys_notification_template` (fallback to `payload.title`/`body`), and hand the
  * subject/body to the `email` service. Retry/backoff/dead-letter come for free
  * from the P1 outbox dispatcher.
+ *
+ * A delivery whose payload carries a `template` reference (a `notify` node's
+ * localizable path, #9205) takes precedence over both: it routes through
+ * `IEmailService.sendTemplate({ template, locale, data })`, which resolves the
+ * `sys_email_template` bundle by `(name, recipient locale)` — the locale being
+ * `payload.locale` if the producer set one, else the deployment default from
+ * {@link EmailChannelOptions.getDefaultTemplateLocale}.
  *
  * Degrades like the inbox channel: no email service ⇒ logged no-op success
  * (capability not installed); a recipient with no resolvable address ⇒ a
@@ -108,6 +144,54 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
             }
 
             const payload = (n.payload ?? {}) as Record<string, unknown>;
+
+            // ── The localizable path (#9205): a `notify` node's `template`
+            // reference, carried in the payload (snapshotted onto the delivery
+            // row by the outbox, so it survives the durable path). Resolution
+            // happens HERE, per recipient, because this is the first moment a
+            // single recipient exists: `sendTemplate` picks the
+            // `(name, recipient locale)` row with its documented en-US ladder
+            // and renders `templateData` into the `{{var}}` holes.
+            const templateName =
+                typeof payload.template === 'string' && payload.template.trim()
+                    ? payload.template.trim()
+                    : undefined;
+            if (templateName) {
+                if (typeof email.sendTemplate !== 'function') {
+                    // Declared ≠ deliverable — fail loudly on the delivery row
+                    // rather than silently downgrading to unlocalized content.
+                    return {
+                        ok: false,
+                        error: `TEMPLATE_UNSUPPORTED: notify template '${templateName}' needs an email service with sendTemplate(); the registered 'email' service does not provide it`,
+                    };
+                }
+                const templateLocale = typeof payload.locale === 'string' && payload.locale.trim()
+                    ? payload.locale.trim()
+                    : opts.getDefaultTemplateLocale?.();
+                const data = (payload.templateData ?? undefined) as Record<string, unknown> | undefined;
+                try {
+                    const result = (await email.sendTemplate({
+                        template: templateName,
+                        to: address,
+                        ...(data !== undefined ? { data } : {}),
+                        ...(templateLocale ? { locale: templateLocale } : {}),
+                    })) as { id?: unknown; status?: unknown; error?: unknown } | undefined;
+                    // `IEmailService.send` reports transport failure as
+                    // `status: 'failed'` rather than throwing — surface it.
+                    if (result && result.status === 'failed') {
+                        return { ok: false, error: String(result.error ?? 'email send failed') };
+                    }
+                    const id = result?.id;
+                    return { ok: true, externalId: id != null ? String(id) : undefined };
+                } catch (err) {
+                    // sendTemplate's own failure vocabulary (TEMPLATE_NOT_FOUND /
+                    // TEMPLATE_INACTIVE / MISSING_VARIABLES) arrives as a thrown
+                    // Error — keep the code at the front of the row's error so
+                    // classifyError() below can grade it permanent.
+                    return { ok: false, error: (err as Error)?.message ?? String(err) };
+                }
+            }
+
             const locale = typeof payload.locale === 'string' ? payload.locale : defaultLocale;
             const template = await opts.store.load(n.topic ?? '', 'email', locale);
             const rendered = renderNotification(template, {
@@ -131,7 +215,18 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
             }
         },
 
-        classifyError(_err: unknown): ErrorClass {
+        classifyError(err: unknown): ErrorClass {
+            // #9205 — a template-resolution failure is wrong METADATA, not a
+            // transport hiccup: re-trying the identical delivery can never
+            // succeed until someone edits the template/node, so grade it
+            // permanent (→ dead immediately, with the code on the delivery
+            // row) instead of burning the whole retry schedule first. These
+            // are `IEmailService.sendTemplate`'s own error codes plus this
+            // channel's missing-capability refusal above.
+            const msg = typeof err === 'string' ? err : String((err as Error)?.message ?? err ?? '');
+            if (/\b(TEMPLATE_NOT_FOUND|TEMPLATE_INACTIVE|MISSING_VARIABLES|TEMPLATE_UNSUPPORTED)\b/.test(msg)) {
+                return 'permanent';
+            }
             return 'retryable';
         },
     };
