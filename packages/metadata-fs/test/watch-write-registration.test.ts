@@ -163,7 +163,20 @@ describe('FileSystemRepository watcher — writes register their own path (#7282
     const anchored = nextEvent();
     await fs.writeFile(path.join(viewDir, 'anchor.json'), JSON.stringify({ label: 'anchor' }, null, 2));
     await Promise.race([anchored, sleep(EVENT_WAIT_MS)]);
-    expect(events.map((e) => e.ref.name)).toContain('anchor');
+    // #9339: on failure, snapshot chokidar's own watched-set for viewDir. That
+    // one datum splits the failure into two disjoint classes — absent means
+    // the loss is upstream of `_handleFile` (the directory scan/poll layer);
+    // present means the loss is at or after the emit gate (`_handleFile` ran
+    // but no event reached this iterator). This does not change what makes
+    // the case pass or fail, only what the failure says when it does.
+    const anchorWatched = watchedIn(repo, viewDir);
+    expect(
+      events.map((e) => e.ref.name),
+      `#9339 triage — getWatched()[${JSON.stringify(viewDir)}] = ${JSON.stringify(anchorWatched)}. ` +
+        (anchorWatched.includes('anchor.json')
+          ? `'anchor.json' IS present in the watched set: the loss is at or after the emit gate (_handleFile ran, no event reached the iterator).`
+          : `'anchor.json' is ABSENT from the watched set: the loss is upstream of _handleFile (the directory scan/poll layer never registered the path).`),
+    ).toContain('anchor');
 
     // ── The measurement ──────────────────────────────────────────────────
     await repo.put(ref('fresh'), { label: 'fresh' }, { parentVersion: null, actor: 'tester' });
