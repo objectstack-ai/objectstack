@@ -18,6 +18,13 @@
 #
 # Requires the `gh` CLI. Where only the GitHub MCP tools are available, mirror
 # these creations through them — the protocol is identical.
+#
+# ⚠️ GitHub hard-caps label descriptions at 100 characters: `gh label create`
+# / `gh label edit` get HTTP 422 above that, and the `|| true` (needed for
+# idempotent reruns) swallows the failure — an over-long -d line means the
+# label is NEVER created on a repo where it doesn't exist yet, silently, and a
+# rerun can never repair it. Keep every -d in this file ≤100 characters
+# (measured: a ~145-char description 422'd in live use).
 
 set -uo pipefail
 
@@ -25,7 +32,7 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   gh label create pm:queue            -R "$R" -c 0e8a16 -d "Ready for the PM dispatch loop" 2>/dev/null || true
   gh label create pm:dispatched       -R "$R" -c 1d76db -d "Dispatched to a dev agent by /pm-dispatch" 2>/dev/null || true
   gh label create needs-user-decision -R "$R" -c d93f0b -d "Blocked on a maintainer decision — do not dispatch" 2>/dev/null || true
-  gh label create pm:on-hold          -R "$R" -c e4e669 -d "Decision made, deliberately deferred — do not dispatch, do not nag; restart condition in the hold comment" 2>/dev/null || true
+  gh label create pm:on-hold          -R "$R" -c e4e669 -d "Decision made, deliberately deferred — no dispatch, no nag; restart condition in the hold comment" 2>/dev/null || true
   gh label create pm:blocked          -R "$R" -c b60205 -d "Blocked by another issue/PR — body carries Blocked-by: #N" 2>/dev/null || true
   # pm:blocking is a derived CACHE, never hand state (maintainer opinion
   # 2026-08-13, superseding the earlier derived-only-no-stored-label ruling):
@@ -36,17 +43,20 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # corrects it against the index.
   gh label create pm:blocking         -R "$R" -c 8250df -d "Derived cache from the Blocked-by reverse index: open card with open dependents — never hand-set" 2>/dev/null || true
   gh label create finding             -R "$R" -c c2e0c6 -d "Recorded observation — held, not dispatchable until the findings triage round grades it" 2>/dev/null || true
-  gh label create pm:epic             -R "$R" -c 5319e7 -d "Parent delegated to a dedicated epic PM (session + territory in the parent's own body) — other PMs never dispatch into its subtree" 2>/dev/null || true
+  gh label create pm:epic             -R "$R" -c 5319e7 -d "Parent delegated to a dedicated epic PM — other PMs never dispatch into its subtree" 2>/dev/null || true
 done
 
 # needs:contract-review — the clause-② enqueue gate's re-review chain (SKILL.md
-# 入队与落地): a PR whose ACTUAL diff touches the contract surface but was
-# dispatched below the contract-review tier waits outside the queue under this
-# label until the review sub-round clears it. Named consumers: the enqueue gate
-# and the triage sub-round's label query. Main repo only — the contract surface
-# (packages/spec) lives here. The label names WHAT is reviewed, never a model;
-# the tier's single source is CONTRACT_REVIEW_TIER in scripts/pm/dispatch-gates.mjs.
-gh label create needs:contract-review -R objectstack-ai/objectstack -c d93f0b -d "Clause-② enqueue gate: contract-surface diff dispatched below the contract-review tier — blocked from enqueue until the review sub-round clears it" 2>/dev/null || true
+# 入队与落地): a PR whose ACTUAL diff touches the contract surface — or whose
+# card's claim comment declares `Clause-②: yes` (the content limb, judged from
+# the card, path-independent) — but was dispatched below the contract-review
+# tier waits outside the queue under this label until the review sub-round
+# clears it. Named consumers: the enqueue gate and the triage sub-round's label
+# query. Main repo only — the contract surface (packages/spec) lives here. The
+# label names WHAT is reviewed, never a model; the tier's single source is
+# CONTRACT_REVIEW_TIER in scripts/pm/dispatch-gates.mjs. The -d below is kept
+# ≤100 chars (the hard cap — see the header) and matches the live label object.
+gh label create needs:contract-review -R objectstack-ai/objectstack -c d93f0b -d "Clause-② enqueue gate: dispatched below contract-review tier — blocked until the review clears it" 2>/dev/null || true
 
 # Routing labels exist only on the main backlog repo, and mark SEAM cards only
 # (file-at-destination ruling: pure sibling-repo fixes live in the target repo).
@@ -75,7 +85,7 @@ done
 # and their current colour and description are left exactly as they are.
 for V in v17; do
   for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud; do
-    gh label create "target:$V" -R "$R" -c ededed -d "Release blocker for $V — stays on the release board until fixed, dropped as no longer valid, or explicitly accepted for GA" 2>/dev/null || true
+    gh label create "target:$V" -R "$R" -c ededed -d "Release blocker for $V — on the board until fixed, dropped as no longer valid, or accepted for GA" 2>/dev/null || true
   done
 done
 
