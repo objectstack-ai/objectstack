@@ -1159,15 +1159,16 @@ export function reachesMetadataFormModule(path, modulePaths) {
  *     output for every card in the tree;
  *   - `check:i18n` walks `packages/` at runtime for files NAMED
  *     `i18n-extract.config.ts` and re-extracts each owning package's bundles.
- *     Its source is worse than silent: the path-ish literals it does carry are
- *     its CLI prerequisite and stale-dist checks (`packages/cli/dist/commands/
- *     i18n/extract.js`, `packages/spec/dist`, measured — eleven hints, none of
- *     them the population). So it matches nothing AND, having hints, never
- *     reaches the "undetermined" bucket either: before this entry existed, an
- *     edit to `packages/services/service-messaging/src/objects/` — which
- *     regenerates that package's four bundles — printed the gate in NEITHER
- *     half of the output. A gate the derivation cannot mention at all is the
- *     one shape this script must not produce; it cost a PR a CI round.
+ *     Its source names only three hints (measured, post-#9144): the shared
+ *     walk module (SURFACE_MODULE) and the two metadata-registry coupling
+ *     constants below — none of them the OWNING-PACKAGE population this entry
+ *     answers for. So it still matches nothing on an ordinary object/field
+ *     edit AND, having hints, never reaches the "undetermined" bucket either:
+ *     before this entry existed, an edit to
+ *     `packages/services/service-messaging/src/objects/` — which regenerates
+ *     that package's four bundles — printed the gate in NEITHER half of the
+ *     output. A gate the derivation cannot mention at all is the one shape
+ *     this script must not produce; it cost a PR a CI round.
  *
  * No per-card gate list derived from paths can ever name these, however the
  * derivation improves.
@@ -1250,6 +1251,32 @@ export function reachesMetadataFormModule(path, modulePaths) {
  * asks the configs' own documented flags whether any package still commits that
  * baseline. The day the last one opts out, no form module can move a committed
  * bundle and this entry stops firing on its own.
+ *
+ * ## Why there is no THIRD i18n entry, for the type-registry edge (#9144)
+ *
+ * `walkMetadataForms` has a second edge the SECOND entry above does not reach:
+ * `DEFAULT_METADATA_TYPE_REGISTRY` (packages/spec/src/kernel/metadata-plugin.
+ * zod.ts) supplies `metadataForms.<type>.label`/`.description` for EVERY
+ * registry entry, including form-less types, and `METADATA_FORM_REGISTRY`
+ * itself (packages/spec/src/system/metadata-form-registry.ts, the map, not
+ * the `*.form.ts` leaves it points at) decides which types get section/field
+ * labels at all. Editing either moves the same bundles PR #9113 paid for —
+ * but unlike the `.form.ts` leaves, neither file carries a filename the
+ * `.form.ts` convention (or any convention) distinguishes, so a KIND entry
+ * here would need to invent one for exactly two files.
+ *
+ * That is not the same shape as the two entries above: this is not a
+ * runtime-enumerated population at all, it is two SPECIFIC, KNOWN files —
+ * the shape `SURFACE_MODULE` and `check-type-check-coverage.mjs`'s
+ * `ROOT_PROGRAM_COUPLED_SCRIPT` already use. So it is closed there instead:
+ * `check-i18n-bundles.mjs` declares both paths as bare module-body coupling
+ * constants (`METADATA_TYPE_REGISTRY_MODULE` / `METADATA_FORM_REGISTRY_
+ * MODULE`), which the ORDINARY path-literal derivation now reads directly off
+ * that gate's own source — no `CHANGE_KIND_GATES` entry, no `matches`
+ * function, nothing here to keep in sync. See that pair's doc comment in
+ * check-i18n-bundles.mjs for the full reasoning, and this file's own
+ * self-test for the live pins that keep the constants honest as the coupling
+ * they are: manual, per-file, and silently rottable if nothing watched it.
  *
  * ## How these entries stay honest
  *
@@ -2358,6 +2385,32 @@ function selfTest() {
   // The shared module is a real file, so the two claims above are live rather
   // than a pair of matching strings.
   t('the declared shared module exists', existsSync(join(ROOT, SHARED)));
+
+  // The same shape again, for the TYPE-registry edge of walkMetadataForms
+  // (#9144) — two specific, known files rather than a runtime-enumerated
+  // population, so they are closed as coupling constants in
+  // check-i18n-bundles.mjs rather than a third CHANGE_KIND_GATES entry. Both
+  // directions pinned LIVE: delete either constant and this reddens instead
+  // of the derivation going silently blind on that edge again.
+  const TYPE_REGISTRY = 'packages/spec/src/kernel/metadata-plugin.zod.ts';
+  const FORM_REGISTRY = 'packages/spec/src/system/metadata-form-registry.ts';
+  const i18nGateHints = readHints('scripts/check-i18n-bundles.mjs');
+  t('the i18n gate declares the type-level metadata registry module', covers(i18nGateHints, TYPE_REGISTRY));
+  t('the i18n gate declares the form registry module too (not just its *.form.ts leaves)', covers(i18nGateHints, FORM_REGISTRY));
+  const typeRegistryVerdict = classifyEntry({ files: ['scripts/check-i18n-bundles.mjs'], hints: i18nGateHints }, [TYPE_REGISTRY]);
+  const formRegistryVerdict = classifyEntry({ files: ['scripts/check-i18n-bundles.mjs'], hints: i18nGateHints }, [FORM_REGISTRY]);
+  t(
+    'so a card editing the type registry is MATCHED through that constant, not dropped as silent',
+    typeRegistryVerdict.verdict === 'matched' && typeRegistryVerdict.hits[0]?.hint === TYPE_REGISTRY,
+  );
+  t(
+    'and a card editing the form registry module is MATCHED through its own constant',
+    formRegistryVerdict.verdict === 'matched' && formRegistryVerdict.hits[0]?.hint === FORM_REGISTRY,
+  );
+  // Both declared paths are real files, so the four claims above are live
+  // rather than a pair of matching strings.
+  t('the declared type registry module exists', existsSync(join(ROOT, TYPE_REGISTRY)));
+  t('the declared form registry module exists', existsSync(join(ROOT, FORM_REGISTRY)));
 
   // ── A family's OWN script files as match keys (#8509) ─────────────────────
   //

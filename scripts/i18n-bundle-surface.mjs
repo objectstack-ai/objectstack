@@ -50,17 +50,23 @@
  * form — the convention and the population coincide, with nothing left over on
  * either side.
  *
- * What it deliberately does NOT cover, measured and stated so the next reader
- * does not mistake silence for coverage: the type-level half of the same
- * surface. `walkMetadataForms` in packages/cli/src/utils/i18n-extract.ts emits
+ * What it still deliberately does NOT cover, stated so the next reader does
+ * not mistake silence for coverage: the type-level half of the same surface.
+ * `walkMetadataForms` in packages/cli/src/utils/i18n-extract.ts emits
  * `metadataForms.TYPE.label`/`.description` for every entry of
  * DEFAULT_METADATA_TYPE_REGISTRY (packages/spec/src/kernel/metadata-plugin.zod.ts),
- * and the registry module itself decides which forms are walked. Editing either
- * moves the same four bundles and matches no convention here, because neither
- * carries a filename that distinguishes it. Closing that edge needs an anchor
- * this module does not have, and the candidates trade off against each other
- * rather than being one obvious shape, so it is filed rather than guessed at:
- * issue 9144.
+ * and the registry module itself (packages/spec/src/system/metadata-form-
+ * registry.ts) decides which forms are walked. Editing either moves the same
+ * four bundles, and neither carries a filename this module's ONE convention
+ * (the `.form.ts` suffix) can see — inventing a second convention for exactly
+ * two files would be a guess, not a discovery. #9144 closed that edge WITHOUT
+ * extending this module: the two module paths are declared as bare coupling
+ * constants directly in check-i18n-bundles.mjs (METADATA_TYPE_REGISTRY_MODULE
+ * / METADATA_FORM_REGISTRY_MODULE, next to SURFACE_MODULE), which the
+ * derivation reads straight off that gate's own module body — no population
+ * to enumerate, since it is exactly two known files. See that pair's doc
+ * comment for why here was the wrong home and dispatch-gates.mjs's self-test
+ * for how the constants are kept honest.
  */
 
 import { readFileSync } from 'node:fs';
