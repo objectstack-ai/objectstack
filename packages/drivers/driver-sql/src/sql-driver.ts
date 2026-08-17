@@ -730,6 +730,120 @@ function unresolvableFilterColumnError(object: string, column: string | null): E
 }
 
 /**
+ * [#8931, maintainer ruling 2026-08-17 「同意 C」] The backend rejected the
+ * statement, and the driver claims NOTHING beyond that.
+ *
+ * # What this envelope asserts, and what it deliberately refuses to assert
+ *
+ * Exactly one thing: *the backend would not run this statement*. It is not
+ * `INVALID_FILTER` and carries no verdict about the filter, the projection, the
+ * sort or the object. That restraint is the ruling, and it is forced by a
+ * measurement rather than chosen for tone: on Postgres a dotted WHERE key
+ * (`{'title.x': v}`, which knex compiles to the qualified reference
+ * `"title"."x"`) and a table that was never provisioned raise the SAME
+ * SQLSTATE — `42P01` — differing only in Postgres' own prose:
+ *
+ * ```
+ * dotted key      42P01  missing FROM-clause entry for table "title"   (errorMissingRTE)
+ * missing table   42P01  relation "no_such_object" does not exist      (parserOpenTable)
+ * ```
+ *
+ * Measured on a live PostgreSQL 16.13. A driver that answered `INVALID_FILTER`
+ * here would tell an operator whose schema sync had not run that their FILTER
+ * was wrong; one that answered "table not provisioned" would tell a caller with
+ * a dotted key that the object is missing. Neither claim is supportable from
+ * the signal, so this envelope makes neither.
+ *
+ * # Why a catch-all rather than a predicate
+ *
+ * The alternative — recognise `42P01` and answer something specific — is a
+ * SECOND recognizer on an error class beside {@link isUnresolvableColumnError},
+ * i.e. two spellings of "the driver recognises this dialect error" with
+ * different consequences in one file. That is the split-predicate shape the
+ * #8926 ruling already refused, and it is refused again here. The rule stays
+ * the ruled one: refuse what the backend could not resolve, and ⛔ never
+ * inspect the caller's key for a `.` — the dotted-path VERDICT is #8371's, and
+ * it landed there (PR #8936).
+ *
+ * # `DATABASE_ERROR` / 500, and why that is the honest pair
+ *
+ * `DATABASE_ERROR` is the catalog's own "database operation failed"
+ * (`StandardErrorCode`, `## Server Errors (500)`), and it is already the verdict
+ * `packages/rest` derives for this condition by sniffing the message
+ * (`DATA_STORE_FAULT` — `500` + `DATABASE_ERROR`). So the wire answer a REST
+ * caller sees does not move; what moves is WHERE it is decided. It is declared
+ * by the producer that actually knows, per ADR-0112, instead of re-derived from
+ * prose at a boundary — and every non-REST consumer (an in-process ObjectQL
+ * caller, a plugin, an AI-authored action) gets the same declared answer, which
+ * before this had to pattern-match a SQLSTATE that differs per backend.
+ *
+ * 400 was not available: it would assert the caller's request is at fault, and
+ * this envelope exists precisely because the driver cannot attribute the
+ * failure. 500 also keeps the answer inside `declaresServerFault`
+ * (`@objectstack/types`), so both HTTP doors withhold the prose and log it.
+ *
+ * # The original is kept as `cause`, and that is load-bearing
+ *
+ * `isMissingTableError` (`@objectstack/metadata`) is the predicate three read
+ * paths use to tell "the table was never provisioned" — a benign emptiness —
+ * from a failure that must stay loud: `seedAutonumber` (returns 0),
+ * `resolveFileReferences` (fails open silently) and the delete-dependents probe
+ * (skips the relation). Wrapping WITHOUT the original attached would have
+ * flipped all three to their loud branch, which is a change to what the
+ * platform accepts — expressly outside this ruling.
+ *
+ * That predicate already follows `error.cause` up to four levels, with its own
+ * pins (`schema-sync-errors.test.ts`, "follows an error wrapped as `cause`"),
+ * because "drivers commonly re-throw with the original attached as `cause`" is
+ * a case it was built for. So the wrap is transparent to it and to every other
+ * cause-following consumer, and ⛔ the predicate itself is untouched.
+ *
+ * The property is defined NON-ENUMERABLE, the same shape `new Error(msg, {
+ * cause })` produces. An enumerable `cause` would ride out through
+ * `JSON.stringify(err)` and `{ ...err }` — putting the compiled statement, and
+ * on the dialects that inline them the caller's bound literals, back on any
+ * wire that serialises the error. The carrier must be readable by code and
+ * invisible to serialisation, which is the same reasoning
+ * {@link WITHHELD_FILTER_DIAGNOSTIC} applies one refusal over.
+ *
+ * @param object - the API object name the caller asked for. Its own vocabulary,
+ *                 never the physical table: see the message note below.
+ * @param cause  - the dialect error, kept whole for the log and for
+ *                 cause-following predicates.
+ */
+function backendStatementFaultError(object: string, cause: unknown): Error {
+  // ⛔ No dialect text reaches the caller — not the statement, not the quoted
+  // references, not the `$n` placeholders, not the backend's own prose. The
+  // ruling's disclosure clause, and it is why this message is COMPOSED rather
+  // than derived from the dialect's: measured on live PG 16.13, a derivation
+  // that keeps the diagnostic tail (the shape `redactStatementFromMessage`
+  // produces) still ships `invalid input syntax for type integer:
+  // "zz-not-a-number"` — Postgres inlines the caller's value in its OWN
+  // diagnostic on `22P02`, downstream of anything knex parameterised. There is
+  // no cut that keeps a dialect's words and reliably drops a caller's value,
+  // so none is attempted.
+  //
+  // The object name is the caller's own input (the API name it passed), not
+  // the physical table it maps to, so echoing it discloses nothing the caller
+  // did not write — the same line every sibling refusal in this file draws.
+  const err = new Error(
+    `The database refused to run this query for object '${object}'. The driver could not ` +
+      'attribute the failure to any part of the request, so no verdict about the query is ' +
+      "claimed here. The backend's own diagnostic and the compiled statement were written " +
+      'to the server log for an operator to read.',
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.DATABASE_ERROR;
+  err.status = 500;
+  Object.defineProperty(err, 'cause', {
+    value: cause,
+    enumerable: false,
+    writable: true,
+    configurable: true,
+  });
+  return err;
+}
+
+/**
  * [#7929] The full, operand-naming text of a refusal whose caller-visible
  * message was redacted — carried on the Error under a SYMBOL key.
  *
@@ -4593,7 +4707,12 @@ export class SqlDriver implements IDataDriver {
         }
         if (!recovered) throw this.unresolvableFilterColumnRefusal(object, lastError);
       } else {
-        throw error;
+        // [#8931] The terminal catch-all — see
+        // {@link SqlDriver.backendStatementFault}. This is the `find` half of
+        // the exit `count` spells below; both halves must answer one condition
+        // one way, which is the invariant #8790 established on this path and
+        // this ruling extends to every condition the ladder does not recover.
+        throw this.backendStatementFault(object, error);
       }
     }
 
@@ -6383,6 +6502,69 @@ export class SqlDriver implements IDataDriver {
     return unresolvableFilterColumnError(object, column);
   }
 
+  /**
+   * [#8931, maintainer ruling 2026-08-17] The TERMINAL of both read halves:
+   * compose {@link backendStatementFaultError} for a dialect error nothing
+   * above classified, writing the dialect's own message to the SERVER LOG on
+   * the way.
+   *
+   * # What reaches here, measured on live PG 16.13 and on better-sqlite3
+   *
+   * Everything the read path can throw that is not an unresolvable WHERE column
+   * (which {@link SqlDriver.unresolvableFilterColumnRefusal} already answers)
+   * and not already ADR-0112-enveloped:
+   *
+   * | condition                | before                                   |
+   * |--------------------------|------------------------------------------|
+   * | table never provisioned  | `42P01` / `SQLITE_ERROR`, no `status`    |
+   * | a dotted WHERE key on pg | `42P01`, no `status` — **this card**     |
+   * | comparand-shape syntax   | `42601` / `SQLITE_ERROR`, no `status`    |
+   * | value/type rejection     | `22P02`, no `status`, **value inlined**  |
+   * | connection, timeout, ACL | the dialect's own error, no `status`     |
+   *
+   * All of them left the driver as the dialect's raw error object: a `code`
+   * from the backend's vocabulary, no `status`, and a message opening with the
+   * compiled statement. The last row is the one worth naming — Postgres puts
+   * the caller's rejected VALUE in its own `22P02` prose (`invalid input syntax
+   * for type integer: "…"`), which no statement-cut removes, and this envelope
+   * closes it as a consequence of withholding the dialect text wholesale.
+   *
+   * ⛔ Deliberately NOT here: the WRITE paths. `create`/`update`/`delete` faults
+   * are classified at the REST boundary FROM their message text — a unique
+   * violation becomes `409 UNIQUE_VIOLATION`, an unknown column `400
+   * INVALID_FIELD` — so composing a message over them would turn precise 4xx
+   * answers into a generic 500. Those routes have their own cards; this ruling
+   * is about the read exits, and the boundary is drawn here rather than left to
+   * be discovered.
+   *
+   * Returns the error rather than throwing it, the shape both siblings on this
+   * path use, so each call site spells its own `throw`.
+   */
+  protected backendStatementFault(object: string, error: unknown): Error {
+    // Never re-envelope something that already declares one. Nothing on
+    // today's read path can (the filter compiler's refusals are raised before
+    // the statement is executed, outside the `try`), but this method is the
+    // terminal of a subclassable driver — `driver-turso` and
+    // `driver-sqlite-wasm` both extend `SqlDriver` — and a double wrap would
+    // bury a precise refusal under a generic one. Asked over the DECLARED
+    // status, the same gate `packages/rest`'s `declaredHttpStatus` reads, and
+    // ⛔ not over any error CLASS: this is "is it already ours", not a second
+    // recognizer for a dialect condition.
+    const declared = (error as { status?: unknown } | null | undefined)?.status;
+    if (typeof declared === 'number') return error as Error;
+
+    const detail = (error as { message?: unknown } | null | undefined)?.message;
+    const code = (error as { code?: unknown } | null | undefined)?.code;
+    this.logger.warn(
+      `[sql-driver] DATABASE_ERROR — the backend refused a read on '${object}'` +
+        (typeof code === 'string' && code.length > 0 ? ` (${code})` : '') +
+        '. The dialect message below is kept server-side: it carries the compiled statement, ' +
+        'and on the dialects that inline them the bound literals too (#7929, #8931): ' +
+        `${typeof detail === 'string' ? detail : String(error)}`,
+    );
+    return backendStatementFaultError(object, error);
+  }
+
   async count(object: string, query?: DriverQuery, options?: DriverOptions): Promise<number> {
     const builder = this.getBuilder(object, options);
     this.applyTenantScope(builder, object, options);
@@ -6406,7 +6588,8 @@ export class SqlDriver implements IDataDriver {
       if (isUnresolvableColumnError(error)) {
         throw this.unresolvableFilterColumnRefusal(object, error);
       }
-      throw error;
+      // [#8931] The terminal catch-all — see {@link SqlDriver.backendStatementFault}.
+      throw this.backendStatementFault(object, error);
     }
     if (result && result.length > 0) {
       const row: any = result[0];

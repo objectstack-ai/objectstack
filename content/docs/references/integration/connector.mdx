@@ -181,7 +181,7 @@ Circuit breaker configuration
 | **requestTimeoutMs** | `number` | optional (default: `30000`) | Request timeout in ms |
 | **status** | `Enum<'active' \| 'inactive' \| 'error' \| 'configuring'>` | optional (default: `"inactive"`) | Connector status |
 | **enabled** | `boolean` | optional (default: `true`) | Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor (#2612). |
-| **errorMapping** | `{ rules: object[]; defaultCategory?: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| … +3 more>; unmappedBehavior: Enum<'passthrough' \| 'generic_error' \| 'throw'>; logUnmapped?: boolean }` | optional | Error mapping configuration |
+| **errorMapping** | `{ rules: object[]; defaultCategory?: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| …>; unmappedBehavior: Enum<'passthrough' \| 'generic_error' \| 'throw'>; logUnmapped?: boolean }` | optional | Error mapping configuration |
 | **health** | `{ healthCheck?: object; circuitBreaker?: object }` | optional | Health and resilience configuration |
 | **metadata** | `Record<string, any>` | optional | Custom connector metadata |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
@@ -503,7 +503,7 @@ Connector type
 | **requestTimeoutMs** | `number` | optional (default: `30000`) | Request timeout in ms |
 | **status** | `Enum<'active' \| 'inactive' \| 'error' \| 'configuring'>` | optional (default: `"inactive"`) | Connector status |
 | **enabled** | `boolean` | optional (default: `true`) | Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor (#2612). |
-| **errorMapping** | `{ rules: object[]; defaultCategory?: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| … +3 more>; unmappedBehavior: Enum<'passthrough' \| 'generic_error' \| 'throw'>; logUnmapped?: boolean }` | optional | Error mapping configuration |
+| **errorMapping** | `{ rules: object[]; defaultCategory?: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| …>; unmappedBehavior: Enum<'passthrough' \| 'generic_error' \| 'throw'>; logUnmapped?: boolean }` | optional | Error mapping configuration |
 | **health** | `{ healthCheck?: object; circuitBreaker?: object }` | optional | Health and resilience configuration |
 | **metadata** | `Record<string, any>` | optional | Custom connector metadata |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
@@ -525,7 +525,7 @@ Error mapping configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **rules** | `{ sourceCode: string \| number; sourceMessage?: string; targetCode: string; targetCategory: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| … +3 more>; … }[]` | ✅ | Error mapping rules |
+| **rules** | `{ sourceCode: string \| number; sourceMessage?: string; targetCode: string; targetCategory: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| …>; … }[]` | ✅ | Error mapping rules |
 | **defaultCategory** | `Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>` | optional (default: `"integration_error"`) | Default category for unmapped errors |
 | **unmappedBehavior** | `Enum<'passthrough' \| 'generic_error' \| 'throw'>` | ✅ | What to do with unmapped errors |
 | **logUnmapped** | `boolean` | optional (default: `true`) | Log unmapped errors |

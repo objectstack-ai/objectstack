@@ -78,9 +78,36 @@
  * was missing, so the property stops being an unstated accident of the client
  * library: see `DOTTED_STATUS_QUO.literalWithheldBy`, the disclosure pins in
  * each cell's sweep, and the mechanism pin at the bottom of the file.
- * ⛔ The dotted route's `code` and `status` are unchanged and stay recorded
- * rather than asserted — questions 1 (can it be enveloped without judging the
- * key) and 2 (which envelope) are unruled and are the maintainer's.
+ *
+ * [#8931 questions 1 and 2, maintainer ruling 2026-08-17 「同意 C」] Those two
+ * are now ruled, and the Postgres row of `DOTTED_STATUS_QUO` changes with them
+ * — DELIBERATELY, so ⛔ do not read the changed cells as drift. The ruling: the
+ * driver stops answering an unenveloped dialect error at all. Any dialect error
+ * the existing classification does not claim leaves the read exits as a GENERIC
+ * backend-fault envelope (`DATABASE_ERROR` / 500) asserting only "the backend
+ * rejected this statement" — ⛔ never `INVALID_FILTER`, and no verdict about the
+ * filter, because on Postgres `42P01` is the same signal for a dotted key and
+ * for a table that was never provisioned (measured below) and cannot honestly
+ * support one. It is a terminal CATCH-ALL, ⛔ not a new recognizer on `42P01`:
+ * `isUnresolvableColumnError` is untouched, the key is still never inspected
+ * for a `.`, and #8371's verdict (landed in PR #8936) stays the only one.
+ *
+ * Two consequences this file now pins rather than records:
+ *
+ *  - the pg cell's `code`/`status` move from `42P01`/`undefined` to
+ *    `DATABASE_ERROR`/`500`, and its caller-visible message loses the dialect
+ *    text entirely — statement, quoted references and `$n` alike;
+ *  - `literalWithheldBy` for pg moves from `NEVER_INLINED` to the envelope, and
+ *    the knex fact it used to name moves one slot over, to
+ *    `dialectTextInlinesLiteral` — asserted now against the SERVER LOG, which
+ *    is where the dialect text still goes. The distinction #9108 paid for is
+ *    kept, not collapsed: "the value was never in the text" and "the text was
+ *    withheld" remain different facts about different strings.
+ *
+ * The end-to-end envelope, its enumeration and its `cause` preservation live in
+ * `sql-driver-backend-fault-envelope.test.ts`; what stays here is the DOTTED
+ * route, because that is the route this file has measured across three dialects
+ * since #8790.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -188,17 +215,54 @@ const UNRESOLVABLE: ReadonlyArray<{ label: string; where: NonNullable<DriverQuer
  * `13d78642d` evidence) does not hold on Postgres. ⚠️ The property is real but
  * INCIDENTAL — it belongs to knex's binding path, not to any rule this repo
  * states — so it is asserted here, and the mechanism pin at the bottom fails
- * the day that path changes. What remains genuinely open on the pg cell is the
- * ENVELOPE (a raw `42P01` with no `status`, carrying the compiled statement's
- * shape), and that is questions 1 and 2, unruled.
+ * the day that path changes.
+ *
+ * ## [#8931 Q1+Q2, ruled 2026-08-17] The pg cell's answer changes — on purpose
+ *
+ * The envelope that was open when the paragraphs above were written is now
+ * ruled, so the pg cell reads `DATABASE_ERROR` / 500 with a COMPOSED message
+ * and no dialect text at all. That collapses the caller-visible half of the
+ * mechanism distinction — a withheld message carries no literal whatever knex
+ * did with the bindings — so the knex fact is kept on its own axis
+ * ({@link DottedCell.dialectTextInlinesLiteral}) and asserted where the dialect
+ * text still exists: the SERVER LOG line the driver writes on the way out.
+ *
+ * ⛔ Collapsing the two into "no literal reaches the caller" is exactly what let
+ * #8931's false premise stand for a month; the axis is kept for that reason and
+ * ⛔ must not be removed because the caller-side assertion became uniform.
  */
 interface DottedCell {
-  /** The `code` the caller receives. ⛔ Recorded, not adjudicated (#8931 Q1/Q2). */
+  /**
+   * The `code` the caller receives.
+   *
+   * [#8931 Q1/Q2] For sqlite/mysql this is still RECORDED (the #8790 refusal
+   * decides it, and #8371 owns the dotted verdict). For pg it is now the ruled
+   * generic backend-fault envelope — the terminal catch-all's answer, which
+   * makes no claim about the filter.
+   */
   code: string;
-  /** Does the answer carry the ADR-0112 envelope (`status: 400`)? */
-  enveloped: boolean;
-  /** [#8931 Q3] Which of the two mechanisms above keeps the literal off the wire. */
-  literalWithheldBy: typeof REFUSAL_ENVELOPE | typeof NEVER_INLINED;
+  /**
+   * The `status` the caller receives — `undefined` would mean an unenveloped
+   * dialect error escaped, which since the 2026-08-17 ruling no cell may do.
+   */
+  status: number;
+  /** [#8931 Q3] Which mechanism keeps the literal out of the CALLER's message. */
+  literalWithheldBy:
+    | typeof REFUSAL_ENVELOPE
+    | typeof NEVER_INLINED
+    | typeof BACKEND_FAULT_ENVELOPE;
+  /**
+   * [#8931 Q3, re-homed by Q1/Q2] Does the dialect's own text — the string that
+   * now reaches only the server log — carry the caller's bound literal?
+   *
+   * The half of `literalWithheldBy` that survives the envelope: `true` means
+   * the log line proves the message COULD have carried the value (sqlite and
+   * mysql leave `?` for knex's formatter to substitute), `false` means it never
+   * could (pg positions bindings to `$n` first). Asserting only the caller's
+   * side would make every cell pass for a different reason and record none of
+   * them.
+   */
+  dialectTextInlinesLiteral: boolean;
   /**
    * Substrings the caller-visible message MUST still carry.
    *
@@ -213,26 +277,43 @@ interface DottedCell {
 const REFUSAL_ENVELOPE = 'the #8790 refusal envelope (a real redaction)';
 /** knex parameterised the value, so the message never carried it. */
 const NEVER_INLINED = 'knex parameterisation — the literal was never in the text';
+/** [#8931 Q1/Q2] The whole dialect text is withheld, so nothing in it can travel. */
+const BACKEND_FAULT_ENVELOPE = 'the #8931 backend-fault envelope (the dialect text is withheld whole)';
 
 const DOTTED_STATUS_QUO: Readonly<Record<string, DottedCell>> = {
   sqlite: {
     code: 'INVALID_FILTER',
-    enveloped: true,
+    status: 400,
     literalWithheldBy: REFUSAL_ENVELOPE,
+    dialectTextInlinesLiteral: true,
     identifies: ['title.x', TABLE],
   },
+  // [#8931 Q1+Q2, ruled 2026-08-17 「同意 C」] ⚠️ CHANGED CELL, and the reason is
+  // recorded here so the next reader does not read it as drift. Postgres
+  // classifies the dotted key as an undefined TABLE (`42P01`) — the identical
+  // signal it raises for a relation that was never provisioned — so no honest
+  // verdict about the FILTER can be read out of it. The ruling therefore does
+  // not teach any predicate to recognise it: the terminal catch-all wraps every
+  // dialect error the existing classification leaves unclaimed, and this cell
+  // is one of them. `code`/`status` move from `42P01`/`undefined` to
+  // `DATABASE_ERROR`/`500`, and the message stops carrying the statement.
   pg: {
-    code: '42P01',
-    enveloped: false,
-    literalWithheldBy: NEVER_INLINED,
-    // The raw dialect text, which on this cell IS the caller-visible message:
-    // `select … where "title"."x" = $1 - missing FROM-clause entry for table "title"`.
-    identifies: ['missing FROM-clause entry for table', '"title"."x"', TABLE],
+    code: 'DATABASE_ERROR',
+    status: 500,
+    literalWithheldBy: BACKEND_FAULT_ENVELOPE,
+    // Still false, still the #9108 measurement, now asserted on the LOG line —
+    // the only string that still holds the dialect's words.
+    dialectTextInlinesLiteral: false,
+    // The composed message names the caller's own object and nothing else: ⛔ no
+    // table name, no quoted reference, no `$n`. The negative half of this is
+    // asserted for every cell in the disclosure sweep below.
+    identifies: [TABLE],
   },
   mysql: {
     code: 'INVALID_FILTER',
-    enveloped: true,
+    status: 400,
     literalWithheldBy: REFUSAL_ENVELOPE,
+    dialectTextInlinesLiteral: true,
     identifies: ['title.x', TABLE],
   },
 };
@@ -314,7 +395,28 @@ describe(`[#8790] driver-sql — unresolvable WHERE column refuses on BOTH halve
     expect(expected, `no recorded status quo for cell '${cell.id}'`).toBeDefined();
     const err = await caught(() => driver.find(TABLE, { where: { 'title.x': SECRET_LITERAL } }));
     expect(err.code).toBe(expected.code);
-    expect(err.status).toBe(expected.enveloped ? 400 : undefined);
+    expect(err.status).toBe(expected.status);
+  });
+
+  // [#8931 Q1+Q2, ruled 2026-08-17] The half of the ruling that is true of
+  // EVERY cell and does not depend on which envelope a dialect lands in: no
+  // dotted route may answer an unenveloped dialect error. Stated separately
+  // from the per-cell record above so that a future cell added to
+  // `DOTTED_STATUS_QUO` cannot record `status: undefined` and pass.
+  it('no dialect answers a dotted key with an unenveloped dialect error (#8931)', async () => {
+    for (const [half, run] of [
+      ['find', () => driver.find(TABLE, { where: { 'title.x': SECRET_LITERAL } })],
+      ['count', () => driver.count(TABLE, { where: { 'title.x': SECRET_LITERAL } })],
+    ] as const) {
+      const err = await caught(run);
+      expect(typeof err.status, `${half}: an ADR-0112 status`).toBe('number');
+      expect(err.status, `${half}`).toBeGreaterThanOrEqual(400);
+      expect(typeof err.code, `${half}: an ADR-0112 code`).toBe('string');
+      // The dialect's own vocabulary must not survive as the caller's `code`.
+      expect(err.code, `${half}`).not.toBe('SQLITE_ERROR');
+      expect(err.code, `${half}`).not.toBe('42P01');
+      expect(err.code, `${half}`).not.toBe('ER_BAD_FIELD_ERROR');
+    }
   });
 
   // ───────────────────────────────────────────────────────────────
@@ -348,6 +450,15 @@ describe(`[#8790] driver-sql — unresolvable WHERE column refuses on BOTH halve
       for (const needle of expected.identifies) {
         expect(err.message, `${half}: the caller must still be told '${needle}'`).toContain(needle);
       }
+      // [#8931 Q1+Q2] The disclosure clause of the 2026-08-17 ruling, asserted
+      // on every cell rather than only the one that changed: the caller-visible
+      // message carries no STATEMENT SHAPE. Before the ruling the pg cell
+      // failed all three of these — its message opened `select * from
+      // "unresolvable_where_task" where "title"."x" = $1` — which is what made
+      // "the caller sees the query's structure" the residue #9108 left open.
+      expect(err.message, `${half}: no compiled statement`).not.toMatch(/\bselect\s/i);
+      expect(err.message, `${half}: no positional placeholder`).not.toMatch(/\$\d/);
+      expect(err.message, `${half}: no quoted physical reference`).not.toMatch(/["`]/);
     }
   });
 
@@ -371,20 +482,36 @@ describe(`[#8790] driver-sql — unresolvable WHERE column refuses on BOTH halve
 
     expect(err.message).not.toContain(SECRET_LITERAL);
 
-    if (expected.literalWithheldBy === REFUSAL_ENVELOPE) {
-      // A REAL redaction: the dialect text did carry the caller's value, and
-      // the refusal moved it to the server log (#7929's line, #8790's seam).
-      // This is the proof the message "would have carried the literal".
+    // [#8931 Q1+Q2, ruled 2026-08-17] Since the catch-all, EVERY cell writes
+    // the dialect's own text to the server log on the way out — the pg cell
+    // included, which before this ruling logged nothing at all because nothing
+    // recognised its error. So the control is now uniform on the log's
+    // EXISTENCE, and the per-cell fact it proves is what that text contains.
+    const dialectText = logged.find((line) => line.includes(' - ') || line.includes('select '));
+    expect(
+      dialectText,
+      'the dialect message must reach the server log — that is what makes this a withholding rather than a deletion',
+    ).toBeDefined();
+
+    if (expected.dialectTextInlinesLiteral) {
+      // sqlite / mysql: knex leaves `?` standing, so its error formatter
+      // substituted the caller's value into the text. The log carrying it is
+      // the proof the caller's message "could have" carried it — without this,
+      // "no literal in the message" is a claim about a string nobody showed
+      // ever held one.
       expect(
         logged.some((line) => line.includes(SECRET_LITERAL)),
         'the dialect text should have reached the server log with the literal intact',
       ).toBe(true);
     } else {
-      // Postgres: NOT a redaction. The value was parameterised, so a `$n`
-      // placeholder stands where it would have been — and nothing was logged,
-      // because nothing recognised the error in the first place. ⛔ Do not
-      // read this cell as "the redaction works here"; see `literalWithheldBy`.
-      expect(err.message, 'the value should stand as a placeholder, not a literal').toMatch(/\$\d/);
+      // Postgres: the value was parameterised BEFORE the failing statement was
+      // formatted, so a `$n` placeholder stands where it would have been — in
+      // the log, which since the ruling is the only place the dialect text
+      // exists. ⛔ Do not read this cell as "the redaction works here": nothing
+      // was redacted, the value was never in the string. The mechanism pin at
+      // the bottom of this file is why that stays true.
+      expect(String(dialectText), 'the value should stand as a placeholder, not a literal')
+        .toMatch(/\$\d/);
       expect(logged.some((line) => line.includes(SECRET_LITERAL))).toBe(false);
     }
   });
@@ -430,9 +557,19 @@ describe(`[#8790] driver-sql — unresolvable WHERE column refuses on BOTH halve
     expect(await driver.count(TABLE, { where: { title: 'no-such-title' } })).toBe(0);
   });
 
-  it('CONTROL an error that is not about an unresolvable column still propagates unchanged', async () => {
+  // [#8931] This used to assert the error "propagates unchanged", which since
+  // the 2026-08-17 ruling is no longer what happens and would have been a
+  // misleading name to leave standing: an unclassified dialect error now takes
+  // the generic backend-fault envelope. What the control is FOR is unchanged —
+  // the #8790 refusal must stay selective, i.e. a failure that is not about an
+  // unresolvable column must not be answered as if it were. The full envelope,
+  // its enumeration and its `cause` preservation are pinned in
+  // `sql-driver-backend-fault-envelope.test.ts`.
+  it('CONTROL an error that is not about an unresolvable column is NOT answered as a filter fault', async () => {
     const err = await caught(() => driver.find('no_such_table_at_all', {}));
     expect(err.code).not.toBe('INVALID_FILTER');
+    expect(err.code).toBe('DATABASE_ERROR');
+    expect(err.status).toBe(500);
   });
 
   // ───────────────────────────────────────────────────────────────
@@ -540,6 +677,15 @@ const DIALECT_MESSAGES: ReadonlyArray<{
   // predicate matches it — before this card or after. Teaching the classifier
   // this shape would mint a dotted-path verdict the driver has no business
   // making; #8371 owns that. See `DOTTED_STATUS_QUO`.
+  //
+  // [#8931 Q1+Q2, ruled 2026-08-17] `recognised: false` is still correct and is
+  // now load-bearing in a second way: the pg dotted route is enveloped, but ⛔
+  // NOT by this predicate learning `42P01`. It is enveloped by the terminal
+  // CATCH-ALL, which claims no error class at all. A future reader tempted to
+  // flip this to `true` "because pg is enveloped now" would be minting exactly
+  // the second recognizer the ruling forbids — and, since `42P01` is also how
+  // Postgres reports a table that was never provisioned, would answer
+  // `INVALID_FILTER` for an unsynced schema.
   {
     dialect: 'postgres, DOTTED key — undefined_table, NOT recognised',
     message: 'select * from "task" where "title"."x" = $1 - missing FROM-clause entry for table "title"',
@@ -656,6 +802,17 @@ describe('[#8790] dialect wording — what the refusal recognises and what it na
  * knex upgrade ever positions bindings after formatting (or teaches the
  * formatter `$n`), this goes red and the pg cell becomes a genuine leak that
  * question 3 would then have to fix for real.
+ *
+ * [#8931 Q1+Q2, ruled 2026-08-17] ⚠️ This pin's CONSUMER moved, and it is worth
+ * a sentence because a reader could otherwise conclude the envelope retired it.
+ * The caller-visible message no longer carries the dialect text on any cell, so
+ * the fact below no longer protects the caller — it protects the SERVER LOG,
+ * which is where the driver now writes the dialect's words. A knex upgrade that
+ * inlined pg bindings would put the caller's value in that log line, which is
+ * precisely the exposure `redactBoundStatement` (`@objectstack/objectql`)
+ * closes for the engine's own log slots. The pin therefore stays live and its
+ * red still means "re-measure by hand"; only the string it is a statement about
+ * has changed.
  *
  * ⚠️ `positionBindings` is knex's own seam, not a public API contract. That is
  * the point: a red here means "the assumption underneath the pg cell moved",

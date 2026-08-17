@@ -87,10 +87,45 @@ export const SysApprovalRequest = ObjectSchema.create({
   fields: {
     id: Field.text({ label: 'Request ID', required: true, readonly: true, group: 'System' }),
 
+    // ⚠️ MEASURED DEFECT, cloud#1395 — read this before trusting the column.
+    //
+    // An approval request DOES belong to an organization: it is read through the
+    // organization wall by the approvals inbox, and on a shared-database
+    // deployment a row carrying no organization is not filtered BY that wall —
+    // it is either invisible to everyone or visible to everyone, decided by
+    // whatever filter each surface happens to apply rather than by the data.
+    //
+    // The value is resolved from the ACTING CONTEXT only (`openNodeRequest`'s
+    // `ctxOrg`), so it is NULL whenever the flow that opened the request ran
+    // without one — every schedule / time-relative / api triggered run, none of
+    // which sets a tenant. On a walled single-database HotCRM SaaS boot this
+    // measured 27 of 27 rows org-less, each naming an `object_name` /
+    // `record_id` owned by a specific customer.
+    //
+    // ⛔ Do NOT read that as "platform tables do not carry an organization".
+    // `sys_audit_log` (1669 rows) was correctly attributed on the SAME boot,
+    // because its writer takes the organization from the RECORD the row is
+    // about, with the session only as fallback (plugin-audit
+    // `resolveRecordOrganizationField`, #8707 honouring #8287's ruling). Two
+    // writers read the actor; a third reads the subject. That disagreement is
+    // the defect.
+    //
+    // Which of the two a side-table row should follow is an open contract
+    // question on cloud#1395 — the audit resolver is scope-pinned to audit
+    // stamping by the #8778 ruling, so this writer needs its own. The same
+    // `ctxOrg` also stamps `sys_approval_action` and `sys_approval_approver`,
+    // so all three move together.
     organization_id: Field.lookup('sys_organization', {
       label: 'Organization',
       required: false,
       group: 'System',
+      // ⛔ String unchanged on purpose: it is extracted into the generated i18n
+      // bundles (`translations/*.objects.generated.ts`, as `help`), so rewording
+      // it is a translation-regeneration change and not a comment. The
+      // correction it needs — it claims a propagation that measurably does not
+      // happen, and says "Tenant" where ADR-0120 §Terminology requires
+      // "organization" — rides the cloud#1395 write-side fix, which rewrites the
+      // sentence and regenerates the four locales in one pass.
       description: 'Tenant that owns this approval request (propagated from submitter context)',
     }),
 

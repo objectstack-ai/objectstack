@@ -394,7 +394,33 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
   /** Flatten a run into a `sys_automation_run` row (state columns JSON-encoded). */
   private serialize(run: SuspendedRun): Record<string, unknown> {
     const ctx = (run.context ?? {}) as Record<string, unknown>;
-    const org = ctx.organizationId ?? ctx.tenantId ?? null;
+    // [cloud#1395] `tenantId` is the ONLY spelling — it is the field
+    // `AutomationContext` declares for the triggering identity's organization,
+    // and the only one any producer writes: `RecordChangeTrigger.buildContext`
+    // maps the hook session's `organizationId` onto it, and the runtime's
+    // automation domain sets it directly. A `ctx.organizationId` limb used to
+    // sit ahead of this read with ZERO producers behind it (PD #12 — the
+    // consumer-side alias that fossilizes a second de-facto contract), and it
+    // was not harmless: the ONE test asserting this column fed the phantom key,
+    // so the only coverage `organization_id` had proved the dead limb worked
+    // and said nothing about the live one. Removed rather than kept "for
+    // safety"; a producer that wants this row attributed sets the declared
+    // `tenantId`.
+    //
+    // ⚠️ MEASURED, and NOT fixed by the line above (cloud#1395): this resolves
+    // to null on every trigger path that carries no acting tenant — the
+    // schedule, time-relative and api triggers set none at all, by
+    // construction, because a scheduled run has no one organization. Those runs
+    // persist `organization_id = NULL` while describing a record that DOES
+    // belong to a customer. `sys_audit_log` does not have this defect on the
+    // same boot because its writer resolves the organization from the RECORD it
+    // describes (plugin-audit `resolveRecordOrganizationField`, #8707 honouring
+    // #8287's ruling) and falls back to the session only when the record has
+    // none. ⛔ Do not read that asymmetry as "platform tables carry no org" —
+    // it is two writers reading the acting context where a third reads the
+    // subject. Which column a side-table row should take its organization from
+    // is the open contract question on cloud#1395.
+    const org = ctx.tenantId ?? null;
     // #7533 — the same three trigger columns the terminal path writes. A paused
     // row is a `sys_automation_run` row too, and leaving them null here would
     // make "which runs did this record provoke?" answer for finished runs while

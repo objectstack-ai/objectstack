@@ -51,9 +51,18 @@ export const FieldZooViews = defineView({
      * for an expanded surface and another way for a plain one; binding the
      * relation as its foreign key everywhere (objectui#3501) is what makes this
      * single rule correct on both.
+     *
+     * #8990 — it is also the same SPARSE binding, so it takes the same guard:
+     * this rule reads a column no view here projects, and the unguarded read
+     * aborted at key resolution on every row. `has()` is the whole guard —
+     * the surviving `!= null` is the rule's own test, not protection from a
+     * fault, because `!=` against a literal never faults on a NULL value.
      */
     conditionalFormatting: [
-      { condition: P`record.f_lookup != null`, style: { backgroundColor: 'rgba(37, 99, 235, 0.08)' } },
+      {
+        condition: P`has(record.f_lookup) && record.f_lookup != null`,
+        style: { backgroundColor: 'rgba(37, 99, 235, 0.08)' },
+      },
     ],
 
     /**
@@ -161,7 +170,11 @@ export const FieldZooViews = defineView({
           operation: 'custom',
           execution: 'aggregate',
           label: 'Rated 4+ only',
-          visible: P`record.f_rating >= 4`,
+          // #8990 — `f_rating` IS a column here, but a `bulkActionDefs` predicate
+          // binds the selection's rows, not this view's columns, so it takes the
+          // guard anyway. Ordering (`>=`) faults on a projected NULL, so this one
+          // needs the full conjunction rather than `has()` alone.
+          visible: P`has(record.f_rating) && record.f_rating != null && record.f_rating >= 4`,
         },
       ],
     },

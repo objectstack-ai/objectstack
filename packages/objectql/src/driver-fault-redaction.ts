@@ -69,10 +69,52 @@
  * `@objectstack/types` refuses to read a column out of it for exactly that
  * reason), and an operator debugging a duplicate needs that index name.
  *
- * ⛔ This is a server LOG. The rethrown error is untouched, every HTTP boundary
- * is unaffected, and no live MySQL deployment was measured — the input strings
- * are this repo's own recorded mysql2 phrasings (`unique-violation.ts`) driven
- * through the real function.
+ * ⛔ This is a server LOG. The rethrown error is untouched and every HTTP
+ * boundary is unaffected.
+ *
+ * ## [#9160] The list is now MEASURED, and there is a way to notice a gap
+ *
+ * #8823 left one entry and no instrument: nothing measured whether a diagnostic
+ * a driver produced carried a value, so the next entry needed the same accident
+ * that found the first. `sql-driver-diagnostic-value-probe.test.ts` is that
+ * instrument. It plants a canary value, raises each candidate family against
+ * the live MySQL 8.0 / PostgreSQL 16 services the `Temporal Conformance (live
+ * PG + MySQL)` job stands up, and asserts of EVERY family — value-bearing or
+ * not — whether the canary reaches `error.message`. A family that starts
+ * inlining a value it did not inline before is a named red, not a silent leak.
+ *
+ * What it measured (MySQL 8.0.46, PostgreSQL 16.13), verbatim:
+ *
+ * ```
+ * mysql 1062  Duplicate entry 'CANARY-abc' for key 'probe.uq'              VALUE
+ * mysql 1366  Incorrect integer value: 'CANARY-abc' for column 'age' at row 1   VALUE
+ * mysql 1292  Incorrect datetime value: 'CANARY' for column 'when_at' at row 1  VALUE
+ * mysql 1264  Out of range value for column 'age' at row 1                 identifier only
+ * mysql 1406  Data too long for column 'label' at row 1                    identifier only
+ * mysql 1054  Unknown column 'zzz_nonexistent_field' in 'field list'        identifier only
+ * pg    22P02 invalid input syntax for type integer: "CANARY-abc"           VALUE
+ * pg    22007 invalid input syntax for type timestamp with time zone: "…"   VALUE
+ * pg    22003 value "99999999999" is out of range for type integer          VALUE
+ * pg    23505 duplicate key value violates unique constraint "…_key"        identifier only¹
+ * pg    23502 null value in column "id" of relation "t" violates not-null…  identifier only¹
+ * pg    22001 value too long for type character varying(20)                 identifier only
+ * ```
+ *
+ * ¹ on `error.message`. Both put the caller's row on `error.detail`, which
+ * `ObjectLogger.write` does not serialize — the coincidence #8823 recorded, and
+ * it is still only a coincidence. **The three Postgres families marked VALUE put
+ * the caller's value on `message`, the field that IS serialized**, so nothing
+ * covers them but the entries below. That was the open question #9160 asked and
+ * the answer is the one the card feared.
+ *
+ * ⛔ Known residue, measured and NOT closed here: when the caller's value itself
+ * contains ` - `, the statement cut lands inside it and eats the template head.
+ * Families with a right anchor (`for key …`, `for column … at row N`) recover
+ * via their `tail` pattern; the two whose value runs to end of message
+ * (pg 22P02/22007, mysql 1292's `Truncated incorrect …` spelling) have no
+ * anchor to recover from and leave a suffix of the value standing. Closing that
+ * needs the cut itself to become template-aware, which is a change to #8682's
+ * contract and is filed rather than decided.
  *
  * ## Why the cut is at the separator, and not at a statement keyword
  *
@@ -164,6 +206,133 @@ const DUPLICATE_ENTRY = /(duplicate entry\s+)["'`][\s\S]*["'`](\s+for key\s+["'`
 const DUPLICATE_ENTRY_TAIL = /["'`](\s+for key\s+["'`][^"'`]+["'`])/gi;
 
 /**
+ * [#9160] MySQL `ER_TRUNCATED_WRONG_VALUE_FOR_FIELD` (1366) and the
+ * column-bound spelling of `ER_TRUNCATED_WRONG_VALUE` (1292).
+ *
+ * `Incorrect %-.32s value: '%-.128s' for column %.192s at row %ld` — slot one is
+ * a TYPE name, slot two is the caller's value, and the `for column '…' at row N`
+ * tail names the identifier an operator needs. Measured off a thrown error on
+ * live MySQL 8.0.46 (see `sql-driver-diagnostic-value-probe.test.ts`), three
+ * type spellings, byte-identical to the manual's template:
+ *
+ * ```
+ * Incorrect integer value: 'CANARY-abc' for column 'age' at row 1
+ * Incorrect decimal value: 'CANARY-notanum' for column 'amount' at row 1
+ * Incorrect datetime value: 'CANARY-notadate' for column 'when_at' at row 1
+ * ```
+ *
+ * Greedy for the same reason `DUPLICATE_ENTRY` is: MySQL escapes the value's
+ * quotes no more here than there, so a value that mimics the anchor resolves to
+ * the LAST one. Measured: a value spelled `CANARY' for column 'x' at row 1`
+ * really does print two anchors, and the greedy read discards both.
+ *
+ * ⛔ The neighbouring identifier-only families — `Out of range value for column
+ * 'age' at row 1` (1264) and `Data too long for column 'label' at row 1` (1406)
+ * — were raised by the same probe and carry NO caller value. They must not
+ * match: the anchor here requires the value's closing quote immediately before
+ * ` for column`, which those two do not have.
+ */
+const MYSQL_INCORRECT_VALUE = /(incorrect \w+ value:\s+)'[\s\S]*'(\s+for column\s+'[^']*'\s+at row\s+\d+)/gi;
+
+/** [#9160] {@link MYSQL_INCORRECT_VALUE} with its head cut away by a value containing ` - `. */
+const MYSQL_INCORRECT_VALUE_TAIL = /'(\s+for column\s+'[^']*'\s+at row\s+\d+)/gi;
+
+/**
+ * [#9160] Postgres `invalid_text_representation` (22P02) and the datetime
+ * spelling `invalid_datetime_format` (22007).
+ *
+ * `invalid input syntax for type %s: "%s"` — the type name is Postgres' own
+ * word, the quoted tail is the caller's value. Measured on live PostgreSQL
+ * 16.13 across `integer`, `numeric`, `boolean`, `uuid` and `timestamp with time
+ * zone`, hence the space-tolerant type class:
+ *
+ * ```
+ * invalid input syntax for type integer: "CANARY-abc"
+ * invalid input syntax for type timestamp with time zone: "CANARY-notadate"
+ * ```
+ *
+ * **This is the family the #8823 note was waiting for.** Postgres' unique
+ * violation is saved only because its value sits on `error.detail`, which
+ * `ObjectLogger.write` does not serialize — recorded there as "coincidence, not
+ * a defence". Here the value is on `error.message`, the field that IS
+ * serialized, so the coincidence does not cover it and the cut alone does not
+ * either.
+ *
+ * The value runs to END OF MESSAGE with no right anchor, so everything from the
+ * opening quote onward is dropped. The valueless spelling
+ * `invalid input syntax for type json` (whose token sits on `detail`) has no
+ * `: "` and is deliberately left untouched.
+ */
+const PG_INVALID_INPUT_SYNTAX = /(invalid input syntax for type [a-z0-9 ]+?:\s+)"[\s\S]*$()/gi;
+
+/**
+ * [#9160] Postgres `numeric_value_out_of_range` (22003).
+ *
+ * `value "%s" is out of range for type %s` — measured live as
+ * `value "99999999999" is out of range for type integer`. The out-of-range
+ * value is the caller's own, and the type after the anchor is Postgres' word.
+ *
+ * ⛔ Must not reach `duplicate key value violates unique constraint "…"`: that
+ * one has no ` is out of range for type` anchor, and the anchor is what
+ * discriminates. The sibling spelling `numeric field overflow` carries no
+ * caller value on `message` at all (its precision note is on `detail`).
+ */
+const PG_VALUE_OUT_OF_RANGE = /(value\s+)"[\s\S]*"(\s+is out of range for type [a-z0-9 ]+)/gi;
+
+/**
+ * [#9160] MySQL `ER_TRUNCATED_WRONG_VALUE` (1292), the spelling that names no
+ * column: `Truncated incorrect %-.32s value: '%-.128s'`.
+ *
+ * Measured live as `Truncated incorrect INTEGER value: 'CANARY-xyz'`, raised by
+ * an explicit `cast(… as signed)`. Recorded as a real negative about REACH as
+ * well as a positive about shape: the probe could only provoke this spelling
+ * through raw SQL, never through the driver's own bind path, which reaches the
+ * column-bound 1366/1292 wording above instead. It is listed because it was
+ * measured, not because a write path is known to produce it.
+ *
+ * Value runs to end of message; no right anchor exists to recover a head-gone
+ * residue.
+ */
+const MYSQL_TRUNCATED_INCORRECT_VALUE = /(truncated incorrect \w+ value:\s+)'[\s\S]*$()/gi;
+
+/**
+ * [#9160] Every dialect template MEASURED to inline a caller's value in the
+ * database's own diagnostic, in the order they are tried.
+ *
+ * ⛔ The standing rule (`unique-violation.ts`) governs this list: a row goes in
+ * once its phrasing has been raised off a THROWN error, never from a reading of
+ * the manual. Every row below cites the live server that produced it, and
+ * `sql-driver-diagnostic-value-probe.test.ts` re-raises each one against the
+ * MySQL/Postgres services the `Temporal Conformance (live PG + MySQL)` job
+ * stands up — so a row whose phrasing drifts, or a NEW family that starts
+ * inlining a value, becomes a named red instead of a silent leak. That probe is
+ * the answer to "how would anyone notice a second entry is missing"; this list
+ * is only half of the pair and must not be extended without it.
+ *
+ * `whole` matches head + value + kept tail (group 1 kept before the value,
+ * group 2 kept after). `tail` is the same template after the statement cut has
+ * eaten its head — which happens when the VALUE itself contained ` - ` — and
+ * drops everything before the anchor, because an anchor is evidence about the
+ * value, not licence to assert which template printed it.
+ */
+interface ValueBearingTemplate {
+  /** Dialect and the server's own error code, as the probe raises it. */
+  readonly id: string;
+  /** Head + value + anchor. */
+  readonly whole: RegExp;
+  /** The head-gone residue, when the template has a right anchor to recover it. */
+  readonly tail?: RegExp;
+}
+
+const VALUE_BEARING_TEMPLATES: readonly ValueBearingTemplate[] = [
+  { id: 'mysql/1062 ER_DUP_ENTRY', whole: DUPLICATE_ENTRY, tail: DUPLICATE_ENTRY_TAIL },
+  { id: 'mysql/1366 ER_TRUNCATED_WRONG_VALUE_FOR_FIELD', whole: MYSQL_INCORRECT_VALUE, tail: MYSQL_INCORRECT_VALUE_TAIL },
+  { id: 'mysql/1292 ER_TRUNCATED_WRONG_VALUE', whole: MYSQL_TRUNCATED_INCORRECT_VALUE },
+  { id: 'pg/22P02 invalid_text_representation', whole: PG_INVALID_INPUT_SYNTAX },
+  { id: 'pg/22003 numeric_value_out_of_range', whole: PG_VALUE_OUT_OF_RANGE },
+];
+
+/**
  * The first stack FRAME line (`    at …`). Everything above it is the header
  * that repeats `name: message` — and therefore repeats the statement.
  */
@@ -227,28 +396,40 @@ export function redactStatementFromMessage(message: string): string {
  * steer what survives. After the cut there is nothing left but the database's
  * words, so the templates below can be read literally.
  *
- * ⛔ Add a dialect's spelling here only once it has been measured off a THROWN
- * error, never from a reading of the manual — the standing rule in this
- * neighbourhood (`unique-violation.ts`), and the reason MySQL's other
- * value-bearing families are not listed. Over-matching is the expensive
- * direction: it deletes the diagnostic an operator came for.
+ * ⛔ Add a dialect's spelling to {@link VALUE_BEARING_TEMPLATES} only once it has
+ * been measured off a THROWN error, never from a reading of the manual — the
+ * standing rule in this neighbourhood (`unique-violation.ts`). Since #9160 that
+ * measurement has a home: add the family to the live probe, read what the server
+ * actually printed, and let the recording be the warrant. Over-matching is still
+ * the expensive direction — it deletes the diagnostic an operator came for — so
+ * a row that the probe cannot raise does not go in.
  */
 function redactDiagnosticValues(diagnostic: string): string {
-  const whole = lastMatch(DUPLICATE_ENTRY, diagnostic);
-  if (whole) {
-    // The template's head survived, so keep it and MySQL's own wording around
-    // it — only the value slot is replaced.
-    return diagnostic.slice(0, whole.index)
-      + whole[1] + REDACTED_VALUE + whole[2]
-      + diagnostic.slice(whole.index + whole[0].length);
+  // Every INTACT template first, then every head-gone residue. Whole-before-tail
+  // is global rather than per-template on purpose: a diagnostic that still
+  // carries a recognisable head should be reported with that head, whichever
+  // family it belongs to, rather than collapsed into a bare anchor by an
+  // earlier row's tail pattern.
+  for (const template of VALUE_BEARING_TEMPLATES) {
+    const whole = lastMatch(template.whole, diagnostic);
+    if (whole) {
+      // The template's head survived, so keep it and the database's own wording
+      // around it — only the value slot is replaced.
+      return diagnostic.slice(0, whole.index)
+        + whole[1] + REDACTED_VALUE + whole[2]
+        + diagnostic.slice(whole.index + whole[0].length);
+    }
   }
 
-  const tail = lastMatch(DUPLICATE_ENTRY_TAIL, diagnostic);
-  if (tail) {
-    // Head gone: everything before the anchor is what is left of the value.
-    // The words are NOT reconstructed — an anchor is evidence about the value,
-    // not licence to assert which template printed it.
-    return REDACTED_VALUE + tail[1] + diagnostic.slice(tail.index + tail[0].length);
+  for (const template of VALUE_BEARING_TEMPLATES) {
+    if (!template.tail) continue;
+    const tail = lastMatch(template.tail, diagnostic);
+    if (tail) {
+      // Head gone: everything before the anchor is what is left of the value.
+      // The words are NOT reconstructed — an anchor is evidence about the value,
+      // not licence to assert which template printed it.
+      return REDACTED_VALUE + tail[1] + diagnostic.slice(tail.index + tail[0].length);
+    }
   }
 
   return diagnostic;

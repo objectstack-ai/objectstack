@@ -210,6 +210,48 @@ describe('notify (baseline node)', () => {
             expect(result.error).toContain('title');
         });
 
+        // ── #9205 — the localizable content path: template references ────────
+        it('emits the template reference + interpolated templateData instead of inline content', async () => {
+            engine.registerFlow('notify_flow', notifyFlow({
+                topic: 'deal.won',
+                recipients: ['user_1'],
+                channels: ['inbox', 'email'],
+                template: 'crm.large_deal_won',
+                templateData: { dealName: '{dealName}', dealUrl: '/opps/{dealId}' },
+            }));
+
+            const result = await engine.execute('notify_flow', {
+                params: { dealName: 'Acme', dealId: '42' },
+            } as any);
+
+            expect(result.success).toBe(true);
+            expect(messaging.emitted).toHaveLength(1);
+            const payload = messaging.emitted[0].payload;
+            // The reference rides RAW (a static metadata cross-reference); its
+            // render context is interpolated per run — that pair is what the
+            // email channel resolves per recipient locale at delivery time.
+            expect(payload.template).toBe('crm.large_deal_won');
+            expect(payload.templateData).toEqual({ dealName: 'Acme', dealUrl: '/opps/42' });
+            // No inline content keys on this path: a channel without template
+            // support falls back to the topic, the honest degraded rendering —
+            // not an empty string masquerading as content.
+            expect(payload).not.toHaveProperty('title');
+            expect(payload).not.toHaveProperty('body');
+        });
+
+        it('refuses a node carrying BOTH template and inline title (the contract superRefine, at the parse seam)', async () => {
+            engine.registerFlow('notify_flow', notifyFlow({
+                recipients: ['user_1'],
+                title: 'Deal won',
+                template: 'crm.large_deal_won',
+            }));
+            const result = await engine.execute('notify_flow');
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('`template`');
+            expect(result.error).toContain('`title`');
+            expect(messaging.emitted).toHaveLength(0);
+        });
+
         it('fails the step when no recipient is given', async () => {
             engine.registerFlow('notify_flow', notifyFlow({ title: 'Hi' }));
             const result = await engine.execute('notify_flow');

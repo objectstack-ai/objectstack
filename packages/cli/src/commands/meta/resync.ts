@@ -36,6 +36,44 @@ function safeGetService(kernel: any, name: string): any {
 }
 
 /**
+ * The dim explanatory line printed under the skip-summary `printWarning`
+ * when `resyncSkipped > 0` — the runtime-output half of #9184 (the docblock
+ * half, #9130/PR #9183, already explains this in source).
+ *
+ * `null` when nothing was skipped, so the caller's `if (resyncSkipped > 0)`
+ * gate is the single source of truth for the trigger condition: this line
+ * rides the SAME condition as the skip-count summary it sits under, never a
+ * separate one (e.g. `resynced === 0`) — a partial skip deserves the same
+ * explanation as a total one, and "alongside the skip summary" in the issue
+ * means exactly that pairing.
+ *
+ * Deliberately neutral about the skipped row's OWN provenance, matching the
+ * seeder docblock (`bootstrap-platform-admin.ts`) this line must not
+ * contradict: the skip decision is unconditionally intentional (only
+ * platform-owned rows are ever reconciled), but a stored `'admin'` stamp is
+ * NOT always a deliberate Setup takeover — on any install predating #8692
+ * the platform's own seeder wrote that exact stamp, so `resynced 0 / skipped
+ * N` is a permanent, by-design outcome there rather than a sign the command
+ * failed. `'user'` is named too: it is the legacy spelling of the same
+ * class, healed to `'admin'` by `normalizeManagedByVocab`, so a stored
+ * legacy row can still surface here under either spelling.
+ */
+export function resyncSkipExplanationLine(resyncSkipped: number): string | null {
+  if (resyncSkipped <= 0) return null;
+  // One unwrapped sentence per concatenated piece — never split by an
+  // embedded '\n' — so a key phrase can never straddle a hard line break
+  // (the terminal soft-wraps on its own, same as the file's other dim
+  // follow-up lines a few lines up).
+  return (
+    "  Expected, not a failure — resync only reconciles platform-owned rows. " +
+    "A stored 'admin' stamp (or the legacy 'user' spelling) isn't always a deliberate Setup takeover: " +
+    "on installs from before #8692, the platform's own seeded defaults carry that same stamp, so a " +
+    "persistent skip count here can be permanent by design. A package-owned row, by contrast, is " +
+    "always a deliberate override by the package that owns it."
+  );
+}
+
+/**
  * `os meta resync` — reconcile materialized metadata to the compiled `dist`
  * without a `--fresh` wipe (#2705).
  *
@@ -169,7 +207,9 @@ export default class MetaResync extends Command {
         printInfo('Nothing reconciled.');
       }
       if (resyncSkipped > 0) {
-        printWarning(`Left ${resyncSkipped} set(s) untouched (admin- or package-owned override).`);
+        printWarning(`Left ${resyncSkipped} set(s) untouched (admin- or package-owned).`);
+        const note = resyncSkipExplanationLine(resyncSkipped);
+        if (note) console.log(chalk.dim(note));
       }
       console.log(chalk.dim(`  ${timer.display()}`));
       console.log('');

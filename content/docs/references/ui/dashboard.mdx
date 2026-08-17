@@ -33,11 +33,11 @@ const result = DashboardSchema.parse(data);
 | **label** | `string \| Record<string, string>` | ✅ | Dashboard label |
 | **description** | `string \| Record<string, string>` | optional | Dashboard description |
 | **header** | `{ showTitle: boolean; showDescription: boolean; actions?: object[] }` | optional | Dashboard header configuration |
-| **widgets** | `{ id: string; title?: string \| Record<string, string>; description?: string \| Record<string, string>; type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| … +13 more>; … }[]` | ✅ | Widgets to display |
+| **widgets** | `{ id: string; title?: string \| Record<string, string>; description?: string \| Record<string, string>; type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; … }[]` | ✅ | Widgets to display |
 | **columns** | `integer` | optional | Number of grid columns (default 12) |
 | **gap** | `integer` | optional | Grid gap in Tailwind spacing units |
 | **refreshInterval** | `number` | optional | Auto-refresh interval in seconds |
-| **dateRange** | `{ field?: string; defaultRange: Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| … +8 more>; allowCustomRange: boolean }` | optional | Global dashboard date range filter configuration |
+| **dateRange** | `{ field?: string; defaultRange: Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| …>; allowCustomRange: boolean }` | optional | Global dashboard date range filter configuration |
 | **globalFilters** | `{ name?: string; field: string; object?: string; label?: string \| Record<string, string>; … }[]` | optional | Global filters that apply to all widgets in the dashboard |
 | **aria** | `never` | optional | [REMOVED] `dashboard.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no dashboard renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **performance** | `never` | optional | [REMOVED] `dashboard.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime read it; dashboard performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
@@ -94,7 +94,7 @@ Dashboard header action
 | **title** | `string \| Record<string, string>` | optional | Widget title |
 | **description** | `string \| Record<string, string>` | optional | Widget description text below the header |
 | **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'combo' \| 'gauge' \| 'solid-gauge' \| … +6 more>` | optional (default: `"metric"`) | Visualization type |
-| **chartConfig** | `{ type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| … +13 more>; title?: string \| Record<string, string>; subtitle?: string \| Record<string, string>; description?: string \| Record<string, string>; … }` | optional | Chart visualization configuration |
+| **chartConfig** | `{ type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; title?: string \| Record<string, string>; subtitle?: string \| Record<string, string>; description?: string \| Record<string, string>; … }` | optional | Chart visualization configuration |
 | **colorVariant** | `Enum<'default' \| 'blue' \| 'teal' \| 'orange' \| 'purple' \| 'success' \| 'warning' \| 'danger'>` | optional | Widget color variant for theming |
 | **requiresObject** | `string` | optional | Hide the widget unless the named object is registered |
 | **requiresService** | `string` | optional | Hide the widget unless the named kernel service is registered |

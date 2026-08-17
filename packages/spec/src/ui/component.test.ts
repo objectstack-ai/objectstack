@@ -880,40 +880,53 @@ describe('Interactive Elements — element:button', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Interactive Elements — element:filter
+// Interactive Elements — element:filter (RETIRED at element grain, #9220)
 // ---------------------------------------------------------------------------
-describe('Interactive Elements — element:filter', () => {
-  it('should accept element:filter component', () => {
+describe('Interactive Elements — element:filter (retired, #9220)', () => {
+  // The node-level parse never judged `properties` (that is the #5068 props
+  // gate's job), and `type` is an open union — so a stored, not-yet-migrated
+  // node still parses at THIS level. Pinned so the element retirement is not
+  // misread as a node-level refusal.
+  it('still parses at the node level — the refusal lives at the props dispatch', () => {
     expect(() => PageComponentSchema.parse({
       type: 'element:filter',
       properties: { object: 'order', fields: ['status'] },
     })).not.toThrow();
   });
 
-  it('should parse filter props with defaults', () => {
-    const props = ElementFilterPropsSchema.parse({
-      object: 'order',
-      fields: ['status', 'priority'],
-    });
-    expect(props.object).toBe('order');
-    expect(props.layout).toBe('inline');
-    expect(props.showSearch).toBe(true);
+  // #9220 tombstones — ADR-0049 enforce-or-remove at ELEMENT grain: no
+  // renderer for `element:filter` ever shipped anywhere, so every authorable
+  // key refuses with the element-retirement prescription. The former accept
+  // shape (`{ object, fields }`) is the exact input that must now refuse.
+  it('rejects every former accept shape with the element-retirement prescription', () => {
+    expect(() => ElementFilterPropsSchema.parse({ object: 'order', fields: ['status'] }))
+      .toThrow(/`element:filter` property `object`.*removed.*`element:filter` element is retired.*Delete the `element:filter` component/s);
+    expect(() => ElementFilterPropsSchema.parse({ layout: 'sidebar' }))
+      .toThrow(/`element:filter` property `layout`.*removed.*Delete the `element:filter` component/s);
+    expect(() => ElementFilterPropsSchema.parse({ showSearch: true }))
+      .toThrow(/`element:filter` property `showSearch`.*removed/s);
+    expect(() => ElementFilterPropsSchema.parse({ aria: { label: 'Filter' } }))
+      .toThrow(/`element:filter` property `aria`.*removed/s);
   });
 
-  it('should accept filter with targetVariable', () => {
-    const props = ElementFilterPropsSchema.parse({
-      object: 'task',
-      fields: ['status'],
-      targetVariable: 'active_filter',
-      layout: 'sidebar',
-    });
-    expect(props.targetVariable).toBe('active_filter');
-    expect(props.layout).toBe('sidebar');
+  // Flip of "should accept filter with targetVariable" — #9198 deliberately
+  // left this element's `targetVariable` untouched as out-of-scope; #9220
+  // retires it with its element, and the prescription carries the migrate
+  // sentence (the D2 conversion `element-filter-removed` strips it).
+  it('rejects the retired `targetVariable` with its prescription', () => {
+    expect(() => ElementFilterPropsSchema.parse({ targetVariable: 'active_filter' }))
+      .toThrow(/`element:filter` property `targetVariable`.*removed.*Run `os migrate meta --from 17` to rewrite existing sources automatically/s);
   });
 
-  it('should reject filter without required fields', () => {
-    expect(() => ElementFilterPropsSchema.parse({})).toThrow();
-    expect(() => ElementFilterPropsSchema.parse({ object: 'order' })).toThrow();
+  // The migrated shape — `element-filter-removed` strips all six keys and
+  // leaves the bare node — parses clean and materializes nothing. (The
+  // pre-retirement schema REQUIRED `object` + `fields`, so `{}` used to
+  // throw; the requiredness died with the element.)
+  it('parses a bare (migrated) node clean and materializes nothing', () => {
+    const props = ElementFilterPropsSchema.parse({});
+    for (const key of ['object', 'fields', 'targetVariable', 'layout', 'showSearch', 'aria']) {
+      expect(props).not.toHaveProperty(key);
+    }
   });
 });
 
@@ -979,11 +992,9 @@ describe('Interactive Elements — element:record_picker', () => {
       valueField: 'id',
       label: 'Account',
       filter: { status: 'active' },
-      targetVariable: 'selected_account',
       placeholder: 'Search accounts...',
       emptyText: 'No accounts',
     });
-    expect(props.targetVariable).toBe('selected_account');
     expect(props.labelField).toBe('name');
     expect(props.valueField).toBe('id');
     expect(props.label).toBe('Account');
@@ -1039,6 +1050,15 @@ describe('Interactive Elements — element:record_picker', () => {
     expect(props).not.toHaveProperty('displayField');
     expect(props).not.toHaveProperty('searchFields');
     expect(props).not.toHaveProperty('multiple');
+    expect(props).not.toHaveProperty('targetVariable');
+  });
+
+  // #9198 tombstone — `targetVariable` was a declarative hint with zero
+  // readers; the live binding is the page variable whose `source` names this
+  // component's `id` (ADR-0049 enforce-or-remove).
+  it('rejects the retired `targetVariable` with its prescription', () => {
+    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', targetVariable: 'selected_id' }))
+      .toThrow(/`targetVariable`.*removed.*Delete the key/s);
   });
 
   // ── #6276 — the flat `sort` / `limit` shorthands ─────────────────────────
@@ -1140,11 +1160,22 @@ describe('Interactive Elements — element:text_input', () => {
       required: true,
       disabled: false,
       description: 'We never share it',
-      targetVariable: 'email',
     });
     expect(props.inputType).toBe('email');
     expect(props.required).toBe(true);
-    expect(props.targetVariable).toBe('email');
+  });
+
+  // #9198 tombstone — `targetVariable` was a declarative hint with zero
+  // readers; the live binding is the page variable whose `source` names this
+  // component's `id` (ADR-0049 enforce-or-remove).
+  it('rejects the retired `targetVariable` with its prescription', () => {
+    expect(() => ElementTextInputPropsSchema.parse({ targetVariable: 'email' }))
+      .toThrow(/`targetVariable`.*removed.*Delete the key/s);
+  });
+
+  it('does not materialize the retired `targetVariable` on a clean parse', () => {
+    const props = ElementTextInputPropsSchema.parse({});
+    expect(props).not.toHaveProperty('targetVariable');
   });
 
   it('should accept all input types', () => {
@@ -1193,12 +1224,14 @@ describe('ComponentPropsMap interactive elements', () => {
     expect(result.label).toBe('Click Me');
   });
 
-  it('should parse element:filter props', () => {
-    const result = ComponentPropsMap['element:filter'].parse({
+  // Flip of "should parse element:filter props" (#9220): the row STAYS so the
+  // #5068 props gate keeps dispatching on the type — and what it dispatches to
+  // now refuses with the element-retirement prescription.
+  it('refuses element:filter props through the kept map row (retired, #9220)', () => {
+    expect(() => ComponentPropsMap['element:filter'].parse({
       object: 'order',
       fields: ['status'],
-    });
-    expect(result.object).toBe('order');
+    })).toThrow(/`element:filter` element is retired/s);
   });
 
   it('should parse element:form props', () => {

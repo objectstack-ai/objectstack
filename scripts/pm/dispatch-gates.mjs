@@ -170,14 +170,73 @@ const BLOCK_SCALAR_HEADER = /^[|>][+-]?\d*$/;
  * Measured both ways on this tree: stripping changes no family's discovery
  * today (every gate named in a body comment is also really invoked somewhere).
  * It is here so that stops being luck.
+ *
+ * ## Why the COMPACT step form is read, and what `indent` must count (#9203)
+ *
+ * A step with no `name:` may be written as a compact block-sequence entry —
+ * the list dash and the key on one line:
+ *
+ *   - run: pnpm check:something
+ *
+ * That is ordinary YAML and an ordinary Actions step, but `run:` there is not
+ * preceded by whitespace alone, so a matcher anchored on `^[ \t]*run:` never
+ * saw the line and the step contributed NOTHING to the derivation — the same
+ * shape as the block-scalar bug above: not matched, and not "undetermined"
+ * either, because a family that is never discovered has no entry to fall into.
+ * Latent rather than live when it was fixed: both compact steps in this tree
+ * (`showcase-smoke.yml`) run `pnpm install` and `pnpm turbo run build`, so no
+ * `check:*` family was hidden — the shape was one workflow edit away from
+ * hiding one.
+ *
+ * The regex widening is the easy half. The load-bearing half is what `indent`
+ * counts, because the block-scalar walk below uses it to decide where a body
+ * ENDS, and a compact step puts its own sibling keys in the columns the dash
+ * occupies:
+ *
+ *   - run: |
+ *       pnpm check:real
+ *     env:
+ *       NOTE: "... pnpm check:not-run-here ..."
+ *
+ * Counting only the leading whitespace makes `env:` deeper than the key, so
+ * the walk swallows the rest of the mapping into the command text — and every
+ * gate NAMED in a swallowed `env:`/`with:` value is then discovered as one the
+ * step RUNS. That trades a missing lead for a fabricated one, which is the
+ * strictly worse direction (see the "22 leads is the same as none" note in the
+ * header): a gap costs a dev one CI round, an invention costs every dev whose
+ * surface brushes it.
+ *
+ * So `indent` is the COLUMN OF THE `run` KEY — leading whitespace plus the
+ * `- ` marker when there is one. Settled by measurement against a real YAML
+ * parser rather than by inspection, in both directions:
+ *
+ *   - over-consumption: parsing the fixture above, counting whitespace only
+ *     discovers 9 commands where YAML says 8, the extra one being the gate
+ *     named in the `env:` value; counting the key column discovers exactly the
+ *     8 the parser reports, for every step form in one file;
+ *   - truncation: a body indented AT or BELOW the key column is not a body
+ *     this walk should keep — under `- run: |` at key column 8, bodies at
+ *     column 7 and 8 are YAML *errors* (ParserError / ScannerError) and only
+ *     9-and-deeper parse. The `> keyColumn` comparison is therefore the YAML
+ *     rule itself, not an approximation of it, and cannot cut a valid body
+ *     short.
+ *
+ * The same reading also makes the two step forms behave identically, which is
+ * the point: for `- run:` the key sits at the column `run` starts on, exactly
+ * as it does for the `name:`/`run:` form, where this walk has always been
+ * right.
  */
 export function runCommandTexts(workflowText) {
   const lines = workflowText.split('\n');
   const out = [];
   for (let i = 0; i < lines.length; i++) {
-    const m = /^([ \t]*)run:[ \t]*(.*)$/.exec(lines[i]);
+    const m = /^([ \t]*)(-[ \t]+)?run:[ \t]*(.*)$/.exec(lines[i]);
     if (!m) continue;
-    const [, indent, inline] = m;
+    const [, lead, dash, inline] = m;
+    // The column `run` starts on — the dash of a compact entry is INDENTATION
+    // for the mapping it opens, so it counts. See the header block above for
+    // the measurement that settles this.
+    const keyColumn = lead.length + (dash ? dash.length : 0);
     if (!BLOCK_SCALAR_HEADER.test(inline.trim())) {
       out.push(inline.trim());
       continue;
@@ -192,7 +251,7 @@ export function runCommandTexts(workflowText) {
         body.push('');
         continue;
       }
-      if (/^[ \t]*/.exec(lines[j])[0].length <= indent.length) break;
+      if (/^[ \t]*/.exec(lines[j])[0].length <= keyColumn) break;
       body.push(lines[j]);
     }
     out.push(body.filter((l) => !/^[ \t]*#/.test(l)).join('\n'));
@@ -321,6 +380,72 @@ export function extractCheckInvocations(workflowText, workflowFile) {
     for (const m of cmd.matchAll(/node\s+(scripts\/[\w./-]*check-[\w.-]+\.mjs)/g)) {
       out.push({ check: m[1], filter: null, workflow: workflowFile, direct: true });
     }
+  }
+  return out;
+}
+
+/**
+ * A workflow's OWN declaration that it deliberately has no check family to
+ * discover — a whole-line comment anywhere in the workflow text:
+ *
+ *   # dispatch-gates: no-check-families -- <reason>
+ *
+ * ## Why a marker IN the workflow, never a list in this script (#9187)
+ *
+ * `checkFamilyCoverageGaps` below turns "a paths-filtered workflow discovers
+ * zero check families" from a silent omission into a CI failure — but one
+ * real case (`scaffold-e2e.yml`: an install/build/boot/docker pipeline, not a
+ * named local verification) is not a bug, it is a workflow that genuinely has
+ * none. The tempting fix is a hardcoded exemption list ([`scaffold-e2e.yml`])
+ * in THIS file — which reinstalls the exact failure this whole family exists
+ * to retire: a second copy of a fact that belongs on the thing it describes,
+ * silently drifting from it (the workflow gets renamed or a real gap gets
+ * added beside the exempted one, and the list says nothing). A marker the
+ * workflow carries is instead read fresh every run, same as `paths:` and
+ * every `run:` step above — nothing to remember to update here.
+ *
+ * The reason is REQUIRED (not just the marker) — an opt-out with no reason
+ * reads identically to a placeholder nobody will ever revisit, and is exactly
+ * the shape a reviewer cannot tell apart from "forgot to name a family".
+ */
+const NO_CHECK_FAMILIES_MARKER = /^[ \t]*#[ \t]*dispatch-gates:[ \t]*no-check-families[ \t]*--[ \t]*(\S.*)$/m;
+
+export function declaredNoCheckFamiliesReason(workflowText) {
+  const m = NO_CHECK_FAMILIES_MARKER.exec(workflowText);
+  return m ? m[1].trim() : null;
+}
+
+/**
+ * The workflows (by filename) that violate the #9187 coverage invariant:
+ *
+ *   Every workflow that declares a `paths:` filter either discovers at least
+ *   one check family, or carries a `declaredNoCheckFamiliesReason`.
+ *
+ * ## Why scoped to paths-filtered workflows, not all of them
+ *
+ * The harm this closes is specific, not general: a `paths:` filter is CI
+ * SCHEDULING a job for a SUBSET of PRs, and #9171 taught this tool to read
+ * that schedule as a match key. A workflow with no `paths:` filter runs on
+ * every PR regardless — it discriminates nothing, so a card touching it
+ * derives no MORE from a family than it already would from every other
+ * unfiltered job, and `residueLines`' "unfiltered" bucket already surfaces
+ * that count honestly rather than as a silent absence. Widening this guard to
+ * every workflow would fold that already-accounted-for bucket into a false
+ * positive, and would also flag every zero-check workflow that is not a
+ * verification job at all (release/publish/nightly-smoke pipelines) — the
+ * "22 leads is the same as none" trap one level down. Measured on this tree
+ * (#9187): 6 of the 25 workflow files declare a `paths:` filter; 4 of those 6
+ * already discover a family, and the remaining 2 (`docs-drift-check.yml`,
+ * `scaffold-e2e.yml`) are the whole known blast radius — one fixed by naming
+ * its self-test through a `check:` script, one exempted by the marker above.
+ */
+export function checkFamilyCoverageGaps(workflowEntries) {
+  const out = [];
+  for (const { file, text } of workflowEntries) {
+    if (extractTriggerPaths(text).length === 0) continue;
+    if (extractCheckInvocations(text, file).length > 0) continue;
+    if (declaredNoCheckFamiliesReason(text)) continue;
+    out.push(file);
   }
   return out;
 }
@@ -1093,15 +1218,16 @@ export function reachesMetadataFormModule(path, modulePaths) {
  *     output for every card in the tree;
  *   - `check:i18n` walks `packages/` at runtime for files NAMED
  *     `i18n-extract.config.ts` and re-extracts each owning package's bundles.
- *     Its source is worse than silent: the path-ish literals it does carry are
- *     its CLI prerequisite and stale-dist checks (`packages/cli/dist/commands/
- *     i18n/extract.js`, `packages/spec/dist`, measured — eleven hints, none of
- *     them the population). So it matches nothing AND, having hints, never
- *     reaches the "undetermined" bucket either: before this entry existed, an
- *     edit to `packages/services/service-messaging/src/objects/` — which
- *     regenerates that package's four bundles — printed the gate in NEITHER
- *     half of the output. A gate the derivation cannot mention at all is the
- *     one shape this script must not produce; it cost a PR a CI round.
+ *     Its source names only three hints (measured, post-#9144): the shared
+ *     walk module (SURFACE_MODULE) and the two metadata-registry coupling
+ *     constants below — none of them the OWNING-PACKAGE population this entry
+ *     answers for. So it still matches nothing on an ordinary object/field
+ *     edit AND, having hints, never reaches the "undetermined" bucket either:
+ *     before this entry existed, an edit to
+ *     `packages/services/service-messaging/src/objects/` — which regenerates
+ *     that package's four bundles — printed the gate in NEITHER half of the
+ *     output. A gate the derivation cannot mention at all is the one shape
+ *     this script must not produce; it cost a PR a CI round.
  *
  * No per-card gate list derived from paths can ever name these, however the
  * derivation improves.
@@ -1184,6 +1310,32 @@ export function reachesMetadataFormModule(path, modulePaths) {
  * asks the configs' own documented flags whether any package still commits that
  * baseline. The day the last one opts out, no form module can move a committed
  * bundle and this entry stops firing on its own.
+ *
+ * ## Why there is no THIRD i18n entry, for the type-registry edge (#9144)
+ *
+ * `walkMetadataForms` has a second edge the SECOND entry above does not reach:
+ * `DEFAULT_METADATA_TYPE_REGISTRY` (packages/spec/src/kernel/metadata-plugin.
+ * zod.ts) supplies `metadataForms.<type>.label`/`.description` for EVERY
+ * registry entry, including form-less types, and `METADATA_FORM_REGISTRY`
+ * itself (packages/spec/src/system/metadata-form-registry.ts, the map, not
+ * the `*.form.ts` leaves it points at) decides which types get section/field
+ * labels at all. Editing either moves the same bundles PR #9113 paid for —
+ * but unlike the `.form.ts` leaves, neither file carries a filename the
+ * `.form.ts` convention (or any convention) distinguishes, so a KIND entry
+ * here would need to invent one for exactly two files.
+ *
+ * That is not the same shape as the two entries above: this is not a
+ * runtime-enumerated population at all, it is two SPECIFIC, KNOWN files —
+ * the shape `SURFACE_MODULE` and `check-type-check-coverage.mjs`'s
+ * `ROOT_PROGRAM_COUPLED_SCRIPT` already use. So it is closed there instead:
+ * `check-i18n-bundles.mjs` declares both paths as bare module-body coupling
+ * constants (`METADATA_TYPE_REGISTRY_MODULE` / `METADATA_FORM_REGISTRY_
+ * MODULE`), which the ORDINARY path-literal derivation now reads directly off
+ * that gate's own source — no `CHANGE_KIND_GATES` entry, no `matches`
+ * function, nothing here to keep in sync. See that pair's doc comment in
+ * check-i18n-bundles.mjs for the full reasoning, and this file's own
+ * self-test for the live pins that keep the constants honest as the coupling
+ * they are: manual, per-file, and silently rottable if nothing watched it.
  *
  * ## How these entries stay honest
  *
@@ -1843,6 +1995,64 @@ function selfTest() {
   t('a block body keeps its lines joined', texts[0].split('\n').filter((l) => l.trim()).length === 2);
   t('a one-line run yields its command verbatim', texts[3] === 'node scripts/check-nul-bytes.mjs');
 
+  // The compact step form (#9203): `- run: …`, a block-sequence entry with the
+  // key on the dash line. Before it was read, every command in a step written
+  // this way was invisible to the derivation.
+  //
+  // The `env:` values are the load-bearing part of the fixture, not padding.
+  // They name gates the steps do NOT run, positioned exactly where a body walk
+  // that mis-reads `indent` swallows them — the compact one sits in the columns
+  // the `- ` marker occupies, which is the only place the two candidate
+  // readings disagree. Pinning the classic form's `env:` too keeps the two step
+  // shapes asserted against the same trap, so a future edit cannot fix one
+  // reading by breaking the other.
+  const compactWf = [
+    'jobs:',
+    '  smoke:',
+    '    steps:',
+    '      - name: Classic block, sibling key after the body',
+    '        run: |',
+    '          pnpm check:classic-body',
+    '        env:',
+    '          NOTE: "we do not run pnpm check:phantom-classic here"',
+    '      - run: pnpm --filter @objectstack/spec check:compact-one-liner',
+    '      - run: |',
+    '          pnpm check:compact-body',
+    '          node scripts/check-compact-direct.mjs',
+    '        env:',
+    '          NOTE: "we do not run pnpm check:phantom-compact here"',
+    '      - run: node scripts/check-compact-tail.mjs',
+    '      - name: Back to the named form',
+    '        run: pnpm check:after-compact',
+  ].join('\n');
+  const compactInvs = extractCheckInvocations(compactWf, 'showcase-smoke.yml');
+  const compactNames = compactInvs.map((i) => i.check);
+  // Leg 1 — the form is now REACHED. Each of these was zero before #9203.
+  t('a compact `- run:` one-liner is discovered, with its filter', compactInvs.some((i) => i.check === 'check:compact-one-liner' && i.filter === '@objectstack/spec'));
+  t('a compact `- run: |` block body is discovered', compactNames.includes('check:compact-body'));
+  t('a direct script in a compact block body is discovered', compactNames.includes('scripts/check-compact-direct.mjs'));
+  t('a compact step after a compact block body still parses', compactNames.includes('scripts/check-compact-tail.mjs'));
+  // Leg 2 — the widening bought no over-consumption. `indent` counts the `- `,
+  // so a compact block body ends at its own sibling keys exactly as the named
+  // form's does; both directions of the mis-read fabricate a gate here.
+  t('a compact block body ends at the `env:` key of its own step', !compactNames.includes('check:phantom-compact'));
+  t('the named form still ends its block body at the `env:` key', !compactNames.includes('check:phantom-classic'));
+  t('the step after a compact block body is not swallowed by it', compactNames.includes('check:after-compact'));
+  const compactTexts = runCommandTexts(compactWf);
+  // Indexed reads are defaulted rather than asserted-then-dereferenced: under a
+  // parser that drops the compact form entirely there is no element 2, and a
+  // bare `compactTexts[2].split(…)` THROWS out of the whole self-test — the
+  // reverse-verification run for this card hit exactly that and got one stack
+  // trace where it needed a list of named failures. A gate that cannot say
+  // which case broke is a worse gate, even when it is correctly red.
+  t('one command text per compact step too', compactTexts.length === 5);
+  t('a compact block body keeps both of its lines', (compactTexts[2] ?? '').split('\n').filter((l) => l.trim()).length === 2);
+  t('a compact one-liner yields its command verbatim', compactTexts[1] === 'pnpm --filter @objectstack/spec check:compact-one-liner');
+  // A `-` that is not a list marker must not be read as one: `-run:` is a key
+  // named `-run`, and `- name:` is a step whose `run:` comes later on its own
+  // line (already covered above, but the negative half needs its own pin).
+  t('a bare `-run:` is not read as a compact step', runCommandTexts('      -run: pnpm check:not-a-step').length === 0);
+
   // #7440: the printed line must be runnable as-is. The three shapes come from
   // the same three fixtures above, so the sample workflow and the print site
   // cannot drift apart.
@@ -2293,6 +2503,32 @@ function selfTest() {
   // than a pair of matching strings.
   t('the declared shared module exists', existsSync(join(ROOT, SHARED)));
 
+  // The same shape again, for the TYPE-registry edge of walkMetadataForms
+  // (#9144) — two specific, known files rather than a runtime-enumerated
+  // population, so they are closed as coupling constants in
+  // check-i18n-bundles.mjs rather than a third CHANGE_KIND_GATES entry. Both
+  // directions pinned LIVE: delete either constant and this reddens instead
+  // of the derivation going silently blind on that edge again.
+  const TYPE_REGISTRY = 'packages/spec/src/kernel/metadata-plugin.zod.ts';
+  const FORM_REGISTRY = 'packages/spec/src/system/metadata-form-registry.ts';
+  const i18nGateHints = readHints('scripts/check-i18n-bundles.mjs');
+  t('the i18n gate declares the type-level metadata registry module', covers(i18nGateHints, TYPE_REGISTRY));
+  t('the i18n gate declares the form registry module too (not just its *.form.ts leaves)', covers(i18nGateHints, FORM_REGISTRY));
+  const typeRegistryVerdict = classifyEntry({ files: ['scripts/check-i18n-bundles.mjs'], hints: i18nGateHints }, [TYPE_REGISTRY]);
+  const formRegistryVerdict = classifyEntry({ files: ['scripts/check-i18n-bundles.mjs'], hints: i18nGateHints }, [FORM_REGISTRY]);
+  t(
+    'so a card editing the type registry is MATCHED through that constant, not dropped as silent',
+    typeRegistryVerdict.verdict === 'matched' && typeRegistryVerdict.hits[0]?.hint === TYPE_REGISTRY,
+  );
+  t(
+    'and a card editing the form registry module is MATCHED through its own constant',
+    formRegistryVerdict.verdict === 'matched' && formRegistryVerdict.hits[0]?.hint === FORM_REGISTRY,
+  );
+  // Both declared paths are real files, so the four claims above are live
+  // rather than a pair of matching strings.
+  t('the declared type registry module exists', existsSync(join(ROOT, TYPE_REGISTRY)));
+  t('the declared form registry module exists', existsSync(join(ROOT, FORM_REGISTRY)));
+
   // ── A family's OWN script files as match keys (#8509) ─────────────────────
   //
   // Both directions are the product, and both are pinned: a card editing a
@@ -2483,6 +2719,83 @@ function selfTest() {
   // — a count alone stays green if one is dropped and another added.
   t('check:engine-double-contract is a live family, so naming it in the table is not a guess', liveFamilies.has('check:engine-double-contract'));
   t('check:where-matcher is a live family too — the gate the prose never named', liveFamilies.has('check:where-matcher'));
+
+  // ── The check-family coverage guard (#9187) ───────────────────────────────
+  //
+  // `docs-drift-check.yml` declared a `paths:` filter and ran a real self-test
+  // (`node scripts/docs-audit/affected-docs.mjs --self-test`) that discovery
+  // could never see, because the naming convention every OTHER family follows
+  // — `check:NAME` or `check-NAME.mjs` — is enforced nowhere: the tree just
+  // happened to comply 103 times running up to this card. This section rules
+  // it normative: a paths-filtered workflow with no discovered family is now
+  // a CI failure, not a lead nobody could see. Fixture cases pin the shape;
+  // the live case at the end pins it against the real tree, the same pairing
+  // the census guard above uses.
+  const noFamilyWf = [
+    'name: X',
+    'on:',
+    '  pull_request:',
+    '    paths:',
+    "      - 'packages/**'",
+    'jobs:',
+    '  j:',
+    '    steps:',
+    '      - name: Self-test the mapper',
+    '        run: node scripts/some-mapper.mjs --self-test',
+  ].join('\n');
+  t(
+    'a paths-filtered workflow discovering no check family is a coverage gap',
+    checkFamilyCoverageGaps([{ file: 'x.yml', text: noFamilyWf }]).includes('x.yml'),
+  );
+  const familyWf = noFamilyWf.replace(
+    'node scripts/some-mapper.mjs --self-test',
+    'pnpm check:some-mapper',
+  );
+  t(
+    'a paths-filtered workflow that DOES discover a family is not a gap',
+    checkFamilyCoverageGaps([{ file: 'x.yml', text: familyWf }]).length === 0,
+  );
+  const unfilteredNoFamilyWf = [
+    'name: X',
+    'on:',
+    '  pull_request: {}',
+    'jobs:',
+    '  j:',
+    '    steps:',
+    '      - name: Self-test the mapper',
+    '        run: node scripts/some-mapper.mjs --self-test',
+  ].join('\n');
+  t(
+    'an UNFILTERED workflow with no family is not a gap — it runs on every PR regardless, the residue bucket already accounts for it',
+    checkFamilyCoverageGaps([{ file: 'x.yml', text: unfilteredNoFamilyWf }]).length === 0,
+  );
+  t(
+    'the declared opt-out reads its reason back',
+    declaredNoCheckFamiliesReason('# dispatch-gates: no-check-families -- e2e build, no named verification (#9187)\n')
+      === 'e2e build, no named verification (#9187)',
+  );
+  t('no marker present reads as no declared reason', declaredNoCheckFamiliesReason('# just a comment\n') === null);
+  t('the marker with no reason text does not count as declared', declaredNoCheckFamiliesReason('# dispatch-gates: no-check-families\n') === null);
+  const exemptedWf = noFamilyWf.replace(
+    'jobs:',
+    '# dispatch-gates: no-check-families -- fixture, not a real verification step\njobs:',
+  );
+  t(
+    "a paths-filtered, zero-family workflow carrying the marker is NOT a gap — the declared opt-out this card's route requires",
+    checkFamilyCoverageGaps([{ file: 'x.yml', text: exemptedWf }]).length === 0,
+  );
+
+  // The live guard: every REAL paths-filtered workflow either discovers a
+  // family or declares why not. This is what actually fails CI the day a new
+  // paths-filtered workflow adds an undiscoverable verification step and
+  // forgets both halves of the fix.
+  const liveWfDir = join(ROOT, '.github/workflows');
+  const liveWorkflowEntries = readdirSync(liveWfDir)
+    .filter((f) => /\.ya?ml$/.test(f))
+    .map((file) => ({ file, text: readFileSync(join(liveWfDir, file), 'utf8') }));
+  t('the live tree has at least one paths-filtered workflow (the guard is not vacuous)', liveWorkflowEntries.some((e) => extractTriggerPaths(e.text).length > 0));
+  const liveGaps = checkFamilyCoverageGaps(liveWorkflowEntries);
+  t(`every real paths-filtered workflow discovers a check family or declares why not (gaps: ${liveGaps.join(', ') || 'none'})`, liveGaps.length === 0);
 
   // ── The residue accounting (#8632) ────────────────────────────────────────
   //

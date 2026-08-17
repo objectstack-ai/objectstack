@@ -255,6 +255,8 @@
     "automation/NotifyConfig:severity",
     "automation/NotifyConfig:sourceId",
     "automation/NotifyConfig:sourceObject",
+    "automation/NotifyConfig:template",
+    "automation/NotifyConfig:templateData",
     "automation/NotifyConfig:title",
     "automation/NotifyConfig:topic",
     "automation/ParallelBranch:edges",

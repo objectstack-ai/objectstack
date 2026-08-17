@@ -27,12 +27,34 @@ function unknownKeyMessage(schema: { safeParse(v: unknown): { success: boolean; 
 }
 
 describe('NotifyConfigSchema — strict as of #4001 批 9', () => {
-  it('accepts every declared key', () => {
+  // Since #9205 the declared keys split into TWO content paths that cannot
+  // coexist on one node (see the mutual-exclusion pins below), so "accepts
+  // every declared key" is two configs: the inline path carries every key
+  // except `template`/`templateData`; the template path carries those two in
+  // place of `title`/`message`.
+  it('accepts every declared key (inline content path — unchanged by #9205)', () => {
     const full = {
       recipients: ['{record.assignee}'],
       title: 'New task',
       message: 'You have been assigned a task.',
       channels: ['inbox'],
+      topic: 'notify',
+      severity: 'info',
+      sourceObject: 'showcase_task',
+      sourceId: '{record.id}',
+      actorId: '{trigger.userId}',
+      actionUrl: '/task/{record.id}',
+      payload: { taskName: '{record.name}' },
+    };
+    expect(NotifyConfigSchema.parse(full)).toEqual(full);
+  });
+
+  it('accepts every declared key (template content path — #9205)', () => {
+    const full = {
+      recipients: ['{record.assignee}'],
+      template: 'crm.large_deal_won',
+      templateData: { dealName: '{record.name}', amount: '{record.amount}' },
+      channels: ['inbox', 'email'],
       topic: 'notify',
       severity: 'info',
       sourceObject: 'showcase_task',
@@ -204,6 +226,97 @@ describe('NotifyConfigSchema — strict as of #4001 批 9', () => {
       expect(doc.length, 'severity .describe() must not be empty').toBeGreaterThan(0);
       expect(doc).toMatch(/messaging service/i);
       expect(doc, 'the vocabulary belongs in the enum, not smuggled back into prose').not.toMatch(/\|/);
+    });
+  });
+
+  // ── #9205 — the localizable content path: `template` + `templateData` ──
+  //
+  // Ruled 「立项，走 emailTemplates 路线」: a notify node references a
+  // `sys_email_template` bundle by name and the delivery path resolves
+  // `(name, recipient locale)` at delivery time. Inline `title`/`message`
+  // stay fully valid (the acceptance faces above) as the non-localizable
+  // path; the two paths are mutually exclusive — loud refusal over silent
+  // precedence, following `objectNavTargetExclusivity` (ui/app.zod.ts).
+  describe('template reference (#9205)', () => {
+    /** Custom (superRefine) issues at exactly `path`, or `[]` when accepted. */
+    function customIssuesAt(value: unknown, path: string): ReadonlyArray<{ code: string; message: string }> {
+      const result = NotifyConfigSchema.safeParse(value);
+      if (result.success) return [];
+      return result.error.issues.filter(
+        (i) => i.code === 'custom' && i.path.length === 1 && i.path[0] === path,
+      );
+    }
+
+    it('accepts a template-only node (no inline title) — RED on origin/main pre-#9205, where `template` was an unrecognized key', () => {
+      expect(NotifyConfigSchema.safeParse({
+        recipients: ['u1'],
+        template: 'crm.large_deal_won',
+        templateData: { dealName: '{record.name}' },
+      }).success).toBe(true);
+    });
+
+    it('accepts a template reference without templateData (a template may need no variables)', () => {
+      expect(NotifyConfigSchema.safeParse({
+        recipients: ['u1'],
+        template: 'crm.weekly_digest',
+      }).success).toBe(true);
+    });
+
+    it('refuses template + inline title/message, naming both paths and which to keep', () => {
+      for (const inline of [{ title: 'Deal won' }, { message: 'Body' }, { title: 'Deal won', message: 'Body' }]) {
+        const issues = customIssuesAt({ recipients: ['u1'], template: 'crm.large_deal_won', ...inline }, 'template');
+        // `code` + `path`, never a bare `success === false` (the #7086 lesson):
+        // a strictObject refuses for several reasons, and this pin must stay
+        // apart from an unknown-key refusal.
+        expect(issues, `combo ${Object.keys(inline).join('+')} must be refused at ['template']`).toHaveLength(1);
+        const msg = issues[0]!.message;
+        // The prescription is behaviour: both keys named, the localizable path
+        // identified, and the fix stated.
+        expect(msg).toContain('`template`');
+        expect(msg).toContain('`title`');
+        expect(msg).toMatch(/recipient locale/);
+        expect(msg).toMatch(/delete `title`\/`message`/);
+        expect(msg).toMatch(/silently ignore/);
+      }
+    });
+
+    it('refuses templateData without template — nothing would ever read it', () => {
+      const issues = customIssuesAt({ recipients: ['u1'], title: 'hi', templateData: { a: 1 } }, 'templateData');
+      expect(issues).toHaveLength(1);
+      expect(issues[0]!.message).toContain('`template`');
+    });
+
+    it('refuses a node with NEITHER inline title NOR template (at-least-one; a bare missing title refused pre-#9205 too, as invalid_type)', () => {
+      const issues = customIssuesAt({ recipients: ['u1'] }, 'title');
+      expect(issues).toHaveLength(1);
+      expect(issues[0]!.message).toContain('`template`');
+      expect(issues[0]!.message).toContain('`title`');
+    });
+
+    it('states the localization contract in the describes, plainly', () => {
+      const shape = (NotifyConfigSchema as unknown as { shape: Record<string, { description?: string }> }).shape;
+
+      // Non-empty arms first, so the pattern arms cannot pass vacuously (#6918).
+      const templateDoc = shape.template!.description ?? '';
+      expect(templateDoc.length, 'template .describe() must not be empty').toBeGreaterThan(0);
+      // The contract: resolves by (name, recipient locale) at delivery time…
+      expect(templateDoc).toMatch(/recipient locale/);
+      expect(templateDoc).toMatch(/delivery time/);
+      expect(templateDoc).toContain('sys_email_template');
+      // …and it is a RAW cross-reference, like topic/channels.
+      expect(templateDoc).toMatch(/no `\{token\}` interpolation/i);
+
+      // Inline strings are the non-localizable path, said out loud on both.
+      for (const key of ['title', 'message'] as const) {
+        const doc = shape[key]!.description ?? '';
+        expect(doc.length, `${key} .describe() must not be empty`).toBeGreaterThan(0);
+        expect(doc).toMatch(/not localizable/i);
+      }
+
+      // templateData names its coupling to template.
+      const dataDoc = shape.templateData!.description ?? '';
+      expect(dataDoc.length, 'templateData .describe() must not be empty').toBeGreaterThan(0);
+      expect(dataDoc).toMatch(/together with `template`/);
     });
   });
 });

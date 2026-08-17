@@ -632,6 +632,7 @@
     "apiExposureDenialReason": "src/data/api-derivation.ts#apiExposureDenialReason (function)",
     "asciiCaseInsensitiveContains": "src/data/filter.zod.ts#asciiCaseInsensitiveContains (function)",
     "asciiCaseInsensitiveRegexSource": "src/data/filter.zod.ts#asciiCaseInsensitiveRegexSource (function)",
+    "assertListComparandShapes": "src/data/filter-comparand-shape.ts#assertListComparandShapes (function)",
     "bareDateRangePresetComparandMessage": "src/data/date-range-presets.ts#bareDateRangePresetComparandMessage (function)",
     "canServeApiOperation": "src/data/api-derivation.ts#canServeApiOperation (function)",
     "canonicalAstOperator": "src/data/filter.zod.ts#canonicalAstOperator (function)",

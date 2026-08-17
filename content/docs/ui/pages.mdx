@@ -148,7 +148,7 @@ The `type` field is a union of the standard `PageComponentType` enum and any cus
 - **Navigation:** `app:launcher`, `nav:menu`, `nav:breadcrumb`
 - **Utility:** `global:search`, `global:notifications`, `user:profile`
 - **AI:** `ai:chat_window`, `ai:suggestion`
-- **Elements:** `element:text`, `element:number`, `element:image`, `element:divider`, `element:button`, `element:filter`, `element:form`, `element:record_picker`, `element:text_input`
+- **Elements:** `element:text`, `element:number`, `element:image`, `element:divider`, `element:button`, `element:form`, `element:record_picker`, `element:text_input` (`element:filter` was retired in v17.x — no renderer ever shipped for it; list surfaces own their filtering via a view's `userFilters` quick-filter bar or the list toolbar's filter builder)
 
 Components may also carry `dataSource` (per-element object binding for multi-object pages), `responsive`, and `aria` configuration. Custom string types are also accepted for project-specific widgets.
 

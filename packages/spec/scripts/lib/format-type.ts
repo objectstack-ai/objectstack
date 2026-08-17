@@ -358,13 +358,15 @@ function formatLiteral(value: unknown): string {
  * An `enum` node's members, joined — and, when a budget is given, cut to it with
  * an explicit count of what was cut.
  *
- * The elided spelling is `Enum<'text' | 'textarea' | … +42 more>`-shaped:
+ * The elided spelling is `Enum<'text' | 'textarea' | …>`-shaped below a summary
+ * and `Enum<'text' | 'textarea' | … +42 more>`-shaped on a vocabulary's own row.
  * `…` is the same "there is more" token the key elision above already uses, and
- * `+42 more` is the part that makes this SAFE to do at all. A silent prefix
- * would leave the page looking complete while it wasn't — the reader has no way
- * to tell a 7-member vocabulary from the first 7 of 49 — and a docs page that
- * lies by omission is worse than a wide one. With the count, the cell states
- * exactly what it is: a sample of a 49-term vocabulary.
+ * it is what makes eliding SAFE to do at all: a SILENT prefix would leave the
+ * page looking complete while it wasn't — the reader has no way to tell a
+ * 7-member vocabulary from the first 7 of 49 — and a docs page that lies by
+ * omission is worse than a wide one. Whether the marker also QUANTIFIES what it
+ * cut is the `quantify` parameter, and it is decided per position by whether the
+ * page carries the members to check the number against (#9182, on `formatEnum`).
  *
  * TWO budgets reach this function, and which one applies decides where the rest
  * of the vocabulary stays readable:
@@ -373,19 +375,26 @@ function formatLiteral(value: unknown): string {
  *      the identical list is printed in full elsewhere on the same page
  *      (`BulkActionDef.params` is one — `BulkActionParam.type` two sections down
  *      carries all 49). For the remaining 348 the JSON Schema under
- *      `json-schema/` is the authority, as it always was.
+ *      `json-schema/` is the authority, as it always was. Unquantified: a count
+ *      no copy on the page can substantiate is what made every page carrying one
+ *      a rewrite whenever the vocabulary grew.
  *   2. `TOP_LEVEL_ENUM_WIDTH_LIMIT`, on a property whose own type IS the
  *      vocabulary (#6225), reached only through `formatPropertyType`. That cell
  *      is often the page's ONLY copy, so nothing is cut unless the caller prints
  *      the members underneath the table — which is why that budget is spent in
- *      the one place that hands them back, and never from `formatType`.
- * The marker is a count and not an anchor in both cases: Zod inlines enums, so
+ *      the one place that hands them back, and never from `formatType`. Keeps
+ *      its count: the list is right below it.
+ * The marker is a count and not an anchor in case 2: Zod inlines enums, so
  * the node reaching this function is a bare `{ type: 'string', enum: [...] }`
  * with no `$ref` and no name to link — inventing one would be guessing at which
  * page-local heading happens to carry the same members. Case 2 does not need one:
  * its list is immediately below, under a heading naming that exact property.
  */
-function elideEnum(values: unknown[], budget: number | null): { body: string; hidden: number } {
+function elideEnum(
+  values: unknown[],
+  budget: number | null,
+  quantify = true,
+): { body: string; hidden: number } {
   const members = values.map((v: unknown) => formatLiteral(v));
   const full = members.join(' | ');
   if (budget === null || full.length <= budget) return { body: full, hidden: 0 };
@@ -406,7 +415,7 @@ function elideEnum(values: unknown[], budget: number | null): { body: string; hi
   // hidden, and `+0 more` would be a marker pointing at nothing.
   if (hidden === 0) return { body: full, hidden: 0 };
 
-  const elided = elideWithMarker(shown, hidden, full.length);
+  const elided = elideWithMarker(shown, hidden, full.length, quantify);
   return elided === null ? { body: full, hidden: 0 } : { body: elided, hidden };
 }
 
@@ -438,15 +447,77 @@ function elideEnum(values: unknown[], budget: number | null): { body: string; hi
  * did for #5340's in-shape elision, because a refusal there saved only a marker
  * while a refusal here saves a page section too.
  */
-function elideWithMarker(shown: string[], hidden: number, fullLength: number): string | null {
+function elideWithMarker(
+  shown: string[],
+  hidden: number,
+  fullLength: number,
+  quantify = true,
+): string | null {
   if (hidden <= 0) return null;
-  const marker = `… +${hidden} more`;
+  const quantified = `… +${hidden} more`;
+  const marker = quantify ? quantified : '…';
   const elided = [...shown, marker].join(' | ');
-  return fullLength - elided.length >= marker.length + ' | '.length ? elided : null;
+  // THE THRESHOLD IS ALWAYS MEASURED AGAINST THE QUANTIFIED MARKER, so dropping
+  // the count changes the NOTATION and never the elision SET. Judged against the
+  // bare `…` instead, the guard gets cheaper to satisfy and fires on bodies it
+  // used to refuse: measured here, three `AppearanceConfig.allowedVisualizations`
+  // cells (a 9-member, 92-character vocabulary printed in full since #5340)
+  // started truncating — an information loss on an enum that has nothing to do
+  // with why the count is coming out. #5340 calibrated this refusal on a corpus
+  // sweep; re-deriving it from a shorter marker would re-decide that measurement
+  // as a side effect of an unrelated change. One change, one effect.
+  const quantifiedLength = [...shown, quantified].join(' | ').length;
+  return fullLength - quantifiedLength >= quantified.length + ' | '.length ? elided : null;
 }
 
+/**
+ * `quantify: false` — the in-shape summary's enum elision states THAT it cut,
+ * never HOW MUCH (#9182).
+ *
+ * WHY THE COUNT COMES OUT OF THIS ONE POSITION. `+N more` is a function of the
+ * vocabulary's cardinality, so every page carrying the marker is rewritten when
+ * the vocabulary grows by one — including pages that say nothing else about it.
+ * Measured on `ApiError.code` (288 members, `StandardErrorCode` ∪
+ * `ERROR_CODE_LEDGER`), by registering one code and regenerating: **11 pages,
+ * 69 lines. 66 of those 69 lines are this marker**, and 9 of the 11 pages —
+ * `analytics`, `auth`, `automation-api`, `batch`, `export`, `metadata`,
+ * `package-api`, `protocol`, `storage` — contain NOTHING ELSE, 100% of their
+ * changed lines being `+285 more` → `+286 more`. The ledger is a per-PR append,
+ * so any two PRs registering a code are mutually exclusive by construction, and
+ * the generated pages carry no conflict markers when one side is dropped — the
+ * silent-drop signature the merge driver already warns about.
+ *
+ * WHY THIS POSITION AND NOT THE OTHER TWO. The count is kept wherever it is
+ * VERIFIABLE against members the page actually prints:
+ *   - `TOP_LEVEL_ENUM_WIDTH_LIMIT` (`formatPropertyType`) keeps it — its
+ *     `### Allowed Values` list is printed directly below, so the count is a
+ *     cross-check the reader can perform, and that page must be rewritten by a
+ *     vocabulary change anyway because it spells the vocabulary.
+ *   - `VARIANT_LIMIT` keeps it — a union's arity is the only fact that cell
+ *     still carries once `SHAPE_DEPTH_LIMIT` has collapsed its variants, and
+ *     arity does not grow with a ledger.
+ *   - The in-shape copy loses it. This file already records why that position
+ *     is the cheap one: "Eliding a copy inside a summary is nearly free — the
+ *     full list is elsewhere, or the JSON Schema is the authority." A count the
+ *     page cannot substantiate is exactly the part that is free to drop, and on
+ *     348 of the 805 in-shape occurrences no copy of the list is on the page at
+ *     all.
+ *
+ * WHY THIS IS NOT A SECOND OMISSION STYLE. #6226 ruled that one table must not
+ * carry two omission notations, and that ruling is intact: the bare `…` is not
+ * new here, it is the token this renderer ALREADY uses for the unquantified
+ * elision in this very cell. `INLINE_KEY_LIMIT` prints
+ * `{ code: …; message: string; category?: string; httpStatus?: integer; … }` —
+ * four keys and a countless `…` — so the summary containing this enum states
+ * "there are more keys" without saying how many. Moving the enum inside it to
+ * the same token makes one cell internally consistent instead of adding a
+ * notation to the table: quantified where the members are printed, bare `…`
+ * inside a summary that is already a sample. What a reader loses is the
+ * MAGNITUDE of a list the page does not carry; what they keep is the fact that
+ * it is a sample, which is what #5340 required against a SILENT prefix.
+ */
 function formatEnum(values: unknown[], budget: number | null): string {
-  return `Enum<${elideEnum(values, budget).body}>`;
+  return `Enum<${elideEnum(values, budget, false).body}>`;
 }
 
 /**

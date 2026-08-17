@@ -75,6 +75,17 @@ function expectConformantError(response: { status: number; body: any } | undefin
     expect(body.error.details?.code).toBeUndefined();
     expect(body.error.details?.type).toBeUndefined();
 
+    // [#9106] `declaredCode` means demotion: when present it is a producer
+    // spelling the closed vocabulary does NOT contain — never a second copy of
+    // `code`, never a registered member. Asserted for every body so a branch
+    // that starts emitting it redundantly (two spellings of one fact on every
+    // refusal) fails here rather than shipping.
+    if (body.error.declaredCode !== undefined) {
+        expect(typeof body.error.declaredCode).toBe('string');
+        expect(body.error.declaredCode).not.toBe(body.error.code);
+        expect(ErrorCode.safeParse(body.error.declaredCode).success).toBe(false);
+    }
+
     return body.error;
 }
 
@@ -231,12 +242,17 @@ describe('#8087 — every code the dispatcher door can emit is parsed against Ap
         );
 
     it('drives a code from the derivation rather than a list written by hand', () => {
-        // #8846 registered every code the first derivation reported, so the
-        // pending list is EMPTY now and the per-code rejection drives below
-        // are vacuous BY DESIGN — that emptiness is the discharged state, not
-        // a broken wiring. The suite does not go quiet with it: the seven
-        // registered codes are driven POSITIVELY in the '#8846 discharge' case
-        // below, and a future pending row re-populates the loop on its own.
+        // #8846 registered every code the FIRST derivation reported, which
+        // emptied this list; [#9223] widening the scan to see a `code: CONST`
+        // in an object literal re-populated it with one member —
+        // UNIQUE_SCOPE_CONFIRMATION_REQUIRED, at the marketplace install seam's
+        // `plugin-route` door — and #9246 registered that one too, ratcheting
+        // its row out and emptying the list again: the loop working, twice
+        // over. PENDING_AT_DISPATCHER_DOOR is empty whenever the pending list
+        // is, so the per-code drives below are vacuous until a new unswept
+        // producer lands BY DESIGN; the suite does not go quiet with them,
+        // since the seven registered codes are driven POSITIVELY in the
+        // '#8846 discharge' case.
         // Spread: both lists are `readonly string[]`, and `arrayContaining`
         // takes a mutable one — passing the frozen list straight in is a tsc
         // error that only the TEST_DEBT ratchet would have caught.
@@ -244,35 +260,25 @@ describe('#8087 — every code the dispatcher door can emit is parsed against Ap
     });
 
     for (const code of PENDING_AT_DISPATCHER_DOOR) {
-        it(`'${code}' reaches the wire verbatim, and ApiErrorSchema rejects it on \`code\` alone`, () => {
+        it(`'${code}' is DEMOTED off \`error.code\` until its ledger row lands (#9106)`, () => {
             const response = emitFor(code, 500);
 
-            // Verbatim — option B was ruled, so the door does NOT narrow. A
-            // failure here means someone quietly implemented option A.
-            expect(response.body.error.code).toBe(code);
+            // [#9106] The door narrows now (maintainer ruling 2026-08-16:
+            // `error.code` is a closed vocabulary at every door): the
+            // unregistered spelling rides the wire's `declaredCode`, and the
+            // closed slot takes the status-derived member. So an unswept
+            // producer's body PARSES — what it loses is its semantic code,
+            // silently absent from `error.code` until registration. That
+            // silent demotion is exactly why a pending-registration row is a
+            // debt the gate carries to the spec lane, not a curiosity.
+            expect(response.body.error.code).toBe(standardErrorCodeForHttpStatus(response.status));
+            expect(response.body.error.declaredCode).toBe(code);
 
-            // The body is STRUCTURALLY conformant — right envelope, status
-            // mirrored, `details` context only — so the one thing standing
-            // between it and its declared schema is the missing ledger row.
-            // That is precisely the claim handed to #8846.
-            expect(envelopeViolations(response.body)).toEqual([]);
-            expect(response.body.success).toBe(false);
-            expect(response.body.error.httpStatus).toBe(response.status);
-
-            const parsed = ApiErrorSchema.safeParse(response.body.error);
-            expect(parsed.success).toBe(false);
-            // Rejected on `code` and nothing else — an entry that failed for a
-            // second reason would be a different defect wearing this one's label.
-            expect([...new Set((parsed.error?.issues ?? []).map((i) => i.path.join('.')))]).toEqual(['code']);
-
-            // MEASURED while writing this: the damage is not confined to the
-            // nested error object. `BaseResponseSchema` embeds `ApiErrorSchema`,
-            // so the WHOLE response body fails to parse — one unregistered
-            // string invalidates the envelope every consumer validates against,
-            // for the same single reason and no other.
-            const envelope = BaseResponseSchema.safeParse(response.body);
-            expect(envelope.success).toBe(false);
-            expect([...new Set((envelope.error?.issues ?? []).map((i) => i.path.join('.')))]).toEqual(['error.code']);
+            // Fully conformant — right envelope, status mirrored, and the
+            // declared schema accepts it (`declaredCode` is a declared
+            // `ApiErrorSchema` field, the open author-authored channel).
+            const error = expectConformantError(response);
+            expect(error.declaredCode).toBe(code);
         });
     }
 
@@ -332,18 +338,25 @@ describe('#8087 — every code the dispatcher door can emit is parsed against Ap
         }
     });
 
-    it('records the sandbox limb as open rather than pretending the door is closed', () => {
+    it('demotes the sandbox limb to `declaredCode` — the door is closed WITHOUT dropping the author code (#9106)', () => {
         // `SandboxError` carries a metadata app's OWN `.code` across the QuickJS
         // boundary on purpose (#7867), and `domains/actions.ts` serves it through
-        // `errorFromThrown`. So this door's vocabulary has a limb authored by
-        // tenants at runtime, which no ledger can enumerate — the honest bound on
-        // what "closed" can mean here, and the reason the witness below is NOT
-        // re-spelled to a registered code.
+        // `errorFromThrown`. So this door's vocabulary had a limb authored by
+        // tenants at runtime, which no ledger can enumerate. The #9106 ruling
+        // (maintainer 2026-08-16) closed it by DEMOTION: the author's spelling
+        // rides `error.declaredCode` — the open, author-authored channel — and
+        // `error.code` takes the closed member the status derives. #7867's
+        // capability is preserved: the code still crosses the sandbox and still
+        // reaches the wire.
         const witness = SANDBOX_AUTHORED_LIMB.witness;
         expect(ErrorCode.safeParse(witness).success).toBe(false);
-        expect(emitFor(witness, 400).body.error.code).toBe(witness);
-        // It is deliberately absent from the registration hand-off: registering
-        // it would close nothing, since the next app picks a different string.
+        const response = emitFor(witness, 400);
+        const error = expectConformantError(response);
+        expect(error.code).toBe(standardErrorCodeForHttpStatus(400));
+        expect(error.declaredCode).toBe(witness);
+        // It stays absent from the registration hand-off (fenced off from
+        // #8846): registering one tenant spelling would close nothing, since
+        // the next app picks a different string.
         expect(PENDING_LEDGER_REGISTRATION).not.toContain(witness);
     });
 
@@ -352,8 +365,33 @@ describe('#8087 — every code the dispatcher door can emit is parsed against Ap
             expect(site.why.length, `${site.code} at ${site.file} carries no evidence`).toBeGreaterThan(40);
             // A site that reaches a door must be on its way to a ledger row;
             // anything else must say which non-wire vocabulary it belongs to.
-            if (site.door !== 'none') expect(site.verdict).toBe('pending-registration');
-            else expect(site.verdict).not.toBe('pending-registration');
+            //
+            // [#9223] One exception, and it is about what a SOURCE SCAN can
+            // know rather than about reachability: a code built by template
+            // interpolation reaches the `rest` door and yet has no literal to
+            // register, so `runtime-pinned` names the test that enumerates the
+            // family at runtime. It stays out of PENDING_LEDGER_REGISTRATION
+            // deliberately — a family identity like `APPROVAL_*_FAILED` can
+            // never be registered, and parking it in that list would hand
+            // #8846 a debt nobody can discharge.
+            if (site.door !== 'none') {
+                expect(['pending-registration', 'runtime-pinned']).toContain(site.verdict);
+            } else {
+                expect(site.verdict).not.toBe('pending-registration');
+            }
+        }
+    });
+
+    it('[#9223] every runtime-pinned row names its runtime half, and only a template may', () => {
+        // The declaration-side half of the same guard the gate enforces on the
+        // scan side. `runtime-pinned` is the one verdict that does not decide
+        // reachability, so it is the one that could become an exemption from
+        // the registry check — on a literal it would be exactly that.
+        for (const site of UNREGISTERED_CODE_SITES.filter((s) => s.verdict === 'runtime-pinned')) {
+            expect(site.shape, `${site.code} is runtime-pinned but spells a literal`).toBe('objlittemplate');
+            expect(site.pin, `${site.code} is runtime-pinned with no pin`).toBeTruthy();
+            expect(site.code, `${site.code} is not a template family identity`).toContain('*');
+            expect(PENDING_LEDGER_REGISTRATION).not.toContain(site.code);
         }
     });
 });

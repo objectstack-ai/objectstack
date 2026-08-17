@@ -164,6 +164,46 @@ which the Studio connection form renders — so the form offers exactly the fiel
 the validator accepts.
 </Callout>
 
+### Secret-shaped keys with no binder slot: accepted at-rest risk
+
+The datasource secret binder injects exactly **one** secret per datasource —
+the login password, resolved through `external.credentialsRef` (or the
+connection form's password field) into `sys_secret` at connect time. A small
+number of other config keys are secret-shaped too, but the binder has no
+second slot to put them in, and the client library that owns them — not
+ObjectStack — is what makes them secrets:
+
+| Driver | Key | What it carries |
+| :--- | :--- | :--- |
+| `mongo` \| `mongodb` | `options.proxyPassword` | SOCKS5 proxy password |
+| `mongo` \| `mongodb` | `options.tlsCertificateKeyFilePassword` | TLS key-file passphrase |
+| `mongo` \| `mongodb` | `options.key` | TLS private key material (PEM) |
+| `mongo` \| `mongodb` | `options.passphrase` | TLS key passphrase |
+| `turso` \| `libsql` | `encryptionKey` | AES-256 key for the local database file |
+
+Unlike `password` / `authToken` (typed `never` in their schemas — the parse
+refuses them outright), these five keys are **writable**: the parse accepts
+them, and they are stored **at rest in `sys_metadata` as plain text**, right
+alongside the rest of the datasource row. The protection that exists today is
+on the READ side only — every one of them is stripped before a datasource
+record is ever served back over the admin API or shown in the Setup UI
+(`PASSTHROUGH_SECRET_PATHS` / `STILL_WRITABLE_CREDENTIAL_KEYS` in
+`datasource-credential-redaction.ts`, shipped in
+[#9040](https://github.com/objectstack-ai/objectstack/issues/9040)). That stops the value
+round-tripping through a read; it is not encryption at rest, and an operator
+with direct access to the metadata store can still read the plain-text value.
+
+<Callout type="warn">
+**This is a deliberate, documented trade-off ([#9124](https://github.com/objectstack-ai/objectstack/issues/9124)), not an oversight.**
+The binder has exactly one named slot. Refusing these five keys at write time
+would remove the only way to configure an authenticated SOCKS5 proxy or a
+passphrase-protected TLS key — a capability the client genuinely honours, with
+no working refusal remedy. **Restart condition:** the first real deployment
+that needs an authenticated proxy or a passphrase-protected key converts this
+into named binder-slot support — one mechanism covering all five keys — rather
+than the current per-key accept-and-document posture.
+</Callout>
+
 ## Startup: a driver that cannot connect aborts the boot
 
 `ObjectQLEngine.init()` connects every registered driver during kernel

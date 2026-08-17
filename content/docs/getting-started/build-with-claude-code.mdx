@@ -159,7 +159,9 @@ export const ResolveTicketAction = defineAction({
   locations: ['record_header', 'list_item'],
   // Only offer "Resolve" on tickets that aren't already resolved or closed.
   // Predicates are CEL, record-scoped — `record.status`, never bare `status`.
-  visible: 'record.status != "resolved" && record.status != "closed"',
+  // `has()` guards the sparse list row: a list projects only the columns it
+  // shows, and CEL faults on an absent key (which hides the button silently).
+  visible: 'has(record.status) && record.status != "resolved" && record.status != "closed"',
   successMessage: 'Ticket resolved.',
   refreshAfter: true,
   ai: {
@@ -194,11 +196,44 @@ export const TicketViews = defineView({
 });
 ```
 
+```typescript title="src/apps/support.app.ts"
+import { defineApp } from '@objectstack/spec';
+
+export const SupportApp = defineApp({
+  name: 'support_desk_support',
+  label: 'Support',
+  navigation: [
+    {
+      id: 'grp_support',
+      type: 'group',
+      label: 'Support',
+      expanded: true,
+      children: [
+        {
+          id: 'nav_open_tickets',
+          type: 'object',
+          label: 'Open',
+          objectName: 'support_desk_ticket',
+          viewName: 'open',
+        },
+      ],
+    },
+  ],
+});
+```
+
 The agent also **wires the new files into `objectstack.config.ts`** — the object
-through the `src/objects/index.ts` barrel, and the action and view via the
-`actions:` / `views:` arrays in `defineStack()`. There is no filename-suffix
-magic: metadata exists in the app only if the config imports it, so if a
-freshly-authored action doesn't show up, the wiring is the first thing to check.
+through the `src/objects/index.ts` barrel, and the action, view and app via the
+`actions:` / `views:` / `apps:` arrays in `defineStack()`. There is no
+filename-suffix magic: metadata exists in the app only if the config imports it,
+so if a freshly-authored action doesn't show up, the wiring is the first thing to
+check.
+
+What it does **not** touch is the starter `note` object the `blank` template
+scaffolded in step 1 (`src/objects/note.object.ts`, two fields). Nothing asked
+for it to go, so it stays in the project — which is why the counts below read
+**two** objects and **six** fields, not one and four. Delete it once the ticket
+object has replaced it and the same run reports `1 Objects  4 Fields`.
 
 This is the same metadata that powers the REST API, the Console UI, **and the MCP
 tools exposed to AI** — define it once, and ObjectStack derives the rest.
@@ -255,9 +290,11 @@ Once it's clean:
   ✓ Validation passed (37ms)
 
   Support Desk v0.1.0
+  Minimal ObjectStack environment — a clean slate for building.
 
-  Data: 1 Objects  6 Fields
+  Data: 2 Objects  6 Fields
   UI: 1 Apps  1 Views  1 Actions
+  Runtime: 3 plugins
 ```
 
 <Callout type="tip">

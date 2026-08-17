@@ -16,6 +16,11 @@
 # ships (the pinned Dockerfile — see that step for why the split exists).
 # Job 2 (nightly) does the same via the *published* `create-objectstack@latest`
 # across every template in the registry — the new-user canary.
+#
+# Every step below is part of an install/build/boot/docker pipeline, not a named local
+# verification script a dev pre-runs with `pnpm check:x` — there is no check family here
+# to discover, deliberately (#9187):
+# dispatch-gates: no-check-families -- steps are an e2e pipeline, not named local checks
 
 name: Scaffold E2E
 

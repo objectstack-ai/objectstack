@@ -191,7 +191,12 @@ export const COMPONENT_FIELD_SPECS: Readonly<Record<string, ComponentFieldSpec>>
   'record:details': { props: ['fields', 'hideFields'], nestedSections: ['sections'] },
   'record:path': { props: ['statusField'] },
   'element:number': { props: ['field'] },
-  'element:filter': { props: ['fields'] },
+  // `element:filter` had a `{ props: ['fields'] }` entry until #9220 retired the
+  // whole element at element grain (ADR-0049 — no renderer ever shipped for it).
+  // Every `ElementFilterProps` key is a `retiredKey()` tombstone now, so no
+  // spec-conformant page carries `fields` on it, and the #5068 props gate
+  // reports an authored one by name with the element-retirement prescription —
+  // the same #5775/#6629 residue class as the record-picker entries below.
   'element:form': { props: ['fields'] },
   // `labelField` is the one field-bearing prop this element declares. Its former
   // companions `displayField` (renamed to `labelField`, ADR-0087 D2) and

@@ -42,23 +42,33 @@
  * unregistered code there is a failing test, not a wire answer.
  *
  * {@link ThrownHttpError.declaredCode} is the producer's own string, verbatim
- * and un-narrowed, which is what the dispatcher door has always put on the
- * wire.
+ * and un-narrowed. Until #9106 it was what the dispatcher door put in
+ * `error.code`; since the #9106 ruling it is what BOTH doors surface as the
+ * wire's `declaredCode` when it is not a vocabulary member (see below).
  *
- * [#8087] That contract question — should the dispatcher's `error.code` be
- * closed too? — has since been ruled: **option B**, keep the verbatim spelling
- * and register the producers, delivered as a GATE rather than a one-time sweep
- * (maintainer, 2026-08-12). So `declaredCode` stays exactly as it is; what
- * changed is that the unregistered producers are now measured and classified
+ * [#8087] The first ruling on that gap (maintainer, 2026-08-12) kept the
+ * dispatcher's verbatim spelling and delivered a GATE — the unregistered
+ * producers are measured and classified
  * (`packages/runtime/src/dispatcher-error-vocabulary.ts`,
- * `pnpm check:dispatcher-error-vocabulary`) instead of being named in prose
- * here. Narrowing this spelling would be option A, which was NOT ruled.
+ * `pnpm check:dispatcher-error-vocabulary`) instead of named in prose here.
+ * The gate's own first derivation then measured the limb no registration can
+ * close: a metadata app's action code crosses the sandbox boundary carrying
+ * the app's OWN `.code` (#7867), authored by tenants at runtime.
  *
- * So the doors agree on **status** unconditionally and on **code** for every
- * registered code, and differ only where a producer emits a code the ledger
- * does not know — a case that is already a contract violation on either door.
- * Both answers come from ONE function, which is what keeps that difference a
- * documented one rather than a drift.
+ * [#9106] That limb was ruled (maintainer, 2026-08-16): **`error.code` is a
+ * closed vocabulary at every door.** The dispatcher door now takes
+ * {@link ThrownHttpError.code} — the demote this resolver has always computed,
+ * and the REST door's spelling since #8016 — and a producer's unregistered
+ * string rides the wire's `declaredCode` (declared on `ApiErrorSchema`)
+ * instead of `error.code`. #7867's capability is preserved: the author's code
+ * still crosses the sandbox and still reaches the wire — in the open,
+ * author-authored channel, not the closed one. Use
+ * {@link demotedDeclaredCode} to read the spelling a boundary should surface
+ * beside the closed `code`.
+ *
+ * So the doors agree on **status** and on **code** unconditionally now — both
+ * answers come from ONE function, which is what keeps agreement a construction
+ * rather than two suites agreeing about literals.
  *
  * ## What this deliberately does NOT decide
  *
@@ -117,8 +127,10 @@ export interface ThrownHttpError {
   code: ErrorCode;
   /**
    * The producer's own code, verbatim and un-narrowed, or `undefined` when it
-   * declared none. For the dispatcher door, whose `error.code` is not closed in
-   * practice. See the module note on why there are two.
+   * declared none. Never for `error.code` — that slot takes {@link code} at
+   * every door (#9106) — but for the wire's `declaredCode` channel when the
+   * spelling is not a vocabulary member ({@link demotedDeclaredCode}). See the
+   * module note on why there are two.
    */
   declaredCode?: string;
   /** The thrown message, UNSANITISED — see the module note on disclosure. */
@@ -196,4 +208,23 @@ export function resolveThrownHttpError(error: unknown, fallbackStatus = 500): Th
     message: typeof e?.message === 'string' ? e.message : String(error),
     ...(Object.keys(details).length > 0 ? { details } : {}),
   };
+}
+
+/**
+ * The producer's spelling a boundary should surface as the wire's
+ * `declaredCode` beside the closed `code` — or `undefined` when there is
+ * nothing to surface (#9106).
+ *
+ * Present exactly when the throw spelled a code that did NOT survive into
+ * {@link ThrownHttpError.code} — i.e. the demote happened. A registered code
+ * is already in `code`, so emitting it again would put two spellings of one
+ * fact on every refusal; a throw with no code has nothing to declare. Spelled
+ * once here rather than as three `!==` comparisons at three exits, so
+ * "presence means demotion" (`ApiErrorSchema.declaredCode`'s documented
+ * semantics) has one definition.
+ */
+export function demotedDeclaredCode(thrown: ThrownHttpError): string | undefined {
+  return thrown.declaredCode !== undefined && thrown.declaredCode !== thrown.code
+    ? thrown.declaredCode
+    : undefined;
 }

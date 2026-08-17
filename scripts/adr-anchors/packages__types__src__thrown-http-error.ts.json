@@ -1,0 +1,7 @@
+{
+  "file": "packages/types/src/thrown-http-error.ts",
+  "adrs": [
+    "ADR-0112"
+  ],
+  "invariant": "This is the ONE definition of how a thrown error becomes an HTTP answer, and the two spellings it returns are not a redundancy to tidy away. ADR-0112 makes `error.code` a CLOSED vocabulary (`StandardErrorCode` union the registered ledger), and the 2026-08-16 ruling on #9106 extended that from the REST package door to every door this function serves: `code` is always a union member — a throw whose `.code` is unregistered falls to the member the status derives — while `declaredCode` keeps the producer's verbatim string. `demotedDeclaredCode()` is the single rule for which spelling a boundary surfaces beside the closed one, and it answers `undefined` for a registered code on purpose: emitting both would put two spellings of one fact on every refusal, and `ApiErrorSchema.declaredCode`'s documented semantics are that PRESENCE MEANS DEMOTION. Do not 'simplify' a boundary by writing `thrown.declaredCode` into `error.code` — that is the pre-#9106 dispatcher behaviour, and it re-opens the tenant-authored limb #9106 closed: a metadata app's action code crosses the QuickJS sandbox carrying the app's own `.code` (#7867, a capability deliberately granted and preserved), so `error.code` would again carry strings authored by tenants at runtime, which no ledger can enumerate and no gate can sweep. The author's spelling is not dropped — it rides the wire's open `declaredCode` channel instead."
+}

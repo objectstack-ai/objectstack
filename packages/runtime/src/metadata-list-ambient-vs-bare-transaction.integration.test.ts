@@ -224,8 +224,28 @@ describe('#7842 metadata list under an open transaction: ambient vs bare (real O
       expect((engine as any).txStore.getStore()).toBeUndefined();
 
       const started = Date.now();
-      await expect(loader.list('object')).rejects.toThrow(/Timeout acquiring a connection/i);
+      // [#8931, maintainer ruling 2026-08-17] This used to read
+      // `rejects.toThrow(/Timeout acquiring a connection/i)` — knex's own words,
+      // reaching the caller because `driver-sql`'s read exits let an
+      // unclassified dialect error out raw. They no longer do: every dialect
+      // error the driver cannot attribute now leaves as the generic
+      // backend-fault envelope (`DATABASE_ERROR` / 500), with the dialect's text
+      // kept to the server log and carried on `cause`.
+      //
+      // ⛔ The DISCRIMINATION this assertion exists for is not weakened, only
+      // re-homed. What it must still separate is "the read failed by waiting on
+      // the pool" from "the read failed for some other reason" — a distinction
+      // the elapsed-time bounds below cannot make on their own — so it is asked
+      // of the same string, at the place that string now lives.
+      const fault = await loader.list('object').then(
+        () => undefined,
+        (e: unknown) => e as { code?: string; status?: number; cause?: { message?: string } },
+      );
       const elapsed = Date.now() - started;
+      expect(fault, 'the bare-transaction read must fail, not quietly succeed').toBeDefined();
+      expect(fault?.code).toBe('DATABASE_ERROR');
+      expect(fault?.status).toBe(500);
+      expect(String(fault?.cause?.message)).toMatch(/Timeout acquiring a connection/i);
 
       // It failed by WAITING on the pool, not instantly for some other reason...
       expect(elapsed).toBeGreaterThanOrEqual(ACQUIRE_MS / 2);

@@ -245,10 +245,16 @@ const KNOWN_UNALIASED_TEST_IMPORTS = {
   '@objectstack/example-embed-objectql': [
     '@objectstack/driver-memory', '@objectstack/objectql', '@objectstack/spec',
   ],
+  // #8990 / PR #9280 — `@objectstack/formula` came OUT of this entry (a shrink) when
+  // `test/action-predicate-sparse-face.test.ts` gained the vitest source alias: that
+  // test evaluates this app's authored predicates on the CEL engine, so a `dist`
+  // merely BEHIND would run it green against the engine's old null/absence semantics —
+  // exactly the behaviour those assertions exist to pin. Same pair examples/app-crm
+  // moved through on PR #9166.
   '@objectstack/example-showcase': [
     '@objectstack/cloud-connection', '@objectstack/connector-mcp', '@objectstack/connector-openapi',
     '@objectstack/connector-rest', '@objectstack/connector-slack', '@objectstack/core',
-    '@objectstack/driver-sql', '@objectstack/formula', '@objectstack/objectql',
+    '@objectstack/driver-sql', '@objectstack/objectql',
     '@objectstack/plugin-approvals', '@objectstack/runtime', '@objectstack/service-automation',
     '@objectstack/service-datasource', '@objectstack/service-messaging', '@objectstack/spec',
   ],

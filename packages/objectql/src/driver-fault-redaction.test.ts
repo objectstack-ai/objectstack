@@ -201,6 +201,181 @@ describe('#8823 — a caller value inlined in the diagnostic itself', () => {
   });
 });
 
+// #9160 — the families the LIVE probe raised, driven through the real function.
+//
+// ⛔ Every message below was raised off a thrown error against MySQL 8.0.46 and
+// PostgreSQL 16.13 by `sql-driver-diagnostic-value-probe.test.ts`, and is copied
+// here byte-for-byte with only the canary and the generated table name folded to
+// readable ones. That probe is the WARRANT for each entry: nothing here comes
+// from a reading of the manual, which is the standing rule
+// (`packages/types/src/unique-violation.ts`). If the probe goes red because a
+// server changed its phrasing, these fixtures are the stale half.
+//
+// The probe lives in `driver-sql` rather than here because that is the package
+// the `Temporal Conformance (live PG + MySQL)` job runs against live servers,
+// and because reaching this internal function from there would mean widening
+// `@objectstack/objectql`'s public surface.
+describe('#9160 — the value-bearing families the live probe measured', () => {
+  const CANARY = 'SENSITIVE-CANARY-9160';
+
+  describe('mysql ER_TRUNCATED_WRONG_VALUE_FOR_FIELD (1366)', () => {
+    // Verbatim: "Incorrect integer value: 'SENSITIVE-CANARY-9160' for column 'age' at row 1"
+    const diagnostic = `Incorrect integer value: '${CANARY}' for column 'age' at row 1`;
+
+    it('drops the caller value and keeps the column the operator needs', () => {
+      const out = redactStatementFromMessage(
+        `insert into \`t\` (\`age\`) values ('${CANARY}') - ${diagnostic}`,
+      );
+
+      expect(out).not.toContain(CANARY);
+      // The failing column is the answer to "which field?" and survives whole.
+      expect(out).toContain("for column 'age' at row 1");
+      expect(out).toContain('Incorrect integer value:');
+      expect(out).toBe(
+        "Incorrect integer value: [value redacted] for column 'age' at row 1"
+        + ' [statement and bound values redacted]',
+      );
+    });
+
+    it('handles the `decimal` and `datetime` spellings the same way', () => {
+      // Both measured live; 1292 reuses this template for datetimes.
+      for (const [type, column] of [['decimal', 'amount'], ['datetime', 'when_at']]) {
+        const out = redactStatementFromMessage(
+          `insert into \`t\` (\`${column}\`) values ('${CANARY}')`
+          + ` - Incorrect ${type} value: '${CANARY}' for column '${column}' at row 1`,
+        );
+
+        expect(out).not.toContain(CANARY);
+        expect(out).toContain(`for column '${column}' at row 1`);
+      }
+    });
+
+    it('resolves an anchor-mimicking value to the LAST anchor', () => {
+      // Measured: a value spelled `…' for column 'x' at row 1` really does print
+      // two anchors. Greedy discards both — the only direction that cannot leak.
+      const out = redactStatementFromMessage(
+        "insert into `t` (`age`) values ('x')"
+        + " - Incorrect integer value: 'CANARY' for column 'x' at row 1' for column 'age' at row 1",
+      );
+
+      expect(out).not.toContain('CANARY');
+      expect(out).not.toContain("for column 'x'");
+      expect(out).toContain("for column 'age' at row 1");
+    });
+
+    it('recovers when the value itself contained " - " and ate the head', () => {
+      // The cut takes the LAST separator, which lands inside a value spelled
+      // like this. The `for column … at row N` anchor is what recovers it.
+      const out = redactStatementFromMessage(
+        "insert into `t` (`age`) values ('2026 - Q3 plan')"
+        + " - Incorrect integer value: '2026 - Q3 plan' for column 'age' at row 1",
+      );
+
+      expect(out).not.toContain('Q3 plan');
+      expect(out).not.toContain('2026');
+      expect(out).toContain("for column 'age' at row 1");
+    });
+  });
+
+  describe('postgres invalid_text_representation (22P02) / invalid_datetime_format (22007)', () => {
+    // ⛔ The family the #8823 note was waiting for. Postgres' UNIQUE violation is
+    // saved only because its value sits on `error.detail`, which
+    // `ObjectLogger.write` never serializes — "coincidence, not a defence". This
+    // family puts the caller's value on `error.message`, which IS serialized, so
+    // the coincidence does not cover it. Measured, not predicted.
+    it('drops the caller value and keeps the type Postgres named', () => {
+      const out = redactStatementFromMessage(
+        `insert into "t" ("age") values ($1) - invalid input syntax for type integer: "${CANARY}"`,
+      );
+
+      expect(out).not.toContain(CANARY);
+      // "which type did it fail to parse as?" is the operator's question.
+      expect(out).toContain('invalid input syntax for type integer:');
+      expect(out).toBe(
+        'invalid input syntax for type integer: [value redacted]'
+        + ' [statement and bound values redacted]',
+      );
+    });
+
+    it('handles multi-word type names', () => {
+      // Measured live: `timestamp with time zone`, plus numeric/boolean/uuid.
+      for (const type of ['timestamp with time zone', 'numeric', 'boolean', 'uuid']) {
+        const out = redactStatementFromMessage(
+          `insert into "t" ("c") values ($1) - invalid input syntax for type ${type}: "${CANARY}"`,
+        );
+
+        expect(out).not.toContain(CANARY);
+        expect(out).toContain(`invalid input syntax for type ${type}:`);
+      }
+    });
+
+    it('leaves the VALUELESS json spelling untouched', () => {
+      // Measured: `invalid input syntax for type json` carries no caller value on
+      // `message` at all (its offending token is on `detail`). Redacting it would
+      // delete a diagnostic that never leaked.
+      const out = redactStatementFromMessage(
+        `insert into "t" ("doc") values ('${CANARY}'::json) - invalid input syntax for type json`,
+      );
+
+      expect(out).toBe('invalid input syntax for type json [statement and bound values redacted]');
+      expect(out).not.toContain('[value redacted]');
+    });
+  });
+
+  describe('postgres numeric_value_out_of_range (22003)', () => {
+    it('drops the out-of-range value and keeps the type', () => {
+      // Verbatim: `value "99999999999" is out of range for type integer`.
+      const out = redactStatementFromMessage(
+        'insert into "t" ("age") values ($1) - value "99999999999" is out of range for type integer',
+      );
+
+      expect(out).not.toContain('99999999999');
+      expect(out).toContain('is out of range for type integer');
+      expect(out).toBe(
+        'value [value redacted] is out of range for type integer'
+        + ' [statement and bound values redacted]',
+      );
+    });
+  });
+
+  describe('mysql ER_TRUNCATED_WRONG_VALUE (1292), the column-less spelling', () => {
+    it('drops the value that runs to end of message', () => {
+      // Measured, but only raisable through a raw `cast(… as signed)` — recorded
+      // as a fact about SHAPE, not a claim that a write path produces it.
+      const out = redactStatementFromMessage(
+        `insert into t (age) select cast('${CANARY}' as signed)`
+        + ` - Truncated incorrect INTEGER value: '${CANARY}'`,
+      );
+
+      expect(out).not.toContain(CANARY);
+      expect(out).toContain('Truncated incorrect INTEGER value:');
+    });
+  });
+
+  it('leaves every family the probe measured as IDENTIFIER-ONLY exactly as it was', () => {
+    // ⛔ The other half of the contract, and the reason the probe raises these
+    // too: a zero is only readable next to a positive. Redacting any of these
+    // would delete the diagnostic an operator came for — the expensive
+    // direction #8682 paid to avoid. All six raised live.
+    for (const diagnostic of [
+      // mysql
+      "Out of range value for column 'age' at row 1",              // 1264
+      "Data too long for column 'label' at row 1",                 // 1406
+      "Unknown column 'zzz_nonexistent_field' in 'field list'",     // 1054
+      // postgres — value on `detail`, never on `message`
+      'duplicate key value violates unique constraint "t_email_key"', // 23505
+      'null value in column "id" of relation "t" violates not-null constraint', // 23502
+      'value too long for type character varying(20)',             // 22001
+      'numeric field overflow',                                    // 22003 sibling
+    ]) {
+      const out = redactStatementFromMessage(`insert into \`t\` (\`c\`) values ('v') - ${diagnostic}`);
+
+      expect(out).toBe(`${diagnostic} [statement and bound values redacted]`);
+      expect(out).not.toContain('[value redacted]');
+    }
+  });
+});
+
 describe('redactBoundStatement', () => {
   it('redacts `stack` too — the statement opened it a second time', () => {
     const original = new Error(BOUND_INSERT);

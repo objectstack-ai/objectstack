@@ -76,15 +76,19 @@
  * change DEFERRED by the #8211 adjudication (option B) until a specific code
  * has a measured victim.
  *
- * One rule, two doors (#8087): registration here is the ADMISSION door — what
- * the vocabulary may contain. The DISPATCHER door is ruled (#8087, option
- * B-as-a-gate, maintainer 2026-08-12) to parse every body it emits against the
- * closed vocabulary; until that gate lands, `resolveThrownHttpError`
- * (`@objectstack/types`, PR #8088) carries `code` (narrowed) / `declaredCode`
- * (verbatim) across the gap. Both doors state the same rule: a code either IS
- * the standard member for its condition, or it is registered here — and if it
- * merely re-spells a standard member, that registration is a recorded waiver,
- * never drift.
+ * One rule, two doors (#8087, completed by #9106): registration here is the
+ * ADMISSION door — what the vocabulary may contain. The DISPATCHER door is
+ * gated (#8087, option B-as-a-gate, maintainer 2026-08-12:
+ * `check:dispatcher-error-vocabulary` sweeps its producers) and, since the
+ * #9106 ruling (maintainer 2026-08-16), NARROWS exactly as the REST door
+ * always has: `resolveThrownHttpError` (`@objectstack/types`) answers `code`
+ * (a member of this union) for `error.code` at BOTH doors, and a producer's
+ * unregistered spelling is demoted to the wire's `declaredCode` — the open,
+ * author-authored channel `ApiErrorSchema` declares for it. Both doors state
+ * the same rule: a code either IS the standard member for its condition, or it
+ * is registered here — and if it merely re-spells a standard member, that
+ * registration is a recorded waiver, never drift. A code registered NOWHERE
+ * (a tenant app's own spelling) still reaches the wire, in `declaredCode`.
  *
  * A code emitted by several packages is listed once per emitting package —
  * the union dedupes; the per-package rows are provenance, not identity.
@@ -372,6 +376,7 @@ export const ERROR_CODE_LEDGER = {
     // and `/packages` serve protocol throws through `errorFromThrown`.
     // Reported by the #8087 dispatcher-vocabulary gate.
     'QUERY_OBJECT_MISMATCH',
+    'REGISTRY_TYPE_NOT_CANONICAL',  // [#9111] a SchemaRegistry overlay entry was offered a non-canonical metadata `type` — the mint door asserts, the caller folds
     'ROLLED_BACK',             // atomic data-batch row was written, then undone by the batch rollback (#4793)
     'STORED_TYPE_NOT_CANONICAL',  // [#8908] a package draft is stored under a non-canonical metadata type (pre-#7894 second-namespace residue) — refused at the publish pre-flight, batch-atomic
     'TENANT_SCOPE_REQUIRED',      // [#7780] destructive call named neither an organization nor an explicit cross-tenant intent; needs an explicit opt-in
@@ -466,6 +471,19 @@ export const ERROR_CODE_LEDGER = {
     'PLUGIN_REGISTER_FAILED',
     'RESEED_NO_ROWS',                // reseed ran but wrote nothing
     'RESEED_SKIPPED',                // reseed declined to run; message carries why
+    // [#9246] ADR-0120 D5e posture gate: the marketplace install seam stops an
+    // install that declares installation-wide (`'global'`) unique constraints
+    // under the `isolated` tenancy posture, 409, until the caller confirms them
+    // (`marketplace-install-local-plugin.ts`; message + machine-readable
+    // per-index `details.findings`). Emitted by the plugin's OWN Hono route —
+    // the `plugin-route` door #9223 surfaced — and READ off the wire:
+    // `packages/cli/src/commands/package/install.ts` branches on the literal to
+    // print the per-index decision list. Reported by the #8087
+    // dispatcher-vocabulary gate once #9223 taught the scan to see a constant
+    // in an object literal (`GLOBAL_UNIQUE_CONFIRMATION_REQUIRED`,
+    // `packages/types/src/unique-scope-install-gate.ts`); the ledger is
+    // door-agnostic.
+    'UNIQUE_SCOPE_CONFIRMATION_REQUIRED',
   ],
   '@objectstack/service-settings': [
     'INTERNAL',

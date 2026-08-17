@@ -61,12 +61,12 @@ const result = AIChatWindowProps.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **object** | `string` | ✅ | Object to filter |
-| **fields** | `string[]` | ✅ | Filterable field names |
-| **targetVariable** | `string` | optional | Page variable to store filter state |
-| **layout** | `Enum<'inline' \| 'dropdown' \| 'sidebar'>` | optional (default: `"inline"`) | Filter display layout |
-| **showSearch** | `boolean` | optional (default: `true`) | Show search input |
-| **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+| **object** | `never` | optional | [REMOVED] `element:filter` property `object` was removed in @objectstack/spec 17 (#9220, ADR-0049) — the whole `element:filter` element is retired: no renderer for it ever shipped in objectui, framework or cloud (Studio's designer palette lists it as a no-renderer exclusion), so every key on this element was a capability claim nothing kept. Delete the `element:filter` component; list surfaces own their filtering — use a view's `userFilters` quick-filter bar or the list toolbar's filter builder. Run `os migrate meta --from 17` to rewrite existing sources automatically. |
+| **fields** | `never` | optional | [REMOVED] `element:filter` property `fields` was removed in @objectstack/spec 17 (#9220, ADR-0049) — the whole `element:filter` element is retired: no renderer for it ever shipped in objectui, framework or cloud (Studio's designer palette lists it as a no-renderer exclusion), so every key on this element was a capability claim nothing kept. Delete the `element:filter` component; list surfaces own their filtering — use a view's `userFilters` quick-filter bar or the list toolbar's filter builder. Run `os migrate meta --from 17` to rewrite existing sources automatically. |
+| **targetVariable** | `never` | optional | [REMOVED] `element:filter` property `targetVariable` was removed in @objectstack/spec 17 (#9220, ADR-0049) — the whole `element:filter` element is retired: no renderer for it ever shipped in objectui, framework or cloud (Studio's designer palette lists it as a no-renderer exclusion), so every key on this element was a capability claim nothing kept. Delete the `element:filter` component; list surfaces own their filtering — use a view's `userFilters` quick-filter bar or the list toolbar's filter builder. Run `os migrate meta --from 17` to rewrite existing sources automatically. |
+| **layout** | `never` | optional | [REMOVED] `element:filter` property `layout` was removed in @objectstack/spec 17 (#9220, ADR-0049) — the whole `element:filter` element is retired: no renderer for it ever shipped in objectui, framework or cloud (Studio's designer palette lists it as a no-renderer exclusion), so every key on this element was a capability claim nothing kept. Delete the `element:filter` component; list surfaces own their filtering — use a view's `userFilters` quick-filter bar or the list toolbar's filter builder. Run `os migrate meta --from 17` to rewrite existing sources automatically. |
+| **showSearch** | `never` | optional | [REMOVED] `element:filter` property `showSearch` was removed in @objectstack/spec 17 (#9220, ADR-0049) — the whole `element:filter` element is retired: no renderer for it ever shipped in objectui, framework or cloud (Studio's designer palette lists it as a no-renderer exclusion), so every key on this element was a capability claim nothing kept. Delete the `element:filter` component; list surfaces own their filtering — use a view's `userFilters` quick-filter bar or the list toolbar's filter builder. Run `os migrate meta --from 17` to rewrite existing sources automatically. |
+| **aria** | `never` | optional | [REMOVED] `element:filter` property `aria` was removed in @objectstack/spec 17 (#9220, ADR-0049) — the whole `element:filter` element is retired: no renderer for it ever shipped in objectui, framework or cloud (Studio's designer palette lists it as a no-renderer exclusion), so every key on this element was a capability claim nothing kept. Delete the `element:filter` component; list surfaces own their filtering — use a view's `userFilters` quick-filter bar or the list toolbar's filter builder. Run `os migrate meta --from 17` to rewrite existing sources automatically. |
 
 
 ---
@@ -149,7 +149,7 @@ const result = AIChatWindowProps.parse(data);
 | **filter** | `any` | optional | Filter criteria for available records |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Row order — synonym of the component-level `dataSource.sort`, which takes precedence when both are set |
 | **limit** | `integer` | optional | Max records offered — synonym of the component-level `dataSource.limit`, which takes precedence when both are set (renderer default 50) |
-| **targetVariable** | `string` | optional | Page variable to bind selected record ID(s) |
+| **targetVariable** | `never` | optional | [REMOVED] `element:record_picker` property `targetVariable` was removed in @objectstack/spec 17 (#9198, ADR-0049) — it was a declarative hint no renderer ever read: the live binding runs the other direction, resolved from the page variable whose `source` names this component's `id`, so authoring only `targetVariable` bound nothing while reporting success. Delete the key; to bind the picked record id, declare it on the variable — `variables: [{ name: '<var>', type: 'record_id', source: '<this component id>' }]`. Run `os migrate meta --from 17` to rewrite existing sources automatically. |
 | **placeholder** | `string \| Record<string, string>` | optional | Placeholder text |
 | **emptyText** | `string \| Record<string, string>` | optional | Text shown when the query returns no records (default "No records") |
 | **displayField** | `never` | optional | [REMOVED] `element:record_picker` property `displayField` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0087 D2) — it was a required declaration no renderer ever read, while the renderer honoured `labelField` for the same thing and defaulted to `name`. Rename the key to `labelField`; the value (a field name) is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
@@ -173,7 +173,7 @@ const result = AIChatWindowProps.parse(data);
 | **required** | `boolean` | optional (default: `false`) | Mark the field as required |
 | **disabled** | `boolean` | optional (default: `false`) | Disable the input |
 | **description** | `string \| Record<string, string>` | optional | Helper text shown below the input |
-| **targetVariable** | `string` | optional | Page variable this input writes to. Declarative hint; the live binding resolves via the variable whose `source` equals this component id (see PageVariableSchema). |
+| **targetVariable** | `never` | optional | [REMOVED] `element:text_input` property `targetVariable` was removed in @objectstack/spec 17 (#9198, ADR-0049) — it was a declarative hint no renderer ever read: the live binding runs the other direction, resolved from the page variable whose `source` names this component's `id`, so authoring only `targetVariable` bound nothing while reporting success. Delete the key; to bind the typed value, declare it on the variable — `variables: [{ name: '<var>', type: 'string', source: '<this component id>' }]`. Run `os migrate meta --from 17` to rewrite existing sources automatically. |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
@@ -525,7 +525,7 @@ const result = AIChatWindowProps.parse(data);
 | **width** | `string \| number` | optional | Panel width (e.g., "350px", "30%") — side positions (`right`/`left`) only. |
 | **collapsible** | `boolean` | optional | Whether the panel can be collapsed (renderer default: off). |
 | **defaultCollapsed** | `boolean` | optional | Whether the panel starts collapsed (renderer default: off; only meaningful with `collapsible`). |
-| **feed** | `{ types?: Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| … +6 more>[]; filterMode: Enum<'all' \| 'comments_only' \| 'changes_only' \| 'tasks_only'>; showFilterToggle: boolean; limit: integer; … }` | optional | Embedded activity feed configuration |
+| **feed** | `{ types?: Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| …>[]; filterMode: Enum<'all' \| 'comments_only' \| 'changes_only' \| 'tasks_only'>; showFilterToggle: boolean; limit: integer; … }` | optional | Embedded activity feed configuration |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
@@ -660,7 +660,7 @@ Type: `string`
 | **columns** | `string[]` | optional | Fields to display in the related list. Optional: when omitted, columns derive from the related object's highlightFields / default list columns (a related list is just another surface that lists that object). Override chain: child highlightFields → field-level relatedListColumns → this inline list. |
 | **sort** | `string \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sort order for related records |
 | **limit** | `integer` | optional (default: `5`) | Number of records to display initially |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| … +15 more>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Additional filter criteria for related records |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Additional filter criteria for related records |
 | **title** | `string \| Record<string, string>` | optional | Custom title for the related list |
 | **showViewAll** | `boolean` | optional (default: `true`) | Show "View All" link to see all related records |
 | **actions** | `string[]` | optional | Action IDs available for related records |
