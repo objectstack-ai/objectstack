@@ -3302,6 +3302,29 @@ export class AutomationEngine implements IAutomationService {
                 success: false,
                 error: errorMessage,
                 durationMs,
+                // [#9378] RAN AND FAILED, said by the producer that knows —
+                // the same lifecycle verdict this exit just wrote to the run
+                // log two statements up, now also on the result.
+                //
+                // Load-bearing, not decoration: `execute()` has three OTHER
+                // `success: false` exits that never dispatched anything (flow
+                // not found, flow disabled, no start node), and a transport
+                // cannot tell them from this one without either a message
+                // regex or sniffing `summary` / `durationMs` — the
+                // tolerant-consumer shape PD #12 forbids, and the one #8684
+                // deliberately did not reproduce on the resume route. Those
+                // three exits carry NO `status`, this one carries `'failed'`,
+                // so "the run dispatched and was rejected" is a fact the route
+                // reads rather than infers.
+                //
+                // `status` and not a new `code`: `AutomationResult.code` is a
+                // closed union whose members are all resume-refusal
+                // vocabulary, and the maintainer ruling on #9384 (2026-08-17)
+                // keeps it closed — the engine classifies with EXISTING
+                // vocabulary. `status?: 'completed' | 'paused' | 'failed'` is
+                // exactly that: declared, documented as the run's lifecycle
+                // verdict, and already the value recorded in the log.
+                status: 'failed',
                 // A failed run's counts matter MORE, not less: they say how far
                 // it got before dying — how many rows it had already written.
                 summary: logged.summary,
@@ -6106,7 +6129,12 @@ export class AutomationEngine implements IAutomationService {
             if (result.success) return result;
             lastError = result.error ?? 'Unknown error';
         }
-        return { success: false, error: lastError, durationMs: Date.now() - startTime };
+        // [#9378] Same "ran and was rejected" class as `execute()`'s own failure
+        // exit — every attempt above dispatched the flow — so it carries the
+        // same lifecycle verdict, and a transport answers it the same way.
+        // Without it, a flow whose author chose `errorHandling.strategy:
+        // 'retry'` would be the ONE failure shape that still rode HTTP 200.
+        return { success: false, error: lastError, durationMs: Date.now() - startTime, status: 'failed' };
     }
 
     /**
@@ -6239,7 +6267,12 @@ export class AutomationEngine implements IAutomationService {
                 steps,
                 error: errorMessage,
             });
-            return { success: false, error: errorMessage, durationMs, summary: logged.summary };
+            // [#9378] The retry loop reads only `result.success` and this
+            // result never escapes `retryExecution` on its own, but it is the
+            // same ran-and-failed exit as the two above and is classified the
+            // same: a selective classification is the one a later reader
+            // mistakes for a rule.
+            return { success: false, error: errorMessage, durationMs, status: 'failed', summary: logged.summary };
         }
     }
 }

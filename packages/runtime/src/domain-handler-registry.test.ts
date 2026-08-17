@@ -620,7 +620,12 @@ describe('HttpDispatcher extracted domains (PR-6: automation)', () => {
      */
     it('both trigger routes translate the body and forward the caller identity', async () => {
         const execute = vi.fn().mockResolvedValue({ success: true });
-        const automation = { execute, listFlows: vi.fn(), getFlow: vi.fn() };
+        // [#9378] `getFlow` resolves the flow rather than `undefined`: both
+        // trigger doors now answer 404 through the same shared existence probe
+        // `POST /:name/toggle` and `GET /:name` use, so a fixture whose
+        // registry claims the flow does not exist never reaches `execute` —
+        // which is this test's subject.
+        const automation = { execute, listFlows: vi.fn(), getFlow: vi.fn().mockResolvedValue({ name: 'nurture' }) };
         const ctx: any = {
             executionContext: {
                 userId: 'u-1',
@@ -668,7 +673,9 @@ describe('HttpDispatcher extracted domains (PR-6: automation)', () => {
     it('never calls a non-contract `trigger` method, even when one exists', async () => {
         const trigger = vi.fn().mockResolvedValue({ success: true });
         const execute = vi.fn().mockResolvedValue({ success: true });
-        const automation = { trigger, execute, listFlows: vi.fn(), getFlow: vi.fn() };
+        // [#9378] See the note on the fixture above: the trigger door consults
+        // the shared existence probe before dispatching.
+        const automation = { trigger, execute, listFlows: vi.fn(), getFlow: vi.fn().mockResolvedValue({ name: 'nurture' }) };
 
         const result = await makeDispatcher({ automation, auth })
             .dispatch('POST', '/automation/trigger/nurture', {}, {}, {} as any);

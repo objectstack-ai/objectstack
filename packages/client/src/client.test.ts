@@ -1354,6 +1354,90 @@ describe('ObjectStackClient.automation', () => {
         expect(err.message).toMatch(/no longer exists in flow/);
     });
 
+    // [#9378] BREAKING, and the wide half of the same flip: DISPATCHING a flow.
+    // `client.automation.trigger()` (legacy route) and `.execute()` used to
+    // resolve with `{ success: false, error }` under HTTP 200 for a run that
+    // ran and failed — every app dispatches flows through this door, so a
+    // caller that never opened the inner envelope read every failed run as a
+    // successful one. The route answers 400 `FLOW_FAILED` now and this SDK's
+    // fetch layer throws on non-2xx before any unwrapping, so both surfaces
+    // REJECT. No SDK code changed; the contract did, and these are its pins.
+    //
+    // Both spellings are pinned, not one: `trigger()` reads `res.json()` while
+    // `execute()` reads `unwrapResponse()`, so a regression in either unwrap
+    // path would be invisible from the other's test.
+    const failedRunBody = {
+        success: false,
+        error: {
+            code: 'FLOW_FAILED',
+            message: "Node 'create_opportunity' failed: Amount must be greater than zero",
+            httpStatus: 400,
+            details: {
+                errorMessage: 'We could not create the opportunity — check the amount and try again.',
+                summary: { nodes: [{ nodeId: 'create_opportunity', status: 'failure' }] },
+            },
+        },
+    };
+
+    it('should reject with FLOW_FAILED when a triggered flow runs and fails (legacy trigger)', async () => {
+        const { client } = createMockClient(failedRunBody, 400);
+
+        const err: any = await client.automation
+            .trigger('my_flow', { amount: 0 })
+            .then(() => { throw new Error('expected the failed trigger to reject'); }, (e) => e);
+
+        // The classification, not merely that it threw: an SDK rejecting with a
+        // bare `Error` would satisfy `.rejects.toThrow()` while losing
+        // everything a caller branches on.
+        expect(err.code).toBe('FLOW_FAILED');
+        expect(err.httpStatus).toBe(400);
+        expect(err.message).toMatch(/Node 'create_opportunity' failed/);
+        // The flow author's own text keeps its one documented location — the
+        // ADR-0112 envelope has no `data`, and the console reads it from here.
+        expect(err.details?.errorMessage)
+            .toBe('We could not create the opportunity — check the amount and try again.');
+    });
+
+    it('should reject with FLOW_FAILED when execute() dispatches a flow that fails', async () => {
+        const { client } = createMockClient(failedRunBody, 400);
+
+        const err: any = await client.automation
+            .execute('my_flow', { params: { amount: 0 } })
+            .then(() => { throw new Error('expected the failed execute to reject'); }, (e) => e);
+
+        expect(err.code).toBe('FLOW_FAILED');
+        expect(err.httpStatus).toBe(400);
+        expect(err.details?.summary?.nodes?.[0]?.status).toBe('failure');
+    });
+
+    it('should reject with 404 when the triggered flow does not exist', async () => {
+        const { client } = createMockClient({
+            success: false,
+            error: { code: 'RESOURCE_NOT_FOUND', message: "Flow 'no_such_flow' not found", httpStatus: 404 },
+        }, 404);
+
+        const err: any = await client.automation
+            .execute('no_such_flow', {})
+            .then(() => { throw new Error('expected the unknown flow to reject'); }, (e) => e);
+
+        expect(err.httpStatus).toBe(404);
+        expect(err.code).not.toBe('FLOW_FAILED');
+        expect(err.message).toContain('no_such_flow');
+    });
+
+    it('should still resolve when a triggered flow succeeds', async () => {
+        // The other half of the contract: a successful dispatch is untouched,
+        // including the paused screen-flow shape the runner drives.
+        const { client } = createMockClient({
+            success: true,
+            data: { success: true, status: 'paused', runId: 'run_1', screen: { nodeId: 'collect', fields: [] } },
+        }, 200);
+
+        const result: any = await client.automation.execute('my_flow', {});
+        expect(result.status).toBe('paused');
+        expect(result.runId).toBe('run_1');
+    });
+
     it('should fetch the screen a paused run awaits', async () => {
         const { client, fetchMock } = createMockClient({
             success: true,

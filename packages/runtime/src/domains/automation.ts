@@ -459,6 +459,93 @@ function flowDefinitionRefusal(err: any): unknown {
 }
 
 /**
+ * [#9378] The ONE mapper both trigger doors answer through — `POST
+ * /:name/trigger` and the legacy `POST /trigger/:name`, which
+ * `client.automation.trigger()` calls. Extracted rather than written twice:
+ * the two routes already shared one context builder so they could not drift
+ * about what a body means (#4127), and they must not drift about what a
+ * failed run means either.
+ *
+ * Until now both ended `return deps.success(result)` unconditionally, so a
+ * flow that RAN AND FAILED came back as
+ * `HTTP 200 {success:true,data:{success:false,error:"…"}}` — the double
+ * envelope #3962 ruled out for `/actions` and #8684 closed on the resume
+ * route. A caller that branches on the HTTP status alone read a failed run as
+ * a successful one, and this is the door every app dispatches flows through.
+ *
+ * Implements the maintainer ruling on #9378 (2026-08-17) for the two rows it
+ * can answer without inventing vocabulary:
+ *
+ * | engine exit                | reality            | answer                |
+ * |----------------------------|--------------------|-----------------------|
+ * | flow not found             | never dispatched   | `404`                 |
+ * | ran and failed (incl. the retry-strategy exits) | ran, rejected | `400` `FLOW_FAILED` |
+ *
+ * **404 is answered by the registry probe, not by reading the result.** It is
+ * the SAME `getFlow` probe `POST /:name/toggle` (#7535) and `GET /:name` use,
+ * so no two doors can disagree about which flows exist — and existence is a
+ * question the transport legitimately owns, the way every REST resource route
+ * owns its own 404. `getFlow` is optional on `IAutomationService`; an
+ * implementation that omits it cannot be asked, so the trigger proceeds as
+ * before rather than this inventing an answer.
+ *
+ * **400 is answered by the ENGINE's classification, never by sniffing.** The
+ * engine stamps `status: 'failed'` on exactly the exits that dispatched the
+ * flow and were rejected (#9378, engine `execute` / `retryExecution`); its
+ * never-dispatched exits carry no `status`. So this reads a producer verdict —
+ * it does not inspect `summary` / `durationMs` / the message text to guess the
+ * class, which is the tolerant-consumer shape PD #12 forbids and the one
+ * #8684 deliberately did not reproduce.
+ *
+ * ⚠️ `errorMessage` is the flow AUTHOR's own failure text and travels in
+ * `details`, the one place the console reads it from (objectui
+ * `flowResponse.ts`, PR #4899): the ADR-0112 envelope carries no `data`, so a
+ * producer that builds its message out of `result.error` alone drops the
+ * author's words silently. `summary` rides along for the same reason it was on
+ * the 200 body — it is how a caller finds WHICH node failed.
+ *
+ * ⛔ **The ruling's other two rows are NOT mapped here, deliberately.** A
+ * DISABLED flow (⇒ 409) and one with NO START NODE (⇒ 422) are both
+ * never-dispatched exits, and telling them apart needs the producer to say
+ * which is which — `AutomationResult.code` is a closed union of resume-refusal
+ * members with no honest home for either, and the maintainer ruling on #9384
+ * (2026-08-17) keeps it closed, routing any new member to the spec seat. The
+ * two alternatives were both rejected rather than quietly taken: matching the
+ * engine's message text is a regex on prose, and probing enable-state here
+ * would put a second copy of the engine's own execution policy in the
+ * transport, with a window in which a flow disabled between probe and dispatch
+ * is answered as a malformed definition. So those two exits keep TODAY's
+ * behaviour (200 with the inner failure) until the union question is ruled;
+ * nothing about them is guessed. See #9378 for the escalation.
+ */
+async function respondToFlowTrigger(
+    deps: DomainHandlerDeps,
+    automationService: IAutomationService,
+    flowName: string,
+    body: any,
+    context: HttpProtocolContext,
+): Promise<HttpDispatcherResult> {
+    if (typeof automationService.getFlow === 'function') {
+        const existing = await automationService.getFlow(flowName);
+        if (!existing) {
+            return { handled: true, response: deps.error(`Flow '${flowName}' not found`, 404) };
+        }
+    }
+    const result = await automationService.execute(flowName, buildAutomationContext(body, context));
+    if (result?.success === false && result.status === 'failed') {
+        return {
+            handled: true,
+            response: deps.error(result.error ?? 'Flow run failed', 400, {
+                code: 'FLOW_FAILED',
+                ...(result.errorMessage !== undefined ? { errorMessage: result.errorMessage } : {}),
+                ...(result.summary !== undefined ? { summary: result.summary } : {}),
+            }),
+        };
+    }
+    return { handled: true, response: deps.success(result) };
+}
+
+/**
  * Handles Automation requests
  * path: sub-path after /automation/
  *
@@ -472,7 +559,9 @@ function flowDefinitionRefusal(err: any): unknown {
  *   POST   /                     → createFlow (registerFlow)
  *   PUT    /:name                → updateFlow
  *   DELETE /:name                → deleteFlow (unregisterFlow)
- *   POST   /:name/trigger        → execute (legacy: trigger/:name also supported)
+ *   POST   /:name/trigger        → execute (legacy: trigger/:name also supported;
+ *                                  unknown name → 404, a run that ran and failed →
+ *                                  400 `FLOW_FAILED`, #9378)
  *   POST   /:name/toggle         → toggleFlow (unknown name → 404, #7535)
  *   GET    /:name/runs           → listRuns (query: limit, cursor — validated, #7300;
  *                                  status — validated AND honoured, #7359)
@@ -558,7 +647,8 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
 
     // Legacy: POST /automation/trigger/:name — the shape
     // `client.automation.trigger()` calls. Same handling as
-    // `POST /:name/trigger` below: one context builder, one service method.
+    // `POST /:name/trigger` below: one context builder, one service method,
+    // and since #9378 one response mapper.
     //
     // [#4127] This branch used to probe `automationService.trigger(name, body,
     // { request })` first and "fall back" to `execute`. Nothing in the repo has
@@ -567,11 +657,14 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // on every deployment and the fallback WAS the route. Declaring `trigger?`
     // to make the probe honest would have blessed a second name for `execute`
     // (Prime Directive #12); the dead branch is gone instead.
+    //
+    // [#9378] Both doors answer through `respondToFlowTrigger` — see its
+    // docblock for the status table, and for the two rows it deliberately
+    // leaves on today's 200 pending the closed-union ruling.
     if (parts[0] === 'trigger' && parts[1] && m === 'POST') {
         const triggerName = parts[1];
         if (typeof automationService.execute === 'function') {
-            const result = await automationService.execute(triggerName, buildAutomationContext(body, context));
-            return { handled: true, response: deps.success(result) };
+            return respondToFlowTrigger(deps, automationService, triggerName, body, context);
         }
     }
 
@@ -741,8 +834,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // legacy `POST /trigger/:name` above so the two routes cannot drift.
         if (parts[1] === 'trigger' && m === 'POST') {
             if (typeof automationService.execute === 'function') {
-                const result = await automationService.execute(name, buildAutomationContext(body, context));
-                return { handled: true, response: deps.success(result) };
+                return respondToFlowTrigger(deps, automationService, name, body, context);
             }
         }
 

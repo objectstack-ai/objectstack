@@ -3016,6 +3016,28 @@ export class ObjectStackClient {
   automation = {
       /**
        * Trigger a named automation flow (legacy endpoint)
+       *
+       * **BREAKING since #9378 — a failed run REJECTS instead of resolving.**
+       * A flow that ran and then failed used to come back as a resolved
+       * `{ success: false, error }` riding HTTP 200, so a caller that did not
+       * open the inner envelope read a failed run as a successful one. The
+       * route answers **400** `FLOW_FAILED` now (inheriting #3962's ruling for
+       * `/actions`, applied to the resume route by #8684), and every non-2xx
+       * throws out of this SDK's fetch layer — so this promise **rejects**:
+       *
+       * ```ts
+       * try { await client.automation.trigger(flow, payload); }
+       * catch (err: any) {
+       *   err.code;                    // 'FLOW_FAILED'
+       *   err.httpStatus;              // 400
+       *   err.message;                 // the node failure, verbatim
+       *   err.details?.errorMessage;   // the flow author's `errorMessage`
+       *   err.details?.summary;        // per-node accounting of the failed run
+       * }
+       * ```
+       *
+       * A flow name the deployment does not hold rejects with **404** instead.
+       * A run that PAUSED at a screen node is not a failure and still resolves.
        */
       trigger: async (triggerName: string, payload: any) => {
           const route = this.getRoute('automation');
@@ -3168,7 +3190,15 @@ export class ObjectStackClient {
           const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(name)}`);
           return this.unwrapResponse(res) as Promise<T>;
       },
-      /** Execute (trigger) a flow with an execution context. */
+      /**
+       * Execute (trigger) a flow with an execution context.
+       *
+       * **BREAKING since #9378**: a run that ran and failed now REJECTS with
+       * `400` `FLOW_FAILED` (author text on `err.details.errorMessage`, per-node
+       * accounting on `err.details.summary`) instead of resolving with an inner
+       * `{ success: false }` under HTTP 200; an unknown flow rejects with `404`.
+       * See `automation.trigger` for the full shape — both call the same door.
+       */
       execute: async <T = any>(name: string, ctx?: Record<string, any>): Promise<T> => {
           const route = this.getRoute('automation');
           const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(name)}/trigger`, {
@@ -5342,6 +5372,12 @@ export class ScopedProjectClient {
     /**
      * Execute (trigger) a flow by name. The request body is forwarded as the
      * automation execution context (e.g. `{ params, trigger }`).
+     *
+     * Mirrors the unscoped `client.automation.execute` — including its
+     * **breaking #9378 behaviour**: a run that ran and then failed REJECTS with
+     * `400` `FLOW_FAILED` (author text on `err.details.errorMessage`) instead of
+     * resolving with an inner `{ success: false }` under HTTP 200, and an
+     * unknown flow rejects with `404`. See that method for the full shape.
      */
     execute: async <T = any>(name: string, ctx?: Record<string, any>): Promise<T> => {
       const res = await this.parent._fetch(this.url(`/automation/${encodeURIComponent(name)}/trigger`), {

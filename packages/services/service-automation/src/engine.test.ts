@@ -3055,3 +3055,123 @@ describe('AutomationEngine - Start Condition Gate', () => {
         expect(ran).toBe(0);
     });
 });
+
+/**
+ * [#9378] `execute()` says WHICH terminal class its `success: false` result is.
+ *
+ * The trigger routes (`POST /automation/:name/trigger` and the legacy
+ * `POST /automation/trigger/:name`) answered HTTP 200 wrapping an inner
+ * `{success:false}` for every failure alike — the double envelope #3962 ruled
+ * out for `/actions`. Mapping the ruled statuses needs the transport to tell a
+ * run that DISPATCHED AND WAS REJECTED from one that never started, and the
+ * producer is the only component that knows.
+ *
+ * `status: 'failed'` is that verdict, and it is existing vocabulary — declared
+ * on `AutomationResult` as the run's lifecycle status, and already the value
+ * these exits write to the run log. The maintainer ruling on #9384
+ * (2026-08-17) keeps `AutomationResult.code` closed, so a new member was not
+ * an option here and is not needed for this half.
+ *
+ * The never-dispatched exits are asserted to carry NO status in the same
+ * breath: it is their ABSENCE that makes the transport's arm provable rather
+ * than a heuristic, so a later edit that stamps `'failed'` on all of them —
+ * the natural-looking tidy-up — has to fail a test.
+ */
+describe('#9378 — execute() classifies terminal exits for the trigger transport', () => {
+    let engine: AutomationEngine;
+
+    beforeEach(() => {
+        engine = new AutomationEngine(createTestLogger());
+    });
+
+    /** start → `bad` (no executor registered for its type) → end. */
+    const failingFlow = (name: string, extra: Record<string, unknown> = {}) => ({
+        name, label: name, type: 'autolaunched' as const,
+        nodes: [
+            { id: 'start', type: 'start' as const, label: 'Start' },
+            { id: 'bad', type: 'script' as const, label: 'Bad' },
+            { id: 'end', type: 'end' as const, label: 'End' },
+        ],
+        edges: [
+            { id: 'e1', source: 'start', target: 'bad' },
+            { id: 'e2', source: 'bad', target: 'end' },
+        ],
+        ...extra,
+    });
+
+    it('reports a run that dispatched and failed as status failed', async () => {
+        engine.registerFlow('ran_and_failed', failingFlow('ran_and_failed'));
+
+        const result = await engine.execute('ran_and_failed');
+
+        expect(result.success).toBe(false);
+        expect(result.status).toBe('failed');
+        // The verdict agrees with the run log's, because it IS the log's.
+        const runs = await engine.listRuns('ran_and_failed');
+        expect(runs[0].status).toBe('failed');
+        // What the transport carries into `error.details` alongside it.
+        expect(result.error).toBeTruthy();
+        expect(result.summary).toBeDefined();
+    });
+
+    it('reports an exhausted retry strategy as status failed too', async () => {
+        // `errorHandling.strategy: 'retry'` returns through `retryExecution`,
+        // a different exit — and the flow still ran, so it is the same class.
+        // Without this the ONE failure shape left riding HTTP 200 would be the
+        // flows whose authors asked for the most robustness.
+        engine.registerFlow('retrying', failingFlow('retrying', {
+            errorHandling: { strategy: 'retry', maxRetries: 1, backoffMs: 1 },
+        }));
+
+        const result = await engine.execute('retrying');
+
+        expect(result.success).toBe(false);
+        expect(result.status).toBe('failed');
+    });
+
+    it('leaves a run that never dispatched WITHOUT a status — all three exits', async () => {
+        // 1. No such flow.
+        const missing = await engine.execute('no_such_flow');
+        expect(missing.success).toBe(false);
+        expect(missing.error).toContain('not found');
+        expect(missing.status).toBeUndefined();
+
+        // 2. Registered but disabled.
+        engine.registerFlow('disabled_flow', failingFlow('disabled_flow'));
+        await engine.toggleFlow('disabled_flow', false);
+        const disabled = await engine.execute('disabled_flow');
+        expect(disabled.success).toBe(false);
+        expect(disabled.error).toContain('is disabled');
+        expect(disabled.status).toBeUndefined();
+
+        // 3. Malformed definition: no start node. Registration accepts it —
+        // `FlowSchema` requires no `start` member — so this exit is reachable
+        // from the trigger door and is not dead code.
+        engine.registerFlow('startless', {
+            name: 'startless', label: 'Startless', type: 'autolaunched',
+            nodes: [{ id: 'middle', type: 'script', label: 'Middle' }],
+            edges: [],
+        });
+        const startless = await engine.execute('startless');
+        expect(startless.success).toBe(false);
+        expect(startless.error).toBe('Flow has no start node');
+        expect(startless.status).toBeUndefined();
+    });
+
+    it('leaves a successful and a paused run unchanged', async () => {
+        engine.registerFlow('fine', {
+            name: 'fine', label: 'Fine', type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'end' }],
+        });
+
+        const ok = await engine.execute('fine');
+        expect(ok.success).toBe(true);
+        // Success keeps the shape it had: `status` is the classification this
+        // card needed, not a field being backfilled everywhere.
+        expect(ok.status).toBeUndefined();
+    });
+});
