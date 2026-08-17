@@ -130,7 +130,10 @@ describe('readonlyWhen strips CALLER-submitted values only (#9107)', () => {
         next_maintenance_date: { type: 'date', readonlyWhen: 'true' },
         closed_note: { type: 'text', readonlyWhen: "record.status == 'closed'" },
       },
-    } as any);
+      // `packageId` is REQUIRED and passed on purpose: omitting it is what the
+      // TEST_DEBT ledger counts in this package, and a new test file may not
+      // add to a shrink-only ratchet.
+    } as any, 'test');
     const seed = (id: string, over: Record<string, unknown> = {}) =>
       storeFor('ehr_equipment').set(id, {
         id, name: 'Autoclave', status: 'open', period_days: 90,
