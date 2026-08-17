@@ -115,6 +115,37 @@ import { findExtractConfigs, flagsFromDocstring } from './i18n-bundle-surface.mj
  */
 const SURFACE_MODULE = 'scripts/i18n-bundle-surface.mjs';
 
+/**
+ * The two producers of the `metadataForms` TYPE-LEVEL surface, declared as
+ * bare module-body path literals for the same reason as SURFACE_MODULE above
+ * (#9144). `walkMetadataForms` (packages/cli/src/utils/i18n-extract.ts) emits
+ * `metadataForms.<type>.label` / `.description` for every entry of
+ * `DEFAULT_METADATA_TYPE_REGISTRY` — including form-less types like
+ * `datasource`/`job`/`translation` — and separately reads
+ * `METADATA_FORM_REGISTRY` itself (the map, not the `*.form.ts` leaves it
+ * points at) to decide which types also get section/field labels. Editing
+ * either moves the same `platform-objects` bundles PR #9113 had to
+ * regenerate — and, unlike the `*.form.ts` leaves, neither carries a filename
+ * SURFACE_MODULE's own convention (`isMetadataFormModulePath`) can see.
+ *
+ * Not folded into SURFACE_MODULE: that module documents the ONE convention it
+ * enumerates at runtime (the `.form.ts` suffix), and these two files
+ * deliberately do not carry it — inventing a second filename convention for
+ * exactly two files would be the guess #9144 declined to make. A bare
+ * coupling constant was the option the card measured to have no downside
+ * beyond upkeep; see i18n-bundle-surface.mjs's header for the two rejected
+ * alternatives and why.
+ *
+ * This is per-coupling manual upkeep, deliberately, and it does not go quiet:
+ * dispatch-gates' own self-test pins that a card editing either path derives
+ * check:i18n, against the real files (existsSync) — delete either constant
+ * and that self-test reddens instead of the silence coming back. If either
+ * module is renamed or the registries merge, update the self-test's pins in
+ * the same change: the evidence goes with the claim, never ahead of it.
+ */
+const METADATA_TYPE_REGISTRY_MODULE = 'packages/spec/src/kernel/metadata-plugin.zod.ts';
+const METADATA_FORM_REGISTRY_MODULE = 'packages/spec/src/system/metadata-form-registry.ts';
+
 /** The one command this gate invokes per package, as oclif topic/command parts. */
 const EXTRACT_COMMAND_ID = ['i18n', 'extract'];
 const write = process.argv.includes('--write');
