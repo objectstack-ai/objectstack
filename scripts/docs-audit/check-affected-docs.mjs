@@ -3,7 +3,9 @@
 
 /**
  * check-affected-docs (#9187) — the discoverable name for affected-docs.mjs's
- * own `--self-test`.
+ * own `--self-test`, which pins the change classifiers, the package-root derivation
+ * and (since #9192) the symbol / route / SDK anchor derivation that decides which
+ * hand-written pages a code change is advertised against.
  *
  *   node scripts/docs-audit/check-affected-docs.mjs
  *

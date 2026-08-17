@@ -1,10 +1,18 @@
 name: Docs Drift Check
 
-# When a PR changes packages/** code, flag the hand-written docs that reference the
-# affected packages so they can be re-verified for implementation accuracy before the
-# drift lands on main. Advisory only — posts a PR comment, never fails the build.
-# The actual LLM audit is run on-demand / on a schedule via the `docs-accuracy-audit`
-# workflow, scoped to exactly the docs this check lists.
+# When a PR changes packages/** code, flag the hand-written docs that NAME something the
+# change touched — a symbol, a wire route, or the SDK method a route ledger binds to it —
+# so they can be re-verified for implementation accuracy before the drift lands on main.
+# Advisory only: posts a PR comment, never fails the build. The actual LLM audit is run
+# on-demand / on a schedule via the `docs-accuracy-audit` workflow, scoped to exactly the
+# docs this check lists.
+#
+# It used to list pages by PACKAGE DEPENDENCY ("which docs mention @objectstack/x"), and
+# #9192 measured that wrong in both directions on a real PR: 2 of 3 listed pages were
+# irrelevant, and the 2 pages that actually documented the changed surface were missing
+# because they document it through the SDK, which does not depend on the implementing
+# package. The comment now also states what the run could NOT see — the derivation being
+# read past its precision, with its silence taken for absence, is what #9192 records.
 
 on:
   pull_request:
@@ -75,6 +83,30 @@ jobs:
             const docs = data.docs || [];
             const pkgs = (data.changedPackages || []).map(p => p.name || p.dir);
             const marker = '<!-- docs-drift-check -->';
+            // #9192 — the derivation now matches pages that NAME something the change
+            // touched (symbol / route / SDK-method anchors) instead of pages that merely
+            // mention a changed package. Everything the derivation could NOT see is
+            // stated in the comment, at the point of use: the failure this fixed was not
+            // the tool lying, it was a reader taking its silence for absence.
+            const anchorList = data.anchors || [];
+            const anchorless = data.anchorlessChanges || [];
+            const overbroad = data.overbroadAnchors || [];
+            const crossCutting = data.crossCuttingSymbols || [];
+            const weak = data.weakAnchorsDropped || [];
+            const coarse = data.packageMentionDocs || [];
+            const rederive = `node scripts/docs-audit/affected-docs.mjs --json origin/${baseRef}`;
+            const limits = [];
+            if (anchorless.length) limits.push(`**${anchorless.length}** changed file(s) yielded no anchor (\`${anchorless.slice(0, 3).join('`, `')}\`${anchorless.length > 3 ? ', …' : ''}) — pages documenting those are invisible to this run`);
+            if (crossCutting.length) limits.push(`**${crossCutting.length}** cross-cutting symbol(s) contributed no route anchor: \`${crossCutting.join('`, `')}\``);
+            if (overbroad.length) limits.push(`**${overbroad.length}** anchor(s) matched too much of the corpus to be a work list: \`${overbroad.join('`, `')}\``);
+            if (weak.length) limits.push(`**${weak.length}** name(s) were too generic to anchor anything (single lowercase words)`);
+            // Rendered whenever there is anything to say, INCLUDING when the only thing to
+            // say is "the wide net exists and holds N pages". A short list is the right
+            // answer here, but a reader must be able to tell a short list from a blind one
+            // without leaving the PR.
+            const limitsBlock = (limits.length || coarse.length)
+              ? ['', '<details><summary>What this run could not see</summary>', '', ...limits.map(l => `- ${l}`), ...(limits.length ? [''] : []), `Coarse fallback — **${coarse.length}** page(s) merely *mention* a changed package (the pre-#9192 predicate, kept for the deliberately-wide backstop): \`${rederive}\` → \`packageMentionDocs\`.`, '</details>']
+              : [];
             // The release-owned rows are PARTITIONED OUT of the editable list, never
             // dropped (#6893, following the #4920 ruling). They keep getting audited —
             // `docs` above is still the full set the audit workflow is scoped to — but
@@ -96,14 +128,19 @@ jobs:
             const capped = editable.length > EDITABLE_ROW_CAP;
             let body;
             if (docs.length === 0) {
-              body = `${marker}\n### 📓 Docs Drift Check\nNo hand-written docs reference the ${pkgs.length} changed package(s). ✅`;
+              // "Nothing found" and "I derived nothing to look for" are DIFFERENT results
+              // and must never render alike — that conflation is #9192's own subject.
+              const headline = anchorList.length === 0
+                ? `Nothing in this diff resolved to a documentable surface (no symbol, route or SDK anchor derived from **${pkgs.length}** changed package(s)), so **this run has no opinion** about the docs.`
+                : `**${anchorList.length}** anchor(s) derived from **${pkgs.length}** changed package(s); no hand-written page names any of them. ✅`;
+              body = [marker, '### 📓 Docs Drift Check', headline, ...limitsBlock].join('\n');
             } else {
               const detail = (data.detail || []).reduce((m, d) => (m[d.doc] = d.via, m), {});
               const row = d => `- \`${d}\`${detail[d] ? `  _(via ${detail[d].join(', ')})_` : ''}`;
               body = [
                 marker,
                 '### 📓 Docs Drift Check',
-                `This PR changes **${pkgs.length}** package(s): ${pkgs.map(p => `\`${p}\``).join(', ')}.`,
+                `This PR changes **${pkgs.length}** package(s): ${pkgs.map(p => `\`${p}\``).join(', ')}, touching **${anchorList.length}** documentable anchor(s).`,
               ];
               if (capped) {
                 // NO row list above the cap — folding rows behind a details tag would
@@ -113,7 +150,7 @@ jobs:
                 // fidelity is one command away, never lost.
                 body.push(
                   '',
-                  `**${editable.length}** hand-written doc(s) reference the affected code — list omitted above ${EDITABLE_ROW_CAP} rows. Re-derive: \`node scripts/docs-audit/affected-docs.mjs --json origin/${baseRef}\`.`,
+                  `**${editable.length}** hand-written doc(s) name something this change touched — list omitted above ${EDITABLE_ROW_CAP} rows. Re-derive: \`node scripts/docs-audit/affected-docs.mjs --json origin/${baseRef}\`.`,
                 );
                 if (readOnly.length) {
                   body.push(
@@ -125,7 +162,7 @@ jobs:
                 if (editable.length) {
                   body.push(
                     '',
-                    `**${editable.length}** hand-written doc(s) reference the affected code and may need an implementation-accuracy re-verification:`,
+                    `**${editable.length}** hand-written doc(s) NAME something this change touched and may need an implementation-accuracy re-verification:`,
                     '',
                     editable.map(row).join('\n'),
                   );
@@ -133,7 +170,7 @@ jobs:
                 if (readOnly.length) {
                   body.push(
                     '',
-                    `⛔ **${readOnly.length}** release-owned page(s) ${editable.length ? 'also ' : ''}reference the affected code. These are **read-only**:`,
+                    `⛔ **${readOnly.length}** release-owned page(s) ${editable.length ? 'also ' : ''}name something this change touched. These are **read-only**:`,
                     '',
                     readOnly.map(row).join('\n'),
                     '',
@@ -144,9 +181,13 @@ jobs:
                   );
                 }
               }
+              body.push(...limitsBlock);
               body.push(
                 '',
-                '> Advisory only. To re-verify, run the `docs-accuracy-audit` workflow scoped to these files:',
+                '> Advisory only, and a **precision-first** one (#9192): a page is listed because it names a',
+                '> symbol, wire route or SDK method this diff touched — not because it mentions a changed',
+                '> package. Each row says which anchor put it there, so a wrong row is reportable rather than',
+                '> merely annoying. To re-verify, run the `docs-accuracy-audit` workflow scoped to these files:',
                 '> `node scripts/docs-audit/affected-docs.mjs origin/' + baseRef + '` → pass the list as `args.docs`.',
               );
               body = body.join('\n');
