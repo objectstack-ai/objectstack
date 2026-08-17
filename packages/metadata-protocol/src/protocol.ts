@@ -13090,6 +13090,11 @@ export class ObjectStackProtocolImplementation implements
      *
      * ## What it declines to touch, and says so
      *
+     * This section documents the function's full internal surface, including
+     * paths no CLI caller can reach: `os migrate meta --stored` always passes
+     * its own automation engine (see `canonicalizeFlow` above), so the first
+     * bullet below is never observed from that door.
+     *
      * - **`flow` rows with no reachable automation engine.** Flow-node
      *   conversions carry ADR-0078's open-namespace conflict guard, which
      *   needs the engine's live executor registry. When one is reachable —
@@ -13120,6 +13125,17 @@ export class ObjectStackProtocolImplementation implements
      *   body is a genuine contract violation, not chain-owned history. They
      *   surface as `failed` with the validation message, keep reading through
      *   the chain, and stay fixable in Studio.
+     * - **Rows stored under a non-canonical metadata type spelling** (#8957,
+     *   {@link isNonCanonicalStoredType}). This pass canonicalizes BODIES;
+     *   rewriting a stored type spelling is an identity move — a new
+     *   `(org, type, name, package_id)` key, not an edit — so it is out of
+     *   its reach. Nothing on the canonical type can see such a row — no
+     *   registry read, no compliance query — and the batch publish refuses
+     *   it for the same reason (`STORED_TYPE_NOT_CANONICAL`). Reported
+     *   `skipped`, not `failed`: nothing is broken about this pass, the row
+     *   is simply outside its reach. Re-author the item under the canonical
+     *   type (`PUT /meta/<canonical>/<name>`) and drop the non-canonical
+     *   row.
      */
     async migrateStoredMetadata(request: {
         /** Write. Omitted / false = preview: reports what it would do, writes nothing. */
