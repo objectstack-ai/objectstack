@@ -188,16 +188,24 @@
  *
  * The steering is real and it is BOUNDED TO OVER-REDACTION. A hostile value
  * that spells a known head makes the cut land inside the statement, at that
- * head — and two properties make what follows unleakable rather than exposed:
+ * head — and ONE property, not several, makes what follows unleakable rather
+ * than exposed: only a template whose value runs to END OF MESSAGE may declare
+ * a `head` (the invariant on {@link ValueBearingTemplate.head}). Whatever the
+ * head-anchored cut leaves — the rest of the statement it cut into included —
+ * is consumed whole by that template's own `whole` pattern.
  *
- *  1. only a template whose value runs to END OF MESSAGE may declare a `head`
- *     (the invariant on {@link ValueBearingTemplate.head}), so whatever follows
- *     the head-anchored cut is consumed whole by that template's own `whole`
- *     pattern — including the rest of the statement it cut into;
- *  2. the LAST such head wins, not the first. A value that mimics a head is
- *     therefore cut at the mimic, never before it, so no part of the value can
- *     survive by hiding behind its own decoy. Taking the first would leak;
- *     this ordering is load-bearing and is pinned by its own case.
+ * ⚠️ That invariant is the WHOLE of the argument, so do not let a second
+ * plausible-sounding reason stand next to it. This note first claimed the cut
+ * was also protected by taking the LAST matching head rather than the first,
+ * "because a value that mimics a head is then cut at the mimic". Ablated: with
+ * the cut changed to take the FIRST head, all 50 cases in this file's suite
+ * stayed GREEN. The reason is mechanical — an end-of-message pattern matches
+ * only ONCE, from its earliest position, so {@link lastMatch} returns that
+ * first match and the output is identical wherever between two heads the cut
+ * landed. Last-head is retained as a tie-break (it discards the most statement,
+ * and reports the head nearest the database's own words, consistent with the
+ * last-separator rule above) — it is NOT what prevents the leak, and a future
+ * reader must not treat it as a second line of defence.
  *
  * What a hostile value CAN do is suppress a real diagnostic: craft `- invalid
  * input syntax for type integer: "` into a value and the operator reads that
@@ -546,14 +554,11 @@ export function redactStatementFromMessage(message: string): string {
  * words began; only when no head appears does this fall back to the last
  * separator in the message, which is #8682's original structural answer.
  *
- * Two orderings carry the safety argument, both spelled out in the head note at
- * the top of this file and pinned by their own cases:
- *
- *  - the last HEAD, not the first — so a value mimicking a head is cut at the
- *    mimic and cannot survive behind its own decoy;
- *  - a head beats the last separator even though it keeps MORE text, which is
- *    only sound because the head invariant guarantees that extra text is
- *    swallowed whole by the template that owns the head.
+ * A head beats the last separator even though it keeps MORE text. That is sound
+ * only because of the head invariant — the extra text is swallowed whole by the
+ * template that owns the head — and the invariant is the entire safety argument
+ * (see the head note; taking the last head rather than the first is a tie-break
+ * that was ABLATED and changes no output).
  */
 function statementCut(message: string): number {
   let headCut = -1;

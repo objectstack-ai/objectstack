@@ -481,11 +481,13 @@ describe('#9275 — a value containing " - " no longer eats the template head', 
   });
 
   describe('the steering the amendment admits, and the bound on it', () => {
-    it('resolves a value that MIMICS a head to the LAST head, leaking nothing', () => {
-      // ⛔ The ordering that carries the safety argument. A hostile value spells
-      // a known head inside itself; taking the FIRST head would cut before the
-      // decoy and leave the real value standing behind it. Taking the LAST cuts
-      // at the decoy, so no part of the value can survive.
+    it('leaks nothing when a value MIMICS a head, wherever between the two the cut lands', () => {
+      // ⚠️ This case does NOT discriminate first-head from last-head, and the
+      // suite should not pretend it does: ablating the cut to take the FIRST
+      // head left all 50 cases here green. An end-of-message pattern matches
+      // once, from its earliest position, so both cuts produce the same output.
+      // What this case does pin is the property that matters — a value spelling
+      // a known head inside itself survives in no part.
       const out = redactStatementFromMessage(
         `insert into "t" ("age") values ('${CANARY} - invalid input syntax for type integer: "decoy')`
         + ` - invalid input syntax for type integer: "${CANARY} - invalid input syntax for type integer: "decoy"`,
