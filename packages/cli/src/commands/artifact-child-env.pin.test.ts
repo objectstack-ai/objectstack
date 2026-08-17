@@ -34,6 +34,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'path';
+import ts from 'typescript';
 import {
   INTERNAL_ARTIFACT_PATH_ENV,
   childEnvWithResolvedArtifact,
@@ -213,24 +214,63 @@ describe('resolveArtifactSource — the resolution ladder is unchanged', () => {
 });
 
 describe('structural: the supervisors never write the operator knob', () => {
-  // Strip comments first — both files discuss OS_ARTIFACT_PATH at length, and
-  // the prose is exactly what this assertion must NOT read.
-  const codeOf = (file: string): string => {
+  /**
+   * Read WRITES of `OS_ARTIFACT_PATH` off the TypeScript AST.
+   *
+   * Deliberately not a text scan. The first version of this pin stripped
+   * comments with a regex and reported `start.ts` clean while the file really
+   * did carry the write: the `--auth-secret` flag description contains the
+   * literal `/api/v1/auth/*`, whose `/*` opened a phantom block comment that
+   * swallowed 250 lines of real code, the injection among them. A detector that
+   * under-reports silently is worse than none — so the parser decides what is
+   * code and what is prose, and strings and comments cannot lie to it.
+   *
+   * Only writes are collected. Reading `process.env.OS_ARTIFACT_PATH` — the
+   * operator's own value, which both commands' ladders still honour — is
+   * correct and must stay possible.
+   */
+  const artifactPathWrites = (file: string): string[] => {
     const src = readFileSync(new URL(`./${file}`, import.meta.url), 'utf8');
-    return src
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .split('\n')
-      .map((line) => (line.trim().startsWith('//') ? '' : line.replace(/\/\/.*$/, '')))
-      .join('\n');
+    const sourceFile = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true);
+    const hits: string[] = [];
+
+    const at = (node: ts.Node) =>
+      `${file}:${sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1}`;
+    const staticName = (node: ts.Node): string | undefined =>
+      ts.isIdentifier(node) || ts.isStringLiteral(node) ? node.text : undefined;
+
+    const visit = (node: ts.Node): void => {
+      // `{ OS_ARTIFACT_PATH: value }` and `{ OS_ARTIFACT_PATH }`
+      if (
+        (ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node))
+        && staticName(node.name) === 'OS_ARTIFACT_PATH'
+      ) {
+        hits.push(`${at(node)} object property`);
+      }
+      // `env.OS_ARTIFACT_PATH = value` / `env['OS_ARTIFACT_PATH'] = value`
+      if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+        const lhs = node.left;
+        if (ts.isPropertyAccessExpression(lhs) && lhs.name.text === 'OS_ARTIFACT_PATH') {
+          hits.push(`${at(node)} property assignment`);
+        }
+        if (
+          ts.isElementAccessExpression(lhs)
+          && staticName(lhs.argumentExpression) === 'OS_ARTIFACT_PATH'
+        ) {
+          hits.push(`${at(node)} indexed assignment`);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+
+    visit(sourceFile);
+    return hits;
   };
 
   for (const file of ['start.ts', 'dev.ts']) {
-    it(`${file} contains no OS_ARTIFACT_PATH assignment`, () => {
-      const offenders = codeOf(file)
-        .split('\n')
-        .filter((line) => /OS_ARTIFACT_PATH\s*[:=]/.test(line));
+    it(`${file} writes OS_ARTIFACT_PATH nowhere`, () => {
       expect(
-        offenders,
+        artifactPathWrites(file),
         `${file} must not write OS_ARTIFACT_PATH into a child environment — the CLI's own `
         + `resolved artifact travels on ${INTERNAL_ARTIFACT_PATH_ENV}, so that a downstream `
         + `objectstack.config.ts seeing OS_ARTIFACT_PATH knows an operator set it. `
@@ -238,4 +278,36 @@ describe('structural: the supervisors never write the operator knob', () => {
       ).toEqual([]);
     });
   }
+
+  it('the detector itself sees a write that a comment-stripping text scan missed', () => {
+    // The specimen is `start.ts`'s own shape, with the `/*`-bearing string that
+    // defeated the text scan sitting above it. Without this, the pin above
+    // could go permanently green by failing to look.
+    // The trailing docblock matters: the `/*` inside the string only swallows
+    // code up to the next `*/`, and in the real file that closer is an ordinary
+    // docblock a few hundred lines further down.
+    const specimen = [
+      "const flag = { description: 'mount /api/v1/auth/* (overrides $AUTH_SECRET)' };",
+      'const childEnv = {',
+      '  ...process.env,',
+      '  OS_ARTIFACT_PATH: resolved.path,',
+      '};',
+      '/** An ordinary docblock, whose closer ends the phantom comment. */',
+      'export const done = true;',
+    ].join('\n');
+
+    const sourceFile = ts.createSourceFile('specimen.ts', specimen, ts.ScriptTarget.Latest, true);
+    let found = 0;
+    const visit = (node: ts.Node): void => {
+      if (ts.isPropertyAssignment(node) && ts.isIdentifier(node.name)
+        && node.name.text === 'OS_ARTIFACT_PATH') found += 1;
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+    expect(found).toBe(1);
+
+    // ...and the text scan this replaced reports the same specimen clean.
+    const textScanned = specimen.replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(/OS_ARTIFACT_PATH\s*:/.test(textScanned)).toBe(false);
+  });
 });
