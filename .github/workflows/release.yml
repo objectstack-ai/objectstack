@@ -14,7 +14,7 @@ name: Release
 # One job, triggered `on: push: branches: [main]`, so EVERY merge-queue landing
 # started it. Inside it, two steps in sequence:
 #
-#   1. changesets/action@v1 with a `publish:` script. With pending changesets it
+#   1. changesets/action@v2 with a `publish:` script. With pending changesets it
 #      takes the version-PR path, which is (its own source, v1):
 #           git checkout -b changeset-release/main
 #           git reset --hard <github.context.sha>
@@ -167,12 +167,12 @@ jobs:
       # nested mapping (caught by check:workflow-status-functions' self-test).
       - name: 'Create or update the "chore: version packages" PR'
         id: changesets
-        uses: changesets/action@v1
+        uses: changesets/action@v2
         with:
           # ⛔ THERE IS NO `publish:` INPUT HERE, AND THAT IS THE FIX. ⛔
           #
           # Not an oversight and not a style choice — it is what makes this lane
-          # structurally unable to publish, per #6170. changesets/action@v1
+          # structurally unable to publish, per #6170. changesets/action@v2
           # branches on `hasPublishScript = !!publishScript` (src/index.ts):
           #
           #     case !hasChangesets && !hasPublishScript:
