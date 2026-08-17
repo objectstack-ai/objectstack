@@ -531,6 +531,7 @@ is not a complete inventory of `/meta` errors.
 
 ### `INVALID_REQUEST` — unrecognised type spelling
 
+**HTTP Status:** 400  
 **Cause:** The type segment of a `/meta` path is not a spelling ObjectStack recognises,
 *and* it evidently reaches for a metadata type the platform itself declares — a
 misspelling of a real type. `GET /meta/viewes` is refused because `viewes` is not a
