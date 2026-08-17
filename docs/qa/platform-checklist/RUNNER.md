@@ -52,9 +52,9 @@ test-run output the clause's `evidence` field names.
      — the vendored `/_console` bundle may be stale (skill §2);
    - then capture the **reproduction rule** — ordered steps / API calls (method · path ·
      body) / the ref-targeted selector path + expected-vs-actual — into the run's result
-     issue, which is labeled `bug`. A `fail` with no reproduction rule in its issue is not
-     a completed verdict. (The screenshot that convinced you is a live judgment aid, not
-     report content — describe what it showed in one line; never attach it.)
+     issue. A `fail` with no reproduction rule in its issue is not a completed verdict.
+     (The screenshot that convinced you is a live judgment aid, not report content —
+     describe what it showed in one line; never attach it.)
 3. **Classify blockers honestly.** Missing seed/persona/fixture → `blocked(fixture)`,
    and *record the gap on the item* (`fixtures.knownGaps` or `blocked`) so the next
    sweep doesn't rediscover it. A defect in the fixture itself (seed silently failing,
@@ -114,8 +114,8 @@ contradicts it, and correct it here when it does.
 ## Run records — the GitHub issue is the report
 
 Every completed run — **pass or fail alike** — files **one GitHub issue** as its durable
-record, labeled `qa-run` (plus `bug` when any clause failed). **Nothing lands in the
-repo** — not the JSON, not screenshots; `runs/` is git-ignored except its README.
+record, labeled `qa-run` and nothing else (extraction obligation below). **Nothing lands
+in the repo** — not the JSON, not screenshots; `runs/` is git-ignored except its README.
 
 **The issue is text only.** Screenshots and DOM dumps are oracles you consult *live* to
 reach a verdict — never report artifacts. What the report carries for a defect is the
@@ -158,3 +158,21 @@ per-clause verdict table (text oracle evidence) · a reproduction rule per `fail
 derived item verdicts + fixture gaps. The durable, version-controlled truth is still the
 checklist under `areas/`; a run is a dated assertion about one build, and it lives in its
 issue, not the tree.
+
+### Extraction obligation — the run record is a protocol carrier, not work
+
+Run issues are excluded from the PM's backlog sweep, same class as the `pm:seat` post
+(maintainer ruling, 2026-08-17: 「把 qa-run 加进 sweep 排除清单 —— run 记录和 pm:seat
+贴同类:协议载体,不是工作」). Nobody fishes a run record for dispatchable work — so
+closing out the report includes the extraction, owed by the runner:
+
+- **The run issue carries run evidence only.** It is ⛔ not a dispatchable unit, and it
+  ⛔ never carries work labels (`bug`, priority, …) — work labels ride the extracted
+  cards.
+- **Product defects found during the run**: at close-out, extract each one into its own
+  standalone issue — self-contained title, reproduction and mechanism itemized in the
+  card, a pointer back to the run record for the full evidence chain. A defect card does
+  not carry `qa-run`; it enters triage first-touch normally.
+- **Checklist-accuracy findings and fixture gaps** close out through the wave's anchor
+  card (the sweep's tracking issue) — ⛔ not extracted.
+- **Environment blockers**: recorded in the run record is enough.
