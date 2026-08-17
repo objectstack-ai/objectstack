@@ -11447,7 +11447,9 @@ export class ObjectStackProtocolImplementation implements
      *     boundary, and `publishPackageDrafts` is pre-empted by #8908's
      *     `STORED_TYPE_NOT_CANONICAL` pre-flight ({@link isNonCanonicalStoredType}).
      *  5. `revertCommit` → write-through         — `PLURAL_TO_SINGULAR[it.type]`
-     *     over a STORED commit-item type. **Unguarded.**
+     *     over a STORED commit-item type. Was **unguarded**; since #9174 the
+     *     restore limb carries its own `STORED_TYPE_NOT_CANONICAL` pre-flight,
+     *     so this producer no longer reaches the assert for that class.
      *  6. `loadMetaFromDb` (boot)                — `PLURAL_TO_SINGULAR[record.type]`
      *     over a STORED row type. **Unguarded.**
      *
@@ -11484,7 +11486,10 @@ export class ObjectStackProtocolImplementation implements
      * {@link applyRegistryWriteThrough}'s best-effort `console.warn`, which is
      * correct there and not a softened assert — the row is already persisted,
      * and #4521's contract is that a registry hiccup must never fail a
-     * committed write.
+     * committed write. [#9174] Correct, and still less informative than the two
+     * at-rest doors that name this class on the wire — which is why
+     * {@link revertCommit}, the one producer that could reach this seam with the
+     * class, now refuses it up front instead of arriving here.
      *
      * ⚠️ This assert touches NO audit row, NO commit record and NO repository
      * key. It is scoped to the registry mint door, and no producer's spelling
@@ -16152,6 +16157,16 @@ export class ObjectStackProtocolImplementation implements
      * dispatching the reverted-away body until restart —
      * {@link rollbackToPackageCommit} inherited it, so a whole-package
      * rollback could report success and change nothing the process could see.
+     *
+     * [#9174] An item whose STORED `type` is non-canonical
+     * ({@link isNonCanonicalStoredType}) is REFUSED on the restore limb, into
+     * `failed[]` with `code: 'STORED_TYPE_NOT_CANONICAL'` — the same wire-visible
+     * verdict the sibling at-rest doors give (`publishPackageDrafts`, #8908;
+     * `migrateStoredMetadata`, #8957), in place of the `console.warn` this door
+     * degraded to. The soft-remove limb is deliberately outside the gate: it
+     * performs its promise exactly, and the removal is the one action that
+     * reduces the residue. The measurement and the refuse-vs-decline reasoning
+     * are stated at the gate itself.
      */
     async revertCommit(request: {
         commitId: string;
@@ -16231,6 +16246,117 @@ export class ObjectStackProtocolImplementation implements
         // Reverse apply order so artifacts that depend on others (e.g. a view on
         // a new object) are removed before the thing they reference.
         for (const it of [...items].reverse()) {
+            // Which limb this item takes, bound ONCE (#9174): the pre-flight
+            // below and the `else if` further down must never drift apart —
+            // a gate that guards a limb it no longer describes is worse than
+            // no gate, because it reads as covered.
+            const willRestore = it.existedBefore
+                && it.prevVersion !== null && it.prevVersion !== undefined;
+
+            // ═══ [#9174] The AT-REST spelling pre-flight, on the RESTORE limb ══
+            //
+            // The third consumer of an at-rest `type` in this file, and the last
+            // one without this gate. `publishPackageDrafts` refuses the class by
+            // name (`STORED_TYPE_NOT_CANONICAL`, #8908) and `migrateStoredMetadata`
+            // reports it `skipped` with the same reason (#8957); this door gave it
+            // a server-side `console.warn` and a receipt that said `restored`.
+            //
+            // ── What was MEASURED at HEAD, per limb, before choosing a shape ───
+            //
+            // Driven end to end over the real `SysMetadataRepository` with a
+            // `fields/showcase_task.title` row at rest (`protocol.revert-stored-
+            // type-canonical.test.ts` carries the harness):
+            //
+            //   RESTORE limb — `{success: true, revertedCount: 1, failed: []}`,
+            //   `reverted[0].action === 'restored'`, `registerItem` called ZERO
+            //   times, and the only trace anywhere is
+            //   `[Protocol] registry write-through failed for fields/… :
+            //    [registry_type_not_canonical] …` on the server's stderr. The
+            //   receipt claims the pre-commit body is what the platform now
+            //   serves. It is not, and for this class it cannot be: #9111's mint
+            //   door refuses the entry and boot refuses it too, so the restored
+            //   body reaches no reader at all.
+            //
+            //   SOFT-REMOVE limb — `{success: true, action: 'removed'}`, the row
+            //   is GONE from `sys_metadata`, no warning is emitted and no registry
+            //   key is touched (`restoreArtifactRegistryView` folds through the
+            //   manifest map, a no-op for this class, and addresses only the
+            //   phantom namespace). Nothing about that outcome is wrong.
+            //
+            // ── Which sibling this matches, and why it is REFUSE not DECLINE ───
+            //
+            // `saveMetaItem`'s: a wire-visible coded refusal, carried on THIS
+            // door's existing per-item `failed[]` channel — the same channel every
+            // other refusal here already uses (`VERSION_NOT_FOUND`, `ITEM_LOCKED`,
+            // `NOT_OVERRIDABLE`). No new receipt surface, no new error code.
+            //
+            // The test that separates the two siblings is whether the door can do
+            // what it promises for this row. `migrateStoredMetadata` DECLINES
+            // because rewriting a stored type spelling is an identity move and is
+            // out of that pass's reach entirely — nothing is refused, so `skipped`
+            // must not poison `storedMigrationClean` for a scan that runs forever.
+            // Here the write is squarely IN reach: the restore would succeed at the
+            // row and still deliver none of what `restored` promises. That is
+            // `saveMetaItem`'s case — a write this door is able to perform and must
+            // not — so it is refused, and `success` goes false because the commit
+            // the operator asked to undo was not undone. A one-shot operator action
+            // has no forever to poison; answering `success: true` over a
+            // deliberately untouched item is the #5980 class of lie this file keeps
+            // paying for.
+            //
+            // ⛔ Deliberately NOT on the soft-remove limb, and this is a scope
+            // decision rather than a softened gate. That limb performs, exactly and
+            // completely, the one action that improves this residue: the row goes
+            // away. Refusing it would answer `success: false` for a revert that
+            // fully succeeded, and would hand the operator an instruction ("drop
+            // the '<plural>' row") naming the very operation it had just declined
+            // to perform. #8908's own predicate is scoped the same way for the same
+            // reason — it excludes the manifest-PRESENT plurals because those are
+            // already fail-closed, since "widening this gate would change a
+            // wire-visible `failed[].code` for rows that are NOT this defect".
+            //
+            // ⛔ NO fold, anywhere. The refusal writes no audit row and no commit
+            // record, and `it.type` is carried into `failed[]` verbatim, so #9161's
+            // ruling — the caller's spelling reaches the ledger keys unfolded, and
+            // #8908's `AUDIT_TYPE_NOT_CANONICAL` fires loudly when it is wrong — is
+            // untouched in both directions. The refused item is simply absent from
+            // `reverted[]`, so the append-only revert commit built from it below
+            // does not claim to have reverted what it did not.
+            //
+            // ⛔ And NOT an audit row either, unlike the publish pre-flight's.
+            // That door audits because every other refusal on that route audits;
+            // this one writes no audit row for ANY of its per-item failures, so a
+            // row minted only for this class would be a lone entry in a ledger the
+            // function otherwise never writes — and it would need the type FOLDED
+            // to be readable, which is the one thing the card rules out.
+            //
+            // The predicate is `isNonCanonicalStoredType`, NOT the complete
+            // `canonicalMetaType(t) !== t`: `objects` folds in the manifest map, so
+            // the restore limb hands the write-through the canonical key and the
+            // registry entry lands correctly (pinned, one file over, in
+            // `protocol.object-registry-write-through-spelling.test.ts`). Refusing
+            // it would be a wire-visible change for rows that are not this defect.
+            if (willRestore && isNonCanonicalStoredType(it.type)) {
+                const canonical = canonicalMetaType(it.type);
+                failed.push({
+                    type: it.type,
+                    name: it.name,
+                    error: `Commit item '${it.type}/${it.name}' is stored under the non-canonical `
+                        + `metadata type '${it.type}'; the canonical type for this item is `
+                        + `'${canonical}'. Restoring it would write the pre-commit body back into a `
+                        + `second namespace that no registry read and no compliance query on `
+                        + `'${canonical}' can see (#7894 closed this namespace at the '/meta' URL `
+                        + `door; this row predates that), and the registry refuses to serve it `
+                        + `(REGISTRY_TYPE_NOT_CANONICAL), so the restored body would reach no reader. `
+                        + `Re-author the item under '${canonical}' (PUT /meta/${canonical}/${it.name}) `
+                        + `and drop the '${it.type}' row. Note that POST /meta/_migrate-stored does NOT `
+                        + `rewrite a stored type spelling — it canonicalizes bodies, and reports rows `
+                        + `of this class as 'skipped' with that same reason (#8957).`,
+                    code: 'STORED_TYPE_NOT_CANONICAL',
+                });
+                continue;
+            }
+
             // [#7559] PER ITEM, and from the ROW rather than from the request —
             // the same shape {@link publishPackageDrafts} already uses when it
             // promotes each draft in the draft's OWN scope and captures
@@ -16350,7 +16476,7 @@ export class ObjectStackProtocolImplementation implements
                     // caller skipped the heal entirely while answering success.
                     await this.restoreArtifactRegistryView(it.type, it.name, itemOrgId);
                     reverted.push({ type: it.type, name: it.name, action: 'removed' });
-                } else if (it.prevVersion !== null && it.prevVersion !== undefined) {
+                } else if (willRestore) {
                     // Edited an existing artifact → restore the pre-commit body.
                     //
                     // [#6563] The write INTENT is derived per item, exactly as the

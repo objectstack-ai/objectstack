@@ -37,7 +37,12 @@
 //      `publishPackageDrafts` is pre-empted by #8908's `STORED_TYPE_NOT_CANONICAL`
 //      pre-flight (`isNonCanonicalStoredType`).
 //   5. `revertCommit`               → write-through       `PLURAL_TO_SINGULAR[it.type]`
-//      over a STORED commit-item type.                    ← UNGUARDED
+//      over a STORED commit-item type.                    ← UNGUARDED at the time
+//      [#9174] Its restore limb now carries a `STORED_TYPE_NOT_CANONICAL`
+//      pre-flight of its own, so this producer no longer delivers the class to
+//      the assert. The assert stays the contract for a producer that stops
+//      folding; the pre-flight is what gives the caller a wire-visible verdict.
+//      Measured in `protocol.revert-stored-type-canonical.test.ts`.
 //   6. `loadMetaFromDb`             boot hydration        `PLURAL_TO_SINGULAR[record.type]`
 //      over a STORED row type.                            ← UNGUARDED
 //
