@@ -13090,10 +13090,13 @@ export class ObjectStackProtocolImplementation implements
      *
      * ## What it declines to touch, and says so
      *
-     * This section documents the function's full internal surface, including
-     * paths no CLI caller can reach: `os migrate meta --stored` always passes
-     * its own automation engine (see `canonicalizeFlow` above), so the first
-     * bullet below is never observed from that door.
+     * This section documents the function's internal surface, which is not
+     * always identical to what an operator running the CLI can observe:
+     * `os migrate meta --stored` always passes its own automation engine
+     * (see `canonicalizeFlow` above), so the first bullet below is never
+     * observed from that door. That does not by itself account for every
+     * difference between this list and `content/docs/deployment/cli.mdx`'s
+     * decline table — see #9271.
      *
      * - **`flow` rows with no reachable automation engine.** Flow-node
      *   conversions carry ADR-0078's open-namespace conflict guard, which
