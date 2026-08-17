@@ -43,7 +43,7 @@ const result = DispatcherConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **routes** | `{ prefix: string; service: Enum<'metadata' \| 'data' \| 'auth' \| 'file-storage' \| 'search' \| 'cache' \| 'queue' \| … +8 more>; authRequired: boolean; criticality: Enum<'required' \| 'core' \| 'optional'>; … }[]` | ✅ | Route-to-service mappings |
+| **routes** | `{ prefix: string; service: Enum<'metadata' \| 'data' \| 'auth' \| 'file-storage' \| 'search' \| 'cache' \| 'queue' \| …>; authRequired: boolean; criticality: Enum<'required' \| 'core' \| 'optional'>; … }[]` | ✅ | Route-to-service mappings |
 | **fallback** | `Enum<'404' \| 'proxy' \| 'custom'>` | optional (default: `"404"`) | Behavior when no route matches |
 | **proxyTarget** | `string` | optional | Proxy target URL when fallback is "proxy" |
 

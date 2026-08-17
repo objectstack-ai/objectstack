@@ -33,7 +33,7 @@ const result = JoinedReportBlockSchema.parse(data);
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **description** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **type** | `Enum<'tabular' \| 'summary' \| 'matrix'>` | optional (default: `"tabular"`) |  |
-| **chart** | `{ type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| … +13 more>; title?: string \| Record<string, string>; subtitle?: string \| Record<string, string>; description?: string \| Record<string, string>; … }` | optional |  |
+| **chart** | `{ type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; title?: string \| Record<string, string>; subtitle?: string \| Record<string, string>; description?: string \| Record<string, string>; … }` | optional |  |
 | **dataset** | `string` | optional | Dataset name to bind (ADR-0021) |
 | **rows** | `string[]` | optional | Dimension names down (dataset-bound) |
 | **columns** | `string[]` | optional | Dimension names across (matrix, dataset-bound) |
@@ -61,7 +61,7 @@ const result = JoinedReportBlockSchema.parse(data);
 | **runtimeFilter** | `any` | optional | Render-time scope filter |
 | **order** | `{ by: string; direction: Enum<'asc' \| 'desc'> }[]` | optional | Result ordering, most significant key first |
 | **drilldown** | `boolean` | optional (default: `true`) | Click-through to underlying records |
-| **chart** | `{ type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| … +13 more>; title?: string \| Record<string, string>; subtitle?: string \| Record<string, string>; description?: string \| Record<string, string>; … }` | optional | Embedded chart configuration |
+| **chart** | `{ type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; title?: string \| Record<string, string>; subtitle?: string \| Record<string, string>; description?: string \| Record<string, string>; … }` | optional | Embedded chart configuration |
 | **blocks** | `{ name: string; label?: string \| Record<string, string>; description?: string \| Record<string, string>; type: Enum<'tabular' \| 'summary' \| 'matrix'>; … }[]` | optional | Sub-reports for type=joined |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this report. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
@@ -87,7 +87,7 @@ const result = JoinedReportBlockSchema.parse(data);
 | **description** | `string \| Record<string, string>` | optional | Accessibility description — announced to screen readers as the chart’s label |
 | **xAxis** | `string` | ✅ | Dataset dimension name for the X-axis (bound-dataset dimension, not a raw field) |
 | **yAxis** | `string` | ✅ | Dataset measure name for the Y-axis (bound-dataset measure, not a raw field) |
-| **series** | `{ name: string; label?: string \| Record<string, string>; type?: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| … +13 more>; color?: string; … }[]` | optional | Defined series configuration |
+| **series** | `{ name: string; label?: string \| Record<string, string>; type?: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; color?: string; … }[]` | optional | Defined series configuration |
 | **colors** | `string[] \| Record<string, string>` | optional | Color palette (string[]) or value→color map (`{ value: color }`) |
 | **height** | `number` | optional | Fixed plot height in pixels (overrides the container default) |
 | **showLegend** | `boolean` | optional (default: `true`) | Display legend |

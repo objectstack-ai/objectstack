@@ -39,7 +39,7 @@ OpenTelemetry compatibility configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **sdkVersion** | `string` | optional | OTel SDK version |
-| **exporter** | `{ type: Enum<'otlp_http' \| 'otlp_grpc' \| 'jaeger' \| 'zipkin' \| 'console' \| 'datadog' \| … +4 more>; endpoint?: string; protocol?: string; headers?: Record<string, string>; … }` | ✅ | Exporter configuration |
+| **exporter** | `{ type: Enum<'otlp_http' \| 'otlp_grpc' \| 'jaeger' \| 'zipkin' \| 'console' \| 'datadog' \| …>; endpoint?: string; protocol?: string; headers?: Record<string, string>; … }` | ✅ | Exporter configuration |
 | **resource** | `{ serviceName: string; serviceVersion?: string; serviceInstanceId?: string; serviceNamespace?: string; … }` | ✅ | Resource attributes |
 | **instrumentation** | `{ autoInstrumentation: boolean; libraries?: string[]; disabledLibraries?: string[] }` | optional |  |
 | **semanticConventionsVersion** | `string` | optional | Semantic conventions version |
@@ -308,8 +308,8 @@ Trace sampling configuration
 | **type** | `Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| 'probability' \| 'composite' \| 'custom'>` | ✅ | Sampling strategy |
 | **ratio** | `number` | optional | Sample ratio (0-1) |
 | **rateLimit** | `number` | optional | Traces per second |
-| **parentBased** | `{ whenParentSampled?: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| … +3 more>; whenParentNotSampled?: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| … +3 more>; root?: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| … +3 more>; rootRatio?: number }` | optional |  |
-| **composite** | `{ strategy: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| … +3 more>; ratio?: number; condition?: Record<string, any> \| string \| object }[]` | optional |  |
+| **parentBased** | `{ whenParentSampled?: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; whenParentNotSampled?: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; root?: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; rootRatio?: number }` | optional |  |
+| **composite** | `{ strategy: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; ratio?: number; condition?: Record<string, any> \| string \| object }[]` | optional |  |
 | **rules** | `{ name: string; match?: object; decision: Enum<'drop' \| 'record_only' \| 'record_and_sample'>; rate?: number }[]` | optional (default: `[]`) |  |
 | **customSamplerId** | `string` | optional | Custom sampler identifier |
 
@@ -340,7 +340,7 @@ Tracing configuration
 | **name** | `string` | ✅ | Configuration name (snake_case, max 64 chars) |
 | **label** | `string` | ✅ | Display label |
 | **enabled** | `boolean` | optional (default: `true`) |  |
-| **sampling** | `{ type: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| … +3 more>; ratio?: number; rateLimit?: number; parentBased?: object; … }` | optional | Trace sampling configuration |
+| **sampling** | `{ type: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; ratio?: number; rateLimit?: number; parentBased?: object; … }` | optional | Trace sampling configuration |
 | **propagation** | `{ formats?: Enum<'w3c' \| 'b3' \| 'b3_multi' \| 'jaeger' \| 'xray' \| 'ottrace' \| 'custom'>[]; extract?: boolean; inject?: boolean; headers?: object; … }` | optional (default: `{"formats":["w3c"],"extract":true,"inject":true}`) | Trace context propagation |
 | **openTelemetry** | `{ sdkVersion?: string; exporter: object; resource: object; instrumentation?: object; … }` | optional | OpenTelemetry compatibility configuration |
 | **spanLimits** | `{ maxAttributes?: integer; maxEvents?: integer; maxLinks?: integer; maxAttributeValueLength?: integer }` | optional |  |

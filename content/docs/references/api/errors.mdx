@@ -48,7 +48,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 | **retryStrategy** | `Enum<'no_retry' \| 'retry_immediate' \| 'retry_backoff' \| 'retry_after'>` | optional | Recommended retry strategy |
 | **retryAfter** | `number` | optional | Seconds to wait before retrying |
 | **details** | `any` | optional | Additional error context |
-| **fields** | `{ field: string; code: Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| … +24 more>; message: string; label?: string; … }[]` | optional | One entry per offending value |
+| **fields** | `{ field: string; code: Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| …>; message: string; label?: string; … }[]` | optional | One entry per offending value |
 | **fieldErrors** | `never` | optional | [REMOVED] `EnhancedApiError.fieldErrors` was renamed to `fields` in @objectstack/spec 17 (ADR-0114 D4, #3977) — the array is unchanged, only the property name. Every producer already emitted `fields`; `fieldErrors` was declared and never emitted, so a reader keying on it was reading a field no server sent. |
 | **timestamp** | `string` | optional | When the error occurred |
 | **requestId** | `string` | optional | Request ID for tracking |
@@ -139,7 +139,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `false` | ✅ | Always false for error responses |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +50 more>; message: string; category?: Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| … +4 more>; httpStatus?: number; … }` | ✅ | Error details |
+| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; message: string; category?: Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| …>; httpStatus?: number; … }` | ✅ | Error details |
 | **meta** | `{ timestamp?: string; requestId?: string; traceId?: string }` | optional | Response metadata |
 
 

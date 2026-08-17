@@ -154,7 +154,7 @@ const result = BlueprintAppSchema.parse(data);
 | **name** | `string` | ✅ | Object machine name (snake_case) |
 | **label** | `string` | optional | Human-readable singular label |
 | **description** | `string` | optional | What this object represents |
-| **fields** | `{ name: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| … +42 more>; required?: boolean; … }[]` | ✅ | Fields to create on the object |
+| **fields** | `{ name: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; required?: boolean; … }[]` | ✅ | Fields to create on the object |
 | **nameField** | `string` | optional | The record title field — which field holds the human-readable name shown on cards, lookup chips, breadcrumbs and search (ADR-0079). Set it to the object's text label field (e.g. "product_name"). For a numbered entity (invoice/ticket), set it to a formula field that composes number + name (e.g. "`{order_no}` · `{customer}`"). Omitting it lets the platform auto-pick a text field, but declaring it is strongly preferred. |
 
 
