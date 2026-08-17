@@ -47,14 +47,17 @@ jobs:
       # implementation changes — or collapsed nested packages into their container
       # again (#4162) — fails loudly here instead of quietly skewing this comment.
       #
-      # Run through the `check:docs-drift-mapper` package.json script, not the raw
-      # `node` invocation: scripts/pm/dispatch-gates.mjs only discovers a check
-      # family from a `check:NAME` / `check-NAME.mjs` shape, and this step's own
-      # `paths:` filter above used to give that derivation nothing to attach to —
-      # this was the one paths-filtered workflow contributing zero of the
-      # discovered families (#9187). Same command, now named so it is found.
+      # Run through check-affected-docs.mjs, not the raw `node affected-docs.mjs`
+      # invocation: scripts/pm/dispatch-gates.mjs only discovers a check family from
+      # a `check:NAME` / `check-NAME.mjs` shape, and this step's own `paths:` filter
+      # above used to give that derivation nothing to attach to — this was the one
+      # paths-filtered workflow contributing zero of the discovered families (#9187).
+      # A `pnpm check:NAME` script is deliberately NOT the fix here: this job never
+      # runs `pnpm install` (the mapper has zero dependencies, kept that way so this
+      # job stays fast on every packages/** PR), so `pnpm` isn't even on PATH — the
+      # wrapper stays a plain `node` call for exactly that reason.
       - name: Self-test the change → docs mapper
-        run: pnpm check:docs-drift-mapper
+        run: node scripts/docs-audit/check-affected-docs.mjs
 
       - name: Compute affected docs
         id: affected
