@@ -1451,7 +1451,10 @@ export function residueLines({ discovered, matched, undetermined, silent, unfilt
  *     `claude-fable-5`. That is judged from the card's CONTENT — what the change
  *     does to the contract — and a path cannot answer it. An ordinary-looking
  *     surface (one package's source file) is the NORMAL shape of a clause-②
- *     card.
+ *     card. The closest a path can honestly get is SUSPICION:
+ *     SUSPECT_TIER_GLOBS below marks the contract surface itself, and `--tier`
+ *     prints a hint for it — never a verdict. The enforcement lives one step
+ *     later, in the PM skill's enqueue gate over the PR's ACTUAL diff.
  *
  * A path derivation that pretended to cover clause ② would produce the failure
  * this whole file is written against, one level up: a "no mandate" line read as
@@ -1492,9 +1495,10 @@ export function residueLines({ discovered, matched, undetermined, silent, unfilt
  *
  * ## One measured side effect of putting a path in a MODULE BODY
  *
- * Comment masking cannot reach a module-body string, so this glob is now a
- * watch hint of this file's own source: measured, `extractWatchHints` yields 5
- * hints here against 4 on the base, the new one being the glob itself. It is
+ * Comment masking cannot reach a module-body string, so this glob — and the
+ * suspect glob below — is a watch hint of this file's own source: measured,
+ * `extractWatchHints` yields 6 hints here against 4 on the base, the new ones
+ * being the globs themselves. They are
  * inert today because no check family resolves to THIS file — the gate that
  * covers it is `check:pm-dispatch-gates`, which resolves to
  * `check-dispatch-gates.mjs` and matches this file through that file's one
@@ -1518,6 +1522,43 @@ export const MANDATORY_TIER_GLOBS = [
   },
 ];
 
+/**
+ * Clause ②'s single source of truth for the CONTRACT-REVIEW tier: the tier a
+ * card that changes contract accept/reject behaviour or widens the public
+ * surface must be dispatched at, and the tier the `needs:contract-review`
+ * re-review sub-round must itself be running at (its opening self-check reads
+ * this). Declared HERE and only here, as a constant, so a model upgrade is a
+ * one-line change in one file. The review label deliberately names WHAT is
+ * reviewed, never a model (maintainer, 2026-08-16: 「needs:fable-review 这个标
+ * 签不好,下次模型升级怎么办」), and the PM skill's prose points at this
+ * constant instead of spelling a model name.
+ */
+export const CONTRACT_REVIEW_TIER = 'claude-fable-5';
+
+/**
+ * The globs that make a surface a clause-② SUSPECT — a HINT, never a verdict.
+ *
+ * Clause ② is judged from a card's CONTENT; no path predicate can decide it
+ * (the docblock above MANDATORY_TIER_GLOBS says why pretending otherwise would
+ * recreate the incident class this file exists against). What a path CAN say
+ * is where such cards normally land: `packages/spec/src/**` is the contract
+ * surface itself — the error-code ledger and the `*.zod.ts` contract schemas
+ * live there, and the measured incident shape (a below-tier dispatch flipping
+ * accept-to-reject behaviour in the ledger, the same hole passed three times
+ * in one day) sat exactly under it. So `--tier` prints a suspicion line for
+ * these paths: judge the tier from the card content as best you can, and
+ * whichever tier is dispatched, the PR's ACTUAL diff passes the clause-②
+ * enqueue gate before the card may enqueue — the diff is a fact; the card's
+ * semantics were a prediction. The gate itself lives in the PM skill
+ * (入队与落地); this output only points at it.
+ */
+export const SUSPECT_TIER_GLOBS = [
+  {
+    glob: 'packages/spec/src/**',
+    why: 'the contract surface (error-code ledger, *.zod.ts contract schemas) — the normal landing zone of a clause-② card',
+  },
+];
+
 /** The tier floor for a card with no mandate — the ruling's 最低下限. */
 export const TIER_FLOOR = 'sonnet';
 
@@ -1532,11 +1573,15 @@ export const TIER_DEFAULT = 'opus';
  * this file encodes no ordering over tiers, so choosing between them would be a
  * guess printed as a derivation.
  */
-export function deriveTier(paths, globs = MANDATORY_TIER_GLOBS) {
+export function deriveTier(paths, globs = MANDATORY_TIER_GLOBS, suspectGlobs = SUSPECT_TIER_GLOBS) {
   const hits = [];
+  const suspects = [];
   for (const p of paths) {
     for (const g of globs) {
       if (hintCovers(g.glob, p)) hits.push({ path: p, glob: g.glob, tier: g.tier, why: g.why });
+    }
+    for (const g of suspectGlobs) {
+      if (hintCovers(g.glob, p)) suspects.push({ path: p, glob: g.glob, why: g.why });
     }
   }
   const tiers = [...new Set(hits.map((h) => h.tier))];
@@ -1546,7 +1591,7 @@ export function deriveTier(paths, globs = MANDATORY_TIER_GLOBS) {
         'two globs cover it with different tiers and this script orders no tiers',
     );
   }
-  return { mandatory: hits.length > 0, tier: tiers[0] ?? null, hits, declared: globs.length };
+  return { mandatory: hits.length > 0, tier: tiers[0] ?? null, hits, suspects, declared: globs.length };
 }
 
 /**
@@ -1556,7 +1601,7 @@ export function deriveTier(paths, globs = MANDATORY_TIER_GLOBS) {
  * as anything else.
  */
 export function tierLines(result) {
-  const { mandatory, tier, hits, declared } = result;
+  const { mandatory, tier, hits, declared, suspects = [] } = result;
   if (mandatory !== hits.length > 0 || mandatory !== Boolean(tier)) {
     throw new Error(
       `tier verdict is self-contradictory: mandatory=${mandatory}, tier=${tier ?? 'none'}, ` +
@@ -1566,11 +1611,23 @@ export function tierLines(result) {
   const clause2 =
     '  Clause ② is NOT reachable from paths: a card that changes contract accept/reject behaviour or widens the public' +
     ' surface is fable-mandatory too, judged from the card CONTENT. This line is a FLOOR, never a clearance.';
+  // The suspicion tail prints only on a hit — unlike the clause-② note above,
+  // which prints always: "no suspicion" and "no suspect table" must not share a
+  // spelling, and the note is what keeps silence from reading as a clearance.
+  const suspicion = suspects.length === 0
+    ? []
+    : [
+        `  Clause ② SUSPECT surface — a hint, not a verdict: judge the tier from the card CONTENT as best you can` +
+          ` (a card changing contract accept/reject behaviour or widening the public surface is ${CONTRACT_REVIEW_TIER});` +
+          ` whichever tier is dispatched, the PR's actual diff passes the clause-② enqueue gate before the card may enqueue.`,
+        ...suspects.map((s) => `    - ${s.path} ⇢ '${s.glob}' — ${s.why}`),
+      ];
   if (!mandatory) {
     return [
       `Model tier — no path-derived mandate: the surface hits none of the ${declared} declared glob(s), derived here, not recalled.`,
       `  The tier stays the PM's per-card judgment call (floor ${TIER_FLOOR} · default ${TIER_DEFAULT} · ceiling fable).`,
       clause2,
+      ...suspicion,
     ];
   }
   return [
@@ -1579,6 +1636,7 @@ export function tierLines(result) {
     '  The only exit is the measured quota exemption (fable unavailable ⇒ opus, never lower), recorded with its reason' +
       " in the claim comment's `Container & model` line.",
     clause2,
+    ...suspicion,
   ];
 }
 
@@ -2154,10 +2212,15 @@ function selfTest() {
   // card editing the tool must still derive it.
   t('the dispatch-gates gate still reaches the tool it runs', covers(readHints('scripts/pm/check-dispatch-gates.mjs'), 'scripts/pm/dispatch-gates.mjs'));
   // And this file, the worst specimen in the card's table: the directory it
-  // really reads survives, the fixtures naming other packages do not.
+  // really reads survives, the fixtures naming other packages do not. The spec
+  // contract surface DOES hint now — via the declared module-body suspect glob
+  // (a real constant, not a fixture; inert for gate matching for the reason the
+  // MANDATORY_TIER_GLOBS docblock records) — so the fixture-masking claim is
+  // pinned on a path only fixtures name.
   const ownHints = readHints('scripts/pm/dispatch-gates.mjs');
   t('this tool still hints the workflow directory it reads', covers(ownHints, '.github/workflows/lint.yml'));
-  t('this tool no longer hints the spec paths its own fixtures name', !covers(ownHints, 'packages/spec/src/data/filter.zod.ts'));
+  t('this tool hints the spec contract surface via the DECLARED suspect glob', covers(ownHints, 'packages/spec/src/data/filter.zod.ts'));
+  t('this tool still does not hint the paths only its fixtures name', !covers(ownHints, 'packages/objectql/src'));
   // The LIVE trailing-dot specimen (#8534): this gate spells its own filename as
   // the last word of a sentence, in a module-body array element that comment
   // masking cannot reach, so the hint carried the period. Pinned live because
@@ -2519,6 +2582,35 @@ function selfTest() {
   t(`every declared mandatory glob names a path this tree really has (dead: ${deadGlobs.map((g) => g.glob).join(', ') || 'none'})`, deadGlobs.length === 0);
   t('every declared glob carries the tier it mandates and a reason', MANDATORY_TIER_GLOBS.every((g) => g.glob && g.tier && g.why));
   t('the incident file is a real file, so the references case is a live claim and not a fixture', existsSync(join(ROOT, '.claude/skills/pm-dispatch/references/review-checklist.md')));
+
+  // ── Clause-② suspicion (the enqueue-gate card): hit / no hit / wording ────
+  //
+  // The wording cases are not decoration — the suspicion line is quoted into
+  // claim comments, and its one invariant is that a HINT must not be readable
+  // as a verdict (nor harden the no-mandate line into a clearance).
+  const suspectHit = fableOf(['packages/spec/src/api/error-code-ledger.zod.ts']);
+  t('a spec contract path is a clause-② SUSPECT, with its provenance recorded', suspectHit.suspects.length === 1 && suspectHit.suspects[0].glob === 'packages/spec/src/**');
+  t('a suspect is NOT a mandate — suspicion must not harden into a path verdict', suspectHit.mandatory === false && suspectHit.tier === null);
+  const suspectRendered = tierLines(suspectHit).join('\n');
+  t('the suspicion rendering says SUSPECT and names the offending path', suspectRendered.includes('SUSPECT') && suspectRendered.includes('packages/spec/src/api/error-code-ledger.zod.ts'));
+  t('the suspicion rendering is a hint, not a verdict, in those words', suspectRendered.includes('a hint, not a verdict'));
+  t('the suspicion rendering sends the seat to the card CONTENT for the tier call', suspectRendered.includes('judge the tier from the card CONTENT'));
+  t('the suspicion rendering routes EVERY dispatch through the enqueue gate on the ACTUAL diff', suspectRendered.includes('whichever tier is dispatched') && suspectRendered.includes('enqueue gate'));
+  t('the suspicion rendering names the contract-review tier from its single-source constant', suspectRendered.includes(CONTRACT_REVIEW_TIER));
+  const noSuspicion = fableOf(['packages/runtime/src/kernel.ts']);
+  t('an ordinary non-contract surface raises no suspicion', noSuspicion.suspects.length === 0);
+  t('no suspicion ⇒ no suspect line — absence and clearance must not share a spelling with a hit', !tierLines(noSuspicion).join('\n').includes('SUSPECT'));
+  const mandatedAndSuspect = fableOf(['.claude/skills/pm-dispatch/SKILL.md', 'packages/spec/src/data/filter.zod.ts']);
+  t('a mandated surface still prints its suspect paths — the enqueue gate reads diffs, not dispatch tiers', mandatedAndSuspect.mandatory && mandatedAndSuspect.suspects.length === 1 && tierLines(mandatedAndSuspect).join('\n').includes('SUSPECT'));
+  t('a verdict built without a suspects field still renders (suspicion defaults empty)', tierLines({ mandatory: false, tier: null, hits: [], declared: 1 }).length === 3);
+  // Same liveness guards as the mandatory table: dead data reading as
+  // protection is the incident class itself.
+  const deadSuspects = SUSPECT_TIER_GLOBS.filter(
+    (g) => !existsSync(join(ROOT, g.glob.replace(/\*\*?/g, '').replace(/\/+$/, ''))),
+  );
+  t(`every declared suspect glob names a path this tree really has (dead: ${deadSuspects.map((g) => g.glob).join(', ') || 'none'})`, deadSuspects.length === 0);
+  t('the suspect table is not empty and every entry carries its reason', SUSPECT_TIER_GLOBS.length > 0 && SUSPECT_TIER_GLOBS.every((g) => g.glob && g.why));
+  t('the contract-review tier constant is a non-empty model id — the single source the PM skill points at', typeof CONTRACT_REVIEW_TIER === 'string' && CONTRACT_REVIEW_TIER.length > 0);
 
   let failed = 0;
   for (const [name, cond] of cases) {
