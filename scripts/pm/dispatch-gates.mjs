@@ -2348,7 +2348,11 @@ function selfTest() {
   // bucket's question, which is about the gate's SOURCE.
   const triggered = { files: [], hints: [], triggers: [{ workflow: 'spec-liveness-check.yml', paths: ['packages/spec/**'] }] };
   t('a family with no hints at all is MATCHED when CI schedules it', classifyEntry(triggered, ['packages/spec/src/x.ts']).verdict === 'matched');
-  t('and its provenance says the claim came from CI, not from a string in a script', classifyEntry(triggered, ['packages/spec/src/x.ts']).hits[0].via.includes('spec-liveness-check.yml'));
+  // Read defensively: a regression here produces NO hit, and an assertion that
+  // indexed straight into `hits[0]` would throw and abort the whole self-test
+  // run — every case below it, the live liveness pins included, would then stop
+  // reporting. A gate that fails must still say what else it checked.
+  t('and its provenance says the claim came from CI, not from a string in a script', Boolean(classifyEntry(triggered, ['packages/spec/src/x.ts']).hits[0]?.via?.includes('spec-liveness-check.yml')));
   t('the same family is still undetermined for a card the workflow does not schedule', classifyEntry(triggered, ['packages/rest/src/server.ts']).verdict === 'undetermined');
   const allThreeKeys = {
     files: ['scripts/check-x.mjs'],
