@@ -119,7 +119,7 @@ The migration is **non-destructive** and **idempotent**: each legacy org's datab
 1. **Stay with per-org DB + `env_id` column.** Rejected — the failure modes above are structural, not implementation bugs.
 2. **Schema-per-environment inside one DB.** Works for Postgres but not Turso/libSQL/SQLite, and defeats the backup/DR argument. Rejected.
 3. **Row-level security via Postgres RLS.** Strengthens the `env_id` approach but still leaves schema evolution coupled and DR complex. Rejected.
-4. **One global DB + tenant column.** Was never on the table — already discarded in v3.4's ADR-0001.
+4. **One global DB + tenant column.** Was never on the table — already discarded in the v3.4-era "ADR-0001", a pre-registry document this repository has never contained and not the unrelated metadata-service record that held the number here ([tombstone](./0001-withdrawn-metadata-service-architecture.md#what-adr-0002-actually-cites)).
 
 ## References
 

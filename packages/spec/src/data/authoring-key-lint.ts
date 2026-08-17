@@ -172,28 +172,29 @@ export const STACK_KEY_GUIDANCE: Readonly<
 });
 
 /**
- * Authored TOP-LEVEL members the **runtime executes off the bundle**, which the
- * stack schema therefore does not — and cannot — declare.
+ * Authored TOP-LEVEL members the **runtime executes off the bundle**.
  *
- * `onEnable` is a function. It cannot survive `ObjectStackDefinitionSchema`
- * (which does not declare it) and it cannot survive `dist/objectstack.json`
- * (JSON has no functions), yet it is not lost: `AppPlugin` reads it straight
- * off the authored bundle and calls it at `start()`, and on the artifact-boot
- * path the CLI grafts it back (#4095). It is the documented place to register
- * action handlers, and `examples/app-todo` and `examples/app-showcase` both
- * ship it.
+ * `onEnable` is a function. It cannot survive `dist/objectstack.json` (JSON
+ * has no functions), yet it is not lost: `AppPlugin` reads it off the authored
+ * bundle and calls it at `start()`, and on the artifact-boot path the CLI
+ * grafts it back (#4095). It is the documented place to register action
+ * handlers, and `examples/app-todo` and `examples/app-showcase` both ship it.
  *
- * So the lint must stay SILENT here. "Not declared" and "dropped at load" are
- * different claims, and this is the one surface where they come apart — telling
- * an author their working `onEnable` is being discarded would be a confident
- * lie about the pattern we ship in our own examples.
+ * HISTORY: until #8687 the stack schema deliberately did NOT declare
+ * `onEnable`, and this list existed to keep the top-level lint from calling a
+ * working handler registration "dropped at load" — "not declared" and
+ * "dropped at load" are different claims, and this was the one surface where
+ * they came apart. #8687 closed `ObjectStackDefinitionSchema` against unknown
+ * keys, which forced the honest resolution: both members are now DECLARED
+ * (`declared = honoured`), the strict parse accepts them, and the lint goes
+ * quiet on the whole strict surface by its own posture rule. The list stays
+ * because the CLI's graft derives from it (see below); each member also
+ * self-excludes from the lint the way `functions` always did.
  *
- * `functions` is listed for the same reason (a name → handler map the runtime
- * resolves string-named hooks against); the schema happens to declare it too,
- * so it self-excludes. `onDisable` is deliberately ABSENT: no kernel, runtime
- * or service ever called it (the protocol declared it until #4212 retired the
- * whole uninvoked lifecycle family), so a value written there really does go
- * nowhere and the lint should say so.
+ * `onDisable` is deliberately ABSENT: no kernel, runtime or service ever
+ * called it (the protocol declared it until #4212 retired the whole uninvoked
+ * lifecycle family), so a value written there really does go nowhere — the
+ * strict parse now refuses it with that prescription.
  *
  * Single source of truth — the CLI's `GRAFTABLE_RUNTIME_MEMBERS` is derived
  * from this, so the list that decides what gets grafted and the list that

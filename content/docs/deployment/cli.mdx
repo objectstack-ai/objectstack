@@ -855,11 +855,12 @@ mutation projectors, exactly like an author's save. The history entry's source
 is `migrate-stored`, so a later diff shows which changes were an upgrade and
 which were somebody's edit.
 
-Three things it deliberately declines, and names in the report rather than
+What it deliberately declines, and names in the report rather than
 counting as done:
 
 | Not rewritten | Why |
 | :--- | :--- |
+| A row stored under a non-canonical metadata type (a plural or alias spelling, e.g. `fields`) | Canonicalizing bodies is an edit; rewriting a stored *type* spelling is an identity move — a new `(org, type, name, package_id)` key — which this pass is not ruled to make. Re-author the item under its canonical type and drop the old row |
 | Types with no repository write path (`agent`) | Their write path records no history and would force a draft live — a half-write is worse than leaving the row to the read path |
 | Rows that still fail the current schema after conversion | That is a genuine contract violation, not chain-owned history. The write path's rejection is correct; fix the row in Studio |
 | A flow whose rename the conflict guard refused | The old node-type token is a live name something else owns here. Rewriting would clobber that owner, so the row fails loudly naming the token — never a silent skip |

@@ -94,7 +94,7 @@ describe('validateRuleSchemaFormats — the dropped keyword goes RED (#5178)', (
     // stack could not parse, the finding would be unreachable on the compile
     // path this rule is registered `input: 'parsed'` for (#5018/#5046).
     const stack = {
-      ...MANIFEST,
+      manifest: MANIFEST,
       ...objectWith(schemaRule({ type: 'object', properties: { email: { type: 'string', format: 'emial' } } })),
     };
     const parsed = ObjectStackSchema.safeParse(stack);
@@ -388,7 +388,7 @@ describe('validateRuleSchemaFormats is wired into every authoring command', () =
 
   it.each([...AUTHORING_COMMANDS])('os %s reports the misspelling as an error', (command) => {
     const stack = {
-      ...MANIFEST,
+      manifest: MANIFEST,
       ...objectWith(schemaRule({ type: 'object', properties: { email: { type: 'string', format: 'emial' } } })),
     };
     const findings = runAuthoringRules(command, { normalized: stack, parsed: stack });

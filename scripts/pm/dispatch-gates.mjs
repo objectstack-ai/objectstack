@@ -36,16 +36,19 @@
  *
  * ## What the output means (and what it cannot promise)
  *
- * For each input path, checks are matched by the path literals discoverable in
- * their sources ("watch hints"). That derivation is honest but heuristic:
+ * For each input path, checks are matched from two independent authorities:
+ * the workflow's own `paths:` TRIGGER (does CI schedule this job for your
+ * surface?) and the path literals discoverable in the check's source ("watch
+ * hints" — does this gate read your file?). The first is a declaration, the
+ * second is a heuristic:
  *
- *   - a MATCHED check is one whose own source names a directory/file that
- *     covers the input path — high-signal, paste it into the dispatch prompt.
- *     It is printed as the RUNNABLE invocation (`pnpm --filter <pkg> run
- *     check:x` for a package-scoped gate, `pnpm check:x` for a root-scoped
- *     one), not as the bare script name: the bare name sends a dev to the root
- *     `package.json`, where a package-scoped gate is absent and therefore reads
- *     as nonexistent (#7440);
+ *   - a MATCHED check is one CI's own trigger schedules for the input path, or
+ *     one whose own source names a directory/file that covers it — high-signal,
+ *     paste it into the dispatch prompt. It is printed as the RUNNABLE
+ *     invocation (`pnpm --filter <pkg> run check:x` for a package-scoped gate,
+ *     `pnpm check:x` for a root-scoped one), not as the bare script name: the
+ *     bare name sends a dev to the root `package.json`, where a package-scoped
+ *     gate is absent and therefore reads as nonexistent (#7440);
  *   - a check with NO discoverable path hints is counted in the "undetermined"
  *     bucket. It is NOT known to be irrelevant — many gates read the whole tree
  *     or a convention rather than a path. The PM's judgment call stays a
@@ -61,6 +64,35 @@
  *     because it counts a population it computes for itself and so names no
  *     path literal to match. Those are derived from the change's KIND instead
  *     and printed under their own heading — see CHANGE_KIND_GATES.
+ *
+ * ## Why CI's own trigger is read, and what it does NOT answer (#9171)
+ *
+ * The watch-hint half asks whether a gate READS your file. CI asks a different
+ * question — whether it SCHEDULES the job at all — and answers it from the
+ * workflow's `on.pull_request.paths` list. Nothing reconciled the two, and the
+ * gap is not theoretical: measured on this tree before the trigger key existed,
+ * four workflows declared a `paths:` filter AND contributed check families, and
+ * across their declared globs there were 42 (trigger, family) pairs CI would
+ * schedule that this derivation named in NEITHER half of its output. The whole
+ * `Spec property liveness` job was one of them — all four of its gates score
+ * `undetermined` (they read the metadata-type registry, so their sources carry
+ * no path literal), so a card editing `packages/spec/**` — the job's own
+ * primary trigger — derived none of them. Every dispatch brief tells a dev to
+ * derive the gate union with this script and run it; where the derivation is
+ * silent and CI is not, following the instruction exactly still under-runs.
+ *
+ * The trigger list is READ, never mirrored: adding a hand-written map from
+ * `packages/spec/**` to `check:liveness` would install a second copy of a fact
+ * the workflow already states, which is the drift this file's whole contract
+ * exists to refuse. `extractTriggerPaths` re-reads the workflow on every run, so
+ * a trigger edited tomorrow moves the derivation with nothing to update here.
+ *
+ * What the trigger key CANNOT answer is the workflow with no `paths:` filter at
+ * all: CI schedules it on every PR, so it discriminates nothing and naming its
+ * families for every card would be the "22 leads is the same as none" failure
+ * below. Those families stay with the watch-hint derivation, and the count of
+ * them is printed in the residue rather than left as an absence — a schedule
+ * this tool cannot narrow is a fact the reader is owed, not one to keep quiet.
  *
  * The output is print-only and exits 0 on a completed derivation; a run that
  * cannot read the workflows or package.json exits non-zero (#4690: unreadable
@@ -165,6 +197,113 @@ export function runCommandTexts(workflowText) {
     }
     out.push(body.filter((l) => !/^[ \t]*#/.test(l)).join('\n'));
     i = j - 1;
+  }
+  return out;
+}
+
+/** Strip one layer of YAML quoting from a scalar. */
+function unquoteScalar(s) {
+  const t = s.trim();
+  const m = /^(['"])([\s\S]*)\1$/.exec(t);
+  return m ? m[2] : t;
+}
+
+/**
+ * The entries of a YAML flow sequence (`[a, 'b', "c"]`), in order. Returns []
+ * for anything that is not a flow sequence, so a caller can try the block form.
+ */
+function flowSequenceItems(text) {
+  const t = text.trim();
+  if (!t.startsWith('[')) return [];
+  const inner = t.replace(/^\[/, '').replace(/\]\s*$/, '');
+  return inner
+    .split(',')
+    .map((s) => unquoteScalar(s))
+    .filter((s) => s !== '');
+}
+
+/**
+ * The `on.pull_request.paths` filter a workflow declares, in DECLARATION ORDER
+ * (`!` negations included — `triggerListCovers` needs the order to evaluate
+ * them). `[]` means the workflow declares no path filter, which is NOT the same
+ * as "matches nothing": it means CI schedules the workflow on every PR.
+ *
+ * ## Why this is parsed at all, rather than mapped by hand (#9171)
+ *
+ * See the header. The one-sentence version: CI decides whether a job runs from
+ * this list, and until it was read, four `paths:`-filtered workflows scheduled
+ * gates that no half of this tool's output named. A hand-written map would be a
+ * second copy of a fact the workflow already states — the exact drift shape
+ * this file refuses everywhere else.
+ *
+ * ## Why an indentation walk and not a YAML dependency
+ *
+ * This script is dependency-free by design (it runs from a bare checkout before
+ * `pnpm install`, which is when a dispatch is written), and `runCommandTexts`
+ * above already established the indentation-walk idiom for the same file
+ * format. The walk is deliberately narrow: it reads the `pull_request:` key
+ * inside the top-level `on:` mapping and nothing else.
+ *
+ * ## The boundaries, each with the direction it fails in
+ *
+ *   - `paths-ignore:` is NOT modelled. A workflow using it parses here as "no
+ *     path filter", so its families fall back to the watch-hint derivation —
+ *     today's behaviour, a possible MISSING lead, never a fabricated one. No
+ *     workflow in this tree uses it; when one does and its families matter,
+ *     model it then. Speculative capability is what this repo's own review
+ *     standard rejects, and the degradation is safe in the meantime.
+ *   - `merge_group:` supports no `paths` at all, so queue builds run these jobs
+ *     unconditionally. That only ever WIDENS what CI runs, so ignoring it
+ *     cannot make this derivation over-claim.
+ *   - `pull_request_target:` is not read: it runs against the base, not the
+ *     card's tree, so it is not a gate a dev can pre-run.
+ */
+export function extractTriggerPaths(workflowText) {
+  const out = [];
+  let inOn = false;
+  let inEvent = false;
+  let eventIndent = -1;
+  let inList = false;
+  let listIndent = -1;
+  for (const line of workflowText.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '' || trimmed.startsWith('#')) continue;
+    const indent = /^[ \t]*/.exec(line)[0].length;
+    if (indent === 0) {
+      // A new top-level key closes whatever we were inside.
+      inOn = /^(?:on|'on'|"on"|true):\s*$/.test(trimmed);
+      inEvent = false;
+      inList = false;
+      continue;
+    }
+    if (!inOn) continue;
+    if (inList) {
+      if (indent > listIndent) {
+        const item = /^-\s*(.*)$/.exec(trimmed);
+        if (item && item[1] !== '') out.push(unquoteScalar(item[1]));
+        continue;
+      }
+      inList = false;
+    }
+    if (inEvent) {
+      if (indent > eventIndent) {
+        const key = /^paths:\s*(.*)$/.exec(trimmed);
+        if (key) {
+          const flow = flowSequenceItems(key[1]);
+          if (flow.length) out.push(...flow);
+          else if (key[1].trim() === '') {
+            inList = true;
+            listIndent = indent;
+          }
+        }
+        continue;
+      }
+      inEvent = false;
+    }
+    if (/^pull_request:\s*$/.test(trimmed)) {
+      inEvent = true;
+      eventIndent = indent;
+    }
   }
   return out;
 }
@@ -594,9 +733,106 @@ export function hintCovers(hint, inputPath) {
 }
 
 /**
+ * Translate ONE GitHub filter pattern into an anchored regex, following the
+ * documented filter-pattern semantics rather than approximating them:
+ *
+ *   `**`  zero or more of ANY character, `/` included
+ *   `*`   zero or more characters, but never `/`
+ *   `?` `+` `[…]`  keep their regex meaning — GitHub's cheat sheet defines them
+ *         as the regex quantifiers/class they look like, so a translation that
+ *         escaped them would be a DIFFERENT language from CI's
+ *
+ * Every other regex metacharacter is escaped. Nothing in this tree uses the
+ * three quantifier forms today; they are translated rather than refused because
+ * "mirror the trigger language exactly" is the whole point of reading the
+ * trigger instead of writing a map — a pattern this function silently got wrong
+ * would be the drift, one level down.
+ */
+export function triggerPatternRegex(pattern) {
+  let out = '';
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i];
+    if (c === '*') {
+      if (pattern[i + 1] === '*') {
+        out += '.*';
+        i++;
+      } else {
+        out += '[^/]*';
+      }
+      continue;
+    }
+    if (c === '?' || c === '+' || c === '[' || c === ']') {
+      out += c;
+      continue;
+    }
+    out += /[\\^$.|(){}]/.test(c) ? `\\${c}` : c;
+  }
+  return new RegExp(`^${out}$`);
+}
+
+/**
+ * Does one GitHub filter pattern cover an input path? Two ways, and only two:
+ *
+ *   - the pattern matches the path itself — the exact question CI asks of every
+ *     changed file;
+ *   - the path is a DIRECTORY the pattern reaches into, decided from the
+ *     pattern's literal prefix (everything before its first wildcard). A card's
+ *     file surface is often given as a directory, and `packages/spec/**` plainly
+ *     schedules the job for a card whose surface is `packages/spec`.
+ *
+ * The directory rule is deliberately decided on the LITERAL prefix and nothing
+ * else, which refuses one reach it could plausibly claim: `**` + `/package.json`
+ * has an empty literal prefix, so a directory surface never derives it — only
+ * the real changed file `packages/spec/package.json` does. That is the same
+ * trade `hintCovers` records and decides the same way: refusing costs a missing
+ * lead on a surface given coarsely, claiming it would paste a gate into every
+ * prompt whose directory might contain a manifest.
+ */
+export function triggerCovers(pattern, inputPath) {
+  if (triggerPatternRegex(pattern).test(inputPath)) return true;
+  const literalPrefix = pattern.split(/[*?+[]/)[0];
+  return literalPrefix.length > 0 && literalPrefix.startsWith(`${inputPath}/`);
+}
+
+/**
+ * Evaluate a workflow's whole `paths:` list against one input path and return
+ * the pattern that DECIDED the answer, or null.
+ *
+ * Order matters, exactly as it does in CI: a later `!` pattern that matches
+ * excludes a path an earlier one included, and a later positive re-includes it.
+ * A list of negations only never covers anything — a path nothing positively
+ * matched was never in.
+ */
+export function triggerListCovers(patterns, inputPath) {
+  let decided = null;
+  for (const raw of patterns ?? []) {
+    const negated = raw.startsWith('!');
+    const pattern = negated ? raw.slice(1) : raw;
+    if (!triggerCovers(pattern, inputPath)) continue;
+    decided = negated ? null : raw;
+  }
+  return decided;
+}
+
+/**
+ * The first of a family's workflows whose declared `paths:` trigger covers the
+ * input path, or null. `entry.triggers` is `[{ workflow, paths }]`, built in
+ * `derive` from `extractTriggerPaths` — workflows that declare NO filter are
+ * left out there, because "CI runs this on every PR" discriminates nothing and
+ * would name every unfiltered family for every card.
+ */
+export function coveringTrigger(entry, inputPath) {
+  for (const { workflow, paths } of entry.triggers ?? []) {
+    const pattern = triggerListCovers(paths, inputPath);
+    if (pattern) return { workflow, pattern };
+  }
+  return null;
+}
+
+/**
  * The key that makes one check family relevant to one input path, or null —
- * the family's OWN script files first, then the path literals scanned out of
- * those files.
+ * the family's OWN script files first, then CI's declared trigger for it, then
+ * the path literals scanned out of those files.
  *
  * ## Why a gate's own script files are match keys (#8509)
  *
@@ -619,26 +855,39 @@ export function hintCovers(hint, inputPath) {
  * contract as the rest of this script: a gate script added tomorrow is matched
  * by the next run with nothing to update here.
  *
- * ## Why identity is consulted FIRST, and why the two cannot fight
+ * ## Why identity is consulted FIRST, and why the keys cannot fight
  *
- * Both key sets are compared with the same `hintCovers` and only one answer is
- * taken per path, so a family can never print twice. Ordering therefore decides
- * one thing only: which provenance the `matched via` column shows when both
- * fire. Identity is the more specific of the two claims — the input IS this
- * file, not a literal that happens to cover it — so it goes first
- * (`check:nul-bytes` against `scripts/check-nul-bytes.mjs` is the live
- * specimen: the same single line, now attributed to the file itself).
+ * Only one answer is taken per path, so a family can never print twice.
+ * Ordering therefore decides one thing only: which provenance the `matched via`
+ * column shows when more than one key fires. Identity is the most specific
+ * claim available — the input IS this file, not a pattern or a literal that
+ * happens to cover it — so it goes first (`check:nul-bytes` against
+ * `scripts/check-nul-bytes.mjs` is the live specimen: the same single line, now
+ * attributed to the file itself).
+ *
+ * CI's trigger outranks a scanned literal for the remaining ties, and the
+ * reason is what the two claims are worth to the reader. The trigger is a
+ * DECLARATION — this workflow will run on your PR, stated by the repo, in the
+ * file CI itself obeys. A watch hint is this tool's inference from a string it
+ * found in a script. When both cover the same path the stronger provenance is
+ * the one to print.
  *
  * Where only one fires, order changes nothing, and this tool's own gate is the
  * specimen for that: `scripts/pm/check-dispatch-gates.mjs` is a thin file whose
  * one module-body constant is the tool it runs, so a card editing the TOOL
  * still matches through that constant while a card editing the GATE FILE
  * matches through identity. They answer different inputs.
+ *
+ * Returns `{ key, via }` — `via` is the provenance label the output prints, so
+ * a lead can never be read as the wrong kind of claim.
  */
-export function coveringHint(entry, inputPath) {
+export function coveringKey(entry, inputPath) {
   const identity = (entry.files ?? []).find((f) => hintCovers(f, inputPath));
-  if (identity) return identity;
-  return (entry.hints ?? []).find((h) => hintCovers(h, inputPath)) ?? null;
+  if (identity) return { key: identity, via: 'gate script' };
+  const trigger = coveringTrigger(entry, inputPath);
+  if (trigger) return { key: trigger.pattern, via: `CI trigger in ${trigger.workflow}` };
+  const hint = (entry.hints ?? []).find((h) => hintCovers(h, inputPath));
+  return hint ? { key: hint, via: 'gate source' } : null;
 }
 
 /**
@@ -662,12 +911,19 @@ export function coveringHint(entry, inputPath) {
  * "does this family's source name any path at all?", which identity does not
  * answer for anybody's card but the one editing that very script. So identity
  * decides matching, and the bucket keeps reading `entry.hints`.
+ *
+ * The CI-trigger key (#9171) is the same shape of addition and takes the same
+ * answer: it decides MATCHING for a card the workflow schedules, and it is
+ * invisible to the bucket. The two are not interchangeable — the whole
+ * `Spec property liveness` job is `undetermined` and always will be, because
+ * its gates read a registry rather than a path, and that remains the honest
+ * verdict for every card the workflow does NOT schedule.
  */
 export function classifyEntry(entry, paths) {
   const hits = [];
   for (const p of paths) {
-    const hint = coveringHint(entry, p);
-    if (hint) hits.push({ path: p, hint });
+    const covering = coveringKey(entry, p);
+    if (covering) hits.push({ path: p, hint: covering.key, via: covering.via });
   }
   if (hits.length) return { verdict: 'matched', hits };
   return { verdict: (entry.hints ?? []).length === 0 ? 'undetermined' : 'silent', hits };
@@ -1107,13 +1363,33 @@ export function changeKindLines(paths, resolveInvocation, kinds = CHANGE_KIND_GA
  * under this script's contract a derivation that cannot complete exits non-zero
  * rather than printing a wrong answer, and a fourth bucket added without wiring
  * it in here would otherwise silently shrink the residue.
+ *
+ * ## Why the unfiltered-workflow count is printed, and why it is NOT a bucket
+ *
+ * `unfiltered` counts the families every one of whose workflows declares no
+ * `on.pull_request.paths` filter. CI schedules those on EVERY pull request, so
+ * no path derivation can ever narrow them — the trigger key added in #9171
+ * reaches the filtered workflows and stops precisely there. It cuts across all
+ * three verdicts (an unfiltered family can be matched, undetermined or silent),
+ * so it is deliberately outside the accounting throw: adding it to the
+ * partition would double-count and turn a correct run into a thrown error.
+ *
+ * It is printed for the same reason `silent` is: the reader is being told what
+ * this derivation's silence does and does not mean, and on this tree the number
+ * is most of the farm. An absence nobody can size is one nobody can weigh.
  */
-export function residueLines({ discovered, matched, undetermined, silent }, kinds = CHANGE_KIND_GATES) {
+export function residueLines({ discovered, matched, undetermined, silent, unfiltered }, kinds = CHANGE_KIND_GATES) {
   const placed = matched + undetermined + silent;
   if (placed !== discovered) {
     throw new Error(
       `residue accounting is short: ${placed} famil(ies) placed of ${discovered} discovered ` +
         '(matched + undetermined + silent must cover every discovered family)',
+    );
+  }
+  if (!Number.isInteger(unfiltered) || unfiltered < 0 || unfiltered > discovered) {
+    throw new Error(
+      `unfiltered-workflow count is not derivable: got ${String(unfiltered)} of ${discovered} discovered ` +
+        '(it must be counted from the workflows, never omitted — a missing count would print as a missing line)',
     );
   }
   const unplaced = undetermined + silent;
@@ -1123,6 +1399,8 @@ export function residueLines({ discovered, matched, undetermined, silent }, kind
       ` · ${silent} silent (their sources name paths, none of which cover yours).`,
     '  A `silent` verdict is this derivation\'s weakest claim, not a clearance: a gate that computes its own population and' +
       ' names only its baseline artifact scores silent for every card in the tree.',
+    `  ${unfiltered} of the ${discovered} sit only in workflows that declare no pull_request path filter — CI schedules those on` +
+      ' EVERY pull request, so no path derivation can narrow them and their verdict above is about relevance, never schedule.',
     `  Convention-triggered gates cut ACROSS all three and are printed above when a kind hits (${kinds.map((k) => k.kind).join('; ')}).`,
     `  This script names no gate from memory. To list the ${unplaced} famil(ies) the path derivation did not place, runnably:` +
       ' node scripts/pm/dispatch-gates.mjs --residue <paths>',
@@ -1315,8 +1593,14 @@ function derive(paths, { showResidue = false } = {}) {
   const rootScripts = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
 
   const invocations = [];
+  // The `paths:` each workflow declares, read from the SAME text the check
+  // invocations come out of — one read, two answers, no chance of the pair
+  // describing different revisions of a file.
+  const triggerPathsByWorkflow = new Map();
   for (const wf of workflows) {
-    invocations.push(...extractCheckInvocations(readFileSync(join(wfDir, wf), 'utf8'), wf));
+    const text = readFileSync(join(wfDir, wf), 'utf8');
+    invocations.push(...extractCheckInvocations(text, wf));
+    triggerPathsByWorkflow.set(wf, extractTriggerPaths(text));
   }
   if (invocations.length === 0) throw new Error('no check:* invocations found in any workflow');
 
@@ -1326,6 +1610,13 @@ function derive(paths, { showResidue = false } = {}) {
     const key = inv.check;
     if (!byCheck.has(key)) byCheck.set(key, { ...inv, workflows: new Set(), files: [], hints: [] });
     byCheck.get(key).workflows.add(inv.workflow);
+  }
+  for (const entry of byCheck.values()) {
+    // Only the workflows that DECLARE a filter become trigger keys. An
+    // unfiltered workflow runs on every PR, so it discriminates nothing.
+    entry.triggers = [...entry.workflows]
+      .map((wf) => ({ workflow: wf, paths: triggerPathsByWorkflow.get(wf) ?? [] }))
+      .filter((t) => t.paths.length > 0);
   }
   for (const entry of byCheck.values()) {
     let files = entry.direct ? [entry.check] : resolveCheckToFiles(entry.check, rootScripts);
@@ -1369,11 +1660,14 @@ function derive(paths, { showResidue = false } = {}) {
   if (matched.size) {
     console.log('Local gates for this card (paste into the dispatch prompt):');
     for (const [check, { entry, hits }] of [...matched].sort()) {
-      const via = hits.map((h) => `${h.path} ⇢ '${h.hint}'`).join('; ');
+      // The provenance travels with every hit: a lead CI's own trigger
+      // schedules and a lead inferred from a string in a script are different
+      // claims, and the column that justifies the lead has to say which.
+      const via = hits.map((h) => `${h.path} ⇢ ${h.via} '${h.hint}'`).join('; ');
       console.log(`  - ${runnableInvocation(entry)}   [${[...entry.workflows].join(', ')}]   matched via ${via}`);
     }
   } else {
-    console.log('No check family names the given paths in its own source.');
+    console.log("No check family names the given paths in its own source, and no workflow's path filter schedules one for them.");
   }
   const kindLines = changeKindLines(paths, (name) => {
     const entry = byCheck.get(name);
@@ -1404,6 +1698,7 @@ function derive(paths, { showResidue = false } = {}) {
     matched: matched.size,
     undetermined: undetermined.length,
     silent: silent.length,
+    unfiltered: [...byCheck.values()].filter((e) => e.triggers.length === 0).length,
   })) {
     console.log(line);
   }
@@ -1946,24 +2241,24 @@ function selfTest() {
   const identityEntry = { files: ['scripts/check-empty-changeset.mjs'], hints: [] };
   t(
     'a gate script derives its own family, with the file path itself as provenance',
-    coveringHint(identityEntry, 'scripts/check-empty-changeset.mjs') === 'scripts/check-empty-changeset.mjs',
+    coveringKey(identityEntry, 'scripts/check-empty-changeset.mjs')?.key === 'scripts/check-empty-changeset.mjs',
   );
-  t('an unrelated path gains nothing from the identity key', coveringHint(identityEntry, 'packages/rest/src/server.ts') === null);
-  t('another gate script does not match through this one identity', coveringHint(identityEntry, 'scripts/check-adr-0087-registration.mjs') === null);
-  t('a family that resolves to no file at all matches nothing by identity', coveringHint({ files: [], hints: [] }, 'scripts/check-empty-changeset.mjs') === null);
+  t('an unrelated path gains nothing from the identity key', coveringKey(identityEntry, 'packages/rest/src/server.ts') === null);
+  t('another gate script does not match through this one identity', coveringKey(identityEntry, 'scripts/check-adr-0087-registration.mjs') === null);
+  t('a family that resolves to no file at all matches nothing by identity', coveringKey({ files: [], hints: [] }, 'scripts/check-empty-changeset.mjs') === null);
   // Precedence, in both of its directions. One answer per path either way — the
   // question is only which provenance a reader is shown when both keys fire.
   const bothKeys = { files: ['scripts/pm/check-x.mjs'], hints: ['scripts/pm'] };
-  t('identity outranks a scanned hint that also covers', coveringHint(bothKeys, 'scripts/pm/check-x.mjs') === 'scripts/pm/check-x.mjs');
-  t('a scanned hint still answers a path identity does not cover', coveringHint(bothKeys, 'scripts/pm/other.mjs') === 'scripts/pm');
+  t('identity outranks a scanned hint that also covers', coveringKey(bothKeys, 'scripts/pm/check-x.mjs')?.key === 'scripts/pm/check-x.mjs');
+  t('a scanned hint still answers a path identity does not cover', coveringKey(bothKeys, 'scripts/pm/other.mjs')?.key === 'scripts/pm');
   // The live thin-gate-file specimen, both directions. This tool's own gate is
   // one file whose single module-body constant is the tool it runs, so the two
   // keys answer DIFFERENT inputs and neither displaces the other. If that gate
   // is renamed or its file moves, re-point these cases rather than deleting
   // them — they are the evidence that the two keys compose.
   const gateEntry = { files: ['scripts/pm/check-dispatch-gates.mjs'], hints: readHints('scripts/pm/check-dispatch-gates.mjs') };
-  t('the gate FILE now derives its own family', coveringHint(gateEntry, 'scripts/pm/check-dispatch-gates.mjs') === 'scripts/pm/check-dispatch-gates.mjs');
-  t('the TOOL it runs still derives it through the module-body constant', coveringHint(gateEntry, 'scripts/pm/dispatch-gates.mjs') === 'scripts/pm/dispatch-gates.mjs');
+  t('the gate FILE now derives its own family', coveringKey(gateEntry, 'scripts/pm/check-dispatch-gates.mjs')?.key === 'scripts/pm/check-dispatch-gates.mjs');
+  t('the TOOL it runs still derives it through the module-body constant', coveringKey(gateEntry, 'scripts/pm/dispatch-gates.mjs')?.key === 'scripts/pm/dispatch-gates.mjs');
   // The card's own specimen, resolved through the REAL root package.json: the
   // gate whose entire job is running that script's self-test names the script
   // there and nowhere in the script's source, which is why the identity key is
@@ -1973,7 +2268,7 @@ function selfTest() {
   t('the changeset self-test gate really resolves to the script the card named', selfTestGateFiles.includes('scripts/check-empty-changeset.mjs'));
   t(
     'so a card editing that script now derives that gate end to end',
-    coveringHint({ files: selfTestGateFiles, hints: [] }, 'scripts/check-empty-changeset.mjs') === 'scripts/check-empty-changeset.mjs',
+    coveringKey({ files: selfTestGateFiles, hints: [] }, 'scripts/check-empty-changeset.mjs')?.key === 'scripts/check-empty-changeset.mjs',
   );
 
   // The bucket the one-line spelling would empty. A family whose source names
@@ -1985,6 +2280,105 @@ function selfTest() {
   t('a family whose scanned hints all miss is neither matched nor undetermined', classifyEntry({ files: [], hints: ['packages/spec/src'] }, ['docs/adr/0112-x.md']).verdict === 'silent');
   const identityHits = classifyEntry(noLiterals, ['scripts/check-silent.mjs', 'packages/rest/src/server.ts']).hits;
   t('an identity hit carries the path and the key that covered it, once', identityHits.length === 1 && identityHits[0].path === 'scripts/check-silent.mjs' && identityHits[0].hint === 'scripts/check-silent.mjs');
+
+  // ── CI's own trigger as a match key (#9171) ───────────────────────────────
+  //
+  // The incident: a workflow declares the paths CI schedules its job on, and
+  // nothing here read them. The gates of the whole `Spec property liveness` job
+  // read a registry rather than a path, so they carry no watch hint and sat in
+  // the `undetermined` bucket for every card — including a card editing
+  // `packages/spec/**`, the job's own first trigger. A dev following the
+  // dispatch instruction exactly therefore never ran them.
+  //
+  // The extraction first. `paths` belongs to `pull_request` inside `on:` and
+  // nowhere else: the fixtures below put a decoy list under another event and
+  // under a job, because a walk that scooped either would widen every family in
+  // the file to paths CI never filters on.
+  const triggerWf = [
+    'name: Fixture',
+    'on:',
+    '  pull_request:',
+    '    types: [opened, synchronize]',
+    '    paths:',
+    "      - 'packages/spec/**'",
+    '      # a comment between entries',
+    '      - docs/audits/**',
+    '  merge_group:',
+    '  schedule:',
+    '    - cron: 0 3 * * 1',
+    'jobs:',
+    '  build:',
+    '    paths:',
+    '      - never/read/**',
+    '',
+  ].join('\n');
+  const triggerPaths = extractTriggerPaths(triggerWf);
+  t('the pull_request paths list is read in declaration order', triggerPaths.join('|') === 'packages/spec/**|docs/audits/**');
+  t('a decoy paths list outside the on: mapping is NOT read', !triggerPaths.some((p) => p.includes('never/read')));
+  t('a workflow with no paths filter yields an empty list, not a match-nothing list', extractTriggerPaths('on:\n  pull_request:\n    branches: [main]\njobs: {}\n').length === 0);
+  t('the flow-sequence spelling is read too', extractTriggerPaths("on:\n  pull_request:\n    paths: ['a/**', \"b/c\"]\n").join('|') === 'a/**|b/c');
+  t('pull_request_target is not mistaken for pull_request', extractTriggerPaths("on:\n  pull_request_target:\n    paths:\n      - 'x/**'\n").length === 0);
+
+  // The pattern language. `*` must not cross a slash and `**` must, or a
+  // trigger reads as narrower or wider than the one CI obeys.
+  t('a double-star trigger covers a file any depth below it', triggerCovers('packages/spec/**', 'packages/spec/src/data/filter.zod.ts'));
+  t('a single star does NOT cross a path separator', !triggerCovers('packages/*', 'packages/spec/src/index.ts'));
+  t('the same single star still covers a direct child', triggerCovers('packages/*', 'packages/spec'));
+  t('a leading double-star reaches a nested file', triggerCovers('**/package.json', 'packages/spec/package.json'));
+  t('an exact-file trigger covers exactly that file', triggerCovers('pnpm-workspace.yaml', 'pnpm-workspace.yaml'));
+  t('an unrelated path is not covered', !triggerCovers('packages/spec/**', 'packages/rest/src/server.ts'));
+  t('a dot in a trigger is a literal dot, not a wildcard', !triggerCovers('pnpm-lock.yaml', 'pnpm-lockXyaml'));
+  // The directory-surface reach and the reach deliberately refused — a card's
+  // file surface is often given as a directory, but a pattern whose literal
+  // prefix is empty could sit under ANY directory and must not claim one.
+  t('a directory surface derives a trigger that reaches into it', triggerCovers('packages/spec/**', 'packages/spec'));
+  t('a leading-wildcard trigger does NOT claim an arbitrary directory surface', !triggerCovers('**/package.json', 'packages/spec'));
+  t('nor a sibling directory sharing a name prefix', !triggerCovers('packages/spec/**', 'packages/spec-extra'));
+
+  // Ordered negation, both directions — CI evaluates the list in order and so
+  // must this, or an excluded path derives a job that will never run on it.
+  t('a plain list answers with the pattern that covered', triggerListCovers(['docs/**', 'packages/spec/**'], 'packages/spec/x.ts') === 'packages/spec/**');
+  t('a later negation excludes what an earlier pattern included', triggerListCovers(['packages/**', '!packages/spec/**'], 'packages/spec/x.ts') === null);
+  t('a later positive re-includes it', triggerListCovers(['packages/**', '!packages/spec/**', 'packages/spec/src/**'], 'packages/spec/src/x.ts') === 'packages/spec/src/**');
+  t('a list of negations alone covers nothing', triggerListCovers(['!packages/**'], 'packages/spec/x.ts') === null);
+  t('an empty list covers nothing — no filter is not a filter that matches all', triggerListCovers([], 'packages/spec/x.ts') === null);
+
+  // Precedence and the bucket. A trigger match must outrank a scanned literal
+  // (a declaration beats an inference) and must never be allowed to answer the
+  // bucket's question, which is about the gate's SOURCE.
+  const triggered = { files: [], hints: [], triggers: [{ workflow: 'spec-liveness-check.yml', paths: ['packages/spec/**'] }] };
+  t('a family with no hints at all is MATCHED when CI schedules it', classifyEntry(triggered, ['packages/spec/src/x.ts']).verdict === 'matched');
+  // Read defensively: a regression here produces NO hit, and an assertion that
+  // indexed straight into `hits[0]` would throw and abort the whole self-test
+  // run — every case below it, the live liveness pins included, would then stop
+  // reporting. A gate that fails must still say what else it checked.
+  t('and its provenance says the claim came from CI, not from a string in a script', Boolean(classifyEntry(triggered, ['packages/spec/src/x.ts']).hits[0]?.via?.includes('spec-liveness-check.yml')));
+  t('the same family is still undetermined for a card the workflow does not schedule', classifyEntry(triggered, ['packages/rest/src/server.ts']).verdict === 'undetermined');
+  const allThreeKeys = {
+    files: ['scripts/check-x.mjs'],
+    hints: ['packages/spec/src'],
+    triggers: [{ workflow: 'w.yml', paths: ['packages/spec/**'] }],
+  };
+  t('identity still outranks CI trigger', coveringKey(allThreeKeys, 'scripts/check-x.mjs')?.via === 'gate script');
+  t('CI trigger outranks a scanned literal that also covers', coveringKey(allThreeKeys, 'packages/spec/src/x.ts')?.via === 'CI trigger in w.yml');
+  t('a scanned literal still answers where no trigger covers', coveringKey({ hints: ['packages/rest/src'], triggers: [{ workflow: 'w.yml', paths: ['packages/spec/**'] }] }, 'packages/rest/src/x.ts')?.via === 'gate source');
+  t('an entry with no triggers at all behaves exactly as before', coveringKey({ files: [], hints: ['packages/spec/src'] }, 'packages/spec/src/x.ts')?.via === 'gate source');
+
+  // The card's own specimen, end to end against the LIVE workflow: the trigger
+  // is read off the file rather than inferred from the one hit that surfaced
+  // this (a `packages/objectql/**` path, which is NOT in the list at all — the
+  // job ran because that PR also touched a path that is). If this workflow is
+  // renamed or its gates move, re-point these cases; do not delete them.
+  const livenessWf = readFileSync(join(ROOT, '.github/workflows/spec-liveness-check.yml'), 'utf8');
+  const livenessTriggers = extractTriggerPaths(livenessWf);
+  t('the liveness workflow really declares a path filter', livenessTriggers.length > 0);
+  const livenessFamilies = extractCheckInvocations(livenessWf, 'spec-liveness-check.yml').map((i) => i.check);
+  t('check:liveness really is one of that workflow\'s families', livenessFamilies.includes('check:liveness'));
+  const livenessEntry = { files: [], hints: [], triggers: [{ workflow: 'spec-liveness-check.yml', paths: livenessTriggers }] };
+  t('so a card editing the spec now derives it', classifyEntry(livenessEntry, ['packages/spec/src/data/filter.zod.ts']).verdict === 'matched');
+  t('a dogfood proof edit derives it too — the ADR-0054 half of the same job', classifyEntry(livenessEntry, ['packages/qa/dogfood/src/some.test.ts']).verdict === 'matched');
+  t('and a hand-written doc page, which is why the trigger is read and not guessed at packages/spec', classifyEntry(livenessEntry, ['content/docs/reference/apps.mdx']).verdict === 'matched');
+  t('while an unrelated package still derives nothing from it', classifyEntry(livenessEntry, ['packages/rest/src/server.ts']).verdict === 'undetermined');
 
   // The table's own rot detector: a name no live run discovers must say so,
   // never disappear quietly.
@@ -2033,22 +2427,37 @@ function selfTest() {
   // every discovered family, and it names no gate. The second is the one that
   // rots — a hand-written list of gate names in this paragraph is exactly what
   // was wrong with it — so it is asserted directly rather than by inspection.
-  const residue = residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 55 });
+  const residue = residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80 });
   t('the residue summary states the discovered total', residue.some((l) => l.includes('98')));
   t('the residue summary states each bucket', residue.some((l) => l.includes('35 undetermined')) && residue.some((l) => l.includes('55 silent')));
   t('the residue summary points at the flag that lists the unplaced families', residue.some((l) => l.includes('--residue') && l.includes('90')));
   t('the residue summary names NO gate — the property the deleted prose lacked', !/check:[\w:-]+/.test(residue.join('\n')));
   t('the residue summary still names the convention KINDS it derives', residue.some((l) => l.includes('adds or edits a test file')));
+  // The schedule half (#9171). The count is the size of the answer this
+  // derivation cannot give — families CI runs on every PR — and printing it is
+  // what stops that from being an absence the reader never sees.
+  t('the residue summary sizes the unfiltered-workflow families', residue.some((l) => l.includes('80 of the 98')));
+  t('and says what their bucket verdict does NOT mean', residue.some((l) => l.includes('EVERY pull request')));
   // The partition must be a partition. A fourth bucket added to classifyEntry
   // and not wired into the summary would otherwise shrink the residue silently,
   // which is the failure class this whole card is about.
   let refused = false;
   try {
-    residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 54 });
+    residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 54, unfiltered: 80 });
   } catch {
     refused = true;
   }
   t('a partition that does not account for every discovered family is REFUSED', refused);
+  // ...and the schedule count is not allowed to go missing quietly either: an
+  // omitted count would render as a line with `undefined` in it, which reads as
+  // a derivation rather than as the absent measurement it is.
+  let refusedUnfiltered = false;
+  try {
+    residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 55 });
+  } catch {
+    refusedUnfiltered = true;
+  }
+  t('an omitted unfiltered-workflow count is REFUSED, never printed as undefined', refusedUnfiltered);
 
   // ── The model-tier derivation (#8640) ─────────────────────────────────────
   //

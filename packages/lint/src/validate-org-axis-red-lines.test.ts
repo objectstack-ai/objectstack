@@ -368,23 +368,29 @@ describe('validateOrgAxisRedLines — undeclared keys are the schema’s job, no
     expect(rules({ objects: [{ name: 'work_order', rls: [ORG_WALKING_POLICY] }] })).toEqual([]);
   });
 
-  it('`permissionSets` / `sharing` are not stack-root keys — the root STRIPS them before any rule runs', () => {
+  it('`permissionSets` / `sharing` are not stack-root keys — the root now REFUSES them (#8687)', () => {
     const rootKeys = Object.keys(ObjectStackSchema.shape);
     expect(rootKeys).toEqual(expect.arrayContaining(['permissions', 'sharingRules']));
     expect(rootKeys).not.toContain('permissionSets');
     expect(rootKeys).not.toContain('sharing');
 
-    // Unlike the `.strict()` sub-schemas this one strips rather than rejects,
-    // which is precisely why the dead branch was invisible: the stack parses,
-    // and the key the rule reached for is simply gone.
+    // When this pin was written the root STRIPPED rather than rejected — which
+    // is precisely why the dead branch was invisible: the stack parsed, and the
+    // key the rule reached for was simply gone. #8687 closed the root
+    // (`strictObject`, the last #4001 door), so the same wrong spellings now
+    // fail the parse loudly, naming both keys. The rule's position is
+    // unchanged either way: the diagnostic belongs to the schema.
     const parsed = ObjectStackSchema.safeParse({
       manifest: MANIFEST,
       permissionSets: [{ name: 'pset', label: 'P', objects: {} }],
       sharing: [{ name: 'r', type: 'criteria', object: 'o', sharedWith: HQ_TEAM, condition: 'true' }],
     });
-    expect(parsed.success).toBe(true);
-    expect(parsed.data).not.toHaveProperty('permissionSets');
-    expect(parsed.data).not.toHaveProperty('sharing');
+    expect(parsed.success).toBe(false);
+    const issue = parsed.success ? undefined : parsed.error.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(issue).toBeDefined();
+    expect((issue as unknown as { keys: string[] }).keys).toEqual(
+      expect.arrayContaining(['permissionSets', 'sharing']),
+    );
 
     // So the rule reads the declared spellings only. A stack that spells them
     // the other way gets its diagnostic from the schema, not from a red line

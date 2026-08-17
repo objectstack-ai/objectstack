@@ -40,8 +40,8 @@ const engineOf = (stack: { kernel: any }): IObjectQLEngine =>
 const SYSTEM = { context: { isSystem: true } };
 
 const ARTIFACT = {
-  id: 'stored_flow_smoke',
-  name: 'Stored Flow Smoke',
+  // #8687: manifest fields under `manifest:` — the flat spelling is refused.
+  manifest: { id: 'stored_flow_smoke', name: 'Stored Flow Smoke', version: '0.0.0', type: 'app' },
   objects: [{ name: 'sfs_lead', fields: { title: { type: 'text' } } }],
 };
 

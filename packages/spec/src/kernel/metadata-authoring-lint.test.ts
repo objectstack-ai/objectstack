@@ -366,57 +366,55 @@ describe('nested descent (#4001 evidence phase)', () => {
   });
 });
 
-describe('top-level stack keys (#4167)', () => {
+describe('top-level stack keys (#4167 → #8687)', () => {
   const lint = (raw: unknown) => lintUnknownStackKeys(raw, ObjectStackDefinitionSchema);
 
-  it('covers ground the collection walker cannot reach', () => {
-    // The complementarity proof, and the reason this is a second pass rather
-    // than a tidier fold into the walker: the walker iterates COLLECTIONS, so a
-    // stack whose only mistake is at the envelope level — no objects, no pages,
-    // nothing to iterate — walks clean and reports nothing.
-    const raw = { storage: { adapter: 's3', s3: { bucket: 'app-files' } } };
-    expect(lintUnknownAuthoringKeys(raw)).toEqual([]);
-    expect(lint(raw)).toHaveLength(1);
-  });
+  // GRADUATION (#8687): `ObjectStackDefinitionSchema` is now `.strict()`, so
+  // against the REAL schema this lint is deliberately silent — the parse
+  // rejects loudly on its own, with the same did-you-mean/guidance riding the
+  // refusal message (`stack-top-level-strict.test.ts` pins that side). What
+  // this suite used to pin against the real schema — the `storage` guidance,
+  // the `datasource` → `datasources` edit-distance fallback, the `onDisable`
+  // report — moved to the refusal path; what remains HERE is the posture
+  // agreement (silence on strict) and the strip-mode behaviour against
+  // injected schemas, which is still the lint's living surface for any future
+  // strip-mode envelope.
 
-  it('reports the worked example with its guidance and no suggestion', () => {
-    // `storage` is 5 edits from `sharingRules`; "did you mean sharingRules?"
-    // would be confident nonsense pointed at a real key. A `why` must win.
-    const [finding, ...rest] = lint({ storage: { adapter: 's3' } });
-    expect(rest).toEqual([]);
-    expect(finding).toMatchObject({ path: 'stack.storage', surface: 'stack', key: 'storage' });
-    expect(finding.suggestion).toBeUndefined();
-    // The prescription has to name where the setting DOES live, or the author
-    // learns only that they were wrong — the #4167 complaint in miniature.
-    expect(finding.guidance).toContain('OS_STORAGE_');
-  });
-
-  it('falls back to edit distance for a near-miss on a declared key', () => {
-    const [finding] = lint({ datasource: [{ name: 'db' }] });
-    expect(finding).toMatchObject({ path: 'stack.datasource', suggestion: 'datasources' });
+  it('goes quiet against the now-strict stack schema — one voice, not two', () => {
+    for (const raw of [
+      { storage: { adapter: 's3', s3: { bucket: 'app-files' } } },
+      { datasource: [{ name: 'db' }] },
+      { onDisable: () => {} },
+      { objectz: [] },
+    ]) {
+      expect(lint(raw)).toEqual([]);
+    }
   });
 
   it('is silent on a clean stack, and on the packaging channel', () => {
     expect(lint({ objects: [], pages: [], manifest: { name: 'app' }, _packageId: 'p' })).toEqual([]);
   });
 
-  it('stays silent on the runtime members the schema cannot declare', () => {
-    // The regression that shipped in review: `onEnable` is a function, so the
-    // schema does not declare it — but `AppPlugin` calls it off the authored
-    // bundle, and `examples/app-todo` and `examples/app-showcase` both ship it.
-    // The first version of this lint told both of them their working handler
-    // registration was "dropped at load".
+  it('stays silent on the runtime members (now declared by the schema)', () => {
+    // `onEnable` was undeclared-but-honoured until #8687 declared it as part
+    // of the strict close; `functions` was always declared. Either way the
+    // lint must never call a working handler registration "dropped at load".
     expect(lint({ onEnable: () => {}, functions: { doThing: () => {} } })).toEqual([]);
   });
 
-  it('still reports `onDisable`, which really does go nowhere', () => {
-    // The distinction the exclusion list has to preserve: no kernel, runtime
-    // or service ever called `onDisable` (the protocol declared it until
-    // #4212 retired the uninvoked lifecycle family), so a value written there
-    // IS lost and the author should hear about it.
-    const [finding, ...rest] = lint({ onDisable: () => {} });
+  it('still reports strip-mode findings against an injected strip schema', () => {
+    // The lint's own machinery — guidance table, edit-distance fallback, the
+    // underscore channel — is unchanged; only the real stack schema's posture
+    // graduated. Pin the machinery against a synthetic strip-mode envelope so
+    // it cannot rot silently while the real surface is strict.
+    const declared = z.object({ datasources: z.array(z.unknown()).optional() });
+    const [finding, ...rest] = lintUnknownStackKeys({ datasource: [] }, declared);
     expect(rest).toEqual([]);
-    expect(finding).toMatchObject({ path: 'stack.onDisable', key: 'onDisable' });
+    expect(finding).toMatchObject({ path: 'stack.datasource', suggestion: 'datasources' });
+    const [storageFinding] = lintUnknownStackKeys({ storage: {} }, declared);
+    expect(storageFinding).toMatchObject({ path: 'stack.storage', key: 'storage' });
+    expect(storageFinding!.suggestion).toBeUndefined();
+    expect(storageFinding!.guidance).toContain('OS_STORAGE_');
   });
 
   it('agrees with the injected schema posture instead of asserting its own', () => {
@@ -450,14 +448,19 @@ describe('STACK_KEY_GUIDANCE does not rot', () => {
     }
   });
 
-  it('no runtime member is silently excluded for a key the schema declares', () => {
-    // `functions` legitimately appears in both lists. But if a member ever
-    // exists ONLY here while the schema also declares it and the runtime has
-    // stopped reading it, the exclusion is dead weight hiding a real finding.
-    // Pin the one that carries the exclusion's whole weight instead of trusting
-    // the list's shape: `onEnable` must be excluded AND undeclared.
+  it('every runtime member is a key the schema now declares (#8687)', () => {
+    // Until #8687 this pin ran the other way: `onEnable` had to be excluded
+    // AND undeclared, because the exclusion list was what kept the lint from
+    // calling an honoured-but-undeclared member "dropped at load". The strict
+    // close resolved that split honestly — a strict schema cannot leave an
+    // honoured member undeclared without refusing it, so BOTH members are now
+    // declared (`declared = honoured`) and each self-excludes the way
+    // `functions` always did. The list itself must stay: the CLI's graft
+    // (`GRAFTABLE_RUNTIME_MEMBERS`) derives from it.
     expect(STACK_RUNTIME_MEMBERS).toContain('onEnable');
-    expect(declared, 'onEnable became a declared key — the exclusion is now dead').not.toContain('onEnable');
+    for (const member of STACK_RUNTIME_MEMBERS) {
+      expect(declared, `runtime member '${member}' must be declared by the strict schema`).toContain(member);
+    }
     expect(STACK_RUNTIME_MEMBERS, 'onDisable is honoured nowhere; excluding it would hide a real drop')
       .not.toContain('onDisable');
   });
