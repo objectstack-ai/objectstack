@@ -54,3 +54,5 @@ try {
 
 Raw-HTTP callers that treated `2xx` as success and never opened the inner envelope now
 see the failure they were already being told about, one level up.
+
+<!-- adr-0087: not-required (no-migration-prescription) retires no metadata surface: no Zod schema, no authorable key, no stored sys_metadata row changes shape, so `objectstack migrate meta` has nothing to rewrite and no ledger entry can be written for it. What changes is an HTTP status plus an SDK method's promise contract, and the only channel that reaches those consumers is this changeset itself. -->
