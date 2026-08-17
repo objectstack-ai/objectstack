@@ -49,10 +49,20 @@ async function servedObject(name: string): Promise<Record<string, any>> {
   return envelope.item as Record<string, any>;
 }
 
+// Explicit hookTimeout (#9311): booting the full showcase stack (ObjectQL +
+// ~45 plugins) through `@objectstack/verify`'s `bootStack` does not fit
+// vitest's 10_000ms `hookTimeout` default with any real margin — observed
+// failing at 10027ms against the 10000ms budget, and this file's own isolated
+// run measured 18.3s (vitest-reported `Duration`) / 19.5s wall clock for the
+// whole file even on an otherwise-idle box (boot dominates; the 5 tests
+// themselves run in ~3.5s). 180_000ms follows this package's existing house
+// pattern for the identical `bootStack(showcaseStack, …)` call — see
+// `admin-identity-audit-trail.dogfood.test.ts`'s `beforeAll(…, 180_000)` —
+// rather than inventing a new number for the same operation.
 beforeAll(async () => {
   stack = await bootStack(showcaseStack);
   token = await stack.signIn();
-});
+}, 180_000);
 
 afterAll(async () => {
   await stack?.stop();
