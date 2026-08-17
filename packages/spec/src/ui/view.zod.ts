@@ -1205,6 +1205,45 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
 }).passthrough());
 
 /**
+ * Map View Settings
+ *
+ * Configures the geospatial (`type: 'map'`) list view: which fields provide
+ * marker coordinates and text, and the initial camera. The key set mirrors the
+ * map renderer's documented config surface (objectui `plugin-map`, read by
+ * `getMapConfig` in `ObjectMap.tsx` and documented in
+ * `content/docs/plugins/plugin-map.mdx`) — every key here has a live read
+ * there, and no renderer knob is admitted without one. Coordinates come from
+ * either a `latitudeField`/`longitudeField` pair or a single combined
+ * `locationField`; when no camera is declared the renderer fits the camera to
+ * the queried records, which is why `zoom`/`center` carry no defaults — a
+ * spec-side default would read as a declared camera and defeat that fit.
+ *
+ * Named `ListMapConfigSchema`, not `MapConfigSchema`: the `map` FLOW-NODE
+ * config in `automation/builtin-node-config.zod.ts` already exports that name
+ * (same collision, same resolution as `ListChartConfigSchema` vs the
+ * `chart.zod.ts` `ChartConfigSchema`).
+ *
+ * Closed (strict), unlike the gantt/tree blocks: their passthrough exists
+ * because those renderers keep adding config knobs ahead of the spec, while
+ * the map renderer's read set is itself closed — it validates `schema.map`
+ * against a local zod schema with exactly these keys, so an extra key here
+ * would be dropped there. Strict means a misspelling is a loud parse error
+ * instead of a marker silently falling back to default field names.
+ */
+export const ListMapConfigSchema = lazySchema(() => strictObject({
+  surface: 'this map configuration',
+  history: VIEW_HISTORY,
+}, {
+  latitudeField: z.string().optional().describe('Field providing the marker latitude (used with longitudeField)'),
+  longitudeField: z.string().optional().describe('Field providing the marker longitude (used with latitudeField)'),
+  locationField: z.string().optional().describe('Field providing a combined location — a "lat,lng" string or a { lat, lng } object — as the alternative to the latitudeField/longitudeField pair'),
+  titleField: z.string().optional().describe('Field displayed as the marker title (popup heading, mobile record card, and what the map search box matches on)'),
+  descriptionField: z.string().optional().describe('Field displayed as the marker description'),
+  zoom: z.number().min(1).max(20).optional().describe('Initial zoom level (1-20). Omit to let the renderer fit the camera to the queried records'),
+  center: z.tuple([z.number(), z.number()]).optional().describe('Initial camera center as [latitude, longitude]. Omit to let the renderer fit the camera to the queried records'),
+}).describe('Map view configuration'));
+
+/**
  * Navigation Mode Enum
  * Defines how to navigate to the detail view from a list item.
  */
@@ -1460,6 +1499,7 @@ export const ListViewSchema = lazySchema(() => strictObject({
   gallery: GalleryConfigSchema.optional(),
   timeline: TimelineConfigSchema.optional(),
   chart: ListChartConfigSchema.optional(),
+  map: ListMapConfigSchema.optional().describe('Map configuration — applies when the view renders as a map layout'),
   tree: TreeConfigSchema.optional().describe('Tree/hierarchy configuration — applies when the view renders as a tree layout'),
 
   /** View Metadata (Airtable-style view management) */
@@ -4216,6 +4256,7 @@ export type CalendarConfig = z.input<typeof CalendarConfigSchema>;
 export type GanttConfig = z.input<typeof GanttConfigSchema>;
 export type GanttQuickFilter = z.input<typeof GanttQuickFilterSchema>;
 export type KanbanConfig = z.input<typeof KanbanConfigSchema>;
+export type ListMapConfig = z.input<typeof ListMapConfigSchema>;
 export type NavigationMode = z.input<typeof NavigationModeSchema>;
 export type TreeConfig = z.input<typeof TreeConfigSchema>;
 export type ViewItemName = z.input<typeof ViewItemNameSchema>;

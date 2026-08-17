@@ -21,6 +21,7 @@ import {
   GroupingConfigSchema,
   GroupingFieldSchema,
   GalleryConfigSchema,
+  ListMapConfigSchema,
   TimelineConfigSchema,
   ViewSharingSchema,
   RowColorConfigSchema,
@@ -1723,6 +1724,94 @@ describe('GalleryConfigSchema', () => {
     fits.forEach(fit => {
       expect(() => GalleryConfigSchema.parse({ coverFit: fit })).not.toThrow();
     });
+  });
+});
+
+describe('ListMapConfigSchema (#9340 — the eighth visualization block)', () => {
+  it('accepts the full documented renderer surface — every key plugin-map reads, no extras', () => {
+    // Mirrors objectui plugin-map's own MapConfigSchema (ObjectMap.tsx): the
+    // spec block and the renderer's read set are the same seven keys.
+    const map = {
+      latitudeField: 'lat',
+      longitudeField: 'lng',
+      locationField: 'location',
+      titleField: 'title',
+      descriptionField: 'address',
+      zoom: 12,
+      center: [37.7749, -122.4194] as [number, number],
+    };
+
+    expect(() => ListMapConfigSchema.parse(map)).not.toThrow();
+  });
+
+  it('accepts the showcase task shape — the exact declaration #9340 exists to make legal', () => {
+    // showcase_task has `title`, not `name`; before this block existed the
+    // renderer default left every marker title undefined and there was no
+    // spec-legal way to say otherwise.
+    const map = { titleField: 'title', locationField: 'location' };
+
+    expect(() => ListMapConfigSchema.parse(map)).not.toThrow();
+  });
+
+  it('accepts an empty config — every key is optional and none carries a default', () => {
+    // No defaults on purpose: objectui#5000 ruled "declared camera wins, no
+    // declaration → fit the camera to the queried records". A spec-side
+    // default zoom/center would read as a declared camera and defeat the fit.
+    const parsed = ListMapConfigSchema.parse({});
+    expect(parsed).toEqual({});
+  });
+
+  it('refuses an unknown key with the prescription — surface name, offending key, suggestion, history', () => {
+    const res = ListMapConfigSchema.safeParse({ titleFeld: 'title' });
+    expect(res.success).toBe(false);
+    const unknown = res.error!.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(unknown).toBeDefined();
+    const m = unknown!.message;
+    expect(m.startsWith('Unrecognized key(s) on this map configuration: `titleFeld`.')).toBe(true);
+    expect(m).toContain('`titleField`');
+    expect(m.endsWith(
+      'Until #4001 closed these shapes an unknown key was dropped silently — the view still '
+      + 'rendered, without whatever the key was meant to configure.',
+    )).toBe(true);
+  });
+
+  it('refuses an out-of-range zoom — the documented renderer range is 1-20', () => {
+    expect(ListMapConfigSchema.safeParse({ zoom: 0 }).success).toBe(false);
+    expect(ListMapConfigSchema.safeParse({ zoom: 25 }).success).toBe(false);
+    expect(ListMapConfigSchema.safeParse({ zoom: 1 }).success).toBe(true);
+    expect(ListMapConfigSchema.safeParse({ zoom: 20 }).success).toBe(true);
+  });
+
+  it('refuses a center that is not a [latitude, longitude] pair', () => {
+    expect(ListMapConfigSchema.safeParse({ center: [1, 2, 3] }).success).toBe(false);
+    expect(ListMapConfigSchema.safeParse({ center: [1] }).success).toBe(false);
+    expect(ListMapConfigSchema.safeParse({ center: '37.7,-122.4' }).success).toBe(false);
+    expect(ListMapConfigSchema.safeParse({ center: [37.7749, -122.4194] }).success).toBe(true);
+  });
+
+  it('is declarable on a map list view — the gap #9340 closes', () => {
+    const view = {
+      label: 'Work Locations (Map)',
+      type: 'map' as const,
+      columns: ['title', 'location', 'assignee'],
+      map: { titleField: 'title', locationField: 'location' },
+    };
+
+    const parsed = ListViewSchema.parse(view);
+    expect(parsed.map?.titleField).toBe('title');
+    expect(parsed.map?.locationField).toBe('location');
+  });
+
+  it('stays strict when nested in a list view — an unknown key inside `map` is still refused', () => {
+    const res = ListViewSchema.safeParse({
+      type: 'map',
+      columns: ['title'],
+      map: { titelField: 'title' },
+    });
+    expect(res.success).toBe(false);
+    const unknown = res.error!.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(unknown).toBeDefined();
+    expect(unknown!.message.startsWith('Unrecognized key(s) on this map configuration: `titelField`.')).toBe(true);
   });
 });
 

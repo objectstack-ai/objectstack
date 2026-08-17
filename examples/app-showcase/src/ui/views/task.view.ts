@@ -41,10 +41,12 @@ export const TaskViews = defineView({
     // and lives as its own named view + dashboard element).
     appearance: {
       // The six record-based visualizations the spec + runtime switcher support
-      // out of the box: the SAME task records re-shaped on demand. (map needs a
-      // spec MapConfigSchema the ListViewSchema doesn't yet have, and chart
-      // aggregates a dataset rather than records — both live as their own named
-      // views below instead of in this switcher.)
+      // out of the box: the SAME task records re-shaped on demand. (map has a
+      // spec block since #9340 — `ListMapConfigSchema`, declared on the named
+      // map view below — but stays out of this switcher until the objectui
+      // renderer consumes the declared `view.map` surface (its follow-up card);
+      // chart aggregates a dataset rather than records — both live as their own
+      // named views below instead of in this switcher.)
       allowedVisualizations: ['grid', 'kanban', 'gallery', 'calendar', 'timeline', 'gantt'],
     },
 
@@ -308,6 +310,12 @@ export const TaskViews = defineView({
       type: 'map',
       data,
       columns: ['title', 'location', 'assignee'],
+      // #9340: showcase_task has `title`, not `name` — without this declared
+      // block the renderer's titleField default of 'name' left every marker
+      // title undefined (empty popup heading / mobile card, search matched
+      // nothing). locationField matches the renderer default; declared anyway
+      // so the binding is explicit rather than coincidental.
+      map: { titleField: 'title', locationField: 'location' },
     },
 
     // 8 ── Chart ────────────────────────────────────────────────────────

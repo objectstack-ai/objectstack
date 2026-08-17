@@ -209,6 +209,8 @@
     "ListColumn": "src/ui/view.zod.ts#ListColumn (type)",
     "ListColumnParsed": "src/ui/view.zod.ts#ListColumnParsed (type)",
     "ListColumnSchema": "src/ui/view.zod.ts#ListColumnSchema (const)",
+    "ListMapConfig": "src/ui/view.zod.ts#ListMapConfig (type)",
+    "ListMapConfigSchema": "src/ui/view.zod.ts#ListMapConfigSchema (const)",
     "ListView": "src/ui/view.zod.ts#ListView (type)",
     "ListViewParsed": "src/ui/view.zod.ts#ListViewParsed (type)",
     "ListViewSchema": "src/ui/view.zod.ts#ListViewSchema (const)",
