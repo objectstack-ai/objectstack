@@ -263,12 +263,19 @@ export function stringArrayItems(body) {
  * arrays but not metadata collections, and no site is expected to carry them.
  */
 export function stackCollections(stackSource) {
-  const sliced = sliceBody(
+  // #8687 closed the top level with the shared `strictObject` template
+  // (`shared/strict-object.ts`): the FIRST argument is the authoring-surface
+  // options object (surface / history / guidance) and the SECOND is the shape
+  // this gate reads. Slice the options body to find where it ends, then slice
+  // the shape body that opens right after it.
+  const options = sliceBody(
     stackSource,
-    'export const ObjectStackDefinitionSchema = lazySchema(() => z.object({',
+    'export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({',
   );
-  if (!sliced) return null;
-  return objectEntries(sliced.body)
+  if (!options) return null;
+  const shape = sliceBody(stackSource, '{', options.end + 1);
+  if (!shape) return null;
+  return objectEntries(shape.body)
     .filter(({ value }) => /^z\.array\(\s*[A-Za-z_$][\w$]*Schema\s*\)/.test(value))
     .map(({ key }) => key);
 }
@@ -732,7 +739,11 @@ function selfTest() {
   };
 
   const stack = `
-export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
+export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
+  surface: 'this stack definition',
+  history: 'a history sentence with brackets { } that the options slice must survive',
+  guidance: { storage: 'a prescription' },
+}, {
   manifest: ManifestSchema.optional(),
   objects: z.array(ObjectSchema).optional().describe('Business Objects'),
   // a commented-out collection must NOT count:
@@ -742,10 +753,15 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
   devPlugins: z.array(z.union([ManifestSchema, z.string()])).optional(),
   api: z.object({ nested: z.array(NestedSchema) }).optional(),
   data: z.array(SeedSchema).optional(),
-}));
+}).superRefine(gates));
 `;
   eq('stackCollections() takes z.array(<X>Schema) only', stackCollections(stack), ['objects', 'data']);
   eq('stackCollections() returns null when the anchor is gone', stackCollections('export const Other = 1;'), null);
+  eq(
+    'stackCollections() returns null when the shape argument is missing',
+    stackCollections('export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({ surface: \'x\' }));'),
+    null,
+  );
 
   eq(
     'stringArrayItems() ignores nested literals and comments',
@@ -804,7 +820,7 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
     for (const f of failures) console.error(`  • ${f}\n`);
     return 1;
   }
-  console.log('✓ check-stack-collection-maps --self-test: 11 assertions over synthetic sources');
+  console.log('✓ check-stack-collection-maps --self-test: 12 assertions over synthetic sources');
   return 0;
 }
 

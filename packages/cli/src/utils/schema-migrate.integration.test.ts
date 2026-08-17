@@ -34,8 +34,9 @@ describe('bootSchemaStack + migrate engine (integration)', () => {
     writeFileSync(
       join(dir, 'dist', 'objectstack.json'),
       JSON.stringify({
-        id: 'mig_smoke',
-        name: 'Migrate Smoke',
+        // #8687: manifest fields belong under `manifest:` — the flat spelling
+        // was silently stripped before the strict close and is refused now.
+        manifest: { id: 'mig_smoke', name: 'Migrate Smoke', version: '0.0.0', type: 'app' },
         objects: [
           {
             name: 'mig_biz_unit',
@@ -149,8 +150,7 @@ describe('bootSchemaStack — dev-provisioned __search companions are not orphan
     writeFileSync(
       join(dir, 'dist', 'objectstack.json'),
       JSON.stringify({
-        id: 'mig_pinyin_smoke',
-        name: 'Migrate Pinyin Smoke',
+        manifest: { id: 'mig_pinyin_smoke', name: 'Migrate Pinyin Smoke', version: '0.0.0', type: 'app' },
         i18n: { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'], fallbackLocale: 'en' },
         objects: [
           {

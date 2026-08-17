@@ -124,9 +124,27 @@ export const ERROR_CODE_LEDGER = {
     'AMBIGUOUS_MATCH',            // import row matched more than one record
     'ANALYTICS_QUERY_FAILED',
     'APPROVAL_ACTIONS_FAILED',
+    // [#8885] The eight rows below are the TEMPLATE-GENERATED members of the
+    // family whose literal-spelled siblings (`APPROVAL_RECALL_FAILED`,
+    // `APPROVAL_ACTIONS_FAILED`, `APPROVAL_REQUEST_GET_FAILED`,
+    // `APPROVAL_REQUEST_LIST_FAILED`) were already registered: the approvals
+    // route factories in `rest-server.ts` spell the terminal 500 catch's code
+    // as `` `APPROVAL_${action.toUpperCase()}_FAILED` `` (`decisionRoute`,
+    // `flowMoveRoute`, `threadRoute`), so a literal sweep could not see them
+    // and they were skipped when the family landed. Emitted whenever the
+    // approvals service throws an error `handleApprovalError`'s message-prefix
+    // table does not map.
+    'APPROVAL_APPROVE_FAILED',
+    'APPROVAL_COMMENT_FAILED',
+    'APPROVAL_REASSIGN_FAILED',
     'APPROVAL_RECALL_FAILED',
+    'APPROVAL_REJECT_FAILED',
+    'APPROVAL_REMIND_FAILED',
     'APPROVAL_REQUEST_GET_FAILED',
+    'APPROVAL_REQUEST_INFO_FAILED',
     'APPROVAL_REQUEST_LIST_FAILED',
+    'APPROVAL_RESUBMIT_FAILED',
+    'APPROVAL_REVISE_FAILED',
     'BATCH_NOT_ATOMIC',
     'BATCH_TOO_LARGE',
     'BATCH_UNRESOLVED_REF',
@@ -213,6 +231,16 @@ export const ERROR_CODE_LEDGER = {
     'SUGGESTION_DISMISS_FAILED',
     'SUGGESTION_LIST_FAILED',
     'SUMMARY_RECOMPUTE_FAILED',
+    // [#8885] `POST /approvals/requests/:id/remind` inside the reminder
+    // cool-down window — `handleApprovalError` (`rest-server.ts`) maps
+    // plugin-approvals' `THROTTLED: …` throw (`approval-service.ts`,
+    // `remind()`) to 429 with this code on the wire. The spec contract
+    // (`contracts/approval-service.ts`) documents the rejection under this
+    // name, so the value is contract vocabulary, not an incidental spelling.
+    // Not a detector-flagged synonym of `RATE_LIMIT_EXCEEDED`, and kept
+    // deliberately: the condition is a per-action business cool-down, not an
+    // API quota.
+    'THROTTLED',
     'UNAUTHORIZED',
     'UNIQUE_VIOLATION',
     'UNSUPPORTED_TRANSFORM',

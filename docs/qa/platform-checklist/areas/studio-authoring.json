@@ -302,7 +302,7 @@
       "title": "Metadata draft→publish lifecycle: drafts staged not served, publish flips visibility atomically, conflicts and invalid drafts refused, and the history/audit/diff/rollback forensics tell the truth",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (authors drafts)", "end user (must not see drafts)"],
@@ -324,7 +324,8 @@
         "author an INVALID draft (a widget carrying a stray legacy key) and attempt its publish — the author-time gate must reject the draft→active transition (#4463)",
         "meta forensics (after the two publishes of qa_lifecycle_probe — revision 1, then the second revision): GET /api/v1/meta/dashboard/qa_lifecycle_probe/history — the durable sys_metadata_history events must list BOTH published revisions (a dashboard is an overlay type, so history is real; a non-overlay type answers { events: [] } by design)",
         "GET /api/v1/meta/dashboard/qa_lifecycle_probe/diff?from=1&to=2 (or omit the params for previous-vs-current) — the structural diff must name the widget key that changed between the revisions, not dump the whole body",
-        "POST /api/v1/meta/dashboard/qa_lifecycle_probe/rollback with { toVersion: 1 } (send X-Actor or drive it under an authenticated session so the actor is attributable); the runtime GET must then serve revision 1's body again and the rendered dashboard must show revision 1's widget",
+        "POST /api/v1/meta/dashboard/qa_lifecycle_probe/rollback with { toVersion: 1 }, driven under an authenticated session so the actor is attributable — the authenticated identity is the ONLY source ([#7941]; resolveMetaWriteActor no longer consults `X-Actor` at all); the runtime GET must then serve revision 1's body again and the rendered dashboard must show revision 1's widget",
+        "repeat the rollback (or another /meta write on this item, e.g. a follow-up draft save) while ALSO sending header `X-Actor: someone_else_entirely` on the authenticated request — the header must NOT change the recorded actor: the audit/history rows for that action still name the authenticated runner's own identity, never `someone_else_entirely` ([#7941] — pinned at the unit layer in packages/rest/src/meta-write-actor-identity.test.ts)",
         "attempt a rollback with a missing/invalid toVersion and capture the 400 INVALID_REQUEST guard",
         "GET /api/v1/meta/dashboard/qa_lifecycle_probe/audit — the save/publish/rollback rows must carry the acting user; run every forensics probe against the REST route-manager server os dev serves, NEVER a simulated dispatch (the dispatcher /meta branch swallows /history as a compound name and 404s)"
       ],
@@ -390,10 +391,16 @@
           "evidence": "the rollback response + the post-rollback GET + the reverted-render screenshot + the 400 response"
         },
         {
-          "clause": "audit rows carry the actor — GET .../audit lists the save/publish/rollback attempts (allowed and denied) each stamped with the acting user, resolved from X-Actor / the session identity, never anonymous",
+          "clause": "audit rows carry the actor — GET .../audit lists the save/publish/rollback attempts (allowed and denied) each stamped with the acting user, resolved from the authenticated session identity ([#7941] — the sole source; `resolveMetaWriteActor` no longer reads `X-Actor` at all), never anonymous",
           "oracle": "api",
           "verify": "the /audit body's rows for this name include the publish and rollback actions with a non-empty actor field",
           "evidence": "the audit response"
+        },
+        {
+          "clause": "X-Actor is inert on an authenticated /meta write: sending the header does NOT change the recorded actor — the authenticated identity is stamped either way ([#7941])",
+          "oracle": "api",
+          "verify": "repeat an authenticated /meta write on this item (e.g. the rollback POST) with header X-Actor: someone_else_entirely added; the follow-up GET .../audit and GET .../history rows for that action name the authenticated runner's own identity, and `someone_else_entirely` appears in neither row",
+          "evidence": "the X-Actor-bearing request + the audit/history rows for that action, showing the authenticated actor and the absent header value"
         }
       ],
       "negative": [
@@ -409,14 +416,16 @@
         "packages/spec/src/api/protocol.zod.ts (SaveMetaItemResponse: state draft|active, version as If-Match/409 OCC token, 'staged only — not served until published')",
         "packages/runtime/src/domains/packages.ts (POST /packages/:id/publish-drafts, ADR-0033/ADR-0045 visibility flip + its failure warning)",
         "packages/objectql/src/protocol-publish-package-drafts.test.ts (atomic namespace gate; #4463 author-time rules gate the draft→active transition)",
-        "packages/rest/src/rest-server.ts (GET /meta/:type/:name/{history,audit,diff} + POST .../rollback: overlay-type history vs { events: [] } for non-overlay; rollback body { toVersion }, 400 on a missing/invalid toVersion; actor from X-Actor / session)",
+        "packages/rest/src/rest-server.ts (GET /meta/:type/:name/{history,audit,diff} + POST .../rollback: overlay-type history vs { events: [] } for non-overlay; rollback body { toVersion }, 400 on a missing/invalid toVersion; actor from resolveMetaWriteActor — the authenticated session identity ONLY, [#7941] — X-Actor is ignored outright, not read as a fallback either)",
+        "packages/rest/src/meta-write-actor-identity.test.ts (unit pin: an explicit X-Actor does NOT outrank the authenticated identity, and is inert on the machine-write path too)",
         "packages/rest/src/rest-route-ledger.ts (client bindings meta.getHistory / getAudit / diffItem / rollbackItem; the 'dispatcher /meta swallows /history as a compound name and 404s' note — routes hunter #12)",
         "docs/audits/2026-07-studio-package-create-ux-dogfood.md ('Unpublished draft' badge, 'Changes · n', 'one atomic release' toast)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: both sides of the draft→publish gate (staged-not-served / flipped-on-publish), plus OCC 409, atomic package-wide publish, and the #4463 invalid-draft publish refusal — grounded in the spec receipt schema, the runtime publish-drafts handler, and the pinned dogfood roundtrip", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-08", "change": "clause-extension (routes hunter #12): meta forensics — GET /meta/:type/:name/{history,audit,diff} + POST .../rollback (two publishes → history lists both, diff names the changed key, rollback restores rev-1 and the live app serves it, audit rows carry the actor); traps gain dispatcher-vs-hono-route (the dispatcher /meta branch 404s /history)", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 3, "date": "2026-08-11", "change": "recorded the run #7695 ledger note that publish-drafts' namespace-gate abort answers HTTP 200 with data.success:false, not a 4xx: the step and the clause now say capture status and body separately and score the abort off data.success (the atomicity itself was verified — the abort leaves both names 404). Logged in negatives as an OPEN ledger question awaiting one deliberate ruling (#7753 item 2) — deliberately RECORDED, not adjudicated: a runner asserts the current behaviour and does not file the status code as a defect", "ref": "#7753" }
+        { "revision": 3, "date": "2026-08-11", "change": "recorded the run #7695 ledger note that publish-drafts' namespace-gate abort answers HTTP 200 with data.success:false, not a 4xx: the step and the clause now say capture status and body separately and score the abort off data.success (the atomicity itself was verified — the abort leaves both names 404). Logged in negatives as an OPEN ledger question awaiting one deliberate ruling (#7753 item 2) — deliberately RECORDED, not adjudicated: a runner asserts the current behaviour and does not file the status code as a defect", "ref": "#7753" },
+        { "revision": 4, "date": "2026-08-17", "change": "re-spell after [#7941]: the rollback step and the audit clause named X-Actor as an alternate actor source alongside the session identity; #7941 removed the header limb from resolveMetaWriteActor entirely (landed as commit 4dc8a618e, PR #9119) so it is now the SOLE source and X-Actor is ignored outright, not consulted even as a fallback. Re-spelled the rollback step, the audit acceptance clause, and the rest-server.ts source pointer to name the single source; added a new step + acceptance clause pairing the inverted check the finding asked for — send X-Actor and confirm it does NOT change the recorded actor — since that is now a meaningful QA-layer assertion nothing else covers (the unit pins live in packages/rest/src/meta-write-actor-identity.test.ts, added as a source pointer). The capability itself (audit rows name the acting user, never anonymous) is unchanged and was never wrong.", "ref": "#9118" }
       ]
     },
     {

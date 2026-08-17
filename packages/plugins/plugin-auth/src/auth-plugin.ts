@@ -19,7 +19,7 @@ import {
 import { SysOrganizationDetailPage, SysUserDetailPage } from '@objectstack/platform-objects/pages';
 import { resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall, type OrgScopingEntitlement } from '@objectstack/spec/security';
-import type { IDataEngine, IEmailService, IObjectQLEngine, ISmsService } from '@objectstack/spec/contracts';
+import type { IDataEngine, IEmailService, II18nService, IObjectQLEngine, ISmsService } from '@objectstack/spec/contracts';
 import {
   AuthManager,
   resolveOidcProviderEnabled,
@@ -744,6 +744,36 @@ export class AuthPlugin implements Plugin {
             }
           } catch {
             // settings service is optional — keep the configured appName.
+          }
+
+          // #8195 — name the deployment-default locale on every auth EMAIL, so
+          // the localized `sys_email_template` rows become reachable through
+          // the platform's own send path instead of sitting dormant.
+          //
+          // Maintainer ruling 2026-08-13: the source is
+          // `II18nService.getDefaultLocale()`, resolved here at the plugin
+          // layer. `Accept-Language` is rejected — auth mail is routinely sent
+          // outside the triggering request (invitations, admin-initiated
+          // resets), so a per-device request header is the wrong authority.
+          //
+          // Both hops are probed rather than assumed: `getService` THROWS for
+          // an unregistered service (i18n is not a required dependency of
+          // auth), and `getDefaultLocale` is OPTIONAL on the contract. Either
+          // one missing must leave the locale unset, which is precisely the
+          // pre-#8195 behaviour — `EmailService` resolves its documented
+          // `en-US` default.
+          try {
+            const i18n = ctx.getService<II18nService>('i18n');
+            const locale =
+              typeof i18n?.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
+            this.authManager?.setDefaultEmailLocale(
+              typeof locale === 'string' ? locale : undefined,
+            );
+            if (typeof locale === 'string' && locale.trim()) {
+              ctx.logger.info(`Auth: bound auth email locale to i18n default=${locale}`);
+            }
+          } catch {
+            // i18n service is optional — leave the email locale unset.
           }
 
           // #2815 — seed the built-in bilingual auth SMS templates into

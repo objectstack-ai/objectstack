@@ -74,8 +74,12 @@ export default class PackageInstall extends Command {
     // [ADR-0120 D5e] The installer's answer to the `isolated`-posture question.
     // Deliberately NOT default-on and deliberately not named `--force`: it
     // records an affirmative fact ("these constraints are genuinely
-    // platform-wide") into the install manifest, where `os doctor` can later
-    // show who affirmed it and when.
+    // platform-wide") into the install manifest, rather than overriding a
+    // check. `os doctor` reads that record back on every later run, but only
+    // to SUPPRESS re-reporting the constraints this ceremony already answered
+    // for (`unconfirmedGlobalUniques` in `@objectstack/types`) — an attested
+    // install does not become the recurring nag the gate exists to avoid. It
+    // does not display who affirmed it or when.
     'confirm-global-uniques': Flags.boolean({
       description:
         "Confirm this app's installation-wide (`unique: 'global'`) constraints are genuinely platform-wide when "

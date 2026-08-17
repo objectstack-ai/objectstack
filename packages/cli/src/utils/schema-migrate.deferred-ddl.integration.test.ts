@@ -21,8 +21,8 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { bootSchemaStack } from './schema-migrate.js';
 
 const ARTIFACT = {
-  id: 'defer_smoke',
-  name: 'Defer Smoke',
+  // #8687: manifest fields under `manifest:` — the flat spelling is refused.
+  manifest: { id: 'defer_smoke', name: 'Defer Smoke', version: '0.0.0', type: 'app' },
   objects: [
     {
       name: 'defer_widget',

@@ -25,14 +25,18 @@ function fakeCtx() {
 function writeArtifact(flowName: string): string {
     const dir = mkdtempSync(join(tmpdir(), 'os-hmr-'));
     const file = join(dir, 'objectstack.json');
+    // Manifest fields under `manifest:` — the flattened spelling was never a
+    // compiled-artifact shape (the strip-mode schema dropped all seven keys);
+    // #8687's strict close refuses the flat keys.
     const artifact = {
-        id: 'com.example.test',
-        name: 'test',
-        version: '0.0.0',
-        type: 'app',
-        scope: 'app',
-        namespace: 'test',
-        defaultDatasource: 'memory',
+        manifest: {
+            id: 'com.example.test',
+            name: 'test',
+            version: '0.0.0',
+            type: 'app',
+            namespace: 'test',
+            defaultDatasource: 'memory',
+        },
         // Seeds have no `name`, so they never enter the MetadataManager —
         // they reach reload consumers only via the `metadata:reloaded`
         // payload (AppPlugin's hot-reload seeder). Pin that pass-through.

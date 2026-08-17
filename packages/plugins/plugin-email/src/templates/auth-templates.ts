@@ -26,6 +26,24 @@ const DEFAULT_FOOTER = `You received this email because of activity on your {{ap
 If this wasn't you, you can safely ignore this message.`;
 
 /**
+ * Localized counterparts of {@link DEFAULT_FOOTER}, one per supported locale.
+ *
+ * Every non-`en-US` row must pass one of these to {@link wrap}: the default
+ * footer is English prose, and a localized body sitting under an English
+ * footer is exactly the mixed-language artefact the locale ladder in
+ * `email-service.ts` exists to prevent — the fact that the footer is boilerplate
+ * does not make it invisible to the reader.
+ */
+const FOOTER_ZH_CN = `您收到本邮件，是因为您的 {{appName}} 账号上有相关操作。<br>
+如果这不是您本人的操作，可以放心忽略本邮件。`;
+
+const FOOTER_JA_JP = `{{appName}} アカウントでの操作にともない、本メールをお送りしています。<br>
+心当たりがない場合は、本メールを破棄していただいて問題ありません。`;
+
+const FOOTER_ES_ES = `Recibes este correo por una actividad en tu cuenta de {{appName}}.<br>
+Si no has sido tú, puedes ignorar este mensaje con tranquilidad.`;
+
+/**
  * `footerHtml` overrides the default footer. Two templates need that: any
  * non-`en-US` row (the default footer is English prose, and a localized body
  * under an English footer is the mixed-language artefact `email-service.ts`'s
@@ -78,6 +96,86 @@ If you didn't request this, ignore this email.`,
   description: 'Sent when a user requests a password reset via better-auth.',
 };
 
+export const AUTH_PASSWORD_RESET_TEMPLATE_ZH_CN: EmailTemplate = {
+  ...AUTH_PASSWORD_RESET_TEMPLATE,
+  locale: 'zh-CN',
+  label: '密码重置',
+  subject: '重置您的 {{appName}} 密码',
+  bodyHtml: wrap('重置密码', `
+<p>{{user.name}} 您好：</p>
+<p>我们收到了重置 <strong>{{user.email}}</strong> 所关联账号密码的请求。</p>
+<p>请点击下方按钮设置新密码。该链接将在 {{expiresInMinutes}} 分钟后失效。</p>
+<p style="margin:24px 0"><a href="{{{resetUrl}}}" style="${buttonStyles}">重置密码</a></p>
+<p style="font-size:13px;color:#6b7280">或将以下链接复制到浏览器中打开：<br><span style="word-break:break-all">{{resetUrl}}</span></p>
+<p>如果这不是您本人的操作，无需进行任何处理——您的密码不会发生变更。</p>
+`, FOOTER_ZH_CN),
+  bodyText: `{{user.name}} 您好：
+
+我们收到了重置 {{user.email}} 所关联账号密码的请求。
+
+请通过以下链接设置新密码（{{expiresInMinutes}} 分钟内有效）：
+{{resetUrl}}
+
+如果这不是您本人的操作，请忽略本邮件。`,
+  description: '当用户通过 better-auth 请求重置密码时发送。',
+};
+
+export const AUTH_PASSWORD_RESET_TEMPLATE_JA_JP: EmailTemplate = {
+  ...AUTH_PASSWORD_RESET_TEMPLATE,
+  locale: 'ja-JP',
+  label: 'パスワードの再設定',
+  subject: '{{appName}} のパスワードを再設定してください',
+  bodyHtml: wrap('パスワードの再設定', `
+<p>{{user.name}} 様</p>
+<p><strong>{{user.email}}</strong> に紐づくアカウントのパスワードを再設定するリクエストを受け付けました。</p>
+<p>下のボタンから新しいパスワードを設定してください。このリンクは {{expiresInMinutes}} 分後に無効になります。</p>
+<p style="margin:24px 0"><a href="{{{resetUrl}}}" style="${buttonStyles}">パスワードを再設定</a></p>
+<p style="font-size:13px;color:#6b7280">または、次の URL をブラウザーに貼り付けてください：<br><span style="word-break:break-all">{{resetUrl}}</span></p>
+<p>心当たりがない場合、操作は必要ありません。パスワードは変更されないままです。</p>
+`, FOOTER_JA_JP),
+  bodyText: `{{user.name}} 様
+
+{{user.email}} に紐づくアカウントのパスワードを再設定するリクエストを受け付けました。
+
+次のリンクから新しいパスワードを設定してください（有効期限 {{expiresInMinutes}} 分）:
+{{resetUrl}}
+
+心当たりがない場合は、本メールを破棄してください。`,
+  description: 'better-auth 経由でパスワードの再設定が要求されたときに送信されます。',
+};
+
+export const AUTH_PASSWORD_RESET_TEMPLATE_ES_ES: EmailTemplate = {
+  ...AUTH_PASSWORD_RESET_TEMPLATE,
+  locale: 'es-ES',
+  label: 'Restablecer contraseña',
+  subject: 'Restablece tu contraseña de {{appName}}',
+  bodyHtml: wrap('Restablece tu contraseña', `
+<p>Hola {{user.name}}:</p>
+<p>Hemos recibido una solicitud para restablecer la contraseña de la cuenta asociada a <strong>{{user.email}}</strong>.</p>
+<p>Pulsa el botón de abajo para elegir una nueva contraseña. Este enlace caduca en {{expiresInMinutes}} minutos.</p>
+<p style="margin:24px 0"><a href="{{{resetUrl}}}" style="${buttonStyles}">Restablecer contraseña</a></p>
+<p style="font-size:13px;color:#6b7280">O copia y pega esta URL en tu navegador:<br><span style="word-break:break-all">{{resetUrl}}</span></p>
+<p>Si no has solicitado este cambio, no tienes que hacer nada: tu contraseña seguirá siendo la misma.</p>
+`, FOOTER_ES_ES),
+  bodyText: `Hola {{user.name}}:
+
+Hemos recibido una solicitud para restablecer la contraseña de {{user.email}}.
+
+Restablece tu contraseña con este enlace (caduca en {{expiresInMinutes}} minutos):
+{{resetUrl}}
+
+Si no has solicitado este cambio, ignora este correo.`,
+  description: 'Se envía cuando una persona solicita restablecer su contraseña mediante better-auth.',
+};
+
+/** Every locale row of the password-reset template, in one enumerable list. */
+export const AUTH_PASSWORD_RESET_TEMPLATES: EmailTemplate[] = [
+  AUTH_PASSWORD_RESET_TEMPLATE,
+  AUTH_PASSWORD_RESET_TEMPLATE_ZH_CN,
+  AUTH_PASSWORD_RESET_TEMPLATE_JA_JP,
+  AUTH_PASSWORD_RESET_TEMPLATE_ES_ES,
+];
+
 export const AUTH_VERIFY_EMAIL_TEMPLATE: EmailTemplate = {
   name: 'auth.verify_email',
   label: 'Verify Email Address',
@@ -105,6 +203,68 @@ Please verify your email ({{user.email}}) by opening this link:
   description: 'Sent when better-auth needs to verify a newly-registered email address.',
 };
 
+export const AUTH_VERIFY_EMAIL_TEMPLATE_ZH_CN: EmailTemplate = {
+  ...AUTH_VERIFY_EMAIL_TEMPLATE,
+  locale: 'zh-CN',
+  label: '验证邮箱地址',
+  subject: '验证您的 {{appName}} 邮箱地址',
+  bodyHtml: wrap('验证您的邮箱', `
+<p>{{user.name}} 您好：</p>
+<p>感谢您注册 {{appName}}！请确认 <strong>{{user.email}}</strong> 属于您本人。</p>
+<p style="margin:24px 0"><a href="{{{verificationUrl}}}" style="${buttonStyles}">验证邮箱</a></p>
+<p style="font-size:13px;color:#6b7280">或将以下链接复制到浏览器中打开：<br><span style="word-break:break-all">{{verificationUrl}}</span></p>
+`, FOOTER_ZH_CN),
+  bodyText: `{{user.name}} 您好：
+
+请打开以下链接，验证您的邮箱地址（{{user.email}}）：
+{{verificationUrl}}`,
+  description: '当 better-auth 需要验证新注册的邮箱地址时发送。',
+};
+
+export const AUTH_VERIFY_EMAIL_TEMPLATE_JA_JP: EmailTemplate = {
+  ...AUTH_VERIFY_EMAIL_TEMPLATE,
+  locale: 'ja-JP',
+  label: 'メールアドレスの確認',
+  subject: '{{appName}} のメールアドレスを確認してください',
+  bodyHtml: wrap('メールアドレスの確認', `
+<p>{{user.name}} 様</p>
+<p>{{appName}} にご登録いただきありがとうございます。<strong>{{user.email}}</strong> がご本人のものであることをご確認ください。</p>
+<p style="margin:24px 0"><a href="{{{verificationUrl}}}" style="${buttonStyles}">メールアドレスを確認</a></p>
+<p style="font-size:13px;color:#6b7280">または、次の URL をブラウザーに貼り付けてください：<br><span style="word-break:break-all">{{verificationUrl}}</span></p>
+`, FOOTER_JA_JP),
+  bodyText: `{{user.name}} 様
+
+次のリンクを開いて、メールアドレス（{{user.email}}）をご確認ください:
+{{verificationUrl}}`,
+  description: 'better-auth が新規登録されたメールアドレスの確認を必要とするときに送信されます。',
+};
+
+export const AUTH_VERIFY_EMAIL_TEMPLATE_ES_ES: EmailTemplate = {
+  ...AUTH_VERIFY_EMAIL_TEMPLATE,
+  locale: 'es-ES',
+  label: 'Verificar dirección de correo',
+  subject: 'Verifica tu dirección de correo de {{appName}}',
+  bodyHtml: wrap('Verifica tu correo', `
+<p>Hola {{user.name}}:</p>
+<p>¡Gracias por registrarte en {{appName}}! Confirma que <strong>{{user.email}}</strong> te pertenece.</p>
+<p style="margin:24px 0"><a href="{{{verificationUrl}}}" style="${buttonStyles}">Verificar correo</a></p>
+<p style="font-size:13px;color:#6b7280">O copia y pega esta URL en tu navegador:<br><span style="word-break:break-all">{{verificationUrl}}</span></p>
+`, FOOTER_ES_ES),
+  bodyText: `Hola {{user.name}}:
+
+Verifica tu dirección de correo ({{user.email}}) abriendo este enlace:
+{{verificationUrl}}`,
+  description: 'Se envía cuando better-auth necesita verificar una dirección de correo recién registrada.',
+};
+
+/** Every locale row of the email-verification template, in one enumerable list. */
+export const AUTH_VERIFY_EMAIL_TEMPLATES: EmailTemplate[] = [
+  AUTH_VERIFY_EMAIL_TEMPLATE,
+  AUTH_VERIFY_EMAIL_TEMPLATE_ZH_CN,
+  AUTH_VERIFY_EMAIL_TEMPLATE_JA_JP,
+  AUTH_VERIFY_EMAIL_TEMPLATE_ES_ES,
+];
+
 export const AUTH_MAGIC_LINK_TEMPLATE: EmailTemplate = {
   name: 'auth.magic_link',
   label: 'Magic Link Sign-In',
@@ -127,6 +287,59 @@ export const AUTH_MAGIC_LINK_TEMPLATE: EmailTemplate = {
   isSystem: true,
   description: 'Passwordless sign-in link sent by the magic-link plugin.',
 };
+
+export const AUTH_MAGIC_LINK_TEMPLATE_ZH_CN: EmailTemplate = {
+  ...AUTH_MAGIC_LINK_TEMPLATE,
+  locale: 'zh-CN',
+  label: '免密登录链接',
+  subject: '您的 {{appName}} 登录链接',
+  bodyHtml: wrap('登录 {{appName}}', `
+<p>点击下方按钮即可登录。该链接将在 {{expiresInMinutes}} 分钟后失效，且只能使用一次。</p>
+<p style="margin:24px 0"><a href="{{{magicLinkUrl}}}" style="${buttonStyles}">登录</a></p>
+<p style="font-size:13px;color:#6b7280">或复制以下链接：<br><span style="word-break:break-all">{{magicLinkUrl}}</span></p>
+`, FOOTER_ZH_CN),
+  bodyText: `登录 {{appName}}（{{expiresInMinutes}} 分钟内有效）：
+{{magicLinkUrl}}`,
+  description: '由 magic-link 插件发送的免密登录链接。',
+};
+
+export const AUTH_MAGIC_LINK_TEMPLATE_JA_JP: EmailTemplate = {
+  ...AUTH_MAGIC_LINK_TEMPLATE,
+  locale: 'ja-JP',
+  label: 'マジックリンクでのサインイン',
+  subject: '{{appName}} のサインインリンク',
+  bodyHtml: wrap('{{appName}} にサインイン', `
+<p>下のボタンからサインインできます。このリンクは {{expiresInMinutes}} 分後に無効になり、一度しか使用できません。</p>
+<p style="margin:24px 0"><a href="{{{magicLinkUrl}}}" style="${buttonStyles}">サインイン</a></p>
+<p style="font-size:13px;color:#6b7280">または、次のリンクを貼り付けてください：<br><span style="word-break:break-all">{{magicLinkUrl}}</span></p>
+`, FOOTER_JA_JP),
+  bodyText: `{{appName}} にサインイン（有効期限 {{expiresInMinutes}} 分）:
+{{magicLinkUrl}}`,
+  description: 'magic-link プラグインが送信するパスワード不要のサインインリンクです。',
+};
+
+export const AUTH_MAGIC_LINK_TEMPLATE_ES_ES: EmailTemplate = {
+  ...AUTH_MAGIC_LINK_TEMPLATE,
+  locale: 'es-ES',
+  label: 'Enlace de acceso directo',
+  subject: 'Tu enlace de acceso a {{appName}}',
+  bodyHtml: wrap('Inicia sesión en {{appName}}', `
+<p>Pulsa el botón de abajo para iniciar sesión. Este enlace caduca en {{expiresInMinutes}} minutos y solo puede usarse una vez.</p>
+<p style="margin:24px 0"><a href="{{{magicLinkUrl}}}" style="${buttonStyles}">Iniciar sesión</a></p>
+<p style="font-size:13px;color:#6b7280">O pega este enlace:<br><span style="word-break:break-all">{{magicLinkUrl}}</span></p>
+`, FOOTER_ES_ES),
+  bodyText: `Inicia sesión en {{appName}} (caduca en {{expiresInMinutes}} min):
+{{magicLinkUrl}}`,
+  description: 'Enlace de inicio de sesión sin contraseña enviado por el plugin magic-link.',
+};
+
+/** Every locale row of the magic-link template, in one enumerable list. */
+export const AUTH_MAGIC_LINK_TEMPLATES: EmailTemplate[] = [
+  AUTH_MAGIC_LINK_TEMPLATE,
+  AUTH_MAGIC_LINK_TEMPLATE_ZH_CN,
+  AUTH_MAGIC_LINK_TEMPLATE_JA_JP,
+  AUTH_MAGIC_LINK_TEMPLATE_ES_ES,
+];
 
 export const AUTH_INVITATION_TEMPLATE: EmailTemplate = {
   name: 'auth.invitation',
@@ -155,6 +368,62 @@ Accept: {{acceptUrl}}`,
   description: 'Sent by better-auth organization plugin when a user is invited to an org.',
 };
 
+export const AUTH_INVITATION_TEMPLATE_ZH_CN: EmailTemplate = {
+  ...AUTH_INVITATION_TEMPLATE,
+  locale: 'zh-CN',
+  label: '组织邀请',
+  subject: '{{inviter.name}} 邀请您加入 {{organization.name}}',
+  bodyHtml: wrap('您收到一份邀请', `
+<p><strong>{{inviter.name}}</strong>（{{inviter.email}}）邀请您以 <em>{{role}}</em> 的身份加入 {{appName}} 上的 <strong>{{organization.name}}</strong>。</p>
+<p style="margin:24px 0"><a href="{{{acceptUrl}}}" style="${buttonStyles}">接受邀请</a></p>
+<p style="font-size:13px;color:#6b7280">或复制以下链接：<br><span style="word-break:break-all">{{acceptUrl}}</span></p>
+`, FOOTER_ZH_CN),
+  bodyText: `{{inviter.name}}（{{inviter.email}}）邀请您加入 {{appName}} 上的 {{organization.name}}。
+
+接受邀请：{{acceptUrl}}`,
+  description: '当用户被邀请加入组织时，由 better-auth organization 插件发送。',
+};
+
+export const AUTH_INVITATION_TEMPLATE_JA_JP: EmailTemplate = {
+  ...AUTH_INVITATION_TEMPLATE,
+  locale: 'ja-JP',
+  label: '組織への招待',
+  subject: '{{inviter.name}} さんが {{organization.name}} に招待しています',
+  bodyHtml: wrap('招待が届いています', `
+<p><strong>{{inviter.name}}</strong>（{{inviter.email}}）さんが、{{appName}} の <strong>{{organization.name}}</strong> に <em>{{role}}</em> として参加するようあなたを招待しました。</p>
+<p style="margin:24px 0"><a href="{{{acceptUrl}}}" style="${buttonStyles}">招待を承認する</a></p>
+<p style="font-size:13px;color:#6b7280">または、次のリンクを貼り付けてください：<br><span style="word-break:break-all">{{acceptUrl}}</span></p>
+`, FOOTER_JA_JP),
+  bodyText: `{{inviter.name}}（{{inviter.email}}）さんが、{{appName}} の {{organization.name}} に招待しています。
+
+承認する: {{acceptUrl}}`,
+  description: 'ユーザーが組織に招待されたときに better-auth organization プラグインが送信します。',
+};
+
+export const AUTH_INVITATION_TEMPLATE_ES_ES: EmailTemplate = {
+  ...AUTH_INVITATION_TEMPLATE,
+  locale: 'es-ES',
+  label: 'Invitación a la organización',
+  subject: '{{inviter.name}} te ha invitado a {{organization.name}}',
+  bodyHtml: wrap('Te han invitado', `
+<p><strong>{{inviter.name}}</strong> ({{inviter.email}}) te ha invitado a unirte a <strong>{{organization.name}}</strong> en {{appName}} como <em>{{role}}</em>.</p>
+<p style="margin:24px 0"><a href="{{{acceptUrl}}}" style="${buttonStyles}">Aceptar invitación</a></p>
+<p style="font-size:13px;color:#6b7280">O pega este enlace:<br><span style="word-break:break-all">{{acceptUrl}}</span></p>
+`, FOOTER_ES_ES),
+  bodyText: `{{inviter.name}} ({{inviter.email}}) te ha invitado a unirte a {{organization.name}} en {{appName}}.
+
+Aceptar: {{acceptUrl}}`,
+  description: 'Lo envía el plugin de organización de better-auth cuando se invita a alguien a una organización.',
+};
+
+/** Every locale row of the invitation template, in one enumerable list. */
+export const AUTH_INVITATION_TEMPLATES: EmailTemplate[] = [
+  AUTH_INVITATION_TEMPLATE,
+  AUTH_INVITATION_TEMPLATE_ZH_CN,
+  AUTH_INVITATION_TEMPLATE_JA_JP,
+  AUTH_INVITATION_TEMPLATE_ES_ES,
+];
+
 export const AUTH_TWO_FACTOR_OTP_TEMPLATE: EmailTemplate = {
   name: 'auth.two_factor_otp',
   label: 'Two-Factor Verification Code',
@@ -177,6 +446,61 @@ export const AUTH_TWO_FACTOR_OTP_TEMPLATE: EmailTemplate = {
   isSystem: true,
   description: 'Time-based OTP delivered for two-factor / email-OTP login.',
 };
+
+const otpCodeStyles = 'font-size:32px;font-weight:700;letter-spacing:6px;background:#f3f4f6;padding:16px;text-align:center;border-radius:6px;margin:24px 0';
+
+export const AUTH_TWO_FACTOR_OTP_TEMPLATE_ZH_CN: EmailTemplate = {
+  ...AUTH_TWO_FACTOR_OTP_TEMPLATE,
+  locale: 'zh-CN',
+  label: '两步验证码',
+  subject: '您的 {{appName}} 验证码',
+  bodyHtml: wrap('您的验证码', `
+<p>请使用以下验证码完成登录：</p>
+<p style="${otpCodeStyles}">{{otp}}</p>
+<p style="color:#6b7280;font-size:13px">该验证码将在 {{expiresInMinutes}} 分钟后失效。如果这不是您本人的登录尝试，请立即修改密码——您的账号可能存在风险。</p>
+`, FOOTER_ZH_CN),
+  bodyText: `您的 {{appName}} 验证码：{{otp}}
+（{{expiresInMinutes}} 分钟内有效）`,
+  description: '用于两步验证 / 邮箱验证码登录的时效性验证码。',
+};
+
+export const AUTH_TWO_FACTOR_OTP_TEMPLATE_JA_JP: EmailTemplate = {
+  ...AUTH_TWO_FACTOR_OTP_TEMPLATE,
+  locale: 'ja-JP',
+  label: '二要素認証コード',
+  subject: '{{appName}} の確認コード',
+  bodyHtml: wrap('確認コード', `
+<p>次のコードを入力してサインインを完了してください：</p>
+<p style="${otpCodeStyles}">{{otp}}</p>
+<p style="color:#6b7280;font-size:13px">このコードは {{expiresInMinutes}} 分後に無効になります。サインインを試みた覚えがない場合は、アカウントが危険にさらされている可能性があります。パスワードを変更してください。</p>
+`, FOOTER_JA_JP),
+  bodyText: `{{appName}} の確認コード: {{otp}}
+（有効期限 {{expiresInMinutes}} 分）`,
+  description: '二要素認証・メール OTP ログインで配信される時限式のワンタイムコードです。',
+};
+
+export const AUTH_TWO_FACTOR_OTP_TEMPLATE_ES_ES: EmailTemplate = {
+  ...AUTH_TWO_FACTOR_OTP_TEMPLATE,
+  locale: 'es-ES',
+  label: 'Código de verificación en dos pasos',
+  subject: 'Tu código de verificación de {{appName}}',
+  bodyHtml: wrap('Tu código de verificación', `
+<p>Usa este código para completar el inicio de sesión:</p>
+<p style="${otpCodeStyles}">{{otp}}</p>
+<p style="color:#6b7280;font-size:13px">Este código caduca en {{expiresInMinutes}} minutos. Si no has intentado iniciar sesión, cambia tu contraseña: tu cuenta podría estar en peligro.</p>
+`, FOOTER_ES_ES),
+  bodyText: `Tu código de verificación de {{appName}}: {{otp}}
+(caduca en {{expiresInMinutes}} minutos)`,
+  description: 'Código de un solo uso con caducidad para el inicio de sesión en dos pasos o con OTP por correo.',
+};
+
+/** Every locale row of the two-factor OTP template, in one enumerable list. */
+export const AUTH_TWO_FACTOR_OTP_TEMPLATES: EmailTemplate[] = [
+  AUTH_TWO_FACTOR_OTP_TEMPLATE,
+  AUTH_TWO_FACTOR_OTP_TEMPLATE_ZH_CN,
+  AUTH_TWO_FACTOR_OTP_TEMPLATE_JA_JP,
+  AUTH_TWO_FACTOR_OTP_TEMPLATE_ES_ES,
+];
 
 // ───────────────────────────────────────────────────────────────────────────
 // auth.email_change_notice — the OLD address's notice (#8019)
@@ -347,11 +671,20 @@ export const AUTH_EMAIL_CHANGE_NOTICE_TEMPLATES: EmailTemplate[] = [
   AUTH_EMAIL_CHANGE_NOTICE_TEMPLATE_ES_ES,
 ];
 
+/**
+ * Every built-in auth template, in every supported locale (#8195).
+ *
+ * ⚠️ Seeding is what makes a row *selectable*: `EmailService.sendTemplate`
+ * resolves `(name, locale)` out of `sys_email_template`, so a locale row that
+ * is exported but missing from this list resolves to nothing and the ladder
+ * silently falls back to the `en-US` body. Adding a locale row means adding it
+ * here in the same edit.
+ */
 export const BUILTIN_AUTH_TEMPLATES: EmailTemplate[] = [
-  AUTH_PASSWORD_RESET_TEMPLATE,
-  AUTH_VERIFY_EMAIL_TEMPLATE,
-  AUTH_MAGIC_LINK_TEMPLATE,
-  AUTH_INVITATION_TEMPLATE,
-  AUTH_TWO_FACTOR_OTP_TEMPLATE,
+  ...AUTH_PASSWORD_RESET_TEMPLATES,
+  ...AUTH_VERIFY_EMAIL_TEMPLATES,
+  ...AUTH_MAGIC_LINK_TEMPLATES,
+  ...AUTH_INVITATION_TEMPLATES,
+  ...AUTH_TWO_FACTOR_OTP_TEMPLATES,
   ...AUTH_EMAIL_CHANGE_NOTICE_TEMPLATES,
 ];
