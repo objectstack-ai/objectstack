@@ -376,6 +376,222 @@ describe('#9160 — the value-bearing families the live probe measured', () => {
   });
 });
 
+describe('#9275 — a value containing " - " no longer eats the template head', () => {
+  // Every string below was raised off a live server at HEAD (PostgreSQL 16.13,
+  // MySQL 8.0.46, the configuration CI uses) with the canary
+  // `SENSITIVE-CANARY-9275 - 2026 - Q3`, and the residue each one produced
+  // BEFORE this change is quoted next to it. `sql-driver-diagnostic-value-probe`
+  // raises the same shapes and asserts the server still prints them.
+  const CANARY = 'SENSITIVE-CANARY-9275';
+  const DASHED = `${CANARY} - 2026 - Q3`;
+  /** The piece that stood in the log before the cut learned about heads. */
+  const RESIDUE = 'Q3';
+
+  describe('the head-anchored cut — families whose value runs to end of message', () => {
+    it('postgres 22P02: keeps the head the operator came for, drops the value whole', () => {
+      // Measured before: `Q3" [statement and bound values redacted]`.
+      const out = redactStatementFromMessage(
+        `insert into "t" ("age") values ($1) - invalid input syntax for type integer: "${DASHED}"`,
+      );
+
+      expect(out).not.toContain(RESIDUE);
+      expect(out).not.toContain(CANARY);
+      expect(out).toBe(
+        'invalid input syntax for type integer: [value redacted]'
+        + ' [statement and bound values redacted]',
+      );
+    });
+
+    it('postgres 22007: the multi-word type name survives too', () => {
+      const out = redactStatementFromMessage(
+        `insert into "t" ("when_at") values ($1)`
+        + ` - invalid input syntax for type timestamp with time zone: "${DASHED}"`,
+      );
+
+      expect(out).not.toContain(RESIDUE);
+      expect(out).toBe(
+        'invalid input syntax for type timestamp with time zone: [value redacted]'
+        + ' [statement and bound values redacted]',
+      );
+    });
+
+    it('mysql 1292: the column-less spelling keeps its head as well', () => {
+      // Measured before: `Q3' [statement and bound values redacted]`.
+      const out = redactStatementFromMessage(
+        `insert into t (age) select cast('${DASHED}' as signed)`
+        + ` - Truncated incorrect INTEGER value: '${DASHED}'`,
+      );
+
+      expect(out).not.toContain(RESIDUE);
+      expect(out).toBe(
+        'Truncated incorrect INTEGER value: [value redacted]'
+        + ' [statement and bound values redacted]',
+      );
+    });
+
+    it('keeps the lower-case type spellings the same server prints', () => {
+      // `INTEGER`, `DOUBLE` and `time` were all raised live — the head pattern's
+      // `i` flag is load-bearing, not decoration.
+      for (const type of ['INTEGER', 'DOUBLE', 'time']) {
+        const out = redactStatementFromMessage(
+          `update t set age = label + 0 - Truncated incorrect ${type} value: '${DASHED}'`,
+        );
+
+        expect(out).not.toContain(RESIDUE);
+        expect(out).toBe(
+          `Truncated incorrect ${type} value: [value redacted] [statement and bound values redacted]`,
+        );
+      }
+    });
+  });
+
+  describe('postgres 22003 — the third family, which takes the ANCHOR remedy', () => {
+    // ⛔ #9160 left this row without a head-gone recovery on the reasoning that
+    // an out-of-range value is a NUMBER and cannot contain ` - `. Measured
+    // through the driver's own bind path, that is false: Postgres detects the
+    // overflow while scanning digits, before it rejects the trailing junk, so it
+    // echoes the caller's whole string.
+    it('recovers the head-gone residue through its right anchor', () => {
+      // Measured before: `Q3" is out of range for type integer […]`.
+      const out = redactStatementFromMessage(
+        'insert into "t" ("age") values ($1)'
+        + ` - value "99999999999 - 2026 - ${RESIDUE}" is out of range for type integer`,
+      );
+
+      expect(out).not.toContain(RESIDUE);
+      expect(out).not.toContain('99999999999');
+      expect(out).toBe(
+        '[value redacted] is out of range for type integer'
+        + ' [statement and bound values redacted]',
+      );
+    });
+
+    it('still keeps the head when the value carried no separator', () => {
+      // The intact template must keep reporting `value …`, so the anchor remedy
+      // does not quietly cost the head in the ordinary case.
+      const out = redactStatementFromMessage(
+        'insert into "t" ("age") values ($1) - value "99999999999" is out of range for type integer',
+      );
+
+      expect(out).toBe(
+        'value [value redacted] is out of range for type integer'
+        + ' [statement and bound values redacted]',
+      );
+    });
+  });
+
+  describe('the steering the amendment admits, and the bound on it', () => {
+    it('resolves a value that MIMICS a head to the LAST head, leaking nothing', () => {
+      // ⛔ The ordering that carries the safety argument. A hostile value spells
+      // a known head inside itself; taking the FIRST head would cut before the
+      // decoy and leave the real value standing behind it. Taking the LAST cuts
+      // at the decoy, so no part of the value can survive.
+      const out = redactStatementFromMessage(
+        `insert into "t" ("age") values ('${CANARY} - invalid input syntax for type integer: "decoy')`
+        + ` - invalid input syntax for type integer: "${CANARY} - invalid input syntax for type integer: "decoy"`,
+      );
+
+      expect(out).not.toContain(CANARY);
+      expect(out).not.toContain('decoy');
+      expect(out).toBe(
+        'invalid input syntax for type integer: [value redacted]'
+        + ' [statement and bound values redacted]',
+      );
+    });
+
+    it('SUPPRESSES a real diagnostic when a value forges a head — over-redaction, never exposure', () => {
+      // The honest cost of the amendment, asserted rather than discovered later.
+      // A crafted value makes the cut land inside the STATEMENT, so the operator
+      // reads the forged head instead of the `Unknown column` the server really
+      // replied. What must NOT happen is any of the statement surviving — the
+      // head invariant (only end-of-message templates may declare a `head`) is
+      // what turns this into lost detail rather than a leak.
+      const out = redactStatementFromMessage(
+        "insert into `t` (`a`, `b`) values"
+        + " ('x - Truncated incorrect INTEGER value: 'forged', 'SECOND-VALUE-CANARY')"
+        + " - Unknown column 'zzz' in 'field list'",
+      );
+
+      expect(out).not.toContain('SECOND-VALUE-CANARY');
+      expect(out).not.toContain('forged');
+      expect(out).toBe(
+        'Truncated incorrect INTEGER value: [value redacted]'
+        + ' [statement and bound values redacted]',
+      );
+    });
+
+    it('every head-bearing family swallows to END OF MESSAGE — the invariant, behaviourally', () => {
+      // ⛔ The structural property the `head` field documents: a template may
+      // declare a `head` only if its value runs to end of message. If one ever
+      // gets a `head` while keeping a right anchor, a head-anchored cut landing
+      // inside the statement would keep everything after that anchor — which is
+      // statement, which is caller values. This case forges each head over a
+      // statement carrying a second value and asserts nothing survives.
+      for (const head of [
+        'invalid input syntax for type integer: "',
+        "Truncated incorrect INTEGER value: '",
+      ]) {
+        const out = redactStatementFromMessage(
+          `insert into \`t\` (\`a\`, \`b\`) values ('x - ${head}forged', 'SECOND-VALUE-CANARY')`
+          + " - Unknown column 'zzz' in 'field list'",
+        );
+
+        expect(out).not.toContain('SECOND-VALUE-CANARY');
+        expect(out).not.toContain('forged');
+        expect(out).not.toContain('insert into');
+        expect(out).toContain('[value redacted]');
+      }
+    });
+  });
+
+  describe('the ordinary case is byte-identical — no head, no change', () => {
+    it('cuts at the last separator when no known head stands after one', () => {
+      // #8682's original answer is untouched wherever this amendment has nothing
+      // to say, which is every message that carries no measured head.
+      const out = redactStatementFromMessage(
+        "insert into `t` (`label`) values ('2026 - Q3 secret plan')"
+        + ' returning * - table t has no column named label',
+      );
+
+      expect(out).toBe('table t has no column named label [statement and bound values redacted]');
+      expect(out).not.toContain('Q3 secret plan');
+    });
+
+    it('leaves the identifier-only families exactly as they were', () => {
+      // The six the probe pins. Over-matching is the expensive direction, and a
+      // cut that learned about heads must not have taught itself to fire here.
+      for (const diagnostic of [
+        "Out of range value for column 'age' at row 1",
+        "Data too long for column 'label' at row 1",
+        "Unknown column 'zzz_nonexistent_field' in 'field list'",
+        'duplicate key value violates unique constraint "t_email_key"',
+        'null value in column "id" of relation "t" violates not-null constraint',
+        'value too long for type character varying(20)',
+        'numeric field overflow',
+      ]) {
+        const out = redactStatementFromMessage(
+          `insert into \`t\` (\`c\`) values ('2026 - Q3 plan') - ${diagnostic}`,
+        );
+
+        expect(out).toBe(`${diagnostic} [statement and bound values redacted]`);
+        expect(out).not.toContain('[value redacted]');
+        expect(out).not.toContain('Q3 plan');
+      }
+    });
+
+    it('leaves the VALUELESS json spelling untouched, separator in the value or not', () => {
+      // It has no `: "`, so no head matches and nothing changes — the guard that
+      // keeps the amendment from redacting a diagnostic that never leaked.
+      const out = redactStatementFromMessage(
+        `insert into "t" ("doc") values ('2026 - Q3'::json) - invalid input syntax for type json`,
+      );
+
+      expect(out).toBe('invalid input syntax for type json [statement and bound values redacted]');
+      expect(out).not.toContain('[value redacted]');
+    });
+  });
+});
+
 describe('redactBoundStatement', () => {
   it('redacts `stack` too — the statement opened it a second time', () => {
     const original = new Error(BOUND_INSERT);
