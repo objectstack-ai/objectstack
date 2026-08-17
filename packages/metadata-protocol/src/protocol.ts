@@ -77,6 +77,7 @@ import {
 } from '@objectstack/spec/kernel';
 import { validateObjectNamespacePrefix, deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
+import { REFERENCE_SITES } from './reference-sites.js';
 // [#5488] The `@objectstack/spec/api` import that stood here — `ApiEndpointSchema`,
 // `validateApiEndpointDeclarations`, `type ApiEndpoint` — went with
 // `gateApiDraftsForPublish` (see its retirement note in `publishPackageDrafts`).
@@ -2952,121 +2953,105 @@ const SERVICE_CONFIG: Record<string, {
 };
 
 /**
- * Phase 3a-references: hand-curated reference path registry.
+ * Phase 3a-references: how a reference is FOUND in a stored document, given the
+ * derived site index in `./reference-sites.ts`.
  *
- * Maps a *target* metadata type to the list of *source* type+path tuples
- * that may point at it. Used by {@link findReferencesToMeta} to scan all
- * loaded metadata and surface "what depends on this?" before a user
- * deletes or renames an artifact.
+ * The registry that used to sit here was a hand-curated table of `fromType` +
+ * fully-qualified dotted paths. It rotted — 34 of its 40 paths named properties
+ * the source type's schema does not declare, leaving five of its seven target
+ * keys answering `{ references: [] }` unconditionally (#9190; the measurements
+ * are in `reference-sites.ts`'s header, which is the one place they live).
  *
- * Path syntax:
- *   - `'foo'`            → item.foo
- *   - `'foo.bar'`        → item.foo.bar
- *   - `'foo[]'`          → each element of array item.foo
- *   - `'foo[].bar'`      → bar of each element of array item.foo
- *   - `'foo{}'`          → each value of Record item.foo
- *   - `'foo{}.bar'`      → bar of each value of Record item.foo
- *
- * Coverage is intentionally narrow — covers the highest-value references
- * for MVP. Add more entries as new editors are built.
+ * ⛔ Do not reintroduce a path table. Paths were the wrong unit: `AppSchema`'s
+ * navigation is recursive, so an exhaustive path list is unbounded, and it goes
+ * stale the moment a wrapper key moves. The derived index records the PROPERTY
+ * that carries a name; this walk finds it wherever the document actually puts
+ * it, and reports the path it was found at.
  */
-const REFERENCE_PATHS: Record<string, Array<{ fromType: string; paths: string[]; kind: string }>> = {
-    object: [
-        { fromType: 'view', paths: ['object', 'objectName'], kind: 'view' },
-        { fromType: 'dashboard', paths: ['widgets[].object', 'widgets[].objectName'], kind: 'dashboard widget' },
-        { fromType: 'flow', paths: ['object', 'context.object', 'trigger.object', 'targetObject'], kind: 'flow' },
-        // fromType 'workflow' removed (#4451): no such metadata type is
-        // registered, so the row scanned nothing.
-        { fromType: 'permission', paths: ['objects[].name', 'objects[].object'], kind: 'permission' },
-        { fromType: 'app', paths: ['navItems[].objectName', 'navItems[].object', 'tabs[].objectName', 'tabs[].object'], kind: 'app nav' },
-        { fromType: 'page', paths: ['object', 'objectName'], kind: 'page' },
-        { fromType: 'report', paths: ['object', 'objectName'], kind: 'report' },
-        { fromType: 'action', paths: ['object', 'objectName'], kind: 'action' },
-        // fromType 'validation' removed (#4509): it scanned `object`/`objectName`
-        // on a schema that has neither — every variant is strict, so parse would
-        // have stripped such a key anyway — and the kind is now retired
-        // (ADR-0088). Rules travel with their object, so a rule's dependency on
-        // that object needs no row: deleting the object takes them with it.
-        { fromType: 'hook', paths: ['object', 'objectName'], kind: 'hook' },
-        { fromType: 'object', paths: ['fields[].referenceTo', 'fields{}.referenceTo', 'fields{}.reference'], kind: 'field reference' },
-    ],
-    view: [
-        { fromType: 'dashboard', paths: ['widgets[].view', 'widgets[].viewName'], kind: 'dashboard widget' },
-        { fromType: 'app', paths: ['navItems[].viewName', 'tabs[].viewName'], kind: 'app nav' },
-        { fromType: 'page', paths: ['viewName'], kind: 'page' },
-    ],
-    tool: [
-        { fromType: 'agent', paths: ['tools[]', 'tools[].name'], kind: 'agent tool' },
-    ],
-    skill: [
-        { fromType: 'agent', paths: ['skills[]', 'skills[].name'], kind: 'agent skill' },
-    ],
-    flow: [
-        { fromType: 'app', paths: ['navItems[].flowName', 'tabs[].flowName'], kind: 'app nav' },
-    ],
-    dashboard: [
-        { fromType: 'app', paths: ['navItems[].dashboardName', 'tabs[].dashboardName'], kind: 'app nav' },
-    ],
-    page: [
-        { fromType: 'app', paths: ['navItems[].pageName', 'tabs[].pageName'], kind: 'app nav' },
-    ],
-};
 
 /**
- * Extract one or more string values from `item` at `path`. Supports
- * `'a.b'` (nested object access) and `'a[].b'` (array element access).
- * Returns an empty array if any segment is missing.
+ * Every name a reference-bearing property value may be carrying, tolerant of
+ * the four shapes a name can arrive in.
+ *
+ * Deliberately shape-TOLERANT at read time while the derivation is shape-STRICT
+ * at build time: the derivation decides whether a property means "a reference"
+ * (and rejects `enum`-constrained lookalikes such as a chart axis `position`),
+ * while this function only has to read a value whose meaning is already
+ * settled. Record KEYS are included because `z.record(name, …)` is how the
+ * platform spells a name-keyed collection — `PermissionSetSchema.objects` is
+ * exactly that, and the old table's `objects[].name` could not express it.
  */
-function extractPathValues(item: unknown, path: string): string[] {
-    if (!item || typeof item !== 'object') return [];
-    const segments = path.split('.');
-    let current: unknown[] = [item];
-    for (const rawSeg of segments) {
-        let kind: 'value' | 'array' | 'record' = 'value';
-        let seg = rawSeg;
-        if (seg.endsWith('[]')) {
-            kind = 'array';
-            seg = seg.slice(0, -2);
-        } else if (seg.endsWith('{}')) {
-            kind = 'record';
-            seg = seg.slice(0, -2);
-        }
-        const next: unknown[] = [];
-        for (const node of current) {
-            if (!node || typeof node !== 'object') continue;
-            let value: unknown;
-            if (seg === '') {
-                value = node;
-            } else {
-                value = (node as Record<string, unknown>)[seg];
-            }
-            if (value === undefined || value === null) continue;
-            if (kind === 'array') {
-                if (Array.isArray(value)) {
-                    for (const v of value) next.push(v);
-                }
-            } else if (kind === 'record') {
-                if (Array.isArray(value)) {
-                    for (const v of value) next.push(v);
-                } else if (typeof value === 'object') {
-                    for (const v of Object.values(value as Record<string, unknown>)) next.push(v);
-                }
-            } else {
-                next.push(value);
+function referencedNamesAt(value: unknown): Array<{ name: string; suffix: string }> {
+    if (typeof value === 'string') {
+        return value.length > 0 ? [{ name: value, suffix: '' }] : [];
+    }
+    if (Array.isArray(value)) {
+        const out: Array<{ name: string; suffix: string }> = [];
+        for (const element of value) {
+            if (typeof element === 'string' && element.length > 0) out.push({ name: element, suffix: '[]' });
+            else if (element && typeof element === 'object') {
+                const named = (element as Record<string, unknown>).name;
+                if (typeof named === 'string' && named.length > 0) out.push({ name: named, suffix: '[].name' });
             }
         }
-        current = next;
-        if (current.length === 0) return [];
+        return out;
     }
-    // Coerce final values to strings, dropping non-string non-object leaves.
-    const out: string[] = [];
-    for (const v of current) {
-        if (typeof v === 'string' && v.length > 0) out.push(v);
-        else if (v && typeof v === 'object' && 'name' in (v as any) && typeof (v as any).name === 'string') {
-            out.push((v as any).name);
+    if (value && typeof value === 'object') {
+        const out: Array<{ name: string; suffix: string }> = [];
+        const record = value as Record<string, unknown>;
+        for (const key of Object.keys(record)) {
+            if (key.length > 0) out.push({ name: key, suffix: '{key}' });
         }
+        const named = record.name;
+        if (typeof named === 'string' && named.length > 0) out.push({ name: named, suffix: '.name' });
+        return out;
     }
-    return out;
+    return [];
+}
+
+/**
+ * Walk a stored metadata document and report every place it names
+ * `targetName` through one of `properties`.
+ *
+ * `properties` is the derived property → target binding for THIS source type,
+ * so the walk never guesses; it only looks where the schema said a name lives.
+ * Paths are reported with array indices and record keys elided (`a.b[].c`,
+ * `a{}.b`), matching the grammar the previous table used, so the value the
+ * "Used by" panel renders keeps its established shape.
+ */
+function collectReferenceHits(
+    item: unknown,
+    properties: ReadonlyMap<string, string>,
+    targetName: string,
+): Array<{ path: string; property: string }> {
+    const hits: Array<{ path: string; property: string }> = [];
+    const seenNodes = new Set<unknown>();
+
+    const walk = (node: unknown, trail: string, depth: number): void => {
+        if (!node || typeof node !== 'object' || depth > 16) return;
+        // Cycle guard. Stored documents are JSON, but a runtime-assembled item
+        // can still be self-referential, and a scan that hangs is a worse
+        // answer than a short one.
+        if (seenNodes.has(node)) return;
+        seenNodes.add(node);
+
+        if (Array.isArray(node)) {
+            for (const element of node) walk(element, `${trail}[]`, depth + 1);
+            return;
+        }
+        for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+            const here = trail ? `${trail}.${key}` : key;
+            if (properties.has(key)) {
+                for (const hit of referencedNamesAt(value)) {
+                    if (hit.name === targetName) hits.push({ path: `${here}${hit.suffix}`, property: key });
+                }
+            }
+            walk(value, here, depth + 1);
+        }
+    };
+
+    walk(item, '', 0);
+    return hits;
 }
 
 /**
@@ -17855,10 +17840,23 @@ export class ObjectStackProtocolImplementation implements
      * "Used by" panel before destructive actions (rename / delete /
      * type-narrowing).
      *
-     * Coverage is driven by the hand-curated {@link REFERENCE_PATHS}
-     * registry. A target type not present in the registry, and a SOURCE type
-     * this deployment does not declare, both simply produce no hits — neither
-     * is an error.
+     * [#9190] Coverage is DERIVED from the metadata type schemas
+     * ({@link REFERENCE_SITES}), not curated. The table that used to drive this
+     * had drifted until 34 of its 40 paths named properties no schema declares
+     * and five of its seven target keys answered `{ references: [] }`
+     * unconditionally — while this method's own doc called that a legitimate
+     * no-hit. It is no longer legitimate and it is no longer what happens: an
+     * empty answer now means the walk read every declared source type's shape
+     * and found nothing that can name this target. A SOURCE type this
+     * deployment does not declare still simply produces no hits, which is a
+     * fact about the deployment rather than about the platform.
+     *
+     * ⚠️ What an empty answer still cannot promise is bounded and recorded
+     * rather than implied: {@link REFERENCE_SITES.unwalkableSourceTypes} names
+     * every declared type whose shape could not be read (pinned by
+     * `reference-sites.derivation.test.ts`, so it cannot grow silently), and
+     * `SEMANTIC_REFERENCE_SITES` carries the properties whose name does not
+     * spell their target. Both are argued in `reference-sites.ts`.
      *
      * [#8896] A source type that could not be READ is a different fact and is
      * no longer answered the same way. This list is what an admin consults
@@ -17889,32 +17887,46 @@ export class ObjectStackProtocolImplementation implements
         // than on the two verbs above, and the difference is stated rather than
         // implied because a future reader will otherwise assume symmetry:
         //
-        //  • The REFUSAL is the whole wire-visible change. `viewes` used to miss
-        //    `REFERENCE_PATHS` and answer 200 `{ references: [] }` — read by an
+        //  • The REFUSAL is the whole wire-visible change #9157 made. `viewes`
+        //    used to miss the lookup and answer 200 `{ references: [] }` — read by an
         //    operator as "nothing depends on this", immediately before the
         //    rename or delete this panel exists to gate (ADR-0110 D3). It is now
         //    400, naming `view` / `views`.
-        //  • The manifest-ABSENT class changes NOTHING here, measured rather
-        //    than assumed: every {@link REFERENCE_PATHS} key (`object`, `view`,
-        //    `tool`, `skill`, `flow`, `dashboard`, `page`) is manifest-PRESENT,
-        //    so the old map already folded each of them. `translations` folded
-        //    to `translation` answers `{ references: [] }` exactly as
-        //    `translations` did, because `translation` is not a registry key
-        //    either — which this method's own doc calls a legitimate no-hit
-        //    rather than an error. Closing THAT gap is a `REFERENCE_PATHS`
-        //    coverage question and not a spelling one; it is not this card.
+        //  • The manifest-ABSENT class changed NOTHING here at the time, and
+        //    #9157 pinned that residue rather than implying it: every curated
+        //    key was manifest-PRESENT, so `translations` folded to
+        //    `translation` answered `{ references: [] }` exactly as
+        //    `translations` had. [#9190] That residue is now CLOSED by
+        //    derivation rather than by folding — `translation` has real
+        //    reference sites (`doc.translations`, `book.groups[].translations`)
+        //    because the walk reads the schemas that declare them. The spelling
+        //    contract below is untouched; what changed is what the lookup finds.
         //
-        // ⛔ Do not "improve" this by teaching `REFERENCE_PATHS` a plural key.
+        // ⛔ Do not "improve" this by teaching the site index a plural key.
         // That is the spelling-tolerant lookup one layer down which
         // {@link canonicalMetaType} has rejected since #4432.
         request = canonicalizeMetaRequestType(request);
         // Canonical by construction from the fold above — NOT a second fold.
         const singularTarget = request.type;
         const targetName = request.name;
-        const matchers = REFERENCE_PATHS[singularTarget];
-        if (!matchers || matchers.length === 0) {
+        const sites = REFERENCE_SITES.byTarget.get(singularTarget);
+        if (!sites || sites.length === 0) {
             return { references: [] };
         }
+
+        // One read per source type, not one per site: several properties of the
+        // same source type routinely name the same target, and the previous
+        // shape re-read the store once per matcher row.
+        const propertiesByFromType = new Map<string, Map<string, string>>();
+        for (const site of sites) {
+            let properties = propertiesByFromType.get(site.fromType);
+            if (!properties) {
+                properties = new Map<string, string>();
+                propertiesByFromType.set(site.fromType, properties);
+            }
+            properties.set(site.property, site.target);
+        }
+        const matchers = [...propertiesByFromType].map(([fromType, properties]) => ({ fromType, properties }));
 
         const seen = new Set<string>(); // dedup key: `${fromType}|${itemName}|${path}`
         const out: Array<{ type: string; name: string; label?: string; path: string; kind: string }> = [];
@@ -17962,20 +17974,27 @@ export class ObjectStackProtocolImplementation implements
                     // Don't list an item as a reference to itself unless the
                     // self-reference is meaningful (e.g. object→field path).
                     const isSelfReference = matcher.fromType === singularTarget && sourceName === targetName;
-                    for (const path of matcher.paths) {
-                        const values = extractPathValues(raw, path);
-                        if (!values.includes(targetName)) continue;
+                    for (const { path, property } of collectReferenceHits(raw, matcher.properties, targetName)) {
+                        // An item naming ITSELF through a scalar property is
+                        // the item, not a dependent. Collection-valued paths
+                        // are kept, because an item that lists itself among
+                        // many (an object's own field pointing back at it) is
+                        // a real edge an admin needs to see before a delete.
                         if (isSelfReference && !path.includes('[]') && !path.includes('{}')) continue;
                         const key = `${matcher.fromType}|${sourceName}|${path}`;
                         if (seen.has(key)) continue;
                         seen.add(key);
                         const label = (raw as any).label as string | undefined;
+                        // `kind` is a human label for the edge, derived from the
+                        // property that produced it rather than hand-written per
+                        // row — a curated label is the same maintenance debt as
+                        // a curated path, one field over.
                         out.push({
                             type: matcher.fromType,
                             name: sourceName,
                             ...(label ? { label } : {}),
                             path,
-                            kind: matcher.kind,
+                            kind: `${matcher.fromType} ${property}`,
                         });
                     }
                 }
