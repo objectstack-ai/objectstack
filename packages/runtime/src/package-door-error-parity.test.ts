@@ -174,9 +174,11 @@ describe('#8016 — the dispatcher package door answers the shared mapping', () 
      *     passed through verbatim, and out of #9106's ruled scope (which named
      *     the actions door and the resolver both doors above share). That path
      *     puts `code` at the body's TOP level rather than in `error.code`, so
-     *     it is not the field this ruling closed, and its envelope position is
-     *     an open finding of its own (#7035).
-     *     `check:dispatcher-error-vocabulary` is what keeps it honest meanwhile.
+     *     it is not the field this ruling closed. Filed as #9232 rather than
+     *     fixed here; `check:dispatcher-error-vocabulary` sweeps its platform
+     *     producers meanwhile. ⚠️ #9098's note pointed at #7035 for the
+     *     envelope-position half — that card is CLOSED (PR #7293, three /meta
+     *     501 handlers), so #9232 is the live one to read.
      *
      * History: #8087 first ruled the verbatim spelling stays and gated the
      * producer set (`dispatcher-error-vocabulary.ts`,
