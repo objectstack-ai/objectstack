@@ -36,6 +36,7 @@ function makeDeps(overrides: Partial<ExplainEngineDeps> & { sets?: any[]; schema
     },
     computeRlsFilter: async () => overrides.rls !== undefined ? overrides.rls : null,
     getFieldMask: () => ({}),
+    getPartialMaskRules: async () => ({}),
     baselinePermissionSets: ['member_default'],
     ...overrides,
   };
@@ -168,6 +169,153 @@ describe('explainAccess (ADR-0090 D6)', () => {
     const fls = d.layers.find((l) => l.layer === 'fls')!;
     expect(fls.verdict).toBe('narrows');
     expect(fls.detail).toContain('salary');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#9127] fls — the THREE-state field mask (hidden / partially masked /
+// readable). #8993 landed partial masking on the enforcement channel; this
+// layer reported only the binary mask, so a gated rule field read as fully
+// hidden and a gate-less rule field as fully readable. `getPartialMaskRules`
+// carries the enforcement composition in (never a re-derivation), and the
+// hidden/partial split here is `FieldMasker.maskResults`' own.
+// ---------------------------------------------------------------------------
+describe('explainAccess — fls reports partial masking (#9127)', () => {
+  const flsOf = async (over: Partial<ExplainEngineDeps>) => {
+    const d = await explainAccess(makeDeps(over), {
+      object: 'leave_request',
+      operation: 'read',
+      context: CTX,
+    });
+    return d.layers.find((l) => l.layer === 'fls')!;
+  };
+
+  it('HIDDEN: a field the mask denies with no applicable rule is still reported deleted', async () => {
+    const fls = await flsOf({
+      getFieldMask: () => ({ ssn: { readable: false }, name: { readable: true } }),
+      getPartialMaskRules: async () => ({}),
+    });
+    expect(fls.verdict).toBe('narrows');
+    expect(fls.detail).toContain('1 field(s) masked from responses');
+    expect(fls.detail).toContain('ssn');
+    expect(fls.detail).not.toContain('PARTIALLY');
+  });
+
+  it('PARTIAL (gated): a rule field the caller has not unmasked is NOT reported as hidden', async () => {
+    // The requiredPermissions fold marks `phone` non-readable; the rule turns
+    // that deletion into a replacement, so the caller receives `138****5678`,
+    // not an absent key. Pre-#9127 this read "1 field(s) masked from
+    // responses: [phone]" — the first misreport on the card.
+    const fls = await flsOf({
+      getFieldMask: () => ({ phone: { readable: false } }),
+      getPartialMaskRules: async () => ({ phone: 'phone' }),
+    });
+    expect(fls.verdict).toBe('narrows');
+    expect(fls.detail).not.toContain('masked from responses');
+    expect(fls.detail).toContain('1 field(s) PARTIALLY masked');
+    expect(fls.detail).toContain('phone (phone)');
+  });
+
+  it('PARTIAL (gate-less): a rule with no requiredPermissions is reported, not passed over', async () => {
+    // No permission entry exists for `bank` — the binary mask is silent — yet
+    // every non-system caller sees it masked. Pre-#9127 this layer answered
+    // `not_applicable` / "No field-level masking applies": the second misreport.
+    const fls = await flsOf({
+      getFieldMask: () => ({}),
+      getPartialMaskRules: async () => ({ bank: 'bank_account' }),
+    });
+    expect(fls.verdict).toBe('narrows');
+    expect(fls.detail).not.toBe('No field-level masking applies.');
+    expect(fls.detail).toContain('1 field(s) PARTIALLY masked');
+    expect(fls.detail).toContain('bank (bank_account)');
+  });
+
+  it('READABLE: a field in neither set appears in neither list', async () => {
+    const fls = await flsOf({
+      getFieldMask: () => ({ ssn: { readable: false }, name: { readable: true } }),
+      getPartialMaskRules: async () => ({ phone: 'phone' }),
+    });
+    expect(fls.detail).toContain('masked from responses: [ssn]');
+    expect(fls.detail).toContain('PARTIALLY masked');
+    expect(fls.detail).not.toContain('name');
+  });
+
+  it('reports all three states together, splitting hidden from partially masked', async () => {
+    const fls = await flsOf({
+      getFieldMask: () => ({
+        ssn: { readable: false },
+        phone: { readable: false },
+        name: { readable: true },
+      }),
+      getPartialMaskRules: async () => ({ phone: 'phone', bank: 'bank_account' }),
+    });
+    expect(fls.verdict).toBe('narrows');
+    // `phone` is denied by the binary mask AND carries a rule → partial, not hidden.
+    expect(fls.detail).toContain('1 field(s) masked from responses: [ssn]');
+    expect(fls.detail).toContain('2 field(s) PARTIALLY masked');
+    expect(fls.detail).toContain('phone (phone)');
+    expect(fls.detail).toContain('bank (bank_account)');
+  });
+
+  it('an explicit permission-set DENY stays HIDDEN — explain follows enforcement, it does not assume', async () => {
+    // A rule never widens an explicit deny, so enforcement drops such fields
+    // from `partialRules` before this layer sees them. The engine must report
+    // whatever the composition hands it rather than re-deriving "has a rule ⇒
+    // partial" — that second derivation is how explain drifted in the first place.
+    const fls = await flsOf({
+      getFieldMask: () => ({ phone: { readable: false } }),
+      getPartialMaskRules: async () => ({}),
+    });
+    expect(fls.detail).toContain('masked from responses: [phone]');
+    expect(fls.detail).not.toContain('PARTIALLY');
+  });
+
+  it('names an explicit keepHead/keepTail span rather than a preset', async () => {
+    const fls = await flsOf({
+      getPartialMaskRules: async () => ({ code: { keepHead: 2, keepTail: 2 } }),
+    });
+    expect(fls.detail).toContain('code (keepHead 2, keepTail 2)');
+  });
+
+  it('keeps the D10 delegator suffix when only partial masks apply', async () => {
+    const d = await explainAccess(
+      makeDeps({
+        // A resolvable delegator — otherwise D10 fails closed as 'missing' and
+        // `delegatorSets` stays null, which is a different report entirely.
+        ql: {
+          getSchema: () => PRIVATE_SCHEMA,
+          findOne: async () => ({ id: 'u_boss' }),
+          find: async () => [],
+        },
+        getPartialMaskRules: async () => ({ phone: 'phone' }),
+      }),
+      {
+        object: 'leave_request',
+        operation: 'read',
+        context: { ...CTX, onBehalfOf: { userId: 'u_boss' } },
+      },
+    );
+    const fls = d.layers.find((l) => l.layer === 'fls')!;
+    expect(fls.detail).toContain('PARTIALLY masked');
+    expect(fls.detail).toContain('D10');
+  });
+
+  it('stays not_applicable when neither dimension applies', async () => {
+    const fls = await flsOf({});
+    expect(fls.verdict).toBe('not_applicable');
+    expect(fls.detail).toBe('No field-level masking applies.');
+  });
+
+  it('passes the delegator sets through to the enforcement composition (D10)', async () => {
+    let seen: unknown = 'not-called';
+    await flsOf({
+      getPartialMaskRules: async (_sets, _object, delegatorSets) => {
+        seen = delegatorSets;
+        return {};
+      },
+    });
+    // No on-behalf-of in CTX → the engine must pass null, not undefined.
+    expect(seen).toBeNull();
   });
 });
 

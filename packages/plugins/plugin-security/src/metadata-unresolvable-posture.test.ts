@@ -195,6 +195,7 @@ describe('[#3545] unresolvable object metadata — security posture fails closed
         },
         computeRlsFilter: async () => null,
         getFieldMask: () => ({}),
+        getPartialMaskRules: async () => ({}),
         baselinePermissionSets: ['member_default'],
       }) as any;
 

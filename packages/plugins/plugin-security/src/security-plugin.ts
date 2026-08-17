@@ -2610,12 +2610,9 @@ export class SecurityPlugin implements Plugin {
         // EXCEPT where a permission set explicitly marks the field
         // non-readable (strictest wins: a masking rule never widens an
         // explicit deny, so those callers keep getting the key deleted).
-        const partialRules = this.computePartialMaskRules(secMeta, permissionSets, delegatorSets);
-        for (const f of Object.keys(partialRules)) {
-          if (basePerms[f]?.readable === false || delBasePerms?.[f]?.readable === false) {
-            delete partialRules[f];
-          }
-        }
+        const partialRules = this.computeReadPartialMaskRules(
+          secMeta, permissionSets, delegatorSets, basePerms, delBasePerms,
+        );
         if (Object.keys(fieldPerms).length > 0 || Object.keys(partialRules).length > 0) {
           opCtx.result = this.fieldMasker.maskResults(opCtx.result, fieldPerms, opCtx.object, partialRules);
         }
@@ -3133,6 +3130,18 @@ export class SecurityPlugin implements Plugin {
           let fp = this.permissionEvaluator.getFieldPermissions(o, sets as any);
           fp = this.foldFieldRequiredPermissions(fp, fieldRequired, sets as any);
           return fp as any;
+        },
+        // [#9127] The partial-mask dimension of the SAME field-mask decision,
+        // read straight off the enforcement composition (`maskResults`' own
+        // `partialRules` argument) rather than re-derived — explain reports the
+        // three states, it does not compute them.
+        getPartialMaskRules: async (sets, o, delSets) => {
+          const meta = await this.getObjectSecurityMeta(o);
+          const basePerms = this.permissionEvaluator.getFieldPermissions(o, sets as any);
+          const delBasePerms = delSets
+            ? this.permissionEvaluator.getFieldPermissions(o, delSets as any)
+            : null;
+          return this.computeReadPartialMaskRules(meta, sets as any, delSets as any, basePerms, delBasePerms);
         },
         baselinePermissionSets: this.baselinePermissionSets,
         // ── record-grained deps (only consulted when recordId is present) ──
@@ -3764,12 +3773,9 @@ export class SecurityPlugin implements Plugin {
     // whose masked values the same caller's rows carry). Mirrors the step-4
     // exclusion exactly: an explicit permission-set deny keeps the field
     // deleted, hence out of the projection.
-    const partialRules = this.computePartialMaskRules(secMeta, permissionSets, delegatorSets);
-    for (const f of Object.keys(partialRules)) {
-      if (basePerms[f]?.readable === false || delBasePerms?.[f]?.readable === false) {
-        delete partialRules[f];
-      }
-    }
+    const partialRules = this.computeReadPartialMaskRules(
+      secMeta, permissionSets, delegatorSets, basePerms, delBasePerms,
+    );
 
     // Readable = every schema field NOT explicitly masked non-readable. A field
     // with no permission entry passes through (the field allow-list only
@@ -5585,6 +5591,42 @@ export class SecurityPlugin implements Plugin {
       if (!unmasked) out[field] = rule;
     }
     return out;
+  }
+
+  /**
+   * [#8993 / #9127] The READ path's EFFECTIVE partial-mask set: the caller's
+   * applicable rules ({@link computePartialMaskRules}) MINUS every field an
+   * explicit permission-set grant marks non-readable.
+   *
+   * That subtraction is the second half of the enforcement semantics and it is
+   * NOT expressible from the folded mask: `foldFieldRequiredPermissions` forces
+   * `readable: false` on exactly the capability-gated fields a masking rule is
+   * meant to cover, so the exclusion must consult the RAW evaluator maps
+   * (`basePerms` / `delBasePerms`) — a rule never widens an explicit deny,
+   * while a capability gate it does soften into a partial mask.
+   *
+   * It lives here, in one place, because THREE surfaces have to agree on it —
+   * result masking (step 4), the readable-field projection
+   * ({@link getReadableFields}) and the explain engine's `fls` layer (#9127).
+   * The explain surface's own module contract promises it "matches enforcement
+   * by construction"; a second, independent derivation of this composition is
+   * precisely how that promise was broken once already, so explain calls THIS
+   * method through its injected dep instead of re-deriving the shape.
+   */
+  private computeReadPartialMaskRules(
+    secMeta: { fieldMaskingRules: Record<string, FieldMaskingRule>; fieldRequiredPermissions: Record<string, string[]> },
+    permissionSets: PermissionSet[],
+    delegatorSets: PermissionSet[] | null,
+    basePerms: Record<string, { readable?: boolean; editable?: boolean }>,
+    delBasePerms: Record<string, { readable?: boolean; editable?: boolean }> | null,
+  ): Record<string, FieldMaskingRule> {
+    const rules = this.computePartialMaskRules(secMeta, permissionSets, delegatorSets);
+    for (const f of Object.keys(rules)) {
+      if (basePerms[f]?.readable === false || delBasePerms?.[f]?.readable === false) {
+        delete rules[f];
+      }
+    }
+    return rules;
   }
 
   private foldFieldRequiredPermissions(
