@@ -365,9 +365,11 @@ export type ExternalDatasourceSettingsParsed = z.infer<typeof ExternalDatasource
  *  - **"bound" mirrors the connect path exactly**: `DatasourceConnectionService`
  *    resolves the ref under `if (credentialsRef)` — a truthy check — so an
  *    empty-string ref is not a binding there and is not one here.
- *  - The COMPOSED branch (no `url`; discrete `host`/`username` fields) is out
- *    of scope by the card's own fences: with no `url` the `username` field is
- *    live and the factory interpolates the secret into the URI it builds.
+ *  - The COMPOSED branch (no `url`) is judged by its own twin refusal since
+ *    #9147 — see {@link CREDENTIALS_REF_MONGO_NO_USERNAME_REFUSED}. It is a
+ *    separate message because the remedy differs: there the discrete
+ *    `username` field is live, so the fix is `config.username`, not the URL's
+ *    userinfo. #9041 fenced it out; #9147 widened the same refinement into it.
  */
 const CREDENTIALS_REF_MONGO_URL_NO_USER_REFUSED =
   'this mongo `config.url` names no user in its userinfo while `external.credentialsRef` binds '
@@ -383,6 +385,85 @@ const CREDENTIALS_REF_MONGO_URL_NO_USER_REFUSED =
   + 'injected at connect (#8696) — or, if the datasource is genuinely meant to connect '
   + 'unauthenticated, remove the `external.credentialsRef` binding. Runtime-environment DSNs '
   + '(`OS_DATABASE_URL` and friends) do not pass through this publish door and are unaffected.';
+
+/**
+ * The COMPOSED-branch twin of the refusal above (#9147): `external.credentialsRef`
+ * bound while the mongo `config` authors no `url` AND names no `username`.
+ *
+ * Same defect, one branch over, and the branches were measured to agree on this
+ * input before either was refused — which is why this inherits #9041's ruling
+ * rather than re-opening it (the standing meta-rule: a sibling spelling of an
+ * already-ruled silent discard defaults into the existing refusal set).
+ *
+ * Why the pair cannot work as written, measured against
+ * `default-datasource-driver-factory.ts` on `origin/main` @ `b0fa4fc1a`:
+ *
+ *  - with no `url`, `buildMongoUrl` COMPOSES the URI from the discrete fields,
+ *    and the bound secret has exactly one route into it —
+ *    `const auth = user ? \`${user}:${password}@\` : ''`. A falsy `username`
+ *    closes that route: the composed URI is `mongodb://host:port/db`, no
+ *    userinfo, and `spec.secret` is read into a string nothing uses;
+ *  - the other route is shut on this branch by construction —
+ *    `buildMongoAuth` opens with `if (!url) return undefined`, because the
+ *    composed branch injects through the URI it builds rather than beside it.
+ *
+ * So the binding is a silent no-op: the datasource connects anonymously and the
+ * operator is told nothing. There is nothing to fabricate here either — a
+ * MongoDB handshake cannot authenticate from a password alone, which is the
+ * same measured asymmetry that made the URL branch's refusal the right answer
+ * rather than an unconditional injection.
+ *
+ * ## Why a SEPARATE message, and not #9041's
+ *
+ * The remedy differs, and a refusal naming a remedy that does not apply is
+ * worse than no refusal — the failure mode this module's own history section
+ * documents at length (the pre-#4410 `belongsInConfig` line, which sent an
+ * author who had made a recoverable mistake to a slot where the same mistake
+ * was silent again). On the URL branch `MongoConfigSchema.url` supersedes the
+ * discrete `username`, so the only fix is the URL's userinfo. Here `url` is
+ * absent and `config.username` is the live field, so `config.username` is the
+ * fix and userinfo is not even authorable.
+ *
+ * ## Scope fences
+ *
+ *  - **mongo arm ONLY**, judged through {@link resolveDriverId} — identical to
+ *    #9041's fence, so a stored legacy `driver: 'mongo'` row is judged the
+ *    same. The postgres arm is NOT widened to (#8873 measured `pg` receiving
+ *    the bound password regardless of the DSN naming a user), and neither is
+ *    any other driver.
+ *  - **"names no username" is `undefined` or `''`** — the two spellings that
+ *    are falsy at `buildMongoUrl`'s `user ?` test, which is what actually
+ *    decides whether the secret is used. `''` is included deliberately and it
+ *    is NOT a widening past the measured no-op: `username: ''` composes the
+ *    same userinfo-free URI and drops the same secret (measured). Excluding it
+ *    would leave this refusal prescribing `config.username` while the platform
+ *    still accepted the one spelling of `config.username` that keeps the
+ *    binding silent — the prescription must land somewhere enforced. Note the
+ *    deliberate asymmetry with #9041's fence, which DOES exclude its
+ *    present-but-empty forms: there `MongoClient` itself throws on them
+ *    (`URI contained empty userinfo section`), so only the `undefined` case is
+ *    silent. Here nothing throws — `username: ''` connects, anonymously — so
+ *    the silent set is the falsy set. Each fence follows the measurement on
+ *    its own branch rather than the other branch's shape.
+ *  - **A non-string `username` is the config gate's finding, not this one** —
+ *    same posture as #9041 takes toward a non-string `url`.
+ *  - **"bound" mirrors the connect path's truthy check**, exactly as above: an
+ *    empty-string `credentialsRef` is not a binding.
+ */
+const CREDENTIALS_REF_MONGO_NO_USERNAME_REFUSED =
+  'this mongo `config` authors no `url` and names no `username`, while `external.credentialsRef` '
+  + 'binds a secret — a pair that cannot work as written (#9147). With no `url` the connection '
+  + 'URI is COMPOSED from the discrete fields, and the bound secret has exactly one route into '
+  + 'it: the userinfo the composer writes beside a username. With `username` absent (or empty) '
+  + 'no userinfo is written at all, so the bound secret is never used — the binding is a silent '
+  + 'no-op: the datasource connects anonymously and the operator is told nothing. (There is no '
+  + 'username to fabricate: a MongoDB handshake cannot authenticate from a password alone.) Two '
+  + 'authoring fixes are valid, depending on what this datasource is meant to do: add `username` '
+  + 'to `config` — the discrete field is live on this branch, and the bound secret is '
+  + 'interpolated beside it at connect (#8696) — or, if the datasource is genuinely meant to '
+  + 'connect unauthenticated, remove the `external.credentialsRef` binding. (Replacing the '
+  + 'discrete fields with a `config.url` that names a user is a third valid shape; it is judged '
+  + 'by the URL-branch refusal, not by this one.)';
 
 /**
  * Replay a driver-config parse onto the datasource's own issue list (#4410).
@@ -608,20 +689,44 @@ export const DatasourceSchema = lazySchema(() => strictObject(
   // author's trust on a slot that cannot pay it back.
   reportDriverConfigIssues(ctx, ds.driver, ds.config, ['config']);
 
-  // #9041 — see CREDENTIALS_REF_MONGO_URL_NO_USER_REFUSED. This cannot live in
+  // #9041 (url branch) + #9147 (composed branch) — see
+  // CREDENTIALS_REF_MONGO_URL_NO_USER_REFUSED and
+  // CREDENTIALS_REF_MONGO_NO_USERNAME_REFUSED. Neither can live in
   // `MongoConfigSchema` (a config-level refinement sees only `config`;
-  // `credentialsRef` sits on the datasource), so it runs here, where both
-  // halves are visible at once. It composes independently with the config
+  // `credentialsRef` sits on the datasource), so both run here, where both
+  // halves are visible at once. They compose independently with the config
   // gate above: a config also violating #8082/#8336/#9040 reports those
   // issues too, each at its own path.
+  //
+  // The two arms split on the connect path's OWN branch test, not on key
+  // presence: `buildMongoUrl` opens `if (explicit) return explicit;`, so a
+  // TRUTHY `config.url` is the DSN branch and anything falsy composes from the
+  // discrete fields. Splitting any other way misjudges `url: ''` — before
+  // #9147 it took the url arm and was refused for "naming no user" even with a
+  // live discrete `username`, i.e. a configuration that connects
+  // authenticated today was rejected at publish. Each arm now judges exactly
+  // the branch that will run.
   if (resolveDriverId(ds.driver) === 'mongodb' && ds.external?.credentialsRef) {
     const url = ds.config?.['url'];
-    if (typeof url === 'string' && urlUserinfoUsername(url) === undefined) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['config', 'url'],
-        message: CREDENTIALS_REF_MONGO_URL_NO_USER_REFUSED,
-      });
+    if (typeof url === 'string' && url !== '') {
+      if (urlUserinfoUsername(url) === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['config', 'url'],
+          message: CREDENTIALS_REF_MONGO_URL_NO_USER_REFUSED,
+        });
+      }
+    } else if (url === undefined || url === '') {
+      // A non-string `url` (`42`, `null`) reaches neither arm: it has no
+      // branch to predict and the config gate already reports the type error.
+      const username = ds.config?.['username'];
+      if (username === undefined || username === '') {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['config', 'username'],
+          message: CREDENTIALS_REF_MONGO_NO_USERNAME_REFUSED,
+        });
+      }
     }
   }
 

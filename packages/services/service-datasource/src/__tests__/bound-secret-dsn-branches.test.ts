@@ -388,4 +388,33 @@ describe('#8696 — mongodb: a bound secret reaches the client on the DSN branch
       secret: BOUND_SECRET,
     })).toMatchObject({ username: 'svc', password: BOUND_SECRET });
   });
+
+  it.each([
+    ['no `username` key at all', undefined],
+    ['an empty-string `username`', ''],
+  ])('drops the bound secret on the composed branch with %s — the measured no-op #9147 refuses at publish', async (_label, username) => {
+    // The connect-path measurement the #9147 publish refusal rests on, pinned
+    // rather than described. `buildMongoUrl` composes the URI and the secret's
+    // ONLY route into it is the userinfo written beside a username
+    // (`const auth = user ? … : ''`); `buildMongoAuth` — the DSN branch's
+    // route — returns early on `!url`. So a falsy `username` leaves the bound
+    // secret with nowhere to go, and the datasource connects ANONYMOUSLY with
+    // the operator told nothing.
+    //
+    // Both spellings are pinned because both are authorable and both are
+    // silent: that is exactly why the refusal's fence is the falsy set rather
+    // than key-absence. Left unpinned, a later "improvement" that injected a
+    // fabricated empty username here would make the publish refusal wrong with
+    // nothing going red — and it is measurably the wrong direction anyway (the
+    // sibling pin above: `{username:''}` turns an anonymous connection that
+    // works into a guaranteed handshake failure).
+    const config: Record<string, unknown> = { host: 'db.internal', port: 27017, database: 'events' };
+    if (username !== undefined) config.username = username;
+
+    expect(await mongoCredentials({ name: 'composed-anon', config, secret: BOUND_SECRET }))
+      .toBeUndefined();
+    // And the composed URI itself carries no userinfo to have carried it.
+    expect(await mongoUrl({ name: 'composed-anon', config, secret: BOUND_SECRET }))
+      .toBe('mongodb://db.internal:27017/events');
+  });
 });
