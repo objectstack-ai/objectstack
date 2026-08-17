@@ -36,12 +36,22 @@ import type { DroppedFieldsEvent } from '@objectstack/spec/data';
  * relocate the exact harm PR #6433 refused to commit (a `reason` that lies)
  * from the event into the error.
  *
- * So the wording branches on the reasons actually present, and the
- * READ-ONLY-ONLY message stays **byte-identical** to #5126's / #5503's — every
- * caller and pin written against it is untouched, and only a payload carrying a
- * genuinely new strip class sees new prose. The error `code` does NOT branch:
+ * So the wording branches on the reasons actually present, and adding a strip
+ * CLASS leaves the read-only-only message untouched — only a payload carrying
+ * the new class sees new prose. The error `code` does NOT branch:
  * `ERR_READONLY_FIELD_REJECTED` is what callers catch, and `drops` is what they
  * read to tell the classes apart.
+ *
+ * [#9107] The `readonlyWhen` REMEDY clause did move once, and not because a
+ * class was added — because the behaviour it described changed. The conditional
+ * strip now judges only API-boundary callers, so "those stay locked for every
+ * caller" had become false in the one direction a server author acts on: a
+ * `beforeUpdate` hook's derived value is not a caller write and is never
+ * stripped. A remedy sentence that has gone false is worse than a reworded one
+ * — it sends the reader to `isSystem`, which does NOT exempt this strip and is
+ * a strictly worse posture adopted for nothing (the same trap #8141 names one
+ * log line over). The byte-exact pin in
+ * `engine-dropped-fields-primary-key.test.ts` moved with it.
  *
  * Identified by `code` rather than `instanceof` so it survives crossing package
  * boundaries — the convention `SummaryRecomputeError` / `DriverConnectError`
@@ -119,7 +129,9 @@ function buildRefusalMessage(
           `context { context: { preserveAudit: true } } (#3493). `
         : `{ context: { isSystem: true } } (this exempts statically 'readonly' fields, but NOT ` +
           `fields locked by a TRUE 'readonlyWhen' predicate — those stay locked for every ` +
-          `caller). `) +
+          `API-boundary caller, isSystem included. A value DERIVED by a beforeUpdate hook is ` +
+          `not a caller write and is never stripped — that is the sanctioned write path for a ` +
+          `conditionally-locked derived field). `) +
       tail
     );
   }
@@ -135,7 +147,9 @@ function buildRefusalMessage(
     `per reason: for a read-only lock, remove the field from the payload, or pass ` +
     `{ context: { isSystem: true } } for server-side code that legitimately writes ` +
     `statically 'readonly' columns (that exempts NEITHER a TRUE 'readonlyWhen' predicate ` +
-    `NOR the primary-key strip — both apply to every caller, isSystem included); for ` +
+    `NOR the primary-key strip — both apply to every API-boundary caller, isSystem included; ` +
+    `a 'readonlyWhen' value DERIVED by a beforeUpdate hook is not a caller write and is never ` +
+    `stripped); for ` +
     `'primary_key', pass a SCALAR id to update ONE row (\`update(object, { id, ...fields })\` ` +
     `or \`{ where: { id } }\`), or put the id set in \`where\` to SELECT rows ` +
     `(\`{ where: { id: { $in: [...] } }, multi: true }\`). ` +

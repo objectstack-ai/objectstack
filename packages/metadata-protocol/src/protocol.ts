@@ -77,6 +77,7 @@ import {
 } from '@objectstack/spec/kernel';
 import { validateObjectNamespacePrefix, deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
+import { REFERENCE_SITES } from './reference-sites.js';
 // [#5488] The `@objectstack/spec/api` import that stood here — `ApiEndpointSchema`,
 // `validateApiEndpointDeclarations`, `type ApiEndpoint` — went with
 // `gateApiDraftsForPublish` (see its retirement note in `publishPackageDrafts`).
@@ -2952,121 +2953,105 @@ const SERVICE_CONFIG: Record<string, {
 };
 
 /**
- * Phase 3a-references: hand-curated reference path registry.
+ * Phase 3a-references: how a reference is FOUND in a stored document, given the
+ * derived site index in `./reference-sites.ts`.
  *
- * Maps a *target* metadata type to the list of *source* type+path tuples
- * that may point at it. Used by {@link findReferencesToMeta} to scan all
- * loaded metadata and surface "what depends on this?" before a user
- * deletes or renames an artifact.
+ * The registry that used to sit here was a hand-curated table of `fromType` +
+ * fully-qualified dotted paths. It rotted — 34 of its 40 paths named properties
+ * the source type's schema does not declare, leaving five of its seven target
+ * keys answering `{ references: [] }` unconditionally (#9190; the measurements
+ * are in `reference-sites.ts`'s header, which is the one place they live).
  *
- * Path syntax:
- *   - `'foo'`            → item.foo
- *   - `'foo.bar'`        → item.foo.bar
- *   - `'foo[]'`          → each element of array item.foo
- *   - `'foo[].bar'`      → bar of each element of array item.foo
- *   - `'foo{}'`          → each value of Record item.foo
- *   - `'foo{}.bar'`      → bar of each value of Record item.foo
- *
- * Coverage is intentionally narrow — covers the highest-value references
- * for MVP. Add more entries as new editors are built.
+ * ⛔ Do not reintroduce a path table. Paths were the wrong unit: `AppSchema`'s
+ * navigation is recursive, so an exhaustive path list is unbounded, and it goes
+ * stale the moment a wrapper key moves. The derived index records the PROPERTY
+ * that carries a name; this walk finds it wherever the document actually puts
+ * it, and reports the path it was found at.
  */
-const REFERENCE_PATHS: Record<string, Array<{ fromType: string; paths: string[]; kind: string }>> = {
-    object: [
-        { fromType: 'view', paths: ['object', 'objectName'], kind: 'view' },
-        { fromType: 'dashboard', paths: ['widgets[].object', 'widgets[].objectName'], kind: 'dashboard widget' },
-        { fromType: 'flow', paths: ['object', 'context.object', 'trigger.object', 'targetObject'], kind: 'flow' },
-        // fromType 'workflow' removed (#4451): no such metadata type is
-        // registered, so the row scanned nothing.
-        { fromType: 'permission', paths: ['objects[].name', 'objects[].object'], kind: 'permission' },
-        { fromType: 'app', paths: ['navItems[].objectName', 'navItems[].object', 'tabs[].objectName', 'tabs[].object'], kind: 'app nav' },
-        { fromType: 'page', paths: ['object', 'objectName'], kind: 'page' },
-        { fromType: 'report', paths: ['object', 'objectName'], kind: 'report' },
-        { fromType: 'action', paths: ['object', 'objectName'], kind: 'action' },
-        // fromType 'validation' removed (#4509): it scanned `object`/`objectName`
-        // on a schema that has neither — every variant is strict, so parse would
-        // have stripped such a key anyway — and the kind is now retired
-        // (ADR-0088). Rules travel with their object, so a rule's dependency on
-        // that object needs no row: deleting the object takes them with it.
-        { fromType: 'hook', paths: ['object', 'objectName'], kind: 'hook' },
-        { fromType: 'object', paths: ['fields[].referenceTo', 'fields{}.referenceTo', 'fields{}.reference'], kind: 'field reference' },
-    ],
-    view: [
-        { fromType: 'dashboard', paths: ['widgets[].view', 'widgets[].viewName'], kind: 'dashboard widget' },
-        { fromType: 'app', paths: ['navItems[].viewName', 'tabs[].viewName'], kind: 'app nav' },
-        { fromType: 'page', paths: ['viewName'], kind: 'page' },
-    ],
-    tool: [
-        { fromType: 'agent', paths: ['tools[]', 'tools[].name'], kind: 'agent tool' },
-    ],
-    skill: [
-        { fromType: 'agent', paths: ['skills[]', 'skills[].name'], kind: 'agent skill' },
-    ],
-    flow: [
-        { fromType: 'app', paths: ['navItems[].flowName', 'tabs[].flowName'], kind: 'app nav' },
-    ],
-    dashboard: [
-        { fromType: 'app', paths: ['navItems[].dashboardName', 'tabs[].dashboardName'], kind: 'app nav' },
-    ],
-    page: [
-        { fromType: 'app', paths: ['navItems[].pageName', 'tabs[].pageName'], kind: 'app nav' },
-    ],
-};
 
 /**
- * Extract one or more string values from `item` at `path`. Supports
- * `'a.b'` (nested object access) and `'a[].b'` (array element access).
- * Returns an empty array if any segment is missing.
+ * Every name a reference-bearing property value may be carrying, tolerant of
+ * the four shapes a name can arrive in.
+ *
+ * Deliberately shape-TOLERANT at read time while the derivation is shape-STRICT
+ * at build time: the derivation decides whether a property means "a reference"
+ * (and rejects `enum`-constrained lookalikes such as a chart axis `position`),
+ * while this function only has to read a value whose meaning is already
+ * settled. Record KEYS are included because `z.record(name, …)` is how the
+ * platform spells a name-keyed collection — `PermissionSetSchema.objects` is
+ * exactly that, and the old table's `objects[].name` could not express it.
  */
-function extractPathValues(item: unknown, path: string): string[] {
-    if (!item || typeof item !== 'object') return [];
-    const segments = path.split('.');
-    let current: unknown[] = [item];
-    for (const rawSeg of segments) {
-        let kind: 'value' | 'array' | 'record' = 'value';
-        let seg = rawSeg;
-        if (seg.endsWith('[]')) {
-            kind = 'array';
-            seg = seg.slice(0, -2);
-        } else if (seg.endsWith('{}')) {
-            kind = 'record';
-            seg = seg.slice(0, -2);
-        }
-        const next: unknown[] = [];
-        for (const node of current) {
-            if (!node || typeof node !== 'object') continue;
-            let value: unknown;
-            if (seg === '') {
-                value = node;
-            } else {
-                value = (node as Record<string, unknown>)[seg];
-            }
-            if (value === undefined || value === null) continue;
-            if (kind === 'array') {
-                if (Array.isArray(value)) {
-                    for (const v of value) next.push(v);
-                }
-            } else if (kind === 'record') {
-                if (Array.isArray(value)) {
-                    for (const v of value) next.push(v);
-                } else if (typeof value === 'object') {
-                    for (const v of Object.values(value as Record<string, unknown>)) next.push(v);
-                }
-            } else {
-                next.push(value);
+function referencedNamesAt(value: unknown): Array<{ name: string; suffix: string }> {
+    if (typeof value === 'string') {
+        return value.length > 0 ? [{ name: value, suffix: '' }] : [];
+    }
+    if (Array.isArray(value)) {
+        const out: Array<{ name: string; suffix: string }> = [];
+        for (const element of value) {
+            if (typeof element === 'string' && element.length > 0) out.push({ name: element, suffix: '[]' });
+            else if (element && typeof element === 'object') {
+                const named = (element as Record<string, unknown>).name;
+                if (typeof named === 'string' && named.length > 0) out.push({ name: named, suffix: '[].name' });
             }
         }
-        current = next;
-        if (current.length === 0) return [];
+        return out;
     }
-    // Coerce final values to strings, dropping non-string non-object leaves.
-    const out: string[] = [];
-    for (const v of current) {
-        if (typeof v === 'string' && v.length > 0) out.push(v);
-        else if (v && typeof v === 'object' && 'name' in (v as any) && typeof (v as any).name === 'string') {
-            out.push((v as any).name);
+    if (value && typeof value === 'object') {
+        const out: Array<{ name: string; suffix: string }> = [];
+        const record = value as Record<string, unknown>;
+        for (const key of Object.keys(record)) {
+            if (key.length > 0) out.push({ name: key, suffix: '{key}' });
         }
+        const named = record.name;
+        if (typeof named === 'string' && named.length > 0) out.push({ name: named, suffix: '.name' });
+        return out;
     }
-    return out;
+    return [];
+}
+
+/**
+ * Walk a stored metadata document and report every place it names
+ * `targetName` through one of `properties`.
+ *
+ * `properties` is the derived property → target binding for THIS source type,
+ * so the walk never guesses; it only looks where the schema said a name lives.
+ * Paths are reported with array indices and record keys elided (`a.b[].c`,
+ * `a{}.b`), matching the grammar the previous table used, so the value the
+ * "Used by" panel renders keeps its established shape.
+ */
+function collectReferenceHits(
+    item: unknown,
+    properties: ReadonlyMap<string, string>,
+    targetName: string,
+): Array<{ path: string; property: string }> {
+    const hits: Array<{ path: string; property: string }> = [];
+    const seenNodes = new Set<unknown>();
+
+    const walk = (node: unknown, trail: string, depth: number): void => {
+        if (!node || typeof node !== 'object' || depth > 16) return;
+        // Cycle guard. Stored documents are JSON, but a runtime-assembled item
+        // can still be self-referential, and a scan that hangs is a worse
+        // answer than a short one.
+        if (seenNodes.has(node)) return;
+        seenNodes.add(node);
+
+        if (Array.isArray(node)) {
+            for (const element of node) walk(element, `${trail}[]`, depth + 1);
+            return;
+        }
+        for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+            const here = trail ? `${trail}.${key}` : key;
+            if (properties.has(key)) {
+                for (const hit of referencedNamesAt(value)) {
+                    if (hit.name === targetName) hits.push({ path: `${here}${hit.suffix}`, property: key });
+                }
+            }
+            walk(value, here, depth + 1);
+        }
+    };
+
+    walk(item, '', 0);
+    return hits;
 }
 
 /**
@@ -3816,10 +3801,12 @@ export class ObjectStackProtocolImplementation implements
      *
      * [#4717] Throws on the gating half, RETURNS the advisory half. Advisories
      * do not block anything, so the only honest place for them is the 2xx the
-     * write earns — `saveMetaItem` attaches them to its response, and the only
-     * other caller (the draft→active promotion in `publishMetaItem`) simply
-     * ignores the value, which is why adding this channel could not change what
-     * either door does.
+     * write earns — `saveMetaItem` attaches them to its response, and since
+     * #9176 the draft→active promotion does the same: `promoteDraftForPublish`
+     * hands the findings out and `publishMetaItem` attaches them, so both
+     * write doors report what D1 makes both of them measure. (The batch route
+     * `publishPackageDrafts` still discards its per-draft findings — its
+     * response face is a different contract.)
      * Returns an empty array on every early return: no rules ran, so there is
      * nothing to report, and "clean" is told apart from "nothing ran" by the
      * gate's own `rulesRun`, not by this.
@@ -11462,7 +11449,9 @@ export class ObjectStackProtocolImplementation implements
      *     boundary, and `publishPackageDrafts` is pre-empted by #8908's
      *     `STORED_TYPE_NOT_CANONICAL` pre-flight ({@link isNonCanonicalStoredType}).
      *  5. `revertCommit` → write-through         — `PLURAL_TO_SINGULAR[it.type]`
-     *     over a STORED commit-item type. **Unguarded.**
+     *     over a STORED commit-item type. Was **unguarded**; since #9174 the
+     *     restore limb carries its own `STORED_TYPE_NOT_CANONICAL` pre-flight,
+     *     so this producer no longer reaches the assert for that class.
      *  6. `loadMetaFromDb` (boot)                — `PLURAL_TO_SINGULAR[record.type]`
      *     over a STORED row type. **Unguarded.**
      *
@@ -11499,7 +11488,10 @@ export class ObjectStackProtocolImplementation implements
      * {@link applyRegistryWriteThrough}'s best-effort `console.warn`, which is
      * correct there and not a softened assert — the row is already persisted,
      * and #4521's contract is that a registry hiccup must never fail a
-     * committed write.
+     * committed write. [#9174] Correct, and still less informative than the two
+     * at-rest doors that name this class on the wire — which is why
+     * {@link revertCommit}, the one producer that could reach this seam with the
+     * class, now refuses it up front instead of arriving here.
      *
      * ⚠️ This assert touches NO audit row, NO commit record and NO repository
      * key. It is scoped to the registry mint door, and no producer's spelling
@@ -13668,6 +13660,15 @@ export class ObjectStackProtocolImplementation implements
          * closed on the spec side.
          */
         projectionApplied?: MutationProjectionOutcome;
+        /**
+         * [#9176] Present ONLY when the #4463 runtime authoring gate raised at
+         * least one non-blocking finding against the draft body this promotion
+         * carried to `active` — an empty array is never emitted, so a clean
+         * publish's response bytes are unchanged (the #4717 discipline, one
+         * door over). Every entry is `warning`/`info` by construction: an
+         * `error` finding refuses the promotion as the 422 instead.
+         */
+        advisories?: RuntimeAuthoringIssue[];
     }> {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. This is the
         // SEVENTH `/meta` entry point, and until #8769 it was the only one that
@@ -13751,7 +13752,7 @@ export class ObjectStackProtocolImplementation implements
         // site has no transaction of its own, so recording it in the `catch` is
         // where it always effectively landed; what changed is that the helper no
         // longer assumes that on behalf of the batch route too.
-        const { singularType, orgId, result } = await this.promoteDraftForPublish(request)
+        const { singularType, orgId, advisories, result } = await this.promoteDraftForPublish(request)
             .catch(async (err: unknown) => {
                 await this.recordPendingDenialAudit(err);
                 throw err;
@@ -13794,11 +13795,17 @@ export class ObjectStackProtocolImplementation implements
             seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[] };
             materializeApplied?: PublishMaterializeResult;
             projectionApplied?: MutationProjectionOutcome;
+            advisories?: RuntimeAuthoringIssue[];
         } = {
             success: true,
             version: result.version,
             seq: result.seq,
             message: `Published draft — type=${request.type}, name=${request.name} [seq=${result.seq}]`,
+            // [#9176] Omitted-when-empty, never `advisories: []` — a clean
+            // publish's response bytes are unchanged, and absence means
+            // "nothing to report", never "the gate did not run" (#4717's
+            // ruling, point 2, carried to this door).
+            ...(advisories.length > 0 ? { advisories } : {}),
         };
         const effects = await this.runPublishSideEffects({
             singularType,
@@ -13867,6 +13874,17 @@ export class ObjectStackProtocolImplementation implements
     }): Promise<{
         singularType: string;
         orgId: string | null;
+        /**
+         * [#9176] The #4463 gate's advisory half for this promotion — the
+         * non-blocking findings `assertRuntimeAuthoringRules` RETURNS (its
+         * gating half throws before this method resolves). Empty when the
+         * gate raised nothing or did not run (no draft, package-author
+         * channel); `publishMetaItem` attaches it to its response only when
+         * non-empty, exactly as `saveMetaItem` does one door over. The batch
+         * caller (`publishPackageDrafts`) deliberately does not read it —
+         * its response face is a different contract.
+         */
+        advisories: RuntimeAuthoringIssue[];
         result: { version: string; seq: number; item: MetadataItem; packageId: string | null };
     }> {
         const singularType = PLURAL_TO_SINGULAR[request.type] ?? request.type;
@@ -13924,8 +13942,13 @@ export class ObjectStackProtocolImplementation implements
             { type: singularType, name: request.name, org: orgId ?? 'env' } as Parameters<typeof repo.get>[0],
             { state: 'draft' },
         );
-        if (draftForGate) {
-            this.assertRuntimeAuthoringRules({
+        // [#9176] The gate's return is its advisory half (#4717): captured and
+        // handed out so `publishMetaItem` can attach it to the 2xx this
+        // promotion is about to earn, exactly as `saveMetaItem` attaches its
+        // own. Held in a local, never on `this` — the gate is per-write and
+        // two concurrent publishes must not read each other's findings.
+        const runtimeAdvisories: RuntimeAuthoringIssue[] = draftForGate
+            ? this.assertRuntimeAuthoringRules({
                 type: singularType,
                 name: request.name,
                 state: 'active',
@@ -13934,8 +13957,8 @@ export class ObjectStackProtocolImplementation implements
                 // it the draft door would be a bypass for this refusal alone,
                 // which is the exact hole #4463 D1 closed for the other 26.
                 organizationId: orgId,
-            });
-        }
+            })
+            : [];
 
         const artifactBacked = this.isArtifactBacked(singularType, request.name);
         const intent: 'override-artifact' | 'runtime-only' = artifactBacked
@@ -13958,7 +13981,7 @@ export class ObjectStackProtocolImplementation implements
                 // present-and-undefined for the historical resolution to hold.
                 ...('packageId' in request ? { packageId: request.packageId ?? null } : {}),
             });
-            return { singularType, orgId, result };
+            return { singularType, orgId, advisories: runtimeAdvisories, result };
         } catch (err: any) {
             if (err instanceof ConflictError) {
                 const conflict: any = new Error(
@@ -16167,6 +16190,16 @@ export class ObjectStackProtocolImplementation implements
      * dispatching the reverted-away body until restart —
      * {@link rollbackToPackageCommit} inherited it, so a whole-package
      * rollback could report success and change nothing the process could see.
+     *
+     * [#9174] An item whose STORED `type` is non-canonical
+     * ({@link isNonCanonicalStoredType}) is REFUSED on the restore limb, into
+     * `failed[]` with `code: 'STORED_TYPE_NOT_CANONICAL'` — the same wire-visible
+     * verdict the sibling at-rest doors give (`publishPackageDrafts`, #8908;
+     * `migrateStoredMetadata`, #8957), in place of the `console.warn` this door
+     * degraded to. The soft-remove limb is deliberately outside the gate: it
+     * performs its promise exactly, and the removal is the one action that
+     * reduces the residue. The measurement and the refuse-vs-decline reasoning
+     * are stated at the gate itself.
      */
     async revertCommit(request: {
         commitId: string;
@@ -16246,6 +16279,128 @@ export class ObjectStackProtocolImplementation implements
         // Reverse apply order so artifacts that depend on others (e.g. a view on
         // a new object) are removed before the thing they reference.
         for (const it of [...items].reverse()) {
+            // The version this item restores to, or `null` when it does not take
+            // the restore limb at all — bound ONCE (#9174), because the pre-flight
+            // below and the `else if` further down must never drift apart: a gate
+            // that guards a limb it no longer describes is worse than no gate,
+            // since it reads as covered.
+            //
+            // A `const` local rather than a hoisted boolean, deliberately, and this
+            // is a compiler fact rather than taste: `it.prevVersion` is a MUTABLE
+            // property, so TypeScript does not carry a narrowing on it through an
+            // aliased boolean, and `repo.restoreVersion(ref, it.prevVersion, …)`
+            // below stops compiling (`TS2345: 'number | null' is not assignable to
+            // 'number'`). Measured — the DTS build caught it while all 1651 package
+            // tests stayed green, because vitest transpiles without type-checking.
+            const restoreToVersion: number | null =
+                it.existedBefore && it.prevVersion !== null && it.prevVersion !== undefined
+                    ? it.prevVersion
+                    : null;
+
+            // ═══ [#9174] The AT-REST spelling pre-flight, on the RESTORE limb ══
+            //
+            // The third consumer of an at-rest `type` in this file, and the last
+            // one without this gate. `publishPackageDrafts` refuses the class by
+            // name (`STORED_TYPE_NOT_CANONICAL`, #8908) and `migrateStoredMetadata`
+            // reports it `skipped` with the same reason (#8957); this door gave it
+            // a server-side `console.warn` and a receipt that said `restored`.
+            //
+            // ── What was MEASURED at HEAD, per limb, before choosing a shape ───
+            //
+            // Driven end to end over the real `SysMetadataRepository` with a
+            // `fields/showcase_task.title` row at rest (`protocol.revert-stored-
+            // type-canonical.test.ts` carries the harness):
+            //
+            //   RESTORE limb — `{success: true, revertedCount: 1, failed: []}`,
+            //   `reverted[0].action === 'restored'`, `registerItem` called ZERO
+            //   times, and the only trace anywhere is
+            //   `[Protocol] registry write-through failed for fields/… :
+            //    [registry_type_not_canonical] …` on the server's stderr. The
+            //   receipt claims the pre-commit body is what the platform now
+            //   serves. It is not, and for this class it cannot be: #9111's mint
+            //   door refuses the entry and boot refuses it too, so the restored
+            //   body reaches no reader at all.
+            //
+            //   SOFT-REMOVE limb — `{success: true, action: 'removed'}`, the row
+            //   is GONE from `sys_metadata`, no warning is emitted and no registry
+            //   key is touched (`restoreArtifactRegistryView` folds through the
+            //   manifest map, a no-op for this class, and addresses only the
+            //   phantom namespace). Nothing about that outcome is wrong.
+            //
+            // ── Which sibling this matches, and why it is REFUSE not DECLINE ───
+            //
+            // `saveMetaItem`'s: a wire-visible coded refusal, carried on THIS
+            // door's existing per-item `failed[]` channel — the same channel every
+            // other refusal here already uses (`VERSION_NOT_FOUND`, `ITEM_LOCKED`,
+            // `NOT_OVERRIDABLE`). No new receipt surface, no new error code.
+            //
+            // The test that separates the two siblings is whether the door can do
+            // what it promises for this row. `migrateStoredMetadata` DECLINES
+            // because rewriting a stored type spelling is an identity move and is
+            // out of that pass's reach entirely — nothing is refused, so `skipped`
+            // must not poison `storedMigrationClean` for a scan that runs forever.
+            // Here the write is squarely IN reach: the restore would succeed at the
+            // row and still deliver none of what `restored` promises. That is
+            // `saveMetaItem`'s case — a write this door is able to perform and must
+            // not — so it is refused, and `success` goes false because the commit
+            // the operator asked to undo was not undone. A one-shot operator action
+            // has no forever to poison; answering `success: true` over a
+            // deliberately untouched item is the #5980 class of lie this file keeps
+            // paying for.
+            //
+            // ⛔ Deliberately NOT on the soft-remove limb, and this is a scope
+            // decision rather than a softened gate. That limb performs, exactly and
+            // completely, the one action that improves this residue: the row goes
+            // away. Refusing it would answer `success: false` for a revert that
+            // fully succeeded, and would hand the operator an instruction ("drop
+            // the '<plural>' row") naming the very operation it had just declined
+            // to perform. #8908's own predicate is scoped the same way for the same
+            // reason — it excludes the manifest-PRESENT plurals because those are
+            // already fail-closed, since "widening this gate would change a
+            // wire-visible `failed[].code` for rows that are NOT this defect".
+            //
+            // ⛔ NO fold, anywhere. The refusal writes no audit row and no commit
+            // record, and `it.type` is carried into `failed[]` verbatim, so #9161's
+            // ruling — the caller's spelling reaches the ledger keys unfolded, and
+            // #8908's `AUDIT_TYPE_NOT_CANONICAL` fires loudly when it is wrong — is
+            // untouched in both directions. The refused item is simply absent from
+            // `reverted[]`, so the append-only revert commit built from it below
+            // does not claim to have reverted what it did not.
+            //
+            // ⛔ And NOT an audit row either, unlike the publish pre-flight's.
+            // That door audits because every other refusal on that route audits;
+            // this one writes no audit row for ANY of its per-item failures, so a
+            // row minted only for this class would be a lone entry in a ledger the
+            // function otherwise never writes — and it would need the type FOLDED
+            // to be readable, which is the one thing the card rules out.
+            //
+            // The predicate is `isNonCanonicalStoredType`, NOT the complete
+            // `canonicalMetaType(t) !== t`: `objects` folds in the manifest map, so
+            // the restore limb hands the write-through the canonical key and the
+            // registry entry lands correctly (pinned, one file over, in
+            // `protocol.object-registry-write-through-spelling.test.ts`). Refusing
+            // it would be a wire-visible change for rows that are not this defect.
+            if (restoreToVersion !== null && isNonCanonicalStoredType(it.type)) {
+                const canonical = canonicalMetaType(it.type);
+                failed.push({
+                    type: it.type,
+                    name: it.name,
+                    error: `Commit item '${it.type}/${it.name}' is stored under the non-canonical `
+                        + `metadata type '${it.type}'; the canonical type for this item is `
+                        + `'${canonical}'. Restoring it would write the pre-commit body back into a `
+                        + `second namespace that no registry read and no compliance query on `
+                        + `'${canonical}' can see (#7894 closed this namespace at the '/meta' URL `
+                        + `door; this row predates that), and the registry refuses to serve it `
+                        + `(REGISTRY_TYPE_NOT_CANONICAL), so the restored body would reach no reader. `
+                        + `Re-author the item under '${canonical}' (PUT /meta/${canonical}/${it.name}) `
+                        + `and drop the '${it.type}' row. Note that POST /meta/_migrate-stored does NOT `
+                        + `rewrite a stored type spelling — it canonicalizes bodies, and reports rows `
+                        + `of this class as 'skipped' with that same reason (#8957).`,
+                    code: 'STORED_TYPE_NOT_CANONICAL',
+                });
+                continue;
+            }
+
             // [#7559] PER ITEM, and from the ROW rather than from the request —
             // the same shape {@link publishPackageDrafts} already uses when it
             // promotes each draft in the draft's OWN scope and captures
@@ -16365,7 +16520,7 @@ export class ObjectStackProtocolImplementation implements
                     // caller skipped the heal entirely while answering success.
                     await this.restoreArtifactRegistryView(it.type, it.name, itemOrgId);
                     reverted.push({ type: it.type, name: it.name, action: 'removed' });
-                } else if (it.prevVersion !== null && it.prevVersion !== undefined) {
+                } else if (restoreToVersion !== null) {
                     // Edited an existing artifact → restore the pre-commit body.
                     //
                     // [#6563] The write INTENT is derived per item, exactly as the
@@ -16410,7 +16565,7 @@ export class ObjectStackProtocolImplementation implements
                     // the shape that ends in a `catch {}` swallowing a real outage
                     // (#4867). Per ITEM, because a batch mixes bindings.
                     const restorePackageId = await this.resolveOverlayPackageBinding(it.type, it.name, itemOrgId);
-                    const restored = await repo.restoreVersion(ref, it.prevVersion, {
+                    const restored = await repo.restoreVersion(ref, restoreToVersion, {
                         actor,
                         source: 'protocol.revertCommit',
                         message: `revert commit ${request.commitId}`,
@@ -17975,10 +18130,23 @@ export class ObjectStackProtocolImplementation implements
      * "Used by" panel before destructive actions (rename / delete /
      * type-narrowing).
      *
-     * Coverage is driven by the hand-curated {@link REFERENCE_PATHS}
-     * registry. A target type not present in the registry, and a SOURCE type
-     * this deployment does not declare, both simply produce no hits — neither
-     * is an error.
+     * [#9190] Coverage is DERIVED from the metadata type schemas
+     * ({@link REFERENCE_SITES}), not curated. The table that used to drive this
+     * had drifted until 34 of its 40 paths named properties no schema declares
+     * and five of its seven target keys answered `{ references: [] }`
+     * unconditionally — while this method's own doc called that a legitimate
+     * no-hit. It is no longer legitimate and it is no longer what happens: an
+     * empty answer now means the walk read every declared source type's shape
+     * and found nothing that can name this target. A SOURCE type this
+     * deployment does not declare still simply produces no hits, which is a
+     * fact about the deployment rather than about the platform.
+     *
+     * ⚠️ What an empty answer still cannot promise is bounded and recorded
+     * rather than implied: {@link REFERENCE_SITES.unwalkableSourceTypes} names
+     * every declared type whose shape could not be read (pinned by
+     * `reference-sites.derivation.test.ts`, so it cannot grow silently), and
+     * `SEMANTIC_REFERENCE_SITES` carries the properties whose name does not
+     * spell their target. Both are argued in `reference-sites.ts`.
      *
      * [#8896] A source type that could not be READ is a different fact and is
      * no longer answered the same way. This list is what an admin consults
@@ -18009,32 +18177,46 @@ export class ObjectStackProtocolImplementation implements
         // than on the two verbs above, and the difference is stated rather than
         // implied because a future reader will otherwise assume symmetry:
         //
-        //  • The REFUSAL is the whole wire-visible change. `viewes` used to miss
-        //    `REFERENCE_PATHS` and answer 200 `{ references: [] }` — read by an
+        //  • The REFUSAL is the whole wire-visible change #9157 made. `viewes`
+        //    used to miss the lookup and answer 200 `{ references: [] }` — read by an
         //    operator as "nothing depends on this", immediately before the
         //    rename or delete this panel exists to gate (ADR-0110 D3). It is now
         //    400, naming `view` / `views`.
-        //  • The manifest-ABSENT class changes NOTHING here, measured rather
-        //    than assumed: every {@link REFERENCE_PATHS} key (`object`, `view`,
-        //    `tool`, `skill`, `flow`, `dashboard`, `page`) is manifest-PRESENT,
-        //    so the old map already folded each of them. `translations` folded
-        //    to `translation` answers `{ references: [] }` exactly as
-        //    `translations` did, because `translation` is not a registry key
-        //    either — which this method's own doc calls a legitimate no-hit
-        //    rather than an error. Closing THAT gap is a `REFERENCE_PATHS`
-        //    coverage question and not a spelling one; it is not this card.
+        //  • The manifest-ABSENT class changed NOTHING here at the time, and
+        //    #9157 pinned that residue rather than implying it: every curated
+        //    key was manifest-PRESENT, so `translations` folded to
+        //    `translation` answered `{ references: [] }` exactly as
+        //    `translations` had. [#9190] That residue is now CLOSED by
+        //    derivation rather than by folding — `translation` has real
+        //    reference sites (`doc.translations`, `book.groups[].translations`)
+        //    because the walk reads the schemas that declare them. The spelling
+        //    contract below is untouched; what changed is what the lookup finds.
         //
-        // ⛔ Do not "improve" this by teaching `REFERENCE_PATHS` a plural key.
+        // ⛔ Do not "improve" this by teaching the site index a plural key.
         // That is the spelling-tolerant lookup one layer down which
         // {@link canonicalMetaType} has rejected since #4432.
         request = canonicalizeMetaRequestType(request);
         // Canonical by construction from the fold above — NOT a second fold.
         const singularTarget = request.type;
         const targetName = request.name;
-        const matchers = REFERENCE_PATHS[singularTarget];
-        if (!matchers || matchers.length === 0) {
+        const sites = REFERENCE_SITES.byTarget.get(singularTarget);
+        if (!sites || sites.length === 0) {
             return { references: [] };
         }
+
+        // One read per source type, not one per site: several properties of the
+        // same source type routinely name the same target, and the previous
+        // shape re-read the store once per matcher row.
+        const propertiesByFromType = new Map<string, Map<string, string>>();
+        for (const site of sites) {
+            let properties = propertiesByFromType.get(site.fromType);
+            if (!properties) {
+                properties = new Map<string, string>();
+                propertiesByFromType.set(site.fromType, properties);
+            }
+            properties.set(site.property, site.target);
+        }
+        const matchers = [...propertiesByFromType].map(([fromType, properties]) => ({ fromType, properties }));
 
         const seen = new Set<string>(); // dedup key: `${fromType}|${itemName}|${path}`
         const out: Array<{ type: string; name: string; label?: string; path: string; kind: string }> = [];
@@ -18082,20 +18264,27 @@ export class ObjectStackProtocolImplementation implements
                     // Don't list an item as a reference to itself unless the
                     // self-reference is meaningful (e.g. object→field path).
                     const isSelfReference = matcher.fromType === singularTarget && sourceName === targetName;
-                    for (const path of matcher.paths) {
-                        const values = extractPathValues(raw, path);
-                        if (!values.includes(targetName)) continue;
+                    for (const { path, property } of collectReferenceHits(raw, matcher.properties, targetName)) {
+                        // An item naming ITSELF through a scalar property is
+                        // the item, not a dependent. Collection-valued paths
+                        // are kept, because an item that lists itself among
+                        // many (an object's own field pointing back at it) is
+                        // a real edge an admin needs to see before a delete.
                         if (isSelfReference && !path.includes('[]') && !path.includes('{}')) continue;
                         const key = `${matcher.fromType}|${sourceName}|${path}`;
                         if (seen.has(key)) continue;
                         seen.add(key);
                         const label = (raw as any).label as string | undefined;
+                        // `kind` is a human label for the edge, derived from the
+                        // property that produced it rather than hand-written per
+                        // row — a curated label is the same maintenance debt as
+                        // a curated path, one field over.
                         out.push({
                             type: matcher.fromType,
                             name: sourceName,
                             ...(label ? { label } : {}),
                             path,
-                            kind: matcher.kind,
+                            kind: `${matcher.fromType} ${property}`,
                         });
                     }
                 }

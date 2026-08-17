@@ -175,14 +175,27 @@ describe('host-app package resolution (cloud#1013, #4700)', () => {
     expect(new mod.OrganizationsPlugin().name).toBe('com.objectstack.organizations');
   });
 
-  it("falls back to the importing package's own resolution when the host does not declare", async () => {
-    // Whatever the host app does not declare must still load from the framework
-    // package's own dependencies — that fallback is what keeps every
-    // framework-owned load in `serve` (plugin-auth, plugin-security,
-    // service-i18n, …) and in `bootStack` working exactly as before.
-    const mod = await createHostImporter(undeclaringRoot)('@objectstack/spec');
-    expect(mod).toBeTypeOf('object');
-  });
+  it(
+    "falls back to the importing package's own resolution when the host does not declare",
+    async () => {
+      // Whatever the host app does not declare must still load from the framework
+      // package's own dependencies — that fallback is what keeps every
+      // framework-owned load in `serve` (plugin-auth, plugin-security,
+      // service-i18n, …) and in `bootStack` working exactly as before.
+      const mod = await createHostImporter(undeclaringRoot)('@objectstack/spec');
+      expect(mod).toBeTypeOf('object');
+    },
+    // Explicit testTimeout (#9311): this is the ONE case in this file that
+    // actually loads `@objectstack/spec` — a real dynamic `import()` of a
+    // multi-megabyte package, not the small on-disk fixtures its siblings use
+    // (all <10ms). Measured unloaded on a 4-CPU box: ~0.9-1.1s. Under nothing
+    // heavier than `turbo run test --concurrency=2` it was already observed at
+    // 5061ms against the 5000ms default — margin, not correctness, is the
+    // defect (#9311). 30s matches the #3662 precedent for subprocess/real-load
+    // cases elsewhere in the repo (~30x the unloaded cost, ~6x the already-
+    // observed loaded failure point) rather than a bare guess.
+    30_000,
+  );
 
   it('reports a package that neither can resolve as module-not-found', async () => {
     const importFromHost = createHostImporter(hostRoot);

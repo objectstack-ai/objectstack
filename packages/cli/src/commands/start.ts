@@ -12,6 +12,7 @@ import { printHeader, printKV, printStep, printError } from '../utils/format.js'
 import { redirectStdoutToStderr } from '../utils/json-stdout.js';
 import { redactConnectionUrl } from '../utils/connection-display.js';
 import { databaseDriverFlag } from '../utils/database-driver-flag.js';
+import { childEnvWithResolvedArtifact } from '../utils/internal-artifact-channel.js';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import type { ResolvedProjectDatabaseUrl } from '@objectstack/runtime';
 
@@ -182,6 +183,18 @@ export default class Start extends Command {
     // Priority: --artifact > $OS_ARTIFACT_PATH > ./dist/objectstack.json
     //         > <home>/dist/objectstack.json > none
     //
+    // This ladder resolves in the PARENT and is unchanged. What changed is how
+    // the answer reaches the child: it travels on the CLI's own
+    // `OS_INTERNAL_ARTIFACT_PATH` channel, never on `OS_ARTIFACT_PATH`, so an
+    // `OS_ARTIFACT_PATH` visible to a downstream `objectstack.config.ts` means
+    // an operator set it. See `utils/internal-artifact-channel.ts`.
+    //
+    // Note every read of `process.env.OS_ARTIFACT_PATH` in this command — the
+    // ladder's second rung below, and the auto-compile guard — is a read of the
+    // PARENT's environment, i.e. of the operator's own value. This command
+    // never mutates `process.env`; it composes a separate child env. So those
+    // guards see exactly what they saw before.
+    //
     // In project mode (objectstack.config.ts present) we additionally
     // auto-compile the config to ./dist/objectstack.json when no
     // artifact has been built yet, so `os start` works on a fresh
@@ -191,8 +204,14 @@ export default class Start extends Command {
     // NOT resolve it — `serve` does, once, and owns the fetch, the `#sha256=`
     // verification, the protocol handshake and the migration gate. All `start`
     // does is get out of the way: no local lookup, no auto-compile, and no
-    // OS_ARTIFACT_PATH / OS_BOOT_EMPTY in the child env that would contradict
-    // the reference. The variable itself is inherited by the child.
+    // resolved-artifact channel or OS_BOOT_EMPTY in the child env that would
+    // contradict the reference. The variable itself is inherited by the child.
+    //
+    // That "nothing in the child env that contradicts the reference" intent is
+    // now general rather than special-cased: the child env carries a resolved
+    // artifact only when this command actually resolved one, on a channel of
+    // the CLI's own — so the operator-facing knob says one thing and one thing
+    // only.
     //
     // An explicit `--artifact` still wins (flags over env, as everywhere in
     // this command), and it wins by REMOVING the variable from the child env —
@@ -293,8 +312,25 @@ export default class Start extends Command {
     // ── Child env ───────────────────────────────────────────────────
     // Flags win over inherited env. When no artifact was located, signal
     // serve.ts to boot an empty kernel via OS_BOOT_EMPTY=1.
+    // #8368: with OS_ARTIFACT_URL in play, neither the resolved-artifact
+    // channel nor OS_BOOT_EMPTY is set — the child resolves the reference
+    // itself. OS_BOOT_EMPTY in particular must NOT be set there: it would tell
+    // `serve` that booting an app-less kernel is an acceptable outcome, turning
+    // an unreachable artifact host into a silently empty platform instead of
+    // the loud refusal acceptance #2 asks for.
+    //
+    // The resolved path travels on `OS_INTERNAL_ARTIFACT_PATH`, so an
+    // `OS_ARTIFACT_PATH` the child sees is the operator's own, inherited
+    // verbatim and never written by this command.
     const localEnv: NodeJS.ProcessEnv = {
-      ...process.env,
+      ...childEnvWithResolvedArtifact(
+        process.env,
+        artifactUrl
+          ? { kind: 'reference' }
+          : artifactSource
+            ? { kind: 'resolved', path: artifactSource.path }
+            : { kind: 'empty' },
+      ),
       OS_HOME: homeDir,
       OS_ENVIRONMENT_ID: environmentId,
       OS_DATABASE_URL: databaseUrl,
@@ -302,17 +338,6 @@ export default class Start extends Command {
       ...(flags['database-driver'] ? { OS_DATABASE_DRIVER: flags['database-driver'] } : {}),
       ...(flags['database-auth-token'] ? { OS_DATABASE_AUTH_TOKEN: flags['database-auth-token'] } : {}),
       AUTH_SECRET: authSecret,
-      // #8368: with OS_ARTIFACT_URL in play, neither knob is set — the child
-      // resolves the reference itself. OS_BOOT_EMPTY in particular must NOT be
-      // set here: it would tell `serve` that booting an app-less kernel is an
-      // acceptable outcome, turning an unreachable artifact host into a
-      // silently empty platform instead of the loud refusal acceptance #2 asks
-      // for.
-      ...(artifactUrl
-        ? {}
-        : artifactSource
-          ? { OS_ARTIFACT_PATH: artifactSource.path }
-          : { OS_BOOT_EMPTY: '1' }),
     };
     // Flags over env: an explicit --artifact removes the reference rather than
     // racing it (see the resolution note above).
@@ -401,15 +426,34 @@ function resolveHome(
   return path.resolve(os.homedir(), '.objectstack');
 }
 
-interface ResolvedArtifact {
-  /** Absolute path or URL passed to OS_ARTIFACT_PATH. */
+export interface ResolvedArtifact {
+  /**
+   * Absolute path or URL handed to the child on the CLI's internal channel
+   * (`OS_INTERNAL_ARTIFACT_PATH`) — never on the operator's `OS_ARTIFACT_PATH`.
+   */
   path: string;
   /** Human-friendly form for the banner. */
   display: string;
 }
 
-function resolveArtifactSource(flagValue: string | undefined, homeDir: string): ResolvedArtifact | undefined {
-  const cwd = process.cwd();
+/**
+ * `start`'s artifact resolution ladder, in one place:
+ *
+ *   `--artifact` > `$OS_ARTIFACT_PATH` > `<cwd>/dist/objectstack.json`
+ *   > `<home>/dist/objectstack.json` > none
+ *
+ * Exported (with `cwd` / `env` injectable) so the ladder itself is pinned
+ * rather than inferred: moving the CLI's plumbing off `OS_ARTIFACT_PATH` must
+ * not shift a single rung, and the operator's `$OS_ARTIFACT_PATH` in
+ * particular must keep being honoured exactly where it is honoured today.
+ */
+export function resolveArtifactSource(
+  flagValue: string | undefined,
+  homeDir: string,
+  opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+): ResolvedArtifact | undefined {
+  const cwd = opts.cwd ?? process.cwd();
+  const env = opts.env ?? process.env;
 
   // Explicit flag wins, including URLs.
   if (flagValue) {
@@ -423,8 +467,10 @@ function resolveArtifactSource(flagValue: string | undefined, homeDir: string): 
     return { path: abs, display: path.relative(cwd, abs) };
   }
 
-  // Explicit env var wins next.
-  const envPath = process.env.OS_ARTIFACT_PATH;
+  // Explicit env var wins next — the OPERATOR's value, read from the parent
+  // environment. It is resolved here and passed down on the internal channel;
+  // the variable itself is inherited by the child untouched.
+  const envPath = env.OS_ARTIFACT_PATH;
   if (envPath) {
     if (/^https?:\/\//i.test(envPath)) return { path: envPath, display: envPath };
     const abs = path.resolve(cwd, envPath);

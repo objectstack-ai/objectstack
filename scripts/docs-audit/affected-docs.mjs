@@ -31,20 +31,40 @@
 // Over-inclusion is NOT free here, and that is the correction: a wrong-both-ways
 // advisory trains its reader to skip it, and then it fails on the PR where it is right
 // (the same bill exclusion 1 below already paid). So this derivation is PRECISION-FIRST:
-// a shorter right list beats a longer noisy one. Three anchor kinds, each exact:
+// a shorter right list beats a longer noisy one. Four anchor kinds, each exact:
 //
-//   symbol — a DOCUMENTABLE declaration the diff touched: a top-level declaration, or a
-//            member of a top-level container (class / interface / type / enum / schema
-//            object). Locals inside a function body are NOT documentable surface — that
-//            single rule is what drops the `singular` false positive above. Taken from
-//            BOTH sides of the diff, so a REMOVED export still anchors the pages naming it.
-//   route  — a wire path the change touched: a path literal on a changed line, plus every
-//            route whose REGISTRAR HANDLER references a changed symbol (that is the
-//            mechanical `auditMetaItem` → `GET /api/v1/meta/:type/:name/audit` link).
-//   sdk    — the client method a route ledger BINDS to an anchor route
-//            (`meta.getAudit`). The declared cross-surface table is what carries the
-//            derivation over the boundary the package graph cannot cross, and it is what
-//            puts `api/client-sdk.mdx` back on the list.
+//   symbol  — a DOCUMENTABLE declaration the diff touched: a top-level declaration, or a
+//             member of a top-level container (class / interface / type / enum / schema
+//             object). Locals inside a function body are NOT documentable surface — that
+//             single rule is what drops the `singular` false positive above. Taken from
+//             BOTH sides of the diff, so a REMOVED export still anchors the pages naming it.
+//   route   — a wire path the change touched: a path literal on a changed line, plus every
+//             route whose REGISTRAR HANDLER references a changed symbol (that is the
+//             mechanical `auditMetaItem` → `GET /api/v1/meta/:type/:name/audit` link).
+//   sdk     — the client method a route ledger BINDS to an anchor route
+//             (`meta.getAudit`). The declared cross-surface table is what carries the
+//             derivation over the boundary the package graph cannot cross, and it is what
+//             puts `api/client-sdk.mdx` back on the list.
+//   command — the CLI command PHRASE a changed command file implements
+//             (`packages/cli/src/commands/meta/resync.ts` → `os meta resync`). Derived
+//             from the oclif filesystem convention, never from a curated table — see the
+//             `commandIdFor` block below for the derivation and the shapes it declines.
+//
+// WHY `command` IS A KIND AND NOT A LOOSENING OF THE SHAPE GUARD (#9230). The shape guard
+// in §3b drops a single all-lowercase word because it cannot be told from the vocabulary
+// the docs are written in; neutralising it took one measured PR from 19 pages to 49.
+// `resync` alone is exactly that shape and stays dropped, deliberately. `os meta resync`
+// is not that shape: binary name plus topic plus command is a multi-word phrase no page
+// supplies by accident, so it is distinctive by CONSTRUCTION in the same way a
+// multi-segment wire path is, and it is admitted the same way — BESIDE the guard, never
+// through it. The guard is untouched for bare tokens and must stay that way.
+//
+// ⛔ Not claimed: that this class matters often. It is a BOUNDED precision improvement.
+// The #9192 sample measured ten PRs and exactly ONE missed for this reason — the worked
+// example 07ad42463 (`fix(cli): explain os meta resync's skip count`), which derived
+// `MetaResync` / `resyncSkipExplanationLine`, matched 0 pages, and left the reader with
+// only the coarse 22-page package-mention set, while one hand-written page names
+// `os meta resync` outright.
 //
 // What this cannot see is REPORTED, never implied: files that yield no anchor at all are
 // listed as `anchorlessChanges`, and the coarse package-mention set is still computed and
@@ -247,6 +267,27 @@ const indentOf = (line) => line.length - line.trimStart().length;
  */
 const isCodeShaped = (name) => /[A-Z]/.test(name.slice(1)) || name.includes('_') || name.includes('.');
 
+/**
+ * Anchor kinds the shape guard does not judge, because their tokens are distinctive by
+ * CONSTRUCTION rather than by spelling — both are multi-segment phrases carrying literals
+ * prose cannot supply by accident (a wire path's static segments; a command phrase's
+ * binary name and topic).
+ *
+ * ⛔ This is an exemption BESIDE the guard, never a loosening OF it. `isCodeShaped` still
+ * governs every single-token kind (`symbol`, `literal`, `sdk`) exactly as before: the
+ * measured cost of neutralising it there is one PR going from 19 pages to 49, and `label`
+ * / `object` matching 82 / 113 of 178 pages. Adding a kind here is only ever legitimate
+ * for a token that cannot BE a bare lowercase word — check that before extending it.
+ */
+const PHRASE_ANCHOR_KINDS = new Set(['route', 'command']);
+
+/**
+ * Where an oclif CLI keeps one source file per command, relative to its package root.
+ * `packages/cli/package.json` declares `oclif.commands.target = './dist/commands'`, and
+ * `dist/` mirrors `src/`, so this is that declaration expressed on the source side.
+ */
+const OCLIF_COMMANDS_DIR = 'src/commands';
+
 // Short-circuit before any git or filesystem work — the self-test needs no repo state.
 if (args.includes('--self-test')) {
   selfTest();
@@ -437,6 +478,114 @@ const liveManifestIo = {
 
 // --- 2b. anchors: what the change actually touched ---------------------------
 
+/**
+ * The oclif command id a source path under `<packageRoot>/src/commands/**` implements,
+ * spelled the way the CLI is invoked (`meta/resync.ts` → `meta resync`), or `null`.
+ *
+ * ⭐ DERIVED FROM THE FILESYSTEM, NOT FROM A CURATED TABLE. oclif resolves command ids
+ * from paths — topic = directory, command = filename — so the machine-readable registry
+ * this anchor kind needs ALREADY EXISTS as the convention, and a hand-kept ledger beside
+ * it would be a second source of truth that drifts silently (the same reasoning that made
+ * `packageRootOf` and `REGISTRAR_FILE_RE` filesystem-derived rather than listed).
+ *
+ * Shapes it handles, all mechanically:
+ *   - `build.ts`             → `build`               (a top-level command)
+ *   - `meta/resync.ts`       → `meta resync`         (topic + command)
+ *   - `migrate/recorded-by.ts` → `migrate recorded-by` (hyphens are ordinary id chars)
+ *   - `migrate/index.ts`     → `migrate`             (oclif: a topic's index IS the topic)
+ *   - `a/b/c.ts`             → `a b c`               (nesting is read off the path, so a
+ *                                                     deeper topic tree needs no change
+ *                                                     here — measured: today's tree is
+ *                                                     one level deep, 45 commands at the
+ *                                                     root and 43 under 11 topics)
+ *
+ * Shapes it DECLINES, and says so rather than guessing — the caller collects them in
+ * `unmappedCommandFiles`:
+ *   - any segment that is not an oclif id segment (`__tests__/`, a `*.test.ts` whose
+ *     residual `.test` survives the extension strip, a `.json` fixture);
+ *   - a bare `index` directly under the commands root, which would name the root binary
+ *     rather than a command.
+ *
+ * One shape is knowingly OUT of reach and is documented rather than detected: a command
+ * that overrides its id in code (`static id` / `static topic`) can disagree with its path.
+ * Measured on this tree: zero commands declare `static topic`, and the one `static id`
+ * (`init.ts` → `'init'`) agrees with its path, so nothing is mis-derived today. The
+ * failure direction if that ever changes is a phrase matching NO page — a recall miss the
+ * anchor list makes visible, not a false positive that pollutes the work list.
+ */
+function commandIdFor(relPath) {
+  const segs = relPath.replace(/\.(?:ts|tsx|js|mjs|cjs)$/, '').split('/').filter(Boolean);
+  if (segs.length && segs[segs.length - 1] === 'index') segs.pop(); // topic/index → the topic
+  if (!segs.length) return null;
+  if (!segs.every((s) => /^[a-z0-9][a-z0-9-]*$/.test(s))) return null;
+  return segs.join(' ');
+}
+
+/**
+ * Every binary name a package declares for itself: `oclif.bin` (the canonical one, used
+ * in help output) plus each `bin` key. Declared data, so a page writing either spelling
+ * is matched without either being guessed at.
+ */
+function oclifBinNamesOf(pkg) {
+  if (!pkg || typeof pkg !== 'object' || !pkg.oclif) return [];
+  const names = [];
+  if (typeof pkg.oclif.bin === 'string' && pkg.oclif.bin) names.push(pkg.oclif.bin);
+  if (pkg.bin && typeof pkg.bin === 'object' && !Array.isArray(pkg.bin)) {
+    for (const k of Object.keys(pkg.bin)) if (/^[A-Za-z0-9][\w.-]*$/.test(k)) names.push(k);
+  } else if (typeof pkg.bin === 'string' && typeof pkg.name === 'string') {
+    const short = pkg.name.split('/').pop();
+    if (short && /^[A-Za-z0-9][\w.-]*$/.test(short)) names.push(short);
+  }
+  return [...new Set(names)];
+}
+
+/**
+ * The `command` anchor a changed file yields, or `null` if it is not an oclif command
+ * source at all. Returns `{ id, bins, token, unmapped }`:
+ *   - `token` is the CANONICAL phrase (`oclif.bin` first) — one anchor per command, so
+ *     the anchor list stays readable; the alternate binary spellings live in the doc
+ *     matcher instead, exactly as `routePatternFor` carries a route's three param
+ *     spellings behind one route tail.
+ *   - `unmapped: true` means "this file IS under a commands dir but yielded no id" — the
+ *     caller must publish it rather than drop it.
+ *
+ * Gated on the package DECLARING `oclif`, not on a hardcoded `packages/cli` path: a
+ * second CLI package would be covered on the day it lands, and a `src/commands/` dir in a
+ * package that is not a CLI is correctly ignored.
+ *
+ * `readPkg`/`hasPackageJson` are injectable so `--self-test` can pin this with no repo state.
+ */
+function commandAnchorFor(file, readPkg = livePackageJsonOf, hasPackageJson = dirHasPackageJson) {
+  const root = packageRootOf(file, hasPackageJson);
+  if (root === null) return null;
+  const prefix = `${root}/${OCLIF_COMMANDS_DIR}/`;
+  if (!file.startsWith(prefix)) return null;
+  const bins = oclifBinNamesOf(readPkg(root));
+  if (!bins.length) return null;
+  const id = commandIdFor(file.slice(prefix.length));
+  if (id === null) return { id: null, bins, token: null, unmapped: true };
+  return { id, bins, token: `${bins[0]} ${id}`, unmapped: false };
+}
+
+const livePackageJsonOf = (dir) => {
+  try { return JSON.parse(readFileSync(join(repoRoot, dir, 'package.json'), 'utf8')); } catch { return null; }
+};
+
+/**
+ * A doc-side matcher for a command phrase: the id's words separated by run-of-the-mill
+ * horizontal whitespace, behind ANY of the binary names the package declares — so
+ * `os meta resync`, `objectstack meta resync` and `npx objectstack meta resync` all
+ * count, while `resync` on its own never does.
+ *
+ * Newlines are deliberately NOT whitespace here: a command is written on one line, and
+ * allowing a line break would let two unrelated sentences straddle into a match.
+ */
+function commandPatternFor(id, bins) {
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const alt = bins.map(esc).join('|');
+  const body = id.split(' ').map(esc).join('[ \\t]+');
+  return new RegExp(`(?<![\\w$.-])(?:${alt})[ \\t]+${body}(?![\\w$-])`);
+}
 
 /**
  * The declaration a single source LINE declares, or `null`. Line-based on purpose: this
@@ -982,6 +1131,99 @@ function selfTest() {
   const bridgeRow = ledger.find((r) => bridged && r.route.endsWith('/:type/:name/audit'));
   check('bridge', 'a changed protocol method reaches the SDK method the docs name', 'auditMetaItem → getAudit', 'getAudit', bridgeRow?.client?.split('.').pop());
 
+  // ---- the CLI command anchor kind (#9230) ----------------------------------
+  // The recall class: a CLI-surface change derives `MetaResync` / a lowercase `resync`,
+  // and neither reaches the page that documents the command. The phrase does. Both halves
+  // are pinned — the phrase that must now be derived, AND the bare token that must stay
+  // dropped, because buying recall by loosening the shape guard is the one fix this card
+  // rules out (19 pages → 49, measured).
+
+  const commandIdCases = [
+    // [path under the commands root, expected id, label]
+    ['meta/resync.ts', 'meta resync', 'topic + command — the #9230 specimen'],
+    ['build.ts', 'build', 'a top-level command'],
+    ['migrate/recorded-by.ts', 'migrate recorded-by', 'a hyphen is an ordinary id char'],
+    ['migrate/index.ts', 'migrate', 'a topic index IS the topic, not "migrate index"'],
+    ['a/b/c.ts', 'a b c', 'deeper nesting is read off the path, not special-cased'],
+    ['cloud/whoami.js', 'cloud whoami', 'the compiled extension resolves the same way'],
+
+    ['meta/resync-skip-explanation.test.ts', null, 'a test file leaves a `.test` segment — declined, not guessed'],
+    ['__tests__/helper.ts', null, 'an underscore dir is not an oclif id segment'],
+    ['meta/fixture.json', null, 'a non-source file under the commands dir'],
+    ['index.ts', null, 'a bare index at the commands root would name the binary, not a command'],
+    ['meta/Resync.ts', null, 'an uppercase filename is not an oclif id'],
+  ];
+  for (const [rel, want, label] of commandIdCases) check('commandIdFor', label, rel, want, commandIdFor(rel));
+
+  // Binary names come from what the package DECLARES — `oclif.bin` first (it is the
+  // canonical spelling, and the one the phrase token is built from), then every `bin` key.
+  const binCases = [
+    [{ oclif: { bin: 'os' }, bin: { objectstack: './bin/run.js', os: './bin/run.js' } }, ['os', 'objectstack'], 'the real @objectstack/cli manifest — canonical first'],
+    [{ oclif: {}, bin: { os: './bin/run.js' } }, ['os'], 'no oclif.bin: the bin keys still stand'],
+    [{ oclif: { bin: 'os' } }, ['os'], 'oclif.bin alone'],
+    [{ bin: { os: './bin/run.js' } }, [], 'a package with NO oclif key is not a CLI — never guessed at'],
+    [{ oclif: { bin: 'tool' }, bin: './bin/run.js', name: '@scope/tool-cli' }, ['tool', 'tool-cli'], 'the string `bin` shorthand falls back to the unscoped package name'],
+    [null, [], 'an unreadable manifest yields nothing'],
+  ];
+  for (const [pkg, want, label] of binCases) {
+    check('oclifBinNamesOf', label, JSON.stringify(pkg), JSON.stringify(want), JSON.stringify(oclifBinNamesOf(pkg)));
+  }
+
+  // The path gate: only a package that declares `oclif`, and only under its commands dir.
+  const cliPkg = { name: '@objectstack/cli', oclif: { bin: 'os' }, bin: { objectstack: 'x', os: 'x' } };
+  const cliTree = new Set(['packages/cli', 'packages/spec']);
+  const readFakePkg = (dir) => (dir === 'packages/cli' ? cliPkg : { name: '@objectstack/spec' });
+  const anchorFor = (f) => commandAnchorFor(f, readFakePkg, (d) => cliTree.has(d));
+  const commandAnchorCases = [
+    ['packages/cli/src/commands/meta/resync.ts', 'os meta resync', 'the specimen resolves to its phrase'],
+    ['packages/cli/src/commands/build.ts', 'os build', 'a top-level command'],
+    ['packages/cli/src/utils/schema-migrate.js', null, 'a CLI file OUTSIDE the commands dir is not a command'],
+    ['packages/spec/src/commands/thing.ts', null, 'a commands dir in a package that declares no oclif is ignored'],
+    ['packages/cli/package.json', null, 'the manifest itself is not a command'],
+  ];
+  for (const [path, want, label] of commandAnchorCases) {
+    check('commandAnchorFor', label, path, want, anchorFor(path)?.token ?? null);
+  }
+  check('commandAnchorFor', 'a declined shape under the commands dir is reported, not dropped silently',
+    'packages/cli/src/commands/__tests__/helper.ts', true, anchorFor('packages/cli/src/commands/__tests__/helper.ts')?.unmapped === true);
+  check('commandAnchorFor', 'a file outside any commands dir is not reported as unmapped either',
+    'packages/cli/src/utils/schema-migrate.js', null, anchorFor('packages/cli/src/utils/schema-migrate.js'));
+
+  // The doc-side matcher. `os meta resync` must find the page that writes it and must NOT
+  // find prose that merely uses the words.
+  const cmdRe = commandPatternFor('meta resync', ['os', 'objectstack']);
+  const commandMatchCases = [
+    ['`os migrate`, `os meta resync`, a test run.', true, 'the real drivers.mdx line — inside a code span'],
+    ['Run `objectstack meta resync --json` to re-sync.', true, 'the alternate declared binary'],
+    ['npx objectstack meta resync', true, 'the npx form is the same phrase with a prefix'],
+    ['os  meta\tresync', true, 'extra horizontal whitespace between the words'],
+    ['resync the metadata cache', false, 'the BARE token never matches — the whole point of the phrase'],
+    ['the meta resync step', false, 'the words without a binary name are prose'],
+    ['macos meta resync', false, 'a binary name must stand alone, not end another word'],
+    ['os meta resyncAll', false, 'a longer identifier is not the command'],
+    ['os meta resync-plan', false, 'a sibling command id is not this one'],
+    ['os meta\nresync', false, 'a line break is not intra-command whitespace'],
+  ];
+  for (const [text, want, label] of commandMatchCases) {
+    check('commandPatternFor', label, JSON.stringify(text), want, cmdRe.test(text));
+  }
+
+  // ⛔ The load-bearing half. The shape guard is EXEMPTED for phrase kinds and otherwise
+  // untouched: `resync` on its own is still not code-shaped, so the `symbol`/`literal`/
+  // `sdk` kinds still drop it. If this pair ever disagrees, recall was bought by
+  // neutralising the guard — the fix #9230 explicitly rules out.
+  check('isCodeShaped', 'the BARE command token is still dropped as prose-shaped', 'resync', false, isCodeShaped('resync'));
+  const guardKindCases = [
+    ['command', true, 'a command phrase is distinctive by construction'],
+    ['route', true, 'a wire path is too'],
+    ['symbol', false, 'a symbol is still judged by its spelling'],
+    ['literal', false, 'so is a string literal'],
+    ['sdk', false, 'so is an SDK method'],
+  ];
+  for (const [kind, want, label] of guardKindCases) {
+    check('PHRASE_ANCHOR_KINDS', label, kind, want, PHRASE_ANCHOR_KINDS.has(kind));
+  }
+
   // String literals on a changed line: an identifier-shaped one is surface, English is not.
   const litLines = ["  if (rule === 'controlled_by_parent') return maskFieldValue(v);", "  fs.readFileSync(p, 'utf8');", "  logger.warn('ignore');"];
   const lits = literalAnchorsFromLines(litLines, [1, 2, 3]).literals;
@@ -1035,6 +1277,8 @@ for (const dir of pkgRoots) {
 const symbolAnchors = new Set();
 const routeAnchors = new Set();
 const literalAnchors = new Set();
+const commandAnchors = new Map(); // canonical phrase → { id, bins }
+const unmappedCommandFiles = [];
 const anchorlessChanges = [];
 
 const readAt = (ref, file) => {
@@ -1042,13 +1286,19 @@ const readAt = (ref, file) => {
 };
 
 for (const f of implementationChanges) {
+  // The command anchor is read off the PATH, so it is derived before the diff is opened
+  // and survives a file that is added or deleted outright — the id lives in the location,
+  // not in the contents.
+  const cmd = commandAnchorFor(f);
+  if (cmd?.unmapped) unmappedCommandFiles.push(f);
+  if (cmd?.token) commandAnchors.set(cmd.token, { id: cmd.id, bins: cmd.bins });
   if (!/\.(?:ts|tsx|js|mjs|cjs)$/.test(f)) { anchorlessChanges.push(f); continue; }
   let diffText = '';
   try { diffText = sh(`git diff -U0 ${baseRef} HEAD -- ${JSON.stringify(f)}`); } catch { /* keep empty */ }
   const { oldLines, newLines } = changedLineNumbers(diffText);
   const before = oldLines.length ? readAt(baseRef, f) : null;
   const after = newLines.length ? (readAt('HEAD', f) ?? (existsSync(join(repoRoot, f)) ? readFileSync(join(repoRoot, f), 'utf8') : null)) : null;
-  let found = 0;
+  let found = cmd?.token ? 1 : 0;
   for (const [text, changed] of [[after, newLines], [before, oldLines]]) {
     if (!text) continue;
     for (const name of symbolAnchorsFromSource(text, changed)) { symbolAnchors.add(name); found++; }
@@ -1095,7 +1345,7 @@ const dottedRe = (name) => new RegExp(`(?<![\\w$])${escape(name)}(?![\\w$])`);
 
 /** Admit one candidate anchor: it must be discriminating, and it must be seen to be. */
 function admitAnchor(kind, token, re) {
-  if (kind !== 'route' && !isCodeShaped(token)) { weakAnchorsDropped.push(`${token} (${kind})`); return false; }
+  if (!PHRASE_ANCHOR_KINDS.has(kind) && !isCodeShaped(token)) { weakAnchorsDropped.push(`${token} (${kind})`); return false; }
   const docs = [];
   for (let i = 0; i < handwritten.length; i++) if (re.test(docTexts[i])) docs.push(i);
   if (docs.length > overbroadLimit) { overbroadAnchors.push(`${token} (${kind}, ${docs.length} pages)`); return false; }
@@ -1116,6 +1366,14 @@ for (const name of [...symbolAnchors].sort()) {
   if (!/^[A-Z0-9_$]+$/.test(name)) bridgeSymbols.push(name);
 }
 for (const name of [...literalAnchors].sort()) admitAnchor('literal', name, symbolRe(name));
+// Command phrases face the CORPUS-SHARE guard like everything else — only the shape guard
+// is skipped, and only because the token cannot be a bare lowercase word (see
+// `PHRASE_ANCHOR_KINDS`). A topic-level phrase broad enough to name a quarter of the docs
+// is still a hub term, and still gets dropped and published in `overbroadAnchors`.
+for (const token of [...commandAnchors.keys()].sort()) {
+  const { id, bins } = commandAnchors.get(token);
+  admitAnchor('command', token, commandPatternFor(id, bins));
+}
 
 // PHASE 2 — carry the surviving symbols across the surface boundary the package graph
 // cannot cross. A changed protocol method appears in the HANDLER of the route it serves;
@@ -1233,10 +1491,13 @@ if (devOnlyManifestsSkipped > 0) skipNotes.push(`${devOnlyManifestsSkipped} pack
 const skipNote = skipNotes.length ? ` (${skipNotes.join('; ')})` : '';
 
 const anchorSummary = anchors.length
-  ? `${anchors.length} anchor(s) — ${symbolAnchors.size} symbol, ${routeAnchors.size} route, ${sdkAnchors.size} sdk, ${literalAnchors.size} literal`
+  ? `${anchors.length} anchor(s) — ${symbolAnchors.size} symbol, ${routeAnchors.size} route, ${sdkAnchors.size} sdk, ${literalAnchors.size} literal, ${commandAnchors.size} command`
   : 'no anchors derived';
 const anchorlessNote = anchorlessChanges.length
   ? `; ⚠️ ${anchorlessChanges.length} changed file(s) yielded no anchor — this run cannot see pages documenting them`
+  : '';
+const unmappedCommandNote = unmappedCommandFiles.length
+  ? `; ⚠️ ${unmappedCommandFiles.length} file(s) under a CLI commands dir yielded no command phrase (${unmappedCommandFiles.join(', ')})`
   : '';
 const overbroadNote = overbroadAnchors.length
   ? `; ${overbroadAnchors.length} over-broad anchor(s) dropped (${overbroadAnchors.join(', ')})`
@@ -1248,12 +1509,13 @@ const crossCuttingNote = crossCuttingSymbols.length
 emit(
   affected.map((a) => a.doc),
   changedPackages,
-  `${affected.length} docs name something this change touched (${anchorSummary}) across ${changedPackages.length} changed package(s) since ${sinceRef}${skipNote}${anchorlessNote}${crossCuttingNote}${overbroadNote}`,
+  `${affected.length} docs name something this change touched (${anchorSummary}) across ${changedPackages.length} changed package(s) since ${sinceRef}${skipNote}${anchorlessNote}${unmappedCommandNote}${crossCuttingNote}${overbroadNote}`,
   affected,
   { testFilesSkipped, scriptFilesSkipped, devOnlyManifestsSkipped },
   {
     anchors: anchors.map((a) => ({ kind: a.kind, token: a.token })),
     anchorlessChanges,
+    unmappedCommandFiles,
     crossCuttingSymbols,
     weakAnchorsDropped,
     overbroadAnchors,
@@ -1266,6 +1528,7 @@ function emit(docList, changedPackages, summary, detail, skipped = {}, anchorInf
   const {
     anchors: anchorList = [], anchorlessChanges: anchorless = [], crossCuttingSymbols: crossCutting = [],
     weakAnchorsDropped: weak = [], overbroadAnchors: overbroad = [], packageMentionDocs: coarse = [],
+    unmappedCommandFiles: unmappedCommands = [],
   } = anchorInfo;
   if (asJson) {
     process.stdout.write(
@@ -1291,6 +1554,11 @@ function emit(docList, changedPackages, summary, detail, skipped = {}, anchorInf
           // Non-empty means the list below is INCOMPLETE by a known amount — never read
           // an empty `docs` as "no page documents this change" while this is non-empty.
           anchorlessChanges: anchorless,
+          // Files sitting under a CLI's commands dir whose path did NOT resolve to a
+          // command id (#9230). Distinct from `anchorlessChanges` — such a file may still
+          // have produced symbol anchors — and published for the same reason: the command
+          // derivation declining a shape must be readable, never inferred from a gap.
+          unmappedCommandFiles: unmappedCommands,
           // The other declared narrowing: symbols wired into so many routes that the
           // route bridge would have answered "every route" instead of "this one".
           crossCuttingSymbols: crossCutting,

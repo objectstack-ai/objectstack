@@ -375,6 +375,42 @@ protocol 17 (#3855): authoring it is rejected with an error naming the
 replacement, not silently stripped, and `os migrate meta --from 16` rewrites
 existing sources automatically.
 
+#### Who the lock applies to — and the derived-field write path
+
+A TRUE `readonlyWhen` predicate locks the field for **every API-boundary
+caller**. Unlike static `readonly`, passing `{ context: { isSystem: true } }`
+does **not** exempt it: a state lock any system-context write could bypass would
+not be a state lock, and the frozen-paid-invoice case depends on it.
+
+What the lock does **not** cover is the server's own trusted code. A value a
+`beforeUpdate` hook derives — or writes over a key the caller also sent — is a
+server value, not a caller write, and is never stripped. That is what makes
+"visible on the form but locked, and recomputed by a hook" a spelling the
+platform supports on one field:
+
+```typescript
+// The field renders locked, and only the hook may move it.
+next_maintenance_date: Field.date({
+  label: 'Next Maintenance',
+  readonlyWhen: P`true`,
+}),
+```
+
+```typescript
+// The hook is the write path.
+beforeUpdate: (ctx) => {
+  if ('period_days' in ctx.input.data) {
+    ctx.input.data.next_maintenance_date = addDays(today, ctx.input.data.period_days);
+  }
+},
+```
+
+A client cannot use this to launder a write. The engine snapshots the caller's
+payload **at entry**, before any middleware or hook runs, and judges a key only
+while it still holds that value — so echoing the locked key back never exempts
+it, and if a hook overwrites it, the value that persists is the hook's. Either
+way the caller's value does not land.
+
 #### Locking a detail from its master: `parent`
 
 On a **detail** object — one that declares a `master_detail` relationship — a

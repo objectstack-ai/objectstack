@@ -660,6 +660,106 @@ describe('readonlyWhen binds a TOTAL record (#4953)', () => {
   });
 });
 
+// #9107 — the CONDITIONAL strip judges only the keys the CALLER supplied at
+// engine entry, the same discipline #5591 gave the static strip below. The two
+// helpers are pinned here at the unit level; the engine-level consequences (the
+// derived-field write path, and the API-boundary lock surviving it) live in
+// `engine-readonly-when-derived-writes.test.ts`.
+describe('stripReadonlyWhen* — supplied-key discipline (#9107)', () => {
+  const lockedFields = {
+    fields: {
+      status: { type: 'text' },
+      amount: { type: 'number', readonlyWhen: "record.status == 'paid'" },
+    },
+  };
+  const paid = { status: 'paid', amount: 100 };
+
+  it('KEEPS a locked key a hook ADDED — the caller never named it', () => {
+    const out = stripReadonlyWhenFields(lockedFields, { amount: 999 }, paid, undefined, undefined, {
+      supplied: {},
+    });
+    expect(out).toEqual({ amount: 999 });
+    expect(out).toBe(out); // nothing dropped
+  });
+
+  it('KEEPS a locked key a hook OVERWROTE, even though the caller supplied it', () => {
+    // The caller echoed `amount` back; a hook then wrote its own value over it.
+    // What sits on the key now is a PLATFORM write, not a forgery.
+    const out = stripReadonlyWhenFields(lockedFields, { amount: 777 }, paid, undefined, undefined, {
+      supplied: { amount: 999 },
+    });
+    expect(out).toEqual({ amount: 777 });
+  });
+
+  it('STILL drops it when the hook wrote the caller value back unchanged', () => {
+    // Identity is the whole test: an unchanged value is indistinguishable from
+    // "no hook touched it", and the fail-safe direction is to strip. This is
+    // also what closes the laundering path — echoing a key cannot exempt it.
+    const out = stripReadonlyWhenFields(lockedFields, { amount: 999 }, paid, undefined, undefined, {
+      supplied: { amount: 999 },
+    });
+    expect(out).toEqual({});
+  });
+
+  it('drops a caller-forged NaN — `Object.is`, not `===`', () => {
+    const nanFields = {
+      fields: { status: { type: 'text' }, amount: { type: 'number', readonlyWhen: "record.status == 'paid'" } },
+    };
+    const out = stripReadonlyWhenFields(nanFields, { amount: Number.NaN }, paid, undefined, undefined, {
+      supplied: { amount: Number.NaN },
+    });
+    expect(out).toEqual({});
+  });
+
+  it('does not read an inherited `Object.prototype` key as caller-supplied', () => {
+    // `constructor` matches the machine-name regex, so it is a legal field
+    // name; `name in supplied` would be TRUE for it on any plain object.
+    const oddly = {
+      fields: { status: { type: 'text' }, constructor: { type: 'text', readonlyWhen: "record.status == 'paid'" } },
+    };
+    const out = stripReadonlyWhenFields(oddly, { constructor: 'hook-stamp' }, paid, undefined, undefined, {
+      supplied: {},
+    });
+    expect(out).toEqual({ constructor: 'hook-stamp' });
+  });
+
+  it('an ABSENT `supplied` judges the whole payload — the fail-SAFE default', () => {
+    // The pre-#9107 behaviour, deliberately kept as the default: a call site
+    // with no entry snapshot cannot tell a hook write from a forgery and must
+    // assume the forgery. Forgetting the option can only over-strip.
+    expect(stripReadonlyWhenFields(lockedFields, { amount: 999 }, paid)).toEqual({});
+  });
+
+  it('a hook-written key is not even EVALUATED — no unbound-root lock, no warn', () => {
+    // The fail-CLOSED unbound-root branch (#4889) exists to protect against an
+    // unjudgeable CALLER write. A hook write is not this strip's business at
+    // all, so the predicate never runs and the branch is never reached.
+    const parentScoped = {
+      fields: { quantity: { type: 'number', readonlyWhen: "parent.status == 'paid'" } },
+    };
+    const warnings: string[] = [];
+    const out = stripReadonlyWhenFields(parentScoped, { quantity: 9999 }, { id: 'l1' }, {
+      warn: (m: string) => warnings.push(m),
+    } as never, undefined, { supplied: {} });
+    expect(out).toEqual({ quantity: 9999 });
+    expect(warnings).toEqual([]);
+  });
+
+  it('the BULK strip applies the identical discipline', () => {
+    const rows = [{ status: 'paid', amount: 100 }, { status: 'draft', amount: 50 }];
+    // Hook-added ⇒ survives, even though row 1 locks the field.
+    expect(
+      stripReadonlyWhenFieldsMulti(lockedFields, { amount: 999 }, rows, undefined, undefined, { supplied: {} }),
+    ).toEqual({ amount: 999 });
+    // Caller-supplied ⇒ dropped for the whole batch (locked in ≥1 row).
+    expect(
+      stripReadonlyWhenFieldsMulti(lockedFields, { amount: 999 }, rows, undefined, undefined, {
+        supplied: { amount: 999 },
+      }),
+    ).toEqual({});
+  });
+});
+
 // #2948 — static `readonly:true` write enforcement (caller-supplied only).
 const stampedFields = {
   fields: {

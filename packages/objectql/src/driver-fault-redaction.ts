@@ -107,14 +107,42 @@
  * covers them but the entries below. That was the open question #9160 asked and
  * the answer is the one the card feared.
  *
- * ⛔ Known residue, measured and NOT closed here: when the caller's value itself
- * contains ` - `, the statement cut lands inside it and eats the template head.
- * Families with a right anchor (`for key …`, `for column … at row N`) recover
- * via their `tail` pattern; the two whose value runs to end of message
- * (pg 22P02/22007, mysql 1292's `Truncated incorrect …` spelling) have no
- * anchor to recover from and leave a suffix of the value standing. Closing that
- * needs the cut itself to become template-aware, which is a change to #8682's
- * contract and is filed rather than decided.
+ * ## [#9275] The residue #9160 left, and the amendment to the cut that closes it
+ *
+ * #9160 recorded a residue it did not close: when the caller's value itself
+ * contains ` - `, the statement cut lands INSIDE that value and eats the
+ * template head. Families with a right anchor recover via their `tail` pattern,
+ * but the ones whose value runs to end of message have nothing to recover from
+ * and leave a suffix of the caller's value standing in the log. Re-measured at
+ * HEAD on the same live servers, canary `SENSITIVE-CANARY-9275 - 2026 - Q3`:
+ *
+ * ```
+ * raised:  insert into "t" ("age") values ($1)
+ *            - invalid input syntax for type integer: "…CANARY… - 2026 - Q3"
+ * logged:  Q3" [statement and bound values redacted]     ← `Q3` is caller data
+ * ```
+ *
+ * Closing it needs the cut itself to become template-aware, which is an
+ * amendment to #8682's contract rather than another row in a list. **Ruled by
+ * the maintainer on 2026-08-17 (#9275): take it, with the trade stated.** See
+ * the section below.
+ *
+ * The re-measurement also moved the COUNT. #9160 named two families here; three
+ * leave a value suffix, and the third wants the other remedy:
+ *
+ * ```
+ * pg 22P02/22007  value runs to end of message   → head-anchored cut (below)
+ * mysql 1292      value runs to end of message   → head-anchored cut (below)
+ * pg 22003        value "…" is out of range …    → `tail`, the #8823 mechanism
+ * ```
+ *
+ * `22003` was assumed unreachable on the reasoning that its value slot holds a
+ * number, which cannot contain ` - `. Measured through the driver's own bind
+ * path, that is false: Postgres' integer parser detects the OVERFLOW before it
+ * rejects the trailing junk, so it echoes the whole caller string back —
+ * `insert({ age: '99999999999 - 2026 - Q3' })` prints `value "99999999999 -
+ * 2026 - Q3" is out of range for type integer` and logged `Q3` as caller data.
+ * It has a right anchor, so it takes a `tail` row and needs no cut change.
  *
  * ## Why the cut is at the separator, and not at a statement keyword
  *
@@ -137,6 +165,64 @@
  * ever discard MORE than necessary, which is the safe direction — and when a
  * native message legitimately contains ` - `, what is lost is a prefix of the
  * diagnostic, never the failing identifier the database names at the end.
+ *
+ * ### [#9275] …except when a KNOWN head says where the diagnostic really began
+ *
+ * "Discard more is safe" holds for the STATEMENT half, and it is exactly wrong
+ * for the DIAGNOSTIC half. When the value the database inlined into its own
+ * message contains ` - `, the last separator sits inside that value, so the cut
+ * discards the template head and keeps the value's suffix — it discards the
+ * half that could not leak and keeps the half that does.
+ *
+ * So the cut asks one more question first: does a separator in this message
+ * stand immediately before a diagnostic head this file has MEASURED (see
+ * `head` in {@link VALUE_BEARING_TEMPLATES})? If one does, that separator is
+ * the true one whatever its position, the head survives, and the value after it
+ * — ` - ` and all — is dropped whole by the template that owns it.
+ *
+ * ⛔ This DOES mean a template is matched before the cut, which the note here
+ * previously forbade in terms: "a bound value can contain anything, this file's
+ * own template included, and matching before the cut would let a value in the
+ * STATEMENT steer what survives". That prohibition is not deleted, it is
+ * AMENDED, and the trade it was protecting is now stated instead of avoided.
+ *
+ * The steering is real and it is BOUNDED TO OVER-REDACTION. A hostile value
+ * that spells a known head makes the cut land inside the statement, at that
+ * head — and ONE property, not several, makes what follows unleakable rather
+ * than exposed: only a template whose value runs to END OF MESSAGE may declare
+ * a `head` (the invariant on {@link ValueBearingTemplate.head}). Whatever the
+ * head-anchored cut leaves — the rest of the statement it cut into included —
+ * is consumed whole by that template's own `whole` pattern.
+ *
+ * ⚠️ That invariant is the WHOLE of the argument, so do not let a second
+ * plausible-sounding reason stand next to it. This note first claimed the cut
+ * was also protected by taking the LAST matching head rather than the first,
+ * "because a value that mimics a head is then cut at the mimic". Ablated: with
+ * the cut changed to take the FIRST head, all 50 cases in this file's suite
+ * stayed GREEN. The reason is mechanical — an end-of-message pattern matches
+ * only ONCE, from its earliest position, so {@link lastMatch} returns that
+ * first match and the output is identical wherever between two heads the cut
+ * landed. Last-head is retained as a tie-break (it discards the most statement,
+ * and reports the head nearest the database's own words, consistent with the
+ * last-separator rule above) — it is NOT what prevents the leak, and a future
+ * reader must not treat it as a second line of defence.
+ *
+ * What a hostile value CAN do is suppress a real diagnostic: craft `- invalid
+ * input syntax for type integer: "` into a value and the operator reads that
+ * head plus `[value redacted]` instead of the `Unknown column …` the server
+ * actually replied. That costs debuggability on a crafted input and is the
+ * price of closing a leak on ordinary ones. **Ruled deliberately by the
+ * maintainer on 2026-08-17 (#9275)**, against the alternatives of inferring
+ * from unbalanced quotes (a new inference rule, over-match risk) and of
+ * accepting the residue as best-effort (caller data at ERROR level, which is
+ * the thing this neighbourhood exists to prevent).
+ *
+ * ⛔ The escape hatch this is NOT: a head is not a licence to cut anywhere a
+ * template appears. No head may be declared for a template whose diagnostic
+ * continues past the value — cutting into a statement on such a head would keep
+ * whatever follows the template's right anchor, which is statement, which is
+ * values. That is the one way this amendment could leak, and the invariant
+ * above is what forecloses it.
  *
  * A driver dump with no separator carries no statement to cut (`UNIQUE
  * constraint failed: sys_user.email`, `SQLITE_CONSTRAINT_NOTNULL: …`) and is
@@ -266,6 +352,15 @@ const MYSQL_INCORRECT_VALUE_TAIL = /'(\s+for column\s+'[^']*'\s+at row\s+\d+)/gi
 const PG_INVALID_INPUT_SYNTAX = /(invalid input syntax for type [a-z0-9 ]+?:\s+)"[\s\S]*$()/gi;
 
 /**
+ * [#9275] {@link PG_INVALID_INPUT_SYNTAX}'s head, through the value's opening
+ * quote — what the statement cut looks for so a value containing ` - ` cannot
+ * eat it. Mirrors group 1 of the pattern above plus the `"` that follows it;
+ * the two must not drift, and `head implies whole matches there` is asserted
+ * directly rather than left as a comment.
+ */
+const PG_INVALID_INPUT_SYNTAX_HEAD = /invalid input syntax for type [a-z0-9 ]+?:\s+"/gi;
+
+/**
  * [#9160] Postgres `numeric_value_out_of_range` (22003).
  *
  * `value "%s" is out of range for type %s` — measured live as
@@ -280,6 +375,30 @@ const PG_INVALID_INPUT_SYNTAX = /(invalid input syntax for type [a-z0-9 ]+?:\s+)
 const PG_VALUE_OUT_OF_RANGE = /(value\s+)"[\s\S]*"(\s+is out of range for type [a-z0-9 ]+)/gi;
 
 /**
+ * [#9275] {@link PG_VALUE_OUT_OF_RANGE} with its head cut away by a value
+ * containing ` - ` — the row #9160 did not know this family needed.
+ *
+ * It was left out on the reasoning that an out-of-range value is a NUMBER and a
+ * number cannot contain the separator. Measured through the driver's own bind
+ * path on live PostgreSQL 16.13, that reasoning is wrong: Postgres' integer
+ * parser detects the overflow while scanning digits, BEFORE it rejects the
+ * trailing junk, so it echoes the caller's whole string rather than a number.
+ *
+ * ```
+ * insert({ age: '99999999999 - 2026 - Q3' })
+ *   raised:  … values ($1) - value "99999999999 - 2026 - Q3" is out of range for type integer
+ *   logged:  Q3" is out of range for type integer          ← `Q3` is caller data
+ * ```
+ *
+ * This family keeps its right anchor, so it takes the #8823 recovery and NOT a
+ * `head`: everything before ` is out of range for type` is value residue by
+ * construction and is dropped whole. ⛔ It must not be given a `head` — its
+ * diagnostic continues past the value, which is exactly the shape the head
+ * invariant forbids.
+ */
+const PG_VALUE_OUT_OF_RANGE_TAIL = /"(\s+is out of range for type [a-z0-9 ]+)/gi;
+
+/**
  * [#9160] MySQL `ER_TRUNCATED_WRONG_VALUE` (1292), the spelling that names no
  * column: `Truncated incorrect %-.32s value: '%-.128s'`.
  *
@@ -291,9 +410,19 @@ const PG_VALUE_OUT_OF_RANGE = /(value\s+)"[\s\S]*"(\s+is out of range for type [
  * measured, not because a write path is known to produce it.
  *
  * Value runs to end of message; no right anchor exists to recover a head-gone
- * residue.
+ * residue, which is why this family takes a `head` instead (#9275).
  */
 const MYSQL_TRUNCATED_INCORRECT_VALUE = /(truncated incorrect \w+ value:\s+)'[\s\S]*$()/gi;
+
+/**
+ * [#9275] {@link MYSQL_TRUNCATED_INCORRECT_VALUE}'s head, through the value's
+ * opening quote. Mirrors group 1 of the pattern above plus the `'` after it.
+ *
+ * The type token really does vary in case — `INTEGER`, `DOUBLE` and `time` were
+ * all raised on live MySQL 8.0.46 — so the `i` flag here is load-bearing, not
+ * decoration.
+ */
+const MYSQL_TRUNCATED_INCORRECT_VALUE_HEAD = /truncated incorrect \w+ value:\s+'/gi;
 
 /**
  * [#9160] Every dialect template MEASURED to inline a caller's value in the
@@ -322,15 +451,45 @@ interface ValueBearingTemplate {
   readonly whole: RegExp;
   /** The head-gone residue, when the template has a right anchor to recover it. */
   readonly tail?: RegExp;
+  /**
+   * [#9275] The template's head through the value's OPENING QUOTE — what the
+   * statement cut looks for so a value containing ` - ` cannot eat it.
+   *
+   * ⛔ INVARIANT, and the only thing standing between this and a leak: a `head`
+   * may be declared ONLY on a template whose value runs to END OF MESSAGE, i.e.
+   * whose `whole` is `$`-anchored and whose group 2 is empty. The head-anchored
+   * cut can land inside the STATEMENT (a hostile value may spell a head), and
+   * what makes that over-redaction rather than exposure is that `whole` then
+   * swallows everything after the head — statement remainder included. A
+   * template with a right anchor would instead keep whatever follows that
+   * anchor, which on such a cut is statement, which is caller values.
+   *
+   * Families that DO have a right anchor take {@link tail} instead; it recovers
+   * the same residue with no cut change at all. Both are asserted structurally
+   * by `driver-fault-redaction.test.ts` rather than trusted from this note.
+   */
+  readonly head?: RegExp;
 }
 
 const VALUE_BEARING_TEMPLATES: readonly ValueBearingTemplate[] = [
   { id: 'mysql/1062 ER_DUP_ENTRY', whole: DUPLICATE_ENTRY, tail: DUPLICATE_ENTRY_TAIL },
   { id: 'mysql/1366 ER_TRUNCATED_WRONG_VALUE_FOR_FIELD', whole: MYSQL_INCORRECT_VALUE, tail: MYSQL_INCORRECT_VALUE_TAIL },
-  { id: 'mysql/1292 ER_TRUNCATED_WRONG_VALUE', whole: MYSQL_TRUNCATED_INCORRECT_VALUE },
-  { id: 'pg/22P02 invalid_text_representation', whole: PG_INVALID_INPUT_SYNTAX },
-  { id: 'pg/22003 numeric_value_out_of_range', whole: PG_VALUE_OUT_OF_RANGE },
+  { id: 'mysql/1292 ER_TRUNCATED_WRONG_VALUE', whole: MYSQL_TRUNCATED_INCORRECT_VALUE, head: MYSQL_TRUNCATED_INCORRECT_VALUE_HEAD },
+  { id: 'pg/22P02 invalid_text_representation', whole: PG_INVALID_INPUT_SYNTAX, head: PG_INVALID_INPUT_SYNTAX_HEAD },
+  { id: 'pg/22003 numeric_value_out_of_range', whole: PG_VALUE_OUT_OF_RANGE, tail: PG_VALUE_OUT_OF_RANGE_TAIL },
 ];
+
+/**
+ * [#9275] Every known diagnostic head, as the separator that stands before it.
+ *
+ * A lookahead, so the match is the SEPARATOR alone and its index is where the
+ * cut goes. Built once from the table above: a row that declares a `head` is
+ * enrolled here automatically, and one that does not cannot be enrolled by
+ * hand.
+ */
+const HEAD_ANCHORED_CUTS: readonly RegExp[] = VALUE_BEARING_TEMPLATES
+  .filter((template): template is ValueBearingTemplate & { head: RegExp } => template.head !== undefined)
+  .map((template) => new RegExp(`${STATEMENT_SEPARATOR}(?=${template.head.source})`, 'gi'));
 
 /**
  * The first stack FRAME line (`    at …`). Everything above it is the header
@@ -371,7 +530,7 @@ export function redactBoundStatement(error: unknown): unknown {
  */
 export function redactStatementFromMessage(message: string): string {
   if (!message || !looksLikeInternalErrorLeak(message)) return message;
-  const cut = message.lastIndexOf(STATEMENT_SEPARATOR);
+  const cut = statementCut(message);
   // No statement to cut — but a dialect may still have inlined a value in the
   // diagnostic itself, and since #9030 taught the shared predicate this
   // phrasing, a BARE `Duplicate entry …` now reaches this line instead of
@@ -387,14 +546,41 @@ export function redactStatementFromMessage(message: string): string {
 }
 
 /**
+ * [#9275] Where the bound statement ends — the index of its separator, or `-1`
+ * when the message carries no statement at all.
+ *
+ * The LAST separator that stands immediately before a MEASURED diagnostic head
+ * wins, because a head is positive evidence about where the database's own
+ * words began; only when no head appears does this fall back to the last
+ * separator in the message, which is #8682's original structural answer.
+ *
+ * A head beats the last separator even though it keeps MORE text. That is sound
+ * only because of the head invariant — the extra text is swallowed whole by the
+ * template that owns the head — and the invariant is the entire safety argument
+ * (see the head note; taking the last head rather than the first is a tie-break
+ * that was ABLATED and changes no output).
+ */
+function statementCut(message: string): number {
+  let headCut = -1;
+  for (const separator of HEAD_ANCHORED_CUTS) {
+    const match = lastMatch(separator, message);
+    if (match && match.index > headCut) headCut = match.index;
+  }
+  return headCut !== -1 ? headCut : message.lastIndexOf(STATEMENT_SEPARATOR);
+}
+
+/**
  * [#8823] Drop the caller values a dialect inlines into its OWN diagnostic,
  * keeping every identifier around them.
  *
  * Runs on the tail the statement cut already produced, never on the whole
- * message: a bound value can contain anything, this file's own template
- * included, and matching before the cut would let a value in the STATEMENT
- * steer what survives. After the cut there is nothing left but the database's
- * words, so the templates below can be read literally.
+ * message: after the cut there is nothing left but the database's words, so the
+ * templates below can be read literally. ⛔ The one exception is deliberate and
+ * bounded — {@link statementCut} matches a template's `head` BEFORE the cut, so
+ * that a value containing ` - ` cannot eat it. That amendment, the steering it
+ * admits and the invariant that keeps the steering to over-redaction rather
+ * than exposure are argued in the head note (#9275); nothing here reads a
+ * template earlier than the cut on its own account.
  *
  * ⛔ Add a dialect's spelling to {@link VALUE_BEARING_TEMPLATES} only once it has
  * been measured off a THROWN error, never from a reading of the manual — the

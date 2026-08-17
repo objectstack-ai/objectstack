@@ -920,6 +920,74 @@ describe('SaveMetaItemResponseSchema.advisories (#4717 — #4463 D3 on the respo
 });
 
 /**
+ * #9176 — `advisories` on the PUBLISH response: the same #4463 D3 key, mirrored
+ * onto the other write door. The gate runs on both doors by D1 (a draft→active
+ * promotion is gated exactly as a direct active save), but until #9176 only the
+ * save door reported — the promotion call site received the gate's advisory
+ * return and discarded it. Studio's designer takes draft-then-publish on every
+ * edit, so the door its authors actually use was the one that said nothing.
+ *
+ * Same conditional-field caveat as the save door: the producer-side conformance
+ * gate (`packages/objectql/src/publish-meta-response-conformance.test.ts`)
+ * asserts nothing is stripped, and an absent key strips nothing — so these
+ * declaration pins are what make the key checkable at all, in both directions.
+ */
+describe('PublishMetaItemResponseSchema.advisories (#9176 — #4463 D3 on the publish door)', () => {
+  const realPublishResponse = {
+    success: true,
+    version: 'sha256:7aad99c8d969efb5067fff275fb3e5be7ec90f9cd610d41709fcddbf8c34b1f0',
+    seq: 2,
+    message: 'Published draft — type=flow, name=nightly_purge [seq=2]',
+  };
+
+  /** A verbatim capture of a real finding — `lintFlowPatterns`, warning tier. */
+  const advisory = {
+    rule: 'flow-multi-write-unfiltered',
+    path: 'flow \'nightly_purge\' · node \'purge\' (delete_record)',
+    where: 'flow \'nightly_purge\' · node \'purge\' (delete_record)',
+    message: 'declares `multi: true` with no `filter` key — this is a WHOLE-OBJECT write.',
+    hint: 'Add a `filter`, or state the whole-object intent explicitly.',
+    severity: 'warning' as const,
+  };
+
+  it('carries a real advisory through parse without stripping it', () => {
+    const parsed = PublishMetaItemResponseSchema.parse({ ...realPublishResponse, advisories: [advisory] });
+    expect(parsed.advisories).toEqual([advisory]);
+  });
+
+  it('is OPTIONAL — absence means "nothing to report", never "the gate did not run"', () => {
+    expect(PublishMetaItemResponseSchema.safeParse(realPublishResponse).success).toBe(true);
+    expect(PublishMetaItemResponseSchema.parse(realPublishResponse).advisories).toBeUndefined();
+  });
+
+  it('does not fabricate an empty array when the key is absent', () => {
+    // The producer omits the key rather than emitting `[]`, so a clean
+    // publish's response bytes are unchanged. A `.default([])` here would
+    // quietly undo that on the consumer side: every caller would see a key
+    // the server never sent, and "absent" would stop being distinguishable.
+    expect('advisories' in PublishMetaItemResponseSchema.parse(realPublishResponse)).toBe(false);
+  });
+
+  it('rejects a non-array, so a single issue object cannot masquerade as the list', () => {
+    expect(
+      PublishMetaItemResponseSchema.safeParse({ ...realPublishResponse, advisories: advisory }).success,
+    ).toBe(false);
+  });
+
+  it('element shape is the ONE declared finding shape — a lossy element is refused, not narrowed', () => {
+    // The element schema is `RuntimeAuthoringIssueSchema` by reference, not a
+    // local re-declaration — so an element missing a required key fails the
+    // whole parse rather than surviving with keys silently dropped. This is
+    // what keeps the save door's `advisories[]`, the publish door's, and the
+    // 422 `issues[]` one dialect (#4717).
+    const partial = { rule: 'x', severity: 'warning' };
+    expect(
+      PublishMetaItemResponseSchema.safeParse({ ...realPublishResponse, advisories: [partial] }).success,
+    ).toBe(false);
+  });
+});
+
+/**
  * The element shape itself — declared once (#4717) and re-exported by
  * `@objectstack/metadata-protocol` as its `RuntimeAuthoringIssue`, so the 422's
  * `issues[]` and the 2xx's `advisories[]` cannot drift into two dialects.

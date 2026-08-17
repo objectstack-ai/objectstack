@@ -55,6 +55,26 @@ Get a specific metadata item with optional ETag caching.
 
 Create or update a metadata item.
 
+Creates are gated per type: `MetadataTypeRegistryEntry.allowRuntimeCreate` decides
+whether a **brand-new** name may be minted under that type at all, separately from
+whether an item that already exists may be overlaid (`allowOrgOverride`). A type that
+declines the create half still accepts updates to names that already exist, and its
+refusal — `403 NOT_CREATABLE` — names the route that does work. The flags are
+documented on
+[`MetadataTypeRegistryEntry`](/docs/references/kernel/metadata-plugin#metadatatyperegistryentry);
+which types currently decline which half is tracked in the
+[overlay whitelist](/docs/concepts/metadata-lifecycle#overlay-whitelist-shared-db-tenancy-invariant)
+rather than enumerated on this page, so this caveat doesn't go stale the next time a
+type is retired.
+
+This verb also refuses a `:type` segment that is not a metadata type the platform
+declares at all — not a recognised spelling, and not a misspelling of one either —
+with `400 INVALID_REQUEST`, before any namespace is minted for it. The refusal is
+scoped to this verb: `GET` and `DELETE` on an item that already exists are
+unaffected. See [unrecognised type spelling](/docs/api/error-catalog#invalid_request--unrecognised-type-spelling)
+in the error catalog for the envelope — the same code and status cover both this
+refusal and the misspelling one above; the message text tells them apart.
+
 **Body**: `{ type: "object", name: "account", item: { ... } }`  
 **Response**: `{ success: true }`
 

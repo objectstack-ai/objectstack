@@ -210,12 +210,23 @@ describe('[#8896] searchAll — an object that could not be READ is not an objec
 
 describe('[#8896] findReferencesToMeta — a source type that could not be READ is not a source type with no references', () => {
     /**
-     * `view` has three matchers (`dashboard`, `app`, `page`), so a single
-     * failing source type leaves the other two answering — which is exactly the
-     * pre-fix trap: a SHORT list that looks complete. `page` carries a real
-     * reference to `my_view`, so the healthy half is observable.
+     * `view` is reachable from four source types (`app`, `object`, `page`,
+     * `view`), so a single failing source type leaves the others answering —
+     * which is exactly the pre-fix trap: a SHORT list that looks complete.
+     * `page` carries a real reference to `my_view`, so the healthy half is
+     * observable.
+     *
+     * [#9190] The fixture used to spell that reference `page.viewName`, which
+     * `PageSchema` does not declare — it agreed with the hand-curated path
+     * table, and the table was wrong. The real site is `view`, reached through
+     * a `dataSource`, and the derived walk finds it wherever the document puts
+     * it rather than at one memorised path.
      */
-    const pageReferencingTheView = { name: 'home_page', label: 'Home', viewName: 'my_view' };
+    const pageReferencingTheView = {
+        name: 'home_page',
+        label: 'Home',
+        slots: { header: { dataSource: { view: 'my_view' } } },
+    };
 
     function engineWhereTypeFails(failingType: string | null, error?: unknown) {
         const typeReads: string[] = [];
@@ -239,18 +250,24 @@ describe('[#8896] findReferencesToMeta — a source type that could not be READ 
         const result = await protocol.findReferencesToMeta({ type: 'view', name: 'my_view' });
 
         expect(result.references).toEqual([
-            { type: 'page', name: 'home_page', label: 'Home', path: 'viewName', kind: 'page' },
+            {
+                type: 'page',
+                name: 'home_page',
+                label: 'Home',
+                path: 'slots.header.dataSource.view',
+                kind: 'page view',
+            },
         ]);
-        // All three source types were really consulted — this is what makes
-        // "one of them failed" a meaningful condition below.
-        expect(typeReads).toContain('dashboard');
+        // Every source type that can name a view was really consulted — this is
+        // what makes "one of them failed" a meaningful condition below.
         expect(typeReads).toContain('app');
+        expect(typeReads).toContain('object');
         expect(typeReads).toContain('page');
     });
 
     it('a source type whose read FAILS fails the whole scan, envelope intact', async () => {
         const injected = connectionDropped();
-        const { engine, typeReads } = engineWhereTypeFails('dashboard', injected);
+        const { engine, typeReads } = engineWhereTypeFails('app', injected);
         const protocol = new ObjectStackProtocolImplementation(engine as never);
 
         const caught = await rejection(
@@ -267,7 +284,7 @@ describe('[#8896] findReferencesToMeta — a source type that could not be READ 
         expect(ErrorCode.safeParse(caught.code).success).toBe(true);
         // The driver's own error is not lost — it rides as `cause`.
         expect(caught.cause).toBe(injected);
-        expect(typeReads).toContain('dashboard');
+        expect(typeReads).toContain('app');
         // Pre-fix this resolved `{ references: [ …the page hit… ] }` — one real
         // reference presented as the complete dependency list, which an admin
         // reads as "safe to delete".
@@ -286,7 +303,7 @@ describe('[#8896] findReferencesToMeta — a source type that could not be READ 
         expect(result.references).toEqual([]);
     });
 
-    it('a target type absent from REFERENCE_PATHS still returns an empty list without reading anything', async () => {
+    it('a target type with no derived reference site still returns an empty list without reading anything', async () => {
         const { engine, typeReads } = engineWhereTypeFails(null);
         const protocol = new ObjectStackProtocolImplementation(engine as never);
 
@@ -300,15 +317,21 @@ describe('[#8896] findReferencesToMeta — a source type that could not be READ 
         // The benign discrimination lives in `getMetaItems`, one layer down —
         // this seam inherits it rather than repeating it, and this pin is what
         // proves the inheritance still holds through the removed `catch`.
-        const { engine, typeReads } = engineWhereTypeFails('dashboard', tableNotProvisioned('sys_metadata'));
+        const { engine, typeReads } = engineWhereTypeFails('app', tableNotProvisioned('sys_metadata'));
         const protocol = new ObjectStackProtocolImplementation(engine as never);
 
         const result = await protocol.findReferencesToMeta({ type: 'view', name: 'my_view' });
 
         expect(result.references).toEqual([
-            { type: 'page', name: 'home_page', label: 'Home', path: 'viewName', kind: 'page' },
+            {
+                type: 'page',
+                name: 'home_page',
+                label: 'Home',
+                path: 'slots.header.dataSource.view',
+                kind: 'page view',
+            },
         ]);
         // Proof the benign branch was actually EXERCISED.
-        expect(typeReads).toContain('dashboard');
+        expect(typeReads).toContain('app');
     });
 });

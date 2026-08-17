@@ -291,10 +291,18 @@ describe('#6437 — the refusal message is composed from `drops`, not from the c
     expect(err.message).toContain('SCALAR id');
   });
 
-  it('the READ-ONLY-only message is byte-identical to the pre-#6437 text', async () => {
-    // The compatibility half. Every caller and pin written against #5126's /
-    // #5503's wording must be untouched by a change that only teaches the
-    // error about a class those payloads do not carry.
+  it('the READ-ONLY-only message is unmoved by a NEW REASON CLASS', async () => {
+    // The compatibility half, and read it for what it actually asserts: adding
+    // a `reason` (#6437's whole change) must not disturb the wording payloads
+    // that carry no such class see. That property still holds.
+    //
+    // [#9107] What it never claimed is that the sentence is frozen for all
+    // time. The remedy clause moved ONCE, deliberately, when the maintainer
+    // ruled the conditional strip judges only API-boundary callers: the old
+    // text told a server author its hook-derived write was locked out, which
+    // stopped being true. A remedy sentence that has gone false is the one
+    // thing a refusal message may not keep — so the pin moves WITH the ruling,
+    // and stays a byte-exact pin so the next unintended drift is still caught.
     const { err } = await refuse({ id: 'rec_1', settled_total: 99 }, {});
     expect(err.message).toBe(
       `Update on 'task' was REFUSED: 1 caller-supplied field(s) ` +
@@ -304,7 +312,9 @@ describe('#6437 — the refusal message is composed from `drops`, not from the c
       `server-side code that legitimately writes read-only columns, pass ` +
       `{ context: { isSystem: true } } (this exempts statically 'readonly' fields, but NOT ` +
       `fields locked by a TRUE 'readonlyWhen' predicate — those stay locked for every ` +
-      `caller). To let the strip happen and merely observe it, drop ` +
+      `API-boundary caller, isSystem included. A value DERIVED by a beforeUpdate hook is ` +
+      `not a caller write and is never stripped — that is the sanctioned write path for a ` +
+      `conditionally-locked derived field). To let the strip happen and merely observe it, drop ` +
       `strictReadonlyWrites and pass options.onFieldsDropped instead (#3407).`,
     );
   });

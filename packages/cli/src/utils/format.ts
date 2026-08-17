@@ -398,7 +398,26 @@ export function collectMetadataStats(config: any): MetadataStats {
 
 export interface ServerReadyOptions {
   port: number;
-  configFile: string;
+  /**
+   * The authored config file, relative to cwd — printed in the `Config:`
+   * row. Omit it when the boot did not actually read a config (#8978): on
+   * every artifact-fallback boot (`OS_ARTIFACT_URL`, `OS_ARTIFACT_PATH`, or
+   * the plain `<cwd>/dist/objectstack.json` convention) the caller derives
+   * this path before deciding which source to boot from, so passing it
+   * unconditionally named a file that was either never read or does not
+   * exist on disk — on the SAME screen that just said so. See
+   * {@link artifactSource} for the OS_ARTIFACT_URL row this slot takes
+   * instead; the other artifact-fallback paths have no safely-redacted
+   * display to show here, so the row is omitted rather than fabricated.
+   */
+  configFile?: string;
+  /**
+   * Set on an `OS_ARTIFACT_URL` boot (#8368) — the resolver's already
+   * redacted `display` string (pre-signed URL query strings stripped),
+   * printed in the `Config:` row's place. When present it takes priority
+   * over {@link configFile}: this is what actually booted (#8978).
+   */
+  artifactSource?: string;
   isDev: boolean;
   pluginCount: number;
   pluginNames?: string[];
@@ -572,7 +591,15 @@ export function printServerReady(opts: ServerReadyOptions) {
     console.error(chalk.dim('      seeded on empty DB · dev only — do not use in production'));
   }
   console.error('');
-  console.error(chalk.dim(`  Config:  ${opts.configFile}`));
+  // #8978 — name what actually booted, never a file that was not read.
+  // `artifactSource` (OS_ARTIFACT_URL) wins when present; a caller with
+  // neither (the other artifact-fallback paths) gets no row at all rather
+  // than a fabricated or nonexistent one.
+  if (opts.artifactSource) {
+    console.error(chalk.dim(`  Artifact: ${opts.artifactSource} (OS_ARTIFACT_URL)`));
+  } else if (opts.configFile) {
+    console.error(chalk.dim(`  Config:  ${opts.configFile}`));
+  }
   console.error(chalk.dim(`  Mode:    ${opts.isDev ? 'development' : 'production'}`));
   if (opts.driverLabel) {
     const dbInfo = opts.databaseUrl ? `${opts.driverLabel}  ${chalk.dim('→')} ${opts.databaseUrl}` : opts.driverLabel;

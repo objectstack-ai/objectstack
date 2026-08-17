@@ -117,6 +117,12 @@
           "status": "live",
           "note": "objectui: @object-ui/plugin-tree ObjectTree.tsx (spec CHANGELOG: 'Renderer ships in objectui @object-ui/plugin-tree')."
         },
+        "map": {
+          "status": "planned",
+          "verifiedAt": "2026-08-17",
+          "evidenceScope": "cross-repo",
+          "note": "PLANNED, deliberately not `live`, and the gap is one spread. Declared spec-first by the #9340 cross-repo ruling (transfer of objectui#5001). The renderer's read of this exact key set exists today — objectui plugin-map ObjectMap.tsx getMapConfig validates `schema.map` against a local zod schema with the same seven keys (latitudeField/longitudeField/locationField/titleField/descriptionField/zoom/center) — but objectui ListView.tsx `case 'map'` forwards only `schema.options?.map` and never the view-level `map` block, so authoring this key changes nothing at runtime until the pre-registered objectui consumer card (Blocked-by #9340) lands the view→renderer forwarding. Flip to `live` citing that ListView.tsx read when it lands — measured objectui at the checkout current on 2026-08-17."
+        },
         "description": {
           "status": "live",
           "note": "objectui: ListView.tsx:1728 renders it under the toolbar (gated by appearance.showDescription)."

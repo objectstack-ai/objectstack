@@ -306,7 +306,7 @@ The strips these two options cover are the engine's legal ones:
 | Strip | `reason` | Verbs | Writers it skips |
 |:---|:---|:---|:---|
 | Static `readonly: true` (#2948) | `readonly` | `update` | `isSystem` |
-| A TRUE `readonlyWhen` predicate (#3042) | `readonly_when` | `update` | none — every caller, `isSystem` included |
+| A TRUE `readonlyWhen` predicate (#3042) | `readonly_when` | `update` | none at the API boundary — every caller, `isSystem` included; a value a `beforeUpdate` hook derived or overwrote is not a caller write and is never stripped (#9107) |
 | Implicitly-readonly runtime-owned type (#5503 — `RUNTIME_OWNED_FIELD_TYPES`, today `autonumber`) | `readonly` | `insert` **and** `update` | `isSystem`, `preserveAudit` (#3493) |
 | Primary-key strip of a payload `id` the update dispatch already ruled is not an identifier (#6437) | `primary_key` | `update` | none |
 

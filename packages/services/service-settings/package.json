@@ -19,7 +19,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@noble/ciphers": "^2.2.0",
+    "@noble/ciphers": "^2.3.0",
     "@objectstack/core": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/spec": "workspace:*",

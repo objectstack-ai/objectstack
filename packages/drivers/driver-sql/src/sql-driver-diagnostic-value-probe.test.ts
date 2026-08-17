@@ -63,6 +63,20 @@ const MATRIX = 'value-bearing diagnostic';
 /** Planted so a leak is unmistakable in the recorded output. */
 const CANARY = 'SENSITIVE-CANARY-9160';
 
+/**
+ * [#9275] The same canary, carrying the statement separator INSIDE itself.
+ *
+ * knex joins `<statement> - <native message>`, and the redactor cuts at the last
+ * ` - `. When the value the server inlines into its OWN diagnostic contains the
+ * separator, that last ` - ` lands inside the value: the cut eats the template
+ * head and keeps a suffix of the caller's data. This canary is what makes that
+ * shape reproducible instead of anecdotal.
+ */
+const SEPARATOR_CANARY = `${CANARY} - 2026 - Q3`;
+
+/** The piece of {@link SEPARATOR_CANARY} that stands to the RIGHT of the last separator. */
+const SEPARATOR_CANARY_SUFFIX = 'Q3';
+
 /** Where a caller's value landed on the thrown error. */
 type Placement =
   /** On `error.message` — the field `ObjectLogger.write` serializes. An exposure. */
@@ -91,6 +105,25 @@ interface ProbeCase {
    */
   readonly phrasing: string;
   /** Provoke the family. Must reject. */
+  readonly raise: (db: Knex) => Promise<unknown>;
+}
+
+/**
+ * [#9275] A family whose diagnostic inlines a value that itself contains ` - `.
+ *
+ * What these measure is the PREMISE, not the remedy: that the server really does
+ * echo the caller's separator-bearing value into its own words, and that the
+ * naive last-separator cut therefore lands inside that value. The redaction half
+ * lives in `packages/objectql/src/driver-fault-redaction.test.ts`, for the same
+ * reason the rest of this file states — `driver-sql` does not depend on
+ * `@objectstack/objectql`, and this file establishes WHAT THE SERVER SAYS.
+ */
+interface SeparatorCase {
+  /** The server's own error code, as it identifies the family. */
+  readonly family: string;
+  /** The template head the naive cut is measured to EAT. */
+  readonly head: string;
+  /** Provoke the family with {@link SEPARATOR_CANARY}. Must reject. */
   readonly raise: (db: Knex) => Promise<unknown>;
 }
 
@@ -162,6 +195,18 @@ const MYSQL_CASES: readonly ProbeCase[] = [
   },
 ];
 
+const MYSQL_SEPARATOR_CASES: readonly SeparatorCase[] = [
+  {
+    // ⛔ Raw SQL on purpose. As #9160 recorded, the column-less spelling is only
+    // raisable through an explicit cast — the driver's own bind path reaches the
+    // column-bound 1366 wording instead. Re-measured at HEAD: still true, and
+    // the type token still varies in case (`INTEGER`, `DOUBLE`, `time`).
+    family: 'ER_TRUNCATED_WRONG_VALUE (1292), column-less spelling',
+    head: 'Truncated incorrect INTEGER value:',
+    raise: (db) => db.raw(`insert into ${MYSQL_TABLE} (age) select cast(? as signed)`, [SEPARATOR_CANARY]),
+  },
+];
+
 // ---------------------------------------------------------------------------
 // Postgres
 // ---------------------------------------------------------------------------
@@ -216,12 +261,43 @@ const PG_CASES: readonly ProbeCase[] = [
   },
 ];
 
+const PG_SEPARATOR_CASES: readonly SeparatorCase[] = [
+  {
+    family: 'invalid_text_representation (22P02)',
+    head: 'invalid input syntax for type integer:',
+    raise: (db) => db(PG_TABLE).insert({ age: SEPARATOR_CANARY }),
+  },
+  {
+    family: 'invalid_datetime_format (22007)',
+    head: 'invalid input syntax for type timestamp with time zone:',
+    raise: (db) => db(PG_TABLE).insert({ when_at: SEPARATOR_CANARY }),
+  },
+  {
+    // ⛔ The family #9160 did NOT expect here, and the reason this list is
+    // measured rather than reasoned. 22003 was left without a head-gone recovery
+    // on the argument that an out-of-range value is a NUMBER, and a number
+    // cannot contain ` - `. It can: Postgres' integer parser detects the
+    // OVERFLOW while scanning digits, before it rejects the trailing junk, so it
+    // echoes the caller's whole string back. Raised here through the driver's
+    // own bind path — no cast, no raw SQL — so the reach is not in question.
+    family: 'numeric_value_out_of_range (22003), separator inside the echoed value',
+    head: 'value "',
+    raise: (db) => db(PG_TABLE).insert({ age: `99999999999 - 2026 - ${SEPARATOR_CANARY_SUFFIX}` }),
+  },
+];
+
 // ---------------------------------------------------------------------------
 
-const SCHEMAS: Record<string, { table: string; ddl: (db: Knex) => Promise<unknown>; cases: readonly ProbeCase[] }> = {
+const SCHEMAS: Record<string, {
+  table: string;
+  ddl: (db: Knex) => Promise<unknown>;
+  cases: readonly ProbeCase[];
+  separatorCases: readonly SeparatorCase[];
+}> = {
   mysql: {
     table: MYSQL_TABLE,
     cases: MYSQL_CASES,
+    separatorCases: MYSQL_SEPARATOR_CASES,
     ddl: (db) =>
       db.raw(
         `create table ${MYSQL_TABLE} (`
@@ -233,6 +309,7 @@ const SCHEMAS: Record<string, { table: string; ddl: (db: Knex) => Promise<unknow
   pg: {
     table: PG_TABLE,
     cases: PG_CASES,
+    separatorCases: PG_SEPARATOR_CASES,
     ddl: (db) =>
       db.raw(
         `create table ${PG_TABLE} (`
@@ -266,6 +343,15 @@ for (const cell of DIALECT_CELLS) {
             raised.set(probe.family, undefined);
           } catch (err) {
             raised.set(probe.family, err);
+          }
+        }
+
+        for (const probe of plan.separatorCases) {
+          try {
+            await probe.raise(db);
+            raised.set(`separator/${probe.family}`, undefined);
+          } catch (err) {
+            raised.set(`separator/${probe.family}`, err);
           }
         }
       }, 60_000);
@@ -337,6 +423,47 @@ for (const cell of DIALECT_CELLS) {
                 : 'The exposure changed shape; re-read the redactor before relaxing this. ')
               + `Server said: ${JSON.stringify(diagnostic)}`,
           ).toBe(probe.placement);
+        });
+      }
+
+      // [#9275] The separator-in-value premise, measured rather than assumed.
+      for (const probe of plan.separatorCases) {
+        it(`${probe.family} — the server echoes a value containing " - ", and the naive cut eats the head`, () => {
+          const err = raised.get(`separator/${probe.family}`);
+
+          expect(
+            err,
+            `${probe.family} could not be raised with a separator-bearing value. If the server stopped `
+              + 'echoing the caller value here, say so as a recorded negative rather than deleting the case.',
+          ).toBeInstanceOf(Error);
+
+          const message = String(err.message);
+
+          // 1. The server inlined the caller's whole separator-bearing value.
+          expect(
+            message,
+            `${probe.family} no longer echoes the separator-bearing value into its own diagnostic. `
+              + `Server said: ${JSON.stringify(message)}`,
+          ).toContain(SEPARATOR_CANARY_SUFFIX);
+
+          // 2. …so the LAST ` - ` falls inside that value, and a cut taken there
+          //    loses the template head. This is the whole of #9275's premise: the
+          //    half that cannot leak is discarded and the half that does is kept.
+          const naive = diagnosticOf(message);
+
+          expect(
+            naive,
+            `${probe.family} no longer loses its head to the naive cut. If the phrasing moved the `
+              + 'separator out of the value, this case has stopped measuring what it was written for. '
+              + `Server said: ${JSON.stringify(message)}`,
+          ).not.toContain(probe.head);
+
+          expect(
+            naive,
+            `${probe.family}: the naive cut is expected to leave a SUFFIX of the caller's value standing — `
+              + 'that residue is the exposure the redactor\'s head-anchored cut closes '
+              + '(objectql/src/driver-fault-redaction.ts, and its suite drives this exact string).',
+          ).toContain(SEPARATOR_CANARY_SUFFIX);
         });
       }
     });

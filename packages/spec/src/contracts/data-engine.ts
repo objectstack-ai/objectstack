@@ -79,7 +79,10 @@ export interface WriteObservabilityOptions {
    * reported set, never an enumeration frozen at #5126. Today that is all three
    * `DroppedFieldsEvent['reason']` arms: static `readonly: true` (#2948, which
    * only runs for non-system callers), a TRUE `readonlyWhen` predicate (#3042,
-   * which runs for every caller, `isSystem` included), and the `primary_key`
+   * which runs for every API-BOUNDARY caller, `isSystem` included — but judges
+   * only the keys the caller supplied at engine entry, so a value a
+   * `beforeUpdate` hook derived or overwrote is never stripped, #9107), and the
+   * `primary_key`
    * strip (#6437) — plus, since #5503, the implicitly-readonly runtime-owned
    * strip, which reports under the same `'readonly'` arm rather than adding one
    * (see the INSERT section below). Covering only the static arm would leave a

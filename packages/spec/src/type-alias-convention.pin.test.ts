@@ -264,7 +264,7 @@ import type * as M167 from './ui/view.zod.js';
 import type * as M170 from './ui/component.zod.js';
 
 // ---------------------------------------------------------------------------
-// 837 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 838 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1583,6 +1583,7 @@ export type Iso826 = Assert<Eq< z.input< typeof M167.CalendarConfigSchema >, z.i
 export type Iso827 = Assert<Eq< z.input< typeof M167.GanttConfigSchema >, z.infer< typeof M167.GanttConfigSchema > >>;
 export type Iso828 = Assert<Eq< z.input< typeof M167.GanttQuickFilterSchema >, z.infer< typeof M167.GanttQuickFilterSchema > >>;
 export type Iso829 = Assert<Eq< z.input< typeof M167.KanbanConfigSchema >, z.infer< typeof M167.KanbanConfigSchema > >>;
+export type Iso851 = Assert<Eq< z.input< typeof M167.ListMapConfigSchema >, z.infer< typeof M167.ListMapConfigSchema > >>;
 export type Iso830 = Assert<Eq< z.input< typeof M167.NavigationModeSchema >, z.infer< typeof M167.NavigationModeSchema > >>;
 export type Iso831 = Assert<Eq< z.input< typeof M167.TreeConfigSchema >, z.infer< typeof M167.TreeConfigSchema > >>;
 export type Iso832 = Assert<Eq< z.input< typeof M167.ViewItemNameSchema >, z.infer< typeof M167.ViewItemNameSchema > >>;
@@ -1654,7 +1655,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 837 isomorphic pins', () => {
+  it('still declares all 838 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -1886,9 +1887,15 @@ describe('ADR-0122 type-alias convention', () => {
     // 836 -> 837 is #8993 — partial masking's `FieldMaskingKeepSchema`
     // ({keepHead, keepTail}, both plain non-negative ints, no defaults, no
     // transform), pinned as `Iso850`.
+    //
+    // 837 -> 838 is #9340 — the map list-view block (`ListMapConfigSchema`),
+    // deliberately default-free: objectui#5000 ruled "declared camera wins, no
+    // declaration → fit to the queried records", so a spec-side default
+    // zoom/center would read as a declared camera and defeat the fit. Pinned
+    // as `Iso851`.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(837);
+    expect(pins).toHaveLength(838);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

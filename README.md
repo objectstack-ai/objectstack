@@ -140,10 +140,10 @@ The reason this works is the same reason TypeScript was the right host language:
 **an agent's errors become located, corrective text it can read and fix itself**,
 in seconds — instead of a silent runtime failure nobody traces back.
 
-The other half is size. The CRM in this repo — [`examples/app-crm`](./examples/app-crm):
+The other half is size. The bundled example CRM — [`examples/app-crm`](./examples/app-crm):
 six objects, views, a dashboard, a lead-conversion flow, permission sets, actions,
 translations — is **31 files, 1,792 lines, roughly 16k tokens**. That's the whole
-business system, in about 8% of a 200k-token context window. Count it yourself:
+example app, in about 8% of a 200k-token context window. Count it yourself:
 
 ```bash
 find examples/app-crm/src -name '*.ts' -not -name '*.test.ts' | xargs cat | wc -l
