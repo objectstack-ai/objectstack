@@ -192,9 +192,6 @@ const result = ErrorCode.parse(data);
 * `EXTERNAL_SERVICE_ERROR`
 * `INTEGRATION_ERROR`
 * `WEBHOOK_DELIVERY_FAILED`
-* `BATCH_PARTIAL_FAILURE`
-* `BATCH_COMPLETE_FAILURE`
-* `TRANSACTION_FAILED`
 * `ACCOUNT_LOCKED`
 * `ALREADY_REVERTED`
 * `AMBIGUOUS_MATCH`
@@ -446,7 +443,7 @@ const result = ErrorCode.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `string` | ✅ | The registered extension code the waiver keeps admissible |
-| **shadows** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +46 more>` | ✅ | The standard-catalog member whose condition the code re-spells |
+| **shadows** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +43 more>` | ✅ | The standard-catalog member whose condition the code re-spells |
 | **reason** | `string` | ✅ | Why the synonym stays registered — recorded so admission is a decision, not drift |
 
 ### Allowed Values: `StandardSynonymWaiver.shadows`
@@ -501,9 +498,6 @@ const result = ErrorCode.parse(data);
 * `EXTERNAL_SERVICE_ERROR`
 * `INTEGRATION_ERROR`
 * `WEBHOOK_DELIVERY_FAILED`
-* `BATCH_PARTIAL_FAILURE`
-* `BATCH_COMPLETE_FAILURE`
-* `TRANSACTION_FAILED`
 
 
 ---

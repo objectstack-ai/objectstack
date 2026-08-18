@@ -1016,6 +1016,36 @@ describe('reconcilePermissionSetProjection', () => {
     expect(logs.some((l) => l.level === 'info' && /reconciled/.test(l.msg))).toBe(false);
   });
 
+  it('[#9657] a sink with NO `error` still hears the backfill failure — at warn, not in silence', async () => {
+    // `ProjectionLogger.error` is declared OPTIONAL, and the report used to be
+    // spelled `logger?.error?.(…)` — an optional call that emits NOTHING when
+    // the method is absent. A host injecting `{ info, warn }` therefore lost
+    // the whole durability report, on the one path that must never be quiet.
+    const ql = makeQl();
+    const protocol = makeProtocol(ql);
+    ql.permRows.push({
+      id: 'ps_bad', name: 'broken_set', managed_by: 'admin', active: true,
+      label: 'Broken Set', object_permissions: JSON.stringify({ ticket: { allowRead: 'yes-please' } }),
+    });
+    const logs: Array<{ level: string; msg: string; meta?: any }> = [];
+    const logger = {
+      info: (m: string, meta?: any) => logs.push({ level: 'info', msg: m, meta }),
+      warn: (m: string, meta?: any) => logs.push({ level: 'warn', msg: m, meta }),
+    };
+
+    const out = await reconcilePermissionSetProjection(protocol, { ql, logger });
+
+    expect(out.backfillFailed).toBe(1);
+    const firstFailure = logs.find((l) => /backfill into metadata FAILED/.test(l.msg));
+    expect(firstFailure).toBeDefined();
+    expect(firstFailure!.level).toBe('warn');
+    // The consequence and the fix survive the fallback — a downgraded level is
+    // a degradation of the CHANNEL, never of the message.
+    expect(firstFailure!.msg).toMatch(/Nothing will look broken/);
+    expect(firstFailure!.msg).toMatch(/Fix:/);
+    expect(firstFailure!.meta?.name).toBe('broken_set');
+  });
+
   it('heals a record that drifted from an EXISTING metadata definition (metadata wins)', async () => {
     const ql = makeQl();
     const declared = { member_default: envBody({ name: 'member_default', systemPermissions: ['declared.baseline'] }) };

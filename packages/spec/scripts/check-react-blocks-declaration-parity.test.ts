@@ -182,12 +182,24 @@ describe('check:react-declaration-parity — the blind spot is stated, every run
     const baseline = path.join(PKG, 'react-declaration-parity.baseline.json');
     // Every baselined block must be present, or the run reports them vanished
     // instead of clean. Each declares only spec props, so registry-only is empty
-    // — the committed baseline's accepted state.
+    // — the committed baseline's accepted state. Since #9392's `--update` the
+    // committed baseline also carries the SDUI `object-*` blocks (#7751 put
+    // them in `current`, so an accept snapshots them too), hence the derived
+    // tail: a future baselined block is covered here the day it lands instead
+    // of reporting as vanished.
+    const committed: BaselineFile = JSON.parse(fs.readFileSync(baseline, 'utf8'));
     const manifest: Manifest = {
       components: {
+        // The react blocks are keyed by PascalCase tag in the baseline but by
+        // schemaType in the manifest — spell those three out.
         ...manifestFor('object-form', [SCHEMA_PROP]).components,
         ...manifestFor('list-view', []).components,
         ...manifestFor('object-chart', []).components,
+        ...Object.fromEntries(
+          Object.keys(committed.blocks)
+            .filter((k) => k.startsWith('object-') && k !== 'object-form')
+            .map((type) => Object.entries(manifestFor(type, []).components)[0]),
+        ),
       },
     };
     const out = run(manifest, ['--baseline', baseline]);

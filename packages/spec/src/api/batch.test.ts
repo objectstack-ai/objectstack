@@ -323,13 +323,13 @@ describe('BatchUpdateResponseSchema', () => {
         },
       ],
       error: {
-        code: 'BATCH_PARTIAL_FAILURE',
+        code: 'INTERNAL_ERROR',
         message: 'Batch operation failed',
       },
     });
 
     expect(response.failed).toBe(1);
-    expect(response.error?.code).toBe('BATCH_PARTIAL_FAILURE');
+    expect(response.error?.code).toBe('INTERNAL_ERROR');
   });
 });
 

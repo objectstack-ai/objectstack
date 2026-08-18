@@ -1,8 +1,18 @@
 {
   "_comment": "Accepted spec↔registry DECLARATION-PARITY baseline (react blocks). Per block: the registry-only input set (the registry config declares it, the spec does not) and whether the block is missing. Regenerate with: MANIFEST=… check:react-declaration-parity --baseline <this> --update. The ratchet flags only NEW registry-only inputs or newly-missing blocks. It compares two declarations and inspects no renderer, so a prop both sides declare and nothing reads records as agreement here (#4413/#4472).",
+  "_acceptedReasons": {
+    "_note": "Hand-maintained record of WHY each accepted registry-only input is deliberately not declared in spec (maintainer ruling 2026-08-18 on #9392). `--update` rewrites this file and drops this block — re-add it (updated) whenever the accepted set changes; an entry with no reason here is an accept nobody ruled.",
+    "ObjectForm.initialData": "Alias spelling of `initialValues` (the drawer/modal presentations read it first). Aliases are not promoted into spec, per the alias-convergence direction.",
+    "ObjectForm.mobile": "Internal presentation override, not an authoring surface.",
+    "ObjectForm.navigateOnSuccess": "Explicitly parked pending the 'action success navigation' family ruling (#9474/#9566, objectui#5034) — declaring it now risks freezing a spelling that family is shaping; revisit when `onSuccess` lands. The family landed on 2026-08-18 (PR #9601); the revisit is tracked on #9392."
+  },
   "blocks": {
     "ObjectForm": {
-      "registryOnly": [],
+      "registryOnly": [
+        "initialData",
+        "mobile",
+        "navigateOnSuccess"
+      ],
       "missing": false
     },
     "ListView": {
@@ -10,6 +20,30 @@
       "missing": false
     },
     "ObjectChart": {
+      "registryOnly": [],
+      "missing": false
+    },
+    "object-calendar": {
+      "registryOnly": [],
+      "missing": false
+    },
+    "object-form": {
+      "registryOnly": [],
+      "missing": false
+    },
+    "object-grid": {
+      "registryOnly": [],
+      "missing": false
+    },
+    "object-kanban": {
+      "registryOnly": [],
+      "missing": false
+    },
+    "object-master-detail-form": {
+      "registryOnly": [],
+      "missing": false
+    },
+    "object-metric": {
       "registryOnly": [],
       "missing": false
     }

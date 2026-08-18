@@ -456,5 +456,7 @@ Apache-2.0. See [LICENSING.md](../../../LICENSING.md).
 ## See Also
 
 - [@objectstack/spec/automation](../../spec/src/automation/)
-- [Flow Builder Guide](https://docs.objectstack.ai/docs/automation)
-- [Trigger Reference](https://docs.objectstack.ai/docs/references/automation)
+- [Automation](https://docs.objectstack.ai/docs/automation) — the automation docs section: hooks, flows,
+  workflows, approvals, webhooks, connectors
+- [Automation Protocol](https://docs.objectstack.ai/docs/references/automation) — the complete schema
+  reference for the automation protocol
