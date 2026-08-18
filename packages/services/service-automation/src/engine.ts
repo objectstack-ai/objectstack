@@ -3329,7 +3329,23 @@ export class AutomationEngine implements IAutomationService {
                 error: errorMessage,
             });
 
-            // Error handling strategy
+            // Error handling strategy.
+            //
+            // [#9510] ⚠️ This handoff can now return a NON-TERMINAL result: a
+            // retry attempt that reaches a pausing node comes back as
+            // `{ success: true, status: 'paused', runId }` — the same shape the
+            // suspend arm above returns — and `execute()` forwards it
+            // unchanged, so its contract is ONE answer per situation rather
+            // than one per attempt number. Deliberate, not incidental: a caller
+            // branching on `status` sees no difference between a pause on
+            // attempt 1 and a pause on attempt 3, which is what
+            // `AutomationResult` already promises.
+            //
+            // ⚠️ The `runId` that comes back is then the PAUSED ATTEMPT's, not
+            // this failed first attempt's. They are different runs with
+            // different log rows, and the paused one is the key
+            // `persistSuspendedRun` stored the continuation under — so it is
+            // the only id `resume()` can be called with.
             if (flow.errorHandling?.strategy === 'retry') {
                 return this.retryExecution(flowName, context, startTime, flow.errorHandling, flow.errorMessage);
             }
@@ -6138,6 +6154,17 @@ export class AutomationEngine implements IAutomationService {
      * Retry execution with exponential backoff, jitter, and recursive protection.
      * Uses an iterative loop with an internal retry flag to prevent recursive call stacking.
      *
+     * ⚠️ [#9510] NOT a terminal-only method. Three results leave it: an attempt
+     * that succeeded, the exhausted-budget failure at the bottom, and — since
+     * the ADR-0019 suspend arm was restored to `executeWithoutRetry` — an
+     * attempt that PAUSED, returned unchanged from inside the loop. The paused
+     * one is non-terminal: the run is durably suspended and finishes later
+     * through `resume()`, not here. Its readers are told so explicitly (the
+     * loop below, `execute()`'s handoff, and the flow-dispatch status table in
+     * `@objectstack/runtime`) rather than discovering it by falling through a
+     * `success` check — a non-terminal result reaching a reader that assumes
+     * terminal is how this defect becomes a different one.
+     *
      * Reads the PARSED `errorHandling` block straight — no `??` fallbacks
      * (#4247). It used to declare every knob optional and re-state a default
      * for each, and one of those copies disagreed with the schema
@@ -6191,6 +6218,29 @@ export class AutomationEngine implements IAutomationService {
 
             // Execute directly without recursion into retryExecution again
             const result = await this.executeWithoutRetry(flowName, context);
+            // [#9510] THE THIRD STATE, read deliberately and BEFORE `success`.
+            // Since the ADR-0019 suspend arm was restored to
+            // `executeWithoutRetry`, an attempt can end NON-TERMINAL: the run
+            // asked to pause, its continuation is persisted under
+            // `result.runId`, and it is waiting for a `resume()` that may
+            // arrive days later. Returning it is the only correct answer —
+            // re-running the flow would start the paused work a SECOND time
+            // while the first continuation is still live and resumable, which
+            // is what the pre-repair loop did on every remaining attempt.
+            //
+            // ⛔ Not left to the `result.success` line below, even though a
+            // paused result is `success: true` and would fall through it today.
+            // That line means "this attempt SUCCEEDED, stop retrying" — a
+            // different sentence about a different outcome — and a
+            // non-terminal result recognised only by a branch that names
+            // something else is one edit away from being misread again. The
+            // reason this returns is the PAUSE, so the pause is what it tests.
+            //
+            // ⛔ And it weakens no retry accounting: nothing above is skipped,
+            // reset or shortened, `maxRetries` still bounds the loop, and a
+            // genuinely failing attempt still consumes one. The loop stops here
+            // only because this attempt did not fail.
+            if (result.status === 'paused') return result;
             if (result.success) return result;
             lastError = result.error ?? 'Unknown error';
         }
@@ -6267,6 +6317,13 @@ export class AutomationEngine implements IAutomationService {
 
     /**
      * Execute a flow without triggering retry logic (used by retryExecution to prevent recursion).
+     *
+     * [#9510] It exits the way `execute()` exits, and that parity is the
+     * contract rather than a coincidence: a run that suspends here is a durable
+     * ADR-0019 pause — continuation persisted, `paused` log row — not a failed
+     * attempt, because it is the SAME event happening on a later attempt. Two
+     * answers for one user-visible situation is what this method's missing
+     * suspend arm produced.
      */
     private async executeWithoutRetry(
         flowName: string,
@@ -6351,6 +6408,87 @@ export class AutomationEngine implements IAutomationService {
             // work — the same route-dependent shape the fix is removing.
             return { success: true, output, durationMs, successMessage: flow.successMessage, summary: logged.summary };
         } catch (err: unknown) {
+            // [#9510] A node asked to suspend the run (ADR-0019 durable pause)
+            // — here, on a RETRY attempt, the only way this method is ever
+            // reached. Tested FIRST and answered exactly as `execute()`'s own
+            // catch answers it, because it is the same event: A PAUSE IS NOT A
+            // FAILURE (`execute()`'s arm says so in those words, and ADR-0019
+            // is the contract). A restoration of a stated contract on the one
+            // path that never got it — not a new capability, and the
+            // `AutomationResult.status` vocabulary it returns is unchanged.
+            //
+            // Without this arm the signal fell through to the generic failure
+            // path below and four halves of the pause were lost at once:
+            //
+            //  1. `persistSuspendedRun` never ran, so THE CONTINUATION WAS
+            //     NEVER STORED and the run could not be resumed by anyone,
+            //     ever — the headline harm, and why the pins for this are
+            //     written against the store and a real `resume()` rather than
+            //     against the status string;
+            //  2. the run log recorded `failed` for a run that asked to pause;
+            //  3. the caller got `status: 'failed'`, with the signal
+            //     stringified into `error` (`FlowSuspendSignal` is not an
+            //     `Error`);
+            //  4. `retryExecution` reads `result.success`, so the pause counted
+            //     as one more failed attempt: the loop burned the rest of the
+            //     budget, and every further attempt re-entered the pausing node
+            //     and orphaned another suspension.
+            //
+            // ⛔ Deliberately NOT an authoring-time refusal of
+            // `errorHandling.strategy: 'retry'` combined with a pausing node.
+            // That refusal over-refuses (a pausing node can sit on a branch the
+            // retrying path never reaches), under-refuses (a pausing node
+            // behind a runtime condition is not statically decidable), and
+            // would ban the ordinary shape this defect is reached through: a
+            // flaky HTTP/connector call followed by an `approval` or `screen`
+            // node — retry is what an author reaches for on the flaky half and
+            // the approval is what the business needs on the other.
+            //
+            // Every field is THIS attempt's own run bookkeeping (`runId`,
+            // `startedAt`, `steps`, `runContext`, `startTime`), never the
+            // failed attempt's, so the continuation is keyed by the run id this
+            // method returns — the only id `resume()` can be called with.
+            if (isSuspendSignal(err)) {
+                const durationMs = Date.now() - startTime;
+                // #7639 — ONE snapshot expression feeding BOTH consumers: the
+                // continuation the run will resume from, and the `paused` log
+                // entry run-detail serves. Same object, so what an operator
+                // reads can never disagree with what the run holds.
+                const variablesSnapshot = Object.fromEntries(variables);
+                await this.persistSuspendedRun({
+                    runId,
+                    flowName,
+                    flowVersion: flow.version,
+                    nodeId: err.nodeId,
+                    nodeType: err.nodeType,
+                    variables: variablesSnapshot,
+                    steps,
+                    context: runContext,
+                    startedAt,
+                    startTime,
+                    correlation: err.correlation,
+                    screen: err.screen,
+                });
+                this.recordLog({
+                    id: runId,
+                    flowName,
+                    flowVersion: flow.version,
+                    status: 'paused',
+                    startedAt,
+                    durationMs,
+                    trigger: buildRunTrigger(context),
+                    steps,
+                    variables: variablesSnapshot,
+                });
+                return {
+                    success: true,
+                    status: 'paused',
+                    runId,
+                    durationMs,
+                    screen: err.screen,
+                };
+            }
+
             const errorMessage = err instanceof Error ? err.message : String(err);
             const durationMs = Date.now() - startTime;
             const logged = this.recordLog({
