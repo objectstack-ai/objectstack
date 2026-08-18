@@ -136,6 +136,81 @@
 //               scans. Without it a typo'd or retired verb makes an entry
 //               unreachable -- it would reconcile against nothing, forever,
 //               and read as a live exemption.
+//   RETAINED    a double that WAS pinned still is. The pinned population is
+//               enumerated in `engine-double-contract.pinned.json`, so a pin
+//               that leaves names itself instead of decrementing a printed
+//               integer nobody compares (#9680). See the block below.
+//
+// ## RETAINED, and why the pinned set is enumerated rather than counted (#9680)
+//
+// The four invariants above ratchet the LEDGERED population in both directions
+// -- measured on this branch, deleting a DEBT-ledgered double's member reddens
+// (`RECONCILED: baseline entry for … declares no engine double with a delete
+// any more`), and so does dropping one of the five doubles behind the EXEMPT
+// entry (`down to 4 … from the baseline's 5`). The PINNED population had no
+// such ratchet, and that asymmetry is the whole of #9680: DISCOVERED fires at
+// zero, never at one-fewer-than-yesterday, and PINNED iterates the discovered
+// set, so a pinned double that stops declaring the member simply LEAVES.
+//
+// Discovery requires the member to exist, so absence is invisible by
+// construction. Measured, two directions, on `packages/core/src/utils/
+// migration-journal.test.ts`:
+//
+//   delete the whole `async delete(…)` member   OK -- 318 pinned (was 319), exit 0
+//   delete only the `assertEngineDeleteDispatch` call   x PINNED …, exit 1
+//
+// The control going red is what makes the first line a blind spot rather than a
+// broken harness: the gate pins the dispatch behaviour of a member that EXISTS.
+//
+// ## Why an identity ledger and not a count, priced rather than assumed
+//
+// A count-delta ("319, shrink-fails") is the cheaper artifact and was rejected
+// on two measurements, not on taste:
+//
+//   - It cannot see a SWAP. One double loses `delete` while another gains one
+//     and the total is unchanged, so the instrument reads clean while coverage
+//     moved. An enumeration compares membership, so the swap is two rows.
+//   - Its remedy carries no information. A legitimate removal and this card's
+//     defect produce the SAME one-character diff (`319` -> `318`), so review
+//     cannot tell them apart and the only available habit is "bump the number"
+//     -- the failure mode a ratchet exists to prevent, re-created by the
+//     ratchet itself.
+//
+// The maintenance objection to an enumeration is real but was measured and is
+// small. Over the 269 commits on `main` in the month to 2026-08-18, membership
+// of the pinned set changed in 7 commits (2.6%): 8 files entered per verb, and
+// **zero left**. So the nuisance case an identity ledger is accused of -- a
+// correct change reddened by a legitimate decrease -- fired 0 times in a month,
+// while the additions it does redden on are already in conversation with this
+// gate (they are new fakes that had to write `assert…Dispatch` because PINNED
+// demanded it). 308 entries today against the 135 the DEBT ledger already
+// carries: same file format, same order of magnitude, same reconciliation shape.
+//
+// ## How a LEGITIMATE decrease is expressed (the anti-nuisance half)
+//
+// `node scripts/check-engine-double-contract.mjs --write`, then commit. That is
+// the whole remedy, it is the repo's existing ratchet idiom (see
+// check-slot-lookup-ratchet.mjs's `--update`), and it is mechanical -- there is
+// no number to choose, so there is no number to fudge.
+//
+// What keeps that from degenerating into "regenerate on red" is that the gate
+// CLASSIFIES the loss before asking for anything, and says which of three
+// worlds it is in:
+//
+//   file gone from disk         a deleted test. Legitimate; regenerate.
+//   file present, verb gone     THE #9680 DEFECT. The member was dropped while
+//                               the fake and its file live on. Loud, and named.
+//   fewer doubles than pinned   the same defect at a finer grain: the file pins
+//                               several and one member was deleted. Nothing else
+//                               in this gate reacts, because a fake is still there.
+//   all doubles present,        the double went UNGUARDED -- already an error
+//   fewer pinned                under PINNED above, and cross-named here so one
+//                               output explains the whole picture.
+//
+// A count can reach none of those three, because by the time it has been
+// decremented the identity is gone. And `--write` prints every loss it is about
+// to record, so the author reads what left at the moment they regenerate rather
+// than discovering it in review.
 //
 // ## Why "routes through the shared predicate" and not "mirrors the guard"
 //
@@ -163,13 +238,14 @@
 // while degrading. What it can do is make the rejection surface impossible to
 // drift, which is the half that shipped #4434.
 
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, writeFileSync } from 'node:fs';
 import { join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BASELINE_PATH = join(ROOT, 'scripts', 'engine-double-contract.baseline.json');
+const PINNED_LEDGER_PATH = join(ROOT, 'scripts', 'engine-double-contract.pinned.json');
 const SCAN_ROOTS = ['packages', 'examples'];
 
 /**
@@ -1190,6 +1266,226 @@ function readBaseline() {
   return JSON.parse(readFileSync(BASELINE_PATH, 'utf8'));
 }
 
+/**
+ * The RETAINED ledger (#9680) — the enumerated pinned population.
+ *
+ * Deliberately a SEPARATE artifact from `engine-double-contract.baseline.json`
+ * rather than more rows in it. The baseline is 135 hand-written MEASURED
+ * justifications whose readability this file's header calls the gate's whole
+ * value ("shrink-only, hand reviewed"); folding 308 generated rows in would
+ * bury the reasons under the census and blur which rows a human must agree to.
+ * These two ledgers also answer to opposite polarities — the baseline records
+ * debt and may only SHRINK, this one records coverage and may only GROW — so a
+ * reader who conflates them reads every ratchet in this file backwards.
+ *
+ * A missing file reads as an empty ledger so a fresh checkout bootstraps
+ * through `--write` rather than crashing, exactly as `readBaseline` does.
+ */
+function readPinnedLedger() {
+  if (!existsSync(PINNED_LEDGER_PATH)) return { entries: [] };
+  return JSON.parse(readFileSync(PINNED_LEDGER_PATH, 'utf8'));
+}
+
+/**
+ * The pinned population as (file, verb, pinned-count) rows, sorted for a stable
+ * diff.
+ *
+ * Counted per FILE and not merely as membership, because a file may hold more
+ * than one pinned double for a verb — measured on this branch: 319 pinned
+ * doubles across 308 (file, verb) pairs, so 11 pairs carry more than one. A
+ * membership-only ledger would let a file that pins two deletes drop to one in
+ * silence, which is this card's defect at a finer grain.
+ */
+function censusPinned(slices) {
+  const rows = [];
+  for (const { slice, found } of slices) {
+    for (const { file, doubles } of found) {
+      const pinned = doubles.filter((d) => d.pinned).length;
+      if (pinned > 0) rows.push({ file, verb: slice.verb, pinned });
+    }
+  }
+  rows.sort((a, b) => (a.file === b.file ? a.verb.localeCompare(b.verb) : a.file.localeCompare(b.file)));
+  return rows;
+}
+
+/**
+ * The (file, verb) key for every map in this section.
+ *
+ * `JSON.stringify` of the pair rather than a joined string: a separator has to
+ * be a character neither half can contain, and the obvious candidates are worse
+ * than they look -- a space can appear in a path, and the NUL that would be
+ * unambiguous is a raw control byte this repo bans outright
+ * (`scripts/check-nul-bytes.mjs`), which is not a rule to route around inside a
+ * gate. Stringifying the pair has no separator to collide on at all.
+ */
+const pairKey = (file, verb) => JSON.stringify([file, verb]);
+
+/**
+ * How many doubles the scan still DECLARES per (file, verb), pinned or not.
+ *
+ * Distinct from `censusPinned`, and the distinction carries the whole
+ * classification below. A double that went UNGUARDED leaves the census (which
+ * counts pinned doubles) but stays here (which counts declared ones), while a
+ * double whose member was DELETED leaves both. Reading the census alone would
+ * report every newly-unguarded double as "the member was dropped" -- the wrong
+ * remedy attached to the wrong story.
+ *
+ * Counted rather than a membership Set, because a file may pin several doubles
+ * for one verb (measured: 10 of 308 rows do). Membership alone cannot separate
+ * "the file pinned two deletes and now pins one because a MEMBER WAS DELETED"
+ * from "...because a member stopped calling the predicate", and those two want
+ * opposite remedies: restore the member vs re-pin it.
+ */
+function declaredCounts(slices) {
+  const counts = new Map();
+  for (const { slice, found } of slices) {
+    for (const { file, doubles } of found) counts.set(pairKey(file, slice.verb), doubles.length);
+  }
+  return counts;
+}
+
+/**
+ * Which of the four worlds a lost pin is in -- see the RETAINED block in the
+ * header. A pure function so the self-test can drive all four without a
+ * filesystem full of fixtures.
+ *
+ * Order matters: a file that is gone cannot also have "lost a member", so disk
+ * is asked first; then whether the verb is declared at all; then whether FEWER
+ * doubles are declared than the ledger pinned, which is the only evidence that
+ * separates a deleted member from a member that merely stopped being pinned.
+ */
+function classifyPinLoss({ onDisk, declared, wasPinned }) {
+  if (!onDisk) return 'file-removed';
+  if (declared === 0) return 'double-removed';
+  if (declared < wasPinned) return 'members-removed';
+  return 'unpinned';
+}
+
+const REGEN = 'node scripts/check-engine-double-contract.mjs --write';
+
+/**
+ * RETAINED's errors, as a pure function of two censuses and the ledger.
+ *
+ * `onDisk` is injected so the self-test can drive all three loss worlds without
+ * creating and deleting real files.
+ */
+function retainedErrors(census, ledger, ledgerExists, declared, onDisk) {
+  const errors = [];
+
+  // Bootstrap. Without this a missing artifact reports 308 separate "not in the
+  // ledger" errors, which reads as a catastrophe and buries the one-line fix.
+  if (!ledgerExists) {
+    return [
+      `RETAINED: ${relative(ROOT, PINNED_LEDGER_PATH)} is missing. That file IS the pinned `
+        + 'population; without it this gate is back to printing an integer nobody compares '
+        + `(#9680). Bootstrap it with \`${REGEN}\` and commit it.`,
+    ];
+  }
+
+  const found = new Map(census.map((r) => [pairKey(r.file, r.verb), r.pinned]));
+  const recorded = new Map();
+
+  for (const entry of ledger.entries) {
+    // Same reasoning as DECLARED: an entry naming a verb no slice scans
+    // reconciles against nothing forever, so it would read as permanent
+    // coverage while protecting nothing.
+    if (!SCANNED_VERBS.has(entry.verb)) {
+      errors.push(
+        `RETAINED: pinned-ledger entry for ${entry.file} names verb ${JSON.stringify(entry.verb)}, `
+          + `which no slice scans (known: ${[...SCANNED_VERBS].join(', ')}). An entry no slice `
+          + 'reaches can never lose its pin, so it records coverage that cannot be checked — fix '
+          + 'the verb or delete the entry.',
+      );
+      continue;
+    }
+    recorded.set(pairKey(entry.file, entry.verb), entry.pinned);
+  }
+
+  // ── The loss direction: a pin the ledger records that the scan no longer sees.
+  for (const entry of ledger.entries) {
+    if (!SCANNED_VERBS.has(entry.verb)) continue;
+    const now = found.get(pairKey(entry.file, entry.verb)) ?? 0;
+    if (now >= entry.pinned) continue;
+
+    const world = classifyPinLoss({
+      onDisk: onDisk(entry.file),
+      declared: declared.get(pairKey(entry.file, entry.verb)) ?? 0,
+      wasPinned: entry.pinned,
+    });
+    const slice = SLICES.find((s) => s.verb === entry.verb);
+    const head = `RETAINED [${entry.verb}]: ${entry.file}`;
+
+    if (world === 'file-removed') {
+      errors.push(
+        `${head} is gone from disk, and the pinned ledger still records ${entry.pinned} pinned `
+          + `${entry.verb} double(s) there. A deleted test is a LEGITIMATE decrease: run `
+          + `\`${REGEN}\` and commit the ledger. There is no number to choose and no judgement to `
+          + 'make — the diff records which pin left, which is the review signal a bare count '
+          + 'could never carry.',
+      );
+    } else if (world === 'double-removed') {
+      errors.push(
+        `${head} is still on disk but declares NO engine double with a ${entry.verb} any more, `
+          + `while the pinned ledger records ${entry.pinned}. This is the #9680 shape exactly: the `
+          + 'member was DROPPED rather than the test deleted, and discovery needs the member to '
+          + 'exist, so the double left the population and every other invariant in this gate '
+          + `passed over it in silence (measured: 319 pinned -> 318, exit 0). Restore the `
+          + `${entry.verb}() member and its \`${slice.pinCall}\` call. ONLY if the double is `
+          + `genuinely and intentionally gone — the fake no longer stands in for the engine at `
+          + `all — run \`${REGEN}\` and commit, so the ledger diff records which pin left.`,
+      );
+    } else if (world === 'members-removed') {
+      const declaredNow = declared.get(pairKey(entry.file, entry.verb)) ?? 0;
+      errors.push(
+        `${head} declares ${declaredNow} engine double(s) with a ${entry.verb}, down from the `
+          + `${entry.pinned} the pinned ledger records as pinned. This is the #9680 shape at a `
+          + 'finer grain: the file still holds a fake, so nothing else in this gate reacts, but '
+          + `${entry.pinned - declaredNow} ${entry.verb}() member(s) were DELETED and the coverage `
+          + 'they carried left with them. Restore the member(s) and their '
+          + `\`${slice.pinCall}\` call. ONLY if the double(s) are genuinely and intentionally gone `
+          + `— that fake no longer stands in for the engine — run \`${REGEN}\` and commit, so the `
+          + 'ledger diff records which pin left.',
+      );
+    } else {
+      errors.push(
+        `${head} still declares every ${entry.verb} double the ledger counted, but only ${now} of `
+          + `${entry.pinned} route through ${[...slice.symbols][0]} any more. The double went `
+          + 'UNGUARDED rather than absent, so the PINNED error naming this same file is the one to '
+          + 'act on — this line exists so one output explains the whole picture. Re-pin it; do '
+          + `NOT reach for \`${REGEN}\`, which would record the loss as intended.`,
+      );
+    }
+  }
+
+  // ── The growth direction: coverage the ledger does not yet know about.
+  //
+  // An error rather than a silent accept, and the reason is decay: measured over
+  // the month to 2026-08-18, 8 files ENTERED the pinned set per verb and none
+  // left, so a ledger that only had to be touched on removals would never be
+  // touched at all and every new double would sit outside the ratchet forever —
+  // this card's blind spot, re-opened on the newest code. The remedy is the same
+  // one command, and the author is already in conversation with this gate.
+  for (const row of census) {
+    const was = recorded.get(pairKey(row.file, row.verb));
+    if (was === undefined) {
+      errors.push(
+        `RETAINED [${row.verb}]: ${row.file} pins ${row.pinned} engine double(s) that the pinned `
+          + 'ledger does not record. New pinned coverage is GOOD and nothing is wrong with your '
+          + `change — the ledger just has to learn about it, or it never protects this file. Run `
+          + `\`${REGEN}\` and commit.`,
+      );
+    } else if (row.pinned > was) {
+      errors.push(
+        `RETAINED [${row.verb}]: ${row.file} now pins ${row.pinned} engine double(s), ledger `
+          + `records ${was}. Coverage grew, which is the direction this ledger wants — run `
+          + `\`${REGEN}\` and commit so the new double is ratcheted too.`,
+      );
+    }
+  }
+
+  return errors;
+}
+
 // ── The ratchet-remedy authority convention (#8435) ──────────────────────────
 //
 // Four independent PRs, four authors, four brand-new test files, one shift --
@@ -1374,6 +1670,22 @@ function audit() {
     }
   }
 
+  // ── RETAINED (#9680) — the pinned population is enumerated, not counted ───
+  //
+  // Runs AFTER the per-slice loop because it reads the same `slices` the loop
+  // built. It adds no criterion to the four above and changes no verdict any of
+  // them reaches: every error below concerns a (file, verb) pair the ledger
+  // names, or one the census found and the ledger does not.
+  const census = censusPinned(slices);
+  const pinnedLedger = readPinnedLedger();
+  errors.push(...retainedErrors(
+    census,
+    pinnedLedger,
+    existsSync(PINNED_LEDGER_PATH),
+    declaredCounts(slices),
+    (file) => existsSync(join(ROOT, file)),
+  ));
+
   // ── The consumer seams (#8194) ────────────────────────────────────────────
   const seamFiles = scanAllSeams();
   const seamCount = seamFiles.reduce((n, f) => n + f.seams.length, 0);
@@ -1415,11 +1727,64 @@ function audit() {
     }
   }
 
-  return { slices, baseline, errors, seamFiles, seamCount };
+  return { slices, baseline, errors, seamFiles, seamCount, census, pinnedLedger };
+}
+
+const PINNED_LEDGER_COMMENT =
+  'GENERATED — the RETAINED ledger of check-engine-double-contract.mjs (#9680). Regenerate with '
+  + '`node scripts/check-engine-double-contract.mjs --write`; never hand-edit. Each row is one '
+  + '(file, verb) whose engine double routes through the producer\'s dispatch predicate. This is '
+  + 'the OPPOSITE polarity to engine-double-contract.baseline.json: that ledger records DEBT and '
+  + 'may only shrink, this one records COVERAGE and may only grow. A row that disappears is a '
+  + 'pinned double that left the population — the blind spot #9680 measured, where deleting a '
+  + 'double\'s delete() member took 319 pinned to 318 with the gate green. Read a removal in this '
+  + 'file\'s diff as a coverage loss and check it was intended.';
+
+/**
+ * Regenerate the RETAINED ledger (#9680).
+ *
+ * Prints every LOSS it is about to record before writing. That is the half that
+ * keeps `--write` from becoming the "bump the number" reflex ruling this gate
+ * out was meant to prevent: the author reads which pin left at the moment they
+ * regenerate, rather than meeting it in review — or not at all.
+ */
+function writeLedger() {
+  const { slices } = audit();
+  const census = censusPinned(slices);
+  const before = readPinnedLedger();
+  const was = new Map((before.entries ?? []).map((e) => [pairKey(e.file, e.verb), e.pinned]));
+  const now = new Map(census.map((r) => [pairKey(r.file, r.verb), r.pinned]));
+
+  const losses = [];
+  for (const [k, n] of was) {
+    const after = now.get(k) ?? 0;
+    const [file, verb] = JSON.parse(k);
+    if (after < n) losses.push(`[${verb}] ${file}: ${n} pinned -> ${after}`);
+  }
+  const gains = [...now].filter(([k, n]) => n > (was.get(k) ?? 0)).length;
+
+  writeFileSync(
+    PINNED_LEDGER_PATH,
+    `${JSON.stringify({ $comment: PINNED_LEDGER_COMMENT, entries: census }, null, 2)}\n`,
+  );
+
+  console.log('');
+  if (losses.length) {
+    console.log(`  ⛔ RECORDING ${losses.length} PIN LOSS(ES) — read these before you commit:`);
+    for (const l of losses) console.log(`     - ${l}`);
+    console.log('     Each line is coverage this gate will no longer hold. If any of them is a');
+    console.log('     dropped member rather than a deleted test, restore it instead of committing.');
+  } else {
+    console.log('  No pin losses — this regeneration only records new or grown coverage.');
+  }
+  console.log(
+    `\ncheck-engine-double-contract --write: ${census.length} (file, verb) row(s), `
+      + `${gains} added or grown, ${losses.length} lost.\n`,
+  );
 }
 
 function report() {
-  const { slices, baseline, errors, seamFiles, seamCount } = audit();
+  const { slices, baseline, errors, seamFiles, seamCount, census } = audit();
 
   console.log('');
   let totalPinned = 0;
@@ -1477,7 +1842,15 @@ function report() {
   const debt = baseline.entries.filter((e) => e.kind !== 'EXEMPT').length;
   console.log(
     `check-engine-double-contract: OK — ${totalPinned} pinned, ${debt} in the DEBT ledger, `
-      + `${exempt.length} exempt.\n`,
+      + `${exempt.length} exempt.`,
+  );
+  // Say that the pinned number is now RATCHETED, not merely printed. Before
+  // #9680 this line ended at "319 pinned" and that integer was the only trace a
+  // vanished double left; a reader had no way to tell a checked count from a
+  // reported one, which is what let 319 -> 318 read as success.
+  console.log(
+    `check-engine-double-contract: ${census.length} (file, verb) row(s) held by the RETAINED `
+      + `ledger — a pin that leaves names itself.\n`,
   );
 }
 
@@ -2224,6 +2597,126 @@ class Svc {
     + 'predicate discriminates rather than approving everything)',
     !ratchetRemedyCarriesAuthority(unmarkedOffer));
 
+
+  // ── RETAINED (#9680): the pinned population is enumerated, not counted ─────
+  //
+  // Driven through the two pure functions the invariant is built from, so all
+  // four loss worlds are exercised without creating and deleting real files.
+  // `onDisk` and the two censuses are injected for exactly that reason.
+  const LEDGER_OK = true;
+  const noDisk = () => false;
+  const onDisk = () => true;
+  const dcount = (pairs) => new Map(pairs.map(([f, v, n]) => [pairKey(f, v), n]));
+  const anyOf = (errs, needle) => errs.some((e) => e.includes(needle));
+
+  // The census reads PINNED doubles, the declared census reads ALL of them.
+  // Both directions, because conflating them is what made the first draft of
+  // this invariant tell a file whose member was deleted to "re-pin" it.
+  const mixedSlices = [{
+    slice: SLICES[0],
+    found: [{ file: 'a.test.ts', doubles: [{ pinned: true }, { pinned: false }] }],
+  }];
+  expect('censusPinned counts only the PINNED doubles',
+    censusPinned(mixedSlices).length === 1 && censusPinned(mixedSlices)[0].pinned === 1);
+  expect('declaredCounts counts pinned AND unpinned doubles',
+    declaredCounts(mixedSlices).get(pairKey('a.test.ts', 'delete')) === 2);
+  expect('censusPinned omits a file whose doubles are all unpinned',
+    censusPinned([{ slice: SLICES[0], found: [{ file: 'b.test.ts', doubles: [{ pinned: false }] }] }])
+      .length === 0);
+
+  // ── The four loss worlds, each separated from its neighbours.
+  expect('a file gone from disk classifies as file-removed',
+    classifyPinLoss({ onDisk: false, declared: 0, wasPinned: 1 }) === 'file-removed');
+  expect('a file on disk declaring no double classifies as double-removed',
+    classifyPinLoss({ onDisk: true, declared: 0, wasPinned: 1 }) === 'double-removed');
+  expect('fewer doubles declared than pinned classifies as members-removed',
+    classifyPinLoss({ onDisk: true, declared: 1, wasPinned: 2 }) === 'members-removed');
+  expect('every double still declared classifies as unpinned',
+    classifyPinLoss({ onDisk: true, declared: 2, wasPinned: 2 }) === 'unpinned');
+
+  // ── The clean direction: a ledger that matches the census reports nothing.
+  // Without this every assertion below could pass on a function that always
+  // errors, which is the guard-that-cannot-pass twin of #4118.
+  const cleanLedger = { entries: [{ file: 'a.test.ts', verb: 'delete', pinned: 1 }] };
+  const cleanCensus = [{ file: 'a.test.ts', verb: 'delete', pinned: 1 }];
+  expect('a ledger matching the census is silent',
+    retainedErrors(cleanCensus, cleanLedger, LEDGER_OK,
+      dcount([['a.test.ts', 'delete', 1]]), onDisk).length === 0);
+
+  // ── Each loss world reaches its OWN message, and never a neighbour's.
+  const lostFile = retainedErrors([], cleanLedger, LEDGER_OK, dcount([]), noDisk);
+  expect('a deleted test file is reported as a legitimate decrease',
+    lostFile.length === 1 && anyOf(lostFile, 'gone from disk')
+      && anyOf(lostFile, 'LEGITIMATE decrease'));
+
+  const lostDouble = retainedErrors([], cleanLedger, LEDGER_OK, dcount([]), onDisk);
+  expect('a dropped member on a live file is reported as the #9680 defect',
+    lostDouble.length === 1 && anyOf(lostDouble, 'declares NO engine double')
+      && anyOf(lostDouble, '#9680'));
+  expect('the dropped-member message does NOT read as a legitimate decrease',
+    !anyOf(lostDouble, 'gone from disk'));
+
+  const twoPinned = { entries: [{ file: 'a.test.ts', verb: 'delete', pinned: 2 }] };
+  const lostOne = retainedErrors([{ file: 'a.test.ts', verb: 'delete', pinned: 1 }], twoPinned,
+    LEDGER_OK, dcount([['a.test.ts', 'delete', 1]]), onDisk);
+  expect('one member deleted out of two pinned is reported as members-removed',
+    lostOne.length === 1 && anyOf(lostOne, 'down from the 2'));
+  expect('the members-removed message does not tell the author to re-pin',
+    !anyOf(lostOne, 'Re-pin it'));
+
+  const wentLoose = retainedErrors([], cleanLedger, LEDGER_OK,
+    dcount([['a.test.ts', 'delete', 1]]), onDisk);
+  expect('a double that went unguarded is reported as unpinned, not as absent',
+    wentLoose.length === 1 && anyOf(wentLoose, 'went UNGUARDED')
+      && !anyOf(wentLoose, 'declares NO engine double'));
+  expect('the unpinned message refuses the regeneration remedy',
+    anyOf(wentLoose, 'do NOT reach for'));
+
+  // ── The growth direction. Both spellings, because a new FILE and a new double
+  // in a known file arrive by different routes and only one was in the first draft.
+  const grewNew = retainedErrors([{ file: 'new.test.ts', verb: 'delete', pinned: 1 }],
+    { entries: [] }, LEDGER_OK, dcount([['new.test.ts', 'delete', 1]]), onDisk);
+  expect('a newly pinned file the ledger does not record is reported',
+    grewNew.length === 1 && anyOf(grewNew, 'does not record'));
+  expect('new coverage is not reported as anyone’s mistake',
+    anyOf(grewNew, 'nothing is wrong with your change'));
+
+  const grewMore = retainedErrors([{ file: 'a.test.ts', verb: 'delete', pinned: 2 }], cleanLedger,
+    LEDGER_OK, dcount([['a.test.ts', 'delete', 2]]), onDisk);
+  expect('a file that pins MORE than the ledger records is reported',
+    grewMore.length === 1 && anyOf(grewMore, 'Coverage grew'));
+
+  // ── Bootstrap: a missing ledger is ONE error, not one per row. The failure
+  // this guards is a fresh checkout reporting 308 problems for one missing file.
+  const missing = retainedErrors(
+    [{ file: 'a.test.ts', verb: 'delete', pinned: 1 }, { file: 'b.test.ts', verb: 'update', pinned: 1 }],
+    { entries: [] }, false, dcount([]), onDisk);
+  expect('a missing pinned ledger reports exactly one bootstrap error',
+    missing.length === 1 && anyOf(missing, 'is missing'));
+
+  // ── DECLARED's twin for this ledger: an entry naming a verb no slice scans
+  // can never lose its pin, so it would record coverage nothing checks.
+  const badVerb = retainedErrors([], { entries: [{ file: 'a.test.ts', verb: 'destroy', pinned: 1 }] },
+    LEDGER_OK, dcount([]), onDisk);
+  expect('a pinned-ledger entry naming an unscanned verb is rejected',
+    badVerb.length === 1 && anyOf(badVerb, 'no slice scans'));
+  expect('an unscanned-verb entry is not ALSO reported as a lost pin',
+    !anyOf(badVerb, 'gone from disk') && !anyOf(badVerb, 'declares NO engine double'));
+
+  // ── The reason this invariant exists, stated as an assertion: the pinned
+  // population must be enumerated. A ledger holding only a COUNT cannot express
+  // the swap that motivated #9680 -- one file loses a pin, another gains one --
+  // so the census rows carry identity, and this fails if they ever stop.
+  expect('census rows carry file identity, not just a total',
+    censusPinned(mixedSlices)[0].file === 'a.test.ts'
+      && typeof censusPinned(mixedSlices)[0].verb === 'string');
+  const swapBefore = { entries: [{ file: 'x.test.ts', verb: 'delete', pinned: 1 }] };
+  const swapAfter = [{ file: 'y.test.ts', verb: 'delete', pinned: 1 }];
+  const swap = retainedErrors(swapAfter, swapBefore, LEDGER_OK,
+    dcount([['y.test.ts', 'delete', 1]]), onDisk);
+  expect('a SWAP (one pin lost, one gained, total unchanged) is reported both ways',
+    swap.length === 2 && anyOf(swap, 'x.test.ts') && anyOf(swap, 'y.test.ts'));
+
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\ncheck-engine-double-contract --self-test: ${failures.length} failure(s).\n`);
@@ -2249,4 +2742,5 @@ class Svc {
 }
 
 if (process.argv.includes('--self-test')) selfTest();
+else if (process.argv.includes('--write')) writeLedger();
 else report();

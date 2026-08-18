@@ -1,0 +1,1545 @@
+{
+  "$comment": "GENERATED — the RETAINED ledger of check-engine-double-contract.mjs (#9680). Regenerate with `node scripts/check-engine-double-contract.mjs --write`; never hand-edit. Each row is one (file, verb) whose engine double routes through the producer's dispatch predicate. This is the OPPOSITE polarity to engine-double-contract.baseline.json: that ledger records DEBT and may only shrink, this one records COVERAGE and may only grow. A row that disappears is a pinned double that left the population — the blind spot #9680 measured, where deleting a double's delete() member took 319 pinned to 318 with the gate green. Read a removal in this file's diff as a coverage loss and check it was intended.",
+  "entries": [
+    {
+      "file": "packages/core/src/utils/migration-journal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/core/src/utils/migration-journal.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-stdio-tools.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-stdio-tools.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-write-response-internal-fields.tripwire.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-write-response-internal-fields.tripwire.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/plugin.record-resource-exposure.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/plugin.record-resource-exposure.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/migrations/recorded-by-sentinel.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/migrations/recorded-by-sentinel.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-advisories.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-advisories.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-endpoint-gate.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-endpoint-gate.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-org-scope.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-org-scope.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-package-scope.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-package-scope.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.adr0005-org-override-rollback.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.adr0005-org-override-rollback.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.audit-field-governance.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.audit-field-governance.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.batch-row-conformance.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.batch-row-conformance.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.batch-row-driver-text.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.batch-row-driver-text.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.batch-row-http-status.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.batch-row-http-status.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.batch-verb-driver-code.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.batch-verb-driver-code.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.batch-verb-driver-text.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.batch-verb-driver-text.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.capability-write-door.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.capability-write-door.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.code-only-types.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.code-only-types.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.container-issue-descent.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.container-issue-descent.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.dashboard-dataset-publish-gate.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.dashboard-dataset-publish-gate.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.delete-object-registry-unregister.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.delete-object-registry-unregister.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.delete-receipt-wording.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.delete-receipt-wording.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.delete-rewrap-envelope.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.delete-rewrap-envelope.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.diff-canonical-type-and-history-outage.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.diff-canonical-type-and-history-outage.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.diff-credential-redaction.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.diff-credential-redaction.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.diff-dead-history-read.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.diff-dead-history-read.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.driver-text-disclosure.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.driver-text-disclosure.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.dropped-fields.test.ts",
+      "verb": "update",
+      "pinned": 3
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.flow-org-override-closed.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.flow-org-override-closed.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.graft-folded-form-sections.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.graft-folded-form-sections.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.injected-system-columns.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.injected-system-columns.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.legacy-overlay-delete.test.ts",
+      "verb": "delete",
+      "pinned": 2
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.legacy-overlay-delete.test.ts",
+      "verb": "update",
+      "pinned": 2
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.lifecycle-audit-rows.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.lifecycle-audit-rows.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.lock-gate-fail-closed.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.lock-gate-fail-closed.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.meta-types-mint-door-agreement.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.meta-types-mint-door-agreement.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.metadata-redaction.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.metadata-redaction.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.migrate-stored-noncanonical-type.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.migrate-stored-noncanonical-type.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.object-registry-write-through-spelling.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.object-registry-write-through-spelling.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.org-scoped-cold-boot-audit-live-registry.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.org-scoped-cold-boot-audit-live-registry.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.org-scoped-cold-boot-audit.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.org-scoped-cold-boot-audit.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.org-scoped-write-refused.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.org-scoped-write-refused.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.package-publish-audit-rows.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.package-publish-audit-rows.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.platform-schedule-org-gate.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.platform-schedule-org-gate.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.publish-commit-capture-read-failure.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.publish-commit-capture-read-failure.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.publish-side-effects-canonical-type.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.publish-side-effects-canonical-type.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.publish-stored-type-canonical.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.publish-stored-type-canonical.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.read-decorations.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.read-decorations.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.record-package-commit-durability.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.record-package-commit-durability.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.revert-stored-type-canonical.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.revert-stored-type-canonical.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.runtime-authoring-gate.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.runtime-authoring-gate.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.save-flow-canonicalization.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.save-flow-canonicalization.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.save-receipt-wording.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.save-receipt-wording.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.save-union-issues.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.save-union-issues.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.stored-conversions.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.stored-conversions.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.stored-migration.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.stored-migration.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.stored-residue-resave.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.stored-residue-resave.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.unrecognised-meta-type.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.unrecognised-meta-type.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.validate-data.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.validate-data.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.write-response-internal-fields.tripwire.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.write-response-internal-fields.tripwire.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-composite-external-id.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-composite-external-id.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-deferred-dropped.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-deferred-dropped.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-deferred-failure.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-deferred-failure.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-driver-text.test.ts",
+      "verb": "delete",
+      "pinned": 2
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-driver-text.test.ts",
+      "verb": "update",
+      "pinned": 2
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-engine-schema-fallback.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-engine-schema-fallback.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-env-scope.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-env-scope.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-existing-records-read-failure.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-existing-records-read-failure.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-multi-value-reference.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-multi-value-reference.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-name-probe.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-name-probe.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-replay.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-replay.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-retry.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-retry.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-state-machine-exempt.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-state-machine-exempt.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-summary-stale.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-summary-stale.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-unresolved-drop.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-unresolved-drop.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.draft-drain.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.draft-drain.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.history-counters.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.history-counters.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.package-writability.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.package-writability.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.recorded-by.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.recorded-by.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/view-container-runtime-expansion.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/view-container-runtime-expansion.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata/src/migrations/migrate-sys-notification-to-event.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata/src/migrations/migrate-sys-notification-to-event.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/layered-overlay-integration.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/layered-overlay-integration.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/package-disable-enforcement.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/package-disable-enforcement.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-boot-hydration-scoped.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-boot-object-package-binding.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-boot-object-package-binding.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-commit-history.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-commit-history.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-delete-object-registry-heal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-delete-object-registry-heal.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-meta-effective-schema.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-meta-effective-schema.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-meta-type-canonicalization.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-meta-type-canonicalization.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-object-overlay-layer.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-object-overlay-layer.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-org-overlay-registry-gate.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-org-overlay-registry-gate.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-packaged-object-base.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-packaged-object-base.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-publish-package-drafts.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-publish-rollback.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-publish-rollback.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-registry-shadow.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-save-meta-repo-path.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-save-meta-repo-path.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-view-identity-overlay.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-view-identity-overlay.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-writepath-object-ownership.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-writepath-object-ownership.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/registry-tenant-index-author-declared-column.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/registry-tenant-index-author-declared-column.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/registry-tenant-index-declaration.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/registry-tenant-index-declaration.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/registry-tenant-index-follows-wall.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/registry-tenant-index-follows-wall.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/seed-loader-org-fallback.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/seed-loader-org-stamp.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/sys-metadata-repository.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/sys-metadata-repository.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/platform-objects/src/plugin.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/platform-objects/src/system/migration-flag.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/admin-exemption-retired.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/record-reader-visibility.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/record-reader-visibility.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/accept-invitation-adopt-membership.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/accept-invitation-adopt-membership.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/auth-manager.jwt-eddsa-fallback.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/auth-manager.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/auth-manager.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/auth-where-operator-coverage.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/change-email-delete-user-wiring.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/change-email-delete-user-wiring.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/impersonation-bearer-rotation.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/impersonation-bearer-rotation.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/org-create-posture-gate.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/remove-member-permission-guard.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/remove-member-permission-guard.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/remove-user-atomicity.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/remove-user-atomicity.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/session-of-record.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/session-tombstone.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/session-tombstone.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-email/src/attachment-reclaim.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-email/src/email-plugin.attachment-storage.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-email/src/email-plugin.outbox-sweep.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-email/src/email-plugin.queue-delivery.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-email/src/email-plugin.template-runtime-write.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/authored-row-write-verdict.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/authored-row-write-verdict.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/check-only-write-scope.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/check-only-write-scope.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/claim-seed-ownership.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/permission-denied-user-copy.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/permission-denied-user-copy.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/row-write-widener-composition.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/row-write-widener-composition.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/security-denial-user-copy.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/security-denial-user-copy.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/select-only-write-visibility.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/select-only-write-visibility.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/share-link-tenant-wall.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/share-link-tenant-wall.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/suggested-audience-bindings-install-path.test.ts",
+      "verb": "delete",
+      "pinned": 2
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/suggested-audience-bindings-install-path.test.ts",
+      "verb": "update",
+      "pinned": 2
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/vama-write-path-convergence.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/vama-write-path-convergence.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/authored-row-write-deferral.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/authored-row-write-deferral.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/boot-backfill.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/bu-tree-recompute.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/bu-tree-recompute.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/bulk-recompute.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/federated-phantom-owner-scoping.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/federated-phantom-owner-scoping.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/recipient-width.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/recipient-width.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/record-share-cascade.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/share-link-eligibility.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/share-link-enforcement-context.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/share-link-enforcement-context.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/sharing-rule-provenance.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/sharing-rule.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/sharing-service.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/system-caller-inert-grant.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/system-caller-inert-grant.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/system-write-skip-notice.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/system-write-skip-notice.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-webhooks/src/webhook-drop-durable-record.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-webhooks/src/webhook-drop-durable-record.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-webhooks/src/webhook-signing-secret.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-webhooks/src/webhook-signing-secret.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/meta-published-overlay.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/meta-published-overlay.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/public-form-lookup-picker.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/public-form-lookup-picker.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/public-form-routes.stored-row.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/public-form-routes.stored-row.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/action-execution-calldata-not-found.test.ts",
+      "verb": "delete",
+      "pinned": 2
+    },
+    {
+      "file": "packages/runtime/src/domains/meta-published-runtime-publish.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/meta-published-runtime-publish.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/share-links-enforcement-context.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/share-links-enforcement-context.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/http-dispatcher.keys.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/http-dispatcher.keys.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/meta-compound-arity-mint-door.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/meta-compound-arity-mint-door.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/meta-field-overlay-lock.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/meta-field-overlay-lock.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/meta-overlay-read-your-writes.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/meta-overlay-read-your-writes.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/meta-write-org-scope.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/meta-write-org-scope.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/seed-loader.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/seed-loader.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/builtin/crud-bulk-intent.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/builtin/wait-node-degraded-run.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/run-summary.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-job/src/db-job-adapter.degraded-outcome.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-job/src/db-job-adapter.timeout.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-knowledge/src/__tests__/reap-guard.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/delivery-headers-at-rest.integration.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/notification-schema-conformance.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-queue/src/db-queue-adapter.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-queue/src/job-queue-retention.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-settings/src/settings-secret-rotation.test.ts",
+      "verb": "update",
+      "pinned": 2
+    },
+    {
+      "file": "packages/services/service-settings/src/sys-secret-orphan-report.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/lax-deviation-reclamation-gate.test.ts",
+      "verb": "update",
+      "pinned": 2
+    },
+    {
+      "file": "packages/services/service-storage/src/metadata-store.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/storage-routes.metadata-outage.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    }
+  ]
+}
