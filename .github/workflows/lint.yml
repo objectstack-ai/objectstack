@@ -224,6 +224,29 @@ jobs:
       - name: Part-of closing-keyword guard self-test
         run: pnpm check:partof-closing-keyword
 
+      # Single-claim path guard self-test (#9402). Same split as the step above
+      # and for the same reason: the guard is a PR-scoped blocking check in its
+      # own workflow, because its question is about OTHER open PRs and needs a
+      # pull request plus an API read that this job has neither of. What runs
+      # HERE is the half that needs no PR — the verdict layer, the exit-code
+      # contract, the short-circuit that makes the gate affordable, and the
+      # declared path list's own invariants.
+      #
+      # That last one is the reason this step is worth its second: the declared
+      # list IS the key, so the realistic way this gate turns into noise is a
+      # careless append to it. The self-test rejects an entry with no stated
+      # reason, rejects a duplicate, and pins that the three measured
+      # high-collision paths (the lock file, the root manifest, one plugin
+      # manifest — 33, 15 and 21 concurrent pairs in 300 PRs) stay OUT of it.
+      #
+      # It also pins the WIRING (the guard workflow still invokes the script,
+      # still subscribes to `synchronize` — without which a claim added in a
+      # second commit is never judged — and still passes the token), so
+      # unwiring the gate reddens here rather than going quiet.
+      # Dependency-free, reads two files; ~0.1s.
+      - name: Single-claim path guard self-test
+        run: pnpm check:single-claim-paths
+
       # PM half-state sweeper self-test (#8528). `scripts/pm/check-half-states.mjs`
       # carried a 79-case --self-test — the H1..H7 predicates, the seat-sticker
       # parser, the transport classifier and its measured container classes —

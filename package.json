@@ -54,6 +54,7 @@
     "check:pm-half-states": "node scripts/pm/check-half-states.mjs --self-test",
     "check:pm-governed-merges": "node scripts/pm/check-governed-merges.mjs --self-test",
     "check:partof-closing-keyword": "node scripts/check-partof-closing-keyword.mjs --self-test",
+    "check:single-claim-paths": "node scripts/check-single-claim-paths.mjs --self-test",
     "check:adr-anchors": "node scripts/check-adr-anchors.mjs --self-test && node scripts/check-adr-anchors.mjs",
     "check:adr-links": "node scripts/check-adr-links.mjs --self-test && node scripts/check-adr-links.mjs",
     "check:platform-checklist": "node scripts/checklist-select.mjs --self-test && node scripts/check-platform-checklist.mjs",
