@@ -66,6 +66,46 @@ const UNCACHED_ARM = 'dashboard'; // bypasses it via `isDashboardType`
 /** `allowOrgOverride: false` — must keep reading env-wide, never org-scoped. */
 const NON_OVERRIDABLE = 'object';
 
+/** The value every read assertion looks for. */
+const MARKER = 'AUTHORED_AT_RUNTIME';
+
+/**
+ * A SPEC-VALID body per type, carrying `label` as the marker the reads assert
+ * on. Real bodies, not `{ label }` stubs: the write door runs full spec
+ * validation (`INVALID_METADATA`, 422), so a thin fixture never reaches the
+ * store and every read assertion below would fail for a reason that has
+ * nothing to do with org scoping. Each shape was measured against the real
+ * validator, not guessed.
+ */
+function bodyFor(type: string, name: string): Record<string, unknown> {
+    const marker = { name, label: MARKER };
+    switch (type) {
+        case 'view':
+            // [#7741] the inline arm requires the object-binding pair.
+            return { ...marker, object: 'task', viewKind: 'list', columns: [{ field: 'name', label: 'Name' }] };
+        case 'dashboard':
+            return { ...marker, widgets: [] };
+        case 'report':
+            return { ...marker, dataset: 'orders_ds', values: ['order_count'] };
+        case 'translation':
+            return { ...marker, locale: 'en-US' };
+        case 'email_template':
+            return { ...marker, subject: 'Hi', bodyHtml: '<p>Hello</p>' };
+        case 'object':
+            // [ADR-0090 D1] an authored `sharingModel` is required at the write
+            // door; without it this control fails on the WRITE and never
+            // reaches the read it exists to make.
+            return {
+                ...marker,
+                sharingModel: 'private',
+                fields: { title: { type: 'text', label: 'Title' } },
+            };
+        default:
+            throw new Error(`no fixture body for type ${type}`);
+    }
+}
+
+
 // ── stub engine (the `protocol.org-scoped-write-refused.test.ts` pattern) ──
 
 interface Row {
@@ -156,6 +196,10 @@ function makeStubEngine() {
             listItems: () => [], getItem: () => undefined,
             getObject: () => undefined, getPackage: () => undefined,
             getArtifactItem: () => undefined,
+            // The LIST door prunes items belonging to disabled packages; a
+            // registry double without this answers 500, which would have read
+            // as "the listing still does not serve org rows".
+            isPackageDisabled: () => false,
         },
     };
     return { engine, rows };
@@ -229,8 +273,8 @@ function boot() {
                 ? { userId: 'u1', systemPermissions: ['manage_metadata'] }
                 : { userId: 'u1', systemPermissions: ['manage_metadata'], tenantId };
         },
-        put: (type: string, name: string, item: unknown) =>
-            drive('PUT', `${META}/:type/:name`, { params: { type, name }, body: item }),
+        put: (type: string, name: string) =>
+            drive('PUT', `${META}/:type/:name`, { params: { type, name }, body: bodyFor(type, name) }),
         get: (type: string, name: string) =>
             drive('GET', `${META}/:type/:name`, { params: { type, name } }),
         list: (type: string) =>
@@ -260,7 +304,7 @@ describe('#9454 every REST /meta read door serves what the write door persisted'
         it.each(ORG_OVERRIDABLE)(
             '%s: the 200 state:active receipt is answered by the direct GET',
             async (type) => {
-                const written = await b.put(type, 'authored_at_runtime', { label: 'Authored' });
+                const written = await b.put(type, 'authored_at_runtime');
                 // The receipt half — unchanged by this card, asserted so a
                 // harness that could not write at all cannot pass the read half
                 // for the wrong reason.
@@ -270,14 +314,14 @@ describe('#9454 every REST /meta read door serves what the write door persisted'
                 const read = await b.get(type, 'authored_at_runtime');
                 expect(read.thrown, `GET /${type} threw: ${read.thrown?.code}`).toBeUndefined();
                 expect(read.status, `GET /${type} did not serve the item`).toBe(200);
-                expect(servedDocument(read.body)?.label).toBe('Authored');
+                expect(servedDocument(read.body)?.label).toBe(MARKER);
             },
         );
 
         it.each(ORG_OVERRIDABLE)(
             '%s: the scoped listing contains it too',
             async (type) => {
-                await b.put(type, 'authored_at_runtime', { label: 'Authored' });
+                await b.put(type, 'authored_at_runtime');
                 const listed = await b.list(type);
                 expect(listed.status).toBe(200);
                 expect(listedNames(listed.body)).toContain('authored_at_runtime');
@@ -290,14 +334,14 @@ describe('#9454 every REST /meta read door serves what the write door persisted'
             // `dashboard` agreeing here is what proves the cached arm and the
             // `isDashboardType` bypass were BOTH threaded. A fix to one arm
             // leaves exactly one of these two red.
-            await b.put(CACHED_ARM, 'both_arms', { label: 'Cached arm' });
-            await b.put(UNCACHED_ARM, 'both_arms', { label: 'Uncached arm' });
+            await b.put(CACHED_ARM, 'both_arms');
+            await b.put(UNCACHED_ARM, 'both_arms');
 
             const cached = await b.get(CACHED_ARM, 'both_arms');
             const uncached = await b.get(UNCACHED_ARM, 'both_arms');
 
-            expect(servedDocument(cached.body)?.label, 'cached arm (view) lost the overlay').toBe('Cached arm');
-            expect(servedDocument(uncached.body)?.label, 'uncached arm (dashboard) lost the overlay').toBe('Uncached arm');
+            expect(servedDocument(cached.body)?.label, 'cached arm (view) lost the overlay').toBe(MARKER);
+            expect(servedDocument(uncached.body)?.label, 'uncached arm (dashboard) lost the overlay').toBe(MARKER);
         });
     });
 
@@ -305,28 +349,28 @@ describe('#9454 every REST /meta read door serves what the write door persisted'
         it('does not serve another org row to a caller that named no org', async () => {
             // The refused option C, pinned. An org-blind fallback matching ANY
             // org row passes every assertion above and fails only here.
-            await b.put(CACHED_ARM, 'org_a_only', { label: 'Org A private' });
+            await b.put(CACHED_ARM, 'org_a_only');
             b.as(undefined);
 
             const read = await b.get(CACHED_ARM, 'org_a_only');
             expect(
                 servedDocument(read.body)?.label,
                 'an org-less caller was served an org-scoped row',
-            ).not.toBe('Org A private');
+            ).not.toBe(MARKER);
             expect(listedNames((await b.list(CACHED_ARM)).body)).not.toContain('org_a_only');
         });
 
         it('does not serve org A row to org B on the same boot', async () => {
             // The control the original reproduction structurally could not run:
             // it had exactly one organization.
-            await b.put(UNCACHED_ARM, 'tenant_bound', { label: 'Belongs to A' });
+            await b.put(UNCACHED_ARM, 'tenant_bound');
             b.as(ORG_B);
 
             const read = await b.get(UNCACHED_ARM, 'tenant_bound');
             expect(
                 servedDocument(read.body)?.label,
                 'org B was served org A metadata',
-            ).not.toBe('Belongs to A');
+            ).not.toBe(MARKER);
             expect(listedNames((await b.list(UNCACHED_ARM)).body)).not.toContain('tenant_bound');
         });
 
@@ -335,13 +379,13 @@ describe('#9454 every REST /meta read door serves what the write door persisted'
             // would resurrect #6190's phantom rows on the READ side — rows boot
             // hydration deliberately walks past, so serving them means serving a
             // document that vanishes at the next restart.
-            await b.put(NON_OVERRIDABLE, 'accounts', { label: 'Accounts' });
+            await b.put(NON_OVERRIDABLE, 'accounts');
             const row = Array.from(b.rows.values()).find((r) => r.name === 'accounts');
             expect(row?.organization_id ?? null, 'a non-overridable write went org-scoped').toBe(null);
 
             const read = await b.get(NON_OVERRIDABLE, 'accounts');
             expect(read.status).toBe(200);
-            expect(servedDocument(read.body)?.label).toBe('Accounts');
+            expect(servedDocument(read.body)?.label).toBe(MARKER);
         });
     });
 
@@ -351,7 +395,7 @@ describe('#9454 every REST /meta read door serves what the write door persisted'
             // never a silent write no-op. If this turns red the defect has
             // changed shape and the rest of this file is asserting the wrong
             // thing.
-            const written = await b.put(CACHED_ARM, 'partitioned', { label: 'Partitioned' });
+            const written = await b.put(CACHED_ARM, 'partitioned');
             const row = Array.from(b.rows.values()).find((r) => r.name === 'partitioned');
             expect(
                 row,
