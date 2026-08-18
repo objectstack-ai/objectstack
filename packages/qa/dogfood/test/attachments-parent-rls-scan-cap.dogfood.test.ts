@@ -244,7 +244,17 @@ describe('sys_attachment read visibility fails CLOSED past the pre-scan cap (#94
     // from this member for some entirely different reason would satisfy the
     // fail-closed assertion while proving nothing about the cap.
     const broad = await stack.apiAs(memberTok, 'GET', '/data/sys_attachment?$top=200');
-    const returned = new Set(((await broad.json()) as any).records.map((r: any) => String(r.id)));
+    const records = ((await broad.json()) as any).records as any[];
+
+    // The page must NOT be full, or "absent from the page" means paged out
+    // rather than filtered out and the conclusion below does not follow. This
+    // guard is not decoration: the fail-open ablation of the cap was caught by
+    // it and by nothing else — with the filter removed the page fills with
+    // unfiltered rows, every visible row falls off the end, and the test would
+    // otherwise have gone green while the surface leaked the whole table.
+    expect(records.length, 'the page is not full, so absence means excluded').toBeLessThan(200);
+
+    const returned = new Set(records.map((r: any) => String(r.id)));
     const dropped = [...visibleRows.entries()].find(([id]) => !returned.has(id));
     expect(dropped, 'the broad read dropped at least one visible row').toBeTruthy();
 
