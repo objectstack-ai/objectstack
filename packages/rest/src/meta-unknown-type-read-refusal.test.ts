@@ -35,7 +35,7 @@
 // the pre-fix answer was a perfectly well-formed 200.
 
 import { describe, it, expect, vi } from 'vitest';
-import { RestServer } from './rest-server';
+import { RestServer } from './rest-server.js';
 
 const LIST = '/api/v1/meta/:type';
 const ITEM = '/api/v1/meta/:type/:name';
