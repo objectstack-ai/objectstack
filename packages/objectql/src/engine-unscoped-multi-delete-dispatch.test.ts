@@ -113,14 +113,14 @@ async function boot() {
   const driver = makeStubDriver();
   engine.registerDriver(driver, true);
   await engine.init();
-  engine.registry.registerObject(attObject);
-  engine.registry.registerObject(taskObject);
+  engine.registry.registerObject(attObject as any, 'app:test');
+  engine.registry.registerObject(taskObject as any, 'app:test');
   return { engine, driver };
 }
 
 /** Seed rows straight into the driver store — no insert hooks involved. */
 function seed(driver: any, object: string, rows: Array<Record<string, unknown>>) {
-  for (const row of rows) driver.stores.get(object) ?? driver.stores.set(object, new Map());
+  if (!driver.stores.get(object)) driver.stores.set(object, new Map());
   for (const row of rows) driver.stores.get(object)!.set(String(row.id), { ...row });
 }
 

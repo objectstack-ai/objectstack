@@ -302,12 +302,12 @@ async function bootWired(opts: {
   const driver = makeWiredDriver();
   ql.registerDriver(driver, true);
   await ql.init();
-  ql.registry.registerObject(sysAttachmentObject as any);
-  ql.registry.registerObject(attSecretObject as any);
+  ql.registry.registerObject(sysAttachmentObject as any, 'app:test');
+  ql.registry.registerObject(attSecretObject as any, 'app:test');
   // `engine as any` mirrors the production wiring in storage-service-plugin.ts.
   installAttachmentAccessHooks(ql as any, () => opts.sharing ?? null, silentLogger());
+  if (!driver.stores.get('sys_attachment')) driver.stores.set('sys_attachment', new Map());
   for (const row of opts.attachments ?? []) {
-    driver.stores.get('sys_attachment') ?? driver.stores.set('sys_attachment', new Map());
     driver.stores.get('sys_attachment')!.set(String(row.id), { ...row });
   }
   const remaining = () => driver.stores.get('sys_attachment')?.size ?? 0;
