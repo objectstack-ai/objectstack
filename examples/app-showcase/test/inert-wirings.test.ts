@@ -6,6 +6,7 @@ import stack from '../objectstack.config.js';
 import { PLATFORM_CAPABILITY_NAMES } from '@objectstack/spec/security';
 import { FILE_REFERENCE_TYPES, valueSchemaFor } from '@objectstack/spec/data';
 import { healthFor, sweepProjectHealth, bindShowcaseJobRuntime } from '../src/automation/jobs/index.js';
+import { POSITION_PERMISSION_SET_BINDINGS } from '../src/security/bind-position-sets.js';
 import {
   ADMIN_EMAIL,
   PHONE_DEMO_USER,
@@ -530,5 +531,122 @@ describe('seeded notify recipients resolve to a real user (#7746)', () => {
     expect(provisioner, 'the approval demo no longer provisions the persona rows').toContain(
       'ensureDemoUser',
     );
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// 6. Sharing rules — the grant must be one a gate would CONSULT (#9237)
+// ───────────────────────────────────────────────────────────────────────────
+/**
+ * The same bug class as §1-§5, on the security surface: a declaration the
+ * runtime accepts at authoring time and then refuses at boot, announced only
+ * by a line in the boot warning block.
+ *
+ * Sharing only ever WIDENS an object's OWD baseline, so on an object whose OWD
+ * is already the widest there is nothing to widen and a `sys_record_share` row
+ * would never be consulted. `SharingService.inertGrantReason` states that as a
+ * verdict and `assertNotInertGrant` REFUSES the write, so the rule's boot
+ * backfill fails per rule:
+ *
+ *   WARN SharingServicePlugin: boot rule backfill failed for rule
+ *     {"rule":"share_open_tasks_with_manager","error":"SHARING_NOT_ENABLED:
+ *      'showcase_task' is not under record-sharing enforcement …"}
+ *
+ * Measured on the stock showcase before #9237: TWO such WARNs per boot, and a
+ * THIRD rule in the same state that produced no diagnostic at all — its
+ * compound condition matched zero seeded rows, so `reconcile` never reached
+ * `grant` and never threw. The silent one is the reason this guard reads the
+ * DECLARATION rather than the boot log: a rule can be just as dead without a
+ * warning to notice.
+ *
+ * ⛔ The runtime's other inertness arm — "no `owner_id` field" — is
+ * deliberately NOT reproduced here. `owner_id` is INJECTED by the schema
+ * registry for ordinary business objects, so it is absent from the authored
+ * metadata this guard reads and present on the schema the runtime judges;
+ * asserting it here would fail every object that (correctly) does not declare
+ * it by hand.
+ */
+describe('sharing rules target an object under record-sharing enforcement (#9237)', () => {
+  interface AuthoredRule {
+    name: string;
+    object: string;
+    sharedWith?: { type?: string; value?: string };
+  }
+  interface AuthoredSet {
+    name: string;
+    isDefault?: boolean;
+    objects?: Record<string, { allowRead?: boolean; viewAllRecords?: boolean }>;
+  }
+
+  const rules = ((stack as { sharingRules?: unknown[] }).sharingRules ?? []) as AuthoredRule[];
+  const objects = ((stack as { objects?: unknown[] }).objects ?? []) as Array<{
+    name: string;
+    sharingModel?: string;
+  }>;
+  const sets = ((stack as { permissions?: unknown[] }).permissions ?? []) as AuthoredSet[];
+
+  /** The permission sets a holder of `position` effectively carries. */
+  function setsHeldBy(position: string): AuthoredSet[] {
+    const held = new Set(
+      POSITION_PERMISSION_SET_BINDINGS.filter(([p]) => p === position).map(([, s]) => s),
+    );
+    // Every authenticated member also holds the `everyone` baseline (the
+    // `isDefault` set, ADR-0090 D5) IN ADDITION to their explicit grants.
+    return sets.filter((s) => held.has(s.name) || s.isDefault === true);
+  }
+
+  it('the stack declares sharing rules (guard is not vacuous)', () => {
+    expect(rules.length).toBeGreaterThan(0);
+  });
+
+  it('no rule is anchored on an object whose OWD leaves nothing to widen', () => {
+    // `effectiveSharingModel` maps BOTH of these to 'public'; the
+    // `controlled_by_parent` case has its own refusal ("share the master
+    // record instead"). Either way the grant is refused, so either way the
+    // declaration is inert.
+    const INERT_OWD = new Set(['public_read_write', 'controlled_by_parent']);
+    const offenders: string[] = [];
+    for (const rule of rules) {
+      const target = objects.find((o) => o.name === rule.object);
+      if (!target) {
+        offenders.push(`${rule.name} → '${rule.object}' (no such object)`);
+        continue;
+      }
+      if (INERT_OWD.has(String(target.sharingModel))) {
+        offenders.push(`${rule.name} → ${rule.object} (sharingModel '${target.sharingModel}')`);
+      }
+    }
+    expect(
+      offenders,
+      `sharing rule(s) on an object not under record-sharing enforcement — the boot backfill `
+        + `refuses these with SHARING_NOT_ENABLED: ${offenders.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  it('every rule names an audience that can READ the object it shares', () => {
+    // The second way a grant goes unconsulted: object-level CRUD is decided
+    // BEFORE record-level visibility, so a share row minted for a principal
+    // holding no `allowRead` on that object widens nothing. This arm is what
+    // stops the retired project/task rules being "fixed" by re-homing them
+    // onto a private object whose recipient cannot read it either.
+    const offenders: string[] = [];
+    for (const rule of rules) {
+      const recipient = rule.sharedWith ?? {};
+      // Non-`position` recipients expand to ordinary members, whose grant is
+      // the `everyone` baseline — represented by the isDefault set.
+      const candidates =
+        recipient.type === 'position'
+          ? setsHeldBy(String(recipient.value))
+          : sets.filter((s) => s.isDefault === true);
+      const canRead = candidates.some((s) => s.objects?.[rule.object]?.allowRead === true);
+      if (!canRead) {
+        offenders.push(`${rule.name} → ${recipient.type}:${recipient.value} on ${rule.object}`);
+      }
+    }
+    expect(
+      offenders,
+      `sharing rule(s) whose audience holds no allowRead on the shared object — the share row `
+        + `is never reached: ${offenders.join(', ')}`,
+    ).toEqual([]);
   });
 });
