@@ -108,6 +108,14 @@
  * and asserts that. Re-litigating per-job `if:` shape here would duplicate that
  * judgement in a second place with a different rationale, which is the one
  * outcome #6865's dispatch explicitly warned against.
+ *
+ * ## The instruction-surface scan (#9491)
+ *
+ * Since #9491 this file also guards the INSTRUCTION FILES that state the
+ * required set as operative prose. The design — its split-PR sequencing
+ * constraint, the occurrence-budget grace, and its measured recognition
+ * limits — is documented at INSTRUCTION_SURFACES / RETIRED_CONTEXT_NAMES
+ * below, with the decision in judgeInstructionSurfaces.
  */
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -233,6 +241,127 @@ export const REQUIRED_CONTEXTS = [
     context: 'Temporal Conformance (live PG + MySQL)',
     authorized: '#5617 closing ruling 2026-08-09, second batch',
     carries: 'the live-server datetime conformance axis (#3912/#3942)',
+  },
+];
+
+/**
+ * ── Instruction surfaces (#9491) ─────────────────────────────────────────────
+ *
+ * The same context literals are OPERATIVE PROSE outside the workflows: the
+ * instruction files that tell a review seat which check-runs to confirm before
+ * flipping a PR ready / arming auto-merge / enqueuing it. #9325's rename moved
+ * lint.yml and this registry in one PR (the pin above forces that), while
+ * AGENTS.md was carried along BY HAND and the pm-dispatch review checklist was
+ * caught by a dev seat READING it — no gate read the name at all (#9491's
+ * measurement: replacing it with `Nonexistent Job Name` turned nothing red
+ * across the file's whole derived gate union). A seat that looks for a
+ * check-run by a stale name and finds nothing either stalls or arms on an
+ * unverified gate family.
+ *
+ * ## The sequencing constraint this design is built around
+ *
+ * A rename CANNOT land atomically across all its surfaces: the Settings entry
+ * is maintainer-only, and the instruction files are split across seat tiers
+ * (`.claude/skills/pm-dispatch/**` is a maintainer-merge surface a dev seat
+ * may not edit — the reason the checklist half of #9325 was its own card). So
+ * between the rename PR and the instruction-fix PR(s), `main` legitimately
+ * holds stale names, and a gate that reds on them blocks the very sitting it
+ * protects. Not hypothetical: this scan landed WHILE the repo sat in that
+ * window — registry renamed, `review-checklist.md` still naming `ESLint`, the
+ * fix PR open. Hence:
+ *
+ *   - RETIRED_CONTEXT_NAMES is a permanent, append-only rename ledger. The
+ *     rename PR MUST add a row: without one, the scan below is red on every
+ *     occurrence of the newly-old literal, and that red lands on the rename
+ *     PR itself — where the registry edit is already in hand — so the ledger
+ *     cannot be forgotten (self-test: 'the ledger cannot be forgotten').
+ *   - `staleSites` is a per-file OCCURRENCE BUDGET, not a ban: the occurrence
+ *     counts at rename time. Above budget = red (the dead name written
+ *     FRESH); at or below = green with a notice. A ban would be wrong even
+ *     for the fix PRs — the checklist's own fix keeps one `ESLint` as a
+ *     deliberate historical mention ("改名前的 PR 仍列旧名"), and history is
+ *     legitimate prose everywhere. Budgets only ever ratchet down, by hand,
+ *     notice-driven; a row whose budgets have been trimmed away is a standing
+ *     ban on writing that dead name fresh anywhere in the scan set.
+ *   - `renameInFlight: true` lets the OLD literal satisfy a `mustName`
+ *     requirement while the instruction fixes are in flight. Once every
+ *     required-set surface names the new literal itself, a notice asks for
+ *     the flip to false. Flipping early is safe by construction: the flip PR
+ *     goes red while any surface still leans on the grace, so it cannot merge
+ *     before the fixes do — it self-orders, it never races.
+ *
+ * ## What this scan can and cannot recognise, measured before it was built
+ *
+ * Recognition is LEXICON-ONLY: current names (the registry) + former names
+ * (this ledger). Recognising an ARBITRARY check-run-shaped literal in
+ * bilingual prose — the stronger reading of #9491's direction 2 — needs
+ * markers in the instruction files, which are exactly the files split across
+ * seat tiers; every marker-free heuristic tried fires on ordinary English.
+ * The `mustName` guard closes most of that gap from the other side: a surface
+ * that states the required set must contain each required literal (current,
+ * or ledgered-former while in flight), so replacing a name with garbage or
+ * deleting the sentence is red even though the garbage itself is never
+ * recognised. RESIDUALS, recorded rather than implied covered: paraphrase
+ * drift (naming a context loosely, e.g. "Lint & Type Check" in
+ * docs/launch-readiness.md) is invisible to both halves; and after a
+ * SHORTENING rename (new name a substring of the old), an old-literal mention
+ * satisfies the new name's `mustName` by substring — the budget half still
+ * tracks the old name, so staleness stays bounded.
+ *
+ * ## The scan set, derived 2026-08-18, not assumed
+ *
+ * Every `*.md` under AGENTS.md, CLAUDE.md, `.claude/` and `docs/` naming any
+ * registered context, case-sensitive, with a positive control run on the zero
+ * hits. Excluded deliberately: `docs/adr/**` and package CHANGELOGs
+ * (point-in-time records — a rename must NOT retro-edit them, so scanning
+ * them would demand exactly that), and this script + `.github/workflows/**`
+ * (the ledger and the pinned half themselves — old names live here as
+ * history by design).
+ */
+export const INSTRUCTION_SURFACES = [
+  {
+    // The merge-queue rule ("the queue enforces only the required set"),
+    // naming both blocking contexts. States the required set ⇒ mustName.
+    file: 'AGENTS.md',
+    mustName: ['Lint & Repo Gates', 'TypeScript Type Check'],
+  },
+  {
+    // The review seat's gate-clearance step: confirm both jobs' `conclusion`
+    // before flipping ready / arming / enqueuing. States the required set.
+    file: '.claude/skills/pm-dispatch/references/review-checklist.md',
+    mustName: ['Lint & Repo Gates', 'TypeScript Type Check'],
+  },
+  {
+    // Names the typecheck context as the job two generated-artifact gates run
+    // in — operative, but does not state the required set ⇒ scan-only.
+    file: '.claude/skills/spec-property-retirement/SKILL.md',
+    mustName: [],
+  },
+  // Release/maintenance checklists that name individual contexts ⇒ scan-only.
+  { file: 'docs/launch-readiness.md', mustName: [] },
+  { file: 'docs/releases-maintenance.md', mustName: [] },
+];
+
+/**
+ * Former required-context names — permanent history, append-only. A row is
+ * added BY the rename PR (the scan is red on the old literal until it is) and
+ * never deleted: once its budgets are trimmed away, the row is a standing ban
+ * on writing the dead name fresh anywhere in the scan set.
+ */
+export const RETIRED_CONTEXT_NAMES = [
+  {
+    name: 'ESLint',
+    replacedBy: 'Lint & Repo Gates',
+    authorized: '#9325 maintainer ruling 2026-08-17; workflow + registry half landed via #9421 on 2026-08-18',
+    // The checklist's gate-clearance line: stale when this ledger row was
+    // written (the fix was in flight as its own PR), and that fix keeps one
+    // deliberate historical `ESLint` mention on the same line — the budget is
+    // 1 across both states on purpose.
+    staleSites: { '.claude/skills/pm-dispatch/references/review-checklist.md': 1 },
+    // While true, the old literal still satisfies mustName — the split-PR
+    // window. Flip to false once every required-set surface names
+    // 'Lint & Repo Gates' itself; the completion notice below says when.
+    renameInFlight: true,
   },
 ];
 
@@ -487,22 +616,231 @@ export async function scanWorkflows(root, registry = REQUIRED_CONTEXTS) {
   return judge({ registry, workflows });
 }
 
+/**
+ * Exact, case-sensitive occurrence count. The names are identifiers, not
+ * words: case is what separates the retired context 'ESLint' from prose about
+ * the eslint tool, and the derivation sweep measured zero incidental
+ * collisions in the scan set under exact matching.
+ */
+function countOccurrences(text, literal) {
+  return text.split(literal).length - 1;
+}
+
+/**
+ * Judge the instruction surfaces against already-read file text.
+ *
+ * Pure, like `judge` above: every input is an argument, so `--self-test`
+ * exercises the real decision instead of a parallel imitation of it.
+ *
+ * @param {{
+ *   registry: ReadonlyArray< { workflow: string, job: string, context: string } >,
+ *   surfaces: ReadonlyArray< { file: string, mustName: ReadonlyArray<string> } >,
+ *   retired: ReadonlyArray< { name: string, replacedBy: string | null, staleSites?: Record<string, number>, renameInFlight?: boolean } >,
+ *   files: Map< string, { text?: string, error?: string } >,
+ * }} input
+ * @returns {{ problems: string[], notices: string[] }}
+ */
+export function judgeInstructionSurfaces({ registry, surfaces, retired, files }) {
+  const problems = [];
+  const notices = [];
+
+  if (!Array.isArray(registry) || registry.length === 0) {
+    return { problems: ['the required-context registry is empty — nothing was pinned (see #4690).'], notices: [] };
+  }
+  if (!Array.isArray(surfaces) || surfaces.length === 0) {
+    return { problems: ['the instruction-surface scan set is empty — the #9491 scan verified nothing while printing a tick (#4690).'], notices: [] };
+  }
+  const retiredList = Array.isArray(retired) ? retired : [];
+  const currentNames = new Set(registry.map((entry) => entry.context));
+
+  // ── registry-level hygiene: a malformed ledger or scan set tolerates or ──
+  // ── bans the wrong thing silently, so each shape is its own named red. ──
+  const surfaceFiles = new Set();
+  for (const surface of surfaces) {
+    if (surfaceFiles.has(surface.file)) {
+      problems.push(`the instruction-surface scan set lists '${surface.file}' twice.`);
+    }
+    surfaceFiles.add(surface.file);
+    for (const context of surface.mustName ?? []) {
+      if (!currentNames.has(context)) {
+        problems.push(
+          `'${surface.file}' is required to name '${context}', which is not a registered required context — if the context was ` +
+            `renamed, update this mustName to the new literal in the same PR as the registry (and ledger the old name in ` +
+            `RETIRED_CONTEXT_NAMES); if it left the required set, drop it from mustName.`,
+        );
+      }
+    }
+  }
+  const seenRetired = new Set();
+  for (const row of retiredList) {
+    if (seenRetired.has(row.name)) {
+      problems.push(`RETIRED_CONTEXT_NAMES lists '${row.name}' twice.`);
+    }
+    seenRetired.add(row.name);
+    if (currentNames.has(row.name)) {
+      problems.push(
+        `RETIRED_CONTEXT_NAMES lists '${row.name}', which is still a REGISTERED context — a name cannot be both current and retired.`,
+      );
+    } else {
+      for (const context of currentNames) {
+        if (context.includes(row.name)) {
+          problems.push(
+            `retired name '${row.name}' is a substring of the registered context '${context}', so every occurrence of the current ` +
+              `name would count as the retired one — this scan cannot tell them apart; resolve the collision before ledgering.`,
+          );
+        }
+      }
+    }
+    if (row.replacedBy != null && !currentNames.has(row.replacedBy)) {
+      problems.push(
+        `retired name '${row.name}' says it was replaced by '${row.replacedBy}', which is not a registered context — on a ` +
+          `chained rename, re-point replacedBy at the CURRENT name in the same PR as the registry.`,
+      );
+    }
+    for (const [site, budget] of Object.entries(row.staleSites ?? {})) {
+      if (!surfaceFiles.has(site)) {
+        problems.push(
+          `retired name '${row.name}' budgets occurrences in '${site}', which is not in the instruction-surface scan set — ` +
+            `a budget nothing reads tolerates nothing; fix the path or add the surface to INSTRUCTION_SURFACES.`,
+        );
+      }
+      if (!Number.isInteger(budget) || budget < 1) {
+        problems.push(
+          `retired name '${row.name}' budgets ${JSON.stringify(budget)} occurrence(s) in '${site}' — a budget is a positive ` +
+            `integer; for zero, drop the key entirely.`,
+        );
+      }
+    }
+  }
+
+  // ── per surface: the stale-name budgets, then the naming requirement. ──
+  for (const surface of surfaces) {
+    const read = files instanceof Map ? files.get(surface.file) : undefined;
+    if (!read) {
+      problems.push(`${surface.file} was never read — a scan that reads nothing cannot report a pass (#4690).`);
+      continue;
+    }
+    if (read.error !== undefined) {
+      problems.push(`${surface.file} could not be read: ${read.error}`);
+      continue;
+    }
+    const text = read.text ?? '';
+
+    for (const row of retiredList) {
+      const count = countOccurrences(text, row.name);
+      const budget = row.staleSites?.[surface.file] ?? 0;
+      const replacement = row.replacedBy != null ? `'${row.replacedBy}'` : 'nothing — it left the required set';
+      if (count > budget) {
+        problems.push(
+          `${surface.file} names the retired required context '${row.name}' ${count}× (budgeted: ${budget}). That name was replaced by ` +
+            `${replacement}; a seat following this text looks for a check-run that no longer reports, and reads the absence as ` +
+            `anything but a rename — it stalls, or arms on an unverified gate family (#9491). Replace the stale name, or — for a ` +
+            `deliberate historical mention — raise this file's budget in RETIRED_CONTEXT_NAMES in the same PR, saying why.`,
+        );
+      } else if (count > 0) {
+        notices.push(
+          `${surface.file} names retired context '${row.name}' ${count}× within its budget of ${budget} (in-flight rename or historical mention).`,
+        );
+      } else if (budget > 0) {
+        notices.push(
+          `${surface.file} no longer names retired context '${row.name}' — its budget of ${budget} in RETIRED_CONTEXT_NAMES can be trimmed.`,
+        );
+      }
+    }
+
+    for (const context of surface.mustName ?? []) {
+      if (!currentNames.has(context)) continue; // already a hygiene problem above
+      const present = text.includes(context);
+      const viaFormer = retiredList.some(
+        (row) => row.replacedBy === context && row.renameInFlight === true && countOccurrences(text, row.name) > 0,
+      );
+      if (!present && !viaFormer) {
+        problems.push(
+          `${surface.file} no longer names the required context '${context}'. This file states the required set, and the literal IS ` +
+            `the contract — a required check is matched by check-run name, so an instruction that stops naming it cannot be followed ` +
+            `(#9491). Name it verbatim; if the context was renamed, ledger the old name in RETIRED_CONTEXT_NAMES (renameInFlight: ` +
+            `true) in the rename PR; if this file legitimately stopped stating the required set, update INSTRUCTION_SURFACES in the ` +
+            `same PR.`,
+        );
+      }
+    }
+  }
+
+  // ── the renameInFlight completion notice: when no required-set surface ──
+  // ── leans on the grace any more, ask for the flip — the flip PR then ──
+  // ── verifies itself (it is red if flipped while any surface still leans). ──
+  for (const row of retiredList) {
+    if (row.renameInFlight !== true || row.replacedBy == null) continue;
+    const relying = surfaces.filter((surface) => (surface.mustName ?? []).includes(row.replacedBy));
+    if (relying.length === 0) continue;
+    const allCurrent = relying.every((surface) => {
+      const read = files instanceof Map ? files.get(surface.file) : undefined;
+      return read !== undefined && read.error === undefined && (read.text ?? '').includes(row.replacedBy);
+    });
+    if (allCurrent) {
+      notices.push(
+        `every required-set surface now names '${row.replacedBy}' itself — flip '${row.name}'.renameInFlight to false in ` +
+          `RETIRED_CONTEXT_NAMES, so the retired name stops satisfying the naming requirement (safe: while any surface still ` +
+          `leans on the grace, that flip is red and cannot merge).`,
+      );
+    }
+  }
+
+  return { problems, notices };
+}
+
+/**
+ * Read the instruction surfaces a scan set names and judge them.
+ *
+ * @param {string} root repository root (or a fixture root in --self-test)
+ */
+export async function scanInstructionSurfaces(
+  root,
+  surfaces = INSTRUCTION_SURFACES,
+  retired = RETIRED_CONTEXT_NAMES,
+  registry = REQUIRED_CONTEXTS,
+) {
+  const files = new Map();
+  for (const surface of surfaces) {
+    const path = join(root, surface.file);
+    if (!existsSync(path)) {
+      files.set(surface.file, { error: 'the file does not exist' });
+      continue;
+    }
+    try {
+      files.set(surface.file, { text: readFileSync(path, 'utf8') });
+    } catch (error) {
+      files.set(surface.file, { error: error.message });
+    }
+  }
+  return judgeInstructionSurfaces({ registry, surfaces, retired, files });
+}
+
 /** The pin. */
 async function main() {
-  const { problems, pinned } = await scanWorkflows(scriptRepoRoot());
+  const root = scriptRepoRoot();
+  const workflowVerdict = await scanWorkflows(root);
+  const surfaceVerdict = await scanInstructionSurfaces(root);
+  const problems = [...workflowVerdict.problems, ...surfaceVerdict.problems];
   if (problems.length > 0) {
     console.error(`✗ check-required-contexts — ${problems.length} problem(s)\n`);
     for (const problem of problems) console.error(`  • ${problem}`);
+    for (const notice of surfaceVerdict.notices) console.error(`  ℹ ${notice}`);
     console.error(
       `\n  This gate pins the job NAMES that branch protection references. It cannot read the required set itself\n` +
         `  (Settings → Rulesets is maintainer-only; the API answers 403 to every agent seat), so a legitimate rename\n` +
-        `  is a two-step act: the maintainer updates the required set, then this registry follows.\n`,
+        `  is a two-step act: the maintainer updates the required set, then this registry follows — and the instruction\n` +
+        `  files that STATE the set follow in their own PRs, bridged by the RETIRED_CONTEXT_NAMES ledger (#9491).\n`,
     );
     process.exit(1);
   }
   const files = new Set(REQUIRED_CONTEXTS.map((entry) => entry.workflow)).size;
-  console.log(`✓ check-required-contexts: ${pinned.length} required context name(s) pinned across ${files} workflow(s).`);
-  for (const line of pinned) console.log(`    ${line}`);
+  console.log(
+    `✓ check-required-contexts: ${workflowVerdict.pinned.length} required context name(s) pinned across ${files} workflow(s); ` +
+      `${INSTRUCTION_SURFACES.length} instruction surface(s) scanned against ${RETIRED_CONTEXT_NAMES.length} retired name(s) (#9491).`,
+  );
+  for (const line of workflowVerdict.pinned) console.log(`    ${line}`);
+  for (const notice of surfaceVerdict.notices) console.log(`  ℹ ${notice}`);
 }
 
 // ── Self-test ───────────────────────────────────────────────────────────────
@@ -758,6 +1096,290 @@ async function selfTest() {
   assert(triggersOf({ [true]: triggerDoc }) === triggerDoc, 'the YAML 1.1 spelling (boolean key true) is read');
   assert(triggersOf({}) === undefined && triggersOf(null) === undefined, 'no trigger block at all is undefined, not a crash');
 
+  // ── instruction surfaces (#9491): the stale-name scan ─────────────────────
+  //
+  // Fixtures here are deliberately either ADDITIVE (text appended; no anchor
+  // into a region an in-flight PR edits) or fully SYNTHETIC (file text
+  // supplied inline). The checklist half of the #9325 rename was an OPEN PR
+  // when this scan landed; a fixture anchored into the line it rewrites would
+  // have let THIS self-test eject that PR from the merge queue — the exact
+  // block-the-sitting failure the budget design exists to avoid.
+  const CHECKLIST_SURFACE = '.claude/skills/pm-dispatch/references/review-checklist.md';
+  const surfaceSources = Object.fromEntries(
+    INSTRUCTION_SURFACES.map((s) => [s.file, readFileSync(join(root, s.file), 'utf8')]),
+  );
+  const surfaceMap = (overrides = {}) =>
+    new Map(Object.entries({ ...surfaceSources, ...overrides }).map(([f, text]) => [f, { text }]));
+  const judgeSurfaces = (input = {}) =>
+    judgeInstructionSurfaces({
+      registry: REQUIRED_CONTEXTS,
+      surfaces: INSTRUCTION_SURFACES,
+      retired: RETIRED_CONTEXT_NAMES,
+      files: surfaceMap(),
+      ...input,
+    });
+
+  // Today's tree passes — INCLUDING while `main` sits in a rename's split-PR
+  // window, which it did on the day this landed (registry renamed, the
+  // checklist still naming `ESLint`, the fix PR open). Red-at-rest here blocks
+  // every PR in the repo, so this asserts the reader and the budgets together.
+  const surfaceBaseline = await scanInstructionSurfaces(root);
+  assert(
+    surfaceBaseline.problems.length === 0,
+    `the checked-in instruction surfaces pass the scan — got ${JSON.stringify(surfaceBaseline.problems)}`,
+  );
+
+  // A retired name written FRESH (beyond budget) ⇒ red, naming the file, the
+  // budget and the replacement. Additive on purpose: the budgeted file holds
+  // 1 occurrence before its fix PR and 1 after (the fix keeps a historical
+  // mention), and two appended mentions exceed the budget from either base.
+  const freshStale = judgeSurfaces({
+    files: surfaceMap({
+      [CHECKLIST_SURFACE]: surfaceSources[CHECKLIST_SURFACE] + '\n- 入队前亲核 ESLint job;确认 ESLint 已绿。\n',
+    }),
+  });
+  assert(
+    freshStale.problems.some(
+      (p) =>
+        p.includes(CHECKLIST_SURFACE) &&
+        p.includes("retired required context 'ESLint'") &&
+        p.includes('budgeted: 1') &&
+        p.includes("'Lint & Repo Gates'"),
+    ),
+    'a retired name written beyond its budget ⇒ red, naming the file, the budget and the replacement',
+  );
+  const staleInAgents = judgeSurfaces({
+    files: surfaceMap({ 'AGENTS.md': surfaceSources['AGENTS.md'] + '\nConfirm the ESLint job is green before arming.\n' }),
+  });
+  assert(
+    staleInAgents.problems.some((p) => p.includes('AGENTS.md') && p.includes("'ESLint'") && p.includes('budgeted: 0')),
+    'a retired name in a zero-budget surface ⇒ red (budgets tolerate only the sites recorded at rename time)',
+  );
+
+  // The post-fix state, synthesised from the fix PR's own line shape: current
+  // names present, ONE historical `ESLint` mention within budget ⇒ green —
+  // the fix itself must not be blocked by this scan — and the completion
+  // notice asks for the renameInFlight flip.
+  const postFix = judgeSurfaces({
+    files: surfaceMap({
+      [CHECKLIST_SURFACE]:
+        '- 入队前亲核 Lint & Repo Gates 与 TypeScript Type Check 两个 job 的 `conclusion` 已为 `success`(必需检查认 check-run 名,改名前的 PR 仍列旧名 `ESLint`)。\n',
+    }),
+  });
+  assert(
+    postFix.problems.length === 0,
+    `the post-rename checklist (current names + one budgeted historical mention) ⇒ green — got ${JSON.stringify(postFix.problems)}`,
+  );
+  assert(
+    postFix.notices.some((n) => n.includes('renameInFlight to false')),
+    'once every required-set surface names the current literal itself, the flip-to-false notice fires',
+  );
+
+  // A rewording that keeps the current literals and drops the historical
+  // mention ⇒ green, with the trim notice (budgets only ever ratchet down).
+  const reworded = judgeSurfaces({
+    files: surfaceMap({ [CHECKLIST_SURFACE]: '- 翻 ready 前确认 Lint & Repo Gates 与 TypeScript Type Check 均已 success。\n' }),
+  });
+  assert(
+    reworded.problems.length === 0,
+    `a rewording that keeps the current literals ⇒ green — got ${JSON.stringify(reworded.problems)}`,
+  );
+  assert(
+    reworded.notices.some((n) => n.includes("'ESLint'") && n.includes('trimmed')),
+    'a budget larger than the surviving occurrence count ⇒ the trim notice',
+  );
+
+  // The anti-vacuous guard, with its own ablation. A checklist that stops
+  // naming any context is red ONLY because mustName exists: nothing stale is
+  // present, so the retired-name half sees nothing — confirmed by ablating
+  // the guard and watching the same text pass. The failure mode is real, and
+  // the guard is the thing catching it, not a side effect.
+  const vacuousText = '- 翻 ready 前确认全部必需检查已绿。\n';
+  const vacuous = judgeSurfaces({ files: surfaceMap({ [CHECKLIST_SURFACE]: vacuousText }) });
+  assert(
+    vacuous.problems.filter((p) => p.includes(CHECKLIST_SURFACE) && p.includes('no longer names')).length === 2 &&
+      vacuous.problems.some((p) => p.includes("'Lint & Repo Gates'")) &&
+      vacuous.problems.some((p) => p.includes("'TypeScript Type Check'")),
+    'an instruction file that stops naming the required set ⇒ red once per required context it dropped',
+  );
+  const vacuousNoGuard = judgeSurfaces({
+    surfaces: INSTRUCTION_SURFACES.map((s) => (s.file === CHECKLIST_SURFACE ? { ...s, mustName: [] } : s)),
+    files: surfaceMap({ [CHECKLIST_SURFACE]: vacuousText }),
+  });
+  assert(
+    vacuousNoGuard.problems.length === 0,
+    'ablating mustName ⇒ the vacuous file passes by saying nothing — the guard is load-bearing',
+  );
+
+  // The #9491 measurement, now with a red: a name that has never existed
+  // replaces the real one. The garbage literal itself is NOT recognised —
+  // recognition is lexicon-only — but the file no longer contains
+  // 'Lint & Repo Gates' under any ledgered spelling, so mustName reds: the
+  // presence guard catching what the recogniser cannot see.
+  const garbage = judgeSurfaces({
+    files: surfaceMap({ [CHECKLIST_SURFACE]: '- 入队前亲核 Nonexistent Job Name 与 TypeScript Type Check 两个 job。\n' }),
+  });
+  assert(
+    garbage.problems.some((p) => p.includes(CHECKLIST_SURFACE) && p.includes("'Lint & Repo Gates'") && p.includes('no longer names')),
+    "replacing a required context with 'Nonexistent Job Name' ⇒ red (the #9491 measurement, closed)",
+  );
+
+  // The split-PR window, self-contained: a surface naming ONLY the old name
+  // satisfies mustName through the in-flight grace; the SAME state with the
+  // grace flipped off is red — so a premature flip PR blocks itself and can
+  // never race the instruction fixes.
+  const windowRetired = (inFlight) => [
+    { name: 'ESLint', replacedBy: 'Lint & Repo Gates', renameInFlight: inFlight, staleSites: { [CHECKLIST_SURFACE]: 1 } },
+  ];
+  const windowText = '- 入队前亲核 ESLint 与 TypeScript Type Check 两个 job 的 `conclusion`。\n';
+  const windowOpen = judgeSurfaces({ retired: windowRetired(true), files: surfaceMap({ [CHECKLIST_SURFACE]: windowText }) });
+  assert(
+    windowOpen.problems.length === 0,
+    `the intermediate state (old name only, budgeted, in flight) ⇒ green — got ${JSON.stringify(windowOpen.problems)}`,
+  );
+  const windowClosed = judgeSurfaces({ retired: windowRetired(false), files: surfaceMap({ [CHECKLIST_SURFACE]: windowText }) });
+  assert(
+    windowClosed.problems.some((p) => p.includes(CHECKLIST_SURFACE) && p.includes("'Lint & Repo Gates'")),
+    'flipping renameInFlight to false while a surface still leans on the old name ⇒ red (the flip self-orders)',
+  );
+
+  // A FUTURE rename, end to end: retire 'TypeScript Type Check' for a new
+  // name. WITH a ledger row (budgets = the real occurrence counts, computed
+  // live so unrelated edits cannot stale this fixture) the atomic in-repo
+  // half is green; WITHOUT it, the same registry rename is red on every
+  // surface still naming the old literal AND on the naming guard — the red
+  // that forces the rename PR to write the ledger.
+  const renamedRegistry = REQUIRED_CONTEXTS.map((e) => (e.job === 'typecheck' ? { ...e, context: 'Static Types Gate' } : e));
+  const renamedSurfaces = INSTRUCTION_SURFACES.map((s) => ({
+    ...s,
+    mustName: s.mustName.map((c) => (c === 'TypeScript Type Check' ? 'Static Types Gate' : c)),
+  }));
+  const typecheckCounts = Object.fromEntries(
+    INSTRUCTION_SURFACES.map((s) => [s.file, countOccurrences(surfaceSources[s.file], 'TypeScript Type Check')]).filter(
+      ([, n]) => n > 0,
+    ),
+  );
+  assert(
+    Object.keys(typecheckCounts).length >= 2,
+    'the rename-protocol fixture is not vacuous: at least two surfaces name the old literal today',
+  );
+  const renameLedgered = judgeSurfaces({
+    registry: renamedRegistry,
+    surfaces: renamedSurfaces,
+    retired: [
+      ...RETIRED_CONTEXT_NAMES,
+      { name: 'TypeScript Type Check', replacedBy: 'Static Types Gate', renameInFlight: true, staleSites: typecheckCounts },
+    ],
+  });
+  assert(
+    renameLedgered.problems.length === 0,
+    `a registry rename WITH its ledger row (budgets = today's counts) ⇒ green, so the rename PR can land — got ${JSON.stringify(renameLedgered.problems)}`,
+  );
+  // Without a ledger row the old literal leaves the LEXICON with the registry
+  // — nothing counts it — so the catch is the naming guard: the required-set
+  // surfaces no longer name the new literal by any recognised spelling, and
+  // the red's remedy says to write the ledger. It cannot be forgotten.
+  const renameUnledgered = judgeSurfaces({ registry: renamedRegistry, surfaces: renamedSurfaces });
+  assert(
+    renameUnledgered.problems.some(
+      (p) => p.includes("'Static Types Gate'") && p.includes('no longer names') && p.includes('RETIRED_CONTEXT_NAMES'),
+    ),
+    'the same rename WITHOUT a ledger row ⇒ red on the naming guard, remedy naming the ledger',
+  );
+  // A ledger row that under-enumerates its sites: every un-budgeted surface
+  // still naming the old literal is red with its real count — the gate tells
+  // the rename PR exactly which budgets to record.
+  const { 'AGENTS.md': droppedBudget, ...partialCounts } = typecheckCounts;
+  assert(droppedBudget > 0, 'the under-budget fixture is not vacuous: AGENTS.md names the old literal today');
+  const renameUnderBudgeted = judgeSurfaces({
+    registry: renamedRegistry,
+    surfaces: renamedSurfaces,
+    retired: [
+      ...RETIRED_CONTEXT_NAMES,
+      { name: 'TypeScript Type Check', replacedBy: 'Static Types Gate', renameInFlight: true, staleSites: partialCounts },
+    ],
+  });
+  assert(
+    renameUnderBudgeted.problems.some(
+      (p) => p.includes('AGENTS.md') && p.includes("'TypeScript Type Check'") && p.includes('budgeted: 0'),
+    ),
+    'a ledger row that under-enumerates its stale sites ⇒ red naming the site and its real count',
+  );
+
+  // Ledger and scan-set hygiene: each malformed shape is its own named red —
+  // a budget nothing reads, or a name the counter cannot tell apart from a
+  // current one, tolerates or bans the wrong thing silently.
+  const hygiene = (input) => judgeSurfaces(input).problems;
+  assert(
+    hygiene({ surfaces: [{ file: 'AGENTS.md', mustName: ['No Such Context'] }] }).some(
+      (p) => p.includes("'No Such Context'") && p.includes('not a registered required context'),
+    ),
+    'mustName naming an unregistered context ⇒ red',
+  );
+  assert(
+    hygiene({ retired: [{ name: 'Test Core', replacedBy: null, staleSites: {} }] }).some((p) =>
+      p.includes('both current and retired'),
+    ),
+    'a retired name that is still registered ⇒ red',
+  );
+  assert(
+    hygiene({ retired: [{ name: 'Build', replacedBy: null, staleSites: {} }] }).some((p) =>
+      p.includes('substring of the registered context'),
+    ),
+    'a retired name that is a substring of a current one ⇒ red (its count would swallow the current name)',
+  );
+  assert(
+    hygiene({ retired: [{ name: 'Old Gate', replacedBy: 'No Such Context', staleSites: {} }] }).some(
+      (p) => p.includes('replaced by') && p.includes('No Such Context'),
+    ),
+    'replacedBy pointing at an unregistered context ⇒ red (a chained rename must re-point at the current name)',
+  );
+  assert(
+    hygiene({ retired: [{ name: 'Old Gate', replacedBy: null, staleSites: { 'no/such/file.md': 1 } }] }).some(
+      (p) => p.includes('no/such/file.md') && p.includes('not in the instruction-surface scan set'),
+    ),
+    'a budget keyed by a file outside the scan set ⇒ red (it would tolerate nothing)',
+  );
+  assert(
+    hygiene({ retired: [{ name: 'Old Gate', replacedBy: null, staleSites: { 'AGENTS.md': 0 } }] }).some((p) =>
+      p.includes('positive'),
+    ),
+    'a zero budget ⇒ red (drop the key instead)',
+  );
+  assert(
+    hygiene({
+      retired: [
+        { name: 'Old Gate', replacedBy: null, staleSites: {} },
+        { name: 'Old Gate', replacedBy: null, staleSites: {} },
+      ],
+    }).some((p) => p.includes("'Old Gate'") && p.includes('twice')),
+    'a ledger row listed twice ⇒ red',
+  );
+  assert(
+    hygiene({ surfaces: [...INSTRUCTION_SURFACES, INSTRUCTION_SURFACES[0]] }).some((p) => p.includes('twice')),
+    'a surface listed twice ⇒ red',
+  );
+  assert(
+    judgeSurfaces({ surfaces: [] }).problems.some((p) => p.includes('scan set is empty')),
+    'an empty scan set ⇒ red, never a silent tick (#4690)',
+  );
+  assert(
+    judgeSurfaces({ files: new Map() }).problems.filter((p) => p.includes('was never read')).length ===
+      INSTRUCTION_SURFACES.length,
+    'an instruction surface that was never read ⇒ red, once per surface (#4690)',
+  );
+  const emptySurfaceRoot = mkdtempSync(join(tmpdir(), 'instruction-surfaces-'));
+  try {
+    const missing = await scanInstructionSurfaces(emptySurfaceRoot);
+    assert(
+      missing.problems.filter((p) => p.includes('could not be read') && p.includes('does not exist')).length ===
+        INSTRUCTION_SURFACES.length,
+      'a scan root with no instruction files ⇒ red per surface, never a pass',
+    );
+  } finally {
+    rmSync(emptySurfaceRoot, { recursive: true, force: true });
+  }
+
   // ── the wiring: this gate must actually run on every PR ──────────────────
   //
   // Same shape, and the same honesty, as check-empty-changeset's consumer block
@@ -798,6 +1420,20 @@ async function selfTest() {
       REQUIRED_CONTEXTS.some((entry) => entry.workflow === 'lint.yml' && entry.job === 'lint'),
       'wiring: the job this gate runs in is itself registered, so a rename of it cannot be the one rename nothing notices',
     );
+    // The instruction-surface scan must be wired into the PIN, not only into
+    // this self-test — a scan only the self-test exercises is #4690's phantom
+    // check with extra ceremony. Read from this file's own source, same
+    // honesty as the package.json/lint.yml wiring reads above.
+    const ownSource = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+    const mainBody = ownSource.slice(ownSource.indexOf('async function main()'), ownSource.indexOf('// ── Self-test'));
+    assert(
+      /scanInstructionSurfaces\(root\)/.test(mainBody),
+      'wiring: the pin (main) runs the instruction-surface scan, not only the self-test (#4690/#9491)',
+    );
+    assert(
+      /surfaceVerdict\.problems/.test(mainBody),
+      "wiring: the pin merges the surface scan's problems into its exit verdict (#9491)",
+    );
   }
 
   if (failures.length > 0) {
@@ -808,7 +1444,7 @@ async function selfTest() {
   console.log(
     `✓ check-required-contexts --self-test: ${checked} assertions ` +
       `(rename ablations across both workflows + matrix/continue-on-error/trigger shapes + the shard-name collision + ` +
-      `the \`carries\` step-count ban + the #4690 pins).`,
+      `the \`carries\` step-count ban + the instruction-surface stale-name scan (#9491) + the #4690 pins).`,
   );
 }
 

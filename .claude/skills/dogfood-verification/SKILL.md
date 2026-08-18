@@ -63,15 +63,22 @@ dev 工作树、dev-server 端口、preview 浏览器全是**共享的**:并行�
       watcher 只重编译示例应用自己的 `objectstack.config.ts` / `src`,不管工作区的包。
 - [ ] 所以:先做完**全部**源码编辑 → `pnpm --filter <pkg...> build` →
       `preview_stop` + `preview_start`。不要每修一处就编辑→构建→重启一遍。
-- [ ] ⚠️ **消融验证(predict-then-mutate)以最危险的方式继承这一条 —— mutate 与运行
-      之间要重建,并在报告里写明重建过。** 忘记重建*修复*是假红:费一圈,但会被发
-      现。忘记重建**消融**跑的是突变前的构建,套件保持**绿**,而这份绿会被记成「测试
-      已被证明有区分度」—— 给一条可能根本红不了的断言发了证书,之后任何 CI 都暴露不
-      了它(CI 构建正确,在那边永远绿)。每一腿都是 mutate →
-      `pnpm --filter <pkg> build` → **证明突变已到达 `dist/`** → 运行:
-      `node scripts/ablation-dist-preflight.mjs <pkg> '<marker>'` 只在被消费的
-      `dist/` 真带着突变时才退 0(消融删除守卫时用 `--absent`;restore 腿也要跑它 ——
-      留在 `dist/` 里的 marker 会让突变代码对该树之后的每次运行保持生效)。
+- [ ] ⚠️ **消融验证(predict-then-mutate)以最危险的方式继承这一条,而且它不是 dogfood
+      专属 —— mutate 腿与 restore 腿各自都要重建,并在报告里写明重建过。** 判据是解析
+      路径:任何主体经依赖的 `exports` 解析(→ 该包的 `dist/`,且没有 vitest alias
+      把 specifier 拉回源码)的测试都中招,普通单元套件一样(这批 pair 的台账是
+      `scripts/check-test-source-alias.mjs` 的 `KNOWN_UNALIASED_TEST_IMPORTS`)。忘记重
+      建*修复*是假红:费一圈,但会被发现。忘记重建**消融**跑的是突变前的构建,套件保持
+      **绿**,而这份绿会被记成「测试已被证明有区分度」—— 给一条可能根本红不了的断言发了
+      证书,之后任何 CI 都暴露不了它(CI 构建正确,在那边永远绿);消融本就为证明**新门
+      禁能失败**时更毒 —— 那份绿读作「门禁没触发」,指向门禁坏了而不是夹具坏了,会诱人
+      去弱化一条本来正常的门禁(实测:plugin-auth → core;plugin-email →
+      platform-objects 则是消融后 375 试假绿、重建后 4 红)。每一腿(mutate **与**
+      restore)都是:改动 → `pnpm --filter <pkg> build` → **证明它到达了 `dist/`** → 才
+      读运行结果:`node scripts/ablation-dist-preflight.mjs <pkg> '<marker>'` 只在被消费
+      的 `dist/` 真带着该状态时才退 0(消融删除守卫、以及每个 restore 腿,用
+      `--absent`)。⛔ restore 腿最常被跳过 —— 留在 `dist/` 里的 marker 会让突变代码对该
+      树之后的每次运行保持生效,后面的测量量的是错的树。
 - [ ] `dist/` 已 gitignore —— 安全;永不提交构建产物。
 - [ ] **`/_console` UI 是 *vendored objectui 构建*,与框架 `dist` 是两回事。** 它由
       `.objectui-sha` 钉住、按预构建 bundle 提供。已合并的 objectui 修复 —— *甚至
