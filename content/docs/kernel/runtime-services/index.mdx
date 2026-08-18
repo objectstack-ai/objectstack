@@ -43,4 +43,15 @@ Each page links the canonical TypeScript source used to derive signatures.
 - SMS: `packages/spec/src/contracts/sms-service.ts`
 - Storage: `packages/spec/src/contracts/storage-service.ts`
 - Settings: `packages/services/service-settings/src/settings-service.ts`
-- Audit bridge: `packages/services/service-settings/src/settings-service.types.ts`
+- Audit: `packages/plugins/plugin-audit/src/auth-event-audit.ts`
+
+<Callout type="warn" title="Not this: the settings audit sink">
+A second audit shape shares the word and is easy to reach for by mistake.
+`SettingsAuditSink` — canonical source
+`packages/services/service-settings/src/settings-service.types.ts` — is
+**constructor-injected** into `service-settings`, which calls its `record()` after a
+settings write lands. It is never registered as, or resolved from, the `services.audit`
+slot: that slot's only registrant is `@objectstack/plugin-audit`, and the object it
+returns exposes `recordAuthEvent`, not `record`. See
+[`services.audit`](/docs/kernel/runtime-services/audit-service) for the full contrast.
+</Callout>
