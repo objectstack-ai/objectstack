@@ -134,6 +134,38 @@ function makeJsonColumnDriver() {
 
   const isJson = (object: string, field: string) => JSON_COLUMNS[object]?.includes(field) === true;
 
+  /**
+   * The #7398 gate, where the real driver has it: on the FILTER, before a
+   * single row is read. `driver-sql` raises this while COMPILING the predicate
+   * (`assertOperatorAppliesToColumn`, reached from `applyFilters`), so an empty
+   * table refuses exactly as a full one does — which is what makes the card's
+   * fault schema-driven rather than data-driven.
+   *
+   * Evaluating it per row instead would make this double LOOSER than the driver
+   * it stands in for, and the card's own reproduction — a delete refused with
+   * an EMPTY referring table — would pass without the fix. Measured: it did,
+   * on the first draft of this file.
+   */
+  const assertCompilable = (object: string, where: any): void => {
+    if (!where || typeof where !== 'object') return;
+    for (const [k, v] of Object.entries(where)) {
+      if (k === '$or' || k === '$and') {
+        for (const sub of v as any[]) assertCompilable(object, sub);
+        continue;
+      }
+      if (k.startsWith('$')) continue;
+      if (!isJson(object, k)) continue;
+      if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+        const op = Object.keys(v as Record<string, unknown>)[0] ?? '';
+        // `$contains` is the one membership spelling a JSON column answers;
+        // every scalar comparison is refused.
+        if (op !== '$contains') throw jsonColumnRefusal(k, op);
+        continue;
+      }
+      throw jsonColumnRefusal(k, 'bare equality');
+    }
+  };
+
   /** One `{ field: <spec> }` entry, evaluated the way the real backends do. */
   const matchesField = (
     object: string, row: Record<string, unknown>, field: string, spec: unknown,
@@ -151,14 +183,11 @@ function makeJsonColumnDriver() {
         return typeof stored === 'string' && stored.includes(String(comparand));
       }
       if (op === '$eq' || op === '$in') {
-        if (isJson(object, field)) throw jsonColumnRefusal(field, op!);
         const wanted = op === '$in' ? (comparand as unknown[]) : [comparand];
         return wanted.some((w) => (stored ?? null) === (w ?? null));
       }
-      throw jsonColumnRefusal(field, String(op));
+      return false;
     }
-    // Bare equality — the spelling the probe used to build for every field.
-    if (isJson(object, field)) throw jsonColumnRefusal(field, 'bare equality');
     return (stored ?? null) === (spec ?? null);
   };
 
@@ -185,9 +214,11 @@ function makeJsonColumnDriver() {
     async execute() { return null; },
     async find(o: string, ast: any) {
       probes.push({ object: o, where: ast?.where });
+      assertCompilable(o, ast?.where);
       return Array.from(storeFor(o).values()).filter((r) => matches(o, r, ast?.where));
     },
     async findOne(o: string, ast: any) {
+      assertCompilable(o, ast?.where);
       for (const r of storeFor(o).values()) if (matches(o, r, ast?.where)) return r;
       return null;
     },
@@ -209,6 +240,7 @@ function makeJsonColumnDriver() {
     },
     async delete(o: string, id: string) { return storeFor(o).delete(id); },
     async count(o: string, ast: any) {
+      assertCompilable(o, ast?.where);
       return Array.from(storeFor(o).values()).filter((r) => matches(o, r, ast?.where)).length;
     },
     async bulkCreate(o: string, rows: Record<string, unknown>[]) {
