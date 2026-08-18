@@ -113,6 +113,11 @@ function runHarness(body: string[]): Record<string, string> {
       // expected failure, before it can kill its stubs, and the run hangs on a
       // stdout pipe held open by an orphan rather than failing an assertion.
       'set +e +o pipefail',
+      // Belt and braces on top of that: every stub below is a listener, and a
+      // leaked one holds a low port in a container several agents share — the
+      // very collision this file is about. `jobs -p` on EXIT kills them however
+      // the harness leaves, including paths no explicit `kill` line reaches.
+      'trap \'for j in $(jobs -p); do kill "$j" 2>/dev/null; done\' EXIT',
       'echo "SOURCED=ok"',
       ...body,
     ].join('\n'),
