@@ -56,7 +56,7 @@ export interface JobSchedule {
  * indistinguishable from a wake that actually woke something.
  *
  * `reason` is a short operator-facing note (`'STORE_UNAVAILABLE'`, `'0 rows
- * matched'`) — free text for an audit surface, never a machine-dispatched code.
+ * matched'`) — free text for run history, never a machine-dispatched code.
  */
 export interface JobRunOutcome {
     /**
@@ -67,7 +67,7 @@ export interface JobRunOutcome {
      * not a failure** (see {@link JobHandler}).
      */
     outcome: 'completed' | 'degraded';
-    /** Why the run was degraded — short, human-readable, for the audit trail. */
+    /** Why the run was degraded — short, human-readable, for job run history. */
     reason?: string;
 }
 
@@ -190,7 +190,10 @@ export interface IJobService {
     /**
      * Replay the most recent execution of a job — useful from admin UI.
      * Equivalent to `trigger(name)` but records that this run is a replay
-     * in the execution audit trail.
+     * in job run history (`sys_job_run`) — not the audit trail; that's
+     * `sys_audit_log`, with its own opt-in, writer and retention. Recording
+     * anything durable depends on an adapter that persists run history at all
+     * (e.g. `DbJobAdapter`'s `recordRuns` option).
      */
     replay?(name: string, data?: unknown): Promise<void>;
 
