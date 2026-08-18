@@ -1005,7 +1005,7 @@
       "title": "Per-record manual shares grant, scope, and revoke access on a private-OWD record; rule evaluate reconciles the audience",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1019,7 +1019,8 @@
         "requires": [
           "showcase_private_note (sharingModel: private — member_default grants create/read/edit, so a non-owner sees nothing without a share)",
           "three fresh sign-ups (A/B/C) whose sys_user ids are resolved via a system-context read",
-          "the seeded criteria sharing rule share_red_projects_with_execs on showcase_project + at least one red-health showcase_project (examples/app-showcase/src/security/sharing-rules.ts) for the evaluate clause"
+          "the seeded criteria sharing rule share_key_account_qualified_contacts_with_managers on showcase_contact (OWD private) + at least one qualified contact at company Northwind — seeded as Nora West (examples/app-showcase/src/security/sharing-rules.ts) — for the evaluate clause",
+          "a holder of the manager position, so the rule's recipient expansion is non-empty: without one the reconcile answers grantsCreated 0 and materializes nothing, which is a fixture gap, not a defect"
         ]
       },
       "steps": [
@@ -1033,7 +1034,7 @@
         "as B (a non-manager on A's note): POST /api/v1/data/showcase_private_note/<A id>/shares granting themselves — must be refused (creating a share is not a reader's power, ADR-0111 D5)",
         "as A: DELETE /api/v1/data/showcase_private_note/<A id>/shares/<shareId> → 204; then as B: GET the note by id again — refused once more",
         "revoke-scope probe: attempt DELETE of the same shareId through a DIFFERENT record's path (/data/showcase_private_note/<some other id>/shares/<shareId>) — must be refused (the URL's object/id is the revoke scope, ADR-0111 D4)",
-        "as admin: POST /api/v1/sharing/rules/share_red_projects_with_execs/evaluate — capture the reconcile result; read sys_record_share for the matched red project"
+        "as admin: assign the manager position to one persona (Setup -> Access Control), then POST /api/v1/sharing/rules/share_key_account_qualified_contacts_with_managers/evaluate — capture the reconcile result; read sys_record_share for the matched contact"
       ],
       "acceptance": [
         {
@@ -1073,9 +1074,9 @@
           "evidence": "the mis-scoped DELETE trace + survival read"
         },
         {
-          "clause": "rule evaluate reconciles the audience: POST /sharing/rules/share_red_projects_with_execs/evaluate returns {ruleId, matchedRecords>=1, grantsCreated/grantsUpdated} and a sys_record_share row exists for the matched red project with source 'rule' and source_id = the rule's ROW ID (sys_sharing_rule.id, e.g. srule_…), NOT the rule name",
+          "clause": "rule evaluate reconciles the audience: POST /sharing/rules/share_key_account_qualified_contacts_with_managers/evaluate returns {ruleId, matchedRecords>=1, grantsCreated/grantsUpdated} and a sys_record_share row exists for the matched contact with source 'rule' and source_id = the rule's ROW ID (sys_sharing_rule.id, e.g. srule_…), NOT the rule name",
           "oracle": "api",
-          "verify": "the SharingRuleEvaluationResult body (packages/plugins/plugin-sharing/src/sharing-rule-service.ts evaluateRule) + the materialized rule-sourced share row: assert share.source_id === the sys_sharing_rule row's id, not 'share_red_projects_with_execs'. The row id is the stable FK the reconcile path relies on — purgeRuleGrants(ruleId) deletes on where {source:'rule', source_id: ruleId} with ruleId = rule.id (sharing-rule-service.ts), and sys-sharing-rule.object.ts documents 'source_id={rule.id}' — so a run asserting the NAME here would be asserting a value the implementation never writes",
+          "verify": "the SharingRuleEvaluationResult body (packages/plugins/plugin-sharing/src/sharing-rule-service.ts evaluateRule) + the materialized rule-sourced share row: assert share.source_id === the sys_sharing_rule row's id, not 'share_key_account_qualified_contacts_with_managers'. The row id is the stable FK the reconcile path relies on — purgeRuleGrants(ruleId) deletes on where {source:'rule', source_id: ruleId} with ruleId = rule.id (sharing-rule-service.ts), and sys-sharing-rule.object.ts documents 'source_id={rule.id}' — so a run asserting the NAME here would be asserting a value the implementation never writes",
           "evidence": "evaluate response + the sys_record_share read (both the row's source_id and the sys_sharing_rule id it must equal)"
         }
       ],
@@ -1091,7 +1092,7 @@
         "packages/rest/src/rest-server.ts (registerRecordShareEndpoints ~L7246-7331; registerSharingRuleEndpoints evaluate ~L7477-7493)",
         "packages/plugins/plugin-sharing/src/objects/sys-record-share.object.ts (recipient_type/recipient_id/access_level/source fields)",
         "packages/plugins/plugin-sharing/src/sharing-rule-service.ts (evaluateRule → SharingRuleEvaluationResult)",
-        "examples/app-showcase/src/security/sharing-rules.ts (share_red_projects_with_execs seeded criteria rule)",
+        "examples/app-showcase/src/security/sharing-rules.ts (share_key_account_qualified_contacts_with_managers seeded criteria rule)",
         "ADR-0111 D1/D4/D5"
       ],
       "history": [
@@ -1106,6 +1107,12 @@
           "date": "2026-08-11",
           "change": "clause 6 text corrected against the implementation (run #7637): a rule-materialized share carries source_id = the sys_sharing_rule ROW ID, not the rule name — the stable FK purgeRuleGrants reconciles on. Semantic intent was already right; the asserted value was not",
           "ref": "#7687"
+        },
+        {
+          "revision": 3,
+          "date": "2026-08-18",
+          "change": "the evaluate clause was UNRUNNABLE as written and had been since it was authored: it drove share_red_projects_with_execs, a rule on showcase_project, whose public_read_write OWD leaves sharing nothing to widen — so evaluate\u0027s reconcile hit assertNotInertGrant and the call was refused (SHARING_NOT_ENABLED, ADR-0111 D7) rather than returning a reconcile result. That rule is retired; the clause now drives share_key_account_qualified_contacts_with_managers on showcase_contact (OWD private), and a step assigns the manager position so the recipient expansion is non-empty",
+          "ref": "#9237"
         }
       ]
     },
