@@ -293,6 +293,11 @@ describe('DbJobAdapter — replay() honours recordRuns (#9633)', () => {
     expect(ran).toBe(1);
     expect(job().run_count).toBe(1);
     expect(job().last_status).toBe('success');
+    // README.md's options table — "`false` keeps the in-memory history only" —
+    // was falsified by exactly the replay row this case now forbids. Pinned
+    // here rather than restated in prose: the durable table is empty and the
+    // in-memory history the sentence promises is still there.
+    expect((await adapter.getExecutions('quiet')).length).toBeGreaterThan(0);
   });
 
   it('recordRuns: false — the terminal-status arm writes nothing either, and leaves no dangling row', async () => {
