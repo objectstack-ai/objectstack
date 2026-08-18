@@ -76,7 +76,7 @@ describe.skipIf(!RUNNABLE)('gen-sdui-manifest.sh cleanup contract', () => {
     const stub = [
       'const { spawn } = require("node:child_process");',
       'spawn(process.execPath, ["-e", "setInterval(() => {}, 1e9)"], { stdio: "ignore" });',
-      'setTimeout(() => process.exit(0), 300);',
+      'setTimeout(() => process.exit(0), 1200);',
     ].join('');
 
     fs.writeFileSync(
@@ -95,19 +95,25 @@ describe.skipIf(!RUNNABLE)('gen-sdui-manifest.sh cleanup contract', () => {
         'echo "LEADER=$LEADER"',
         'echo "LEADER_SID=$(ps -o sid= -p "$LEADER" | tr -d " ")"',
         'echo "SCRIPT_PGID=$(ps -o pgid= -p $$ | tr -d " ")"',
-        // Let the stub exit so its helper is reparented to init before cleanup.
+        // Count inherited descriptors NOW, while the session LEADER is still
+        // alive. Counting later would inspect only the reparented helper, which
+        // never inherits the fd anyway (node closes it across its own spawn) —
+        // an assertion that stays green with the fd hygiene deleted. That green
+        // was observed before this line moved, so the ordering is the test.
+        'FDS=0',
+        'for p in $(pgrep -s "$LEADER"); do',
+        `  n=$(ls -l "/proc/$p/fd" 2>/dev/null | grep -c ${JSON.stringify(path.basename(lock))} || true)`,
+        '  FDS=$((FDS + n))',
+        'done',
+        'echo "LOCKFDS=$FDS"',
+        `echo "LEADER_ALIVE_AT_COUNT=$(kill -0 "$LEADER" 2>/dev/null && echo yes || echo no)"`,
+        // Now let the stub exit, so its helper is reparented to init before cleanup.
         'sleep 2',
         'MEMBERS="$(pgrep -s "$LEADER" | tr "\\n" " ")"',
         'echo "MEMBERS=$MEMBERS"',
         'ORPHAN=""',
         'for p in $MEMBERS; do [ "$(ps -o ppid= -p "$p" | tr -d " ")" = "1" ] && ORPHAN="$p"; done',
         'echo "ORPHAN_BEFORE=$ORPHAN"',
-        'FDS=0',
-        'for p in $MEMBERS; do',
-        `  n=$(ls -l "/proc/$p/fd" 2>/dev/null | grep -c ${JSON.stringify(path.basename(lock))} || true)`,
-        '  FDS=$((FDS + n))',
-        'done',
-        'echo "LOCKFDS=$FDS"',
         // Falling off the end fires the EXIT trap, which is the path under test.
       ].join('\n'),
       { mode: 0o755 },
@@ -131,7 +137,10 @@ describe.skipIf(!RUNNABLE)('gen-sdui-manifest.sh cleanup contract', () => {
     // existed. Without this, the survivor assertion below could pass vacuously.
     expect(field('ORPHAN_BEFORE'), out).toMatch(/^\d+$/);
 
-    // (2) nothing in the session inherited the caller's lock descriptor.
+    // (2) nothing in the session inherited the caller's lock descriptor —
+    // counted while the leader was still alive, which is the only moment the
+    // count can be non-zero and therefore the only moment it means anything.
+    expect(field('LEADER_ALIVE_AT_COUNT'), out).toBe('yes');
     expect(field('LOCKFDS'), out).toBe('0');
 
     // (3) the trap reaped the session, orphan included.
