@@ -186,8 +186,8 @@ references);② 创建后手动 fire 一轮烟测,判据取**GitHub 上的产出
 | `domain:drivers` | `packages/drivers/driver-*`(维护者 2026-08-05 对 `driver-memory` / `driver-mongodb` 族有投入冻结指令;`formula` / `driver-sql` 不受影响) |
 | `domain:services` | `packages/services/*`、`packages/connectors/*`、`packages/triggers/*`、`plugin-approvals`、`plugin-webhooks`、`plugin-email`、`plugin-reports`、`embedder-openai`、`knowledge-*` |
 | `domain:identity` | `plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit` |
-| `domain:devx` | `packages/lint`、`packages/sdui-parser`、`content/docs/**`、`apps/docs`、`scripts/`(门禁类)—— 与 `domain:spec` 相交的三面按「是否围着 spec 契约转」切分 |
-| `domain:skills` | 两个技能根:`.claude/skills/**`(含本文件)+ `skills/**`(维护者 2026-08-11 裁定单设座位,与维护者走专题讨论;skills 更新 ADR-class,见 Guardrails) |
+| `domain:devx` | `packages/lint`、`packages/sdui-parser`、`content/docs/**`、`apps/docs`、`scripts/`(门禁类;与 `domain:skills` 的分界按门禁的 SUBJECT:治理 agent 指令面/governed 面的归 skills,治理代码/文档质量的归本域)—— 与 `domain:spec` 相交的三面按「是否围着 spec 契约转」切分 |
+| `domain:skills` | 两个技能根:`.claude/skills/**`(含本文件)+ `skills/**`(维护者 2026-08-11 裁定单设座位,与维护者走专题讨论;skills 更新 ADR-class,见 Guardrails);指令架构文件:根 `AGENTS.md` + 根 `CLAUDE.md`(所有面向 agent 的宪法文本);governed 面(统一定义见 ACCEPT 路径分叉)的治理执行文件:`.github/CODEOWNERS`(治理路由半边)+ SUBJECT 是 governed 面本身的门禁/审计(现为 `scripts/pm/check-governed-merges.mjs`,一句话见守卫索引;未来同类同判)—— 维护者 2026-08-18 裁决:「skills 相关的应该都归你管,为什么派给了 devx」 |
 | `domain:spec` | `packages/spec` 整包唯一契约,语义/文本/机器三面同席:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及围着 spec 契约转的工具链(门禁/生成器/lint 规则/报错散文/references 管线)—— 一般开发工具面留 `devx`(维护者 2026-08-09 裁决);席内分派判据见下文「spec 席内分派参考」 |
 | `domain:cli` | `packages/cli`、`runtime`、`verify`、`qa`、`types`、`packages/rest`、`packages/mcp`、`packages/observability`、`packages/client*`、`cloud-connection`、`create-objectstack`、`packages/adapters/*`、`plugin-hono-server`、`plugin-dev` |
 | (无固定归属,按落点分诊) | `packages/apps/*`、`packages/console`(dist 由脚本生成 ⛔ 手改;UI 缺陷走 `repo:objectui`,pin/刷新脚本归 `scripts/` 行)、`examples/*`(归它演练的子系统) |
