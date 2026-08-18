@@ -31,6 +31,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // of this package's (file, verb) pairs sat in the gate's DEBT ledger until
 // #5619 sank the two predicates into a package both sides already depend on.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+// [#4716] The advisory-tier rule the Q2 fence test proves its body WOULD trip
+// — imported from the full barrel deliberately: this is a TEST, not the gate
+// (the gate itself may only reach the registry through `@objectstack/lint/runtime`,
+// which the wiring guard enforces on the gate's own source).
+import { validateSemanticRoles } from '@objectstack/lint';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import type { MetadataAuthoringChannel } from './protocol.js';
 
@@ -321,16 +326,18 @@ describe('runtime authoring gate on saveMetaItem (#4463)', () => {
         }
     });
 
-    it('does not gate a metadata type no rule declares (P1 wires `flow` only)', async () => {
-        // `object` writes are deliberately outside P1 — see the registry's
-        // RUNTIME_OBJECT_WRITES_P2 reason. A type nobody declared must pass
-        // through untouched rather than be silently half-checked.
-        //
-        // [#8308] The body carries an authored `sharingModel` so this write is
-        // ALSO clean on the gated side: it succeeds today because nothing runs,
-        // and keeps succeeding when #8310 declares `object` in `runtimeTypes`
-        // (at which point this case's "no rule declares" premise ends — #8310
-        // owns re-pinning what this test asserts).
+    it('publishes a clean object write through the fully widened door (#4716)', async () => {
+        // HISTORY: this case was born as "does not gate a metadata type no
+        // rule declares (P1 wires `flow` only)". That premise ended twice —
+        // #8310 put `validateSecurityPosture` on `object` writes, and #4716
+        // crossed the five gating object rules — so what it pins now is the
+        // accept side of the widened door: a body clean under ALL SEVEN
+        // object-gated rules (authored `sharingModel`, no broken validation /
+        // autonumber / summary / apiMethods shape) publishes exactly as it
+        // did when nothing ran. The refusal side lives in the #4716 block
+        // below. A dedicated ungated-type case is deliberately not minted
+        // here: `runtime-gate.test.ts` pins `runtimeAuthoringRulesFor` on an
+        // undeclared type returning [], at the layer that owns dispatch.
         const { protocol } = makeProtocol();
         const result = await protocol.saveMetaItem({
             type: 'object',
@@ -587,5 +594,146 @@ describe('#6710 — gate activation is keyed on the declared authoring channel',
         await host.protocol.saveMetaItem({ type: 'flow', name: 'leave_approval', item: validApprovalFlow() });
         expect(seen).toEqual(['flow/leave_approval']);
         expect(flowRows(host.rows)).toHaveLength(1);
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #4716 — the OBJECT write door, end to end through `saveMetaItem`.
+//
+// The narrowed, adjudicated scope (2026-08-18): the five GATING rules carrying
+// the object-writes reason cross onto `object` writes; the six advisory-tier
+// object rules do NOT ride. The lint layer pins dispatch and the six refusal
+// controls (`runtime-gate.object-writes.test.ts`); this block pins what a
+// Studio/REST/MCP author actually experiences at the door — the 422 envelope,
+// D1's draft carve-out, the clean-save wire shape, and the Q2 fence.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('runtime authoring gate on OBJECT writes (#4716)', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+
+    const objectRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'object');
+
+    const saveObject = (protocol: any, item: unknown, extra: Record<string, unknown> = {}) =>
+        protocol.saveMetaItem({ type: 'object', name: 'task', item, ...extra });
+
+    /**
+     * Zod-green at the per-type parse, broken only where `lintAutonumberFormats`
+     * judges: the autonumber interpolates a field the object does not carry, so
+     * the counter is broken from the first record. Before #4716 this exact body
+     * published clean through Studio.
+     */
+    const brokenAutonumberObject = () => ({
+        name: 'task',
+        label: 'Task',
+        sharingModel: 'private',
+        fields: {
+            owner: { type: 'text', label: 'Owner' },
+            task_no: { type: 'autonumber', label: 'Task No', autonumberFormat: '{plan_no}{000}' },
+        },
+    });
+
+    /** The same shape with the referenced field declared and required. */
+    const cleanTaskObject = () => ({
+        name: 'task',
+        label: 'Task',
+        sharingModel: 'private',
+        fields: {
+            owner: { type: 'text', label: 'Owner' },
+        },
+    });
+
+    it('refuses an ACTIVE object publish with a 422 in the structured envelope', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        const err = await saveObject(protocol, brokenAutonumberObject()).catch((e: any) => e);
+        expect(err.status).toBe(422);
+        expect(err.code).toBe('INVALID_METADATA');
+
+        const issue = err.issues.find((i: any) => i.rule === 'autonumber-references-unknown-field');
+        expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
+        expect(issue.severity).toBe('error');
+        expect(String(issue.path).length).toBeGreaterThan(0);
+        expect(issue.message).toContain('plan_no');
+        expect(issue.hint.length).toBeGreaterThan(10);
+
+        // Which rules produced the verdict — "clean" and "nothing ran" stay
+        // distinguishable from the outside.
+        expect(err.rulesRun).toContain('lintAutonumberFormats');
+
+        // Nothing landed. A gate that rejects AFTER persisting is a log line.
+        expect(objectRows(rows)).toEqual([]);
+    });
+
+    it('refuses a json_schema validation ajv cannot compile — the lazy-compiler leg, end to end', async () => {
+        // The runtime's `checkJsonSchema` would log "uncompilable — skipped"
+        // and enforce NOTHING for every record, forever (#4762). ajv loads
+        // lazily inside the rule to judge exactly this; the boot-path contract
+        // around that load is pinned in `runtime-lazy-deps.test.ts`.
+        const { protocol, rows } = makeProtocol();
+        const err = await saveObject(protocol, {
+            ...cleanTaskObject(),
+            validations: [
+                { name: 'payload_shape', type: 'json_schema', field: 'owner', schema: { required: 'name' } },
+            ],
+        }).catch((e: any) => e);
+
+        expect(err.status).toBe(422);
+        expect(err.code).toBe('INVALID_METADATA');
+        const issue = err.issues.find((i: any) => i.rule === 'validation-rule-json-schema-uncompilable');
+        expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
+        expect(err.rulesRun).toContain('validateRuleCompilability');
+        expect(objectRows(rows)).toEqual([]);
+    });
+
+    it('lets the same broken body through as a DRAFT (D1 unchanged for object writes)', async () => {
+        const { protocol, rows } = makeProtocol();
+        const result = await saveObject(protocol, brokenAutonumberObject(), { state: 'draft' });
+        expect(result.success).toBe(true);
+        expect(objectRows(rows)).toHaveLength(1);
+    });
+
+    it('publishes a clean object with no advisories key — the clean save stays byte-identical', async () => {
+        const { protocol, rows } = makeProtocol();
+        const result = await saveObject(protocol, cleanTaskObject());
+        expect(result.success).toBe(true);
+        expect('advisories' in result, `response carried: ${JSON.stringify(result.advisories)}`).toBe(false);
+        expect(objectRows(rows)).toHaveLength(1);
+    });
+
+    it('the six advisory-tier object rules do NOT ride — the Q2 fence, at the wire', async () => {
+        // A field `group` naming a fieldGroup the object never declares is
+        // exactly what `validateSemanticRoles` (advisory tier) flags. First
+        // prove the body WOULD trip it — a fence test over a body no fenced
+        // rule objects to would pin nothing…
+        const body = {
+            ...cleanTaskObject(),
+            fields: { owner: { type: 'text', label: 'Owner', group: 'main_info' } },
+        };
+        const wouldFire = validateSemanticRoles({ objects: [body] });
+        expect(
+            wouldFire.some((f: any) => f.rule === 'field-group-undeclared'),
+            `the fixture stopped tripping validateSemanticRoles (${JSON.stringify(wouldFire)}) — ` +
+                'restore a body the fenced tier flags, or this fence test is vacuous',
+        ).toBe(true);
+
+        // …then that the door neither refuses NOR advises: the adjudication's
+        // Q2 resolution is that the measured ~8-advisories-per-object-write
+        // designer noise never materialises at this scope. An `advisories` key
+        // appearing here means an advisory rule crossed the wall — that is a
+        // UX/volume decision with its own card, not a drive-by.
+        const { protocol, rows } = makeProtocol();
+        const result = await saveObject(protocol, body);
+        expect(result.success).toBe(true);
+        expect('advisories' in result, `advisories leaked: ${JSON.stringify(result.advisories)}`).toBe(false);
+        expect(objectRows(rows)).toHaveLength(1);
     });
 });

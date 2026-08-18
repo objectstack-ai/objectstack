@@ -359,14 +359,35 @@ const RUNTIME_HEAVY_SOURCE_PARSE =
   'kernel boot path must never load (lazy-deps.test.ts). Studio compiles page source on its own path.';
 
 /**
- * The rule judges an OBJECT/field declaration. Object writes are the hottest
- * metadata path there is (every Studio field edit) and the blast radius of a
- * wrong 422 there is the whole product, so P1 does not gate them — the issue's
- * own worked example, and every acceptance criterion on it, is a flow.
+ * The rule judges an OBJECT/field declaration at `advisory` tier — it can
+ * never refuse a write (`tier: 'advisory'` means it never emits `error`, and
+ * `authoring-rule-wiring.test.ts` reads each advisory rule's own source to
+ * keep that true).
+ *
+ * This constant used to hold the whole object-writes group back ("P1 gates
+ * `flow` first and widens once the gate has real traffic"). #4716 split that
+ * group by tier and crossed the five GATING object rules (2026-08-18
+ * adjudication): the false-positive budget their crossing owed was exempted on
+ * a measured 0 refusals across 75 real object declarations from two authoring
+ * lineages — a LOWER BOUND, since every measured population is authored
+ * config-file metadata — with a post-launch replay of stored `sys_metadata`
+ * overlay rows as the standing audit of the exemption.
+ *
+ * What holds THIS tier back is not refusal risk but ADVISORY VOLUME: measured
+ * on the platform's own 45 shipped object declarations, widening these six
+ * rules adds ~8 advisories per object write (vs 0.10 per write on the
+ * CI-swept examples), and since #4717 advisories render in Studio's designer
+ * on every field edit. A designer that answers every save with eight warnings
+ * teaches its authors — human and AI — to ignore the channel, and an ignored
+ * advisory channel is worse than none because it reads as covered. Crossing
+ * an advisory rule is therefore a UX/volume decision with its own card
+ * (suppress by tier? collapse by rule? surface only on publish?), never a
+ * bare `runtimeTypes` edit — the #4716 adjudication scoped it out by name.
  */
-const RUNTIME_OBJECT_WRITES_P2 =
-  'P2 (#4463): judges an object/field declaration. Object writes are the hottest metadata path in ' +
-  'the product, so P1 gates `flow` first and widens once the gate has real traffic behind it.';
+const RUNTIME_OBJECT_ADVISORY_VOLUME =
+  'Advisory-tier object rule: it cannot refuse a write, and it is held off the runtime door for ' +
+  'advisory VOLUME (~8 findings per object write measured on unswept metadata, rendered in Studio ' +
+  'since #4717), not refusal risk. Crossing it is a UX decision with its own card (#4716).';
 
 /**
  * `ExprIssue` is the one rule finding that carries no rule id of its own — it
@@ -441,8 +462,14 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'normalized',
     commands: ALL,
     source: 'packages/lint/src/validate-functional-completeness.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_OBJECT_WRITES_P2,
+    // Runtime publish gate (#4716): the OBJECT write door — the five gating
+    // object rules cross together under the 2026-08-18 adjudication. The
+    // false-positive budget the crossing owed was exempted on a measured
+    // 0 refusals / 75 real object declarations (authored config-file metadata,
+    // so a lower bound — see RUNTIME_OBJECT_ADVISORY_VOLUME's note); the six
+    // advisory-tier object rules deliberately do NOT ride.
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['object'],
     run: (stack) => validateFunctionalCompleteness(stack),
   },
   // [#7521, via cloud#1225] A managed object advertising a generic write verb
@@ -466,8 +493,11 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'normalized',
     commands: ALL,
     source: 'packages/lint/src/validate-managed-api-methods.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_OBJECT_WRITES_P2,
+    // Runtime publish gate (#4716): a managed object advertising a verb its
+    // own affordances refuse is exactly the contradiction a Studio/MCP author
+    // can save today — the CLI sweep (#7934) never sees an overlay row.
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['object'],
     run: (stack) => validateManagedApiMethods(stack),
   },
   // A view container in `views: []` that registers zero views: nothing appears
@@ -789,7 +819,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ALL,
     source: 'packages/lint/src/validate-record-title.ts',
     surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_OBJECT_WRITES_P2,
+    surfaceReason: RUNTIME_OBJECT_ADVISORY_VOLUME,
     run: (stack) => validateRecordTitle(stack),
   },
   // ADR-0085 — `stageField` / `highlightFields` / `Field.group` are pointers
@@ -802,7 +832,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ALL,
     source: 'packages/lint/src/validate-semantic-roles.ts',
     surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_OBJECT_WRITES_P2,
+    surfaceReason: RUNTIME_OBJECT_ADVISORY_VOLUME,
     run: (stack) => validateSemanticRoles(stack),
   },
   // #2578 / #4449 — a form section's field reference that resolves to nothing
@@ -1014,7 +1044,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ALL,
     source: 'packages/lint/src/lint-liveness-properties.ts',
     surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_OBJECT_WRITES_P2,
+    surfaceReason: RUNTIME_OBJECT_ADVISORY_VOLUME,
     run: (stack) =>
       lintLivenessProperties(stack).map((f) => ({
         severity: 'warning' as const,
@@ -1034,8 +1064,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/lint-autonumber-formats.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_OBJECT_WRITES_P2,
+    // Runtime publish gate (#4716): an autonumber referencing a field the
+    // object does not carry is broken from the first record; only the error
+    // arm blocks — the optional-field arm is `warning` and rides the
+    // advisory channel like every other non-error finding (#4463 P1).
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['object'],
     run: (stack) =>
       lintAutonumberFormats(stack).map((f) => ({
         severity: f.severity,
@@ -1078,7 +1112,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ['validate', 'build'],
     source: 'packages/lint/src/data-model-rules.ts',
     surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_OBJECT_WRITES_P2,
+    surfaceReason: RUNTIME_OBJECT_ADVISORY_VOLUME,
     scopeReason:
       '`os lint` already reports this rule through `lintDataModel`, which calls it directly ahead of ' +
       'R10 in its best-practice sweep — registering it for `lint` as well would report every finding ' +
@@ -1103,7 +1137,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ['validate', 'build'],
     source: 'packages/lint/src/data-model-rules.ts',
     surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_OBJECT_WRITES_P2,
+    surfaceReason: RUNTIME_OBJECT_ADVISORY_VOLUME,
     scopeReason:
       "`os lint` already reports this rule through `lintDataModel`, which calls it directly as R10 of " +
       'its best-practice sweep — registering it for `lint` as well would report every finding twice. ' +
@@ -1129,7 +1163,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ['validate', 'build'],
     source: 'packages/lint/src/data-model-rules.ts',
     surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_OBJECT_WRITES_P2,
+    surfaceReason: RUNTIME_OBJECT_ADVISORY_VOLUME,
     scopeReason:
       '`os lint` already reports this rule through `lintDataModel`, which calls it directly alongside ' +
       'R10/R11 in its best-practice sweep — registering it for `lint` as well would report every finding ' +
@@ -1337,8 +1371,15 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-rule-compilability.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_OBJECT_WRITES_P2,
+    // Runtime publish gate (#4716): the rule loads ajv LAZILY, only when the
+    // judged snapshot actually carries a `json_schema` validation — so an
+    // ordinary object write (no `json_schema` anywhere) still loads no
+    // compiler, which `runtime-lazy-deps.test.ts` pins in both directions.
+    // The load it does take (~64 ms cold once, ~15 ms warm per publish
+    // carrying such a rule) is the measured, adjudicated price of refusing a
+    // validation rule that would otherwise ship compiled-by-nothing.
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['object'],
     run: (stack) => validateRuleCompilability(stack),
   },
   // #5178 — the residual half of #5029, which registering `ajv-formats` does
@@ -1359,8 +1400,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-rule-schema-formats.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_OBJECT_WRITES_P2,
+    // Runtime publish gate (#4716): crosses with its compile sibling above —
+    // the two judgements over one artifact stay on one side of the wall
+    // (#7220's family discipline). Same lazy-ajv contract: the registered
+    // format set is only enumerated once a schema actually names a format.
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['object'],
     run: (stack) => validateRuleSchemaFormats(stack),
   },
 ];
