@@ -216,7 +216,12 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // UNIQUE_SCOPE_CONFIRMATION_REQUIRED at the marketplace install seam's
     // `plugin-route` door (stamped through a constant in an object literal, the
     // shape `objlit` could not see), and #9246 registered it under
-    // `@objectstack/cloud-connection`, ratcheting that row out the same way. A
+    // `@objectstack/cloud-connection`, ratcheting that row out the same way.
+    // #9460's further-widened scan then reported two sites at once —
+    // `FLOW_CONVERSION_CONFLICT` and `owd_widening_forbidden` — and #9567
+    // registered the former under `@objectstack/metadata-protocol`, ratcheting
+    // only that row out; `owd_widening_forbidden`'s lowercase spelling is a
+    // naming decision, not a plain admission, so it stays pending below. A
     // future unswept producer lands here as an `unclassified-site` finding and
     // gets a new row (then a spec-lane registration, then the row comes out
     // again). ──
@@ -357,25 +362,14 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     },
 
     // ── pending registration [#9460]: found by the widened scan ────────────
-    // Both rows are the deliverable of #9460, not a regression: the scan could
-    // not SEE either site before it learned the two stamp positions below, so
-    // "no finding" meant "not looked at", which is the failure this gate
-    // exists to prevent.
-    {
-        code: 'FLOW_CONVERSION_CONFLICT',
-        file: 'packages/metadata-protocol/src/protocol.ts',
-        shape: 'assign',
-        door: 'rest',
-        verdict: 'pending-registration',
-        why:
-            'A live 409 from the metadata write path: the conversion pass refuses a body whose token is a ' +
-            "live name in the environment, and stamps `(err as any).code = 'FLOW_CONVERSION_CONFLICT'` " +
-            'beside `status = 409` before throwing. [#9460] The `assign` shape demanded a BARE identifier ' +
-            'to the left of `.code`, and this site writes a cast — `(err as any)` puts a `)` exactly where ' +
-            'the anchor wanted a word character — so the single most common way this repo stamps a code ' +
-            'onto a constructed error was invisible in the shape named for it. Registering it is the ' +
-            "`packages/spec` lane's call (#8846's batch); this row records the measurement.",
-    },
+    // This row is the deliverable of #9460, not a regression: the scan could
+    // not SEE the site before it learned the stamp shape below (a
+    // code-carrying helper), so "no finding" meant "not looked at", which is
+    // the failure this gate exists to prevent. Its sibling from the same
+    // #9460 batch, `FLOW_CONVERSION_CONFLICT`, ratcheted out via #9567 (see
+    // the running log above); this one stays pending because admitting it AS
+    // SPELLED is what ADR-0112 D1 forbids — the rename-or-keep-the-#9106-demote
+    // call is the spec lane's and is not resolved here.
     {
         code: 'owd_widening_forbidden',
         file: 'packages/plugins/plugin-security/src/object-posture-gate.ts',
