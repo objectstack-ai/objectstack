@@ -32,12 +32,12 @@
   布,看起来像修好了,比不合更糟。
 - **测试证据**要有真实命令与通过输出,不是一句 tests pass。**测量类交付先看阳性对
   照**:对照本身失败 ⇒ 该读数记 INCONCLUSIVE,⛔ 不把它的「绿」当被测风险的证据入账。
-- **CI 收敛读数只属于复核侧**(维护者 2026-08-10 裁定;dev 的契约是草稿 PR 时点
-  交报,报告里 gate `in_progress` 是诚实读数、预期内常态):翻 ready / 挂 auto-merge /
-  入队前亲核 Lint & Repo Gates 与 TypeScript Type Check 两个 job 的 `conclusion` 已
-  为 `success`(必需检查认 check-run 名,改名前的 PR 仍列旧名 `ESLint`),⛔ 不因报告写
-  了「本地绿」跳过。收敛期转红走补丁轮(SendMessage 续派原 dev —— 那是这笔交换已付过
-  的价钱,不是 REWORK 的理由;红着合并才是)。重量级卡可在派发令显式写「本单等 CI」。
+- **CI 收敛读数只属于复核侧**(维护者 2026-08-10 裁定;dev 的契约是草稿 PR 时点交
+  报,报告里 gate `in_progress` 是诚实读数、预期内常态):翻 ready / 挂 auto-merge
+  / 入队前亲核 Lint & Repo Gates 与 TypeScript Type Check 两个 job 的 `conclusion` 已为
+  `success`(门禁族跑在其内),⛔ 不因报告写了「本地绿」跳过。收敛期转红走补丁轮
+  (SendMessage 续派原 dev —— 那是这笔交换已付过的价钱,不是 REWORK 的理由;红着
+  合并才是)。重量级卡可在派发令显式写「本单等 CI」。
 - **每个门禁读数先钉到 PR 的当前 head**:先读 PR 的 `head.sha`,再比对 run 的
   `head_sha` —— 不一致的 run 是关于一个死提交的读数,绿与红**双向都不入账**(旧 head
   的绿把「新推送未验」读成「消费者干净」,旧 head 的红把已修掉的缺陷重新挂回 PR)。
