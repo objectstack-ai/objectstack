@@ -65,9 +65,9 @@ jobs:
       # workflow source, and the misleading first read is that the `run:` line
       # below invoked a package manager. It does not, and never did.
       #
-      # The adr-merge-approval gate is the known-good shape this now matches
-      # exactly: checkout, setup-node, one `node scripts/check-*.mjs` call, no
-      # install and no corepack. It is green on this repo today.
+      # The check-links workflow's ADR-links job is the known-good shape this
+      # now matches exactly: checkout, setup-node, one `node scripts/check-*.mjs`
+      # call, no install and no corepack. It is green on this repo today.
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:

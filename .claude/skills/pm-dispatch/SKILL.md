@@ -479,9 +479,8 @@ not-reachable 是设计非故障(维护者 2026-08-11 裁定)⛔ 不复测;**接
   `pm:dispatched` 换回 `pm:queue`(或按剩余物定级)+ 评论写明已交付/还剩/归谁。changed files 范围
   检查(⛔ 不看报告自述);tests/docs-only 按仓库分流:本仓库 `skip-changeset` 标签是真实机制;
   objectui 无此标签,空 frontmatter changeset 即声明,⛔ 永不铸标签;测试证据要真实命令与输出。
-- **报告在草稿 PR 时点到达,CI 收敛读数只属于复核侧**(维护者 2026-08-10 裁定): gate
-  `in_progress` 是诚实读数;翻 ready / 挂 auto-merge / 入队前亲核门禁 job 结论,⛔ 不因「本地
-  绿」跳过;收敛期转红走补丁轮(续派原 dev,不是 REWORK);重量级卡可在派发令写「本单等 CI」。
+- **报告在草稿 PR 时点到达,CI 收敛读数只属于复核侧**(维护者 2026-08-10 裁定):gate
+  `in_progress` 是诚实读数;放行前亲核判据、收敛期补丁轮与「本单等 CI」例外见 checklist。
 - **绿色输出 ≠ 该绿证明了被测风险**:拒收用例查 `code`+`status` 断言;「N 个包全绿」问方向与时
   序;裁决实施 PR 查全仓 pin 翻转 + 拒收断言仍在;收益穿过必经边界后还在吗(必要时端到端验一次)。
 - **证伪是好运行**:`premise_still_valid: false` 是再分诊输入不是失败;dev 纠正 PM要当众认;验
@@ -494,9 +493,12 @@ not-reachable 是设计非故障(维护者 2026-08-11 裁定)⛔ 不复测;**接
 续派原 dev —— 上下文保留省掉全部重验;最多 2 轮,第三次升级);**ESCALATE**(见「升级与决策」)。
 
 **ACCEPT 之后的路径分叉(动手之前先分,不是事后对照)。** 翻 ready / 挂 auto-merge / 入队前,先
-取一次 PR 的路径面(`get_files`,⛔ 不看报告自述)。路径面**一条命中** `docs/adr/**`、
-`.claude/skills/**` 或 `skills/**` ⇒ ACCEPT 换终局三件套:① 复核结论照常写在 issue 上(不能
-合 ≠ 不复核;条款①技能面 PR 的复核席本身须跑在契约复审档位 —— 以 dispatch-gates 常量 `CONTRACT_REVIEW_TIER` 为准,档位单源不写模型名);② PR 留给维护者 —— ⛔ 不合并不入队不挂auto-merge,必须**看得见地悬着**;③ 轮次报
+取一次 PR 的路径面(`get_files`,⛔ 不看报告自述)。governed 面统一定义(维护者 2026-08-18
+「同意」):`docs/adr/**` + `.claude/**`(全量,含 agents/hooks/settings)+ `skills/**` +
+`AGENTS.md` + `CLAUDE.md`。路径面**一条命中** ⇒ ACCEPT 换终局三件套:① 复核结论照常写在
+issue 上(不能合 ≠ 不复核;技能面 PR 的复核席须跑在契约复审档位,档位单源见条款②闸门);
+② PR 留给维护者,**看得见地悬着** —— **人工合并即审核记录,本条座位纪律是唯一的 merge 前防线**
+(per-PR 事前门已退役,没有机器会替你挡):⛔ 永不翻 ready、永不入队、永不挂 auto-merge;③ 轮次报
 告单列「awaiting a human merge」(「等人来合」与「被忘了」在 GitHub 上长得一模一样)。混
 合 diff 一条命中就分叉,⛔ 不按比例判;要拆就让 dev 单独开 PR;已入队才读到本条 ⇒ 撤回只有
 转 draft。路径面干净的才转 ready → 入队(队列是唯一被认可的落地路径,⛔ 永不队列
@@ -512,15 +514,12 @@ not-reachable 是设计非故障(维护者 2026-08-11 裁定)⛔ 不复测;**接
   钉在契约复审档位),分诊轮新增子轮清该标签 —— 只审契约增量 diff、结论一行写在卡上、清标签后卡方可入队;每小时一轮即天然攒批;过渡期(分诊 Routine 未建成前)由 skills 席代行。**降档保险丝**:
   子轮开场自检当前模型,非契约复审档位 ⇒ 该子轮整体跳过、标签原样留置 —— 卡在队列外等待是安全态;契约复审 ⛔ 不适用额度耗尽豁免降档(豁免的对象是派发;复审的存在意义就是补偿一次低于地板的派发)。**载体不迁移**(维护者 2026-08-18,原话:「中期把闸门迁到 PR review 的 Request Changes 上 我觉得没必要」):闸门载体保持本标签,⛔ 不迁 PR review / Request Changes、不为迁移留门;挂与清皆按标签纪律的 read-modify-write 硬步骤写。
 - **碰生成物的 PR,入队前先同步 + 整体重生成** —— os-regen 驱动会零冲突标记地**静默丢掉一侧改
-  动**,只有重生成才暴露;四步序已机械化(`bash scripts/pm/os-regen-merge.sh`:**先 commit
-  merge 再重生成**,顺序防锚点静默倒退与`gen:openapi` 假红两个陷阱);重生成后断言兄弟单条目与
-  上一单**实现体**仍在;清单当场读 `grep os-regen .gitattributes` ⛔ 不抄进派发令当常量;⛔ 禁
-  止为凑相等手改锚点文件,⛔ 不得要求 `baseRev == merge-base`(允许滞后)。
-- **跟到 MERGED 为止;入队后的看护同归车道 PM 的落地窗口。** 车道 PM 管验收、首次入队(ACCEPT 后
-  挂 6–9 分钟 flip 定点核门禁 job 结论,绿即转 ready + 挂 auto-merge —— CI success webhook 不可
-  靠,⛔ 不坐等不忙轮询)、确认 MERGED(两个读数);落地窗口给关键 PR 挂`subscribe_pr_activity`(
-  ⛔ 不订阅 dev 交报告前的 PR —— 双驾驶员互踩;**MERGED/关闭即退订 + 云
-  卡 `archive_session`**,⛔ 合并前不归档,不留孤儿订阅);落地后再核一次落地判据仍是车道 PM 的
+  动**,只有重生成才暴露;四步序已机械化(`bash scripts/pm/os-regen-merge.sh`,**先 commit
+  merge 再重生成**);两个陷阱、断言措辞、清单读法与锚点禁令细则见 landing-operations A。
+- **跟到 MERGED 为止;入队后的看护同归车道 PM 的落地窗口。** 车道 PM 管验收、首次入队(flip 定点
+  与判据见 landing-operations B)、确认 MERGED(两个读数);落地窗口给关键 PR
+  挂`subscribe_pr_activity`(⛔ 不订阅 dev 交报告前的 PR —— 双驾驶员互踩;**MERGED/关闭即退订 +
+  云卡 `archive_session`**,⛔ 合并前不归档,不留孤儿订阅);落地后再核一次落地判据仍是车道 PM 的
   活(队列合并同样走 os-regen 驱动)。**落地记账**:座位贴落地清单即账本,逐轮即时记;确需全仓
   核对时首选 `head:claude/` 精确过滤。
 - **红/踢出处置在同一落地窗口内做**:机器输入是 merge-queue triage workflow 落在被踢 PR 上的分诊
@@ -538,7 +537,8 @@ not-reachable 是设计非故障(维护者 2026-08-11 裁定)⛔ 不复测;**接
 ### 轮次报告与节奏
 
 每轮向维护者打**中文**轮次报告(chat 通道,语言政策显式例外):issue → 判决 → PR 链接 → 备注的表
-,加升级项、代裁清单(分诊)、awaiting a human merge 项。健康指标四个(总 open 数刻意不在其
+,加升级项、代裁清单(分诊)、awaiting a human merge 项、governed 合并审计清单(实跑
+`node scripts/pm/check-governed-merges.mjs --since <上轮>`,⛔ 不凭记忆汇总)。健康指标四个(总 open 数刻意不在其
 中 —— 债密区发现快于关闭是循环在工作):**可派发库存**(dispatchable inventory;open `pm:queue` 未
 认领及趋势);**决策箱**(decision inbox;待维护者数,分诊简报还要点名带开放下游依赖的决策
 卡 —— 从 `Blocked-by:` 反向索引现算);**finding 数与中位年龄**(裸标签数即未定级数,hold 已换标不
@@ -629,13 +629,12 @@ pull(今天谁撞上;零拉动默认 defer/ remove);③ AI-agent error-resistanc
   **合并 Version Packages PR**。围绕发布的工作(发版板、pin bump、对账、状态核验)照旧归座位;
   「发布」本身不归任何座位。发现未经人工的发布痕迹按事故立案,⛔ 不代跑补救性发布 —— 机械通道
   的存在不构成授权,遇到那类通道当缺陷上报。
-- **ADR 由维护者确认、人工合并**(维护者 2026-08-08 拍板,原话:「adr 只能由维护者自己确认,人工
-  合并,ai 不得擅自合并」)。任何 AI 座位对改动 `docs/adr/**` 的 PR ⛔ 不得合并、入队、
-  挂 auto-merge;起草、推分支、开 PR 都可以。「已复核 + 已批准 + 全绿」不构成例外 —— 绿灯只说
-  明机器没意见。撤回机制别反着记:已入队的 PR 只有转draft 才真的离队。
-- **Skills 更新与 ADR 同级**(维护者 2026-08-11 裁定,原话:「所有 skills 的更新和adr 类似,需要
-  人工审核」)。「所有 skills」= 两个技能根 `.claude/skills/**` 与`skills/**`;终局三件套、混
-  合 diff 一条命中即分叉、撤回机制全部照 ADR 条执行(复核路径见「复核」的 ACCEPT 路径分叉)。
+- **Governed 面由维护者人工合并,合并即审核记录**(三裁一脉:2026-08-08「adr 只能由维护者自己确
+  认,人工合并,ai 不得擅自合并」;2026-08-11「所有 skills 的更新和adr 类似,需要人工审核」;
+  2026-08-18 对「人工合并即人工审核,事后审计代替事前门」整包:「同意。」)。面 = ACCEPT 路径分叉
+  的统一定义;任何 AI 座位对 governed PR ⛔ 不得合并、入队、挂 auto-merge —— 唯一的 merge 前防线
+  (per-PR 门已退役);起草、推分支、开 PR 都可以,「已复核 + 已批准 + 全绿」不构成例外;已入队
+  只有转 draft 才真的离队。事后防线 = 审计清单,维护者不认识的条目 = 席位违规,立案回滚。
 - **决定属于维护者:永不代维护者回答产品/架构问题**(唯一例外:分诊职责里已裁的代裁车道,边界恰
   与其置信门重合,不得更宽);**永不派发 assignee 是别人的 issue;永不派发带 `needs-user-decision` 的 issue**。
 - 每个 dev agent 都在**每仓专属的自有 worktree** 里干活(hook 强制;os-dev 定义重申);并行度
@@ -675,6 +674,7 @@ pull(今天谁撞上;零拉动默认 defer/ remove);③ AI-agent error-resistanc
 | `scripts/pm/check-skill-line-ratchet.mjs` | 本文件行数只降不升(`pnpm check:pm-skill-ratchet`);抬上限需维护者裁决引用在 PR 正文;⛔ re-wrap(折行合并)不得用作筹行 —— 棘轮治理的是内容体量,行数只是机读代理,新增以删减付账;密度优化仅随净减内容的 PR 顺带(维护者 2026-08-17 授权席裁) |
 | `scripts/pm/check-skill-id-lint.mjs` | 本技能与 os-dev 定义的操作文本 ⛔ 不引用 issue 编号(`pnpm check:pm-skill-id-lint`)—— 经验必须自含 |
 | `scripts/pm/check-half-states.mjs` | label/assignee/PR 半状态的 report-only 巡查(含已复核就绪却无人落地的孤儿 PR 检测) |
+| `scripts/pm/check-governed-merges.mjs` | governed 面合并清单的 report-only 审计(事后防线;轮报载体,本地枚举零 API,仅归因走查询) |
 | `scripts/pm/dispatch-gates.mjs` | 文件面 → 该跑的门禁族(派发令取数) |
 | `scripts/pm/os-regen-merge.sh` | 碰生成物 PR 的 merge 四步序(防静默吞并与锚点倒退) |
 | `scripts/pm/ensure-pm-labels.sh` | pm 标签词表的幂等创建 |

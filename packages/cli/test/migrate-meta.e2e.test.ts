@@ -17,9 +17,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { ObjectStackDefinitionSchema } from '@objectstack/spec';
 
@@ -316,4 +317,128 @@ describe('os migrate meta --from 16 (e2e over the real CLI)', () => {
     }
     expect(failed, 'expected a non-zero exit below the floor').toBe(true);
   }, 120_000);
+});
+
+/**
+ * #9418 — the input class the codemod EXISTS for: a source carrying a RETIRED
+ * key, migrated end-to-end.
+ *
+ * The suite above deliberately does not reach this. Its fixture is a bare
+ * `export default { … }` object literal, and a bare literal is validated by
+ * nobody at load — so it passed on a build where `os migrate meta` could not
+ * open a single real project. A real `objectstack.config.ts` runs the CURRENT
+ * schema itself: `os init` scaffolds `export default defineStack({ … })`, every
+ * `define*` helper is a `Schema.parse()`, and a retired key is a `retiredKey()`
+ * tombstone — `z.never()` carrying the upgrade prescription — so the parse
+ * REJECTS it rather than stripping it. The refusal therefore happened while the
+ * config module was being evaluated inside the load, before the command reached
+ * its first conversion, and the message it printed was the very prescription
+ * telling the author to run this command.
+ *
+ * So the fixture here is deliberately shaped like a real project and not like a
+ * test: `defineStack` at the root, per-artifact helpers imported from a spec
+ * SUBPATH (`@objectstack/spec/ai`, the spelling the example apps use), and the
+ * retired keys authored inside them. A `defineStack`-only tolerance passes the
+ * first and fails the last two.
+ *
+ * The second test is the other half of the pin, and it is the one that keeps
+ * this a restoration rather than a widening: `os validate` on the SAME fixture
+ * must still refuse. The tolerance belongs to the codemod alone — for every
+ * other command the tombstone is the upgrade channel.
+ */
+describe('os migrate meta over a source carrying a retired key (#9418)', () => {
+  /**
+   * Resolved through node_modules rather than by walking up from this file:
+   * `packages/cli` already depends on `@objectstack/spec`, so the dependency is
+   * one turbo already knows about, and a package specifier is not a
+   * cross-package source read.
+   */
+  const SPEC_PACKAGE_ROOT = dirname(createRequire(import.meta.url).resolve('@objectstack/spec/package.json'));
+
+  const RETIRED_KEY_CONFIG = `
+import { defineStack } from '@objectstack/spec';
+import { defineAgent, defineSkill } from '@objectstack/spec/ai';
+
+export default defineStack({
+  manifest: { id: 'retired_key_e2e', name: 'Retired Key E2E', version: '1.0.0', type: 'app', namespace: 'rk' },
+  objects: [{
+    name: 'rk_ticket',
+    label: 'Ticket',
+    fields: { title: { type: 'text', label: 'Title' } },
+  }],
+  agents: [defineAgent({
+    name: 'rk_agent',
+    label: 'Agent',
+    role: 'Helper',
+    instructions: 'help',
+    knowledge: { sources: ['faq'] },     // RETIRED in protocol 17 — the whole point
+  })],
+  skills: [defineSkill({
+    name: 'rk_skill',
+    label: 'Skill',
+    tools: ['query_records'],
+    triggerPhrases: ['do the thing'],    // RETIRED in protocol 17
+  })],
+});
+`;
+
+  let rkDir: string;
+  let specLink: string;
+
+  beforeAll(() => {
+    rkDir = mkdtempSync(join(tmpdir(), 'os-migrate-meta-retired-'));
+    mkdirSync(join(rkDir, 'node_modules', '@objectstack'), { recursive: true });
+    specLink = join(rkDir, 'node_modules', '@objectstack', 'spec');
+    symlinkSync(SPEC_PACKAGE_ROOT, specLink, 'dir');
+    writeFileSync(join(rkDir, 'objectstack.config.ts'), RETIRED_KEY_CONFIG);
+  });
+
+  afterAll(() => {
+    // Unlinked BEFORE the recursive remove, and named explicitly: this symlink
+    // points at the real `packages/spec` in the checkout, and the one thing
+    // that must never be ambiguous in a cleanup is whether it can follow it.
+    try { unlinkSync(specLink); } catch { /* already gone */ }
+    try { rmSync(rkDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  it('loads it, converts it, and reports the migrated stack schema-valid', async () => {
+    const stdout = await runMeta(['--from', '16', '--json', '--out', join(rkDir, 'migrated.json')], rkDir);
+    const parsed = JSON.parse(stdout);
+
+    const appliedAt = new Map<string, string>(
+      parsed.applied.map((a: any) => [a.conversionId, a.path] as [string, string]),
+    );
+    // Authored through `defineStack`'s own inline literal…
+    expect(parsed.from).toBe(16);
+    // …and through helpers imported from a spec subpath, which is where a
+    // tolerance scoped to `defineStack` alone would still have refused.
+    expect(appliedAt.get('agent-knowledge-removed')).toBe('agents[0].knowledge');
+    expect(appliedAt.get('skill-trigger-phrases-removed')).toBe('skills[0].triggerPhrases');
+    expect(parsed.schemaValid).toBe(true);
+
+    const snap = JSON.parse(readFileSync(join(rkDir, 'migrated.json'), 'utf-8'));
+    expect(snap.agents[0].knowledge).toBeUndefined();
+    expect(snap.skills[0].triggerPhrases).toBeUndefined();
+    // The rest of the artifact survives the tolerant load intact — the codemod
+    // removes what retired, not what it could not parse.
+    expect(snap.agents[0].name).toBe('rk_agent');
+    expect(snap.skills[0].tools).toEqual(['query_records']);
+  }, 180_000);
+
+  it('still refuses the same source everywhere else — `os validate` keeps the prescription', async () => {
+    let refused = false;
+    try {
+      await execFileP(TSX, [CLI, 'validate'], {
+        cwd: rkDir,
+        maxBuffer: 16 * 1024 * 1024,
+        env: { ...process.env, NO_COLOR: '1' },
+      });
+    } catch (e: any) {
+      refused = true;
+      const output = `${String(e.stdout ?? '')}${String(e.stderr ?? '')}`;
+      expect(output).toMatch(/`agent\.knowledge` was removed/);
+      expect(output).toMatch(/os migrate meta --from 16/);
+    }
+    expect(refused, '`os validate` must still reject a retired key').toBe(true);
+  }, 180_000);
 });

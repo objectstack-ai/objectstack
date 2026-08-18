@@ -259,6 +259,17 @@ jobs:
       - name: PM half-state sweeper self-test
         run: pnpm check:pm-half-states
 
+      # Governed-merges audit self-test (#9495) — same family, same split as
+      # the half-state sweeper above: the live sweep enumerates the governed
+      # merges (docs/adr/**, .claude/**, skills/**, AGENTS.md, CLAUDE.md)
+      # since a date/ref for the PM round report — report-only by design, the
+      # human-merge-is-the-review-record regime's detection half — while this
+      # step runs only the offline self-test (pure predicates + replay
+      # fixtures; no network, no token), so the predicates cannot rot unrun
+      # the way an uninvoked self-test does (#4690).
+      - name: Governed-merges audit self-test
+        run: pnpm check:pm-governed-merges
+
       # Docs/skills authoring guard (#2035 / ADR-0059): TS code blocks in
       # Markdown/MDX are not type-checked or ESLinted, so skills/ and
       # content/docs/ can drift back to teaching the bare `: Page = {}` literal

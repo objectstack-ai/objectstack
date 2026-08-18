@@ -22,6 +22,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         help: "Action type (snake_case)",
         options: {
           create: "create",
+          read: "read",
           update: "update",
           delete: "delete",
           login: "login",
@@ -85,6 +86,13 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       auth_events: {
         label: "Auth"
+      },
+      record_views: {
+        label: "Record Views",
+        emptyState: {
+          title: "No record views recorded",
+          message: "Record-view auditing is opt-in per object. Rows appear here once an object is added to the audit plugin's readAudit.objects list and someone opens one of its records."
+        }
       },
       config_changes: {
         label: "Config"

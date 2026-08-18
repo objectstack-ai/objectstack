@@ -10,6 +10,21 @@
 export { AuditPlugin } from './audit-plugin.js';
 export { createFieldPresenceProbe, installAuditWriters } from './audit-writers.js';
 export { createAuthEventAuditSink } from './auth-event-audit.js';
+export {
+  createReadAuditBatcher,
+  extractDetailReadId,
+  installReadAuditWriter,
+  READ_AUDIT_ACTION,
+} from './read-audit.js';
+export type {
+  ReadAuditBatcher,
+  ReadAuditBatcherOptions,
+  ReadAuditEvent,
+  ReadAuditLogger,
+  ReadAuditTimers,
+  ReadAuditWriterHandle,
+  ReadAuditWriterOptions,
+} from './read-audit.js';
 export type {
   AuthEventAuditLogger,
   AuthEventAuditSink,

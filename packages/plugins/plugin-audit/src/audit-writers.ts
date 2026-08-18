@@ -95,7 +95,10 @@ export interface AuditWriterOptions {
  * Skip rules avoid recursion and noise:
  *  - Never audit the audit/activity tables themselves.
  *  - Never audit session/presence/auth tables (high-frequency, low value).
- *  - Read-only operations (`afterFind`) are never audited.
+ *  - Read-only operations (`afterFind`) are not audited BY THIS WRITER. Since
+ *    #8992 the `read` action has its own writer in `read-audit.ts`, installed
+ *    separately and only over the objects a deployment opts in: record-detail
+ *    views, batched off the request path. This writer stays write-only.
  *
  * All writes go through `ctx.api.sudo()` so they bypass record-level
  * permissions and always succeed regardless of the calling user's RBAC.
@@ -187,8 +190,15 @@ const SKIP_OBJECTS = new Set<string>([
  * are one list, so neither can drift from the other. The early return stays as
  * defence in depth — it is what protects every non-hook caller of these
  * handlers, and it keeps audit behaviour bit-for-bit conserved by this change.
+ *
+ * [#8992] EXPORTED because the read/view writer (`read-audit.ts`) needs the same
+ * subtraction and must not keep a second copy of it. Every reason an object is
+ * excluded from write auditing — recursion, auth/session noise, ADR-0057
+ * telemetry plumbing — applies unchanged to auditing its READS, and two
+ * hand-kept lists would disagree the day either is fixed. Same rule this
+ * docblock already states one paragraph up, now across two files.
  */
-const AUDIT_EXCLUDED_OBJECTS: string[] = [...SKIP_OBJECTS];
+export const AUDIT_EXCLUDED_OBJECTS: string[] = [...SKIP_OBJECTS];
 
 /** Fields that are noise in diffs (always change, never user-meaningful). */
 const NOISE_FIELDS = new Set<string>([

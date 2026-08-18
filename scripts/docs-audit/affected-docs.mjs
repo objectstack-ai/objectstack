@@ -153,6 +153,11 @@ const args = process.argv.slice(2);
 const asJson = args.includes('--json');
 const all = args.includes('--all');
 const sinceRef = args.find((a) => !a.startsWith('--')) || 'origin/main';
+// The commit the change set is actually measured FROM, published in `computedOn`
+// below (#9519). Declared up here so both `emit` call sites can read it — the `--all`
+// arm returns long before §2 assigns it, and a `let` in §2 would put that arm in the
+// temporal dead zone. `null` is the honest answer for `--all`: it diffs nothing.
+let diffBaseRef = null;
 
 // --- 0. classifier constants -------------------------------------------------
 // Declared up here, ahead of the `--self-test` short-circuit below, because `const` is
@@ -515,6 +520,9 @@ let baseRef = sinceRef;
 if (threeDot) {
   try { baseRef = sh(`git merge-base ${sinceRef} HEAD`).trim() || sinceRef; } catch { /* keep sinceRef */ }
 }
+// Publish it (#9519). READ-ONLY of a value §2 has already settled — this line adds no
+// input to any derivation, it only lets the answer say what it was measured from.
+diffBaseRef = baseRef;
 
 /**
  * A test file — it observes behaviour rather than defining it, so changing one cannot
@@ -1727,6 +1735,46 @@ function selfTest() {
   ];
   for (const [lit, want, label] of literalCases) check('literalAnchorsFromLines', label, lit, want, lits.has(lit));
 
+  // ── `computedOn` (#9519): the record that names WHICH TREE the answer is about ──
+  // Pinned on the pure shaper, so these stay hermetic; the probing wrapper reads real
+  // git state by construction. Two properties carry the field's whole value: a merge
+  // commit's parents must survive as a PAIR — that pair is the only durable handle on
+  // an ephemeral `refs/pull/N/merge` tree — and "could not tell" must never be
+  // flattened into "checked, clean".
+  const mergeParents = '097fe96e1228f7da71f87e8f5ed95ae2739b53f1 047457ca3a8757012043460b8ded6090cbc9b114';
+  const computedOnCases = [
+    // [label, want, got]
+    ['a merge commit keeps BOTH parents, in order',
+      JSON.stringify(mergeParents.split(' ')), JSON.stringify(computedOnFrom('m', mergeParents, 'b', '').headParents)],
+    ['an ordinary commit has exactly one, trailing newline stripped',
+      JSON.stringify(['p1']), JSON.stringify(computedOnFrom('m', 'p1\n', 'b', '').headParents)],
+    ['a root commit has none — never a [""] entry',
+      JSON.stringify([]), JSON.stringify(computedOnFrom('m', '', 'b', '').headParents)],
+    ['a failed parent probe degrades to [] rather than throwing',
+      JSON.stringify([]), JSON.stringify(computedOnFrom('m', null, 'b', '').headParents)],
+    ['the head sha is trimmed', 'abc', computedOnFrom('abc\n', 'p', 'b', '').head],
+    ['a failed head probe is null, never the empty string', null, computedOnFrom(null, 'p', 'b', '').head],
+    ['`--all` diffs nothing, so it names no base', null, computedOnFrom('m', 'p', null, '').diffBase],
+    ['a clean checkout is dirty=false', false, computedOnFrom('m', 'p', 'b', '').dirty],
+    ['a modified page is dirty=true', true, computedOnFrom('m', 'p', 'b', ' M content/docs/x.mdx\n').dirty],
+    ['an UNTRACKED page counts too — walk() reads the filesystem, not the index',
+      true, computedOnFrom('m', 'p', 'b', '?? content/docs/new.mdx\n').dirty],
+    ['a failed status probe is null — "could not tell" is not "checked, clean"',
+      null, computedOnFrom('m', 'p', 'b', null).dirty],
+    ['the record carries exactly the four declared members',
+      'head,headParents,diffBase,dirty', Object.keys(computedOnFrom('m', 'p', 'b', '')).join(',')],
+  ];
+  for (const [label, want, got] of computedOnCases) check('computedOnFrom', label, 'computedOn', want, got);
+
+  // PRESENCE, not merely shape. The field is worth nothing unless it reaches the JSON
+  // the workflow renders, and a rename or a dropped line there returns the comment to
+  // the unnamed-tree state this field exists to end — with every pin above still green.
+  // Read from source because the emitter writes to stdout under module-level flags and
+  // cannot be called hermetically.
+  const ownSource = readFileSync(new URL(import.meta.url), 'utf8');
+  check('emit', 'the emitted JSON actually carries `computedOn`', 'affected-docs.mjs',
+    true, /\bcomputedOn:\s*computedOnIdentity\(/.test(ownSource));
+
   if (failed) {
     console.error(`\n✗ affected-docs self-test failed (${failed} case(s)).`);
     process.exit(1);
@@ -2072,6 +2120,75 @@ emit(
   },
 );
 
+/**
+ * Shape the `computedOn` record from raw git answers. PURE — every probe lives in
+ * `computedOnIdentity` below — so `--self-test` can pin the shape with no repo state.
+ *
+ * @param {string|null} head       `git rev-parse HEAD`
+ * @param {string|null} parentLine `git log -1 --format=%P HEAD` — space-separated
+ * @param {string|null} diffBase   the resolved commit the diff was measured from
+ * @param {string|null} porcelain  `git status --porcelain`; null when the probe failed
+ */
+function computedOnFrom(head, parentLine, diffBase, porcelain) {
+  const one = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+  return {
+    head: one(head),
+    // A root commit has no parents and a failed probe answered nothing: both are the
+    // empty list, never a `['']` entry that reads downstream as a real commit.
+    headParents: typeof parentLine === 'string' ? parentLine.trim().split(/\s+/).filter(Boolean) : [],
+    diffBase: one(diffBase),
+    // "Could not tell" and "checked, clean" are DIFFERENT answers and must not render
+    // alike — the same distinction this tool's output draws everywhere else.
+    dirty: typeof porcelain === 'string' ? porcelain.trim().length > 0 : null,
+  };
+}
+
+/**
+ * Name the tree this run's answer is a fact ABOUT (#9519).
+ *
+ * The row set is a function of two commits and, until this field, the JSON named
+ * neither by anything stable. The pages are read with `readFileSync` from the WORKING
+ * TREE (`docTexts`, §3b) — not from any ref — and the change set is a diff whose base
+ * was published only as `sinceRef`, a moving NAME (`origin/main`), never a commit.
+ *
+ * On a `pull_request` run `actions/checkout` checks out merge(base, head), so the
+ * advisory is a fact about a tree that exists on no branch the reader can name and that
+ * GitHub drops once the PR closes. `headParents` is the durable handle on it: both
+ * parents stay fetchable, and re-merging them rebuilds the same tree.
+ *
+ * `diffBase` is the merge-base §2 already resolved, not `sinceRef` re-read here, and
+ * that distinction is what makes it reproducible: the diff is three-dot, so re-running
+ * with `origin/main` a day later measures from the same merge-base while re-running
+ * with THIS sha measures from it by construction — even from a clone whose `origin/main`
+ * has moved. Naming the commit is what makes the command replayable; naming the branch
+ * is what made it a trap.
+ *
+ * Measured cost of leaving all of it unsaid: a reader re-derived in a worktree cut from
+ * an older `main`, one page had gained an anchor token on `main` in between, and a
+ * correct row was reported as a false positive. The follow-up then investigated a defect
+ * class that does not exist in this tool — the anchor set is derived fresh per run, with
+ * no cache, index or snapshot anywhere — and cost a full round.
+ *
+ * `dirty` is this field's own correctness guard, not decoration: the tool reads the
+ * working tree, so with uncommitted changes present the shas do NOT identify what was
+ * read. A sha that misidentifies the tree is worse than no sha — the same defect, now
+ * wearing a credential.
+ *
+ * ⛔ Read-only, and deliberately evaluated HERE, at the emit boundary after every
+ * derivation has finished, so it cannot participate in deriving anything. Every probe
+ * degrades to `null` rather than throwing: this is a courtesy label on an advisory and
+ * must never be the reason a scan fails.
+ */
+function computedOnIdentity() {
+  const probe = (cmd) => { try { return sh(cmd); } catch { return null; } };
+  return computedOnFrom(
+    probe('git rev-parse HEAD'),
+    probe('git log -1 --format=%P HEAD'),
+    diffBaseRef === null ? null : probe(`git rev-parse --verify --quiet ${JSON.stringify(`${diffBaseRef}^{commit}`)}`),
+    probe('git status --porcelain'),
+  );
+}
+
 function emit(docList, changedPackages, summary, detail, skipped = {}, anchorInfo = {}) {
   const { testFilesSkipped = 0, scriptFilesSkipped = 0, devOnlyManifestsSkipped = 0 } = skipped;
   const {
@@ -2085,6 +2202,10 @@ function emit(docList, changedPackages, summary, detail, skipped = {}, anchorInf
         {
           summary,
           sinceRef: all ? null : sinceRef,
+          // WHICH TREE THIS ANSWER IS A FACT ABOUT (#9519). `sinceRef` above is a NAME
+          // and names move; the pages were read from the WORKING TREE, which no field
+          // named at all. See `computedOnIdentity` for what each member is for.
+          computedOn: computedOnIdentity(),
           changedPackages,
           // The FULL set, release-owned pages included — this is what feeds the audit
           // workflow's `args.docs`, and #4920 requires those pages to stay audited.

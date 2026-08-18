@@ -27,10 +27,9 @@
  * one-second-local verification with a verdict (#9187). This thin wrapper is
  * the fix: it satisfies the naming convention AND stays runnable in a job that
  * never installs pnpm, by using the SAME direct-`node`-invocation shape every
- * other zero-pnpm-setup workflow gate already uses
- * (`check-adr-merge-approval.mjs`, `check-adr-links.mjs`, …) — never a `pnpm`
- * wrapper, which would reintroduce the exact breakage this file exists to
- * avoid.
+ * other zero-pnpm-setup workflow gate already uses (`check-adr-links.mjs`,
+ * `check-partof-closing-keyword.mjs`, …) — never a `pnpm` wrapper, which
+ * would reintroduce the exact breakage this file exists to avoid.
  *
  * Spawned, not imported, so a card that touches the mapper's own logic is
  * matched via the CI trigger `docs-drift-check.yml` already declares

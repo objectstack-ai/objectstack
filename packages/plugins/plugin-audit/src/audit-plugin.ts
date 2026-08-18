@@ -14,8 +14,43 @@ import { SysAuditLog, SysActivity, SysComment } from './objects/index.js';
 // @objectstack/service-storage for the same ownership reason (ADR-0052 §3: a
 // file↔record link belongs with storage, not the compliance ledger).
 import { installAuditWriters, type AuditI18nSurface, type MessagingEmitSurface } from './audit-writers.js';
+import { installReadAuditWriter, type ReadAuditWriterHandle } from './read-audit.js';
 import { createAuthEventAuditSink } from './auth-event-audit.js';
 import { installCommentAccessHooks, installCommentReadVisibility } from './comment-access-hooks.js';
+
+/**
+ * [#8992] Read/view audit configuration — the per-object opt-in, closed.
+ *
+ * Not a global flag with exceptions: the maintainer's 2026-08-16 ruling chose a
+ * closed opt-in deliberately, because on a compliance surface the failure modes
+ * of the two shapes are not symmetric. A global flag that forgets an exception
+ * over-collects (noisy, expensive, and it buries the views an auditor is
+ * looking for); an opt-in that forgets an object under-collects, which is
+ * visible the moment anyone asks the question this capability exists to answer.
+ */
+export interface AuditPluginReadAuditOptions {
+  /**
+   * Objects whose RECORD-DETAIL views are recorded as `read` rows in
+   * `sys_audit_log`. Absent or empty installs no hook at all — a deployment
+   * that opts nothing in pays nothing on its read path.
+   *
+   * ⛔ Scope is record-detail views only (a read that materialized one record
+   * and pinned its primary key). List and search results are NOT audited: that
+   * is a deferred follow-up, and a deferral that leaked rows anyway would not
+   * be one.
+   */
+  objects?: readonly string[];
+  /** Flush once this many views are buffered. Default 50. */
+  maxBatchSize?: number;
+  /** Flush this long after the first view of a batch. Default 2000ms. */
+  flushIntervalMs?: number;
+}
+
+/** Constructor options for {@link AuditPlugin}. */
+export interface AuditPluginOptions {
+  /** [#8992] Record-view auditing. Off unless objects are named. */
+  readAudit?: AuditPluginReadAuditOptions;
+}
 
 /**
  * AuditPlugin
@@ -38,6 +73,16 @@ export class AuditPlugin implements Plugin {
    * field to mean.
    */
   providesServices = ['audit'];
+
+  /**
+   * [#8992] The record-view writer's handle, held so `destroy()` can flush the
+   * tail. A batched ledger that never flushes on shutdown loses its last batch
+   * on every clean restart — silently, because the reads it describes all
+   * succeeded.
+   */
+  private readAuditWriter: ReadAuditWriterHandle | null = null;
+
+  constructor(private readonly options: AuditPluginOptions = {}) {}
 
   async init(ctx: PluginContext): Promise<void> {
     // Register audit system objects via the manifest service.
@@ -161,6 +206,28 @@ export class AuditPlugin implements Plugin {
       };
       installAuditWriters(engine as any, this.name, { getMessaging, getI18n, getLocale });
       ctx.logger.info('AuditPlugin: audit + activity writers installed');
+
+      // [#8992] Record-view auditing — the `read` half of the ledger. Installed
+      // only over the objects this deployment opted in, and returns null when
+      // that set is empty, so the default posture costs a read exactly nothing.
+      const readAuditObjects = this.options.readAudit?.objects ?? [];
+      this.readAuditWriter = installReadAuditWriter(engine, {
+        objects: readAuditObjects,
+        packageId: this.name,
+        logger: ctx.logger,
+        ...(this.options.readAudit?.maxBatchSize !== undefined
+          ? { maxBatchSize: this.options.readAudit.maxBatchSize }
+          : {}),
+        ...(this.options.readAudit?.flushIntervalMs !== undefined
+          ? { flushIntervalMs: this.options.readAudit.flushIntervalMs }
+          : {}),
+      });
+      if (this.readAuditWriter) {
+        ctx.logger.info(
+          `AuditPlugin: record-view auditing installed on ${this.readAuditWriter.auditedObjects.length} object(s) — `
+            + `${this.readAuditWriter.auditedObjects.join(', ')}`,
+        );
+      }
 
       // #4630 — record-level authorization for sys_comment: a comment's access
       // derives from the record its `thread_id` names, exactly as an
@@ -305,5 +372,21 @@ export class AuditPlugin implements Plugin {
           '"no such table" even though provisioning succeeded.',
       );
     }
+  }
+
+  /**
+   * [#8992] Flush the record-view tail on shutdown.
+   *
+   * Batching is what keeps the ledger write off the read path, and the price of
+   * a buffer is that a clean shutdown can take the last batch with it. The
+   * views in it already returned 200, so nothing else would ever report the
+   * loss. `stop()` cancels the timer and drains what is left; it never throws
+   * (the batcher's `persist` reports and swallows), so this can never turn a
+   * clean shutdown into a failed one.
+   */
+  async destroy(): Promise<void> {
+    const writer = this.readAuditWriter;
+    this.readAuditWriter = null;
+    if (writer) await writer.stop();
   }
 }

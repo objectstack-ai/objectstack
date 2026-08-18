@@ -72,6 +72,7 @@ const RETIRED_ACTIONS: ReadonlyArray<readonly [action: string, prescription: str
  */
 const ACTIONS_WITH_WRITERS: ReadonlyArray<readonly [action: string, writer: string]> = [
   ['create', 'plugin-audit/src/audit-writers.ts — actionFor(afterInsert)'],
+  ['read', 'plugin-audit/src/read-audit.ts — installReadAuditWriter afterFind hook (#8992)'],
   ['update', 'plugin-audit/src/audit-writers.ts — actionFor(afterUpdate)'],
   ['delete', 'plugin-audit/src/audit-writers.ts — actionFor(afterDelete)'],
   ['login', 'plugin-audit/src/auth-event-audit.ts — createAuthEventAuditSink (#8144)'],

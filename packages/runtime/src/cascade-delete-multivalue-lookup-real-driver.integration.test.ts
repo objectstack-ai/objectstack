@@ -157,26 +157,47 @@ describe('[#9362] REST DELETE on an object targeted by a multiple:true lookup �
         expect(err.status).toBe(409);
     });
 
-    // ── [#9362 -> #9438] The holding position, on the real stack.
+    // ── [#9438] Member removal on the real stack. The residual-shape
+    //    sentence these tests consume is `FieldSchema`'s, not theirs:
+    //    `packages/spec/src/data/field.zod.ts`, the `multiple` and `required`
+    //    doc blocks (#9447, maintainer ruling 2026-08-18). Under the #9437
+    //    holding position each of these deletes was a 409, so the 200s below
+    //    also pin the interim escalation's removal.
 
-    it('a multi-value set_null refuses instead of nulling the array, and the array survives', async () => {
+    it('a multi-value set_null removes the deleted member and the sibling reference survives', async () => {
         const { protocol, real } = await rig([ACCOUNT, FIELD_ZOO]);
         const a: any = await engine!.insert('zz_account', { id: 'acc_a', name: 'A' });
         await engine!.insert('zz_account', { id: 'acc_b', name: 'B' });
         await engine!.insert('zz_field_zoo', { id: 'z1', name: 'z', f_lookups: ['acc_a', 'acc_b'] });
 
-        const err: any = await protocol
-            .deleteData({ object: 'zz_account', id: a.id })
-            .catch((e: any) => e);
-        expect(err.code).toBe('DELETE_RESTRICTED');
-        expect(err.status).toBe(409);
-        expect(err.developerMessage).toContain('objectstack#9438');
+        const res = await protocol.deleteData({ object: 'zz_account', id: a.id });
+        expect(res).toMatchObject({ object: 'zz_account', id: a.id, success: true });
 
-        // Read the stored array back out of the DATABASE. Before the hold this
-        // re-read as `null`, taking `acc_b` with it.
+        // Read the stored array back out of the DATABASE, on the driver's own
+        // connection. Before the fix this slot re-read as `null`, taking
+        // `acc_b` with it; under the interim hold the delete was a 409.
         const [row]: any[] = await real.find('zz_field_zoo', { where: { id: 'z1' } });
-        expect(row.f_lookups).toEqual(['acc_a', 'acc_b']);
-        expect(await real.count('zz_account')).toBe(2);
+        expect(row.f_lookups).toEqual(['acc_b']);
+        // …and the surviving member still resolves to a live record.
+        expect(await real.count('zz_account', { where: { id: 'acc_b' } })).toBe(1);
+        expect(await real.count('zz_account')).toBe(1);
+    });
+
+    it('removing the LAST member stores `[]`, never `null` — the ruled representation, in the database', async () => {
+        const { protocol, real } = await rig([ACCOUNT, FIELD_ZOO]);
+        const a: any = await engine!.insert('zz_account', { id: 'acc_a', name: 'A' });
+        await engine!.insert('zz_field_zoo', { id: 'z1', name: 'z', f_lookups: ['acc_a'] });
+
+        const res = await protocol.deleteData({ object: 'zz_account', id: a.id });
+        expect(res).toMatchObject({ id: 'acc_a', success: true });
+
+        const [row]: any[] = await real.find('zz_field_zoo', { where: { id: 'z1' } });
+        // The literal shape, asserted both ways: `[]`, not `null` — this is
+        // the observable half of the #9447 ruling, proved against what the
+        // real driver actually stored and read back.
+        expect(row.f_lookups).toEqual([]);
+        expect(row.f_lookups).not.toBeNull();
+        expect(Array.isArray(row.f_lookups)).toBe(true);
     });
 
     it('a multi-value CASCADE still deletes end to end — the P0 closes for that path', async () => {

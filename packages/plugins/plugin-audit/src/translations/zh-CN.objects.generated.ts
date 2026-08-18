@@ -22,6 +22,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "操作类型（snake_case）",
         options: {
           create: "创建",
+          read: "查看",
           update: "更新",
           delete: "删除",
           login: "登录",
@@ -85,6 +86,13 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       auth_events: {
         label: "认证"
+      },
+      record_views: {
+        label: "记录查看",
+        emptyState: {
+          title: "暂无记录查看日志",
+          message: "记录查看审计按对象开启。将对象加入审计插件的 readAudit.objects 列表后，有人打开其记录时便会显示在这里。"
+        }
       },
       config_changes: {
         label: "配置"

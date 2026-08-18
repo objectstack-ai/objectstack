@@ -188,6 +188,10 @@ const DURABILITY_CRITICAL_CALLEES = new Map([
         'The compliance audit row was never written — the audited write itself succeeded and returned 200, so the API, the data and every counter read clean, while the `sys_audit_log` entry that records WHO did it is simply absent and nothing retries it. The gap surfaces, if ever, to an auditor who cannot connect it back to the write (#5226, the #4420 shape on the compliance ledger).',
     ],
     [
+        'persistReadAuditRows',
+        'A batch of compliance record-VIEW rows was never written — the reads themselves succeeded and returned 200, so the API, the screens and every counter read clean, while the `sys_audit_log` rows recording WHO opened those records are simply absent and nothing retries them. Worse than the write-side shape it mirrors: these rows are written from a BUFFER off the request path, so there is no in-flight request left to notice, and the shipped `record_views` list view answers "who viewed this record" with a confident, wrong, SHORT list (#8992, the #5226 shape on the read seam).',
+    ],
+    [
         'persistAuthEventAuditRow',
         'The compliance audit row for a sign-in / sign-out was never written — the auth request itself succeeded and the user holds a valid session, so the API, the cookie and every counter read clean, while the `sys_audit_log` row recording WHO signed in is simply absent and nothing retries it. The shipped `auth_events` list view and the system-overview widgets read exactly those rows, so the screen an operator checks stays empty and healthy-looking (#8144, the #5226 shape on the auth seam).',
     ],

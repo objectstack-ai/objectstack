@@ -22,6 +22,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Tipo de acción (snake_case).",
         options: {
           create: "Crear",
+          read: "Lectura",
           update: "Actualizar",
           delete: "Eliminar",
           login: "Inicio de sesión",
@@ -85,6 +86,13 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       auth_events: {
         label: "Autenticación"
+      },
+      record_views: {
+        label: "Vistas de registro",
+        emptyState: {
+          title: "No hay vistas de registro",
+          message: "La auditoría de vistas de registro se activa por objeto. Las filas aparecen aquí cuando se añade un objeto a la lista readAudit.objects del plugin de auditoría y alguien abre uno de sus registros."
+        }
       },
       config_changes: {
         label: "Configuración"

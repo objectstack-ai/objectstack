@@ -225,6 +225,40 @@ const PROBES: ReadonlyArray<{ file: string; re: RegExp; key: (m: RegExpExecArray
     key: () => tripwireKey('realtime:rest-server.ts:route'),
   },
 
+  // ── #9410 — the tripwire population's DELIBERATE boundary ─────────────
+  //
+  // `packages/runtime/src/dispatcher-plugin.ts` is NOT in the list above, and
+  // that is a decision on record rather than an oversight — read this before
+  // concluding it was simply missed. It has both properties that make a file a
+  // plausible landing site for a realtime transport: it mounts routes
+  // (`/actions`, `/automation`, `/packages` — the separate registration path
+  // named in the #5519 note above, which is a DIFFERENT point about anonymous
+  // gates, not this one), and it already writes SSE — content type,
+  // `no-cache`, `keep-alive` and all.
+  //
+  // Its two `text/event-stream` sites are nevertheless outside the #2992
+  // tripwire set, because they are per-request AI response streaming, not
+  // realtime subscription fan-out: each drains one `AsyncIterable` that the
+  // route handler itself returned into that same request's response body, then
+  // calls `res.end()`. No subscriber is registered, no event is delivered to a
+  // SET of recipients, and the file carries no upgrade handler, no subscribe
+  // registration and no realtime-service call. Watching them with the mechanics
+  // pattern would mint a TRANSPORT-WIRED key on day one for a surface that is
+  // not the hazard #2992 is about, and the only exits from that red would be to
+  // classify two non-realtime sites in the matrix vocabulary or to weaken the
+  // pattern — so this record adds no probe, no key and no matrix row.
+  //
+  // ⚠️ The boundary is drawn on FAN-OUT, not on the SSE content type. Wire an
+  // actual subscription transport into that file — an upgrade handler, a
+  // subscribe registration, a realtime-service call — and it is back inside the
+  // hazard while this paragraph still says otherwise: nothing here will fail
+  // for you. Promoting the file into the population with a fan-out-specific
+  // marker (NOT the bare content type, which is precisely what would over-match
+  // the two sites above) is written into #8347's acceptance as a precondition
+  // of the WS/SSE transport landing. The twin record, for a reader arriving
+  // from the docs side, is the identity-admission callout in
+  // `content/docs/protocol/kernel/realtime-protocol.mdx`.
+
   // ── ADR-0096 / #3167 — MCP execution-surface identity pins ─────────────
   // (1) The HTTP `/mcp` handler must stay classified (a new sibling MCP data
   // handler → UNCLASSIFIED). (2) Its caller-identity threading: handleMcp must

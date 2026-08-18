@@ -89,9 +89,9 @@ const guard: ServiceObject = {
 };
 
 /** Multi-value, `set_null` spelled OUT — `||` collapses it with the default. */
-const holdExplicit: ServiceObject = {
-  name: 'mv_hold_explicit',
-  label: 'Hold (explicit set_null)',
+const explicitSetNull: ServiceObject = {
+  name: 'mv_explicit_set_null',
+  label: 'Explicit set_null',
   fields: {
     id: { name: 'id', label: 'ID', type: 'text' as const },
     accounts: {
@@ -145,7 +145,7 @@ const opp: ServiceObject = {
 const JSON_COLUMNS: Record<string, readonly string[]> = {
   mv_zoo: ['f_lookups'],
   mv_guard: ['accounts'],
-  mv_hold_explicit: ['accounts'],
+  mv_explicit_set_null: ['accounts'],
   mv_cascade_multi: ['accounts'],
 };
 
@@ -309,7 +309,7 @@ describe('[#9362] the dependents probe reads a multi-value reference field the w
     probes = stub.probes;
     engine.registerDriver(stub.driver, true);
     await engine.init();
-    for (const o of [acct, zoo, guard, opp, holdExplicit, cascadeMulti, singleSetNull]) {
+    for (const o of [acct, zoo, guard, opp, explicitSetNull, cascadeMulti, singleSetNull]) {
       engine.registry.registerObject(o, OWNER_PACKAGE);
     }
   });
@@ -459,22 +459,27 @@ describe('[#9362] the dependents probe reads a multi-value reference field the w
 });
 
 /**
- * [#9362 -> #9438] The holding position: a `set_null` limb aimed at a
- * SET-valued foreign key refuses instead of writing.
+ * [#9438] `set_null` on a SET-valued foreign key removes the deleted MEMBER
+ * and writes what remains; the emptied set is written as `[]`, never `null`.
  *
- * Maintainer-ruled (option B) as a temporary measure to ship alongside the
- * probe repair above. The limb it holds back writes `null` over the whole
- * array, dropping every other member; the correct semantics is #9438's to
- * decide. Refusing decides nothing and is reversible; writing decides it by
- * accident and is not.
+ * The residual-shape sentence is NOT this suite's finding: `FieldSchema` pins
+ * it (`packages/spec/src/data/field.zod.ts`, the `multiple` and `required`
+ * doc blocks — #9447, maintainer ruling 2026-08-18, binding for every
+ * writer). This suite pins that the cascade repair CONSUMES that contract.
  *
- * The suite is written OVER-FIRE FIRST, because that is the way this guard can
- * re-break what the probe repair just fixed: every disposition it must NOT
- * touch — single-valued `set_null`, multi-value `cascade`, an already-declared
- * `restrict`, and a relation with no dependents at all — is asserted here
- * beside the two it must catch.
+ * The #9437 holding position — refusing these deletes 409 while the residual
+ * shape was undecided — is REMOVED by the same change, so the success pins
+ * here are also the revert's pins: under the hold every one of them was a
+ * `DELETE_RESTRICTED` refusal.
+ *
+ * Controls stay OVER-FIRE FIRST, as the hold's suite had them: single-valued
+ * `set_null`, multi-value `cascade`, an already-declared `restrict`, and a
+ * relation with no dependents are asserted beside the member-removal pins.
+ * The single-valued control is non-vacuous in the WIDEN direction (treat
+ * every field as multi-valued and it goes red on the array write), not under
+ * a removal ablation.
  */
-describe('[#9362 -> #9438] set_null on a multi-value reference refuses instead of nulling the array', () => {
+describe('[#9438] set_null on a multi-value reference removes the deleted member', () => {
   let engine: ObjectQL;
   let stores: Map<string, Map<string, Record<string, unknown>>>;
 
@@ -484,60 +489,99 @@ describe('[#9362 -> #9438] set_null on a multi-value reference refuses instead o
     stores = stub.stores;
     engine.registerDriver(stub.driver, true);
     await engine.init();
-    for (const o of [acct, zoo, guard, opp, holdExplicit, cascadeMulti, singleSetNull]) {
+    for (const o of [acct, zoo, guard, opp, explicitSetNull, cascadeMulti, singleSetNull]) {
       engine.registry.registerObject(o, OWNER_PACKAGE);
     }
   });
 
-  // ── FIRES — and the array is still intact afterwards.
+  // ── The write: member removal, on both spellings of set_null.
 
-  it('a DEFAULTED set_null on a multi-value field refuses, and writes nothing', async () => {
+  it('a DEFAULTED set_null removes the deleted member and keeps the rest', async () => {
     const a = await engine.insert('mv_acct', { id: 'acc_a', name: 'A' });
     await engine.insert('mv_acct', { id: 'acc_b', name: 'B' });
     await engine.insert('mv_zoo', { id: 'z1', name: 'z', f_lookups: ['acc_a', 'acc_b'] });
 
-    const err: any = await engine.delete('mv_acct', { where: { id: a.id } } as any).catch((e) => e);
-    expect(err.code).toBe('DELETE_RESTRICTED');
-    expect(err.status).toBe(409);
-    expect(err.dependentObject).toBe('mv_zoo');
-    expect(err.dependentCount).toBe(1);
-    // The whole point: the sibling reference is still there.
-    expect(stores.get('mv_zoo')?.get('z1')?.f_lookups).toEqual(['acc_a', 'acc_b']);
-    expect(stores.get('mv_acct')?.has('acc_a')).toBe(true);
+    await engine.delete('mv_acct', { where: { id: a.id } } as any);
+
+    expect(stores.get('mv_acct')?.has('acc_a')).toBe(false);
+    // The whole point of the card: the sibling reference SURVIVES, and the
+    // record it points at is still there to resolve.
+    expect(stores.get('mv_zoo')?.get('z1')?.f_lookups).toEqual(['acc_b']);
+    expect(stores.get('mv_acct')?.has('acc_b')).toBe(true);
   });
 
-  it('an EXPLICITLY authored set_null on a multi-value field refuses too', async () => {
+  it('an EXPLICITLY authored set_null takes the same member removal', async () => {
     // `fdef.deleteBehavior || 'set_null'` collapses the absent declaration and
-    // this one into the same value, which is why one `if` covers both — the
-    // same reason the required-FK escalation beside it covers both.
+    // this one into the same value — both spellings take the same write.
     const a = await engine.insert('mv_acct', { id: 'acc_a', name: 'A' });
-    await engine.insert('mv_hold_explicit', { id: 'h1', accounts: ['acc_a'] });
+    await engine.insert('mv_acct', { id: 'acc_b', name: 'B' });
+    await engine.insert('mv_explicit_set_null', { id: 'h1', accounts: ['acc_a', 'acc_b'] });
 
-    const err: any = await engine.delete('mv_acct', { where: { id: a.id } } as any).catch((e) => e);
-    expect(err.code).toBe('DELETE_RESTRICTED');
-    expect(err.status).toBe(409);
-    expect(err.dependentObject).toBe('mv_hold_explicit');
-    expect(stores.get('mv_hold_explicit')?.get('h1')?.accounts).toEqual(['acc_a']);
+    await engine.delete('mv_acct', { where: { id: a.id } } as any);
+
+    expect(stores.get('mv_explicit_set_null')?.get('h1')?.accounts).toEqual(['acc_b']);
   });
 
-  it('the refusal names the hold as TEMPORARY and points at #9438, on the developer half only', async () => {
+  it('removing the LAST member writes `[]`, never `null` — the ruled representation', async () => {
     const a = await engine.insert('mv_acct', { id: 'acc_a', name: 'A' });
     await engine.insert('mv_zoo', { id: 'z1', name: 'z', f_lookups: ['acc_a'] });
 
-    const err: any = await engine.delete('mv_acct', { where: { id: a.id } } as any).catch((e) => e);
-    expect(err.developerMessage).toContain('TEMPORARY');
-    expect(err.developerMessage).toContain('objectstack#9438');
-    expect(err.developerMessage).toContain('multiple: true');
-    // The BUSINESS sentence is the ordinary one — the user's action is the
-    // same, and #7307 keeps the machine detail off this half.
-    expect(err.message).not.toContain('9438');
-    // And the wire code does not split (operation-message.ts's own rule).
-    expect(err.code).toBe('DELETE_RESTRICTED');
+    await engine.delete('mv_acct', { where: { id: a.id } } as any);
+
+    const stored = stores.get('mv_zoo')?.get('z1')?.f_lookups;
+    // Assert the literal shape, both ways: the contract sentence is exactly
+    // "`[]`, never `null`" (field.zod.ts, `multiple` doc block).
+    expect(stored).toEqual([]);
+    expect(stored).not.toBeNull();
+    expect(Array.isArray(stored)).toBe(true);
   });
 
-  // ── DOES NOT FIRE — four dispositions the hold must leave alone.
+  it('removal compares WHOLE members — an id keeps a member it is only a prefix of', async () => {
+    // The probe pushdown is a substring superset; the write must not be.
+    const a = await engine.insert('mv_acct', { id: 'acc_1', name: 'one' });
+    await engine.insert('mv_acct', { id: 'acc_10', name: 'ten' });
+    await engine.insert('mv_zoo', { id: 'z1', name: 'z', f_lookups: ['acc_1', 'acc_10'] });
 
-  it('a SINGLE-valued set_null still clears the foreign key, exactly as before', async () => {
+    await engine.delete('mv_acct', { where: { id: a.id } } as any);
+
+    expect(stores.get('mv_zoo')?.get('z1')?.f_lookups).toEqual(['acc_10']);
+  });
+
+  it('every dependent row loses the member, each keeping its own others', async () => {
+    const a = await engine.insert('mv_acct', { id: 'acc_a', name: 'A' });
+    await engine.insert('mv_acct', { id: 'acc_b', name: 'B' });
+    await engine.insert('mv_zoo', { id: 'z1', name: 'z1', f_lookups: ['acc_a', 'acc_b'] });
+    await engine.insert('mv_zoo', { id: 'z2', name: 'z2', f_lookups: ['acc_a'] });
+    await engine.insert('mv_zoo', { id: 'z3', name: 'z3', f_lookups: ['acc_b'] });
+
+    await engine.delete('mv_acct', { where: { id: a.id } } as any);
+
+    expect(stores.get('mv_zoo')?.get('z1')?.f_lookups).toEqual(['acc_b']);
+    expect(stores.get('mv_zoo')?.get('z2')?.f_lookups).toEqual([]);
+    // A row that never referenced the deleted record is not touched.
+    expect(stores.get('mv_zoo')?.get('z3')?.f_lookups).toEqual(['acc_b']);
+  });
+
+  // ── The refusal channel: plain policy again, no interim sentence.
+
+  it("an already-declared multi-value restrict refuses with its OWN sentence — the interim's is gone", async () => {
+    const a = await engine.insert('mv_acct', { id: 'acc_a', name: 'A' });
+    await engine.insert('mv_guard', { id: 'g1', name: 'g', accounts: ['acc_a'] });
+
+    const err: any = await engine.delete('mv_acct', { where: { id: a.id } } as any).catch((e) => e);
+    expect(err.code).toBe('DELETE_RESTRICTED');
+    expect(err.status).toBe(409);
+    expect(err.dependentObject).toBe('mv_guard');
+    // Configured policy only: the holding-position wording must not outlive
+    // the hold (it cited its card literally so that this grep is possible).
+    expect(err.developerMessage).not.toContain('TEMPORARY');
+    expect(err.developerMessage).not.toContain('9438');
+    expect(stores.get('mv_guard')?.get('g1')?.accounts).toEqual(['acc_a']);
+  });
+
+  // ── Controls the removal must leave alone.
+
+  it('a SINGLE-valued set_null still clears the foreign key to null, exactly as before', async () => {
     const a = await engine.insert('mv_acct', { id: 'acc_a', name: 'A' });
     await engine.insert('mv_single', { id: 's1', account: 'acc_a' });
 
@@ -547,7 +591,7 @@ describe('[#9362 -> #9438] set_null on a multi-value reference refuses instead o
     expect(stores.get('mv_single')?.get('s1')?.account).toBeNull();
   });
 
-  it('a multi-value CASCADE still deletes the dependents (the P0 closes for this path)', async () => {
+  it('a multi-value CASCADE still deletes the dependents', async () => {
     const a = await engine.insert('mv_acct', { id: 'acc_a', name: 'A' });
     await engine.insert('mv_cascade_multi', { id: 'c1', accounts: ['acc_a'] });
 
@@ -557,23 +601,10 @@ describe('[#9362 -> #9438] set_null on a multi-value reference refuses instead o
     expect(stores.get('mv_cascade_multi')?.has('c1')).toBe(false);
   });
 
-  it('an already-declared multi-value restrict refuses with its OWN sentence, not the hold\'s', async () => {
-    const a = await engine.insert('mv_acct', { id: 'acc_a', name: 'A' });
-    await engine.insert('mv_guard', { id: 'g1', name: 'g', accounts: ['acc_a'] });
-
-    const err: any = await engine.delete('mv_acct', { where: { id: a.id } } as any).catch((e) => e);
-    expect(err.code).toBe('DELETE_RESTRICTED');
-    expect(err.dependentObject).toBe('mv_guard');
-    // Configured policy, not a holding position — the two must stay tellable
-    // apart, which is the whole reason the sentence splits.
-    expect(err.developerMessage).not.toContain('9438');
-    expect(err.developerMessage).not.toContain('TEMPORARY');
-  });
-
-  it('a multi-value set_null relation with NO dependent rows still deletes (the card\'s P0 repro)', async () => {
+  it('a multi-value set_null relation with NO dependent rows still deletes', async () => {
     const a = await engine.insert('mv_acct', { id: 'acc_a', name: 'A' });
     expect(stores.get('mv_zoo')?.size ?? 0).toBe(0);
-    expect(stores.get('mv_hold_explicit')?.size ?? 0).toBe(0);
+    expect(stores.get('mv_explicit_set_null')?.size ?? 0).toBe(0);
 
     await engine.delete('mv_acct', { where: { id: a.id } } as any);
 

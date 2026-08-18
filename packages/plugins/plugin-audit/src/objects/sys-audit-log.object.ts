@@ -72,6 +72,27 @@ export const SysAuditLog = ObjectSchema.create({
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
     },
+    // [#8992] The `read` action's shipped surface. A ledger value with no view
+    // is half of the empty-widget defect the 2026-08-12 ruling named; this card
+    // adds the action and the screen that answers its question in one stroke.
+    // `record_views` is the "who viewed this record" query as a list: actor
+    // first, because that is the column an auditor scans.
+    record_views: {
+      type: 'grid',
+      name: 'record_views',
+      label: 'Record Views',
+      data: { provider: 'object', object: 'sys_audit_log' },
+      columns: ['created_at', 'user_id', 'object_name', 'record_id', 'ip_address'],
+      filter: [{ field: 'action', operator: 'in', value: ['read'] }],
+      sort: [{ field: 'created_at', order: 'desc' }],
+      pagination: { pageSize: 50 },
+      emptyState: {
+        title: 'No record views recorded',
+        message:
+          'Record-view auditing is opt-in per object. Rows appear here once an object is added to the audit '
+          + "plugin's readAudit.objects list and someone opens one of its records.",
+      },
+    },
     config_changes: {
       type: 'grid',
       name: 'config_changes',
@@ -135,8 +156,17 @@ export const SysAuditLog = ObjectSchema.create({
     // and silently, because every field here is `readonly: true` and
     // `validateRecord` skips readonly fields, so nothing would ever go red.
     // See #8147 for the escalation.
+    // [#8992, maintainer ruling 2026-08-16] `read` joins the enum WRITER-FIRST,
+    // which is the only way a value is allowed back onto this surface (the
+    // docblock in `sys-audit-log-retired-actions.test.ts` states the rule and
+    // the pin enforces it). Its writer is `read-audit.ts`'s `afterFind` hook,
+    // its shipped surface is the `record_views` list view above, and both
+    // landed in the same PR as this line. Scope is the ruling's MVP:
+    // record-detail views on per-object opt-in, batched off the request path —
+    // so a deployment that opts nothing in never writes one, and the value is
+    // narrow rather than absent (审计面宁窄勿谎).
     action: Field.select(
-      ['create', 'update', 'delete', 'login', 'logout', 'config_change', 'import'],
+      ['create', 'read', 'update', 'delete', 'login', 'logout', 'config_change', 'import'],
       {
         label: 'Action',
         required: true,
