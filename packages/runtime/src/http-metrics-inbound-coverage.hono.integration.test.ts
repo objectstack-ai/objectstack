@@ -226,7 +226,7 @@ describe('#9650 §2 — SEAM A: registering the instrumented proxy back as `http
             name: 'com.objectstack.test.provider',
             version: '1.0.0',
             providesServices: ['http.server'],
-            init: async (ctx: PluginContext) => { ctx.registerService('http.server', { id: 'raw' }); },
+            init: async (ctx: PluginContext) => { ctx.registerService('http.server', {} as unknown as IHttpServer); },
         } as Plugin);
         kernel.use({
             name: 'com.objectstack.test.reregistrar',
@@ -234,7 +234,7 @@ describe('#9650 §2 — SEAM A: registering the instrumented proxy back as `http
             init: async () => {},
             start: async (ctx: PluginContext) => {
                 try {
-                    ctx.registerService('http.server', { id: 'proxy' });
+                    ctx.registerService('http.server', {} as unknown as IHttpServer);
                 } catch (err: any) {
                     registerError = String(err?.message ?? err);
                 }
@@ -250,7 +250,11 @@ describe('#9650 §2 — SEAM A: registering the instrumented proxy back as `http
 
     it('MEASURED: a consumer that resolved `http.server` in an EARLIER start() keeps the raw handle', async () => {
         const resolved: string[] = [];
-        const raw = { id: 'raw' };
+        // Stand-ins for the adapter and the instrumented wrapper. Which one a
+        // consumer holds is decided by IDENTITY, not by a marker property —
+        // `http.server` has a real contract (core-service-contracts.ts:155),
+        // so the lookups below are typed to it rather than erased.
+        const raw = {} as unknown as IHttpServer;
         const kernel = new LiteKernel();
         kernel.use({
             name: 'com.objectstack.test.provider',
@@ -263,7 +267,7 @@ describe('#9650 §2 — SEAM A: registering the instrumented proxy back as `http
             version: '1.0.0',
             init: async () => {},
             start: async (ctx: PluginContext) => {
-                resolved.push(ctx.getService<any>('http.server').id);
+                resolved.push(ctx.getService<IHttpServer>('http.server') === raw ? 'raw' : 'proxy');
             },
         } as Plugin);
         kernel.use({
@@ -271,9 +275,10 @@ describe('#9650 §2 — SEAM A: registering the instrumented proxy back as `http
             version: '1.0.0',
             init: async () => {},
             start: async (ctx: PluginContext) => {
-                const proxy = new Proxy(raw, {
-                    get: (t, p, r) => (p === 'id' ? 'proxy' : Reflect.get(t, p, r)),
-                });
+                // A Proxy is never `===` its target, which is the whole point:
+                // the consumers below can tell which handle they were given
+                // without the stub carrying a marker member.
+                const proxy = new Proxy(raw, {}) as IHttpServer;
                 ctx.replaceService('http.server', proxy);
             },
         } as Plugin);
@@ -282,7 +287,7 @@ describe('#9650 §2 — SEAM A: registering the instrumented proxy back as `http
             version: '1.0.0',
             init: async () => {},
             start: async (ctx: PluginContext) => {
-                resolved.push(ctx.getService<any>('http.server').id);
+                resolved.push(ctx.getService<IHttpServer>('http.server') === raw ? 'raw' : 'proxy');
             },
         } as Plugin);
         await kernel.bootstrap();
