@@ -19,6 +19,15 @@ import { validateActionParams, type ActionSession, type ResolvedActionParam } fr
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IObjectQLEngine, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 import { checkApiExposure } from './api-exposure.js';
+// [#9446] The ONE #9378 status table. Imported rather than re-read here: this
+// door's blanket `FLOW_FAILED` was the second of three readings of one engine
+// result, and a second definition of the rule is what let the doors diverge.
+import {
+    classifyFlowRefusal,
+    flowIsUnknown,
+    flowNotFoundMessage,
+    FLOW_NOT_FOUND_STATUS,
+} from './flow-dispatch-status.js';
 // [#5138] The ONE 404 envelope a single-record path answers. Imported rather
 // than re-spelled so `callData`'s ObjectQL fallback and the protocol service it
 // falls back FROM cannot disagree about what "this id names no row" looks like.
@@ -561,9 +570,32 @@ export function seedFlowActionParams(_deps: ActionExecutionDeps,
  * The ONE implementation both headless surfaces share — the MCP `run_action`
  * tool and the REST `/actions/:object/:action` route (#3915, which is exactly
  * the asymmetry that let this branch exist on only one of them). Throws on a
- * missing automation service and converts a `{ success: false }` engine result
- * into a throw so both callers report failure the same way; returns the raw
+ * missing automation service and converts a refused or failed dispatch into a
+ * throw so both callers report failure the same way; returns the raw
  * automation result otherwise.
+ *
+ * [#9446] **The refusal it throws is the #9378 table, read from the ONE
+ * definition** (`./flow-dispatch-status.js`) that the trigger door reads too:
+ *
+ * | engine exit            | this door answers          |
+ * |------------------------|----------------------------|
+ * | flow not found         | `404`                      |
+ * | flow disabled          | `409` `FLOW_DISABLED`      |
+ * | flow has no start node | `422` `FLOW_NO_START_NODE` |
+ * | ran and failed         | `400` `FLOW_FAILED`        |
+ *
+ * Maintainer ruling (2026-08-18, verbatim 「同意」): the table is a property of
+ * the flow-dispatch CONTRACT, not of the trigger route, so this door converges
+ * on it rather than keeping its own reading. It used to map EVERY
+ * `success: false` to `400 FLOW_FAILED` under a comment asserting "The flow
+ * RAN and rejected" — a false statement for the two never-dispatched exits it
+ * caught, told to a caller whose only machine-readable signal is that code.
+ *
+ * The throw carries `status` and `code` and the route serves them through
+ * `errorFromThrown`; `error.details` is whatever `resolveThrownHttpError`
+ * reads off a thrown value, so the trigger door's `errorMessage` / `summary`
+ * details do NOT ride this door — see the shared module's note on what the
+ * table deliberately does not answer.
  *
  * Forwarding the caller's identity (rather than just executing the flow) is
  * what lets a `runAs: 'user'` flow enforce RLS as the invoker instead of
@@ -593,6 +625,16 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
     if (!automation) {
         throw new Error(flowActionUnavailableError(action));
     }
+    // [#9446] Row 1 of the table, answered by the SAME optional `getFlow`
+    // registry probe the trigger door uses — the engine's not-found exit
+    // carries no classification, so this is the only way to read it that is not
+    // a regex over its message. A service that omits `getFlow` cannot be asked
+    // and dispatches as before.
+    if (await flowIsUnknown(automation, action.target)) {
+        const err: any = new Error(flowNotFoundMessage(action.target));
+        err.status = FLOW_NOT_FOUND_STATUS;
+        throw err;
+    }
     // Pass a proper AutomationContext (the engine never read the former
     // `triggerData` envelope).
     const result: any = await automation.execute(action.target, {
@@ -604,11 +646,40 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         ...(ec?.tenantId ? { tenantId: ec.tenantId } : {}),
         params: seedFlowActionParams(deps, action, { objectName, record, params, recordId }),
     });
+    // [#9446] Rows 2-4, read off the PRODUCER's classification through the one
+    // shared table. What stood here mapped every `success: false` to
+    // `400 FLOW_FAILED` under a comment claiming "the flow RAN and rejected" —
+    // false for two of the exits it caught, and the producer's own `code` was
+    // available and ignored. A disabled flow invoked through an action told the
+    // caller a run had failed when no node ever executed.
+    const refusal = classifyFlowRefusal(action.target, result);
+    if (refusal) {
+        const err: any = new Error(
+            // The ran-and-failed row keeps THIS door's wording, byte for byte:
+            // it has been on the wire since #3962, the ruling is about status
+            // and code, and re-labelling a message nobody asked about would be
+            // an unruled change riding along. It also names the flow, which
+            // this door needs and the trigger door does not — the flow name is
+            // in that route's URL and is nowhere in this one. The two
+            // never-dispatched rows are NEW here, so they take the shared
+            // table's message: the producer's own words, exactly as the
+            // trigger door serves them.
+            refusal.code === 'FLOW_FAILED'
+                ? `Flow '${action.target}' failed: ${result.error ?? 'unknown error'}`
+                : refusal.message,
+        );
+        err.status = refusal.status;
+        err.code = refusal.code;
+        throw err;
+    }
+    // An UNCLASSIFIED `success: false` still refuses, and `FLOW_FAILED` stays
+    // its answer — deliberately NOT the trigger door's 200. This route settled
+    // in #3962 that failures speak HTTP, so the alternative residual here is
+    // the `200 {success:true,data:{success:false}}` double envelope that
+    // ruling removed. `FLOW_FAILED` is what this exit has answered all along;
+    // narrowing which refusals reach it is this card's change, re-labelling
+    // the residual is not.
     if (result && typeof result === 'object' && 'success' in result && result.success === false) {
-        // The flow RAN and rejected — a deliberate business rejection, served
-        // as a 400 (#3962). Tagging the status/code here (rather than relying
-        // on the route's name heuristic) keeps the semantic `FLOW_FAILED` on
-        // the wire for callers that branch on `err.code`.
         const err: any = new Error(`Flow '${action.target}' failed: ${result.error ?? 'unknown error'}`);
         err.status = 400;
         err.code = 'FLOW_FAILED';

@@ -22,6 +22,13 @@ import { ExecutionStatus } from '@objectstack/spec/automation';
 import { ListRunsRequestSchema } from '@objectstack/spec/api';
 import { parseEnumParam, parseIntegerParam, parseStringParam } from '../query-param.js';
 import { capabilityUnavailable } from './unavailable.js';
+// [#9446] The ONE #9378 status table, now shared with the `/actions` door.
+import {
+    classifyFlowRefusal,
+    flowIsUnknown,
+    flowNotFoundMessage,
+    FLOW_NOT_FOUND_STATUS,
+} from '../flow-dispatch-status.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
@@ -483,6 +490,16 @@ function flowDefinitionRefusal(err: any): unknown {
  * | flow has no start node     | never dispatched   | `422` `FLOW_NO_START_NODE` |
  * | ran and failed (incl. the retry-strategy exits) | ran, rejected | `400` `FLOW_FAILED` |
  *
+ * [#9446] **The table itself now lives in `../flow-dispatch-status.js`** — one
+ * definition, read by this door and by `/actions` (`action-execution.ts`) —
+ * because the maintainer ruled (2026-08-18, verbatim 「同意」) that it is a
+ * property of the flow-dispatch CONTRACT rather than of this route. Everything
+ * below about WHY each row answers as it does is unchanged and is still the
+ * reference for it; what moved is the READING, so no door can drift from the
+ * rule while claiming to implement it. Two things stay here because the table
+ * deliberately does not answer them: the `errorMessage` / `summary` details on
+ * the 400 arm, and the 200 an UNCLASSIFIED refusal still gets at this door.
+ *
  * **404 is answered by the registry probe, not by reading the result.** It is
  * the SAME `getFlow` probe `POST /:name/toggle` (#7535) and `GET /:name` use,
  * so no two doors can disagree about which flows exist — and existence is a
@@ -545,37 +562,28 @@ async function respondToFlowTrigger(
     body: any,
     context: HttpProtocolContext,
 ): Promise<HttpDispatcherResult> {
-    if (typeof automationService.getFlow === 'function') {
-        const existing = await automationService.getFlow(flowName);
-        if (!existing) {
-            return { handled: true, response: deps.error(`Flow '${flowName}' not found`, 404) };
-        }
+    if (await flowIsUnknown(automationService, flowName)) {
+        return {
+            handled: true,
+            response: deps.error(flowNotFoundMessage(flowName), FLOW_NOT_FOUND_STATUS),
+        };
     }
     const result = await automationService.execute(flowName, buildAutomationContext(body, context));
-    if (result?.success === false && result.code === 'FLOW_DISABLED') {
-        return {
-            handled: true,
-            response: deps.error(result.error ?? `Flow '${flowName}' is disabled`, 409, {
-                code: 'FLOW_DISABLED',
-            }),
-        };
-    }
-    if (result?.success === false && result.code === 'FLOW_NO_START_NODE') {
-        return {
-            handled: true,
-            response: deps.error(result.error ?? `Flow '${flowName}' has no start node`, 422, {
-                code: 'FLOW_NO_START_NODE',
-            }),
-        };
-    }
-    if (result?.success === false && result.status === 'failed') {
-        return {
-            handled: true,
-            response: deps.error(result.error ?? 'Flow run failed', 400, {
-                code: 'FLOW_FAILED',
+    const refusal = classifyFlowRefusal(flowName, result);
+    if (refusal) {
+        // The run's own artefacts ride the 400 arm ONLY — they describe a run
+        // that happened. A never-dispatched refusal has no author failure text
+        // and no node log to point at, so emitting either there would be this
+        // door inventing run evidence for a run that never started.
+        const runDetails = refusal.code === 'FLOW_FAILED'
+            ? {
                 ...(result.errorMessage !== undefined ? { errorMessage: result.errorMessage } : {}),
                 ...(result.summary !== undefined ? { summary: result.summary } : {}),
-            }),
+            }
+            : {};
+        return {
+            handled: true,
+            response: deps.error(refusal.message, refusal.status, { code: refusal.code, ...runDetails }),
         };
     }
     return { handled: true, response: deps.success(result) };
