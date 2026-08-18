@@ -431,6 +431,19 @@ import {
 } from '@objectstack/service-automation';
 ```
 
+Types: `AutomationEngineOptions`, `AutomationServicePluginOptions`, `RunSummaryLogLevel`,
+`NodeExecutor`, `NodeExecutionResult`, `SuspensionRelease`, `SuspensionReleaseReason`,
+`FlowTrigger`, `FlowTriggerBinding`, `RegisteredConnector`, `SuspendedRun`,
+`SuspendedRunStore`, `SuspendedRunStoreEngine`, `ObjectStoreSuspendedRunStoreOptions`,
+`RunRecord`, `StepLogEntry`, `UnknownNodeTypeAuditEntry`, `RunDataContext`,
+`RunIdentityContext`, `RunProvenanceContext`, `ConnectorProviderFactory`,
+`ConnectorProviderContext`, `ConnectorMaterialization`, `ConnectorMaterializationHandler`,
+`ConnectorOrigin`, `ConnectorState`, `ConnectorDescriptor`, `ConnectorActionDescriptor`,
+`ConnectorActionHandler`, `ConnectorActionContext`.
+
+The connector types are re-exports from `@objectstack/spec/integration` — connector
+plugins should import them from there rather than coupling to this engine.
+
 `AutomationEngine` is the engine underneath the plugin, exported for hosts that build
 their own kernel integration; `AutomationServicePlugin` is the entry point for everyone
 else. The built-in node installers are functions, not plugins — the platform's
