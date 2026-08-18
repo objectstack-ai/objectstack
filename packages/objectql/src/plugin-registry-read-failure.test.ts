@@ -45,6 +45,13 @@
  * these seams today. The reach that is real is a duck-typed `ql`: an
  * incomplete test double, which #9154 measured shipping in nine suites at once.
  *
+ * One case is labelled PRESERVED rather than fixed, because the ablation said
+ * so: a throwing registry already propagated out of `syncRegisteredSchemas`
+ * before #9285 (its `?.` chain short-circuits on ABSENCE, never on a throw, and
+ * that seam had no `catch`). Seam 2's defect was the structural half alone. The
+ * test is kept — relabelled — because it fails the day someone wraps this read
+ * in a `try/catch`, which is how seam 3 acquired its second swallow.
+ *
  * Every failure case is paired with a POSITIVE CONTROL in the same describe —
  * a genuinely empty registry, and a populated one that still does the work — so
  * a plugin that had stopped syncing/binding/auditing altogether could not pass
@@ -163,7 +170,19 @@ function makePlugin(objects: ServiceObject[], driver?: unknown) {
 // ───────────────────────────────────────────────────────────────────────────
 
 describe('#9285 seam 2 — syncRegisteredSchemas propagates a registry it could not read', () => {
-  it('hands a THROWING registry error to the caller, identity intact', async () => {
+  /**
+   * ⚠️ PRESERVED behaviour, not fixed behaviour — measured, and labelled as
+   * such because reverse verification proved it green in BOTH directions.
+   *
+   * Seam 2's swallow was the OPTIONAL-CHAIN half only: `?? []` never caught
+   * anything, because `?.` short-circuits on absence, not on a throw, and this
+   * seam had no `catch` (unlike seam 3). So a throwing registry propagated here
+   * before #9285 too. This test therefore pins nothing about the fix — its job
+   * is the opposite one, and a real one: it fails the day someone "hardens"
+   * this seam by wrapping the read in a `try/catch`, which is exactly how
+   * seam 3 acquired its second swallow.
+   */
+  it('a THROWING registry already propagated, and must keep propagating (preserved, not fixed)', async () => {
     const { plugin, engine, ctx, rec } = makePlugin([acct], recordingDriver().driver);
     injectRegistryFailure(engine, 'throws');
 
