@@ -993,11 +993,13 @@ function resolveLogCallee(expr, ctx, depth = 0) {
  *
  * The old matcher required the callee to be a plain property access, so it read
  * exactly one spelling. A census of every log-emitting call under `packages/`
- * (3,294 calls, 655 of them inside a `catch`) found SIX shape families:
+ * found SIX shape families — 3,308 calls, 658 of them inside a `catch`
+ * (measured on the tree this landed in; re-run it before trusting the counts,
+ * the SHAPES are the durable part):
  *
  *   | callee shape                                            | calls | in a catch |
  *   |---------------------------------------------------------|------:|-----------:|
- *   | `logger.error(…)` and its `?.` variants                  |  3252 |        642 |
+ *   | `logger.error(…)` and its `?.` variants                  |  3266 |        645 |
  *   | `(logger.error ?? logger.warn)(…)`                        |     6 |          2 |
  *   | `(logger.error ?? logger.warn).call(logger, …)`           |     1 |          0 |
  *   | `((c.warn ?? c.error))?.(…)`                              |     1 |          0 |
