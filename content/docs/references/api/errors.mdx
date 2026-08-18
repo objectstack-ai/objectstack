@@ -40,7 +40,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +46 more>` | ✅ | Machine-readable error code |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +43 more>` | ✅ | Machine-readable error code |
 | **message** | `string` | ✅ | Human-readable error message |
 | **category** | `Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'server' \| 'external' \| 'maintenance'>` | optional | Error category |
 | **httpStatus** | `number` | optional | HTTP status code |
@@ -108,9 +108,6 @@ const result = EnhancedApiErrorSchema.parse(data);
 * `EXTERNAL_SERVICE_ERROR`
 * `INTEGRATION_ERROR`
 * `WEBHOOK_DELIVERY_FAILED`
-* `BATCH_PARTIAL_FAILURE`
-* `BATCH_COMPLETE_FAILURE`
-* `TRANSACTION_FAILED`
 
 
 ---
@@ -294,9 +291,6 @@ const result = EnhancedApiErrorSchema.parse(data);
 * `EXTERNAL_SERVICE_ERROR`
 * `INTEGRATION_ERROR`
 * `WEBHOOK_DELIVERY_FAILED`
-* `BATCH_PARTIAL_FAILURE`
-* `BATCH_COMPLETE_FAILURE`
-* `TRANSACTION_FAILED`
 
 
 ---
