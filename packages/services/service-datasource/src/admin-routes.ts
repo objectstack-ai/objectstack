@@ -13,7 +13,13 @@ import {
   ANONYMOUS_DENY_MESSAGE,
 } from '@objectstack/core';
 import type { ErrorCode } from '@objectstack/spec/api';
-import type { IHttpServer } from '@objectstack/spec/contracts';
+// The slots this module resolves, by their declared contracts. Erasing a
+// lookup to `any` is banned (#4127/#4176/#4202/#4251) and the ban is right
+// here: `IAuthService` is what declares BOTH shapes of the session accessor
+// (`api` and the lazy `getApi()`), so the two-step read below is a checked
+// expression rather than a pair of guesses — the exact gap the rule's own
+// message reports that erasure hiding, on the exact member this guard reads.
+import type { IAuthService, IDataEngine, IHttpServer } from '@objectstack/spec/contracts';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 import { sendOk, sendError } from '@objectstack/types';
 import { DRIVER_CATALOG } from './driver-catalog.js';
@@ -173,16 +179,23 @@ function toWebHeaders(raw: unknown): Headers | undefined {
  * below. A kernel with no auth service simply has no session to present.
  */
 function buildGetSession(ctx: PluginContext): ((headers: Headers) => Promise<unknown>) | undefined {
-  let authService: any;
+  let authService: IAuthService | undefined;
   try {
-    authService = ctx.getService<any>('auth');
+    authService = ctx.getService<IAuthService>('auth');
   } catch {
     return undefined;
   }
   if (!authService) return undefined;
+  // Narrowed once, outside the closure, so the closure body needs no re-check.
+  const service = authService;
   return async (headers: Headers) => {
-    let api: any = authService.api;
-    if (!api && typeof authService.getApi === 'function') api = await authService.getApi();
+    // Both accessors are declared on the contract, and reading only the first
+    // is a known way to get a silent anonymous: the shipped `plugin-auth`
+    // registers an `AuthManager`, which has no `api` member at all, so `api`
+    // alone yields `undefined` on every current deployment and the caller
+    // reads that as "no session". `getApi()` is the accessor to prefer;
+    // `api` is its legacy twin, kept because a provider may still mount it.
+    const api = service.api ?? (await service.getApi?.());
     return api?.getSession?.({ headers });
   };
 }
@@ -266,9 +279,14 @@ export function registerDatasourceAdminRoutes(
         // have one but register it later — every session-authenticated caller
         // refused, with nothing in the registry to show for it.
         const getSession = buildGetSession(ctx);
-        let ql: any;
+        // `IDataEngine` for both spellings: the resolver reads exactly `find`
+        // off this, which is the data plane's own surface, and the same pair
+        // is spelled this way where other services resolve the engine. The
+        // two names are one registration — `packages/objectql` registers one
+        // object under both, two lines apart.
+        let ql: IDataEngine | undefined;
         try {
-          ql = ctx.getService<any>('objectql') ?? ctx.getService<any>('data');
+          ql = ctx.getService<IDataEngine>('objectql') ?? ctx.getService<IDataEngine>('data');
         } catch {
           ql = undefined;
         }
