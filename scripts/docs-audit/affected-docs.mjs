@@ -144,6 +144,9 @@
 import { execSync } from 'node:child_process';
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
+// The one answer to "is this span a comment, or code?" (#9367). Dependency-free and
+// side-effect-free on import, so the no-install contract this script runs under holds.
+import { maskComments } from '../js-comment-mask.mjs';
 
 const repoRoot = execSync('git rev-parse --show-toplevel').toString().trim();
 const args = process.argv.slice(2);
@@ -944,9 +947,40 @@ function symbolAnchorsFromSource(text, changed) {
  * mentions. This is the mechanical half of the SDK bridge: a changed protocol method
  * appears in the handler of the route it serves, which the ledger then binds to a client
  * method the docs actually name.
+ *
+ * ⛔ READ OFF CODE, NEVER OFF PROSE (#9432). Everything this function claims is a claim
+ * about what a handler DOES: the premise the bridge tests is "this symbol IS this route's
+ * implementation, so the handler that implements the route mentions it". A name that a
+ * handler mentions only in an English sentence satisfies a bare token scan without
+ * satisfying that premise — and an implementation comment naming a neighbouring symbol is
+ * ordinary, careful writing, not a smell. Measured on `40d5b2d4c` (#9405, a
+ * `metadata-protocol` batch-publish change): BOTH route anchors the run produced came from
+ * prose and nothing else — `promoteDraftForPublish` from two comment lines in the publish
+ * handler, and `publishPackageDrafts` from two more that put the state-machine route (and
+ * `meta.getLegalNextStates` through the ledger) on the advisory for a diff that never
+ * touched a state machine. Comments contribute 4329 of the 7649 identifier slots this scan
+ * sees on today's tree, so the surface is more than half prose.
+ *
+ * The mask covers the `path:` scan too, not just the identifier scan, and that is the same
+ * rule rather than a second one: a route registration written inside a JSDoc `@example` is
+ * an illustration, not a registration (`route-manager.ts` has exactly one, minting a
+ * phantom `/api/users/:id`), and a `path:` line inside a comment must not truncate the
+ * previous handler's window either. `maskComments` is the projection — this scan reasons in
+ * LINE POSITIONS (a window is 150 lines past a site) and in what precedes `path:` on a
+ * line, and blanking keeps both while deleting would move columns. The #9367 lazy-matcher
+ * hazard does not apply: the one lazy quantifier here is `(.*?)` inside a per-LINE regex,
+ * bounded by a line, never dragged across the file. Cost measured: 115 ms to mask the 19
+ * registrar files (888 KB), taking a whole run from 387 ms to 480 ms.
+ *
+ * Measured cost in RECALL, which is the question the card said to answer before assuming:
+ * ZERO, over the last 60 commits touching `packages/`. Three runs changed at all, and every
+ * row that moved is a wrong row — including the one that looked most like a real loss,
+ * `api/client-sdk.mdx` on `40d5b2d4c`: the hunks that made `promoteDraftForPublish` an
+ * anchor there are DOC-COMMENT-only, so `publishItem`'s behaviour never moved, and the page
+ * names none of the three symbols that did.
  */
 function parseRegistrarSource(text) {
-  const lines = text.split('\n');
+  const lines = maskComments(text).split('\n');
   const sites = [];
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(/(?:^|[\s{,(])path\s*:\s*([`'"])(.*?)\1/);
@@ -1404,6 +1438,84 @@ function selfTest() {
     check('symbolAnchorsFromSource.bridgeable', label, `${name} @ line ${line}`, want, bridgeableAt(src, line).has(name));
   }
 
+  // ---- the handler-window scan reads CODE, never PROSE (#9432) ---------------
+  // #9294 removed CONTAINER names from the bridge, which closed the specimen it measured.
+  // The residue is one layer down and is what this block pins: a LEAF symbol named only in
+  // an English comment inside a handler window bridged just the same.
+  //
+  // MEASURED FAILURE (40d5b2d4c, #9405 — a `metadata-protocol` batch-publish change): BOTH
+  // route anchors that run produced were prose and nothing else.
+  //
+  //   promoteDraftForPublish → /:type/:name/publish   rest-server.ts:5324,5376  (comments)
+  //   publishPackageDrafts   → /:name/state/:field    rest-server.ts:5694,5722  (comments)
+  //
+  // The second one carried `content/docs/protocol/objectql/state-machine.mdx` onto the
+  // advisory (and `meta.getLegalNextStates` through the ledger) for a diff that went
+  // nowhere near a state machine. Neither name is called by the handler that named it;
+  // both sentences are ordinary implementation commentary about a neighbouring door.
+  //
+  // ⚠️ PINNED IN BOTH DIRECTIONS, for the reason #9294's block states: an exclusion-only
+  // test passes just as happily on a fix that breaks the bridge outright, which would trade
+  // a precision bug for the recall hole the bridge exists to fill. So the comment-named leaf
+  // must NOT bridge, the code-named leaf MUST, and the raw scan must still SEE the prose
+  // name — that last one is the counterfactual, and it is what stops this block going green
+  // because the fixture drifted into carrying no comment at all.
+  const commentaryRegistrar = [
+    'export class RestServer {',
+    '    private registerPublishRoutes() {',
+    '        this.routeManager.register({',
+    "            method: 'POST',",
+    '            path: `${metaPath}/:type/:name/publish`,',
+    '            handler: async (req, res) => {',
+    '                // Promotion is authoring. `promoteDraftForPublish` flips the',
+    "                // `sys_metadata` row state: 'draft' → 'active', and ADR-0027",
+    '                // (E)(5) defines sealing a publish as exactly that.',
+    "                const base = 'https://acme.test//v1'; // a URL is not a comment opener",
+    '                return this.publishMetaItem(base, req.params); // seals the draft',
+    '            },',
+    '        });',
+    '    }',
+    '',
+    '    /**',
+    '     * @example',
+    '     * manager.register({',
+    "     *   method: 'GET',",
+    "     *   path: '/api/users/:id',",
+    '     *   handler: getUserHandler,',
+    '     * });',
+    '     */',
+    '    private describeRegistration() {}',
+    '}',
+  ].join('\n');
+  const commentary = parseRegistrarSource(commentaryRegistrar);
+  const publishIds = commentary.get('/:type/:name/publish');
+  check('parseRegistrarSource', 'a leaf the handler actually CALLS is still seen — the bridge is untouched where its premise holds', 'publishMetaItem', true, !!publishIds?.has('publishMetaItem'));
+  check('parseRegistrarSource', 'a leaf named only in an English comment is NOT this route\'s implementation', 'promoteDraftForPublish', false, !!publishIds?.has('promoteDraftForPublish'));
+  check('parseRegistrarSource', 'a `//` inside a STRING opens no comment — this scan rides the shared scanner, not a private regex', 'base + publishMetaItem', true, !!publishIds?.has('base') && !!publishIds?.has('publishMetaItem'));
+  check('parseRegistrarSource', 'a `path:` inside a JSDoc @example is an illustration, not a registration', 'tails', JSON.stringify(['/:type/:name/publish']), JSON.stringify([...commentary.keys()]));
+
+  // The counterfactual, twice: the PRE-FIX scan, verbatim, over the same fixture. Both
+  // halves must still be there to be excluded, or this block proves nothing.
+  const rawWindowIds = (src, siteFragment) => {
+    const ls = src.split('\n');
+    const start = ls.findIndex((l) => l.includes(siteFragment));
+    const ids = new Set();
+    for (let j = start; j >= 0 && j < Math.min(ls.length, start + REGISTRAR_HANDLER_WINDOW); j++) {
+      for (const m of ls[j].matchAll(/[A-Za-z_$][\w$]*/g)) ids.add(m[0]);
+    }
+    return ids;
+  };
+  check('parseRegistrarSource', 'counterfactual: the bare-token scan DID read the prose name out of that window', 'promoteDraftForPublish', true, rawWindowIds(commentaryRegistrar, ':type/:name/publish').has('promoteDraftForPublish'));
+  check('parseRegistrarSource', 'counterfactual: that @example line DID match the registration-site regex', '/api/users/:id', '/api/users/:id', routeTailOf(commentaryRegistrar.split('\n').find((l) => l.includes('/api/users/:id')).match(/(?:^|[\s{,(])path\s*:\s*([`'"])(.*?)\1/)?.[2] ?? ''));
+
+  // End to end through the same selection step the bridge runs: a diff confined to the
+  // commented-about symbol selects no route, and one on the called symbol still selects its
+  // own. The commented-about name is a doc anchor either way — it enters `symbolAnchors`
+  // from its OWN declaration, which this hop never touched — so nothing is lost but the
+  // false bridge.
+  check('bridge', 'a diff touching only the symbol the comment MENTIONS selects no route', 'tails', JSON.stringify([]), JSON.stringify(tailsSelectedBy(new Set(['promoteDraftForPublish']), commentary)));
+  check('bridge', 'a diff touching the symbol the handler CALLS still selects the publish route', 'tails', JSON.stringify(['/:type/:name/publish']), JSON.stringify(tailsSelectedBy(new Set(['publishMetaItem']), commentary)));
+
   // ---- the CLI command anchor kind (#9230) ----------------------------------
   // The recall class: a CLI-surface change derives `MetaResync` / a lowercase `resync`,
   // and neither reaches the page that documents the command. The phrase does. Both halves
@@ -1762,9 +1874,10 @@ for (const name of [...symbolAnchors].sort()) {
   // TWO KINDS OF SYMBOL ARE DOC ANCHORS BUT NOT BRIDGE SYMBOLS. The bridge's premise is
   // "this name IS some route's implementation, so the handler that implements that route
   // mentions it" — and `parseRegistrarSource` tests that premise by scanning a handler
-  // window for the BARE IDENTIFIER. Any name a handler mentions for some OTHER reason
-  // satisfies the scan without satisfying the premise, and mints a route (and, through
-  // the ledger, an sdk) anchor from a diff that never came near that route.
+  // window for the BARE IDENTIFIER (over comment-masked source since #9432, so a name a
+  // handler only WRITES ABOUT never satisfies it). Any name a handler mentions for some
+  // OTHER reason satisfies the scan without satisfying the premise, and mints a route (and,
+  // through the ledger, an sdk) anchor from a diff that never came near that route.
   //
   //  1. A SCREAMING_SNAKE constant is a data table, not a route's implementation: it is
   //     referenced by handlers that merely consult it. `ERROR_CODE_LEDGER` names a real
