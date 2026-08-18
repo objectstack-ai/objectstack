@@ -42,6 +42,13 @@ import { createDispatcherPlugin } from './dispatcher-plugin.js';
  *    (`rest-server.ts:834` constructs it; `route-manager.ts:191-213` calls
  *    `server.get/post/put/delete/patch`). Modelling the mount would have been
  *    weaker: this is the production registrar itself.
+ *
+ * ## What a fix has to invert
+ *
+ * The two §1 assertions spelled "does NOT count" are this card's acceptance
+ * criterion in executable form. Whichever seam is chosen, BOTH have to flip
+ * together — a change that flips one and leaves the other reproduces the
+ * defect one surface over, which is the thing this card exists about.
  */
 
 const AUTH_BASE = '/api/v1/auth';
@@ -212,25 +219,54 @@ describe('#9650 §2 — SEAM A: registering the instrumented proxy back as `http
         expect(calls).toContain('patch:/q');
     });
 
+    it('MEASURED: `registerService` REFUSES a second `http.server`; the seam needs `replaceService`', async () => {
+        const kernel = new LiteKernel();
+        let registerError: string | undefined;
+        kernel.use({
+            name: 'com.objectstack.test.provider',
+            version: '1.0.0',
+            providesServices: ['http.server'],
+            init: async (ctx: PluginContext) => { ctx.registerService('http.server', { id: 'raw' }); },
+        } as Plugin);
+        kernel.use({
+            name: 'com.objectstack.test.reregistrar',
+            version: '1.0.0',
+            init: async () => {},
+            start: async (ctx: PluginContext) => {
+                try {
+                    ctx.registerService('http.server', { id: 'proxy' });
+                } catch (err: any) {
+                    registerError = String(err?.message ?? err);
+                }
+            },
+        } as Plugin);
+        await kernel.bootstrap();
+        await kernel.shutdown();
+
+        // Not a detail: "register the proxy back as the service" cannot be
+        // spelled with registerService at all (kernel-base.ts:79-81).
+        expect(registerError).toContain("already registered");
+    });
+
     it('MEASURED: a consumer that resolved `http.server` in an EARLIER start() keeps the raw handle', async () => {
         const resolved: string[] = [];
-        const kernel = new LiteKernel();
         const raw = { id: 'raw' };
-        const providerPlugin: Plugin = {
+        const kernel = new LiteKernel();
+        kernel.use({
             name: 'com.objectstack.test.provider',
             version: '1.0.0',
             providesServices: ['http.server'],
             init: async (ctx: PluginContext) => { ctx.registerService('http.server', raw); },
-        };
-        const earlyConsumer: Plugin = {
+        } as Plugin);
+        kernel.use({
             name: 'com.objectstack.test.early-consumer',
             version: '1.0.0',
             init: async () => {},
             start: async (ctx: PluginContext) => {
-                resolved.push((ctx.getService<any>('http.server') as any).id ?? 'proxy');
+                resolved.push(ctx.getService<any>('http.server').id);
             },
-        };
-        const lateRegistrar: Plugin = {
+        } as Plugin);
+        kernel.use({
             name: 'com.objectstack.test.late-registrar',
             version: '1.0.0',
             init: async () => {},
@@ -238,71 +274,171 @@ describe('#9650 §2 — SEAM A: registering the instrumented proxy back as `http
                 const proxy = new Proxy(raw, {
                     get: (t, p, r) => (p === 'id' ? 'proxy' : Reflect.get(t, p, r)),
                 });
-                ctx.registerService('http.server', proxy as any);
+                ctx.replaceService('http.server', proxy);
             },
-        };
-        const lateConsumer: Plugin = {
+        } as Plugin);
+        kernel.use({
             name: 'com.objectstack.test.late-consumer',
             version: '1.0.0',
             init: async () => {},
             start: async (ctx: PluginContext) => {
-                resolved.push((ctx.getService<any>('http.server') as any).id ?? 'proxy');
+                resolved.push(ctx.getService<any>('http.server').id);
             },
-        };
-        kernel.use(providerPlugin);
-        kernel.use(earlyConsumer);
-        kernel.use(lateRegistrar);
-        kernel.use(lateConsumer);
+        } as Plugin);
         await kernel.bootstrap();
         await kernel.shutdown();
 
-        // This is ruling ②'s condition, measured: correctness of seam A is a
-        // function of Phase-2 position, and in the shipped composition REST
-        // (serve.ts:2548) starts BEFORE the dispatcher (serve.ts:2566).
+        // Ruling ②'s condition, measured: seam A's correctness is a function of
+        // Phase-2 position. In the shipped composition REST (serve.ts:2548)
+        // starts BEFORE the dispatcher (serve.ts:2566), i.e. it is the 'raw'
+        // row here — the unfavourable one.
         expect(resolved).toEqual(['raw', 'proxy']);
     });
 });
 
 describe('#9650 §3 — SEAM B/C: a raw-app Hono middleware, and when it is installed', () => {
-    it('MEASURED: a middleware installed AFTER a route does not observe that route (seam B)', async () => {
-        const { Hono } = await import('hono');
-        const app = new Hono();
+    /**
+     * Seam B — installed during the dispatcher's `start()`, i.e. AFTER the
+     * plugins that mount auth and REST have already run their own `start()`.
+     * Measured on the REAL booted app, not a synthetic Hono instance.
+     */
+    it('MEASURED: a middleware installed AFTER the routes does not observe them (seam B)', async () => {
+        const metrics = new InMemoryMetricsRegistry();
+        const { kernel, baseUrl } = await bootMeasurementKernel(metrics);
+        const httpServer = kernel.getService<IHttpServer>('http.server');
+        const rawApp = (httpServer as unknown as { getRawApp(): any }).getRawApp();
+
         const seen: string[] = [];
-        app.get('/early', (c: any) => c.json({ ok: true }));
-        app.use('*', async (c: any, next: any) => {
+        // Registered now = after every plugin's start() mounted its routes.
+        rawApp.use('*', async (c: any, next: any) => {
             await next();
             seen.push(c.req.path);
         });
-        app.get('/late', (c: any) => c.json({ ok: true }));
+        // A route mounted after the middleware, as the positive control.
+        rawApp.get('/late-probe', (c: any) => c.json({ ok: true }));
 
-        await app.request('/early');
-        await app.request('/late');
+        await fetch(`${baseUrl}${AUTH_PROBE}`, { method: 'POST' });
+        await fetch(`${baseUrl}${REST_PROBE}`);
+        await fetch(`${baseUrl}${DISPATCHER_PROBE}`);
+        await fetch(`${baseUrl}/late-probe`);
+        await kernel.shutdown();
 
-        // Hono composes the handlers that matched in REGISTRATION order; the
+        // Hono composes the handlers that matched in REGISTRATION order, so a
         // route registered first answers and never calls next().
-        expect(seen).toEqual(['/late']);
-    });
+        expect(seen).toContain('/late-probe');
+        expect(seen).not.toContain(AUTH_PROBE);
+        expect(seen).not.toContain(REST_PROBE);
+        expect(seen).not.toContain(DISPATCHER_PROBE);
+    }, 30_000);
 
-    it('MEASURED: a middleware installed BEFORE every route observes all of them, incl. status (seam C)', async () => {
-        const { Hono } = await import('hono');
-        const app = new Hono();
+    /**
+     * Seam C — installed during Phase 1 (`init()`), before any route exists,
+     * which is exactly where the adapter puts its own `installMiddlewareSeam()`.
+     */
+    it('MEASURED: a middleware installed in Phase 1 observes BOTH mounts, with status (seam C)', async () => {
         const seen: Array<{ route: string; status: number }> = [];
-        app.use('*', async (c: any, next: any) => {
-            await next();
-            seen.push({ route: c.req.routePath, status: c.res.status });
-        });
-        // Both mount styles, on the one app, after the middleware.
-        app.all(`${AUTH_BASE}/*`, (c: any) => c.json({ ok: true }, 200));
-        app.get(REST_PROBE, (c: any) => c.json({ ok: true }, 201));
+        const probePlugin: Plugin = {
+            name: 'com.objectstack.test.phase1-observer',
+            version: '1.0.0',
+            requiresServices: ['http.server'],
+            init: async (ctx: PluginContext) => {
+                const httpServer = ctx.getService<IHttpServer>('http.server');
+                const rawApp = (httpServer as unknown as { getRawApp(): any }).getRawApp();
+                rawApp.use('*', async (c: any, next: any) => {
+                    await next();
+                    seen.push({ route: c.req.routePath, status: c.res.status });
+                });
+            },
+        };
 
-        await app.request(AUTH_PROBE, { method: 'POST' });
-        await app.request(REST_PROBE);
+        const kernel = new LiteKernel();
+        kernel.use(new HonoServerPlugin({ port: 0, cors: false }));
+        kernel.use(probePlugin);
+        kernel.use(authLikePlugin());
+        kernel.use(restLikePlugin());
+        kernel.use(
+            createDispatcherPlugin({
+                prefix: '/api/v1',
+                securityHeaders: false,
+                observability: { metrics: new InMemoryMetricsRegistry() },
+            } as any),
+        );
+        await kernel.bootstrap();
+        const httpServer = kernel.getService<IHttpServer>('http.server');
+        const baseUrl = `http://127.0.0.1:${httpServer.getPort!()}`;
 
-        expect(seen).toEqual([
-            { route: `${AUTH_BASE}/*`, status: 200 },
-            { route: REST_PROBE, status: 201 },
-        ]);
-    });
+        await fetch(`${baseUrl}${AUTH_PROBE}`, { method: 'POST' });
+        await fetch(`${baseUrl}${REST_PROBE}`);
+        await fetch(`${baseUrl}${DISPATCHER_PROBE}`);
+        await kernel.shutdown();
+
+        const routes = seen.map((s) => s.route);
+        expect(routes).toContain(`${AUTH_BASE}/*`);
+        expect(routes).toContain(REST_PROBE);
+        expect(routes).toContain(DISPATCHER_PROBE);
+        // The status label the counter needs is readable here, which is what
+        // the framework-agnostic `use()` seam cannot offer.
+        expect(seen.every((s) => typeof s.status === 'number')).toBe(true);
+    }, 30_000);
+
+    /**
+     * The exact boundary `serve.ts:3429-3435` claims is sufficient. That
+     * comment governs how the unknown-hostname guard (and anything copied
+     * from it) is installed, so the claim is measured rather than trusted:
+     *
+     *   "Hono's `app.use('*')` is order-independent for matching, so as long
+     *    as the middleware is added before kernel:listening fires, it
+     *    intercepts every request regardless of which plugin registered its
+     *    handler."
+     *
+     * Every route in the platform is mounted in a plugin's `start()`, i.e.
+     * in Phase 2 — strictly BEFORE `kernel:bootstrapped` and `kernel:listening`.
+     */
+    it('MEASURED: a middleware installed at `kernel:bootstrapped` — before kernel:listening — still observes nothing', async () => {
+        const seen: string[] = [];
+        const lateObserver: Plugin = {
+            name: 'com.objectstack.test.late-hook-observer',
+            version: '1.0.0',
+            requiresServices: ['http.server'],
+            init: async (ctx: PluginContext) => {
+                const httpServer = ctx.getService<IHttpServer>('http.server');
+                const rawApp = (httpServer as unknown as { getRawApp(): any }).getRawApp();
+                // Subscribed in init(), but the middleware is INSTALLED from
+                // the hook — after every plugin's start() has mounted routes,
+                // and still before kernel:listening.
+                (ctx as any).hook('kernel:bootstrapped', async () => {
+                    rawApp.use('*', async (c: any, next: any) => {
+                        await next();
+                        seen.push(c.req.path);
+                    });
+                });
+            },
+        };
+
+        const kernel = new LiteKernel();
+        kernel.use(new HonoServerPlugin({ port: 0, cors: false }));
+        kernel.use(lateObserver);
+        kernel.use(authLikePlugin());
+        kernel.use(restLikePlugin());
+        kernel.use(
+            createDispatcherPlugin({
+                prefix: '/api/v1',
+                securityHeaders: false,
+                observability: { metrics: new InMemoryMetricsRegistry() },
+            } as any),
+        );
+        await kernel.bootstrap();
+        const httpServer = kernel.getService<IHttpServer>('http.server');
+        const baseUrl = `http://127.0.0.1:${httpServer.getPort!()}`;
+
+        await fetch(`${baseUrl}${AUTH_PROBE}`, { method: 'POST' });
+        await fetch(`${baseUrl}${REST_PROBE}`);
+        await fetch(`${baseUrl}${DISPATCHER_PROBE}`);
+        await kernel.shutdown();
+
+        // "Before kernel:listening" is NOT sufficient — Phase 1 is.
+        expect(seen).toEqual([]);
+    }, 30_000);
 
     it('MEASURED: the IHttpServer `use()` seam cannot observe status — it runs BEFORE dispatch', async () => {
         const metrics = new InMemoryMetricsRegistry();
@@ -323,5 +459,5 @@ describe('#9650 §3 — SEAM B/C: a raw-app Hono middleware, and when it is inst
         // order-independent seam cannot carry a `{status}` counter.
         expect(observed[0]).not.toHaveProperty('status');
         expect(observed[0].body).toBeUndefined();
-    });
+    }, 30_000);
 });
