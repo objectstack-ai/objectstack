@@ -501,6 +501,7 @@ function selfTest() {
     // loses an activity type is not a weaker gate, it is a silent one.
     const wiringPath = join(ROOT, WIRING_WORKFLOW);
     const wiring = existsSync(wiringPath) ? readFileSync(wiringPath, 'utf8') : '';
+    const wiringLines = wiring.split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
     t('the wiring workflow exists', wiring !== '', true);
     t('the wiring workflow runs this script', wiring.includes('node scripts/check-single-claim-paths.mjs'), true);
     t('the wiring passes the PR number (the wired-ness witness)', /PR_NUMBER:/.test(wiring), true);
@@ -508,12 +509,19 @@ function selfTest() {
     for (const activity of ['opened', 'reopened', 'edited', 'synchronize']) {
       t(`the wiring subscribes to '${activity}' (a collision only exists while both PRs are open)`, new RegExp(`types:\\s*\\[[^\\]]*\\b${activity}\\b[^\\]]*\\]`).test(wiring), true);
     }
-    t('the wiring can read pull requests', /pull-requests:\s*read/.test(wiring), true);
+    // Both permission assertions read the COMMENT-STRIPPED workflow, and that
+    // is not tidiness — it is a hole this file's own ablation sweep found. The
+    // header comment above the permissions block has to be able to say the
+    // words contents read to explain why the scope is there, and a naive scan
+    // of the whole file therefore passed with the real grant DELETED: a phantom
+    // check, green because of the prose describing it. Only executable lines
+    // are scanned.
+    t('the wiring can read pull requests', /pull-requests:\s*read/.test(wiringLines), true);
     // Naming a permissions block sets every unlisted scope to none, and this
     // job checks the repo out to reach this script. Without the contents scope
     // it dies in checkout, before judging anything.
-    t('the wiring can read contents, which its checkout step requires', /contents:\s*read/.test(wiring), true);
-    t('the guard job invokes no package manager (it needs node and nothing else)', /\b(pnpm|corepack|yarn|npm)\b/.test(wiring.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n')), false);
+    t('the wiring can read contents, which its checkout step requires', /contents:\s*read/.test(wiringLines), true);
+    t('the guard job invokes no package manager (it needs node and nothing else)', /\b(pnpm|corepack|yarn|npm)\b/.test(wiringLines), false);
 
     // --- The older gate must still be there, unweakened. This gate ADDS a
     // second question; it does not replace the card-keyed one.
