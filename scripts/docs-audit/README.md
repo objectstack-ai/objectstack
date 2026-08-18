@@ -403,6 +403,19 @@ monthly / per-release) catches drift the CI gate missed — it runs the
    meant to cover. A backstop has to run `--all`: all 178 hand-written docs (run
    `check-audit-scope.mjs` for today's number rather than trusting this one).
 
+3. **And the obvious cheap substitute is not a backstop either.** When the backstop is
+   missing, the tempting one-line fix is to widen the audit's scope back to the coarse
+   `packageMentionDocs` set part 1 still emits. Measured across the 8 most recent
+   `packages/**`-touching commits on `main`: it is wider (21 pages vs 5 on `a4331227b`)
+   but it is **not a superset** — in every one of the 8, between 3 and 7 pages present in
+   the precise `docs` set are absent from `packageMentionDocs`
+   (`api/error-catalog.mdx`, `automation/approvals.mdx`, `api/plugin-endpoints.mdx`,
+   `data-modeling/relationships.mdx` among them). That is #9192's finding restated: the
+   two sets miss in *different* directions, because the coarse one is a dependency-graph
+   proxy and pages documenting a change through the SDK surface never name the
+   implementing package. Swapping to it trades one incomplete set for another and loses
+   pages the precise scope gets right. Only `--all` is a backstop.
+
 ---
 
 **Cost note:** a full audit is ~2 agents per doc — measured at ~2.8M output tokens /
