@@ -2372,7 +2372,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_job_run: {
     label: "Job Run",
     pluralLabel: "Job Runs",
-    description: "Background job execution audit trail",
+    description: "Background job execution history",
     fields: {
       id: {
         label: "Run ID"
