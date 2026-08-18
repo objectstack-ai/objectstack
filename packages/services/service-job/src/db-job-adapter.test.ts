@@ -234,3 +234,129 @@ describe('DbJobAdapter — kernel rebuild (#8362)', () => {
     await rebuilt.db.destroy();
   });
 });
+
+// ─── #9633 — replay() honours `recordRuns`, on all three of its arms ─────────
+//
+// `recordRuns` had exactly two `startRun` call sites and the gate landed on one
+// of them: `wrap`'s per-attempt row was gated, `replay`'s synthetic row was not.
+// An operator who switched run history off therefore kept accumulating rows —
+// exclusively replay ones, the least representative sample of a job's history,
+// with no non-replay rows beside them for context. The carve-out was an
+// artifact of `replay` being written to solve a different problem (#5548's
+// synthetic row forces the `trigger: 'replay'` tag), never a designed exception,
+// so it is closed rather than documented (the ruling on #9633).
+//
+// ⚠️ Nothing in this package referenced `recordRuns` in ANY direction before
+// #9631 — the flag could have stopped being honoured entirely and the suite
+// would not have noticed. These cases are written so that cannot happen again:
+// each flag-off case asserts the execution REALLY RAN (handler counter plus the
+// `sys_job` counters, which the flag deliberately does not gate) alongside the
+// "no rows" assertion, so "0 rows" cannot pass for a job that never ran; and
+// the flag-on cases assert the synthetic row reached a TERMINAL status, so
+// over-gating the three `finishRun` arms — a dangling `running` half-row, worse
+// than either original state — goes red instead of silently passing "a row
+// exists".
+describe('DbJobAdapter — replay() honours recordRuns (#9633)', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  const adapters: DbJobAdapter[] = [];
+
+  function makeAdapter(options?: { recordRuns?: boolean }) {
+    const a = new DbJobAdapter({ engine, options });
+    adapters.push(a);
+    return a;
+  }
+
+  beforeEach(() => {
+    engine = makeFakeEngine();
+    adapters.length = 0;
+  });
+  afterEach(async () => {
+    for (const a of adapters) await a.destroy();
+  });
+
+  const runs = () => engine.tables.get('sys_job_run') ?? [];
+  const job = () => (engine.tables.get('sys_job') ?? [])[0];
+
+  it('recordRuns: false — a replay runs the handler and writes NO sys_job_run row', async () => {
+    const adapter = makeAdapter({ recordRuns: false });
+    let ran = 0;
+    await adapter.schedule('quiet', { type: 'cron', expression: '* * * * *' }, async () => { ran += 1; });
+
+    await adapter.replay('quiet');
+
+    // The discriminator: neither the synthetic replay row nor the wrapped
+    // per-attempt row is written. Ungated, this table holds a `trigger:
+    // 'replay'` row here.
+    expect(runs()).toHaveLength(0);
+    // …and the execution really happened, so "0 rows" cannot be passing for a
+    // job that never ran. `bumpJob` is called outside the row gate by design.
+    expect(ran).toBe(1);
+    expect(job().run_count).toBe(1);
+    expect(job().last_status).toBe('success');
+  });
+
+  it('recordRuns: false — the terminal-status arm writes nothing either, and leaves no dangling row', async () => {
+    const adapter = makeAdapter({ recordRuns: false });
+    let ran = 0;
+    await adapter.schedule('sour', { type: 'cron', expression: '* * * * *' }, async () => {
+      ran += 1;
+      throw new Error('replayed and failed');
+    });
+
+    await adapter.replay('sour');
+
+    // The arm that reads the terminal status off the inner execution (#7734).
+    // Half-gating — suppressing `startRun` but not `finishRun`, or the reverse
+    // — is what would leave a `running` row with no `completed_at`.
+    expect(runs()).toHaveLength(0);
+    expect(ran).toBe(1);
+    expect(job().last_status).toBe('failed');
+    expect(job().failure_count).toBe(1);
+  });
+
+  it('recordRuns: false — the catch arm writes nothing and still rethrows', async () => {
+    const adapter = makeAdapter({ recordRuns: false });
+    await adapter.schedule('boom', { type: 'cron', expression: '* * * * *' }, async () => {});
+    // `executeJob` swallows a handler throw, so the catch arm is unreachable
+    // through the handler — the inner call itself has to reject for it to run.
+    const inner = (adapter as any).inner;
+    inner.trigger = async () => { throw new Error('inner exploded'); };
+
+    await expect(adapter.replay('boom')).rejects.toThrow('inner exploded');
+
+    expect(runs()).toHaveLength(0);
+  });
+
+  it('default recordRuns — the synthetic replay row is still written, and SETTLED', async () => {
+    const adapter = makeAdapter(); // no options at all: the flag defaults to true
+    await adapter.schedule('loud', { type: 'cron', expression: '* * * * *' }, async () => {});
+
+    await adapter.replay('loud');
+
+    // The #5548 tag survives the gate: one synthetic replay row beside the
+    // wrapped run the execution itself produced.
+    const replayRows = runs().filter((r: any) => r.trigger === 'replay');
+    expect(replayRows).toHaveLength(1);
+    // Terminal, not left `running` — this is what goes red if the three
+    // `finishRun` arms are over-gated along with `startRun`.
+    expect(replayRows[0].status).toBe('success');
+    expect(replayRows[0].completed_at).toBeTruthy();
+    expect(runs().map((r: any) => r.trigger).sort()).toEqual(['replay', 'schedule']);
+  });
+
+  it('recordRuns: true — the replay row still carries the terminal status of the inner execution', async () => {
+    const adapter = makeAdapter({ recordRuns: true }); // explicit, matching the default
+    await adapter.schedule('sour', { type: 'cron', expression: '* * * * *' }, async () => {
+      throw new Error('replayed and failed');
+    });
+
+    await adapter.replay('sour');
+
+    const replayRows = runs().filter((r: any) => r.trigger === 'replay');
+    expect(replayRows).toHaveLength(1);
+    // #7734: read off the inner execution, not assumed `success`.
+    expect(replayRows[0].status).toBe('failed');
+    expect(replayRows[0].error).toBe('replayed and failed');
+    expect(replayRows[0].completed_at).toBeTruthy();
+  });
+});

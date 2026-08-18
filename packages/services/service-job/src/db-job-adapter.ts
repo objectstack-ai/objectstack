@@ -137,6 +137,16 @@ export class DbJobAdapter implements IJobService {
     return this.inner.listJobs();
   }
 
+  /**
+   * Replay a job's most recent execution, tagging its run `trigger: 'replay'`.
+   *
+   * The synthetic `sys_job_run` row this writes is governed by
+   * {@link DbJobAdapterOptions.recordRuns} exactly as every other run row is:
+   * with the flag `false` the handler still runs and no row is written — not
+   * this synthetic one, and not the per-attempt row the execution itself
+   * would produce. `sys_job_run` is run history, not an audit trail; an
+   * operator who switched history off gets nothing durable from this path.
+   */
   async replay(name: string, data?: unknown): Promise<void> {
     // Same execution path as trigger but tag the run as 'replay'.
     const handlers = (this.inner as any).jobs?.get?.(name);
@@ -144,7 +154,13 @@ export class DbJobAdapter implements IJobService {
     // Reuse trigger; the wrap function uses a closure flag — simpler:
     // expose by calling inner.trigger with a marker via data is intrusive,
     // so we record a synthetic run row before/after to ensure 'replay' tag.
-    const runId = await this.startRun(name, 'replay');
+    //
+    // Gated exactly as `wrap`'s per-attempt row is: `recordRuns` is the on/off
+    // switch for run history and this row is run history, so an operator who
+    // turned it off gets no replay rows either. Ungated, this was the one write
+    // that ignored the flag — the artifact of the gate landing on one of two
+    // `startRun` call sites, never a designed carve-out for replay.
+    const runId = this.recordRuns ? await this.startRun(name, 'replay') : undefined;
     try {
       await this.inner.trigger(name, data);
       // The wrap already recorded a run; settle our synthetic row the same way
@@ -161,12 +177,12 @@ export class DbJobAdapter implements IJobService {
       const [last] = await this.inner.getExecutions(name, 1);
       const status = last?.status;
       if (status === 'degraded' || status === 'timeout' || status === 'failed') {
-        await this.finishRun(runId, status, last.error);
+        if (runId) await this.finishRun(runId, status, last.error);
       } else {
-        await this.finishRun(runId, 'success');
+        if (runId) await this.finishRun(runId, 'success');
       }
     } catch (err) {
-      await this.finishRun(runId, 'failed', err instanceof Error ? err.message : String(err));
+      if (runId) await this.finishRun(runId, 'failed', err instanceof Error ? err.message : String(err));
       throw err;
     }
   }
