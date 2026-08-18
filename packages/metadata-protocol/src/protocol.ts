@@ -13183,13 +13183,15 @@ export class ObjectStackProtocolImplementation implements
      *
      * ## What it declines to touch, and says so
      *
-     * This section documents the function's internal surface, which is not
-     * always identical to what an operator running the CLI can observe:
+     * This section documents the function's FULL internal surface, which is
+     * not always identical to what an operator running the CLI can observe:
      * `os migrate meta --stored` always passes its own automation engine
      * (see `canonicalizeFlow` above), so the first bullet below is never
-     * observed from that door. That does not by itself account for every
-     * difference between this list and `content/docs/deployment/cli.mdx`'s
-     * decline table — see #9271.
+     * observed from that door. That is now the only difference between this
+     * list and `content/docs/deployment/cli.mdx`'s decline table, which
+     * documents the operator-observable surface and so carries the other
+     * four. #9271 ruled that split intentional: keep each list correct for
+     * its own audience rather than reconciling them.
      *
      * - **`flow` rows with no reachable automation engine.** Flow-node
      *   conversions carry ADR-0078's open-namespace conflict guard, which
@@ -13197,6 +13199,15 @@ export class ObjectStackProtocolImplementation implements
      *   passed as `canonicalizeFlow`, or resolved from the services registry
      *   (#4498) — flows are migrated like anything else (#4454); when none is,
      *   they are reported `skipped` with that reason, never counted done.
+     * - **A flow whose rename that guard refused.** With an engine reachable,
+     *   the same open-namespace check can still find the old node-type token
+     *   is a LIVE name something else owns here. The conversion is refused and
+     *   the row reported `failed`, naming the token and its path: rewriting
+     *   would clobber that owner, and a quiet skip would hide it. Unlike the
+     *   bullet above this one IS reachable from every door — the CLI boots an
+     *   inert engine to hold the registry, and `POST /meta/_migrate-stored`
+     *   resolves a live one from the services registry — so
+     *   `content/docs/deployment/cli.mdx` carries it too.
      * - **Types with no repository write path** (neither `allowOrgOverride` nor
      *   `allowRuntimeCreate`). This pass declines them, and since #5086 it
      *   would have no choice: `saveMetaItem` refuses a code-only type with

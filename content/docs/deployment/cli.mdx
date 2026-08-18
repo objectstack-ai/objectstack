@@ -856,7 +856,12 @@ is `migrate-stored`, so a later diff shows which changes were an upgrade and
 which were somebody's edit.
 
 What it deliberately declines, and names in the report rather than
-counting as done:
+counting as done. This table is the **operator-observable** surface — what a
+run can actually report, from the command above or the route below. The
+function's own JSDoc in `packages/metadata-protocol/src/protocol.ts` documents
+its full internal surface instead, and so lists one decline more: flow rows
+skipped for want of a reachable automation engine, which neither operator door
+can produce, because both supply a live one.
 
 | Not rewritten | Why |
 | :--- | :--- |
