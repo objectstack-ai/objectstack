@@ -510,6 +510,66 @@ const DISPATCHER_DOMAINS = {
  * add is exactly the one that drifts.
  *
  * A discovered file absent from the table is an ERROR, never a default.
+ *
+ * ## Two ways to be held here: tracked drift, or a RULED boundary
+ *
+ * `ratchet` is the first. It is a measured count of bodies that depart from the
+ * envelope plus the issue that will drive it to zero, and it says nothing about
+ * whether the shape is acceptable — only that somebody is counting.
+ *
+ * `exempt` is the second, and it arrived with a maintainer ruling: 2026-08-17,
+ * on #9389, option B of that card. **Pre-auth discovery/bootstrap payloads are
+ * outside `BaseResponseSchema` by design.** The boundary the ruling drew is not
+ * about age and not about taste — it is about WHO reads the body and WHEN:
+ * these are read before authentication, by our own shells, before an envelope
+ * reader exists. The SPA fetching `/api/v1/runtime/config` is deciding what to
+ * boot; there is no `unwrapResponse` in the page yet, and after the flip there
+ * would still be none, because the code that would do the unwrapping is what the
+ * payload is being read to choose. `/bootstrap-status` is polled to decide
+ * between `/login` and first-run `/setup`, by a caller that by construction has
+ * no credential to authenticate with.
+ *
+ * Say what this is NOT, because both misreadings are available and both are
+ * wrong. It is not "these are legacy" — the payloads are current and correct.
+ * It is not "bare bodies are fine here" — the other ratchets on this surface
+ * (`plugin-hono-server/src/adapter.ts`, `adapters/hono/src/index.ts`,
+ * `cli/src/commands/serve.ts`) are ordinary refusals at ordinary doors and stay
+ * tracked drift under #9364; the ruling does not reach them. The rejected option
+ * (A: envelope them, flip objectui's readers, carry a skew window on the least
+ * versionable seam in the product) is on record in #9389 rather than lost.
+ *
+ * The reason is the deliverable. The entry is only where it is written down.
+ *
+ * ## An `exempt` on THIS surface stays COUNTED — unlike surface 1's
+ *
+ * `hmr-routes.ts` (surface 1) is a whole file that is one dev-only endpoint, so
+ * exempting the file and exempting the surface are the same act there, and its
+ * counts are not asserted at all.
+ *
+ * Here they are not the same act. `plugin-auth/src/auth-plugin.ts` builds 49
+ * bodies, of which THREE are the ruled `/bootstrap-status` payloads; among the
+ * other 46 is the conformant `{ success: true, data: config }` of
+ * `/auth/public-config`. A file-level waiver there would stop asserting anything
+ * about any of them, so the next bare body added to that file — pre-auth or not
+ * — would land in silence. That is precisely the state the ruling exists to end
+ * ("neither enveloped nor ruled exempt"), re-entered one file at a time.
+ *
+ * So an `exempt` entry declares the same counters a `ratchet` does and they are
+ * asserted the same way: the boundary is closed at exactly N bodies, in exactly
+ * these files. A new pre-auth bare surface fails the gate until it carries its
+ * own exempt-with-reason — by being declared at all if it is a new file, or by
+ * moving a number and amending a reason if it is inside one of these. That
+ * second path widens a ruled boundary and is therefore not an author's to take;
+ * the diagnostics mark it `⛔ MAINTAINER-ONLY` (#8435).
+ *
+ * `ratchet` and `exempt` are mutually exclusive. A count is either tracked drift
+ * heading for zero or a boundary somebody ruled; declaring both says neither.
+ *
+ * Where the ruling is recorded: HERE. This gate names no doc location of its own
+ * — the `hmr-routes.ts` precedent's reasoning lives in this file's prose and
+ * nowhere else, `content/docs/references/` is generated and must not be
+ * hand-edited, and the ruling governs this table rather than the wire format
+ * docs. #9389 carries the four-prism analysis and the maintainer's acceptance.
  */
 const HONO_CONTEXT_RECEIVERS = new Set(['c', 'ctx']);
 
@@ -532,16 +592,6 @@ const PLUGIN_ROUTE_MODULES = {
   // the issue that will drive it to zero; every number ticks DOWN only. These
   // are the finding this surface was worth adding for — none of them was
   // visible to any check in the repo before it.
-  'packages/cloud-connection/src/runtime-config-plugin.ts': {
-    unenveloped: 1,
-    ratchet: '#9364 (envelope /api/v1/runtime/config)',
-    note: 'the discovery payload the Console SPA reads BARE before first paint (objectui `app-shell/src/runtime-config.ts` reads body.cloudUrl / body.features / body.branding off the top level) — enveloping it is a cross-repo breaking wire change, deliberately not done in #9267',
-  },
-  'packages/plugins/plugin-hono-server/src/current-user-endpoints.ts': {
-    unenveloped: 9,
-    ratchet: '#9364 (envelope the bare plugin-route payloads)',
-    note: 'nine `{ authenticated, userId, … }` bodies with no `success` flag — the same bare-payload class as runtime-config, read directly by the Console',
-  },
   'packages/plugins/plugin-hono-server/src/adapter.ts': {
     unenveloped: 4,
     stringError: 4,
@@ -561,12 +611,58 @@ const PLUGIN_ROUTE_MODULES = {
     ratchet: '#9364 (envelope the serve host-resolution refusal)',
     note: 'the unbound-hostname 404 — `{ error: \'environment_not_found\', message, hostname }`, a bare-string error with two stray top-level keys',
   },
+  'packages/triggers/trigger-api/src/plugin.ts': {},
+
+  // ── Ruled exempt: the pre-auth bootstrap seam (#9389) ────────────────────
+  //
+  // Maintainer ruling of 2026-08-17, option B. These three entries were
+  // `ratchet`ed under #9364 until that ruling: measured as drift, tracked as
+  // drift, and heading for an envelope flip that was never going to be worth its
+  // skew window. The ruling settled the direction instead of the schedule, so
+  // the classification changes and the NUMBERS DO NOT — the count is what keeps
+  // the boundary a closed list rather than a waiver. See the header on why an
+  // `exempt` here stays counted where surface 1's does not, and on what the
+  // ruling does and does not say.
+  //
+  // ⛔ No route behaviour changed with this classification, by design: the
+  // payloads stay bare and the SPAs keep reading them bare. This is the gate
+  // learning a ruled boundary, not the boundary moving.
+
+  // ONE body — `GET|POST /api/v1/runtime/config`, at line 521. objectui's
+  // `app-shell/src/runtime-config.ts` reads `body.cloudUrl` / `body.features` /
+  // `body.branding` straight off the top level.
+  'packages/cloud-connection/src/runtime-config-plugin.ts': {
+    unenveloped: 1,
+    exempt:
+      'pre-auth discovery, ruled outside BaseResponseSchema by design (2026-08-17, #9389 option B): /api/v1/runtime/config is read by the app shell before first paint and before any credential exists, to decide what to boot — at that moment no envelope reader exists in the page to unwrap anything, and the payload is what selects the code that would be it',
+  },
+
+  // NINE bodies across three shell-bootstrap routes. Measured here, and NOT what
+  // the pre-ruling note said: SIX are `{ authenticated, … }` (`/auth/me/permissions`
+  // at 732/802/908/921, `/auth/me/localization` at 934/936) and THREE are
+  // `{ apps }` (`/me/apps` at 958/1050/1053). What puts the whole family on the
+  // pre-auth side of the boundary is that each route answers an unauthenticated
+  // caller in the SAME bare shape it answers an authenticated one — a
+  // `{ authenticated: false }` / `{ apps: [] }` body rather than a refusal — so
+  // the anonymous case is a first-class answer here, not an error arm.
+  'packages/plugins/plugin-hono-server/src/current-user-endpoints.ts': {
+    unenveloped: 9,
+    exempt:
+      'pre-auth bootstrap, ruled outside BaseResponseSchema by design (2026-08-17, #9389 option B): the shell reads /auth/me/permissions, /auth/me/localization and /me/apps to decide what to render, and each answers an unauthenticated caller a bare `{ authenticated: false }` / `{ apps: [] }` instead of refusing — our own shells branch on that top-level field with no unwrap step in between',
+  },
+
+  // THREE bodies, all `{ hasOwner: … }` from `/bootstrap-status` (1681/1684/
+  // 1687), whose own comment states the boundary: "Public, unauthenticated; only
+  // returns a boolean so it can be polled before the user has any credentials."
+  //
+  // The count is also what keeps this file's OTHER 46 bodies audited — the
+  // conformant `{ success: true, data: config }` of `/auth/public-config` at
+  // 1663 among them — instead of one waiver retiring the lot.
   'packages/plugins/plugin-auth/src/auth-plugin.ts': {
     unenveloped: 3,
-    ratchet: '#9364 (envelope the bare plugin-route payloads)',
-    note: 'three `{ hasOwner: … }` bodies from `/bootstrap-status`, polled by the Account SPA before any credential exists — the same bare-payload class as runtime-config. The rest of this file\'s ~46 bodies are better-auth\'s own wire format, relayed rather than built, and so are invisible to these counters by design',
+    exempt:
+      'pre-auth bootstrap, ruled outside BaseResponseSchema by design (2026-08-17, #9389 option B): /bootstrap-status is polled by the Account SPA to choose between /login and first-run /setup, by a caller that has no credential to authenticate with yet. The rest of this file (~46 bodies) is better-auth\'s own wire format, relayed rather than built, and stays invisible to these counters by design',
   },
-  'packages/triggers/trigger-api/src/plugin.ts': {},
 };
 
 /**
@@ -690,6 +786,150 @@ const PLUGIN_ROUTE_COUNTERS = {
   stringError: '`error` is a bare string, so `body.error.message` reads `undefined`',
   siblingCode: '`code` sits beside `error` rather than inside it, so `body.error.code` reads `undefined`',
 };
+
+/**
+ * The #8435 authority token. Byte-identical to every instrumented gate's const.
+ *
+ * Widening a `ratchet` and widening an `exempt` are both remedies that EXPAND a
+ * registry which only ever shrinks, and the second is the sharper case: an
+ * `exempt` boundary is a maintainer's ruling, so an author who raises its number
+ * has amended the ruling rather than applied it.
+ */
+const RATCHET_AUTHORITY_MARKER = '⛔ MAINTAINER-ONLY';
+
+/**
+ * Classify one plugin-route module against its declaration.
+ *
+ * Pure on purpose — it takes the declaration and the scan result rather than
+ * reading the filesystem, and that is what lets the self-test drive the property
+ * this table exists to hold. The closed-list guarantee the #9389 ruling names
+ * ("any NEW pre-auth bare surface must carry its own exempt-with-reason entry to
+ * pass") is a property of the TABLE, not of the scanner: `scanHonoRouteSource`
+ * will happily count a new bare body, and whether that is a failure depends
+ * entirely on what is declared for the file. A self-test that only drove the
+ * scanner would be asserting the easy half.
+ *
+ * @param {string} file      repo-relative path
+ * @param {object|undefined} declared its `PLUGIN_ROUTE_MODULES` entry, if any
+ * @param {object} got       `scanHonoRouteSource` output for it
+ * @returns {string[]} problems, empty when the module is in order
+ */
+export function auditPluginRouteModule(file, declared, got) {
+  const problems = [];
+
+  if (!declared) {
+    problems.push(
+      `${file}\n    NOT DECLARED. This file writes Hono responses (\`c.json(…)\`), so it is a\n` +
+      `    plugin-route module — add it to PLUGIN_ROUTE_MODULES in\n` +
+      `    scripts/check-route-envelope.mjs. If every body it BUILDS is the declared\n` +
+      `    envelope, declare {}. If some are not, declare the CURRENT counts plus a\n` +
+      `    \`ratchet\` naming the issue that will fix them, and a \`note\` saying what they\n` +
+      `    are — never leave a response-emitting module unaudited.\n` +
+      `    A pre-auth discovery/bootstrap payload is the one class that is ruled rather\n` +
+      `    than tracked (#9389, 2026-08-17). It is a CLOSED list of files, so a new one\n` +
+      `    does not inherit the ruling by resembling it: declaring the counts plus an\n` +
+      `    \`exempt\` reason is how it joins, and that is ${RATCHET_AUTHORITY_MARKER} —\n` +
+      `    a maintainer widens a ruled boundary, an author enveloping the body does not\n` +
+      `    need anyone's leave.`,
+    );
+    return problems;
+  }
+
+  // Tracked drift and a ruled boundary are different claims about the same
+  // number, and an entry asserting both asserts neither.
+  if (declared.ratchet && declared.exempt) {
+    problems.push(
+      `${file}\n    declares both \`ratchet\` and \`exempt\` — those are exclusive.\n` +
+      `    A ratchet says "this is drift and it is heading for zero"; an exempt says\n` +
+      `    "this was ruled outside the envelope and is staying". Pick the one that is\n` +
+      `    true. See the header of scripts/check-route-envelope.mjs.`,
+    );
+  }
+
+  for (const [key, what] of Object.entries(PLUGIN_ROUTE_COUNTERS)) {
+    const want = declared[key] ?? 0;
+    if (got[key] === want) continue;
+    const sites = got.sites[key].map((s) => s.slice(s.lastIndexOf(':') + 1)).join(', ') || '(none)';
+
+    if (got[key] > want) {
+      problems.push(
+        declared.exempt
+          ? `${file}\n    ${key}: found ${got[key]}, declared ${want} — a NEW body outside the envelope\n` +
+            `    in a module whose departures are RULED rather than tracked.\n` +
+            `    ${what}.\n` +
+            `    A ruled exemption is a CLOSED list of the bodies that were measured when the\n` +
+            `    ruling was made, not a standing waiver over this file. If this body is NOT a\n` +
+            `    pre-auth discovery/bootstrap payload, the ruling does not reach it: emit\n` +
+            `    { success: false, error: { code, message } } with an ADR-0112 code, and no\n` +
+            `    number here moves. If it IS one, widening the boundary to cover it is\n` +
+            `    ${RATCHET_AUTHORITY_MARKER}, NOT a co-equal option — raising this count and\n` +
+            `    amending the reason amends a maintainer ruling (#9389, 2026-08-17), so it is\n` +
+            `    a decision to take to the maintainer rather than a fix to apply.\n` +
+            `    (exempt: ${declared.exempt})\n` +
+            `    Lines: ${sites}`
+          : `${file}\n    ${key}: found ${got[key]}, declared ${want} — a NEW non-conforming body.\n` +
+            `    ${what}.\n` +
+            `    Emit the envelope BaseResponseSchema declares —\n` +
+            `    { success: false, error: { code, message } } — with \`code\` a member of the\n` +
+            `    ADR-0112 vocabulary. Raising the declared number is not the fix.\n` +
+            (declared.ratchet ? `    (ratchet for ${declared.ratchet})\n` : '') +
+            `    Lines: ${sites}`,
+      );
+      continue;
+    }
+
+    problems.push(
+      declared.exempt
+        ? `${file}\n    ${key}: found ${got[key]}, declared ${want} — ${want - got[key]} fewer than pinned.\n` +
+          `    A ruled exemption is an exact enumeration, so this is a body the reason still\n` +
+          `    describes and the file no longer emits. Lower the count to ${got[key]} and amend\n` +
+          `    the \`exempt\` reason to match what is left` +
+          (got[key] === 0 ? `, or drop the entry entirely — nothing departs from the envelope here any more` : '') + `.\n` +
+          `    Shrinking a ruled boundary needs nobody's leave; it is the widening direction\n` +
+          `    that is ${RATCHET_AUTHORITY_MARKER}.\n` +
+          `    Lines: ${sites}`
+        : `${file}\n    ${key}: found ${got[key]}, declared ${want} — ${want - got[key]} fewer than pinned.\n` +
+          `    That is progress, and banking it is the other half of the ratchet: lower the\n` +
+          `    declared number to ${got[key]} in PLUGIN_ROUTE_MODULES so the ground cannot be\n` +
+          `    given back` + (got[key] === 0 ? ` (and drop the \`ratchet\`/\`note\` if this was the last one)` : ``) + `.\n` +
+          (declared.ratchet ? `    (ratchet for ${declared.ratchet})\n` : '') +
+          `    Lines: ${sites}`,
+    );
+  }
+
+  const pinned = Object.keys(PLUGIN_ROUTE_COUNTERS).reduce((n, k) => n + (declared[k] ?? 0), 0);
+
+  if (pinned > 0 && !declared.ratchet && !declared.exempt) {
+    problems.push(
+      `${file}\n    pins ${pinned} non-conforming body/bodies with neither a \`ratchet\` nor an\n` +
+      `    \`exempt\` reason.\n` +
+      `    A pinned count is tracked drift or a ruled boundary — never a blessing that\n` +
+      `    arrived by itself. Name the issue that will drive it to zero, or write the\n` +
+      `    reason it is outside the envelope.`,
+    );
+  }
+  if (pinned > 0 && declared.ratchet && !declared.note) {
+    problems.push(
+      `${file}\n    pins ${pinned} non-conforming body/bodies with no \`note\`.\n` +
+      `    Say what they are, so the next reader can tell tracked drift from a shape\n` +
+      `    somebody decided was fine.`,
+    );
+  }
+  // An exemption with nothing to exempt reads as a standing waiver over whatever
+  // this file emits next — which is the file-level shape the #9389 ruling was
+  // deliberately not given (see the header).
+  if (declared.exempt && pinned === 0) {
+    problems.push(
+      `${file}\n    declares \`exempt\` but pins no non-conforming body.\n` +
+      `    An exemption over nothing is a waiver over whatever this file emits next: the\n` +
+      `    counters would stop meaning anything here the moment a bare body appeared. A\n` +
+      `    module that departs from the envelope in no way these counters can see is\n` +
+      `    conformant — declare {}.`,
+    );
+  }
+
+  return problems;
+}
 
 /**
  * Files that write a Hono context response, found by parsing rather than by
@@ -1124,58 +1364,12 @@ function audit() {
 
   for (const file of honoRoutes) {
     const declared = PLUGIN_ROUTE_MODULES[file];
-    if (!declared) {
-      problems.push(
-        `${file}\n    NOT DECLARED. This file writes Hono responses (\`c.json(…)\`), so it is a\n` +
-        `    plugin-route module — add it to PLUGIN_ROUTE_MODULES in\n` +
-        `    scripts/check-route-envelope.mjs. If every body it BUILDS is the declared\n` +
-        `    envelope, declare {}. If some are not, declare the CURRENT counts plus a\n` +
-        `    \`ratchet\` naming the issue that will fix them, and a \`note\` saying what they\n` +
-        `    are — never leave a response-emitting module unaudited.`,
-      );
-      continue;
-    }
-    if (declared.exempt) continue;
-
-    const got = scanHonoRouteSource(readFileSync(join(ROOT, file), 'utf8'), file);
-
-    for (const [key, what] of Object.entries(PLUGIN_ROUTE_COUNTERS)) {
-      const want = declared[key] ?? 0;
-      if (got[key] === want) continue;
-      const sites = got.sites[key].map((s) => s.slice(s.lastIndexOf(':') + 1)).join(', ') || '(none)';
-      problems.push(
-        got[key] > want
-          ? `${file}\n    ${key}: found ${got[key]}, declared ${want} — a NEW non-conforming body.\n` +
-            `    ${what}.\n` +
-            `    Emit the envelope BaseResponseSchema declares —\n` +
-            `    { success: false, error: { code, message } } — with \`code\` a member of the\n` +
-            `    ADR-0112 vocabulary. Raising the declared number is not the fix.\n` +
-            (declared.ratchet ? `    (ratchet for ${declared.ratchet})\n` : '') +
-            `    Lines: ${sites}`
-          : `${file}\n    ${key}: found ${got[key]}, declared ${want} — ${want - got[key]} fewer than pinned.\n` +
-            `    That is progress, and banking it is the other half of the ratchet: lower the\n` +
-            `    declared number to ${got[key]} in PLUGIN_ROUTE_MODULES so the ground cannot be\n` +
-            `    given back` + (got[key] === 0 ? ` (and drop the \`ratchet\`/\`note\` if this was the last one)` : '') + `.\n` +
-            (declared.ratchet ? `    (ratchet for ${declared.ratchet})\n` : '') +
-            `    Lines: ${sites}`,
-      );
-    }
-
-    const pinned = Object.keys(PLUGIN_ROUTE_COUNTERS).reduce((n, k) => n + (declared[k] ?? 0), 0);
-    if (pinned > 0 && !declared.ratchet) {
-      problems.push(
-        `${file}\n    pins ${pinned} non-conforming body/bodies with no \`ratchet\`.\n` +
-        `    A pinned count is tracked drift, not a blessing — name the issue that will\n` +
-        `    drive it to zero.`,
-      );
-    }
-    if (pinned > 0 && !declared.note) {
-      problems.push(
-        `${file}\n    pins ${pinned} non-conforming body/bodies with no \`note\`.\n` +
-        `    Say what they are, so the next reader can tell tracked drift from a shape\n` +
-        `    somebody decided was fine.`,
-      );
-    }
+    // An `exempt` module is still SCANNED and still COUNTED — the ruling closed
+    // a list of bodies, not a list of files. See the header.
+    const got = declared
+      ? scanHonoRouteSource(readFileSync(join(ROOT, file), 'utf8'), file)
+      : null;
+    problems.push(...auditPluginRouteModule(file, declared, got));
   }
 
   for (const file of Object.keys(PLUGIN_ROUTE_MODULES)) {
@@ -1247,13 +1441,16 @@ function audit() {
     `${honoRoutes.length - pRatcheted.length - pExempt.length} conformant, ` +
     `${pRatcheted.length} ratcheted, ${pExempt.length} exempt`,
   );
+  const pCounts = (m) => Object.keys(PLUGIN_ROUTE_COUNTERS)
+    .filter((k) => m[k]).map((k) => `${k} ${m[k]}`).join(', ');
   for (const [file, m] of pRatcheted) {
-    const counts = Object.keys(PLUGIN_ROUTE_COUNTERS)
-      .filter((k) => m[k]).map((k) => `${k} ${m[k]}`).join(', ');
-    console.log(`  ⚠ ratchet ${m.ratchet}: ${file} (${counts}; ticks down only) — ${m.note}`);
+    console.log(`  ⚠ ratchet ${m.ratchet}: ${file} (${pCounts(m)}; ticks down only) — ${m.note}`);
   }
+  // The counts belong in the exempt line too: an exemption here is a closed
+  // enumeration, and printing it without its number would report the ruling as
+  // the file-level waiver it deliberately is not.
   for (const [file, m] of pExempt) {
-    console.log(`  – exempt: ${file} — ${m.exempt}`);
+    console.log(`  – exempt, closed at ${pCounts(m)}: ${file} — ${m.exempt}`);
   }
 }
 
@@ -1498,6 +1695,91 @@ function selfTest() {
   // scans must not both claim the same write site.
   p = scanHonoRouteSource(`res.status(404).json({ error: 'nope' });`);
   assert(p.bodies === 0, `a res.json write must not enter surface 3 → ${JSON.stringify(p)}`);
+
+  // ── The #9389 ruling: an exemption is a CLOSED list ───────────────────────
+  //
+  // The ruling's own load-bearing clause is that the boundary stays enumerated:
+  // a NEW pre-auth bare surface must carry its own exempt-with-reason to pass.
+  // That is a property of the TABLE, not of the scanner — the scanner counts a
+  // new bare body either way, and whether that is a failure is decided by what
+  // is declared. So these cases drive `auditPluginRouteModule`, which is why it
+  // is a pure function; asserting only that `scanHonoRouteSource` still sees a
+  // bare body would be pinning the half that was never in doubt.
+
+  // The shape the ruling covers, so every case below is the real one.
+  const preAuth = `rawApp.get('/bootstrap-status', async (c) => c.json({ hasOwner: true }));`;
+  const ruled = {
+    unenveloped: 1,
+    exempt: 'pre-auth bootstrap, ruled outside BaseResponseSchema by design (2026-08-17, #9389 option B)',
+  };
+  const scanOf = (src) => scanHonoRouteSource(src, 'x.ts');
+  assert(scanOf(preAuth).unenveloped === 1, 'the fixture must be a bare pre-auth body');
+
+  // (1) A NEW FILE carrying one. Undeclared is an ERROR, never a default — the
+  // closed list at file granularity. A new pre-auth surface does not inherit the
+  // ruling by resembling the three files it named.
+  let probs = auditPluginRouteModule('packages/plugins/plugin-new/src/plugin.ts', undefined, scanOf(preAuth));
+  assert(
+    probs.length === 1 && probs[0].includes('NOT DECLARED'),
+    `an unlisted bare pre-auth route must fail the gate → ${JSON.stringify(probs)}`,
+  );
+
+  // (2) …and the same body added INSIDE a file that is already ruled exempt.
+  // This is the case a file-level waiver would have passed in silence, and the
+  // reason `exempt` stays counted on this surface.
+  probs = auditPluginRouteModule('x.ts', ruled, scanOf(`${preAuth}\n${preAuth}`));
+  assert(
+    probs.length === 1 && probs[0].includes('CLOSED list'),
+    `a second bare body on a ruled-exempt module must fail → ${JSON.stringify(probs)}`,
+  );
+  // …and it must send the author to the envelope, naming the widening path as
+  // the maintainer's (#8435). A diagnostic offering "raise the number" as a
+  // co-equal fix would let the ruling grow by author fiat.
+  assert(
+    probs[0].includes(RATCHET_AUTHORITY_MARKER),
+    `widening a ruled boundary must be marked ${RATCHET_AUTHORITY_MARKER} → ${JSON.stringify(probs)}`,
+  );
+
+  // (3) At exactly the ruled count it is green — the exemption does its job.
+  probs = auditPluginRouteModule('x.ts', ruled, scanOf(preAuth));
+  assert(probs.length === 0, `a ruled-exempt module at its pinned count must pass → ${JSON.stringify(probs)}`);
+
+  // (4) BELOW the count is red too. An enumeration that over-counts describes a
+  // body the file no longer emits, and the reason is the deliverable here — a
+  // reason nobody has to keep true decays into the waiver this is not.
+  probs = auditPluginRouteModule('x.ts', ruled, scanOf(`c.json({ success: true, data });`));
+  assert(
+    probs.length === 1 && probs[0].includes('fewer than pinned'),
+    `a ruled-exempt module below its pinned count must fail → ${JSON.stringify(probs)}`,
+  );
+
+  // (5) Tracked drift and a ruled boundary are exclusive claims about one
+  // number. The fixture carries a `note` so this asserts the exclusivity rule
+  // alone rather than tripping the ratchet's own note requirement as well.
+  probs = auditPluginRouteModule('x.ts', { ...ruled, ratchet: '#9364', note: 'n' }, scanOf(preAuth));
+  assert(
+    probs.length === 1 && probs[0].includes('exclusive'),
+    `ratchet + exempt must be refused → ${JSON.stringify(probs)}`,
+  );
+
+  // (6) An exemption with nothing to exempt is the file-level waiver again,
+  // spelled as an empty one: it would sit dormant until the next bare body made
+  // it retroactively cover something nobody ruled on.
+  probs = auditPluginRouteModule('x.ts', { exempt: 'because' }, scanOf(`c.json({ success: true, data });`));
+  assert(
+    probs.length === 1 && probs[0].includes('pins no non-conforming body'),
+    `an exemption over nothing must be refused → ${JSON.stringify(probs)}`,
+  );
+
+  // (7) NEGATIVE: the ordinary tracked-drift path is untouched by all of the
+  // above — a ratchet gaining a body still says "raising the declared number is
+  // not the fix", not the ruling's text.
+  probs = auditPluginRouteModule('y.ts', { unenveloped: 1, ratchet: '#9364', note: 'n' }, scanOf(`${preAuth}\n${preAuth}`));
+  assert(
+    probs.length === 1 && probs[0].includes('Raising the declared number is not the fix') &&
+    !probs[0].includes('CLOSED list'),
+    `a ratchet must keep its own diagnostic → ${JSON.stringify(probs)}`,
+  );
 
   console.log('✓ check-route-envelope self-test passed');
 }
