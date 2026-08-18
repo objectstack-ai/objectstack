@@ -28,7 +28,14 @@
 
 set -uo pipefail
 
-for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud; do
+# objectos joined the triage sweep under Option B (maintainer ruling 2026-08-18,
+# 「就按 B,带你补的两条,落地吧」): it gets the full pm state-machine vocabulary
+# below, but stays OUT of the domain-lane loop (lanes are main-repo-only — its
+# execution folds into domain:devx) and OUT of the target:<major> loop (docs/site
+# repo, no changeset/release flow, no release board). Those absences are
+# deliberate, not oversights. Actually RUNNING this against objectos is a PM
+# landing step (needs label-write credentials on that repo).
+for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud objectstack-ai/objectos; do
   gh label create pm:queue            -R "$R" -c 0e8a16 -d "Ready for the PM dispatch loop" 2>/dev/null || true
   gh label create pm:dispatched       -R "$R" -c 1d76db -d "Dispatched to a dev agent by /pm-dispatch" 2>/dev/null || true
   gh label create needs-user-decision -R "$R" -c d93f0b -d "Blocked on a maintainer decision — do not dispatch" 2>/dev/null || true
