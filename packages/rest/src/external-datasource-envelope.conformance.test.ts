@@ -56,6 +56,15 @@ interface Captured {
  */
 const CREDENTIALED = async () => ({ userId: 'u_env_conformance' });
 
+/**
+ * A resolver that RESOLVES, and resolves to no identity — the anonymous case as
+ * the production resolver expresses it. Spelled as its own constant because
+ * passing `undefined` for the parameter below would take the default above:
+ * "no argument" and "no identity" are different facts, and only one of them is
+ * what the 401 case means to drive.
+ */
+const ANONYMOUS = async () => undefined;
+
 function mount(svc: unknown, resolveExecutionContext: any = CREDENTIALED) {
   const routes = new Map<string, RouteHandler>();
   const server = {
@@ -319,7 +328,7 @@ describe('[#9686] the anonymous refusal is written in the same declared envelope
     // The guard added a body to this surface, and a new body is exactly where
     // an envelope drifts. Same assertions the arms above make, on the arm the
     // authentication floor produces.
-    const routes = mount({ listRemoteTables: async () => [{ name: 'customers' }] }, undefined);
+    const routes = mount({ listRemoteTables: async () => [{ name: 'customers' }] }, ANONYMOUS);
     const { status, body } = await drive(routes, 'GET', `${EXT}/tables`);
 
     expect(status).toBe(401);
