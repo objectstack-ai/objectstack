@@ -66,7 +66,7 @@ Two triggers, not one. Both call the same repair with the same guards.
 
 | Trigger | Where | When it fires |
 | :--- | :--- | :--- |
-| `kernel:ready` boot hook | `@objectstack/metadata-protocol` | Every boot of a kernel that has no environment id — that is, an ordinary self-hosted server. Per-environment (cloud) kernels do not provision these tables locally and are skipped. |
+| `kernel:ready` boot hook | `@objectstack/metadata-protocol` | Every **serving** boot of a self-hosted kernel — `os dev`, `os serve`, `os start`. Per-environment (cloud) kernels do not own these tables locally and are skipped, and so are the one-shot `os migrate` / `os meta` boots (see below). |
 | First-organization handoff | `@objectstack/runtime` | After any successful `create` on `sys_organization`. On a fresh install this is the **first admin sign-up**. |
 
 The second trigger is the one most operators will meet first, and it is not a
@@ -76,6 +76,15 @@ by which time the duplicates of this session have already been minted, and per
 the ruling they are not the platform's to renumber. `sys_organization` gaining
 its first row is exactly the event that makes the answer derivable, so the
 repair runs there too.
+
+<Callout type="info" title="One-shot CLI commands never trigger it">
+`os migrate *` and `os meta *` boot the same stack, but they declare
+themselves out of this repair (`runPlatformMigrations: false`) — so a dry-run
+report cannot destroy the evidence it was run to collect. Only a boot that
+STARTS THE SERVER repairs. Before #9380 no self-hosted boot ran the repair at
+all: the hook was gated on the kernel having no environment id, and the
+standalone stack stamps `proj_local` on every boot, so the gate never opened.
+</Callout>
 
 <Callout type="info" title="It runs on every boot, but is a no-op after the first success">
 The repair is idempotent. Once the rows carry an organization and the
@@ -257,12 +266,14 @@ The live condition is the only forward-looking line in the report, and it is the
 perishable one. On a deployment you have not yet restarted since discovering the
 problem, run the report first.
 
-`os migrate duplicates` writes nothing: it boots read-only, issues `SELECT`s
-only, and emits JSON to stdout for you to archive.
+`os migrate duplicates` writes nothing: it boots read-only, declares itself out
+of the boot repair, issues `SELECT`s only, and emits JSON to stdout for you to
+archive.
 
 <Callout type="warn" title="This is easy to lose by accident">
-The repair fires at `kernel:ready`. Restarting the server to "have a look" is
-enough to consume the evidence.
+The repair fires at `kernel:ready` on a serving boot. Restarting the server to
+"have a look" is enough to consume the evidence — running `os migrate
+duplicates` is not.
 </Callout>
 
 ---
