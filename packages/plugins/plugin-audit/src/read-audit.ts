@@ -461,7 +461,7 @@ export function installReadAuditWriter(
         return;
       }
       failureReported = true;
-      logger?.error?.(
+      const message =
         `Read-audit write FAILED — ${count} record-view row(s) were LOST and the compliance trail is now ` +
           'INCOMPLETE. The reads themselves SUCCEEDED and returned 200, so the API, the screens and every ' +
           'counter read clean; only the `sys_audit_log` rows recording WHO opened those records never landed, ' +
@@ -473,10 +473,16 @@ export function installReadAuditWriter(
           'one is registered (`os dev` provisions one by default as a SIBLING SQLite file), so a "no such ' +
           'table" here usually means the write executed against a DIFFERENT datasource than the one the table ' +
           'was created in. Set `OS_TELEMETRY_DB=0` to keep every lifecycle-classed object on the primary ' +
-          'datasource.',
-        err instanceof Error ? err : new Error(detail),
-        { count },
-      );
+          'datasource.';
+      // `error` is OPTIONAL on this sink, so `logger?.error?.(…)` printed
+      // NOTHING when the host injected one without it — the durability
+      // degradation this text describes would then be reported by nobody at
+      // all (#9657). Reach for `error`, fall back to `warn`, never to silence.
+      if (logger?.error) {
+        logger.error(message, err instanceof Error ? err : new Error(detail), { count });
+      } else {
+        logger?.warn?.(message, { count, err: detail });
+      }
     } catch {
       /* logging must never break the read */
     }
