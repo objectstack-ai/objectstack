@@ -153,6 +153,11 @@ function mountBoth() {
       }
     }
     const authz = await resolveAuthzContext({
+      // No data engine here, stated rather than omitted: `ql` is a required
+      // member, and it is what the api-key admission path reads. This fixture
+      // wires only a session, so that path resolves nothing and the session
+      // path is the one under comparison.
+      ql: undefined,
       headers,
       getSession: async (h: any) => authService.api.getSession({ headers: h }),
     });
