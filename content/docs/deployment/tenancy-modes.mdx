@@ -201,6 +201,15 @@ idempotent, and self-guards: it no-ops under `invite-only`, and under any walled
 request `defaultOrgId()` is `null` so there is nothing to bind to. Opt out with
 `OS_SKIP_MEMBERSHIP_BACKFILL=1`.
 
+<Callout type="warn" title="There is a second, unrelated boot-time backfill">
+The platform also runs a **seed tenancy repair** at `kernel:ready` — a different
+mechanism that rewrites `organization_id` on business rows and merges autonumber
+counters. It is gated on the posture being `single`, so it is adjacent to this
+page's subject, but it is not this backfill: `OS_SKIP_MEMBERSHIP_BACKFILL` has
+**no effect on it**, and it has no opt-out of its own. See [Seed Tenancy
+Repair](/docs/deployment/seed-tenancy-repair).
+</Callout>
+
 ---
 
 ## Degraded tenancy: the boot guard
