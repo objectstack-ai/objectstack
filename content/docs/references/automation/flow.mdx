@@ -42,8 +42,8 @@ const result = FlowSchema.parse(data);
 | **name** | `string` | ✅ | Machine name |
 | **label** | `string` | ✅ | Flow label |
 | **description** | `string` | optional |  |
-| **successMessage** | `string` | optional | Toast shown when a screen flow completes (defaults to a generic "Done"). |
-| **errorMessage** | `string` | optional | Toast shown when a screen flow fails (defaults to the raw error). |
+| **successMessage** | `string` | optional | Message carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of a generic "Done". |
+| **errorMessage** | `string` | optional | Message carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error. |
 | **version** | `integer` | optional (default: `1`) | Version number |
 | **status** | `Enum<'draft' \| 'active' \| 'obsolete' \| 'invalid'>` | optional (default: `"draft"`) | Deployment status |
 | **template** | `never` | optional | [REMOVED] `flow.template` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no designer or engine path ever read it, so flagging a flow as a template/subflow did nothing. Delete the key. Shared logic is invoked via a subflow NODE referencing the flow by name. Run `os migrate meta --from 16` to rewrite existing sources automatically. |

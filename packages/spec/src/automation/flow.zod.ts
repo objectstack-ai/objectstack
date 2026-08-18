@@ -616,14 +616,23 @@ export const FlowSchema = lazySchema(() => strictObject(
   description: z.string().optional(),
 
   /**
-   * Terminal messages for `screen`-flow runs. When the run reaches a terminal
-   * state, the UI flow-runner shows `successMessage` instead of a generic
-   * "Done" toast, and `errorMessage` instead of the raw error. Both are
-   * surfaced on the terminal {@link AutomationResult} (`successMessage` /
-   * `errorMessage`). Plain strings; `{var}` is NOT interpolated here.
+   * Terminal messages for the flow. Since #9414, carried on EVERY terminal
+   * run — `execute()`'s exit, both `retryExecution()` exits, and the resume
+   * exit — not only on `screen`-flow runs. The pair is set on the terminal
+   * {@link AutomationResult} (`successMessage` on success, `errorMessage` on
+   * failure) returned by any trigger route (e.g.
+   * `POST /api/v1/automation/:name/trigger`), whether or not a UI is
+   * listening; a `screen`-flow run additionally has the UI flow-runner show
+   * `successMessage` as a toast instead of a generic "Done", and
+   * `errorMessage` instead of the raw error. Reading this pair as
+   * screen-flow-only was the alternative considered and rejected at #9414's
+   * triage — narrowing the text would delete a declared, documented,
+   * console-consumed capability to make a bug disappear — so treat the
+   * screen-flow toast as one consumer, not the whole contract. Plain
+   * strings; `{var}` is NOT interpolated here.
    */
-  successMessage: z.string().optional().describe('Toast shown when a screen flow completes (defaults to a generic "Done").'),
-  errorMessage: z.string().optional().describe('Toast shown when a screen flow fails (defaults to the raw error).'),
+  successMessage: z.string().optional().describe('Message carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of a generic "Done".'),
+  errorMessage: z.string().optional().describe('Message carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error.'),
 
   /** Metadata & Versioning */
   version: z.number().int().default(1).describe('Version number'),
