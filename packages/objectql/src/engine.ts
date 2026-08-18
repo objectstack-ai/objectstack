@@ -10275,11 +10275,54 @@ export class ObjectQL implements IObjectQLEngine {
           behavior = 'restrict';
         }
 
-        // [#9362] The probe's filter is spelled for the KIND of reference field
-        // it is aimed at, and a multi-value one is narrowed EXACTLY afterwards.
-        // See `referenceProbeFilter` / `storedReferenceIncludes` for why both
-        // halves are needed.
+        // [#9362] Declared here rather than at the probe because BOTH the
+        // escalation below and the probe's filter spelling turn on it.
         const multiValued = fdef.multiple === true;
+
+        // [#9362 -> #9438] TEMPORARY HOLDING POSITION. Delete this block, and
+        // the `multiValueHold` limb of the refusal below, when #9438 lands.
+        //
+        // `set_null` on a SET-valued foreign key has no settled meaning yet.
+        // The limb it would run writes `null` over the WHOLE array, discarding
+        // every other member — references that have nothing to do with the
+        // record being deleted. Measured on the real stack: a row holding
+        // `["acc_a","acc_b"]` re-reads as `null` after `acc_a` is deleted.
+        //
+        // That limb has never executed in this codebase: before #8895 the
+        // dependents probe swallowed its own failure and skipped the relation,
+        // after #8895 it raised `INVALID_FILTER` and aborted the delete. The
+        // probe repair one method over is what would make it run, so this is
+        // not a behaviour being taken away — it is one being held back.
+        //
+        // The RIGHT semantics is "remove the deleted member", but the residual
+        // shape when the array empties (`[]` or `null`) is observable — on the
+        // read path and to a required multi-value validator — and nothing in
+        // `FieldSchema` pins it. #9438 answers that; until it does, refusing
+        // LOUDLY decides nothing, while writing decides it by accident. A
+        // delete that is refused can still be performed by clearing the
+        // references first; data dropped by a successful 200 cannot be undone.
+        //
+        // Shaped as the required-FK escalation directly above, deliberately
+        // rather than as a new mechanism: same `behavior` reassignment, same
+        // one `if`. It reads `behavior === 'set_null'`, which is exactly what
+        // that escalation reads — `fdef.deleteBehavior || 'set_null'` collapses
+        // an ABSENT declaration and an explicitly authored `set_null` into one
+        // value, so both are covered here for the same reason both are covered
+        // there. Distinguishing them would be new machinery, and would leave
+        // the explicit spelling running the very write this holds back — the
+        // author of `set_null` on a set-valued field cannot have chosen "clear
+        // the whole set", because that semantic has never existed to choose.
+        //
+        // An explicit `cascade` or `restrict` is untouched, and a relation with
+        // no dependent rows still deletes: this only changes the DISPOSITION,
+        // so the `restrict` branch below is still reached only when the probe
+        // actually found referencing rows.
+        let multiValueHold = false;
+        if (behavior === 'set_null' && multiValued) {
+          behavior = 'restrict';
+          multiValueHold = true;
+        }
+
         let dependents: any[];
         try {
           dependents = await this.find(
@@ -10379,10 +10422,29 @@ export class ObjectQL implements IObjectQLEngine {
               { locale: msgCtx.locale, translate: msgCtx.translate },
             ),
           );
-          err.developerMessage =
-            `Cannot delete ${object} (${id}): ${dependents.length} dependent ${childName} record(s) reference it via ${fieldName}` +
-            `${required ? ` (${fieldName} is required, so it cannot be cleared)` : ''}. ` +
-            `Delete or reassign them first, or set deleteBehavior:'cascade' on ${childName}.${fieldName}.`;
+          // [#9362 -> #9438] The hold's reason is DEVELOPER-facing and rides
+          // `developerMessage` alone — the split #7307 already made on this
+          // envelope, applied to a third reason. The business `message` is
+          // unchanged because the USER's action is unchanged: clear or reassign
+          // the referencing records. Why the wire code does not split either:
+          // `operation-message.ts` states the rule for this exact envelope —
+          // "one wire code with two sentences ... splitting the SENTENCE, never
+          // the code ... `DELETE_RESTRICTED` stays one member of the ADR-0112
+          // vocabulary that clients match on". A code minted for a holding
+          // position would also have to be RETIRED under ADR-0087 when #9438
+          // lands, which is the opposite of reverting in one line. `#9438` is
+          // spelled literally so removing this is one grep.
+          err.developerMessage = multiValueHold
+            ? `Cannot delete ${object} (${id}): ${dependents.length} dependent ${childName} record(s) reference it via ` +
+              `${fieldName}, which is a multi-value reference (multiple: true) taking the default/declared ` +
+              `deleteBehavior:'set_null'. This refusal is TEMPORARY and is not a policy you configured: clearing ` +
+              `that field would null the WHOLE array and drop the other references it holds, and the correct ` +
+              `semantics ("remove just this member", and what the field holds once empty) is still open — ` +
+              `objectstack#9438. Until it lands: delete or reassign the referencing records first, or set ` +
+              `deleteBehavior:'cascade' on ${childName}.${fieldName} if the dependents should go with the parent.`
+            : `Cannot delete ${object} (${id}): ${dependents.length} dependent ${childName} record(s) reference it via ${fieldName}` +
+              `${required ? ` (${fieldName} is required, so it cannot be cleared)` : ''}. ` +
+              `Delete or reassign them first, or set deleteBehavior:'cascade' on ${childName}.${fieldName}.`;
           err.code = 'DELETE_RESTRICTED';
           err.status = 409;
           err.object = object;

@@ -61,6 +61,27 @@ const GUARD = {
     },
 };
 
+/** Multi-value + explicit `cascade` — the P0 must close for this path. */
+const CASCADE_MULTI = {
+    name: 'zz_cascade',
+    fields: {
+        name: { type: 'text' },
+        accounts: {
+            type: 'lookup', reference: 'zz_account',
+            multiple: true, deleteBehavior: 'cascade',
+        },
+    },
+};
+
+/** SINGLE-valued, defaulted `set_null` — the limb that must keep running. */
+const SINGLE = {
+    name: 'zz_single',
+    fields: {
+        name: { type: 'text' },
+        account: { type: 'lookup', reference: 'zz_account' },
+    },
+};
+
 const OWNER_PACKAGE = 'com.objectstack.test.9362';
 
 describe('[#9362] REST DELETE on an object targeted by a multiple:true lookup — real driver', () => {
@@ -134,5 +155,49 @@ describe('[#9362] REST DELETE on an object targeted by a multiple:true lookup �
             .catch((e: any) => e);
         expect(err.code).toBe('DELETE_RESTRICTED');
         expect(err.status).toBe(409);
+    });
+
+    // ── [#9362 -> #9438] The holding position, on the real stack.
+
+    it('a multi-value set_null refuses instead of nulling the array, and the array survives', async () => {
+        const { protocol, real } = await rig([ACCOUNT, FIELD_ZOO]);
+        const a: any = await engine!.insert('zz_account', { id: 'acc_a', name: 'A' });
+        await engine!.insert('zz_account', { id: 'acc_b', name: 'B' });
+        await engine!.insert('zz_field_zoo', { id: 'z1', name: 'z', f_lookups: ['acc_a', 'acc_b'] });
+
+        const err: any = await protocol
+            .deleteData({ object: 'zz_account', id: a.id })
+            .catch((e: any) => e);
+        expect(err.code).toBe('DELETE_RESTRICTED');
+        expect(err.status).toBe(409);
+        expect(err.developerMessage).toContain('objectstack#9438');
+
+        // Read the stored array back out of the DATABASE. Before the hold this
+        // re-read as `null`, taking `acc_b` with it.
+        const [row]: any[] = await real.find('zz_field_zoo', { where: { id: 'z1' } });
+        expect(row.f_lookups).toEqual(['acc_a', 'acc_b']);
+        expect(await real.count('zz_account')).toBe(2);
+    });
+
+    it('a multi-value CASCADE still deletes end to end — the P0 closes for that path', async () => {
+        const { protocol, real } = await rig([ACCOUNT, CASCADE_MULTI]);
+        const a: any = await engine!.insert('zz_account', { id: 'acc_a', name: 'A' });
+        await engine!.insert('zz_cascade', { id: 'c1', name: 'c', accounts: ['acc_a'] });
+
+        const res = await protocol.deleteData({ object: 'zz_account', id: a.id });
+        expect(res).toMatchObject({ id: 'acc_a', success: true });
+        expect(await real.count('zz_account')).toBe(0);
+        expect(await real.count('zz_cascade')).toBe(0);
+    });
+
+    it('a SINGLE-valued set_null still clears the foreign key — the hold does not over-fire', async () => {
+        const { protocol, real } = await rig([ACCOUNT, SINGLE]);
+        const a: any = await engine!.insert('zz_account', { id: 'acc_a', name: 'A' });
+        await engine!.insert('zz_single', { id: 's1', name: 's', account: 'acc_a' });
+
+        const res = await protocol.deleteData({ object: 'zz_account', id: a.id });
+        expect(res).toMatchObject({ id: 'acc_a', success: true });
+        const [row]: any[] = await real.find('zz_single', { where: { id: 's1' } });
+        expect(row.account).toBeNull();
     });
 });

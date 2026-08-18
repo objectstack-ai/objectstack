@@ -53,3 +53,43 @@ column refusal and against a real `SqlDriver` on better-sqlite3 driven through
 the real data-plane delete: the delete succeeds and the row is gone, a live
 dependent through the array still refuses with `DELETE_RESTRICTED` / 409, and an
 id that is a prefix of another neither inherits its dependents nor loses its own.
+
+## Shipping with it: a TEMPORARY refusal on `set_null` over a multi-value reference
+
+Maintainer-ruled to land in the same change, and **explicitly a holding position
+rather than a semantic**: while a `multiple: true` reference field would take the
+`set_null` limb, the delete is now refused (`DELETE_RESTRICTED` / 409) instead of
+executed.
+
+Repairing the probe is what would make that limb run for the first time in this
+codebase — before #8895 the probe swallowed its own failure and skipped the
+relation, after #8895 it raised `INVALID_FILTER` and aborted the delete — and the
+limb writes `null` over the WHOLE array, discarding every other member. Measured
+on the real stack: a row holding `["acc_a","acc_b"]` re-reads as `null` once
+`acc_a` is deleted.
+
+The right semantics is "remove just the deleted member", but the residual shape
+when the array empties (`[]` or `null`) is observable on the read path and to a
+required multi-value validator, and nothing in `FieldSchema` pins it. That
+question is tracked in objectstack#9438; refusing loudly until it is answered
+decides nothing and reverts in one `if`, while writing would decide it by
+accident and cannot be undone for the rows it touched.
+
+**Scope of the refusal, and what it deliberately leaves alone.** It is the
+required-FK escalation directly above it, applied to an adjacent case: the same
+`behavior` reassignment, reading the same `behavior === 'set_null'`. Because
+`fdef.deleteBehavior || 'set_null'` collapses an absent declaration and an
+explicitly authored `set_null` into one value, both are covered — the same way
+both are already covered by the required-FK escalation, and without adding a
+distinction the existing shape does not make. An explicit `cascade` or `restrict`
+is untouched, a single-valued `set_null` still clears its foreign key, and a
+relation with no dependent rows still deletes: only the disposition changes, so
+the P0 above genuinely closes for every other path.
+
+**No new wire code**, per the rule `operation-message.ts` already states for this
+envelope — one `DELETE_RESTRICTED` with more than one sentence, splitting the
+sentence and never the code. The reason is developer-facing, so it rides
+`developerMessage`, which names the refusal as temporary and cites the tracking
+issue literally so removing this is one grep. The business message a user reads is
+unchanged, because their action is unchanged: clear or reassign the referencing
+records.
