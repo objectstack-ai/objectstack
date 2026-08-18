@@ -844,6 +844,138 @@ function backendStatementFaultError(object: string, cause: unknown): Error {
 }
 
 /**
+ * [#9354] How long the deferred-DDL flush waits for a metadata lock, in seconds.
+ *
+ * MySQL's own default for `lock_wait_timeout` is **31,536,000 — one year**. A
+ * widening `ALTER … MODIFY COLUMN` needs an exclusive metadata lock on the
+ * table, so a single long-running transaction elsewhere (an open REPEATABLE
+ * READ snapshot, a forgotten `BEGIN` in a psql-style shell, a stuck report
+ * query) parks the ALTER in `Waiting for table metadata lock` for that long.
+ * Nothing prints. `os migrate apply` looks like it hung, and no operator can
+ * tell that from a crash — which is the condition this bound exists to end.
+ *
+ * # Why 120 seconds
+ *
+ * The bound is a diagnosis deadline, not a capacity knob: its job is to end the
+ * silence, not to decide how patient a migration may be. So it is chosen as the
+ * shortest wait that still clears the legitimate blockers, and no longer.
+ *
+ *   - **Above the noise.** Normal OLTP transactions on a table being migrated
+ *     hold their metadata lock for milliseconds. Two minutes is three orders of
+ *     magnitude above that, so an ordinary busy table never trips it — the bound
+ *     does not convert a working migration into a failing one.
+ *   - **Below an operator's patience.** A command that has printed nothing for
+ *     two minutes is still within the window where the operator is watching it.
+ *     At ten minutes they have already reached for `SHOW PROCESSLIST` or killed
+ *     it, so a bound that fires later than that arrives after the diagnosis it
+ *     was supposed to provide.
+ *   - **Minutes-scale, per the ruling**, and deliberately at the low end of it:
+ *     failing fast is cheap here. `os migrate apply` is re-runnable and the
+ *     widening is idempotent (`migrateMysqlDatetimeColumns` re-reads
+ *     `information_schema` and does nothing when the column is already
+ *     `DATETIME(3)`), so the cost of a bound that fires too eagerly is one
+ *     re-run once the blocker is gone — against an unbounded hang as the cost of
+ *     one that never fires.
+ *
+ * ⛔ Deliberately NOT configurable, and deliberately NOT retried — the 2026-08-17
+ * ruling's explicit minimality. Both wait for measured demand. A knob added now
+ * would have to be supported forever on the evidence of one CI stall.
+ */
+const DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS = 120;
+
+/**
+ * [#9354] MySQL's lock-wait timeout, as it arrives through mysql2 and knex.
+ *
+ * `ER_LOCK_WAIT_TIMEOUT` (**errno 1205**) is what BOTH lock waits raise — the
+ * InnoDB row-lock timeout (`innodb_lock_wait_timeout`) and the metadata-lock
+ * timeout (`lock_wait_timeout`) this bound arms. The ALTER path can only be
+ * blocked by the second, so on this seam 1205 means the metadata lock.
+ *
+ * Both spellings are checked because the two layers carry different ones:
+ * mysql2 sets a string `code` (`'ER_LOCK_WAIT_TIMEOUT'`) alongside the numeric
+ * `errno`, and a wrapper that rebuilds the error commonly keeps one and drops
+ * the other. `cause` is followed because knex re-throws the driver error with
+ * the original attached — the same cause-chaining
+ * {@link backendStatementFaultError} relies on, and the reason a recognizer
+ * that inspected only the top-level error would go quietly blind.
+ *
+ * ⛔ Message text is NOT sniffed. MySQL and MariaDB word this differently and
+ * both translate it, so a prose match is a recognizer that fails in another
+ * locale — silently, back to the year-long hang.
+ */
+function isMysqlLockWaitTimeout(err: unknown, depth = 0): boolean {
+  if (!err || typeof err !== 'object' || depth > 4) return false;
+  const e = err as { errno?: unknown; code?: unknown; cause?: unknown };
+  if (Number(e.errno) === 1205) return true;
+  if (e.code === 'ER_LOCK_WAIT_TIMEOUT') return true;
+  return isMysqlLockWaitTimeout(e.cause, depth + 1);
+}
+
+/** [#9354] Marks the enveloped refusal below, so the flush's own catch can tell
+ *  it from every other failure without re-running the recognizer on a wrapper. */
+const LOCK_WAIT_REFUSAL = Symbol.for('objectstack.driver-sql.deferredDdlLockWaitRefusal');
+
+/** [#9354] True only for the refusal {@link deferredDdlLockWaitError} built. */
+function isDeferredDdlLockWaitRefusal(err: unknown): boolean {
+  return Boolean(err && typeof err === 'object' && (err as Record<symbol, unknown>)[LOCK_WAIT_REFUSAL]);
+}
+
+/**
+ * [#9354] The refusal a blocked deferred-DDL widening ALTER fails with.
+ *
+ * # Why this is thrown at all, when every sibling here is swallowed
+ *
+ * {@link SqlDriver.migrateMysqlDatetimeColumns} logs and swallows its failures
+ * on purpose: correctness never depends on the widening having run, and a
+ * migration must not take boot down. That policy is right for boot and wrong
+ * for the flush. `os migrate apply` is a command an operator RAN, whose whole
+ * contract is to report what it did; a swallowed lock wait there prints
+ * "Applied 0 change(s)" and reports success while the widening silently did not
+ * happen. So the escape is scoped exactly to this condition on exactly that
+ * path — every other failure keeps the swallow it has today.
+ *
+ * # `DATABASE_ERROR` / 500
+ *
+ * The 2026-08-17 ruling requires a code from the CLOSED standard vocabulary
+ * (ADR-0112), from the `DATABASE_ERROR` family, naming the lock wait. That is
+ * the catalog's own "database operation failed", and it is the same pair
+ * {@link backendStatementFaultError} answers with one refusal over — so this
+ * mints nothing and adds no code to the catalog. 500 rather than 4xx: nothing
+ * about the operator's request is at fault. The blocker is another session.
+ *
+ * # The message carries the diagnosis, because it is the only thing shown
+ *
+ * `os migrate apply` prints `error.message` and exits 1 — `code` and `status`
+ * reach programmatic consumers, but the operator reads this sentence and
+ * nothing else. So it names the lock wait, the table, the bound it hit, and the
+ * one thing that resolves it. The table name is the operator's own schema
+ * (the line beside it already logs it), so naming it discloses nothing new —
+ * and unlike the query-refusal envelope there is no caller-bound literal here
+ * to leak: the statement's only bindings are the table and column.
+ */
+function deferredDdlLockWaitError(table: string, seconds: number, cause: unknown): Error {
+  const err = new Error(
+    `Migration of table '${table}' timed out after ${seconds}s waiting for a MySQL metadata ` +
+      'lock (lock_wait_timeout). Another session is holding a lock on the table — a long-running ' +
+      'transaction or an open, uncommitted session. No schema change was made. Identify the ' +
+      "holder with `SHOW PROCESSLIST` or by querying `performance_schema.metadata_locks`, end " +
+      'it, then re-run `os migrate apply` — the widening is idempotent, so re-running is safe.',
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.DATABASE_ERROR;
+  err.status = 500;
+  Object.defineProperty(err, LOCK_WAIT_REFUSAL, { value: true, enumerable: false });
+  // Non-enumerable, like every sibling refusal in this file: the carrier must be
+  // readable by cause-following predicates and invisible to `JSON.stringify`.
+  Object.defineProperty(err, 'cause', {
+    value: cause,
+    enumerable: false,
+    writable: true,
+    configurable: true,
+  });
+  return err;
+}
+
+/**
  * [#7929] The full, operand-naming text of a refusal whose caller-visible
  * message was redacted — carried on the Error under a SYMBOL key.
  *
@@ -4005,6 +4137,19 @@ export class SqlDriver implements IDataDriver {
 
   /** Object defs `initObjects` registered but did not physically sync while {@link deferredDdl}. */
   protected deferredSchemaObjects = new Map<string, { name: string; fields?: Record<string, any> }>();
+
+  /**
+   * [#9354] True only while {@link flushDeferredSchemaDdl} is performing the
+   * deferred work — the operator-initiated `os migrate apply` path.
+   *
+   * The MySQL widening ALTERs are reached from BOTH boot schema-sync and the
+   * flush, through the same `initObjects` line, and the two want opposite
+   * failure policies: boot must never be taken down by a migration, while a
+   * command the operator ran must never report success for work it did not do.
+   * This flag is what tells them apart at the point the policy is applied, so
+   * neither path needs its own copy of the widening.
+   */
+  private flushingDeferredDdl = false;
 
   /** Backing field for {@link sqliteOpenedEmptyInMemory} (#6743). */
   private openedEmptyInMemory = false;
@@ -7926,6 +8071,91 @@ export class SqlDriver implements IDataDriver {
    * keeps the range and precision limits. Correctness must not depend on a
    * migration having run, and a migration must never take boot down.
    */
+  /**
+   * [#9354] Run the deferred flush's MySQL widening ALTERs under a bounded
+   * metadata-lock wait, on ONE pinned connection.
+   *
+   * # Why the connection has to be pinned
+   *
+   * `lock_wait_timeout` is a SESSION variable, and `this.knex.raw` takes
+   * whatever connection the pool hands it. Issuing `SET SESSION …` through the
+   * pool and the ALTER through the pool sets the bound on one connection and
+   * runs the ALTER on another — a no-op that looks exactly like a fix, and that
+   * a test can pass against by asserting the `SET` was merely emitted. A knex
+   * transaction is this file's existing single-connection seam (it is how every
+   * multi-statement unit here already holds one connection), so both statements
+   * provably ride the same session. MySQL implicitly commits on DDL, which
+   * costs nothing here: the transaction is being used for connection affinity,
+   * not atomicity — an ALTER was never rollback-able on MySQL to begin with.
+   *
+   * # The prior value is restored
+   *
+   * The connection goes back to the pool afterwards and would otherwise carry
+   * this bound into every later statement on it — a migration quietly changing
+   * the lock behaviour of unrelated runtime work. The restore is best-effort:
+   * it must never mask the refusal it runs alongside.
+   *
+   * Only armed for the flush. On boot this runs the statements exactly as
+   * before, through the pool and unbounded, because {@link setDeferredDdl} was
+   * never armed and there is no operator waiting on a prompt.
+   */
+  protected async runWideningAlters(
+    table: string,
+    statements: ReadonlyArray<{ sql: string; bindings: unknown[] }>,
+  ): Promise<void> {
+    if (!this.flushingDeferredDdl || !this.isMysql) {
+      for (const s of statements) await this.knex.raw(s.sql, s.bindings as any);
+      return;
+    }
+    await this.withPinnedSession(async (run) => {
+      let prior: unknown;
+      try {
+        const res: any = await run('select @@session.lock_wait_timeout as v');
+        const rows = Array.isArray(res?.[0]) ? res[0] : (res?.rows ?? res ?? []);
+        prior = (rows?.[0] as any)?.v;
+      } catch {
+        // Unreadable prior value only costs the restore below; it must not stop
+        // the bound from being armed, which is the point of the whole seam.
+      }
+      await run('set session lock_wait_timeout = ?', [DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS]);
+      try {
+        for (const s of statements) {
+          try {
+            await run(s.sql, s.bindings);
+          } catch (err) {
+            if (isMysqlLockWaitTimeout(err)) {
+              throw deferredDdlLockWaitError(table, DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS, err);
+            }
+            throw err;
+          }
+        }
+      } finally {
+        if (prior !== undefined && prior !== null) {
+          try {
+            await run('set session lock_wait_timeout = ?', [Number(prior)]);
+          } catch {
+            // Best-effort: never mask the refusal being thrown past this block.
+          }
+        }
+      }
+    });
+  }
+
+  /**
+   * [#9354] Hold one connection for the duration of `fn`, and give it a runner
+   * that provably issues every statement on that connection.
+   *
+   * Its own method so the connection acquisition can be replaced in a test
+   * without stubbing any of the bounding, recognition or refusal logic above —
+   * the parts that must be exercised for real.
+   */
+  protected async withPinnedSession<T>(
+    fn: (run: (sql: string, bindings?: unknown[]) => Promise<unknown>) => Promise<T>,
+  ): Promise<T> {
+    return await this.knex.transaction(async (trx) =>
+      fn((sql, bindings) => trx.raw(sql, (bindings ?? []) as any)));
+  }
+
   protected async migrateMysqlDatetimeColumns(
     table: string,
     fields: Record<string, any>,
@@ -7935,23 +8165,31 @@ export class SqlDriver implements IDataDriver {
       const legacy = await this.legacyMysqlTimestampColumns(table, fields);
       if (legacy.length === 0) return;
 
-      for (const col of legacy) {
+      // #9354: built as a list, then run as one unit, so the whole widening of a
+      // table shares the ONE pinned session the bounded lock wait needs.
+      const statements = legacy.map((col) => {
         // The default is re-stated because MySQL drops a column's DEFAULT when
         // MODIFY does not repeat it, and an audit column without
         // `CURRENT_TIMESTAMP(3)` would start inserting NULL.
         const isAudit = (AUDIT_TIMESTAMP_COLUMNS as readonly string[]).includes(col.name);
         const nullClause = col.nullable ? 'null' : 'not null';
         const defaultClause = isAudit ? ' default current_timestamp(3)' : '';
-        await this.knex.raw(
-          `alter table ?? modify column ?? datetime(3) ${nullClause}${defaultClause}`,
-          [table, col.name],
-        );
-      }
+        return {
+          sql: `alter table ?? modify column ?? datetime(3) ${nullClause}${defaultClause}`,
+          bindings: [table, col.name] as unknown[],
+        };
+      });
+      await this.runWideningAlters(table, statements);
       this.logger.info?.(
         `[sql-driver] widened MySQL TIMESTAMP → DATETIME(3) (#3942) on ${table}`,
         { columns: legacy.map((c) => c.name) },
       );
     } catch (err) {
+      // #9354: the ONE failure that must not be swallowed. Everything else on
+      // this path keeps the policy the doc comment above describes; a metadata
+      // lock wait that the flush bounded is the operator's answer to a command
+      // they ran, and dropping it would report success for work not done.
+      if (isDeferredDdlLockWaitRefusal(err)) throw err;
       this.logger.warn(
         `[sql-driver] could not widen MySQL datetime columns on ${table}; ` +
         `writes stay correct, but the 2038 ceiling and millisecond truncation remain`,
@@ -8015,23 +8253,31 @@ export class SqlDriver implements IDataDriver {
       const legacy = await this.legacyMysqlTimeColumns(table, fields);
       if (legacy.length === 0) return;
 
-      for (const col of legacy) {
+      // #9354: the datetime twin's seam, for the same reason — this ALTER takes
+      // the same exclusive metadata lock and blocks on the same holder.
+      const statements = legacy.map((col) => {
         // MODIFY drops a default it does not restate. A `defaultValue: 'NOW()'`
         // column gets the canonical UTC expression default (`nowColumnDefault`);
         // its legacy `current_timestamp()` default read the SESSION's zone, so
         // dropping-and-replacing it is a fix, not collateral.
         const isNowDefault = isNowDefaultValue(fields[col.name]?.defaultValue);
         const defaultClause = isNowDefault ? ' default (cast(utc_timestamp(3) as time(3)))' : '';
-        await this.knex.raw(
-          `alter table ?? modify column ?? time(3) ${col.nullable ? 'null' : 'not null'}${defaultClause}`,
-          [table, col.name],
-        );
-      }
+        return {
+          sql: `alter table ?? modify column ?? time(3) ${col.nullable ? 'null' : 'not null'}${defaultClause}`,
+          bindings: [table, col.name] as unknown[],
+        };
+      });
+      await this.runWideningAlters(table, statements);
       this.logger.info?.(
         `[sql-driver] widened MySQL TIME → TIME(3) (#3994) on ${table}`,
         { columns: legacy.map((c) => c.name) },
       );
     } catch (err) {
+      // #9354: the ONE failure that must not be swallowed. Everything else on
+      // this path keeps the policy the doc comment above describes; a metadata
+      // lock wait that the flush bounded is the operator's answer to a command
+      // they ran, and dropping it would report success for work not done.
+      if (isDeferredDdlLockWaitRefusal(err)) throw err;
       this.logger.warn(
         `[sql-driver] could not widen MySQL time columns on ${table}; ` +
         `fractional-second writes keep rounding to whole seconds`,
@@ -8248,7 +8494,17 @@ export class SqlDriver implements IDataDriver {
     // Re-entering initObjects re-registers the same metadata (idempotent) and
     // this time takes the DDL path, so create/alter/index/rotation handling
     // stays in exactly one place.
-    await this.initObjects(pending);
+    //
+    // #9354: armed across that re-entry, and cleared in a `finally` so a refusal
+    // thrown out of the widening cannot leave the flag set on a driver the
+    // caller goes on using (`os migrate apply` keeps the stack alive to shut it
+    // down). It is the only thing distinguishing this path from boot sync.
+    this.flushingDeferredDdl = true;
+    try {
+      await this.initObjects(pending);
+    } finally {
+      this.flushingDeferredDdl = false;
+    }
     return performed;
   }
 
