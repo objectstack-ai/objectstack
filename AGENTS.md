@@ -300,6 +300,38 @@ every `update_pull_request` edit; the session-URL form survives both write paths
 this is unknown, and the guidance does not depend on the answer — do not spend a
 session establishing it. Comments are a different path and unaffected.
 
+**The platform also mutates body BYTES — two measured shapes; spell the poison
+tokens out in words, never write them literally.** (This clause obeys its own rule:
+a clause that cannot survive its own channel is self-defeating.) Both shapes are
+silent, ignore backticks and code fences, and leave text that still reads as
+intended prose or code:
+
+1. **Storage-side deletion** — the exclamation mark is deleted from the
+   markup-declaration opener: the byte sequence less-than, exclamation mark, open
+   square bracket, which is exactly the shape of a regex negative lookbehind before
+   a character class. Measured by two independent authors on the same construct;
+   the rendered web page shows the same loss, so the damage is at rest. The
+   surviving text still looks like code and no longer means what the author wrote
+   (a correct regex proposal read back as an apparent syntax error). A bare
+   less-than + exclamation mark without the bracket survives.
+2. **API-side truncation** — reading a body through the GitHub API/MCP tools cuts
+   it off at a literal script-tag-shaped token (a doctype opener and an
+   object-tag-shaped token also trigger it). Everything after vanishes with no
+   error or marker, while the web page carries the full text — the damage is in
+   the read path, not storage. ⛔ Never "repair" a card that reads short only
+   through the API: fetch the rendered page first; the stored body is probably
+   intact, and a rewrite destroys a correct card.
+
+The operative rule for authors: regex literals and script-tag-shaped tokens go in
+fenced code **with the dangerous character spelled out in words**, or are described
+entirely in words — fences do NOT protect them, and a load-bearing literal that
+cannot survive its own channel must not be entrusted to a GitHub body at all. After
+writing a body that must carry any less-than fragment, read it back and verify the
+fragment survived (write the HTML entity form when it must render literally). The
+older guidance — a less-than sign followed by a letter is stripped as an HTML tag —
+is one member of this family, not its boundary: probes measured that form
+*surviving* inside code fences while the two shapes above were destroyed there.
+
 Even inside your own worktree, operate defensively:
 
 1. **Only touch the files your task needs.** Don't "fix" unrelated diffs, reverts, or
@@ -646,12 +678,14 @@ their output is current; the wrapper reports that each run rather than staying s
 
 ## Skills (`skills/`)
 
-Consult the matching `SKILL.md` when working in its domain: `objectstack-platform`, `objectstack-data`, `objectstack-query`, `objectstack-api`, `objectstack-ui`, `objectstack-automation`, `objectstack-ai`, `objectstack-i18n`, `objectstack-formula` (CEL).
+Two roots; **the filesystem is the catalog**. Consult the matching `SKILL.md` when
+working in its domain — browse the directory, never a hand-written list here (two
+such lists drifted stale as skills landed; a reader who trusts a list cannot see
+what it is missing):
 
-`skills/` is the **published** catalog (it ships to customer projects). Repo-internal
-agent playbooks live in `.claude/skills/` and must carry `metadata.internal: true`:
-`dogfood-verification` (boot and drive the real app in a browser) and
-`spec-property-retirement` (ADR-0049 enforce-or-remove — the full retirement kit).
+- `skills/` — the **published** catalog (it ships to customer projects).
+- `.claude/skills/` — repo-internal agent playbooks; every entry must carry
+  `metadata.internal: true`.
 
 ⛔ **Both roots are governed surfaces**: a PR touching either is human-merge only and may
 never be queued, armed or flipped out of draft — **Prime Directive #14**. No per-PR check
