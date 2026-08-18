@@ -682,7 +682,13 @@ describe('runtime authoring gate on OBJECT writes (#4716)', () => {
         const err = await saveObject(protocol, {
             ...cleanTaskObject(),
             validations: [
-                { name: 'payload_shape', type: 'json_schema', field: 'owner', schema: { required: 'name' } },
+                {
+                    name: 'payload_shape',
+                    type: 'json_schema',
+                    field: 'owner',
+                    message: 'payload must match the declared shape',
+                    schema: { required: 'name' },
+                },
             ],
         }).catch((e: any) => e);
 
@@ -696,9 +702,11 @@ describe('runtime authoring gate on OBJECT writes (#4716)', () => {
 
     it('lets the same broken body through as a DRAFT (D1 unchanged for object writes)', async () => {
         const { protocol, rows } = makeProtocol();
-        const result = await saveObject(protocol, brokenAutonumberObject(), { state: 'draft' });
+        const result = await saveObject(protocol, brokenAutonumberObject(), { mode: 'draft' });
         expect(result.success).toBe(true);
-        expect(objectRows(rows)).toHaveLength(1);
+        const states = objectRows(rows).map((r) => r.state);
+        expect(states).toContain('draft');
+        expect(states, 'a draft save must not mint an active row').not.toContain('active');
     });
 
     it('publishes a clean object with no advisories key — the clean save stays byte-identical', async () => {
