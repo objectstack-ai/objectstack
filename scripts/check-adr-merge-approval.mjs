@@ -5,7 +5,7 @@
 // not be mergeable without an APPROVED review on it, and must not be sitting on
 // an armed auto-merge. Any account's approval counts; no account's arming does.
 //
-// Two surfaces are governed, with IDENTICAL pass conditions and DISTINCT
+// Three surfaces are governed, with IDENTICAL pass conditions and DISTINCT
 // wording (each red names the rule that governs its own surface):
 //
 //   docs/adr/**        -- an ADR is the recorded decision (Prime Directive #13),
@@ -14,6 +14,9 @@
 //                         agent playbooks every later dispatch reads. Added
 //                         2026-08-17 by maintainer ruling on #9319 decision 2
 //                         (see "The skill surface" below).
+//   skills/**          -- the PUBLISHED skill catalog, shipped outward to
+//                         customer projects. Added 2026-08-18 by maintainer
+//                         ruling on #9404 (see "The published catalog" below).
 //
 // The script keeps its original file name: the job name it reports under
 // ("ADR maintainer approval") is a required status context in the `main`
@@ -40,10 +43,10 @@
 //
 //   GUARANTEED (machine-enforced here)   | NOT guaranteed (convention only)
 //   -------------------------------------+----------------------------------------
-//   a GOVERNED diff (docs/adr/** or      | that the approver is the maintainer.
-//   .claude/skills/**) cannot reach a    | Any account with review rights on this
-//   mergeable state with no approving    | repo -- INCLUDING an AI seat -- satisfies
-//   review on the PR                     | this gate. That is the accepted cost of
+//   a GOVERNED diff (docs/adr/**,        | that the approver is the maintainer.
+//   .claude/skills/** or skills/**)      | Any account with review rights on this
+//   cannot reach a mergeable state with  | repo -- INCLUDING an AI seat -- satisfies
+//   no approving review on the PR        | this gate. That is the accepted cost of
 //                                        | the 2026-08-12 ruling, stated out loud.
 //   -------------------------------------+----------------------------------------
 //   the approval is CURRENT, not         | that the approver is not also the
@@ -116,18 +119,40 @@
 // pointed at the lane's own protocol.
 //
 // Deliberately NOT widened to the published `skills/` catalog in the same
-// stroke: the ruling names `.claude/skills/**`, and `skills/**` is a customer-
-// shipped catalog whose merge posture is a separate decision. The pm-dispatch
-// skill's ACCEPT fork already treats all three prefixes alike as CONVENTION;
-// only two of them are machine-enforced here, and that gap is stated rather
-// than quietly closed or quietly ignored.
+// stroke: the #9319 ruling names `.claude/skills/**` only, so the catalog's
+// merge posture stayed a stated gap rather than a quietly-closed one. That
+// separate decision has since been made -- the next section.
+//
+// ## The published catalog surface (skills/**), added 2026-08-18
+//
+// Same control, third surface, ruled by the maintainer on #9404 (2026-08-18,
+// 「同意」 -- the batch acceptance recorded on the card, adopting the
+// recommendation it names: the published `skills/` catalog joins the gate, so
+// all three of the pm-dispatch fork's human-merge prefixes (docs/adr/**,
+// .claude/skills/**, skills/**) are machine-enforced by this required check).
+//
+// The rationale on record: this catalog ships OUTWARD. `skills/**` is
+// published to customer projects, so a bad landing propagates into codebases
+// this repo cannot see -- a worse direction than the repo-internal skills,
+// which steer only this repo's own agents. And prose alone was already
+// measured not to hold a surface of this kind: PR #9238 landed through the
+// merge queue with zero reviews while the pm-dispatch SKILL text named its
+// prefix as human-merge-only. The same declared-must-be-enforced doctrine
+// (ADR-0049), pointed at the catalog the product ships.
+//
+// The cost was measured BEFORE the ruling and accepted in it, not discovered
+// after: ~148 commits/month land on skills/** (the same order as the
+// already-governed docs/adr/** at 165) -- about 5 extra human merges per
+// working day. The #8012 armed-auto-merge clause applies to this surface on
+// the same terms as the other two, and `--self-test` replays the emptiness
+// proof on it.
 //
 // ## The decision rule
 //
 //   diff touches no governed prefix  -> PASS, with ZERO API lookups
-//   diff touches docs/adr/** and/or  -> PASS only if BOTH hold:
-//   .claude/skills/**                   (1) the PR's latest state-setting
-//                                            review is APPROVED, and
+//   diff touches docs/adr/**,        -> PASS only if BOTH hold:
+//   .claude/skills/** and/or            (1) the PR's latest state-setting
+//   skills/**                                review is APPROVED, and
 //                                        (2) auto-merge is NOT armed on the PR
 //
 // One path hit is enough. A mixed diff (governed files plus anything else) is
@@ -192,7 +217,7 @@
 //
 // Ungoverned PRs are untouched: arming auto-merge is ordinary, useful practice
 // here (the release PR runs on it) and the clean path still returns before any
-// lookup happens. Only docs/adr/** and .claude/skills/** are governed.
+// lookup happens. Only docs/adr/**, .claude/skills/** and skills/** are governed.
 //
 // ## The window this does NOT close, stated rather than assumed
 //
@@ -280,15 +305,31 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 export const ADR_PATH_PREFIX = 'docs/adr/';
 
 /**
- * The agent-skill surface, added by the #9319 decision-2 ruling (2026-08-17).
+ * The repo-internal agent-skill surface, added by the #9319 decision-2 ruling
+ * (2026-08-17).
  *
  * `.claude/skills/` and NOT `skills/`: the published catalog at the repo root
- * ships to customer projects and its merge posture is a separate decision the
- * ruling did not make. A prefix, like the ADR one, so `.claude/skills-archive/`
- * and `.claude/skillset.md` do NOT match -- the trailing slash is load-bearing
- * and `--self-test` pins both near misses.
+ * is its own governed surface with its own ruling and wording
+ * (PUBLISHED_SKILL_PATH_PREFIX below), and the two must not be conflated or a
+ * red on one would cite the other's rule. A prefix, like the ADR one, so
+ * `.claude/skills-archive/` and `.claude/skillset.md` do NOT match -- the
+ * trailing slash is load-bearing and `--self-test` pins both near misses.
  */
 export const SKILL_PATH_PREFIX = '.claude/skills/';
+
+/**
+ * The PUBLISHED skill catalog, added by the maintainer ruling on #9404
+ * (2026-08-18, 「同意」): the repo-root `skills/` directory ships outward to
+ * customer projects, so its merge posture is machine-enforced here rather than
+ * left to convention (see "The published catalog surface" in the header).
+ *
+ * Matched with `startsWith` against repo-relative paths, so it is anchored at
+ * the repo root: `.claude/skills/**` does NOT double-match (it starts with
+ * `.claude/`), and a nested `packages/x/skills/` would not match either. The
+ * trailing slash keeps `skillsets/` or a root `skills.md` out -- `--self-test`
+ * pins the near misses on both sides.
+ */
+export const PUBLISHED_SKILL_PATH_PREFIX = 'skills/';
 
 /**
  * Every governed surface, in report order. Identical pass conditions (an
@@ -328,6 +369,19 @@ export const GOVERNED_SURFACES = Object.freeze([
       '    ZERO reviews -- these files are what every LATER dispatch reads, so a bad landing here\n' +
       '    propagates into work nobody has started yet.',
   }),
+  Object.freeze({
+    id: 'published-skill',
+    prefix: PUBLISHED_SKILL_PATH_PREFIX,
+    glob: 'skills/**',
+    what: 'the published skill catalog -- shipped outward to customer projects',
+    rule:
+      'The rule: a published-catalog PR is merged by a human, by hand -- ⛔ never merge, never add to the\n' +
+      '    merge queue, never arm auto-merge on it. Machine-enforced since the 2026-08-18 maintainer ruling\n' +
+      '    on #9404 (「同意」, adopting the recorded recommendation): this catalog ships OUTWARD to customer\n' +
+      '    projects, so a bad landing propagates into codebases this repo cannot see -- a worse direction\n' +
+      '    than the repo-internal skills. The cost was measured before the ruling and accepted in it:\n' +
+      '    ~148 commits/month on this surface, about 5 extra human merges per working day.',
+  }),
 ]);
 
 /** Review states that SET the reviewer's standing; COMMENTED/PENDING do not. */
@@ -354,6 +408,11 @@ export function adrFilesIn(paths) {
 /** @param {string[]} paths @returns {string[]} the paths under .claude/skills/ */
 export function skillFilesIn(paths) {
   return paths.filter((p) => p.startsWith(SKILL_PATH_PREFIX));
+}
+
+/** @param {string[]} paths @returns {string[]} the paths under skills/ (the published catalog) */
+export function publishedSkillFilesIn(paths) {
+  return paths.filter((p) => p.startsWith(PUBLISHED_SKILL_PATH_PREFIX));
 }
 
 /**
@@ -775,10 +834,12 @@ const bullets = (files) => files.map((f) => `      • ${f}`).join('\n');
  * The whole report, as text -- PURE, so `--self-test` asserts on the words an
  * operator actually reads instead of on the verdict object alone.
  *
- * The wording requirement this function exists to hold (#9395): each governed
- * surface names ITS OWN rule. A skills PR is refused citing Prime Directive
- * #14's human-merge reservation; an ADR PR is refused citing the ADR approval
- * ruling; a mixed PR gets both blocks, in table order. The shared reason blocks
+ * The wording requirement this function exists to hold (#9395, extended by
+ * #9404): each governed surface names ITS OWN rule. An internal-skills PR is
+ * refused citing Prime Directive #14's human-merge reservation; an ADR PR is
+ * refused citing the ADR approval ruling; a published-catalog PR is refused
+ * citing the #9404 ruling; a mixed PR gets every touched block, in table
+ * order. The shared reason blocks
  * (arming, approval) below deliberately cite NEITHER rule -- the pass condition
  * is identical for every surface, so the shared half must stay surface-neutral
  * or the distinctness is decoration.
@@ -1151,10 +1212,10 @@ async function selfTest() {
 
     // ── the SKILL surface, added 2026-08-17 (#9319 decision 2) ──────────────
     // The prefix is `.claude/skills/` with the trailing slash load-bearing, and
-    // it is NOT the published `skills/` catalog. Both near misses are pinned
-    // because either one silently mis-scopes the gate: matching too little
-    // restores the #9238 hole, matching too much would gate every customer-
-    // facing skill PR under a ruling that never mentioned them.
+    // it is NOT the published `skills/` catalog -- since #9404 the catalog is
+    // its own surface with its own wording, so a conflation here would refuse
+    // a catalog PR in the internal surface's words (and vice versa). The near
+    // misses stay pinned: matching too little restores the #9238 hole.
     assert(
       'skill-prefix-matches-only-dot-claude-skills',
       skillFilesIn([
@@ -1168,15 +1229,40 @@ async function selfTest() {
       ]).length === 2,
       'expected exactly the two .claude/skills/ paths to match',
     );
+    // ── the PUBLISHED catalog surface, added 2026-08-18 (#9404) ─────────────
+    // INVERTED from `the-published-skills-catalog-is-NOT-governed`, which
+    // pinned the pre-#9404 state ("a separate, unmade decision"). The decision
+    // is now made -- maintainer, 2026-08-18, 「同意」 on #9404 -- so the SAME
+    // fixture must land on the OPPOSITE verdict: governed, by the
+    // published-skill surface and ONLY that surface (the internal prefix must
+    // not swallow it, or a catalog red would cite the internal rule).
     assert(
-      'the-published-skills-catalog-is-NOT-governed',
-      skillFilesIn(['skills/objectstack-ui/SKILL.md']).length === 0 &&
-        governedFilesIn(['skills/objectstack-ui/SKILL.md']).length === 0,
-      'the ruling names .claude/skills/** only; skills/** is a separate, unmade decision',
+      'the-published-skills-catalog-IS-governed',
+      publishedSkillFilesIn(['skills/objectstack-ui/SKILL.md']).length === 1 &&
+        skillFilesIn(['skills/objectstack-ui/SKILL.md']).length === 0 &&
+        governedFilesIn(['skills/objectstack-ui/SKILL.md']).map((s) => s.id).join() === 'published-skill',
+      'the 2026-08-18 ruling on #9404 makes skills/** the third governed surface',
+    );
+    // The new prefix is anchored at the repo root by `startsWith`: near misses
+    // on BOTH sides stay out. `.claude/skills/**` must not double-match (that
+    // would refuse an internal-skill PR in two wordings at once), and root-level
+    // near-spellings and nested `*/skills/` directories must not match at all.
+    assert(
+      'published-skill-prefix-matches-only-the-root-skills-dir',
+      publishedSkillFilesIn([
+        'skills/objectstack-ui/SKILL.md',
+        'skills/deep/nested/reference.md',
+        '.claude/skills/pm-dispatch/SKILL.md',
+        'packages/spec/skills/x.md',
+        'skillsets/overview.md',
+        'skills.md',
+        'docs/adr/0001-x.md',
+      ]).length === 2,
+      'expected exactly the two skills/ paths to match',
     );
     assert(
-      'both-surfaces-are-declared-in-table-order',
-      GOVERNED_SURFACES.map((s) => s.prefix).join(',') === 'docs/adr/,.claude/skills/',
+      'all-three-surfaces-are-declared-in-table-order',
+      GOVERNED_SURFACES.map((s) => s.prefix).join(',') === 'docs/adr/,.claude/skills/,skills/',
       JSON.stringify(GOVERNED_SURFACES.map((s) => s.prefix)),
     );
     assert(
@@ -1188,17 +1274,29 @@ async function selfTest() {
     // Grouping, not flattening: a mixed governed diff must arrive at the
     // renderers as SEPARATE surfaces, or per-surface wording is unreachable.
     {
-      const grouped = governedFilesIn(['docs/adr/0001-x.md', '.claude/skills/pm-dispatch/SKILL.md', 'package.json']);
+      const grouped = governedFilesIn([
+        'docs/adr/0001-x.md',
+        '.claude/skills/pm-dispatch/SKILL.md',
+        'skills/objectstack-ui/SKILL.md',
+        'package.json',
+      ]);
       assert(
         'a-mixed-governed-diff-groups-by-surface',
-        grouped.length === 2 && grouped[0].id === 'adr' && grouped[1].id === 'skill' && grouped.every((s) => s.files.length === 1),
+        grouped.length === 3 &&
+          grouped.map((s) => s.id).join() === 'adr,skill,published-skill' &&
+          grouped.every((s) => s.files.length === 1),
         JSON.stringify(grouped.map((s) => [s.id, s.files])),
       );
     }
 
     // ── clean diff → GREEN with zero lookups (predicted: GREEN, thunk unused) ─
-    // The fixture deliberately includes `skills/` (the published catalog) and
-    // `.claude/hooks/`: the widening must not have swallowed the neighbours.
+    // The fixture deliberately includes near-neighbours of every governed
+    // prefix (`.claude/hooks/`, `docs/adrs/`, `skillsets/`): none of the three
+    // surfaces may swallow them. `skills/objectstack-ui/SKILL.md` was a member
+    // of this fixture until the 2026-08-18 ruling on #9404 made it governed --
+    // the clean path is now proven on the neighbours alone, and it still
+    // short-circuits: both thunks throw on invocation, so a green here IS the
+    // zero-lookup proof.
     {
       const v = await decide({
         changedPaths: [
@@ -1206,7 +1304,8 @@ async function selfTest() {
           'scripts/check-adr-merge-approval.mjs',
           '.github/CODEOWNERS',
           'package.json',
-          'skills/objectstack-ui/SKILL.md',
+          'skillsets/overview.md',
+          'docs/adrs/z.md',
           '.claude/hooks/guard-main-checkout.sh',
         ],
         getReviews: forbiddenLookup,
@@ -1309,59 +1408,138 @@ async function selfTest() {
         `1-of-4 governed gave ok=${mixed.ok} while 1-of-1 gave ok=${unreviewed.ok} — a proportion crept in`,
       );
 
-      // BOTH surfaces at once (predicted: RED, two surfaces in table order).
-      const both = await decide({
-        changedPaths: ['docs/adr/0001-x.md', '.claude/skills/pm-dispatch/SKILL.md'],
+      // ALL THREE surfaces at once (predicted: RED, three surfaces in table
+      // order). Extended from the two-surface case when #9404 added the third.
+      const all = await decide({
+        changedPaths: ['docs/adr/0001-x.md', '.claude/skills/pm-dispatch/SKILL.md', 'skills/objectstack-ui/SKILL.md'],
         getReviews: async () => [],
         getArming: DISARMED,
       });
       assert(
-        'a-diff-touching-both-surfaces-names-both',
-        !both.ok && (both.surfaces ?? []).map((s) => s.id).join() === 'adr,skill',
-        JSON.stringify((both.surfaces ?? []).map((s) => s.id)),
+        'a-diff-touching-all-three-surfaces-names-all-three',
+        !all.ok && (all.surfaces ?? []).map((s) => s.id).join() === 'adr,skill,published-skill',
+        JSON.stringify((all.surfaces ?? []).map((s) => s.id)),
       );
     }
 
-    // ── the two surfaces fail with DISTINCT wording (#9395 acceptance) ───────
+    // ── THE THIRD PATH CLASS: skills/** (#9404, ruled 2026-08-18) ────────────
+    // The published catalog, replayed through the same behaviours as the other
+    // two surfaces. Directions predicted before running: identical to them in
+    // every case -- the ruling added a PREDICATE row, not a new pass condition.
+    {
+      const catalog = ['skills/objectstack-ui/SKILL.md'];
+
+      // no reviews → RED (predicted: RED). Before #9404 this exact input was
+      // GREEN on the zero-lookup clean path -- the inversion the card names.
+      const unreviewed = await decide({ changedPaths: catalog, getReviews: async () => [], getArming: DISARMED });
+      assert('published-skills-diff-without-reviews-is-red', !unreviewed.ok && unreviewed.kind === 'missing-approval', JSON.stringify(unreviewed));
+      assert(
+        'a-published-skills-verdict-names-its-own-surface',
+        (unreviewed.surfaces ?? []).length === 1 && unreviewed.surfaces[0].id === 'published-skill' && unreviewed.files.join() === catalog.join(),
+        JSON.stringify(unreviewed.surfaces),
+      );
+
+      // approved + disarmed → GREEN (predicted: GREEN -- the legitimate path.
+      // ~148 commits/month land on this surface; a gate that refused approved
+      // PRs would be a five-a-day deadlock, not a control).
+      const approvedDisarmed = await decide({
+        changedPaths: catalog,
+        getReviews: async () => [review(HOTLONG, 'APPROVED', '2026-08-18T15:00:00Z')],
+        getArming: DISARMED,
+      });
+      assert('published-skills-approved-and-disarmed-is-green', approvedDisarmed.ok && approvedDisarmed.kind === 'approved', JSON.stringify(approvedDisarmed));
+
+      // ⚠️ THE EMPTINESS PROOF FOR THE THIRD PATH CLASS: identical reviews,
+      // only the arming bit differs, and the verdicts must be opposite --
+      // clause (2) must reach this surface too (predicted: RED vs the GREEN
+      // above, exactly as pinned for the other two surfaces).
+      const armedApproved = await decide({
+        changedPaths: catalog,
+        getReviews: async () => [review(HOTLONG, 'APPROVED', '2026-08-18T15:00:00Z')],
+        getArming: ARMED_BY('os-zhuang'),
+      });
+      assert(
+        'published-skills-armed-clause-changes-a-verdict-that-would-otherwise-be-green',
+        armedApproved.ok === false && approvedDisarmed.ok === true,
+        `armed=${armedApproved.ok}, disarmed=${approvedDisarmed.ok} over identical reviews — clause (2) did not reach the published catalog`,
+      );
+
+      // MIXED: catalog + ordinary files ⇒ gate-scoped in full (predicted: RED,
+      // gated on the catalog file only -- proportion is never asked).
+      const mixed = await decide({
+        changedPaths: ['package.json', 'skills/objectstack-ui/SKILL.md', 'README.md'],
+        getReviews: async () => [],
+        getArming: DISARMED,
+      });
+      assert(
+        'a-mixed-published-skills-diff-is-gate-scoped',
+        !mixed.ok && mixed.files.join() === 'skills/objectstack-ui/SKILL.md' && mixed.checked === 3,
+        JSON.stringify(mixed.files),
+      );
+    }
+
+    // ── the three surfaces fail with DISTINCT wording (#9395, extended #9404) ─
     // Asserted on the rendered TEXT an operator reads, not on the verdict
     // object: "each surface names its own rule" is a claim about words, and a
     // claim about words that is only checked structurally is not checked.
-    // Predicted before running: the skills red cites Prime Directive #14 and
-    // never mentions the ADR glob; the ADR red cites the 2026-08-12 approval
-    // ruling and never mentions Prime Directive #14; the mixed red carries both.
+    // Predicted before running: the internal-skills red cites Prime Directive
+    // #14 and mentions neither the ADR rule nor #9404; the ADR red cites the
+    // 2026-08-12 approval ruling and neither skill rule; the published red
+    // cites the #9404 ruling and none of the others; the mixed red carries
+    // every rule its diff touches.
     {
       const render = async (changedPaths) =>
         renderVerdict(await decide({ changedPaths, getReviews: async () => [], getArming: DISARMED }), { source: 'self-test' });
 
       const skillsRed = await render(['.claude/skills/pm-dispatch/SKILL.md']);
       const adrRed = await render(['docs/adr/0001-x.md']);
-      const mixedRed = await render(['docs/adr/0001-x.md', '.claude/skills/pm-dispatch/SKILL.md']);
+      const publishedRed = await render(['skills/objectstack-ui/SKILL.md']);
+      const mixedRed = await render(['docs/adr/0001-x.md', '.claude/skills/pm-dispatch/SKILL.md', 'skills/objectstack-ui/SKILL.md']);
 
       assert('a-skills-red-exits-1-on-stderr', skillsRed.exitCode === 1 && skillsRed.stream === 'error', JSON.stringify(skillsRed.exitCode));
       assert('a-skills-red-cites-prime-directive-14', skillsRed.text.includes('Prime Directive #14'), skillsRed.text);
       assert('a-skills-red-names-its-own-glob', skillsRed.text.includes('.claude/skills/**'), skillsRed.text);
       assert('a-skills-red-names-the-9238-bypass', skillsRed.text.includes('#9238'), skillsRed.text);
       assert(
-        'a-skills-red-does-NOT-cite-the-adr-rule',
-        !skillsRed.text.includes('docs/adr/**') && !skillsRed.text.includes('#6741'),
-        'the skill surface must not be refused in the ADR surface\'s words',
+        'a-skills-red-does-NOT-cite-the-other-rules',
+        !skillsRed.text.includes('docs/adr/**') && !skillsRed.text.includes('#6741') && !skillsRed.text.includes('#9404'),
+        'the internal skill surface must not be refused in another surface\'s words',
       );
 
       assert('an-adr-red-cites-the-adr-approval-ruling', adrRed.text.includes('#6741') && adrRed.text.includes('docs/adr/**'), adrRed.text);
       assert(
-        'an-adr-red-does-NOT-cite-the-skill-rule',
-        !adrRed.text.includes('Prime Directive #14') && !adrRed.text.includes('.claude/skills/**'),
-        'the ADR surface must not be refused in the skill surface\'s words',
+        'an-adr-red-does-NOT-cite-either-skill-rule',
+        !adrRed.text.includes('Prime Directive #14') && !adrRed.text.includes('.claude/skills/**') && !adrRed.text.includes('#9404'),
+        'the ADR surface must not be refused in a skill surface\'s words',
+      );
+
+      assert('a-published-red-exits-1-on-stderr', publishedRed.exitCode === 1 && publishedRed.stream === 'error', JSON.stringify(publishedRed.exitCode));
+      assert('a-published-red-cites-the-9404-ruling', publishedRed.text.includes('#9404'), publishedRed.text);
+      // `(skills/**)` rather than `skills/**`: the internal surface's glob
+      // CONTAINS the published one as a substring, so only the parenthesised
+      // spelling the renderer writes is unambiguous evidence here.
+      assert('a-published-red-names-its-own-glob', publishedRed.text.includes('(skills/**)'), publishedRed.text);
+      assert('a-published-red-names-the-outward-direction', publishedRed.text.includes('customer'), publishedRed.text);
+      assert(
+        'a-published-red-does-NOT-cite-the-other-rules',
+        !publishedRed.text.includes('Prime Directive #14') &&
+          !publishedRed.text.includes('#6741') &&
+          !publishedRed.text.includes('#9238') &&
+          !publishedRed.text.includes('.claude/skills/**') &&
+          !publishedRed.text.includes('docs/adr/**'),
+        'the published catalog must not be refused in another surface\'s words',
       );
 
       assert(
-        'a-mixed-red-carries-BOTH-rule-texts',
-        mixedRed.text.includes('Prime Directive #14') && mixedRed.text.includes('#6741'),
+        'a-mixed-red-carries-EVERY-rule-text',
+        mixedRed.text.includes('Prime Directive #14') && mixedRed.text.includes('#6741') && mixedRed.text.includes('#9404'),
         mixedRed.text,
       );
       assert(
-        'a-mixed-red-lists-both-surfaces-files',
-        mixedRed.text.includes('docs/adr/0001-x.md') && mixedRed.text.includes('.claude/skills/pm-dispatch/SKILL.md'),
+        'a-mixed-red-lists-every-surfaces-files',
+        mixedRed.text.includes('docs/adr/0001-x.md') &&
+          mixedRed.text.includes('.claude/skills/pm-dispatch/SKILL.md') &&
+          mixedRed.text.includes('skills/objectstack-ui/SKILL.md'),
         mixedRed.text,
       );
 
@@ -1372,9 +1550,15 @@ async function selfTest() {
         await decide({ changedPaths: ['README.md'], getReviews: forbiddenLookup, getArming: forbiddenArming }),
         { source: 'self-test' },
       );
+      // ` / skills/**` with the separator: `.claude/skills/**` contains
+      // `skills/**` as a substring, so the bare spelling can pass on the wrong
+      // glob's strength.
       assert(
-        'the-clean-verdict-advertises-both-governed-globs',
-        clean.exitCode === 0 && clean.text.includes('docs/adr/**') && clean.text.includes('.claude/skills/**'),
+        'the-clean-verdict-advertises-every-governed-glob',
+        clean.exitCode === 0 &&
+          clean.text.includes('docs/adr/**') &&
+          clean.text.includes('.claude/skills/**') &&
+          clean.text.includes(' / skills/**'),
         clean.text,
       );
       const green = renderVerdict(
@@ -1389,6 +1573,19 @@ async function selfTest() {
         'a-green-skills-verdict-names-the-skill-glob-and-the-approver',
         green.exitCode === 0 && green.text.includes('.claude/skills/**') && green.text.includes('hotlong'),
         green.text,
+      );
+      const greenPublished = renderVerdict(
+        await decide({
+          changedPaths: ['skills/objectstack-ui/SKILL.md'],
+          getReviews: async () => [review(HOTLONG, 'APPROVED', '2026-08-18T15:00:00Z')],
+          getArming: DISARMED,
+        }),
+        { source: 'self-test' },
+      );
+      assert(
+        'a-green-published-verdict-names-its-glob-and-the-approver',
+        greenPublished.exitCode === 0 && greenPublished.text.includes('under skills/**') && greenPublished.text.includes('hotlong'),
+        greenPublished.text,
       );
     }
 
