@@ -332,6 +332,7 @@ Gallery/card view configuration
 | **tooltipFields** | `(string \| { field: string; label?: string })[]` | optional | Fields to surface in the hover tooltip, in display order |
 | **quickFilters** | `{ field: string; label?: string; options?: (string \| object)[] }[]` | optional | Multi-select filter dropdowns rendered above the chart |
 | **autoZoomToFilter** | `boolean` | optional | When true (default), filtering zooms the range to the filtered tasks |
+| **viewMode** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional | Timeline granularity — one column per day/week/month/quarter/year (also the resource-view column granularity; renderer default 'day') |
 
 
 ---

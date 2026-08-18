@@ -1178,6 +1178,14 @@ export const GanttConfigSchema = lazySchema(() => strictObject({
   ])).optional().describe('Fields to surface in the hover tooltip, in display order'),
   quickFilters: z.array(GanttQuickFilterSchema).optional().describe('Multi-select filter dropdowns rendered above the chart'),
   autoZoomToFilter: z.boolean().optional().describe('When true (default), filtering zooms the range to the filtered tasks'),
+  // Timeline granularity. The member list is measured from the renderer
+  // (objectui plugin-gantt GanttView.tsx: GanttViewMode / VIEW_MODES), not
+  // invented here. No spec-side `.default()` on purpose: the renderer's
+  // absence behaviour is not a constant — an omitted `viewMode` lets a
+  // persisted layout seed the granularity before falling back to 'day', so a
+  // materialized default would read as an explicit author choice and defeat
+  // that seeding (same reasoning as the map block's defaultless `zoom`/`center`).
+  viewMode: z.enum(['day', 'week', 'month', 'quarter', 'year']).optional().describe("Timeline granularity — one column per day/week/month/quarter/year (also the resource-view column granularity; renderer default 'day')"),
 // Forward-compatible: the gantt renderer (objectui plugin-gantt) keeps adding
 // config knobs (e.g. lockField / defaultCollapsedDepth) ahead of this schema.
 // Passthrough lets those extra fields reach the renderer instead of being

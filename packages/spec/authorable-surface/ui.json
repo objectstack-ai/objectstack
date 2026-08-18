@@ -530,6 +530,7 @@
     "ui/GanttConfig:titleField",
     "ui/GanttConfig:tooltipFields",
     "ui/GanttConfig:typeField",
+    "ui/GanttConfig:viewMode",
     "ui/GanttQuickFilter:field",
     "ui/GanttQuickFilter:label",
     "ui/GanttQuickFilter:options",

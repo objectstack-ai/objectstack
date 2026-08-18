@@ -263,6 +263,53 @@ describe('GanttConfigSchema', () => {
     expect(() => GanttConfigSchema.parse(config)).not.toThrow();
     expect(GanttConfigSchema.parse(config)).toMatchObject({ lockField: 'is_locked', defaultCollapsedDepth: 2 });
   });
+
+  // #9463 — `viewMode`, the spec half of objectui#5074's ruled both-branches
+  // wiring. The member list is MEASURED from the renderer (objectui
+  // plugin-gantt GanttView.tsx: `GanttViewMode` / the `VIEW_MODES` runtime
+  // guard), not invented; if a granularity joins or leaves the renderer, this
+  // pin and the schema move together.
+  describe('viewMode (#9463)', () => {
+    const base = {
+      startDateField: 'start_date',
+      endDateField: 'end_date',
+      titleField: 'name',
+    };
+
+    it.each(['day', 'week', 'month', 'quarter', 'year'] as const)(
+      "accepts the measured granularity '%s'",
+      (viewMode) => {
+        const r = GanttConfigSchema.safeParse({ ...base, viewMode });
+        expect(r.success, `expected acceptance of viewMode '${viewMode}'`).toBe(true);
+        expect(r.data).toMatchObject({ viewMode });
+      },
+    );
+
+    it('leaves an omitted viewMode ABSENT — no materialized default', () => {
+      // The renderer's absence behaviour is not a constant: an omitted
+      // viewMode lets a persisted layout seed the granularity before falling
+      // back to 'day' (objectui GanttView.tsx). A spec-side `.default('day')`
+      // would materialize an explicit author choice and defeat that seeding.
+      const parsed = GanttConfigSchema.parse(base);
+      expect('viewMode' in parsed).toBe(false);
+    });
+
+    it('refuses an out-of-vocabulary granularity, naming the members', () => {
+      // 'hour' is a real granularity on the TIMELINE block's `scale` but not
+      // in the gantt renderer's VIEW_MODES — exactly the near-miss an author
+      // would try. Declared-key values are judged even inside this
+      // deliberately-passthrough parent.
+      const r = GanttConfigSchema.safeParse({ ...base, viewMode: 'hour' });
+      expect(r.success).toBe(false);
+      const issues = JSON.stringify(r.error?.issues);
+      expect(issues).toContain('viewMode');
+      expect(issues).toContain('invalid_value');
+      // The prescription carries the full measured vocabulary.
+      for (const member of ['day', 'week', 'month', 'quarter', 'year']) {
+        expect(issues).toContain(member);
+      }
+    });
+  });
 });
 
 describe('ListViewSchema', () => {

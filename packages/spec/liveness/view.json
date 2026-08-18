@@ -99,7 +99,7 @@
         },
         "gantt": {
           "status": "live",
-          "note": "objectui: ObjectGantt.tsx:236 (audit L16)."
+          "note": "objectui: ObjectGantt.tsx:236 (audit L16). One key rides this blanket verdict at PLANNED strength, mirroring the #9340 map precedent one level down: `viewMode` (#9463, the spec half of the objectui#5074 both-branches ruling) is measured from the renderer's own vocabulary (objectui plugin-gantt GanttView.tsx GanttViewMode/VIEW_MODES: day/week/month/quarter/year, default 'day') but today only the resourceView branch reads it (objectui ObjectGantt.tsx:1445, an `as any` cast); the timeline branch passes nothing, so authoring it changes the majority path not at all until objectui#5074 (pm:blocked on #9463) wires both branches and retires the cast. Amend this note to plain live, citing the timeline-branch read, when that lands — measured objectui at origin/main 68d9e282c on 2026-08-18."
         },
         "gallery": {
           "status": "live",
