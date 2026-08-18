@@ -500,6 +500,7 @@ export function resolveCheckToFiles(checkName, scriptsMap) {
  *
  * Re-exported because this tool's self-test drives the SAME masker the gates
  * run, not a copy of it.
+ */
 export { maskComments };
 
 /**
@@ -2181,6 +2182,24 @@ function selfTest() {
   t('a `//` inside a string does not start a comment', commentHints.includes('packages/metadata/src'));
   t('a quote inside a regex literal does not open a string', commentHints.includes('packages/client/src'));
   t('masking preserves every offset', maskComments(commented).length === commented.length);
+
+  // ...and the re-export of that masker is CODE, not comment text (#9640). The
+  // statement sits at the end of the longest docblock in this file, and a
+  // missing `*/` swallows it into prose that still parses: the module then has
+  // no `maskComments` export while its header says it has one, and nothing goes
+  // red — every gate stayed green over it until someone parsed for it. Asked of
+  // this file's own source with this file's own masker, which is what the
+  // docblock claims. Column 0 only, and a match the scan flags as literal is
+  // rejected, so no fixture spelling in this self-test can stand in for the
+  // statement.
+  const ownSource = readFileSync(new URL(import.meta.url), 'utf8');
+  const ownScan = scanSource(ownSource);
+  t(
+    'the maskComments re-export is code, not comment text',
+    [...ownSource.matchAll(/^export \{ maskComments \};$/gm)].some(
+      (m) => !ownScan.comment[m.index] && !ownScan.literal[m.index],
+    ),
+  );
 
   // The self-test boundary. The fixture puts a column-0 `}` inside a template
   // literal on purpose: that is the shape this tree really has (a check script
