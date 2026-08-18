@@ -1143,8 +1143,9 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
      *                whose trigger IS the unbound-root case) and
      *                `stripReadonlyWhenFields` deletes the value from the
      *                payload; client `fallback: false` ⇒ editable. The two ends
-     *                fault in OPPOSITE directions and ADR-0057 D10 gives it to
-     *                the server. ⇒ the old sentence was BACKWARDS here.
+     *                fault in OPPOSITE directions and the "server enforces,
+     *                client is courtesy" rule (cited as ADR-0057 D10; an
+     *                attribution, #9628) gives it to the server. ⇒ the old sentence was BACKWARDS here.
      *   requiredWhen server logs the unbound root and `continue`s (#4977 did not
      *                copy the carve-out); client `fallback: false`. Both ends
      *                fail open and neither is about visibility. ⇒ the old
@@ -1183,7 +1184,9 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       });
 
       it('`readonlyWhen` — names the client/server disagreement, not just the server verdict', () => {
-        // ADR-0057 D10: the form renders the field editable (`fallback: false`)
+        // Server enforces, client is courtesy (cited as ADR-0057 D10, an
+        // attribution — #9628): the form renders the field editable
+        // (`fallback: false`)
         // while the server locks it. An author who only reads "LOCKED" cannot
         // reconcile that with the editable input in front of them.
         const m = messageFor('readonlyWhen');

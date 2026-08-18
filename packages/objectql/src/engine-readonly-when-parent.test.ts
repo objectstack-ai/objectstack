@@ -7,7 +7,8 @@
 // Paid, its lines are frozen". It was enforced only in the client grid: the
 // server-side strip bound `record` and `previous` and nothing else, so every
 // `parent.*` predicate faulted, took the fail-OPEN branch, and the write landed
-// with a 200 while the UI still drew the cell locked. ADR-0057 D10 puts
+// with a 200 while the UI still drew the cell locked. The rule this repo cites
+// as ADR-0057 D10 (an attribution, not a resolvable anchor — #9628) puts
 // enforcement on the SERVER and makes the client courtesy; this suite pins that
 // direction end-to-end through the real engine + a real driver, not through the
 // strip function in isolation (PD #10: a `case` label is not enforcement —

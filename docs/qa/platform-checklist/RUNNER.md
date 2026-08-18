@@ -74,8 +74,11 @@ test-run output the clause's `evidence` field names.
    this" was the actual bug.
 4. **Both sides of every gate.** For any permission/visibility/feature gate, verify
    presence for the entitled persona AND absence (or server-side rejection) for the
-   unentitled one. UI absence alone is a client courtesy; the server is the authority
-   (ADR-0057 D10) — where feasible, prove denial with a direct forged request.
+   unentitled one. UI absence alone is a client courtesy; the server is the authority.
+   (That rule is cited across the framework as `ADR-0057 D10`; treat it as an
+   attribution — D10 itself decides Setup-nav capability surfacing, and recording the
+   general rule is tracked in #9628. The rule is not in doubt, only its anchor.)
+   Where feasible, prove denial with a direct forged request.
 5. **Severe findings are hypotheses.** "The whole surface is unreachable" gets
    disproven-or-confirmed via screenshot + the server's own metadata before it is
    written down (the golden rule of the dogfood skill).
