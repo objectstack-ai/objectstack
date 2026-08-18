@@ -800,14 +800,17 @@ export function createPermissionSetWriteThrough(
           // definition never returned to the metadata store — the stores
           // disagree silently until someone notices the set behaves like a
           // legacy data-door row.
-          logger?.error?.(
+          const message =
             '[security] restored permission set was NOT re-authored into metadata (ADR-0094 D3) — the record is ' +
             'back and looks healthy, but the metadata store has no definition for it, so a metadata-driven ' +
             're-provision will not recreate it. Fix: make the record body spec-valid (the error names the ' +
-            'offending key) and re-save the set through Setup, or re-run boot reconciliation.',
-            e as Error,
-            { name: row.name },
-          );
+            'offending key) and re-save the set through Setup, or re-run boot reconciliation.';
+          // `ProjectionLogger.error` is OPTIONAL, so `logger?.error?.(…)` printed
+          // NOTHING against a sink that has only `warn` — the durability
+          // degradation described above would then be reported by nobody at all
+          // (#9657). Reach for `error`, fall back to `warn`, never to silence.
+          if (logger?.error) logger.error(message, e as Error, { name: row.name });
+          else logger?.warn?.(message, { name: row.name, error: String((e as Error)?.message ?? e) });
         }
       }
       return;
@@ -1023,7 +1026,7 @@ export async function reconcilePermissionSetProjection(
         // the summary line below. #4669: this was a `warn` with no counter,
         // which is why a 100%-failing backfill sat green for a release.
         if (out.backfillFailed === 1) {
-          logger?.error?.(
+          const message =
             '[security] permission-set backfill into metadata FAILED (ADR-0094 D4) — this environment has ' +
             '`sys_permission_set` records with NO metadata definition backing them, and the one-time backfill ' +
             'did not write one. Nothing will look broken: the records still list in Setup and the evaluator ' +
@@ -1032,10 +1035,13 @@ export async function reconcilePermissionSetProjection(
             'of them, and every boot retries and fails identically. Fix: make the record body spec-valid — the ' +
             'error below names the offending key; `permissionSetBodyFromRow()` already drops storage columns ' +
             '(`active`, timestamps, provenance), so a rejection here means the stored facet JSON itself is ' +
-            'off-contract — then reboot to re-run reconciliation, or delete the orphan record.',
-            e as Error,
-            { name: row.name },
-          );
+            'off-contract — then reboot to re-run reconciliation, or delete the orphan record.';
+          // `ProjectionLogger.error` is OPTIONAL, so `logger?.error?.(…)` printed
+          // NOTHING against a sink that has only `warn` — the durability
+          // degradation described above would then be reported by nobody at all
+          // (#9657). Reach for `error`, fall back to `warn`, never to silence.
+          if (logger?.error) logger.error(message, e as Error, { name: row.name });
+          else logger?.warn?.(message, { name: row.name, error: String((e as Error)?.message ?? e) });
         }
       }
     } else if (recordDiffersFromBody(row, effective)) {
