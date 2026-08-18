@@ -24,6 +24,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { installReadAuditWriter, extractDetailReadId, type ReadAuditTimers } from './read-audit.js';
 
 // ---------------------------------------------------------------------------
@@ -166,11 +167,22 @@ async function makeEngine() {
 
 /** Every ledger row, oldest first. */
 async function ledgerRows(engine: ObjectQL): Promise<any[]> {
-  return (await engine.find('sys_audit_log', {} as any)) as any[];
+  return (await engine.find('sys_audit_log', {})) as any[];
 }
 
+/**
+ * The execution context an engine read carries.
+ *
+ * Named and typed rather than erased with `as any` at each call site: the
+ * engine's options schemas are not `.strict()`, so an unknown key is silently
+ * DROPPED rather than rejected, and `tsc` is the only channel that catches it
+ * for an internal caller (#4674). plugin-audit's tsconfig does not exclude
+ * its test files, so that channel is live over this one.
+ */
+type ReadContext = NonNullable<EngineQueryOptions['context']>;
+
 /** An ordinary authenticated caller — a person, not the platform. */
-const viewerCtx = { userId: 'u_alice', tenantId: 'org_a' };
+const viewerCtx: ReadContext = { userId: 'u_alice', tenantId: 'org_a' };
 
 describe('#8992 record-view auditing — the opt-in is enforced, not declared', () => {
   let engine: ObjectQL;
@@ -180,12 +192,12 @@ describe('#8992 record-view auditing — the opt-in is enforced, not declared', 
     await engine.insert(
       'contact',
       { id: 'c1', full_name: 'Wei Zhang', id_number: '310101199001010011', organization_id: 'org_a' },
-      { context: { isSystem: true } } as any,
+      { context: { isSystem: true } },
     );
     await engine.insert(
       'invoice',
       { id: 'i1', full_name: 'INV-1', organization_id: 'org_a' },
-      { context: { isSystem: true } } as any,
+      { context: { isSystem: true } },
     );
   });
 
@@ -193,7 +205,7 @@ describe('#8992 record-view auditing — the opt-in is enforced, not declared', 
     const writer = installReadAuditWriter(engine, { objects: ['contact'] })!;
     expect(writer).not.toBeNull();
 
-    await engine.findOne('contact', { where: { id: 'c1' }, context: viewerCtx } as any);
+    await engine.findOne('contact', { where: { id: 'c1' }, context: viewerCtx });
     await writer.flush();
 
     const rows = await ledgerRows(engine);
@@ -210,7 +222,7 @@ describe('#8992 record-view auditing — the opt-in is enforced, not declared', 
   it('an object that is NOT opted in produces NO row — the engine never dispatches to us', async () => {
     const writer = installReadAuditWriter(engine, { objects: ['contact'] })!;
 
-    await engine.findOne('invoice', { where: { id: 'i1' }, context: viewerCtx } as any);
+    await engine.findOne('invoice', { where: { id: 'i1' }, context: viewerCtx });
     // Nothing was even buffered: the narrow `{ object: ['contact'] }` registration
     // is the enforcement, so a non-audited read costs no dispatch at all.
     expect(writer.pending()).toBe(0);
@@ -222,7 +234,7 @@ describe('#8992 record-view auditing — the opt-in is enforced, not declared', 
   it('an EMPTY opt-in installs nothing at all', async () => {
     expect(installReadAuditWriter(engine, { objects: [] })).toBeNull();
 
-    await engine.findOne('contact', { where: { id: 'c1' }, context: viewerCtx } as any);
+    await engine.findOne('contact', { where: { id: 'c1' }, context: viewerCtx });
     expect(await ledgerRows(engine)).toHaveLength(0);
   });
 
@@ -247,7 +259,7 @@ describe('#8992 the write is OFF the request path', () => {
 
   beforeEach(async () => {
     engine = await makeEngine();
-    await engine.insert('contact', { id: 'c1', full_name: 'Wei Zhang' }, { context: { isSystem: true } } as any);
+    await engine.insert('contact', { id: 'c1', full_name: 'Wei Zhang' }, { context: { isSystem: true } });
   });
 
   /**
@@ -261,7 +273,7 @@ describe('#8992 the write is OFF the request path', () => {
     const timers = makeManualTimers();
     const writer = installReadAuditWriter(engine, { objects: ['contact'], timers })!;
 
-    const record = await engine.findOne('contact', { where: { id: 'c1' }, context: viewerCtx } as any);
+    const record = await engine.findOne('contact', { where: { id: 'c1' }, context: viewerCtx });
     expect(record).toMatchObject({ id: 'c1' });
 
     // The read is DONE. The view is buffered and the ledger is still empty.
@@ -277,7 +289,7 @@ describe('#8992 the write is OFF the request path', () => {
     const timers = makeManualTimers();
     const writer = installReadAuditWriter(engine, { objects: ['contact'], timers, maxBatchSize: 50 })!;
 
-    await engine.findOne('contact', { where: { id: 'c1' }, context: viewerCtx } as any);
+    await engine.findOne('contact', { where: { id: 'c1' }, context: viewerCtx });
     expect(timers.armed()).toBe(true);
     expect(await ledgerRows(engine)).toHaveLength(0);
 
@@ -291,7 +303,7 @@ describe('#8992 the write is OFF the request path', () => {
     const writer = installReadAuditWriter(engine, { objects: ['contact'], timers, maxBatchSize: 3 })!;
 
     for (let i = 0; i < 3; i += 1) {
-      await engine.findOne('contact', { where: { id: 'c1' }, context: viewerCtx } as any);
+      await engine.findOne('contact', { where: { id: 'c1' }, context: viewerCtx });
     }
     // The size-triggered flush was started by the third enqueue; join it
     // without arming or running the timer, which is still unarmed.
@@ -313,7 +325,7 @@ describe('#8992 the write is OFF the request path', () => {
     // The read still succeeds — an audit write must never turn a valid read
     // into an error.
     await expect(
-      engine.findOne('contact', { where: { id: 'c1' }, context: viewerCtx } as any),
+      engine.findOne('contact', { where: { id: 'c1' }, context: viewerCtx }),
     ).resolves.toMatchObject({ id: 'c1' });
     await expect(writer.flush()).resolves.toBeUndefined();
 
@@ -329,15 +341,15 @@ describe('#8992 record-detail views ONLY — the deferral of list auditing is re
 
   beforeEach(async () => {
     engine = await makeEngine();
-    await engine.insert('contact', { id: 'c1', full_name: 'A', organization_id: 'org_a' }, { context: { isSystem: true } } as any);
-    await engine.insert('contact', { id: 'c2', full_name: 'B', organization_id: 'org_a' }, { context: { isSystem: true } } as any);
+    await engine.insert('contact', { id: 'c1', full_name: 'A', organization_id: 'org_a' }, { context: { isSystem: true } });
+    await engine.insert('contact', { id: 'c2', full_name: 'B', organization_id: 'org_a' }, { context: { isSystem: true } });
     writer = installReadAuditWriter(engine, { objects: ['contact'], timers: makeManualTimers() });
   });
 
   it('a LIST read produces no row, even one that returns a single record', async () => {
-    const many = await engine.find('contact', { where: { organization_id: 'org_a' }, context: viewerCtx } as any);
+    const many = await engine.find('contact', { where: { organization_id: 'org_a' }, context: viewerCtx });
     expect(many).toHaveLength(2);
-    const one = await engine.find('contact', { where: { id: 'c1' }, context: viewerCtx } as any);
+    const one = await engine.find('contact', { where: { id: 'c1' }, context: viewerCtx });
     expect(one).toHaveLength(1);
 
     await writer!.flush();
@@ -349,13 +361,13 @@ describe('#8992 record-detail views ONLY — the deferral of list auditing is re
   it('a findOne WITHOUT a primary-key pin produces no row', async () => {
     // "Give me a contact called A" is an internal lookup, not someone opening
     // a record — and the platform makes many of them.
-    await engine.findOne('contact', { where: { full_name: 'A' }, context: viewerCtx } as any);
+    await engine.findOne('contact', { where: { full_name: 'A' }, context: viewerCtx });
     await writer!.flush();
     expect(await ledgerRows(engine)).toHaveLength(0);
   });
 
   it('a findOne that matched NOTHING produces no row', async () => {
-    await engine.findOne('contact', { where: { id: 'nope' }, context: viewerCtx } as any);
+    await engine.findOne('contact', { where: { id: 'nope' }, context: viewerCtx });
     await writer!.flush();
     expect(await ledgerRows(engine)).toHaveLength(0);
   });
@@ -407,7 +419,7 @@ describe('#8992 who the row names — and who it deliberately does not', () => {
     await engine.insert(
       'contact',
       { id: 'c1', full_name: 'Wei Zhang', organization_id: 'org_a' },
-      { context: { isSystem: true } } as any,
+      { context: { isSystem: true } },
     );
   });
 
@@ -418,7 +430,7 @@ describe('#8992 who the row names — and who it deliberately does not', () => {
     // land in the ledger as "alice viewed this record".
     await engine.findOne(
       'contact',
-      { where: { id: 'c1' }, context: { ...viewerCtx, isSystem: true } } as any,
+      { where: { id: 'c1' }, context: { ...viewerCtx, isSystem: true } },
     );
     await writer.flush();
     expect(await ledgerRows(engine)).toHaveLength(0);
@@ -426,7 +438,7 @@ describe('#8992 who the row names — and who it deliberately does not', () => {
 
   it('a read with NO principal produces no row', async () => {
     const writer = installReadAuditWriter(engine, { objects: ['contact'], timers: makeManualTimers() })!;
-    await engine.findOne('contact', { where: { id: 'c1' } } as any);
+    await engine.findOne('contact', { where: { id: 'c1' } });
     await writer.flush();
     expect(await ledgerRows(engine)).toHaveLength(0);
   });
@@ -435,7 +447,7 @@ describe('#8992 who the row names — and who it deliberately does not', () => {
     const writer = installReadAuditWriter(engine, { objects: ['contact'], timers: makeManualTimers() })!;
     await engine.findOne(
       'contact',
-      { where: { id: 'c1' }, context: { actor: 'svc:export-worker', tenantId: 'org_a' } } as any,
+      { where: { id: 'c1' }, context: { actor: 'svc:export-worker', tenantId: 'org_a' } },
     );
     await writer.flush();
 
@@ -452,7 +464,7 @@ describe('#8992 who the row names — and who it deliberately does not', () => {
     // invisible to the one tenant admin it concerns.
     await engine.findOne(
       'contact',
-      { where: { id: 'c1' }, context: { userId: 'u_bob', tenantId: 'org_b' } } as any,
+      { where: { id: 'c1' }, context: { userId: 'u_bob', tenantId: 'org_b' } },
     );
     await writer.flush();
 
@@ -470,7 +482,7 @@ describe('#8992 what the row must NOT contain, and when it says it happened', ()
     await engine.insert(
       'contact',
       { id: 'c1', full_name: 'Wei Zhang', id_number: '310101199001010011' },
-      { context: { isSystem: true } } as any,
+      { context: { isSystem: true } },
     );
   });
 
@@ -484,7 +496,7 @@ describe('#8992 what the row must NOT contain, and when it says it happened', ()
    */
   it('records NO field values — the row is who/what/when, never the data', async () => {
     const writer = installReadAuditWriter(engine, { objects: ['contact'], timers: makeManualTimers() })!;
-    await engine.findOne('contact', { where: { id: 'c1' }, context: viewerCtx } as any);
+    await engine.findOne('contact', { where: { id: 'c1' }, context: viewerCtx });
     await writer.flush();
 
     const rows = await ledgerRows(engine);
@@ -509,7 +521,7 @@ describe('#8992 what the row must NOT contain, and when it says it happened', ()
       now: () => viewedAt,
     })!;
 
-    await engine.findOne('contact', { where: { id: 'c1' }, context: viewerCtx } as any);
+    await engine.findOne('contact', { where: { id: 'c1' }, context: viewerCtx });
     // Drain much later than the view.
     await new Promise((r) => setTimeout(r, 25));
     await writer.flush();
@@ -521,8 +533,8 @@ describe('#8992 what the row must NOT contain, and when it says it happened', ()
 
   it('two views of the same record are two rows — a view is an event, not a state', async () => {
     const writer = installReadAuditWriter(engine, { objects: ['contact'], timers: makeManualTimers() })!;
-    await engine.findOne('contact', { where: { id: 'c1' }, context: viewerCtx } as any);
-    await engine.findOne('contact', { where: { id: 'c1' }, context: { userId: 'u_bob' } } as any);
+    await engine.findOne('contact', { where: { id: 'c1' }, context: viewerCtx });
+    await engine.findOne('contact', { where: { id: 'c1' }, context: { userId: 'u_bob' } });
     await writer.flush();
 
     const rows = await ledgerRows(engine);
@@ -534,11 +546,11 @@ describe('#8992 what the row must NOT contain, and when it says it happened', ()
 describe('#8992 shutdown drains the tail', () => {
   it('stop() flushes what is buffered and disarms the timer', async () => {
     const engine = await makeEngine();
-    await engine.insert('contact', { id: 'c1', full_name: 'A' }, { context: { isSystem: true } } as any);
+    await engine.insert('contact', { id: 'c1', full_name: 'A' }, { context: { isSystem: true } });
     const timers = makeManualTimers();
     const writer = installReadAuditWriter(engine, { objects: ['contact'], timers })!;
 
-    await engine.findOne('contact', { where: { id: 'c1' }, context: viewerCtx } as any);
+    await engine.findOne('contact', { where: { id: 'c1' }, context: viewerCtx });
     expect(writer.pending()).toBe(1);
 
     await writer.stop();
@@ -546,7 +558,7 @@ describe('#8992 shutdown drains the tail', () => {
     expect(await ledgerRows(engine)).toHaveLength(1);
 
     // After stop the writer is inert — a late read cannot resurrect the buffer.
-    await engine.findOne('contact', { where: { id: 'c1' }, context: viewerCtx } as any);
+    await engine.findOne('contact', { where: { id: 'c1' }, context: viewerCtx });
     expect(writer.pending()).toBe(0);
   });
 });
