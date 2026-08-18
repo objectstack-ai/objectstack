@@ -15,6 +15,7 @@ import { Contact } from '../objects/contact.object.js';
 import { Inquiry } from '../objects/inquiry.object.js';
 import { FieldZoo } from '../objects/field-zoo.object.js';
 import { Announcement } from '../objects/announcement.object.js';
+import { ClientBrief } from '../objects/client-brief.object.js';
 import { ADMIN_EMAIL, PHONE_DEMO_USER, AUDITOR_DEMO_USER } from '../../security/demo-personas.js';
 
 /**
@@ -496,4 +497,43 @@ const announcements = defineSeed(Announcement, {
   ],
 });
 
-export const ShowcaseSeedData = [accounts, contacts, inquiries, products, projects, tasks, categories, businessUnits, orgUnits, teams, memberships, fieldZoo, invoices, invoiceLines, expenseReports, expenseLines, preferences, announcements];
+/**
+ * Client briefs — the fixture behind the share-link demo (#9308 fixture 2).
+ *
+ * Two rows on purpose, one per side of `showcase_client_brief`'s declared
+ * `publicSharing.eligibility` (`record.status == 'published'`): the published
+ * brief is the one a capability token may be minted for, and the draft is the
+ * one whose mint must be REFUSED (422 `RECORD_NOT_ELIGIBLE`, #7861). Seeding
+ * only the shareable side would leave the predicate's enforcement unobservable
+ * on stock data — the same "demonstrate it in BOTH directions" reasoning the
+ * key-account sharing rule's seed follows.
+ *
+ * `internal_notes` and `deal_value` are populated on both, because they are the
+ * object's `redactFields`: a resolve that strips a field which was empty anyway
+ * proves nothing.
+ */
+const clientBriefs = defineSeed(ClientBrief, {
+  mode: 'upsert',
+  externalId: 'title',
+  records: [
+    {
+      title: 'Northwind — Website Relaunch brief',
+      summary:
+        'Discovery is complete and the new information architecture is signed off. Build starts this sprint; the first client-visible preview lands in three weeks.',
+      project: 'Website Relaunch',
+      status: 'published',
+      internal_notes: 'Client stakeholder is nervous about the timeline — do not surface the slip until the preview is up.',
+      deal_value: 150_000,
+    },
+    {
+      title: 'Fabrikam — Compliance Audit brief',
+      summary: 'Draft summary of the audit scope, pending internal review before it goes to the client.',
+      project: 'Compliance Audit',
+      status: 'draft',
+      internal_notes: 'Budget is 98% consumed with a month of scope left. Renegotiate before this leaves the building.',
+      deal_value: 90_000,
+    },
+  ],
+});
+
+export const ShowcaseSeedData = [accounts, contacts, inquiries, products, projects, tasks, categories, businessUnits, orgUnits, teams, memberships, fieldZoo, invoices, invoiceLines, expenseReports, expenseLines, preferences, announcements, clientBriefs];

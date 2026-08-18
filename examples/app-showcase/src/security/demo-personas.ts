@@ -2,7 +2,8 @@
 
 /**
  * The identities the showcase actually PROVISIONS — the one place that answers
- * "which `sys_user` rows exist on a fresh boot of this app?".
+ * "which `sys_user` rows exist on a fresh boot of this app?", and "which of
+ * them can SIGN IN".
  *
  * ## Why this module exists (#7746)
  *
@@ -26,23 +27,40 @@
  * dev boot that set is exactly three rows, and this module is their registry:
  *
  *   1. {@link ADMIN_EMAIL} — the dev admin seeded by `plugin-auth`
- *      (`OS_SEED_ADMIN_EMAIL`, default below). The only LOGINABLE one.
+ *      (`OS_SEED_ADMIN_EMAIL`, default below).
  *   2. {@link PHONE_DEMO_USER} / 3. {@link AUDITOR_DEMO_USER} — the personas
  *      `seed-approval-demo.ts` provisions on `kernel:bootstrapped`.
  *
- * ## The honest limits of that set
+ * ## All three are LOGINABLE (#9308 fixture 1)
  *
- * Both persona rows are **display/routing identities, not accounts**: they carry
- * no better-auth credential, so they cannot sign in (see `ensureDemoUser`). They
- * are enough to make a recipient RESOLVE — which is the whole of this defect —
- * and enough to make the inbox row addressable to a real user id, but reading
- * that row as that persona still needs the sign-up the showcase deliberately
- * leaves to the operator.
+ * The two persona rows used to be **display/routing identities, not accounts**:
+ * they carried no better-auth credential, so they could not sign in. That was
+ * enough to make a recipient RESOLVE and to make an inbox row addressable, but
+ * every checklist item needing a SECOND session — per-group 会签 decided by two
+ * distinct people, a submitter who is not an approver, an out-of-office
+ * delegation decided under the delegate's own identity — was stuck on it, and
+ * each rediscovered the same non-obvious cause: a password hash is not enough.
+ * better-auth 1.7 keys accounts on `(issuer, providerAccountId)`, so a
+ * credential row whose `issuer` is not the local credential issuer is INVISIBLE
+ * to sign-in, which then fails `INVALID_EMAIL_OR_PASSWORD` behind a misleading
+ * "User not found" — pointing at the row, which is fine, instead of at the
+ * account, which is not.
+ *
+ * `seed-approval-demo.ts` now provisions the credential account too
+ * (`ensureCredentialAccount`), through better-auth's own `$context` — its
+ * hasher, its `internalAdapter.createAccount`, and the issuer READ OFF the dev
+ * admin's own credential row rather than re-spelled here. Reading it is what
+ * keeps this app from carrying a second copy of a constant `plugin-auth` owns:
+ * whatever better-auth minted for the admin in THIS runtime is by construction
+ * the issuer a sign-in will look the personas up under.
+ *
+ * Both sign in with {@link DEMO_PERSONA_PASSWORD}.
  *
  * And all three are DEV-ONLY: the dev admin is gated on
  * `NODE_ENV === 'development'`, and the two personas are provisioned only when
- * that admin exists. In a real deployment a fresh showcase has NO users at all,
- * so nothing here could resolve — that is a property of the environment, not a
+ * that admin exists — so the well-known password below can never be minted in a
+ * production boot. In a real deployment a fresh showcase has NO users at all, so
+ * nothing here could resolve — that is a property of the environment, not a
  * defect in the seed, and no seed value can repair it.
  *
  * ## What is deliberately NOT addressed to these, and why
@@ -59,17 +77,35 @@
  * their own invoices — `qa/dogfood/test/showcase-invoice-seed-isolation.
  * dogfood.test.ts` does exactly that, and pins the seeded owners.
  *
- * Repointing invoices at the personas above would not fix that demo, it would
- * DELETE it: these personas hold no credential, so nobody can sign in as one
- * and observe the row-level scoping. Making them loginable, or giving the
- * showcase a set of real signup-able contributor accounts, is a larger design
- * decision than this defect — so it is reported on #7746 rather than guessed
- * at here, and `test/inert-wirings.test.ts` §5 carries the exemption with the
- * same reasoning attached.
+ * Repointing invoices at the personas above would still DELETE that demo rather
+ * than fix it, and #9308 fixture 1 does not change that. The reason moved, so it
+ * is restated rather than dropped: the demo's subject is an operator who SIGNS
+ * UP as one of those three addresses and then sees only their own invoices, and
+ * the dogfood proof pins those exact seeded owners. What used to make repointing
+ * impossible was "the personas hold no credential"; what makes it wrong NOW is
+ * that the owners are the fixture. `test/inert-wirings.test.ts` §5 carries the
+ * exemption with this reasoning attached.
  */
 
 /** The dev admin `plugin-auth` seeds when `NODE_ENV === 'development'`. */
 export const ADMIN_EMAIL = 'admin@objectos.ai';
+
+/**
+ * The password both demo personas sign in with (#9308 fixture 1).
+ *
+ * Well-known ON PURPOSE — it is the same contract as the dev admin's
+ * `admin123`: a demo credential exists so a reviewer, a browser dogfood run or
+ * a checklist runner can drive a SECOND identity without a sign-up detour. It
+ * is not a secret and is not treated as one.
+ *
+ * Its safety comes from WHERE it can be minted, not from what it is:
+ * `seed-approval-demo.ts` provisions these accounts only once the dev admin row
+ * exists, and that admin is itself hard-gated on `NODE_ENV === 'development'`
+ * (`plugin-auth` → `maybeSeedDevAdmin`). A production boot has no dev admin, so
+ * the personas are never provisioned and this password is never written
+ * anywhere. Long enough to clear better-auth's `minPasswordLength` (8).
+ */
+export const DEMO_PERSONA_PASSWORD = 'showcase123';
 
 /** A phone-based demo persona (§6 "phone sign-in surfaces"). */
 export const PHONE_DEMO_USER = {
