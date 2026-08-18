@@ -785,6 +785,44 @@ jobs:
       - name: Workflow status-function guard
         run: pnpm check:workflow-status-functions
 
+      # Cross-repo closer outcome contract (#9595, and #9575 before it).
+      # `cross-repo-issue-closer.yml` carries ~150 lines of inline
+      # github-script, and it is code nobody has ever seen run: over the 1176
+      # most recently merged PRs, ZERO bodies carry a qualified cross-repo
+      # closing keyword, so the branch that closes foreign issues has had no
+      # target in that whole window. Its defects are therefore found by reading
+      # — one card per silent exit — and each fix lands as more unexercised
+      # code. This step is the exercise: the shipped script is extracted from
+      # the YAML with a real parser (never retyped) and run under doubles the
+      # way actions/github-script runs it, as one AsyncFunction body. Ten
+      # scenarios pin the target parse and the outcome of EVERY exit — which of
+      # setFailed / warning / job summary fires, and which API calls were made.
+      #
+      # Assertion 0 is the compile, and it is not theoretical: this job failed
+      # twice on 2026-08-02 with `SyntaxError: Identifier 'octokit' has already
+      # been declared`, i.e. a script that never ran at all, on a post-merge
+      # workflow whose red nothing else in CI can see.
+      #
+      # Its --self-test runs first and is the half that stops the battery
+      # rotting into decoration: it mutates the shipped script seven ways —
+      # downgrade the verdict to a warning, stop collecting failed keys, break
+      # out of the loop instead of isolating, drop the same-repo skip, narrow
+      # the keyword set, drop the already-closed skip, downgrade the notice
+      # path's verdict — and requires the battery to go RED for each, naming the
+      # scenario that catches it. A mutation whose anchor no longer exists is a
+      # failure too, so a rewrite of the workflow cannot leave the mutations
+      # silently matching nothing.
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias: that alias
+      # belongs in root package.json, declared territory of the @changesets/cli
+      # v3 migration lane (#9465) while it runs. Same shape as the
+      # release-rehearsal step above; dispatch-gates.mjs derives gate families
+      # from either spelling. No network, no build; ~0.2 s.
+      - name: Cross-repo closer outcome contract
+        run: |
+          node scripts/check-cross-repo-closer-outcome.mjs --self-test
+          node scripts/check-cross-repo-closer-outcome.mjs
+
       # Shard positive-attestation gate (#6082). ci.yml's two aggregate gates
       # used to decide from one `needs.<matrix>.result` word, which cannot carry
       # three shards' verdicts: run 31120902911 read the undocumented
