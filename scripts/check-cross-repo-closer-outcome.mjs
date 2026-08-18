@@ -170,7 +170,7 @@ function httpError(status, message) {
   return Object.assign(new Error(message), { status });
 }
 
-/** The `github.rest.issues.*` methods this harness models. See `ISSUES_GUARD`. */
+/** The `github.rest.issues.*` methods this harness models. See the `guard` in `makeDoubles`. */
 const MODELLED_ISSUE_METHODS = new Set(['get', 'createComment', 'update', 'listComments']);
 
 /**
@@ -241,20 +241,30 @@ function makeDoubles({ body, token, issues = {}, prCommentError = null, summaryE
   // and all 52 assertions stayed green, because the missing stub landed in the
   // script's own "could not read the comments" branch. So the access is
   // RECORDED as well as thrown, and `judge` fails the scenario on the record.
-  const issuesGuard = new Proxy(issuesApi, {
-    get(t, prop, receiver) {
-      if (typeof prop === 'string' && !MODELLED_ISSUE_METHODS.has(prop)) {
-        unstubbedCalls.push(`github.rest.issues.${prop}`);
-        throw new Error(
-          `${SELF}: the shipped script now calls \`github.rest.issues.${prop}()\`, which this harness ` +
-            'does not stub. Model it here rather than letting a scenario absorb it.',
-        );
-      }
-      return Reflect.get(t, prop, receiver);
-    },
-  });
+  //
+  // The guard is applied at every level of `github`, not just to the issues
+  // methods: `github.paginate`, `github.request` and `github.graphql` are all
+  // reachable from a github-script body and all three would otherwise be
+  // `undefined`, i.e. the identical silent-absorption bug one level up.
+  const guard = (impl, path, allowed) =>
+    new Proxy(impl, {
+      get(t, prop, receiver) {
+        if (typeof prop === 'string' && !allowed.has(prop)) {
+          unstubbedCalls.push(`${path}.${prop}`);
+          throw new Error(
+            `${SELF}: the shipped script now uses \`${path}.${prop}\`, which this harness does not ` +
+              'stub. Model it here rather than letting a scenario absorb it.',
+          );
+        }
+        return Reflect.get(t, prop, receiver);
+      },
+    });
 
-  const github = { rest: { issues: issuesGuard } };
+  const github = guard(
+    { rest: guard({ issues: guard(issuesApi, 'github.rest.issues', MODELLED_ISSUE_METHODS) }, 'github.rest', new Set(['issues'])) },
+    'github',
+    new Set(['rest']),
+  );
 
   const summary = {
     addRaw(text) {
@@ -290,12 +300,19 @@ function makeDoubles({ body, token, issues = {}, prCommentError = null, summaryE
   return { github, context, core, calls, log, token, unstubbedCalls };
 }
 
-/** Anything github-script hands the script that this harness does not model. */
-function unstubbed(name) {
+/**
+ * Anything github-script hands the script that this harness does not model.
+ *
+ * Records into the same sink as the `github` guard before throwing, for the
+ * same reason: a throw raised inside the script's own `try` is caught by the
+ * script, and a scenario then reports a pass about a degradation path.
+ */
+function unstubbed(name, sink) {
   return new Proxy(
     {},
     {
-      get() {
+      get(_t, prop) {
+        sink.push(typeof prop === 'string' ? `${name}.${prop}` : name);
         throw new Error(
           `${SELF}: the shipped script now uses \`${name}\`, which this harness does not stub. ` +
             'Model it here rather than deleting the assertion that found it.',
@@ -315,10 +332,10 @@ async function runScript(source, scenario) {
     github: doubles.github,
     context: doubles.context,
     core: doubles.core,
-    exec: unstubbed('exec'),
-    glob: unstubbed('glob'),
-    io: unstubbed('io'),
-    fetch: unstubbed('fetch'),
+    exec: unstubbed('exec', doubles.unstubbedCalls),
+    glob: unstubbed('glob', doubles.unstubbedCalls),
+    io: unstubbed('io', doubles.unstubbedCalls),
+    fetch: unstubbed('fetch', doubles.unstubbedCalls),
     require: createRequire(import.meta.url),
     __original_require__: createRequire(import.meta.url),
   };
