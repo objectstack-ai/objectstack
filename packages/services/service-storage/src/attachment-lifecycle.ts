@@ -40,7 +40,18 @@ export interface AttachmentLifecycleEngine {
   registerHook(
     event: string,
     handler: (ctx: any) => void | Promise<void>,
-    options?: { object?: string; packageId?: string },
+    options?: {
+      object?: string;
+      packageId?: string;
+      /**
+       * [#9719] Opt-in: the engine ALSO dispatches this handler once with the
+       * whole-operation context when a `multi: true` delete carries no `where`
+       * at all — before any row is resolved. The #4757 unscoped-multi-delete
+       * refusal in `attachment-access-hooks.ts` declares it; nothing else here
+       * does. `beforeDelete` registrations only.
+       */
+      dispatchUnscopedMultiDelete?: boolean;
+    },
   ): void;
   /** Onion-model data middleware (runs for find/findOne/count/aggregate AND
    * writes) — the only seam that filters `count()` (→ list `total`)
