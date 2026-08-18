@@ -77,6 +77,7 @@
     "check:durability-log-level": "node scripts/check-durability-degradation-log-level.mjs --self-test && node scripts/check-durability-degradation-log-level.mjs",
     "check:startup-registry-verdict": "node scripts/check-startup-registry-verdict.mjs --self-test && node scripts/check-startup-registry-verdict.mjs",
     "check:console-sha": "node scripts/check-console-sha.mjs",
+    "check:console-injection": "node scripts/check-console-injection.mjs --self-test && node scripts/check-console-injection.mjs",
     "check:dev-prereqs": "node scripts/check-dev-prereqs.mjs --self-test && node scripts/check-dev-prereqs.mjs",
     "check:objectui-changeset": "node scripts/objectui-changeset-digest.mjs --self-test && node scripts/objectui-range.mjs --self-test",
     "check:objectui-pin-fresh": "node scripts/check-objectui-pin-fresh.mjs --self-test && node scripts/check-objectui-pin-fresh.mjs",

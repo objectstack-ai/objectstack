@@ -103,6 +103,9 @@ jobs:
               - '.objectui-sha'
               - 'scripts/build-console.sh'
               - 'scripts/check-console-sha.mjs'
+              - 'scripts/check-console-injection.mjs'
+              - 'scripts/console-spec-probes.mjs'
+              - 'scripts/assert-console-spec-injection.mjs'
               - '.github/workflows/ci.yml'
 
   test:
@@ -1471,6 +1474,36 @@ jobs:
 
       - name: Verify the Console dist stamp matches the pin
         run: pnpm check:console-sha
+
+      # The spec-injection half of the same question, and the reason it is a
+      # SEPARATE step from build-console.sh (#9667).
+      #
+      # The dist cache key is hashFiles('.objectui-sha', 'scripts/build-console.sh')
+      # — packages/spec is deliberately NOT in it, because adding it would bust the
+      # key on every spec change and force a ~20 min cold console rebuild on a repo
+      # doing ~18 merges a day. The cost model stays; what does not stay is the
+      # silence. scripts/assert-console-spec-injection.mjs runs INSIDE
+      # build-console.sh, so the `if: cache-hit != 'true'` above skips it exactly
+      # when the dist was NOT built here — which is the run that most needs asking.
+      #
+      # That script cannot simply be re-run on this path: it derives its stale
+      # detector from the PUBLISHED @objectstack/spec in objectui's own lockfile,
+      # and on a cache hit there is no objectui clone to read it from. So the build
+      # stamps the probes it chose into dist/.objectstack-injection.json and this
+      # step replays them against whatever is actually on disk — one node process,
+      # no network, cheap enough to run on every PR (which is the whole point; a
+      # gate too expensive to always run is a gate that gets skipped).
+      #
+      # --require-stamp because the vacuity that check:console-sha tolerates is
+      # wrong here for the same reason the presence assert above exists: an
+      # unstamped dist is one no build ever proved, including one saved by a run
+      # that died before the assertion. release.yml uses the COMBINED cache action,
+      # whose post-step saves even on failure, under this same repo-scoped key — so
+      # a poisoned entry is reachable from here and must not pass quietly.
+      - name: Verify the restored Console dist bundles this tree's spec
+        env:
+          CONSOLE_DIST_CACHE_KEY: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}
+        run: pnpm check:console-injection --require-stamp
 
       # Reached only with every assertion above green (see the split-restore note).
       # This deviates from the workflow's restore-only-on-PRs policy on purpose:
