@@ -2291,7 +2291,11 @@ function selfTest() {
   // the shape. If one of these gates stops declaring its root, re-point the
   // case at whatever gate then does; deleting one deletes the evidence.
   const crossPkgHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-cross-package-test-inputs.mjs'), 'utf8'));
-  t('the cross-package gate reaches the root scripts dir it declares', crossPkgHints.some((h) => hintCovers(h, 'scripts/check-nul-bytes.mjs')));
+  // NOT `scripts/check-nul-bytes.mjs`: that gate names that file explicitly
+  // too, so the case would pass with the declaration still refused — measured,
+  // it survived the ablation. Pick a scripts path reachable ONLY through the
+  // declared subtree, or the case pins nothing.
+  t('the cross-package gate reaches the root scripts dir it declares', crossPkgHints.some((h) => hintCovers(h, 'scripts/pm/dispatch-gates.mjs')));
   t('and the content tree it declares', crossPkgHints.some((h) => hintCovers(h, 'content/docs/getting-started/index.mdx')));
   const governedHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/pm/check-governed-merges.mjs'), 'utf8'));
   t('the governed-merge gate reaches the published skills catalog it declares', governedHints.some((h) => hintCovers(h, 'skills/objectstack-upgrade/SKILL.md')));
