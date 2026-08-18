@@ -455,7 +455,8 @@ export const PageHeaderProps = strictObject({
     + 'never off the header\'s own props bag, and the component registry never published it as an '
     + 'input, so an authored value was accepted and dropped. Delete the key. The header\'s own '
     + 'identity is drawn by the record chrome (`recordChrome`, on by default) and each action '
-    + 'carries its own `icon`. Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    + 'carries its own `icon`. '
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   breadcrumb: z.boolean().default(true).describe('Show breadcrumb'),
   actions: z.array(z.string()).optional().describe('Action IDs to show in header'),
@@ -565,7 +566,7 @@ export const PageTabsProps = strictObject({
     + 'a props key named `type` collides with the page component\'s own dispatch key, so it is '
     + 'unauthorable in the flat and JSX carriers and was never validated in them. Rename the key '
     + 'to `tabStyle`; the value (`line` | `card` | `pill`) is unchanged. '
-    + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   position: z.enum(['top', 'left']).default('top'),
   /**
@@ -694,7 +695,7 @@ export const PageCardProps = strictObject({
     + 'never published it as an input, so an authored value was accepted and dropped. Delete the '
     + 'key and author the buttons as components in the card\'s `children` or `footer` '
     + '(`element:button`, `record:quick_actions`), which is what actually renders. '
-    + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   /**
    * Card content, in order — the canonical composition slot, matching every
@@ -717,7 +718,8 @@ export const PageCardProps = strictObject({
     '`page:card` property `body` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0087 D2) — '
     + 'it was a second spelling of the composition slot every other container calls `children`, '
     + 'and the renderer reads both. Rename the key to `children`; the value (an array of child '
-    + 'components) is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    + 'components) is unchanged. '
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   /** Slot for footer content */
   footer: z.array(z.unknown()).optional().describe('Card footer components (slot)'),
@@ -764,7 +766,7 @@ export const RecordDetailsProps = strictObject({
     + 'values took the same branch and the key selected nothing. Delete the key — the body is '
     + 'already chosen by what you author: `sections` renders the explicit groups (the old '
     + '`custom`), and omitting it falls back to the object\'s `highlightFields` (the old `auto`). '
-    + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   /**
    * Field groups rendered as the detail body, IN ORDER.
@@ -1037,17 +1039,18 @@ const CHATTER_POSITION_RETIRED: ReadonlyMap<string, string> = new Map([
     + 'no renderer branch ever compared the old vocabulary: `RecordChatterPanel` docks on '
     + "'right'/'left' and renders in flow on 'bottom', so a spec-valid 'sidebar' silently fell "
     + "through to the in-flow render. Write 'right' — the docked side panel 'sidebar' meant. "
-    + 'Run `os migrate meta` to rewrite existing sources automatically (registered under '
-    + 'protocol major 18).'],
+    + 'Run `os migrate meta` to list the mechanical edits for existing sources '
+    + '(registered under protocol major 18); apply them by hand.'],
   ['inline', "'inline' was removed from `record:chatter` / `record:discussion` `position` (#8762) — "
     + 'no renderer branch ever compared the old vocabulary. Write \'bottom\' — the renderer\'s '
     + "in-flow branch, which is where 'inline' already rendered. Run `os migrate meta` to "
-    + 'rewrite existing sources automatically (registered under protocol major 18).'],
+    + 'list the mechanical edits for existing sources (registered under protocol major 18); '
+    + 'apply them by hand.'],
   ['drawer', "'drawer' was removed from `record:chatter` / `record:discussion` `position` (#8762) "
     + 'with no successor: no renderer branch ever implemented an overlay drawer — the value fell '
     + "through to the in-flow render. Write 'right' — the docked side panel is the nearest "
-    + 'surviving shape of a side drawer. Run `os migrate meta` to rewrite existing sources '
-    + 'automatically (registered under protocol major 18).'],
+    + 'surviving shape of a side drawer. Run `os migrate meta` to list the mechanical edits '
+    + 'for existing sources (registered under protocol major 18); apply them by hand.'],
 ]);
 
 /**
@@ -1637,7 +1640,7 @@ const elementFilterRetired = (key: string): string =>
   + 'no-renderer exclusion), so every key on this element was a capability claim nothing '
   + 'kept. Delete the `element:filter` component; list surfaces own their filtering — use a '
   + "view's `userFilters` quick-filter bar or the list toolbar's filter builder. "
-  + 'Run `os migrate meta --from 17` to rewrite existing sources automatically.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
 /**
  * RETIRED at element grain (#9220, ADR-0049 enforce-or-remove). `element:filter`
@@ -1785,7 +1788,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
     + "component's `id`, so authoring only `targetVariable` bound nothing while reporting "
     + 'success. Delete the key; to bind the picked record id, declare it on the variable — '
     + "`variables: [{ name: '<var>', type: 'record_id', source: '<this component id>' }]`. "
-    + 'Run `os migrate meta --from 17` to rewrite existing sources automatically.',
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   placeholder: I18nLabelSchema.optional().describe('Placeholder text'),
   /** Shown in place of the row list when the query returns nothing. */
@@ -1799,7 +1802,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
     + '(#5775, ADR-0087 D2) — it was a required declaration no renderer ever read, while the '
     + 'renderer honoured `labelField` for the same thing and defaulted to `name`. Rename the key '
     + 'to `labelField`; the value (a field name) is unchanged. '
-    + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   /**
    * REMOVED (#5775). ADR-0049 enforce-or-remove: the control has no search
@@ -1810,7 +1813,8 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
     + '(#5775, ADR-0049) — the picker renders a plain single-select with no search input, so no '
     + 'renderer ever read it and it narrowed nothing. Delete the key. To restrict which records '
     + 'the picker offers, use `filter` (or the component-level `dataSource.filter`), which the '
-    + 'query path does apply. Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    + 'query path does apply. '
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   /**
    * REMOVED (#5775). ADR-0049 enforce-or-remove: the control is a single-select
@@ -1821,7 +1825,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
     + '(#5775, ADR-0049) — the picker is a single-select `Select` and the bound page variable '
     + 'holds one record id, so `multiple: true` selected nothing extra and reported success. '
     + 'Delete the key; multi-record selection is not implemented on this element. '
-    + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
@@ -1868,7 +1872,7 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
     + "component's `id`, so authoring only `targetVariable` bound nothing while reporting "
     + 'success. Delete the key; to bind the typed value, declare it on the variable — '
     + "`variables: [{ name: '<var>', type: 'string', source: '<this component id>' }]`. "
-    + 'Run `os migrate meta --from 17` to rewrite existing sources automatically.',
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),

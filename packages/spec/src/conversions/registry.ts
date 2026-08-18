@@ -1814,7 +1814,7 @@ const appDeadAuthoringKeysRemoved: MetadataConversion = {
  *
  * `retiredFromLoadPath`: the strict schema refuses the keys outright, so there
  * is no alias window; the entry exists so `spec-changes.json` carries the
- * removal and `os migrate meta --from 16` can rewrite authored sources.
+ * removal and `os migrate meta --from 16` can list the mechanical edits for authored sources.
  */
 const appAreaFailOpenGatesRemoved: MetadataConversion = {
   id: 'app-area-fail-open-gates-removed',
@@ -2105,7 +2105,7 @@ const fieldRequiredNotNullExplicit: MetadataConversion = {
  * pure lossless deletes — none of these keys ever had a runtime effect to
  * lose — and all are retired from the load path: each schema tombstones its
  * keys with the prescription (`retiredKey`), so the loader rejects loudly and
- * only `os migrate meta` rewrites sources.
+ * only `os migrate meta` lists the mechanical edits for existing sources.
  */
 const stripKeys = (
   item: Record<string, unknown>,
@@ -2355,7 +2355,7 @@ const viewListPassthroughKeysRemoved: MetadataConversion = {
  * `retiredFromLoadPath`: the enum rejects the value outright, so a live author
  * is taught at parse rather than silently rewritten. The entry exists so
  * stored 16.x/17-rc rows replay clean (`applyConversionsToStoredItem`) and so
- * `os migrate meta --from 16` rewrites author sources. As with `crypto.hash`,
+ * `os migrate meta --from 16` lists the mechanical edits for author sources. As with `crypto.hash`,
  * the strip keeps the surrounding declaration — an emptied `formats` array
  * stays (an export menu configured to offer nothing is a declaration, not an
  * accident this conversion may invent an answer for).
@@ -3829,8 +3829,7 @@ const objectManagedBySystemToSystemData: MetadataConversion = {
  * live author is taught at parse; this entry exists so stored 16.x rows
  * replay clean (`applyConversionsToStoredItem` — without it a pre-removal row
  * flags `metadata_spec_invalid` forever, mislabelling chain-owned history as
- * a current-contract violation) and so `os migrate meta --from 16` rewrites
- * sources.
+ * a current-contract violation) and so `os migrate meta --from 16` lists the mechanical edits for existing sources.
  */
 const objectEnableTrashMruRemoved: MetadataConversion = {
   id: 'object-enable-trash-mru-removed',
@@ -3912,7 +3911,7 @@ const objectEnableTrashMruRemoved: MetadataConversion = {
  * author is taught by the parse error. This entry exists so stored ≤16 rows
  * replay clean through `applyConversionsToStoredItem` (without it a
  * pre-removal row would flag `metadata_spec_invalid` forever) and so
- * `os migrate meta --from 16` rewrites sources mechanically.
+ * `os migrate meta --from 16` lists the mechanical edits for existing sources.
  */
 const objectIndexTypePartialRemoved: MetadataConversion = {
   id: 'object-index-type-partial-removed',
@@ -4241,7 +4240,7 @@ const retryPolicyConverged: MetadataConversion = {
  * 16.x/17-rc rows replay clean (`applyConversionsToStoredItem` — without it a
  * pre-removal row flags `metadata_spec_invalid` forever, mislabelling
  * chain-owned history as a current-contract violation) and so
- * `os migrate meta --from 16` rewrites author sources. The
+ * `os migrate meta --from 16` lists the mechanical edits for author sources. The
  * `object-enable-trash-mru-removed` precedent, one level deeper: the token is a
  * VALUE inside `body.capabilities`, not a key, so `stripKeys` cannot reach it.
  *
@@ -4417,7 +4416,7 @@ const hookBodyCryptoHashRemoved: MetadataConversion = {
  * 16.x/17-rc rows replay clean (`applyConversionsToStoredItem` — without it a
  * pre-removal row flags `metadata_spec_invalid` forever, mislabelling
  * chain-owned history as a current-contract violation) and so
- * `os migrate meta --from 16` rewrites author sources.
+ * `os migrate meta --from 16` lists the mechanical edits for author sources.
  */
 const datasetMeasureAggRemoved: MetadataConversion = {
   id: 'dataset-measure-array-string-agg-removed',
@@ -4541,8 +4540,7 @@ const datasetMeasureAggRemoved: MetadataConversion = {
  * `flow-node-wait-timeout-keys-removed` distinction. Silently absorbing it at
  * load would let the author keep believing they had configured a cap. The entry
  * exists so stored 16.x/17-rc rows replay clean
- * (`applyConversionsToStoredItem`) and `os migrate meta --from 16` rewrites
- * author sources; live parses hit the `retiredKey()` tombstone instead.
+ * (`applyConversionsToStoredItem`) and `os migrate meta --from 16` lists the mechanical edits for author sources; live parses hit the `retiredKey()` tombstone instead.
  */
 const connectorRateLimitConfigRemoved: MetadataConversion = {
   id: 'connector-rate-limit-config-removed',
@@ -4658,8 +4656,7 @@ const connectorRateLimitConfigRemoved: MetadataConversion = {
  * `connector-rate-limit-config-removed` shape exactly. Absorbing it silently at
  * load would let an author keep believing their values were being cast, mapped
  * or looked up. The entry exists so stored rows replay clean
- * (`applyConversionsToStoredItem`) and `os migrate meta --from 16` rewrites
- * author sources; live parses hit the tombstone.
+ * (`applyConversionsToStoredItem`) and `os migrate meta --from 16` lists the mechanical edits for author sources; live parses hit the tombstone.
  */
 const fieldMappingTransformRemoved: MetadataConversion = {
   id: 'field-mapping-transform-removed',
@@ -4771,8 +4768,7 @@ const fieldMappingTransformRemoved: MetadataConversion = {
  * authored config a rewrite would have saved.
  *
  * `retiredFromLoadPath`: the schema tombstones each key with its prescription,
- * so a live parse rejects loudly and only `os migrate meta --from 16` rewrites
- * sources. Absorbing these at load would let an author keep believing they had
+ * so a live parse rejects loudly and only `os migrate meta --from 16` lists the mechanical edits for existing sources. Absorbing these at load would let an author keep believing they had
  * configured a type scale.
  */
 const themeInertTokenScalesRemoved: MetadataConversion = {
@@ -5130,12 +5126,12 @@ const pageHeaderSubtitleAlias: MetadataConversion = {
  * panel is rewritten where it sits. The tombstones still carry the refusal at
  * parse time for anything a conversion declines to touch (a disagreeing pair
  * under {@link renameKey}'s house rule, or a source no migration ran over);
- * what changed is that "run `os migrate meta`" is now a promise the rewrite can
- * keep at a nested site, not only at region level.
+ * what changed is that "run `os migrate meta`" is now a prescription the
+ * conversion can honour at a nested site, not only at region level.
  *
  * All three are **retired from the load path**: each key is tombstoned in
  * `ui/component.zod.ts`, so the loader rejects it loudly with the prescription
- * and only `os migrate meta` rewrites sources.
+ * and only `os migrate meta` lists the mechanical edits for existing sources.
  */
 const RECORD_PICKER_COMPONENT_TYPE = 'element:record_picker';
 
@@ -5827,7 +5823,7 @@ const inlineActionApiParamsToBodyExtra: MetadataConversion = {
  *
  * `retiredFromLoadPath: true`: no alias window, deliberately. The tombstone owns
  * the refusal; this entry exists so `spec-changes.json`, the upgrade guide and
- * `os migrate meta` still carry the rewrite.
+ * `os migrate meta` still carry the conversion.
  */
 const pageTabsTypeToTabStyle: MetadataConversion = {
   id: 'page-tabs-type-to-tab-style',
@@ -6432,7 +6428,7 @@ const appHiddenToUnpublished: MetadataConversion = {
  * 16.x/17-rc rows replay clean (`applyConversionsToStoredItem` — without it a
  * pre-removal row flags `metadata_spec_invalid` forever, mislabelling
  * chain-owned history as a current-contract violation) and so
- * `os migrate meta --from 16` rewrites author sources.
+ * `os migrate meta --from 16` lists the mechanical edits for author sources.
  */
 const actionGlobalNavLocationRemoved: MetadataConversion = {
   id: 'action-global-nav-location-removed',
@@ -6624,8 +6620,7 @@ const fieldMalformedScalePrecisionRemoved: MetadataConversion = {
  * with a per-value prescription (`CHATTER_POSITION_RETIRED`,
  * ui/component.zod.ts), so a live author is taught at parse rather than
  * silently rewritten. The entry exists so stored rows replay clean
- * (`applyConversionsToStoredItem`) and so `os migrate meta` rewrites author
- * sources mechanically.
+ * (`applyConversionsToStoredItem`) and so `os migrate meta` lists the mechanical edits for author sources.
  *
  * The same #8762 ruling dropped all three schema defaults (`position`,
  * `collapsible`, `defaultCollapsed`) per the `maxVisible` principle; that

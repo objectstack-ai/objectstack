@@ -151,14 +151,16 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
     expect(issues[0].message).toMatch(/os migrate meta --from 16/);
     // #7030 — house sentence (#6856 route D): names the TOOL's behaviour, never
     // the retired key's fate. This branch can DELETE the key outright
-    // (`template`/`recipients`/`variables`/`script`), so "rewrite it" reads two
-    // ways ("it" = the key vs. "it" = your sources) while "rewrite existing
-    // sources" has one antecedent. Pinned here AND class-wide in
+    // (`template`/`recipients`/`variables`/`script`), so "rewrite it" read two
+    // ways ("it" = the key vs. "it" = your sources); #9529 then withdrew the
+    // automatic-rewrite claim outright — the tool lists the edits and never
+    // writes a source file. Pinned here AND class-wide in
     // `retired-key-migrate-sentence.test.ts` (widened to `packages/lint/src`).
     expect(issues[0].message).toMatch(
-      /Run `os migrate meta --from 16` to rewrite existing sources automatically\.$/,
+      /Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand\.$/,
     );
     expect(issues[0].message).not.toMatch(/rewrite it automatically/);
+    expect(issues[0].message).not.toMatch(/rewrite existing sources automatically/);
   });
 
   it('tells a shorthand actionType exactly where its name belongs', () => {

@@ -104,7 +104,7 @@ describe('the `aria` tombstones name only live `AriaProps` carriers (#6756)', ()
     // site that already flipped once.
     expect(message).toContain('Delete the key.');
     expect(message).toContain('os migrate meta --from 16');
-    expect(message).toMatch(/to rewrite existing sources automatically\.$/);
+    expect(message).toMatch(/to list the mechanical edits for existing sources; apply them by hand\.$/);
   });
 
   it('the App.aria tombstone points at a page component, not at the retired widget surface', () => {

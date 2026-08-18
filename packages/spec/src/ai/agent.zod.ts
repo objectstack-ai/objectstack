@@ -236,7 +236,7 @@ export const AgentSchema = lazySchema(() => strictObject({
     'This is NOT a rename — there is no key the value moves to: the migration ' +
     'DELETES the key and emits a notice naming each tool that was listed, and ' +
     'you re-declare each one in a skill by hand. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
 
   /** Knowledge */
@@ -252,7 +252,7 @@ export const AgentSchema = lazySchema(() => strictObject({
     'the agent record. Delete the block. Restrict retrieval at the knowledge-service / ' +
     'source level (per-source permissions), and describe intended grounding in ' +
     '`instructions` so the model asks for the right sources. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
 
   /** Interface */

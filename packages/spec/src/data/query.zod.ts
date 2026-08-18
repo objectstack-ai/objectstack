@@ -81,7 +81,7 @@ const AGG_RETIRED_TAIL =
   'There is no replacement in the query vocabulary: read the rows with an ordinary `fields` '
   + 'query and shape them in the caller, or model the roll-up as a stored field. It returns '
   + 'only WITH a portable lowering — ADR-0049\'s enforce leg, implementation first. '
-  + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.';
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
 const ARRAY_AGG_RETIRED =
   '`array_agg`' + AGG_RETIRED_MIDDLE
