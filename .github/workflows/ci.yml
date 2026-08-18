@@ -745,8 +745,21 @@ jobs:
       # into a warning, so the symptom was a skipped repair in the log.
       #
       # This rides this job rather than getting its own because this is where a
-      # live MySQL already exists. Only the live file runs: the rest of the
+      # live MySQL already exists. Only the live files run: the rest of the
       # package's suite has no server axis and runs in Test Core.
+      #
+      # The argument is a FILTER, not the one path it started as (#9434). A
+      # second migration in this family needed the same server — `sys_setting`'s
+      # degradation report prints an operator query in which `key` is a MySQL
+      # reserved word — and a named-path list is the shape where the next such
+      # file is added, is green locally because it SKIPS without a server, and is
+      # never run here at all. A test that cannot fail reports success.
+      #
+      # `live-mysql` and not `src/migrations/*.live-mysql.test.ts`: vitest's
+      # positional arguments are SUBSTRING filters against the resolved test
+      # paths, not shell globs — measured, the glob form matches zero files
+      # ("No test files found", exit 1). Loud rather than silent, but still
+      # wrong; the substring is the form that actually selects both.
       - name: Build metadata-protocol and its dependencies
         run: pnpm exec turbo run build --filter=@objectstack/metadata-protocol... --concurrency=4
 
@@ -758,8 +771,7 @@ jobs:
           # and must be a red rather than a skip.
           OS_EXPECT_LIVE_DIALECT_MATRIX: '1'
         run: |
-          pnpm --filter @objectstack/metadata-protocol exec vitest run \
-            src/migrations/seed-tenancy-backfill.live-mysql.test.ts
+          pnpm --filter @objectstack/metadata-protocol exec vitest run live-mysql
 
   dogfood:
     # Sharded 3-way: the suite is ~60 independent test files, each booting its

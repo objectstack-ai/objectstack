@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import {
     buildSysSettingDuplicateProbeSql,
+    buildSysSettingDuplicateProbeSqlMysql,
     buildSysSettingIdentityIndexSql,
     buildSysSettingPresenceSql,
     ensureSysSettingIdentityIndex,
@@ -292,6 +293,12 @@ describe('sys_setting row-identity uniqueness (#8629)', () => {
             expect(message).toContain('no row is discarded automatically');
             expect(message).toContain(buildSysSettingDuplicateProbeSql());
             expect(message).toContain('os migrate plan');
+            // #9434 stays out of THIS arm: a conflict means real rows blocked a
+            // build the server was willing to attempt, which only SQLite and
+            // PostgreSQL ever are. MySQL refuses the statement outright and
+            // lands in `unsupported`, so backticks here would be wrong for
+            // every reader who can actually reach this line.
+            expect(message).not.toContain(buildSysSettingDuplicateProbeSqlMysql());
         });
 
         it('the shipped query lists the offending rows, on the folded key', () => {
@@ -386,6 +393,78 @@ describe('sys_setting row-identity uniqueness (#8629)', () => {
             expect(sql).toContain("COALESCE(user_id, '') AS user_id_key");
             expect(sql).not.toMatch(/SELECT organization_id,/);
         });
+
+        // ─────────────────────────────────────────────────────────────────────
+        // #9434 — the MySQL spelling of that same query.
+        //
+        // ⚠️ Nothing in THIS file can prove the statement parses on MySQL: the
+        // suite runs on SQLite, which accepts backticks (MySQL compatibility)
+        // and also accepted the broken bare form, so a green run here is
+        // compatible with the defect being fully present. That proof lives in
+        // `sys-setting-identity-index.live-mysql.test.ts`, which runs the
+        // statement on a real server. What these assertions add is the half a
+        // live server cannot check — that the two spellings describe the SAME
+        // key — plus a byte pin a reviewer can read against MySQL's manual.
+        // ─────────────────────────────────────────────────────────────────────
+        it('the MySQL spelling quotes EVERY identifier, and leaves the bare one untouched', () => {
+            expect(buildSysSettingDuplicateProbeSqlMysql()).toBe(
+                'SELECT COALESCE(`organization_id`, \'__global__\') AS `organization_id_key`, ' +
+                    '`namespace`, `key`, `scope`, COALESCE(`user_id`, \'\') AS `user_id_key`, ' +
+                    'COUNT(*) AS `duplicate_rows` FROM `sys_setting` ' +
+                    'GROUP BY COALESCE(`organization_id`, \'__global__\'), `namespace`, `key`, ' +
+                    '`scope`, COALESCE(`user_id`, \'\') HAVING COUNT(*) > 1',
+            );
+            // The bare builder is the package's existing surface and several
+            // callers execute it on SQLite/PostgreSQL — adding a variant must
+            // not have moved it.
+            expect(buildSysSettingDuplicateProbeSql()).toBe(
+                "SELECT COALESCE(organization_id, '__global__') AS organization_id_key, " +
+                    "namespace, key, scope, COALESCE(user_id, '') AS user_id_key, " +
+                    'COUNT(*) AS duplicate_rows FROM sys_setting ' +
+                    "GROUP BY COALESCE(organization_id, '__global__'), namespace, key, scope, " +
+                    "COALESCE(user_id, '') HAVING COUNT(*) > 1",
+            );
+            // No identifier left bare — not a list of MySQL's reserved words,
+            // which is version-dependent, but the rule that makes such a list
+            // unnecessary (#9381's lesson, carried forward).
+            expect(buildSysSettingDuplicateProbeSqlMysql()).not.toMatch(/[ ,(]key\b/);
+            expect(buildSysSettingDuplicateProbeSqlMysql()).not.toMatch(/FROM sys_setting/);
+        });
+
+        it('differs from the bare spelling ONLY in the quoting — same key, same query', () => {
+            // Strip the backticks and the MySQL statement must be the bare one,
+            // character for character. This is the invariant a hand-written
+            // second statement would break: the two would drift into grouping by
+            // different keys and the operator's list would stop matching what
+            // the index rejects.
+            expect(buildSysSettingDuplicateProbeSqlMysql().replace(/`/g, '')).toBe(
+                buildSysSettingDuplicateProbeSql(),
+            );
+        });
+
+        it('and returns the same rows — the folded key survives the re-spelling', () => {
+            // SQLite takes backticks too, so it can answer the EQUIVALENCE
+            // question (do both spellings select the same thing?) even though it
+            // cannot answer the parse question for MySQL.
+            const dup = { namespace: 'lifecycle', key: 'retention_overrides', scope: 'tenant' };
+            insert('m1', { ...dup, organization_id: 'org_jia' });
+            insert('m2', { ...dup, organization_id: 'org_jia' });
+
+            const bare = db.prepare(buildSysSettingDuplicateProbeSql()).all();
+            const mysql = db.prepare(buildSysSettingDuplicateProbeSqlMysql()).all();
+
+            expect(mysql).toEqual(bare);
+            expect(bare).toEqual([
+                {
+                    organization_id_key: 'org_jia',
+                    namespace: 'lifecycle',
+                    key: 'retention_overrides',
+                    scope: 'tenant',
+                    user_id_key: '',
+                    duplicate_rows: 2,
+                },
+            ]);
+        });
     });
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -443,7 +522,13 @@ describe('sys_setting row-identity uniqueness (#8629)', () => {
             expect(indexDdl(SYS_SETTING_IDENTITY_INDEX_NAME)).toBe(DECLARED_INDEX_DDL);
             const [message] = logger.error.mock.calls[0]!;
             expect(message).toContain('stays NULL-distinct on user_id');
-            expect(message).toContain(buildSysSettingDuplicateProbeSql());
+            // #9434: this arm is reached on MySQL/MariaDB by construction, so the
+            // one remedy it offers has to be spelled for MySQL — `key` is
+            // reserved there and the bare form is ERROR 1064, i.e. no remedy at
+            // all. The negative is the half that would have caught the defect:
+            // the old message contained the bare statement and read fine.
+            expect(message).toContain(buildSysSettingDuplicateProbeSqlMysql());
+            expect(message).not.toContain(buildSysSettingDuplicateProbeSql());
         });
 
         it('an unclassifiable failure is still reported at error, with the previous index kept', async () => {

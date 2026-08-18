@@ -208,17 +208,57 @@ export const SYS_SETTING_NULL_SENTINELS: Readonly<Record<string, string>> = {
 };
 
 /**
+ * How ONE identifier is spelled.
+ *
+ * Every statement this module *executes* uses {@link BARE} — the platform's own
+ * spelling, which SQLite and PostgreSQL take verbatim. {@link MYSQL_IDENT} is
+ * the single dialect-specific alternative, and it is used only where the reader
+ * is known to be MySQL: the `unsupported` arm's operator query (#9434).
+ */
+type IdentifierQuote = (name: string) => string;
+
+/** Identifiers exactly as declared. What every executed statement here emits. */
+const BARE: IdentifierQuote = (name) => name;
+
+/**
+ * MySQL's identifier quote — backticks, with an embedded backtick doubled.
+ *
+ * Deliberately NOT the ANSI `"name"`: MySQL does not run with `ANSI_QUOTES`, so
+ * `"name"` there is a STRING LITERAL and not an identifier at all. Measured on
+ * a live MySQL 8.0.46 by #9381, whose `quoteIdent` in `seed-tenancy-backfill.ts`
+ * this mirrors on purpose — that sibling shipped the ANSI spelling and every one
+ * of its statements came back `ER_PARSE_ERROR`.
+ *
+ * ⚠️ It quotes EVERY identifier handed to it, never only the ones that look
+ * reserved. That is #9381's other recorded lesson (its `last_value` was reserved
+ * and unquoted while the table beside it was quoted), and it is why this module
+ * carries no list of MySQL's reserved words: such a list is version-dependent —
+ * MySQL adds reserved words in point releases — and being wrong about a single
+ * entry reinstates the whole defect. Quoting everything cannot be wrong about a
+ * word, and costs the operator nothing but backticks.
+ */
+const MYSQL_IDENT: IdentifierQuote = (name) => `\`${name.replace(/`/g, '``')}\``;
+
+/** {@link sysSettingIdentityKeyParts}, in a chosen identifier spelling. */
+function keyPartsIn(quote: IdentifierQuote): string[] {
+    return SYS_SETTING_IDENTITY_INDEX_COLUMNS.map((column) => {
+        const sentinel = SYS_SETTING_NULL_SENTINELS[column];
+        const ident = quote(column);
+        return sentinel === undefined ? ident : `COALESCE(${ident}, '${sentinel}')`;
+    });
+}
+
+/**
  * The index's key parts, in key order: a bare column, or its NULL-safe
  * `COALESCE` form when {@link SYS_SETTING_NULL_SENTINELS} names one.
  *
  * One builder so the CREATE, the duplicate-listing query the conflict report
- * ships, and the degradation messages can never describe different keys.
+ * ships, and the degradation messages can never describe different keys — and,
+ * since #9434, so the MySQL-spelled operator query cannot describe a different
+ * key either: it is this same array under a different quote.
  */
 export function sysSettingIdentityKeyParts(): string[] {
-    return SYS_SETTING_IDENTITY_INDEX_COLUMNS.map((column) => {
-        const sentinel = SYS_SETTING_NULL_SENTINELS[column];
-        return sentinel === undefined ? column : `COALESCE(${column}, '${sentinel}')`;
-    });
+    return keyPartsIn(BARE);
 }
 
 /**
@@ -274,14 +314,67 @@ export function buildSysSettingPresenceSql(): string {
  * `user_id_key = ''` as "user_id IS NULL".
  */
 export function buildSysSettingDuplicateProbeSql(): string {
-    const keyParts = sysSettingIdentityKeyParts();
+    return duplicateProbeSqlIn(BARE);
+}
+
+/**
+ * The SAME query, spelled for MySQL — for the one arm whose reader is a MySQL
+ * operator and whose server rejects the bare form (#9434).
+ *
+ * ## Why a second spelling exists at all
+ *
+ * `key` is a RESERVED word on MySQL, so the bare statement above is not a
+ * degraded-but-usable query there — it is `ERROR 1064`, measured on MySQL
+ * 8.0.46. The `unsupported` arm is reached *specifically* on MySQL/MariaDB —
+ * `classifyIndexFailure`'s dialect arm in `partial-index-probe.ts` stands for
+ * exactly the two refusals MySQL raises — so the one remedy that arm offered was
+ * a statement its only audience could not run: the operator is told to watch for
+ * duplicates and handed a parse error to do it with.
+ *
+ * ## Why a variant, and not a dialect threaded through the migration
+ *
+ * Because nothing executes this string. `ensureSysSettingIdentityIndex` takes a
+ * bare {@link IndexExec} and has no dialect in hand; giving it one — the route
+ * the sibling `seed-tenancy-backfill.ts` had to take, because its statements
+ * really do run — would be a new seam through a boot hook, paid for a piece of
+ * text the platform prints. The `unsupported` arm already knows its dialect by
+ * construction, which is what makes the cheap answer the correct one here
+ * (triage adjudication, 2026-08-18).
+ *
+ * ⚠️ This does NOT extend to {@link buildSysSettingIdentityIndexSql}. That
+ * statement's verdict — MySQL refuses it whatever the quoting, for the
+ * unparenthesized functional key parts — is unchanged and still stated at its
+ * own definition. Quoting rescues the `SELECT`, which MySQL can otherwise run;
+ * it rescues nothing about the `CREATE`.
+ *
+ * ## What stays in the platform's own spelling
+ *
+ * Only the copy-pasteable STATEMENT is compiled for MySQL. The prose around it
+ * keeps naming the table, the columns and the key parts the way the platform
+ * declares them — that text is a description of the schema, not something an
+ * operator pastes into a client, and re-spelling it per dialect would make the
+ * four degradation messages in this module disagree about what the table is
+ * called. Executable text is dialect-compiled; prose naming things is not.
+ */
+export function buildSysSettingDuplicateProbeSqlMysql(): string {
+    return duplicateProbeSqlIn(MYSQL_IDENT);
+}
+
+/**
+ * The duplicate-listing query in a chosen identifier spelling.
+ *
+ * ONE body, so the two spellings cannot drift into describing different keys —
+ * the same reason the projection and the `GROUP BY` are built from one array.
+ */
+function duplicateProbeSqlIn(quote: IdentifierQuote): string {
+    const keyParts = keyPartsIn(quote);
     const projected = SYS_SETTING_IDENTITY_INDEX_COLUMNS.map((column, i) => {
         const keyPart = keyParts[i]!;
-        return keyPart === column ? column : `${keyPart} AS ${column}_key`;
+        return keyPart === quote(column) ? keyPart : `${keyPart} AS ${quote(`${column}_key`)}`;
     });
     return (
-        `SELECT ${projected.join(', ')}, COUNT(*) AS duplicate_rows ` +
-        `FROM ${SYS_SETTING_TABLE} ` +
+        `SELECT ${projected.join(', ')}, COUNT(*) AS ${quote('duplicate_rows')} ` +
+        `FROM ${quote(SYS_SETTING_TABLE)} ` +
         `GROUP BY ${keyParts.join(', ')} HAVING COUNT(*) > 1`
     );
 }
@@ -396,6 +489,11 @@ function reportDegradation(
 ): void {
     const columns = SYS_SETTING_IDENTITY_INDEX_COLUMNS.join(', ');
     const keyParts = sysSettingIdentityKeyParts().join(', ');
+    // The bare spelling, for the arms whose reader is NOT known to be MySQL.
+    // `conflict` is the live one: it means real rows blocked a build that the
+    // server was willing to attempt, which only SQLite and PostgreSQL ever are —
+    // MySQL never gets that far, it refuses the statement and lands in
+    // `unsupported` above, which prints the MySQL spelling instead (#9434).
     const duplicateQuery = buildSysSettingDuplicateProbeSql();
 
     if (status === 'unsupported') {
@@ -405,6 +503,12 @@ function reportDegradation(
         // ADR-0120 D3's degradation — the previous index stays in force —
         // reached by keeping it rather than by rebuilding it, which is also
         // `createNullSafeUniqueIndex`'s handling of the same refusal.
+        //
+        // The remedy query is the MySQL-spelled one (#9434). This arm's reader
+        // is a MySQL/MariaDB operator by construction, and the bare form is not
+        // merely unidiomatic there — `key` is reserved, so it is ERROR 1064.
+        // Handing that operator a statement their server cannot parse is handing
+        // them nothing, in the one arm that has no other remedy to offer.
         logProblem(
             logger,
             `[metadata-protocol] this database cannot build the NULL-safe row-identity index — ` +
@@ -414,7 +518,8 @@ function reportDegradation(
             `(namespace, key) in ONE organization, or two platform defaults on the global layer, can coexist ` +
             `and SettingsService has no defined answer for which one wins (#8629). MySQL/MariaDB before ` +
             `8.0.13 has no functional key parts, so there is no in-dialect fix: run this platform on ` +
-            `SQLite/PostgreSQL for the guarantee, and meanwhile watch for duplicates with: ${duplicateQuery}`,
+            `SQLite/PostgreSQL for the guarantee, and meanwhile watch for duplicates with this MySQL ` +
+            `statement: ${buildSysSettingDuplicateProbeSqlMysql()}`,
             detail,
         );
         return;
