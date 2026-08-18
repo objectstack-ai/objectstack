@@ -94,13 +94,13 @@ describe('[#9362] REST DELETE on an object targeted by a multiple:true lookup â€
         const created: any = await engine!.insert('zz_account', { name: 'anything' });
         expect(typeof created.id).toBe('string');
         // Schema-driven: the referring table has no rows at all.
-        expect(await real.count('zz_field_zoo', {} as any)).toBe(0);
+        expect(await real.count('zz_field_zoo')).toBe(0);
 
         const res = await protocol.deleteData({ object: 'zz_account', id: created.id });
         expect(res).toMatchObject({ object: 'zz_account', id: created.id, success: true });
 
         // Read the row count out of the DRIVER, not through the engine.
-        expect(await real.count('zz_account', {} as any)).toBe(0);
+        expect(await real.count('zz_account')).toBe(0);
     });
 
     it('still refuses the delete when a row really does reference it through the array', async () => {
@@ -115,7 +115,7 @@ describe('[#9362] REST DELETE on an object targeted by a multiple:true lookup â€
         expect(err.status).toBe(409);
         expect(err.dependentObject).toBe('zz_guard');
         expect(err.dependentCount).toBe(1);
-        expect(await real.count('zz_account', {} as any)).toBe(1);
+        expect(await real.count('zz_account')).toBe(1);
     });
 
     it('a referenced id does not lend its dependents to an id it is a prefix of', async () => {
@@ -127,7 +127,7 @@ describe('[#9362] REST DELETE on an object targeted by a multiple:true lookup â€
 
         const res = await protocol.deleteData({ object: 'zz_account', id: 'acc_1' });
         expect(res).toMatchObject({ id: 'acc_1', success: true });
-        expect(await real.count('zz_account', { where: { id: 'acc_10' } } as any)).toBe(1);
+        expect(await real.count('zz_account', { where: { id: 'acc_10' } })).toBe(1);
 
         const err: any = await protocol
             .deleteData({ object: 'zz_account', id: 'acc_10' })
