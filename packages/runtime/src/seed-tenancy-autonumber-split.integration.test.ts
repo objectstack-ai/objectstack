@@ -50,7 +50,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import {
   SeedLoaderService,
   backfillSeedTenancy,
-  resolveSeedTenancyExec,
+  resolveSeedTenancySeam,
   GLOBAL_TENANT,
 } from '@objectstack/metadata-protocol';
 
@@ -196,7 +196,7 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
 
     // The fix: the moment an organization exists, the untenanted seed rows are
     // adopted into it and the `__global__` counter is retired.
-    const result = await backfillSeedTenancy(resolveSeedTenancyExec(engine), createLogger() as any);
+    const result = await backfillSeedTenancy(resolveSeedTenancySeam(engine), createLogger() as any);
     expect(result.status).toBe('applied');
     expect(result.organizationId).toBe(ORG_ID);
     expect(result.collisions).toEqual([]);
@@ -225,7 +225,7 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
     for (let i = 0; i < 4; i++) await apiCreate(engine, `api ${i + 1}`);
     expect(await readDuplicates(driver)).toHaveLength(4);
 
-    const result = await backfillSeedTenancy(resolveSeedTenancyExec(engine), createLogger() as any);
+    const result = await backfillSeedTenancy(resolveSeedTenancySeam(engine), createLogger() as any);
     expect(result.status).toBe('applied');
 
     // Reported — every already-minted duplicate is named, with its holder count.
@@ -260,8 +260,8 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
     await seedFreshInstall(engine);
     await createOrganization(engine);
 
-    await backfillSeedTenancy(resolveSeedTenancyExec(engine), createLogger() as any);
-    const second = await backfillSeedTenancy(resolveSeedTenancyExec(engine), createLogger() as any);
+    await backfillSeedTenancy(resolveSeedTenancySeam(engine), createLogger() as any);
+    const second = await backfillSeedTenancy(resolveSeedTenancySeam(engine), createLogger() as any);
 
     // Nothing left to detect: the `__global__` counter is gone, so the probe
     // short-circuits before any guard or write is even considered.
@@ -279,7 +279,7 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
     // source, not re-derived. `isolated` is a walled (multi-organization) shape.
     vi.stubEnv('OS_TENANCY_POSTURE', 'isolated');
     const logger = createLogger();
-    const result = await backfillSeedTenancy(resolveSeedTenancyExec(engine), logger as any);
+    const result = await backfillSeedTenancy(resolveSeedTenancySeam(engine), logger as any);
 
     expect(result.status).toBe('skipped-multi-tenant');
     // Skipping is not silence: the ruling requires the condition AND the remedy.
@@ -307,7 +307,7 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
     );
 
     const logger = createLogger();
-    const result = await backfillSeedTenancy(resolveSeedTenancyExec(engine), logger as any);
+    const result = await backfillSeedTenancy(resolveSeedTenancySeam(engine), logger as any);
 
     // The posture says single-tenant but the DATA says otherwise. Two organizations
     // means the owner of an untenanted row is not derivable, whatever the posture
@@ -374,7 +374,7 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
     await createOrganization(engine);
     expect(await readSequences(driver)).toEqual([{ tenant: GLOBAL_TENANT, lastValue: 3 }]);
 
-    const result = await backfillSeedTenancy(resolveSeedTenancyExec(engine), createLogger() as any);
+    const result = await backfillSeedTenancy(resolveSeedTenancySeam(engine), createLogger() as any);
 
     // Seen as no split at all — the platform namespace is filtered before any
     // guard runs, so nothing is adopted and nothing is warned about.

@@ -1282,10 +1282,10 @@ export class AppPlugin implements Plugin {
                 (opCtx?.operation === 'create' || opCtx?.operation === 'insert');
             if (!isOrgCreate) return;
             try {
-                const { backfillSeedTenancy, resolveSeedTenancyExec } = await import(
+                const { backfillSeedTenancy, resolveSeedTenancySeam } = await import(
                     '@objectstack/metadata-protocol'
                 );
-                await backfillSeedTenancy(resolveSeedTenancyExec(ql), ctx.logger);
+                await backfillSeedTenancy(resolveSeedTenancySeam(ql), ctx.logger);
             } catch (e: any) {
                 // Best-effort, exactly like the ownership handoff beside it: an
                 // organization was just created and that must stand whatever
