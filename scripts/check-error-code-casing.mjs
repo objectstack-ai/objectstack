@@ -51,6 +51,7 @@
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { maskComments } from './js-comment-mask.mjs';
 import { join, relative, sep } from 'node:path';
 
 const ROOT = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
@@ -124,15 +125,10 @@ function walk(dir, out = []) {
   return out;
 }
 
-/** Strip line and block comments so a docblock naming an old code is not a hit. */
-function stripComments(src) {
-  return src
-    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
-    .replace(/(^|[^:])\/\/[^\n]*/g, (m, p) => p + m.slice(p.length).replace(/./g, ' '));
-}
+
 
 export function findViolations(src, file) {
-  const text = stripComments(src);
+  const text = maskComments(src);
   const hits = [];
   for (const { name, re } of CODE_POSITION_PATTERNS) {
     re.lastIndex = 0;

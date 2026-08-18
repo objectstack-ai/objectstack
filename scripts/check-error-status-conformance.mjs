@@ -110,6 +110,7 @@
 // `scripts/error-status-unpinned-baseline.json`; a NEW one fails the gate, and a
 // row that becomes pinned fails it too (ratchet down with `--update`).
 import { readdirSync, readFileSync, writeFileSync, statSync, existsSync } from 'node:fs';
+import { maskComments } from './js-comment-mask.mjs';
 import { join, relative } from 'node:path';
 
 const SCAN_ROOT = 'packages';
@@ -176,7 +177,7 @@ export function buildConstantIndex(sources) {
   // error family and reporting three declarations it could have resolved.
   const COMPUTED_ENTRY = /\[\s*([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?)\s*\]\s*:\s*(?:'([^'\n]*)'|"([^"\n]*)"|(\d{3}))/g;
 
-  const clean = [...sources.values()].map(stripComments);
+  const clean = [...sources.values()].map((src) => maskComments(src));
   const objectBodies = [];
   for (const src of clean) {
     for (const m of src.matchAll(SCALAR)) put(m[1], m[2] ?? m[3] ?? Number(m[4]));
@@ -231,54 +232,23 @@ function lookup(e, index) {
 // ───────────────────────────────────────────────────────────────────────────
 
 /**
- * Blank out comments (keeping byte offsets, so reported line numbers stay
- * true), because this repo DOCUMENTS envelopes in prose.
+ * Comment masking, shared. See `scripts/js-comment-mask.mjs` for the scanner.
  *
- * Not a tidiness measure — it is load-bearing. Two of this gate's first findings
- * on `main` were docblocks: `quickjs-runner.ts` narrates the bug it fixed
- * ("the action surface answered `{ code: 'RECORD_NOT_FOUND', httpStatus: 400 }`")
- * and `protocol.ts` names a shape it exists to PREVENT ("would mint incoherent
- * rows — `{ code: 'INTERNAL_ERROR', httpStatus: 409 }`"). Read as producers,
- * both manufacture a status disagreement out of a sentence saying the opposite.
- * A deriver that mines prose is not a deriver.
+ * Not a tidiness measure -- it is load-bearing here. Two of this gate's first
+ * findings on `main` were docblocks: `quickjs-runner.ts` narrates the bug it
+ * fixed ("the action surface answered `{ code: 'RECORD_NOT_FOUND', httpStatus:
+ * 400 }`") and `protocol.ts` names a shape it exists to PREVENT ("would mint
+ * incoherent rows -- `{ code: 'INTERNAL_ERROR', httpStatus: 409 }`"). Read as
+ * producers, both manufacture a status disagreement out of a sentence saying
+ * the opposite. A deriver that mines prose is not a deriver.
  *
- * Strings and template literals are tracked only so a `//` or `/*` inside one
- * cannot open a phantom comment; their contents are left intact.
+ * The private scanner this replaces tracked strings and templates but read a
+ * `/` as division, so a regex literal holding a quote character opened a
+ * phantom string -- and because a scanner SKIPS string spans, every comment
+ * inside one went unmasked, which is the FABRICATING direction, not the
+ * blinding one. Byte offsets still survive the mask, so reported line numbers
+ * stay true.
  */
-export function stripComments(src) {
-  const out = src.split('');
-  let i = 0;
-  const n = src.length;
-  while (i < n) {
-    const c = src[i];
-    const d = src[i + 1];
-    if (c === '/' && d === '/') {
-      while (i < n && src[i] !== '\n') { out[i] = ' '; i++; }
-      continue;
-    }
-    if (c === '/' && d === '*') {
-      while (i < n && !(src[i] === '*' && src[i + 1] === '/')) { if (src[i] !== '\n') out[i] = ' '; i++; }
-      if (i < n) { out[i] = ' '; out[i + 1] = ' '; i += 2; }
-      continue;
-    }
-    if (c === "'" || c === '"' || c === '`') {
-      const quote = c;
-      // A `'` or `"` never spans a line in JS, so a quote character mis-read
-      // out of a regex character class (`/["'`]/`) recovers at end of line
-      // instead of swallowing the rest of the file.
-      const bounded = quote !== '`';
-      i++;
-      while (i < n && src[i] !== quote && !(bounded && src[i] === '\n')) {
-        if (src[i] === '\\') i++;
-        i++;
-      }
-      i++;
-      continue;
-    }
-    i++;
-  }
-  return out.join('');
-}
 
 /** Brace-matched class bodies, so a property read never escapes its class. */
 function classBodies(src) {
@@ -324,7 +294,7 @@ export function deriveRuntimeStatuses(sources, index) {
     unresolved.push(`${where}: code=${String(code).trim()} status=${String(status).trim()}`);
 
   for (const [path, raw] of sources) {
-    const src = stripComments(raw);
+    const src = maskComments(raw);
     // R1 — error classes declaring their own code + status/statusCode.
     for (const { name, body } of classBodies(src)) {
       const codeM = /^[ \t]*(?:public\s+|protected\s+|private\s+)?readonly\s+code\s*(?::[^=\n]+)?=\s*([^;\n]+);/m.exec(body);
