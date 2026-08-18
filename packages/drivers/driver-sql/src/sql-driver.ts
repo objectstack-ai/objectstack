@@ -844,7 +844,11 @@ function backendStatementFaultError(object: string, cause: unknown): Error {
 }
 
 /**
- * [#9354] How long the deferred-DDL flush waits for a metadata lock, in seconds.
+ * [#9354] How long a widening ALTER waits for a metadata lock, in seconds.
+ *
+ * Named for the seam it arrived on; since #9542 it governs BOTH callers of
+ * {@link SqlDriver.runWideningAlters} — the deferred-DDL flush and boot
+ * schema-sync.
  *
  * MySQL's own default for `lock_wait_timeout` is **31,536,000 — one year**. A
  * widening `ALTER … MODIFY COLUMN` needs an exclusive metadata lock on the
@@ -876,6 +880,14 @@ function backendStatementFaultError(object: string, cause: unknown): Error {
  *     `DATETIME(3)`), so the cost of a bound that fires too eagerly is one
  *     re-run once the blocker is gone — against an unbounded hang as the cost of
  *     one that never fires.
+ *
+ * # The same number on boot (#9542)
+ *
+ * Boot schema-sync arms this bound too, at the same value rather than a longer
+ * one. Everything above is reasoning about how long a legitimate metadata-lock
+ * holder can plausibly hold it — a property of the lock, not of who is waiting
+ * on it. Boot's difference from the flush is what happens when the bound fires
+ * (boot warns and carries on; the flush refuses), never how long it waits.
  *
  * ⛔ Deliberately NOT configurable, and deliberately NOT retried — the 2026-08-17
  * ruling's explicit minimality. Both wait for measured demand. A knob added now
@@ -8095,15 +8107,28 @@ export class SqlDriver implements IDataDriver {
    * the lock behaviour of unrelated runtime work. The restore is best-effort:
    * it must never mask the refusal it runs alongside.
    *
-   * Only armed for the flush. On boot this runs the statements exactly as
-   * before, through the pool and unbounded, because {@link setDeferredDdl} was
-   * never armed and there is no operator waiting on a prompt.
+   * # Armed on BOTH callers; only the flush escapes the swallow (#9542)
+   *
+   * The bound is armed unconditionally, because the year-long default is no
+   * better for boot than it is for an operator: a boot blocked on another
+   * session's metadata lock waits 31,536,000 seconds having printed nothing,
+   * and boot is the path nobody can retry from a prompt. Bounding it turns
+   * that into a bounded wait plus the widening's own `logger.warn` — which,
+   * until the bound reached here, could never fire at all: the ALTER never
+   * returned, so its catch never ran.
+   *
+   * What stays gated on {@link flushDeferredSchemaDdl} is the REFUSAL, and
+   * only it. Boot still swallows: correctness never depends on the widening
+   * having run, and a migration must never take boot down, so throwing here
+   * would trade a silent hang for a failed boot — a worse answer, not the
+   * same one. `this.isMysql` is therefore the only early return left; no other
+   * dialect takes this lock, and `lock_wait_timeout` is MySQL's variable.
    */
   protected async runWideningAlters(
     table: string,
     statements: ReadonlyArray<{ sql: string; bindings: unknown[] }>,
   ): Promise<void> {
-    if (!this.flushingDeferredDdl || !this.isMysql) {
+    if (!this.isMysql) {
       for (const s of statements) await this.knex.raw(s.sql, s.bindings as any);
       return;
     }
@@ -8123,7 +8148,11 @@ export class SqlDriver implements IDataDriver {
           try {
             await run(s.sql, s.bindings);
           } catch (err) {
-            if (isMysqlLockWaitTimeout(err)) {
+            // #9542: the bound is armed on both callers, the ESCAPE is not.
+            // Off the flush this rethrows the server's own error, which the
+            // widening's catch logs and swallows — boot's policy unchanged,
+            // now reached by a wait that ends.
+            if (this.flushingDeferredDdl && isMysqlLockWaitTimeout(err)) {
               throw deferredDdlLockWaitError(table, DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS, err);
             }
             throw err;
