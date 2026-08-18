@@ -689,6 +689,206 @@ export const PublishMetaItemResponseSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * Publish Package Drafts Response — the "publish whole app" door.
+ *
+ * Describes the FULL body `POST /api/v1/packages/:id/publish-drafts` answers
+ * inside the dispatcher's `{ success, data }` envelope (#9406 — the #5745
+ * "declared = returned" discipline carried to the batch door, the same move
+ * #7294 made for the single-item `POST /meta/:type/:name/publish`). Until this
+ * declaration the batch response was only an inline TypeScript return type in
+ * `@objectstack/metadata-protocol` — no spec schema, no pin suite, no
+ * conformance gate — so a field added to or dropped from Studio's "publish
+ * whole app" response could not turn anything red (#9343's discarded
+ * advisories were the measured instance).
+ *
+ * **The wire face is the helper's return PLUS the route's mutations** —
+ * measured on the producer pair, not assumed:
+ *
+ * - `ObjectStackProtocolImplementation.publishPackageDrafts` builds the base
+ *   object. Its three return sites always set `success` / `publishedCount` /
+ *   `failedCount` / `published` / `failed` (so those five are REQUIRED), and
+ *   attach `seedApplied` / `materializeApplied` / `probes` / `commitId` only
+ *   on the happy path when the corresponding fact exists (so each is
+ *   optional — absence means "did not apply", never "failed").
+ * - The REST door (`packages/runtime/src/domains/packages.ts`) then mutates
+ *   that object before `res.json()`: it back-fills `seedApplied` for custom
+ *   protocols that do not self-apply, and attaches the ADR-0045 visibility
+ *   flip receipts `unhiddenApps` / `unhideError` and the `metadata:reloaded`
+ *   announce receipt `rebindError`. Those keys are ON the wire, so they are
+ *   declared here — a schema of the helper's raw return would strip them.
+ *
+ * **`success` is the batch verdict, not an HTTP echo**: the producer sets
+ * `failed.length === 0 && published.length > 0`, and the two refusal returns
+ * (pre-flight violations; the ADR-0067 D2 all-or-nothing rollback) answer
+ * `success: false` on a 200 with `publishedCount: 0`, `published: []` and the
+ * whole batch in `failed[]` (`BATCH_ABORTED` marks the non-causal items).
+ *
+ * **`probes` is deliberately OPAQUE** — see its own note below. Do not model
+ * it here without a consumer-driven card (#9406 ruling).
+ */
+export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
+  success: z.boolean().describe(
+    'True only when every pending draft promoted (`failed` empty) AND at '
+    + 'least one item published. A pre-flight refusal or an ADR-0067 D2 '
+    + 'rollback answers false on a 200 — read `failed[]`, not the HTTP '
+    + 'status. It does NOT cover the best-effort receipts below, each of '
+    + 'which reports its own `success`.',
+  ),
+  publishedCount: z.number().int().describe(
+    'Number of drafts promoted to active — `published.length`. 0 on every '
+    + 'refusal path (the batch is all-or-nothing, ADR-0067 D2).',
+  ),
+  failedCount: z.number().int().describe(
+    'Number of items that did not publish — `failed.length`. On a rollback '
+    + 'this counts the WHOLE batch: the causal item plus every sibling '
+    + 'marked BATCH_ABORTED.',
+  ),
+  published: z.array(z.object({
+    type: z.string().describe('Metadata type of the promoted draft (canonical singular).'),
+    name: z.string().describe('Item name of the promoted draft.'),
+    version: z.string().describe(
+      'Content hash of the just-promoted body — the same ADR-0008 '
+      + 'optimistic-concurrency token the single-item doors return: echo it '
+      + 'back as `If-Match` on the next write to this item. Opaque to '
+      + 'callers; currently `sha256:<64 hex chars>`, but the format is not '
+      + 'part of this contract.',
+    ),
+    advisories: z.array(RuntimeAuthoringIssueSchema).optional().describe(
+      'Non-gating findings the #4463 runtime authoring gate raised against '
+      + 'THIS draft\'s promotion (#9343 — the same element shape and the '
+      + 'same omitted-when-empty discipline as '
+      + '`PublishMetaItemResponseSchema.advisories`, riding each element '
+      + 'rather than a parallel top-level map). Present ONLY when at least '
+      + 'one finding was raised — an empty array is never emitted, so an '
+      + 'advisory-free batch\'s response bytes are unchanged. Advisory by '
+      + 'construction: every entry is `warning`/`info`, because an `error` '
+      + 'finding refuses the promotion and — the batch being all-or-nothing '
+      + '— aborts the whole batch as `failed[]` instead; `failed[]` '
+      + 'elements never carry this key.',
+    ),
+  })).describe(
+    'Every draft promoted to active, in publish order. Empty on every '
+    + 'refusal path.',
+  ),
+  failed: z.array(z.object({
+    type: z.string().describe('Metadata type of the item that did not publish.'),
+    name: z.string().describe('Item name.'),
+    error: z.string().describe(
+      'What refused it. On a rollback, the causal item carries its real '
+      + 'error and every sibling carries the all-or-nothing explanation.',
+    ),
+    code: z.string().optional().describe(
+      'Machine code for the refusal class (SCREAMING_SNAKE, ADR-0112 '
+      + 'vocabulary) — e.g. a pre-flight violation code, or BATCH_ABORTED '
+      + 'on the non-causal items of a rolled-back batch.',
+    ),
+  })).describe(
+    'Items that did not publish. Because the batch is all-or-nothing '
+    + '(ADR-0067 D2), a non-empty list means NOTHING landed: '
+    + '`published: []`, `publishedCount: 0`.',
+  ),
+  seedApplied: z.object({
+    success: z.boolean().describe(
+      'False when the seed rows did not fully land. The publish itself '
+      + 'still succeeded — check this rather than assuming data went live.',
+    ),
+    inserted: z.number().int().optional().describe(
+      'Rows created by the externalId-keyed upsert. Optional ONLY because '
+      + 'the route-level fallback producer (custom protocols that do not '
+      + 'self-apply) reports early failures without counters; the in-batch '
+      + 'producer always emits both counters.',
+    ),
+    updated: z.number().int().optional().describe(
+      'Rows updated by the externalId-keyed upsert. Same optionality '
+      + 'rationale as `inserted`.',
+    ),
+    error: z.string().optional().describe(
+      'Single failure message, present when the apply failed before the '
+      + 'loader ran (including "no readable seed bodies").',
+    ),
+    errors: z.array(z.unknown()).optional().describe(
+      'Per-record failures reported by the seed loader, plus any seed-body '
+      + 'read failures. May be present and empty on a clean load.',
+    ),
+  }).optional().describe(
+    'Aggregate outcome of materializing EVERY published `seed` body in one '
+    + 'multi-pass loader run (cross-seed references need the whole set). '
+    + 'Present ONLY when the batch published at least one seed. Two '
+    + 'producers, one key: the batch itself self-applies '
+    + '(`applySeedBodies`), and the REST door back-fills the same key for '
+    + 'custom protocols that do not — never both (an externalId-less seed '
+    + 'would double-insert). Best-effort: a seed problem is surfaced here, '
+    + 'never thrown.',
+  ),
+  materializeApplied: z.object({
+    success: z.boolean().describe('False when any item\'s materializer failed; the publish still succeeded.'),
+    inserted: z.number().int().describe('Data-plane rows created across the batch.'),
+    updated: z.number().int().describe('Data-plane rows updated across the batch.'),
+    failures: z.array(z.object({
+      type: z.string().describe('Metadata type of the item whose projection did not land.'),
+      name: z.string().describe('Item name.'),
+      error: z.string().describe('Why the projection did not land.'),
+    })).describe(
+      'Each item whose data-plane projection did NOT land — named '
+      + 'per-item, unlike the single-item door\'s scalar `error`, because '
+      + 'one aggregate boolean over N items would hide WHICH ones never '
+      + 'went live.',
+    ),
+  }).optional().describe(
+    'ADR-0086 P2 — aggregate result of publish-time materializers across '
+    + 'the batch (e.g. `permission` → `sys_permission_set`), including '
+    + 'side-effect failures surfaced by the per-item effects loop. Present '
+    + 'ONLY when at least one published item had a registered materializer '
+    + 'or a side-effect failure. Best-effort, same contract as '
+    + '`seedApplied`.',
+  ),
+  // #9406 ruling: `probes` (`BuildProbeReport`) gets a DELIBERATELY OPAQUE
+  // passthrough declaration — the key is declared so the face is complete and
+  // nothing strips it, but its inner shape is NOT modeled here. It upgrades to
+  // a modeled Zod schema only when a consumer needs a field of it (maintainer,
+  // 2026-08-18: "Do not model it speculatively"). The TS shape lives on
+  // `packages/metadata-protocol/src/build-probes.ts` (`BuildProbeReport`:
+  // `issues[]` + per-plane `checked` counters).
+  probes: z.unknown().optional().describe(
+    'ADR-0038 L3 post-publish runtime probe report — one real read per '
+    + 'published artifact (seeded objects have rows, views are readable, '
+    + 'widget dataset selections execute). DELIBERATELY OPAQUE in this '
+    + 'contract (#9406): the key is declared and carried through verbatim, '
+    + 'but its inner shape is intentionally not modeled until a consumer '
+    + 'needs a field of it. Present only when something was publishable; '
+    + 'probes never fail the publish.',
+  ),
+  commitId: z.string().optional().describe(
+    'ADR-0067 — id of the commit this publish recorded. Absent when '
+    + 'nothing published.',
+  ),
+  unhiddenApps: z.array(z.string()).optional().describe(
+    'ADR-0045 §3 — names of the apps whose `_unpublished` gate this publish '
+    + 'cleared (publish = live AND visible; a materialized additive build '
+    + 'has no drafts, only this flip). Attached by the REST door, not the '
+    + 'protocol helper. Present ONLY when at least one app flipped — on a '
+    + 'mid-loop failure it names the apps that DID persist, beside '
+    + '`unhideError` (#5242\'s split report). Spelling is a permanent wire '
+    + 'contract (see the door\'s #6955 note).',
+  ),
+  unhideError: z.string().optional().describe(
+    'Present when the ADR-0045 visibility flip failed (wholly or partway): '
+    + 'the drafts ARE published, but apps still stored `_unpublished: true` '
+    + 'stay externally unobservable. Client-facing text only — undeclared '
+    + 'driver text is withheld per ADR-0112 (#8516); the full cause is in '
+    + 'the server log. The route is idempotent: re-run it once the cause is '
+    + 'resolved.',
+  ),
+  rebindError: z.string().optional().describe(
+    'Present when the post-publish `metadata:reloaded` announce failed: '
+    + 'everything is published and stored, but boot-cached consumers keep '
+    + 'the pre-publish view until re-run or restart (a newly published '
+    + 'record-triggered flow does not bind its trigger). Client-facing text '
+    + 'only, same ADR-0112 withhold as `unhideError` (#8516).',
+  ),
+}));
+
+/**
  * Delete Metadata Item Request
  * Removes a customization overlay row from sys_metadata (ADR-0005).
  */
@@ -1845,6 +2045,12 @@ export type RuntimeAuthoringIssue = z.input<typeof RuntimeAuthoringIssueSchema>;
 export type SaveMetaItemRequest = z.input<typeof SaveMetaItemRequestSchema>;
 export type SaveMetaItemResponse = z.input<typeof SaveMetaItemResponseSchema>;
 export type PublishMetaItemResponse = z.input<typeof PublishMetaItemResponseSchema>;
+/**
+ * The batch publish door's response — `POST /packages/:id/publish-drafts`
+ * (#9406). `probes` is `unknown` by declaration, not by omission: the #9406
+ * ruling stages it opaque until a consumer needs a field of it.
+ */
+export type PublishPackageDraftsResponse = z.input<typeof PublishPackageDraftsResponseSchema>;
 export type DeleteMetaItemRequest = z.input<typeof DeleteMetaItemRequestSchema>;
 export type DeleteMetaItemResponse = z.input<typeof DeleteMetaItemResponseSchema>;
 export type GetMetaItemCachedRequest = z.input<typeof GetMetaItemCachedRequestSchema>;

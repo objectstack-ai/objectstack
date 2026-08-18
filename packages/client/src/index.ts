@@ -17,6 +17,7 @@ import {
   GetMetaItemResponse,
   SaveMetaItemResponse,
   PublishMetaItemResponse,
+  PublishPackageDraftsResponse,
   LoginRequest,
   SessionResponse,
   GetPresignedUrlRequest,
@@ -1285,14 +1286,25 @@ export class ObjectStackClient {
      * ADR-0033 "publish whole app": promote every pending draft bound to the
      * package to active in one shot. Published `seed` drafts also materialize
      * their rows (reported under `seedApplied`).
+     *
+     * Nameable at the type level only since #9406, which declared
+     * `PublishPackageDraftsResponseSchema` — the batch sibling of #7294's
+     * single-item declaration; this method resolved to `any` before that.
+     * The batch is all-or-nothing (ADR-0067 D2): `success: false` on a 200
+     * means NOTHING landed — read `failed[]`. Each `published[]` element's
+     * `version` is the ADR-0008 OCC token (echo as `If-Match`), and the
+     * conditional receipts (`seedApplied` / `materializeApplied` /
+     * `unhiddenApps` / `unhideError` / `rebindError`) each report their own
+     * outcome: a 200 does not mean the data plane or the visibility flip
+     * caught up. `probes` is deliberately opaque in the contract (#9406).
      */
-    publishDrafts: async (id: string, opts?: { actor?: string }) => {
+    publishDrafts: async (id: string, opts?: { actor?: string }): Promise<PublishPackageDraftsResponse> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/publish-drafts`, {
             method: 'POST',
             body: JSON.stringify(opts ?? {}),
         });
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<PublishPackageDraftsResponse>(res);
     },
 
     /** ADR-0033: drop every pending draft bound to the package. */
@@ -5485,6 +5497,7 @@ export type {
   GetMetaItemResponse,
   SaveMetaItemResponse,
   PublishMetaItemResponse,
+  PublishPackageDraftsResponse,
   CheckPermissionRequest,
   CheckPermissionResponse,
   GetObjectPermissionsResponse,

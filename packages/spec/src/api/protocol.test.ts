@@ -1025,3 +1025,264 @@ describe('RuntimeAuthoringIssueSchema (#4717 — the ONE finding shape)', () => 
     expect(RuntimeAuthoringIssueSchema.safeParse({ ...issue, severity: 'fatal' }).success).toBe(false);
   });
 });
+
+import { PublishPackageDraftsResponseSchema } from './protocol.zod';
+
+/**
+ * #9406 — the same suite one door over again, for the BATCH publish door
+ * `POST /packages/:id/publish-drafts` (Studio's "publish whole app").
+ *
+ * The batch door sat in exactly the undeclared state the single-item publish
+ * door sat in before #7294: its face lived only as an inline TypeScript return
+ * type in `@objectstack/metadata-protocol`, so a field added to or dropped
+ * from the response could not turn any declared-contract gate red — #9343's
+ * discarded advisories were the measured instance.
+ *
+ * Optionality is measured, not assumed (receipts in the PR): the producer pair
+ * is `ObjectStackProtocolImplementation.publishPackageDrafts` (three return
+ * sites, all setting the five required keys) plus the REST door's response
+ * mutations in `packages/runtime/src/domains/packages.ts` (`seedApplied`
+ * back-fill, `unhiddenApps` / `unhideError` / `rebindError`). The producer
+ * side is pinned in
+ * `packages/objectql/src/publish-package-drafts-response-conformance.test.ts`
+ * and the route mutations in
+ * `packages/runtime/src/domains/packages-publish-drafts-response-conformance.test.ts`.
+ */
+describe('PublishPackageDraftsResponseSchema (#9406 — declares the batch publish response)', () => {
+  /** A verbatim-shaped capture of a real `publishPackageDrafts` return (happy path). */
+  const realResponse = {
+    success: true,
+    publishedCount: 2,
+    failedCount: 0,
+    published: [
+      { type: 'view', name: 'cases', version: 'sha256:7aad99c8d969efb5067fff275fb3e5be7ec90f9cd610d41709fcddbf8c34b1f0' },
+      { type: 'flow', name: 'nightly_purge', version: 'sha256:1bad99c8d969efb5067fff275fb3e5be7ec90f9cd610d41709fcddbf8c34b1f1' },
+    ],
+    failed: [],
+    commitId: 'cmt_01HZX3V9K2',
+  };
+
+  it('round-trips a real response without stripping any field', () => {
+    const parsed = PublishPackageDraftsResponseSchema.parse(realResponse);
+    expect(Object.keys(parsed).sort()).toEqual(Object.keys(realResponse).sort());
+    expect(parsed).toEqual(realResponse);
+  });
+
+  it('requires the five always-emitted keys — every producer return site sets them', () => {
+    for (const missing of ['success', 'publishedCount', 'failedCount', 'published', 'failed'] as const) {
+      const body: Record<string, unknown> = { ...realResponse };
+      delete body[missing];
+      expect(
+        PublishPackageDraftsResponseSchema.safeParse(body).success,
+        `omitting '${missing}' must fail parse`,
+      ).toBe(false);
+    }
+  });
+
+  it('keeps the counters integers and rejects fractional ones', () => {
+    expect(PublishPackageDraftsResponseSchema.safeParse({ ...realResponse, publishedCount: 1.5 }).success).toBe(false);
+    expect(PublishPackageDraftsResponseSchema.safeParse({ ...realResponse, failedCount: 0.5 }).success).toBe(false);
+  });
+
+  it('published[] elements carry the ADR-0008 OCC token: version is required per element', () => {
+    const parsed = PublishPackageDraftsResponseSchema.parse(realResponse);
+    expect(parsed.published[0]!.version).toBe(realResponse.published[0]!.version);
+    const lossy = {
+      ...realResponse,
+      published: [{ type: 'view', name: 'cases' }],
+    };
+    expect(PublishPackageDraftsResponseSchema.safeParse(lossy).success).toBe(false);
+  });
+
+  it('failed[] carries the refusal shape, code optional — BATCH_ABORTED marks non-causal items', () => {
+    const rolledBack = {
+      success: false,
+      publishedCount: 0,
+      failedCount: 2,
+      published: [],
+      failed: [
+        { type: 'object', name: 'ticket', error: "[invalid_metadata] object name 'ticket' must carry the package namespace prefix", code: 'PACKAGE_NAMESPACE_PREFIX_REQUIRED' },
+        { type: 'view', name: 'cases', error: 'not published — the batch is all-or-nothing (ADR-0067 D2) and object/ticket failed; the transaction rolled back', code: 'BATCH_ABORTED' },
+      ],
+    };
+    const parsed = PublishPackageDraftsResponseSchema.parse(rolledBack);
+    expect(parsed.failed).toEqual(rolledBack.failed);
+    // `error` is required once an element exists — a failure with no reason
+    // is the shape this declaration exists to refuse.
+    expect(
+      PublishPackageDraftsResponseSchema.safeParse({
+        ...rolledBack,
+        failed: [{ type: 'object', name: 'ticket' }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('carries seedApplied — counters optional ONLY for the route-level fallback producer', () => {
+    // The in-batch producer (`applySeedBodies`) always emits both counters.
+    const inBatch = PublishPackageDraftsResponseSchema.parse({
+      ...realResponse,
+      seedApplied: { success: true, inserted: 3, updated: 1, errors: [] },
+    });
+    expect(inBatch.seedApplied).toEqual({ success: true, inserted: 3, updated: 1, errors: [] });
+    // The route back-fill's early-failure shape has no counters — measured on
+    // `applyPublishedSeeds` ("required services unavailable") and the door's
+    // own catch. The wire face is the union, so the counters are optional.
+    const routeFallback = PublishPackageDraftsResponseSchema.parse({
+      ...realResponse,
+      seedApplied: { success: false, error: 'seed apply failed' },
+    });
+    expect(routeFallback.seedApplied).toEqual({ success: false, error: 'seed apply failed' });
+    // `success` stays required either way.
+    expect(
+      PublishPackageDraftsResponseSchema.safeParse({ ...realResponse, seedApplied: { inserted: 1, updated: 0 } }).success,
+    ).toBe(false);
+  });
+
+  it('carries materializeApplied with the batch\'s per-item failures[], not the single door\'s scalar error', () => {
+    const parsed = PublishPackageDraftsResponseSchema.parse({
+      ...realResponse,
+      materializeApplied: {
+        success: false, inserted: 1, updated: 0,
+        failures: [{ type: 'permission', name: 'sales_reps', error: 'materialize failed' }],
+      },
+    });
+    expect(parsed.materializeApplied?.failures).toHaveLength(1);
+    // `failures` is REQUIRED once the key is present — the aggregate's whole
+    // point is naming WHICH items never went live (an omitted list would
+    // read as "none failed" while `success: false` says otherwise).
+    expect(
+      PublishPackageDraftsResponseSchema.safeParse({
+        ...realResponse,
+        materializeApplied: { success: true, inserted: 1, updated: 0 },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('probes is opaque BY DECLARATION (#9406 ruling): any shape passes through unmodified, unstripped', () => {
+    // The real `BuildProbeReport` shape of today…
+    const report = { issues: [], checked: { seeds: 1, views: 2, widgets: 0 } };
+    const parsed = PublishPackageDraftsResponseSchema.parse({ ...realResponse, probes: report });
+    expect(parsed.probes).toEqual(report);
+    // …and a future shape this contract deliberately does NOT constrain. If a
+    // consumer ever needs a field of `probes`, upgrade the declaration on its
+    // own card instead of relaxing this pin.
+    expect(
+      PublishPackageDraftsResponseSchema.safeParse({ ...realResponse, probes: { anything: 'else' } }).success,
+    ).toBe(true);
+  });
+
+  it('declares the route-attached ADR-0045 receipts: unhiddenApps / unhideError / rebindError', () => {
+    const withFlip = PublishPackageDraftsResponseSchema.parse({
+      ...realResponse,
+      unhiddenApps: ['crm', 'ops'],
+    });
+    expect(withFlip.unhiddenApps).toEqual(['crm', 'ops']);
+    // #5242's split report: the persisted half rides BESIDE the failure.
+    const partWay = PublishPackageDraftsResponseSchema.parse({
+      ...realResponse,
+      unhiddenApps: ['crm'],
+      unhideError: 'visibility flip failed',
+    });
+    expect(partWay.unhiddenApps).toEqual(['crm']);
+    expect(partWay.unhideError).toBe('visibility flip failed');
+    const withRebind = PublishPackageDraftsResponseSchema.parse({
+      ...realResponse,
+      rebindError: 'metadata:reloaded announce failed',
+    });
+    expect(withRebind.rebindError).toBe('metadata:reloaded announce failed');
+  });
+
+  it('leaves every conditional key optional — absent means "did not apply", never "failed"', () => {
+    const minimal = {
+      success: false,
+      publishedCount: 0,
+      failedCount: 0,
+      published: [],
+      failed: [],
+    };
+    for (const key of ['seedApplied', 'materializeApplied', 'probes', 'commitId', 'unhiddenApps', 'unhideError', 'rebindError'] as const) {
+      expect(minimal).not.toHaveProperty(key);
+    }
+    expect(PublishPackageDraftsResponseSchema.safeParse(minimal).success).toBe(true);
+  });
+
+  it('does not fabricate any key: parse of a lean body adds nothing (byte-stability half)', () => {
+    // No `.default()` anywhere — a declaration that invents keys on the
+    // consumer side would make "absent" unobservable and change what callers
+    // see relative to the wire bytes. The other half of the byte-stability
+    // proof (the wire itself is unchanged) lives in the producer-side
+    // conformance suites: nothing on the serving path parses this schema.
+    const parsed = PublishPackageDraftsResponseSchema.parse(realResponse) as Record<string, unknown>;
+    expect(Object.keys(parsed).sort()).toEqual(Object.keys(realResponse).sort());
+  });
+});
+
+/**
+ * #9406 / #9343 — `advisories` on the batch door's `published[]` elements: the
+ * same #4463 D3 key the single-item doors carry, riding each element (the
+ * maintainer ruled against a parallel top-level map on #9343). Same
+ * conditional-field caveat as both siblings: a strip-nothing conformance gate
+ * cannot go red for an absent key, so these declaration pins are what make the
+ * key checkable in both directions.
+ */
+describe('PublishPackageDraftsResponseSchema published[].advisories (#9343 — #4463 D3 per element)', () => {
+  const base = {
+    success: true,
+    publishedCount: 1,
+    failedCount: 0,
+    failed: [],
+    commitId: 'cmt_01HZX3V9K2',
+  };
+
+  /** A verbatim capture of a real finding — `lintFlowPatterns`, warning tier. */
+  const advisory = {
+    rule: 'flow-multi-write-unfiltered',
+    path: 'flow \'nightly_purge\' · node \'purge\' (delete_record)',
+    where: 'flow \'nightly_purge\' · node \'purge\' (delete_record)',
+    message: 'declares `multi: true` with no `filter` key — this is a WHOLE-OBJECT write.',
+    hint: 'Add a `filter`, or state the whole-object intent explicitly.',
+    severity: 'warning' as const,
+  };
+
+  const el = (extra?: Record<string, unknown>) => ({
+    type: 'flow', name: 'nightly_purge',
+    version: 'sha256:7aad99c8d969efb5067fff275fb3e5be7ec90f9cd610d41709fcddbf8c34b1f0',
+    ...(extra ?? {}),
+  });
+
+  it('carries a real advisory through parse on its element, unstripped', () => {
+    const parsed = PublishPackageDraftsResponseSchema.parse({
+      ...base,
+      published: [el({ advisories: [advisory] })],
+    });
+    expect(parsed.published[0]!.advisories).toEqual([advisory]);
+  });
+
+  it('is OPTIONAL per element — absence means "nothing to report", never "the gate did not run"', () => {
+    const parsed = PublishPackageDraftsResponseSchema.parse({ ...base, published: [el()] });
+    expect(parsed.published[0]!.advisories).toBeUndefined();
+    expect('advisories' in parsed.published[0]!).toBe(false);
+  });
+
+  it('element shape is the ONE declared finding shape — a lossy element is refused, not narrowed', () => {
+    // `RuntimeAuthoringIssueSchema` by reference, not a local re-declaration —
+    // the save door's advisories[], the single publish door's, this door's,
+    // and the 422 issues[] stay one dialect (#4717).
+    const partial = { rule: 'x', severity: 'warning' };
+    expect(
+      PublishPackageDraftsResponseSchema.safeParse({
+        ...base,
+        published: [el({ advisories: [partial] })],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects a non-array, so a single issue object cannot masquerade as the list', () => {
+    expect(
+      PublishPackageDraftsResponseSchema.safeParse({
+        ...base,
+        published: [el({ advisories: advisory })],
+      }).success,
+    ).toBe(false);
+  });
+});

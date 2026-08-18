@@ -14269,6 +14269,18 @@ export class ObjectStackProtocolImplementation implements
      * `metadata` service (unlike `MetadataService.publishPackage`, which reads
      * the in-memory registry and 503s when that service is absent). Per-item
      * failures are collected and do NOT abort the rest.
+     *
+     * [#9406] The wire face of this return is DECLARED:
+     * `PublishPackageDraftsResponseSchema` in `@objectstack/spec/api` (the
+     * #5745/#7294 "declared = returned" pair, batch door). The declaration
+     * covers this object PLUS the REST door's mutations (`seedApplied`
+     * back-fill and the ADR-0045 `unhiddenApps`/`unhideError`/`rebindError`
+     * receipts in `packages/runtime/src/domains/packages.ts`). Changing this
+     * return type means updating the schema and its two conformance suites
+     * (`packages/objectql/src/publish-package-drafts-response-conformance.test.ts`,
+     * `packages/runtime/src/domains/packages-publish-drafts-response-conformance.test.ts`)
+     * in the same PR. `probes` is deliberately opaque in the declaration —
+     * upgrade it only on a consumer-driven card (#9406 ruling).
      */
     async publishPackageDrafts(request: {
         packageId: string;

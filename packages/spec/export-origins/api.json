@@ -730,6 +730,8 @@
     "PresignedUrlResponseSchema": "src/api/storage.zod.ts#PresignedUrlResponseSchema (const)",
     "PublishMetaItemResponse": "src/api/protocol.zod.ts#PublishMetaItemResponse (type)",
     "PublishMetaItemResponseSchema": "src/api/protocol.zod.ts#PublishMetaItemResponseSchema (const)",
+    "PublishPackageDraftsResponse": "src/api/protocol.zod.ts#PublishPackageDraftsResponse (type)",
+    "PublishPackageDraftsResponseSchema": "src/api/protocol.zod.ts#PublishPackageDraftsResponseSchema (const)",
     "QueryAdapterConfig": "src/api/query-adapter.zod.ts#QueryAdapterConfig (type)",
     "QueryAdapterConfigParsed": "src/api/query-adapter.zod.ts#QueryAdapterConfigParsed (type)",
     "QueryAdapterConfigSchema": "src/api/query-adapter.zod.ts#QueryAdapterConfigSchema (const)",
