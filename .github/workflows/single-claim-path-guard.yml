@@ -1,0 +1,107 @@
+# Two PRs reached green independently while shipping ONE physical change: both
+# rewrote the objectui pin from the same old sha to the same new sha and both
+# added the same generated changeset — a byte-identical hunk under two card
+# numbers. The first entered the merge queue; the second was green and one flip
+# from enqueueing behind it, where it would have conflicted on both files.
+#
+# The repo's Duplicate Fix Guard is not broken and is not touched by this file.
+# It asks whether two open PRs claim the same CARD, and it answered correctly:
+# these claimed two genuinely different, independently filed cards, neither a
+# duplicate of the other as written. The duplication existed only in the diff.
+# This workflow adds the second question — do two open PRs write the same
+# at-most-one-writer path — and the two gates run side by side.
+#
+# The rule, the declared path list, the measured false-positive rates that
+# forced a declared list instead of repo-wide diff intersection, and the wording
+# of the failure all live in `scripts/check-single-claim-paths.mjs`; that header
+# is authoritative and this file is the invocation.
+#
+# Sibling shape, deliberately copied rather than reinvented: the Part-of
+# Closing-Keyword Guard is this repo's other single-script PR-scoped blocking
+# check, and this takes its job shape, its runtime pin and its trigger set.
+name: Single-Claim Path Guard
+
+# `synchronize` is the load-bearing one here, and that is the difference from
+# the two body-scoped guards this otherwise copies. Their whole input is the PR
+# body, so `edited` is what they need; this one's input is the PR's CHANGED
+# FILES, which move on every push. A PR that adds a claim on a listed path in
+# its second commit must be judged on that commit, and one that drops the path
+# again must be able to go green without being closed and reopened.
+#
+# `edited` is kept anyway and is not decoration: the failure text tells a reader
+# to close one of the two PRs, and closing the earlier one must let the later
+# one recover. That recovery arrives as an event on the SURVIVING PR only if it
+# is touched — so `edited` is the cheap, no-push way back to green, exactly as
+# in the sibling guards.
+#
+# No `merge_group:` trigger, and not by oversight: a merge-queue event carries
+# no pull request, so this check has nothing to judge there. That also keeps it
+# out of the required-context registry, whose entries must report on queue
+# builds. Branch protection is a settings change no agent seat can make; this
+# publishes a check run, and whether it becomes REQUIRED carries a maintainer
+# ruling. The Duplicate Fix Guard sits in exactly the same position.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+# Read-only, and that is the whole grant. This gate reports; it never closes a
+# PR, comments, or edits a body. The one incident where a duplicate PR was
+# closed, it was closed by a human who spotted by eye what no gate could see —
+# and a gate that closed PRs by itself would be a far more expensive mistake
+# than the one it prevents.
+#
+# `contents: read` is not optional padding: naming a `permissions:` block at all
+# sets every scope NOT listed to `none`, and this job checks the repo out to get
+# at the script. With only the pull-requests scope here the job dies in the
+# checkout step, before the gate ever runs — a gate that is red for a reason
+# that has nothing to do with what it checks.
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: single-claim-path-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  single-claim-path:
+    name: No other open PR may claim the same single-writer path
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # Pinned to the same major and spelling as every other setup-node in this
+      # repo, for the measured reason recorded in the sibling guard's header:
+      # a setup-node major whose package-manager-cache default is on reads
+      # `packageManager` out of package.json and shells out to pnpm to find its
+      # store, killing the job in the SETUP step with "Unable to locate
+      # executable file: pnpm" — before the script runs, and naming a tool the
+      # workflow source never mentions. This job installs no package manager on
+      # purpose: the script is dependency-free and imports nothing.
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # Everything reaches the script through `env:`, never through `${{ }}`
+      # inside the `run:` line. Nothing here is attacker-controlled text today
+      # — a PR number is a number — but the spelling is the one the sibling
+      # guard's self-test pins, and keeping both gates identical on this point
+      # is what stops a later edit from introducing the unsafe form by analogy.
+      #
+      # `PR_NUMBER` is also the witness that separates a real verdict from an
+      # unwired run: with it absent the script exits 2 and says it judged
+      # nothing, rather than exiting 0 and reading as "no violations".
+      #
+      # The token is required, not optional: this gate's question is about OTHER
+      # open PRs, which cannot be answered from the event payload. The read is
+      # short-circuited on the cheap side — when this PR touches none of the
+      # declared paths, which is ~99.7% of runs by measurement, the job makes a
+      # single API call and stops.
+      - name: At most one open PR may modify a declared single-writer path
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/check-single-claim-paths.mjs

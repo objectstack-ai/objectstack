@@ -621,9 +621,20 @@ const opportunities = await engine.find('opportunity', {
 ```
 
 **On Delete Options:**
-- `set_null`: Set field to null when referenced record is deleted
+- `set_null`: Clear the reference when the referenced record is deleted. On a
+  single-value lookup the stored id becomes `null`; on a `multiple: true` lookup the
+  reference is a set, so only the deleted **member** is removed and the remaining
+  members are kept
 - `restrict`: Prevent deletion if references exist
 - `cascade`: Delete this record when referenced record is deleted
+
+> **Residual shape of a multi-value reference.** A `multiple: true` lookup emptied by
+> member removal is written as `[]`, **never `null`**. That is not a cascade
+> convention: the representation binds every writer — cascade repair, form clears and
+> API writes alike — so a reader of an array field never needs a null branch. The
+> guarantee is pinned by `FieldSchema`, in the `multiple` doc block of
+> `packages/spec/src/data/field.zod.ts` (rendered in the
+> [Field reference](/docs/references/data/field)).
 
 > **Required foreign keys.** A `required: true` lookup cannot be nulled, so the
 > *default* `set_null` automatically escalates to `restrict` on such a field —

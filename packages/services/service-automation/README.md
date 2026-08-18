@@ -1,16 +1,9 @@
 # @objectstack/service-automation
 
-Automation Service for ObjectStack — implements `IAutomationService` with plugin-based DAG (Directed Acyclic Graph) flow execution engine.
+The shipped provider for the kernel's **`automation`** service slot — a DAG flow
+execution engine implementing `IAutomationService`.
 
-## Features
-
-- **Flow Execution Engine**: Execute multi-step automation flows with conditional logic
-- **DAG-based Architecture**: Flows are represented as directed acyclic graphs for parallel execution
-- **Trigger System**: Launch flows automatically on record changes, schedule, or manual invocation
-- **Variable Management**: Pass data between flow steps with type-safe variables
-- **Error Handling**: Built-in retry logic, error branches, and rollback support
-- **Visual Flow Builder**: Compatible with Studio's visual flow designer
-- **Type-Safe**: Full TypeScript support with flow definition validation
+Slot criticality: `optional` (`ServiceRequirementDef` in `@objectstack/spec/system`).
 
 ## Installation
 
@@ -18,16 +11,46 @@ Automation Service for ObjectStack — implements `IAutomationService` with plug
 pnpm add @objectstack/service-automation
 ```
 
-## Basic Usage
+## Usage
+
+The entry point is the kernel plugin `AutomationServicePlugin`. It seeds every
+built-in node executor, so it is the only plugin an automation capability needs.
 
 ```typescript
-import { defineStack, defineFlow } from '@objectstack/spec';
-import { ServiceAutomation } from '@objectstack/service-automation';
+import { LiteKernel } from '@objectstack/core';
+import type { IAutomationService } from '@objectstack/spec/contracts';
+import { AutomationServicePlugin } from '@objectstack/service-automation';
 
-const stack = defineStack({
-  services: [ServiceAutomation.configure()],
+const kernel = new LiteKernel();
+kernel.use(new AutomationServicePlugin());
+await kernel.bootstrap();
+
+const automation = kernel.getService<IAutomationService>('automation');
+await automation.execute('escalate_high_priority_case', {
+  object: 'crm_case',
+  record: { id: 'case_1', priority: 'high' },
 });
 ```
+
+`LiteKernel.use()` is synchronous; `ObjectKernel.use()` returns a promise — await it there.
+
+### Plugin options
+
+Every field of `AutomationServicePluginOptions` is optional.
+
+| Option | Type | Default | Purpose |
+|:---|:---|:---|:---|
+| `debug` | `boolean` | `false` | Debug logging for flow execution. |
+| `armRuntime` | `boolean` | `true` | Bring up the runtime, not just the engine. `false` installs built-in nodes and fires `automation:ready`, then stops before anything is armed — no flow pull, no connector materialization, no wait-timer re-arm. |
+| `suspendedRunStore` | `'auto' \| 'memory'` | `'auto'` | `'auto'` persists suspended runs to `sys_automation_run` when an ObjectQL engine is available; `'memory'` never persists. |
+| `maxLogSize` | `number` | `DEFAULT_MAX_EXECUTION_LOG_SIZE` (1000) | In-memory execution-log ring buffer size. |
+| `runSummaryLog` | `RunSummaryLogLevel` | `'info'` | Level for the one-line-per-terminal-run summary. Turning it down changes narration only — the summary is still computed, returned and persisted. |
+| `runHistoryMaxPerFlow` | `number` | `DEFAULT_MAX_TERMINAL_RUNS_PER_FLOW` (100) | Per-flow cap on terminal run-history rows; `0` disables the cap. |
+| `credentialResolver` | `CredentialResolver` | env-var resolver | Resolves a declarative connector's `auth.credentialRef` at boot. |
+| `packageRoot` | `string` | `process.cwd()` | Root that relative file refs in connector entries resolve against; reads are confined to it. |
+
+The AGE half of run retention is declarative, not an option here: `sys_automation_run`
+declares `retention: { maxAge: '30d', … }` and the platform LifecycleService enforces it.
 
 ## Flow Types
 
@@ -184,72 +207,95 @@ parsed it.
 
 ## Service API
 
+`IAutomationService` (from `@objectstack/spec/contracts`) declares two required members
+and a set of optional ones; this package implements them all.
+
 ```typescript
-// Get automation service
-const automation = kernel.getService<IAutomationService>('automation');
+import type { IAutomationService } from '@objectstack/spec/contracts';
+
+// required
+//   execute(flowName, context?)          -> Promise<AutomationResult>
+//   listFlows()                          -> Promise<string[]>
+// optional
+//   registerFlow?(name, definition)      -> void
+//   unregisterFlow?(name)                -> void
+//   getFlow?(name)                       -> Promise<FlowParsed | null>
+//   toggleFlow?(name, enabled)           -> Promise<void>
+//   listRuns?(...)                       -> run history
+//   getRun?(runId)                       -> Promise<ExecutionLog | null>
+//   resume?(runId, signal?)              -> Promise<AutomationResult>
+//   listSuspendedRuns?()                 -> suspended-run summaries
+//   getSuspendedScreen?(runId)           -> Promise<ScreenSpec | null>
+//   getActionDescriptors?()              -> ActionDescriptor[]
+//   getConnectorDescriptors?()           -> ConnectorDescriptor[]
+//   getFlowRuntimeStates?()              -> FlowRuntimeState[]
+//   canonicalizeStoredFlow?(name, definition)
 ```
 
-### Execute Flow
+### Execute a flow
+
+`execute` takes the flow's **machine name** and an optional `AutomationContext` — it
+does not take an options object, and there is no `inputs` key.
 
 ```typescript
-// Execute a flow manually
-const result = await automation.executeFlow({
-  flowName: 'create_opportunity',
-  inputs: {
-    account_id: '123',
-    amount: 50000,
-  },
+const result = await automation.execute('escalate_high_priority_case', {
+  record: { id: 'case_1', priority: 'high' },
+  object: 'crm_case',
+  event: 'on_update',
+  userId: 'usr_123',
 });
 
-// Check execution status
-if (result.status === 'success') {
-  console.log('Flow completed:', result.outputs);
+if (result.success) {
+  console.log('output:', result.output, 'in', result.durationMs, 'ms');
 } else {
-  console.error('Flow failed:', result.error);
+  console.error('failed:', result.error, result.code);
 }
 ```
 
-### Flow Management
+`AutomationResult` fields: `success`, `output?`, `error?`, `durationMs?`, `code?`,
+`status?`, `runId?`, `screen?`, `successMessage?`, `errorMessage?`, `summary?`. The
+machine-readable classification is `code` (not `errorCode`) — resume refusals such as
+`RUN_NOT_FOUND`, `STORE_UNAVAILABLE`, `RESUME_IN_PROGRESS`, plus the trigger-time
+`FLOW_DISABLED` / `FLOW_NO_START_NODE`.
+
+⚠️ `runAs` on `AutomationContext` is derived by the engine from the flow definition —
+callers do not set it.
+
+### Register and inspect flows
 
 ```typescript
-// Get flow definition
-const flow = await automation.getFlow('welcome_email');
+automation.registerFlow?.('escalate_high_priority_case', escalateCase);
 
-// List all flows
-const flows = await automation.listFlows();
-
-// Get flow execution history
-const history = await automation.getFlowHistory({
-  flowName: 'daily_report',
-  limit: 100,
-});
+const names = await automation.listFlows();     // string[] of machine names
+const parsed = await automation.getFlow?.('escalate_high_priority_case');
+await automation.toggleFlow?.('escalate_high_priority_case', false);
 ```
 
-### Trigger Management
+`registerFlow` validates against the live action registry and rejects unknown `config`
+keys. There is no `registerTrigger` method — a flow's trigger is declared on its `start`
+node (`record_change`) or by its `type`, and arming happens at registration.
 
-```typescript
-// Register a custom trigger
-automation.registerTrigger({
-  name: 'on_payment_received',
-  description: 'Triggered when a payment is received',
-  async handler(context) {
-    // Trigger logic
-    return {
-      record: context.payment,
-      timestamp: new Date(),
-    };
-  },
-});
-```
+## REST API
 
-## REST API Endpoints
+Served by the runtime dispatcher's `/automation` domain when this service occupies the
+slot (paths shown with the `/api/v1` wire prefix):
 
 ```
-POST   /api/v1/automation/flows/:name/execute     # Execute flow
-GET    /api/v1/automation/flows                   # List flows
-GET    /api/v1/automation/flows/:name             # Get flow definition
-GET    /api/v1/automation/flows/:name/history     # Get execution history
-POST   /api/v1/automation/triggers/:name          # Trigger a flow
+GET    /api/v1/automation                              # list flows
+POST   /api/v1/automation                              # create a flow
+GET    /api/v1/automation/actions                      # action descriptors
+GET    /api/v1/automation/connectors                   # connector descriptors
+GET    /api/v1/automation/_status                      # runtime status
+GET    /api/v1/automation/:name                        # get one flow
+PUT    /api/v1/automation/:name                        # update a flow
+DELETE /api/v1/automation/:name                        # delete a flow
+POST   /api/v1/automation/:name/trigger                # execute a flow
+POST   /api/v1/automation/:name/toggle                 # enable / disable
+GET    /api/v1/automation/:name/runs                   # list runs
+GET    /api/v1/automation/:name/runs/:runId            # run detail
+GET    /api/v1/automation/:name/runs/:runId/screen     # screen spec of a parked run
+POST   /api/v1/automation/:name/runs/:runId/resume     # resume a parked run
+POST   /api/v1/automation/trigger/:name                # legacy execute shape
 ```
 
 ## Advanced Features
@@ -370,19 +416,38 @@ The node resumes down its ordinary out-edges; there is no `nextSteps` key.
 - **Query Optimization**: Filter queries early to reduce data volume
 - **Async Execution**: Long-running flows execute asynchronously
 
-## Contract Implementation
-
-Implements `IAutomationService` from `@objectstack/spec/contracts`:
+## Exports
 
 ```typescript
-interface IAutomationService {
-  executeFlow(options: FlowExecutionOptions): Promise<FlowResult>;
-  getFlow(name: string): Promise<Flow>;
-  listFlows(filter?: FlowFilter): Promise<Flow[]>;
-  getFlowHistory(options: FlowHistoryOptions): Promise<FlowExecution[]>;
-  registerTrigger(trigger: TriggerDefinition): void;
-}
+import {
+  AutomationEngine, AutomationServicePlugin, createPackageFileLoader,
+  InMemorySuspendedRunStore, ObjectStoreSuspendedRunStore, SysAutomationRun,
+  installBuiltinNodes, registerLogicNodes, registerCrudNodes,
+  registerScreenNodes, registerHttpNodes, registerConnectorNodes,
+  resolveRunDataContext, stampSystemInsertOwner, UnscopedRunDataAccessError,
+  summarizeRun, formatRunSummaryLine,
+  DEFAULT_MAX_EXECUTION_LOG_SIZE, DEFAULT_MAX_TERMINAL_RUNS_PER_FLOW,
+  MAX_PERSISTED_HISTORY_STEPS,
+} from '@objectstack/service-automation';
 ```
+
+Types: `AutomationEngineOptions`, `AutomationServicePluginOptions`, `RunSummaryLogLevel`,
+`NodeExecutor`, `NodeExecutionResult`, `SuspensionRelease`, `SuspensionReleaseReason`,
+`FlowTrigger`, `FlowTriggerBinding`, `RegisteredConnector`, `SuspendedRun`,
+`SuspendedRunStore`, `SuspendedRunStoreEngine`, `ObjectStoreSuspendedRunStoreOptions`,
+`RunRecord`, `StepLogEntry`, `UnknownNodeTypeAuditEntry`, `RunDataContext`,
+`RunIdentityContext`, `RunProvenanceContext`, `ConnectorProviderFactory`,
+`ConnectorProviderContext`, `ConnectorMaterialization`, `ConnectorMaterializationHandler`,
+`ConnectorOrigin`, `ConnectorState`, `ConnectorDescriptor`, `ConnectorActionDescriptor`,
+`ConnectorActionHandler`, `ConnectorActionContext`.
+
+The connector types are re-exports from `@objectstack/spec/integration` — connector
+plugins should import them from there rather than coupling to this engine.
+
+`AutomationEngine` is the engine underneath the plugin, exported for hosts that build
+their own kernel integration; `AutomationServicePlugin` is the entry point for everyone
+else. The built-in node installers are functions, not plugins — the platform's
+foundational nodes are built in, not installed.
 
 ## License
 

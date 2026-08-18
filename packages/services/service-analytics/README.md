@@ -1,18 +1,10 @@
 # @objectstack/service-analytics
 
-Analytics Service for ObjectStack — implements `IAnalyticsService` with multi-driver strategy pattern (NativeSQL, ObjectQL, InMemory).
+The shipped provider for the kernel's **`analytics`** service slot — a cube/dataset
+query engine implementing `IAnalyticsService` over a priority-ordered strategy chain.
 
-## Features
-
-- **Multi-Driver Architecture**: Choose the right execution strategy for your analytics queries
-  - **NativeSQL**: Direct SQL execution for maximum performance on large datasets
-  - **ObjectQL**: Leverage ObjectStack's query engine for metadata-aware analytics
-  - **InMemory**: Fast aggregations on small datasets without database round-trips
-- **Aggregation Functions**: SUM, COUNT, AVG, MIN, MAX, GROUP BY, HAVING
-- **Time Series Analysis**: Time-based aggregations and grouping
-- **Custom Metrics**: Define and track custom business metrics
-- **Dashboard Integration**: Auto-generated REST endpoints for visualization
-- **Type-Safe**: Full TypeScript support with inferred result types
+Slot criticality: `optional` (`ServiceRequirementDef` in `@objectstack/spec/system`).
+Without it, `/api/v1/analytics/*` answers 404 rather than degrading.
 
 ## Installation
 
@@ -20,369 +12,176 @@ Analytics Service for ObjectStack — implements `IAnalyticsService` with multi-
 pnpm add @objectstack/service-analytics
 ```
 
-## Basic Usage
+## Usage
+
+The entry point is the kernel plugin `AnalyticsServicePlugin`. Construct it and hand
+it to the kernel; it registers the service under `'analytics'` during `init`.
 
 ```typescript
-import { defineStack } from '@objectstack/spec';
-import { ServiceAnalytics } from '@objectstack/service-analytics';
+import { LiteKernel } from '@objectstack/core';
+import type { Cube } from '@objectstack/spec/data';
+import type { IAnalyticsService } from '@objectstack/spec/contracts';
+import { AnalyticsServicePlugin } from '@objectstack/service-analytics';
 
-const stack = defineStack({
-  services: [
-    ServiceAnalytics.configure({
-      defaultDriver: 'objectql', // or 'sql', 'memory'
-      enableCaching: true,
-    }),
-  ],
-});
+const ordersCube: Cube = {
+  name: 'orders',
+  title: 'Orders',
+  sql: 'orders',
+  measures: {
+    count: { name: 'count', label: 'Count', type: 'count', sql: '*' },
+    total_amount: { name: 'total_amount', label: 'Total Amount', type: 'sum', sql: 'amount' },
+  },
+  dimensions: {
+    status: { name: 'status', label: 'Status', type: 'string', sql: 'status' },
+  },
+};
+
+const kernel = new LiteKernel();
+kernel.use(new AnalyticsServicePlugin({ cubes: [ordersCube] }));
+await kernel.bootstrap();
+
+const analytics = kernel.getService<IAnalyticsService>('analytics');
+const result = await analytics.query({ cube: 'orders', measures: ['orders.count'] });
 ```
 
-## Configuration
+`LiteKernel.use()` is synchronous; `ObjectKernel.use()` returns a promise — await it there.
 
-```typescript
-interface AnalyticsServiceConfig {
-  /** Default execution driver */
-  defaultDriver?: 'sql' | 'objectql' | 'memory';
+## Plugin options
 
-  /** Enable query result caching */
-  enableCaching?: boolean;
+Every field of `AnalyticsServicePluginOptions` is optional. The plugin bridges the
+host's engine into `AnalyticsServiceConfig`; anything left unset falls back to what
+the plugin can auto-discover from the kernel.
 
-  /** Cache TTL in seconds (default: 300) */
-  cacheTTL?: number;
+| Option | Type | Default | Purpose |
+|:---|:---|:---|:---|
+| `cubes` | `Cube[]` | none | Cube definitions registered at init. |
+| `queryCapabilities` | `(cubeName: string) => AnalyticsDriverCapabilities` | in-memory only | Which execution paths a cube's backing driver supports. |
+| `executeRawSql` | `(objectName, sql, params) => Promise<Record<string, unknown>[]>` | auto-bridged to the ObjectQL engine | Enables `NativeSQLStrategy`. |
+| `executeAggregate` | `(objectName, options) => Promise<Record<string, unknown>[]>` | auto-bridged to the ObjectQL engine | Enables `ObjectQLStrategy`. |
+| `getReadScope` | `(objectName, context?) => FilterCondition \| null \| undefined \| Promise<…>` | auto-bridges to a registered `'security'` service exposing `getReadFilter` | Per-object tenant/RLS read scope (ADR-0021 D-C). |
+| `getAllowedRelationships` | `(cubeName: string) => Set<string> \| undefined` | supplied by compiled datasets | Join allowlist per cube. |
+| `debug` | `boolean` | `false` | Server-side log verbosity only. |
+| `debugSql` | `boolean` | development only (`NODE_ENV === 'development'`) | Echo the executed statement back to callers in `AnalyticsResult.sql`. |
 
-  /** Maximum result set size for in-memory driver */
-  maxMemoryResults?: number;
-}
-```
+`debug` and `debugSql` are deliberately separate: raising log verbosity must never
+widen what travels to a tenant.
 
 ## Service API
 
-```typescript
-// Get analytics service from kernel
-const analytics = kernel.getService<IAnalyticsService>('analytics');
-```
-
-### Basic Aggregations
+`IAnalyticsService` (from `@objectstack/spec/contracts`) declares four members — two
+required, two optional:
 
 ```typescript
-// Count records
-const totalOrders = await analytics.count({
-  object: 'order',
-  filters: [{ field: 'status', operator: 'eq', value: 'completed' }],
-});
+import type { IAnalyticsService } from '@objectstack/spec/contracts';
 
-// Sum field values
-const totalRevenue = await analytics.sum({
-  object: 'order',
-  field: 'amount',
-  filters: [{ field: 'created_at', operator: 'gte', value: '2024-01-01' }],
-});
-
-// Calculate average
-const avgOrderValue = await analytics.avg({
-  object: 'order',
-  field: 'amount',
-});
-
-// Find min/max
-const highestOrder = await analytics.max({
-  object: 'order',
-  field: 'amount',
-});
+// query(query, context?)             -> Promise<AnalyticsResult>     (required)
+// getMeta(cubeName?)                 -> Promise<CubeMeta[]>          (required)
+// generateSql?(query, context?)      -> Promise<{ sql, params }>     (optional)
+// queryDataset?(dataset, selection, context?, options?)              (optional)
 ```
 
-### Group By Aggregations
+This package implements all four. Pass the caller's `ExecutionContext` as the second
+argument: without it the per-object read scope resolves to no filter and the query
+runs unscoped.
+
+### AnalyticsQuery
+
+`AnalyticsQuery` is a **strict** schema (`AnalyticsQuerySchema`, `@objectstack/spec/data`)
+with exactly these fields; `measures` is the only required one, and an undeclared key
+is rejected rather than dropped.
+
+| Field | Type | Notes |
+|:---|:---|:---|
+| `cube` | `string?` | Optional when supplied by the request wrapper. |
+| `measures` | `string[]` | Required. |
+| `dimensions` | `string[]?` | |
+| `where` | `FilterCondition?` | Canonical Query DSL filter — the same shape `find()` takes. |
+| `timeDimensions` | `{ dimension, granularity?, dateRange? }[]?` | Also strict per item. |
+| `order` | `Record<string, 'asc' \| 'desc'>?` | |
+| `limit` | `number?` | |
+| `offset` | `number?` | |
+| `timezone` | `string?` | IANA name. No default — an absent timezone means the engine resolves it. |
+
+There is no `filters` key and no `aggregations` key. `filters` is rejected at the REST
+door with a 400 naming `where`; per-metric filtering lives on the cube metric's own
+`filters`.
 
 ```typescript
-// Revenue by product category
-const revenueByCategory = await analytics.groupBy({
-  object: 'order_item',
-  groupBy: ['product.category'],
-  aggregations: [
-    { function: 'sum', field: 'total', as: 'revenue' },
-    { function: 'count', as: 'order_count' },
-  ],
+const revenueByStatus = await analytics.query({
+  cube: 'orders',
+  measures: ['orders.total_amount'],
+  dimensions: ['orders.status'],
+  where: { is_active: true },
+  order: { 'orders.total_amount': 'desc' },
+  limit: 10,
 });
-
-// Result format:
-// [
-//   { category: 'Electronics', revenue: 125000, order_count: 342 },
-//   { category: 'Clothing', revenue: 98000, order_count: 567 },
-// ]
+// result.rows  — Record<string, unknown>[]
+// result.fields — column metadata (name, type, label?, format?, currency?, percentScale?)
 ```
 
-### Time Series Analytics
+## Strategy chain
+
+`AnalyticsService` delegates to a priority-ordered chain; the first strategy whose
+`canHandle` returns true serves the query.
+
+| Priority | Strategy | Condition |
+|:---:|:---|:---|
+| 10 | `NativeSQLStrategy` | driver supports raw SQL (`executeRawSql`) |
+| 20 | `ObjectQLStrategy` | driver supports aggregate AST (`executeAggregate`) |
+| 30 | custom strategies, or the internal delegate added when `fallbackService` is set | injected by the host |
+
+`InMemoryStrategy` is **not** built in — it ships from `@objectstack/driver-memory` and
+is injected through `AnalyticsServiceConfig.strategies` (or `fallbackService`).
+
+## REST API
+
+Served by the runtime dispatcher's `/analytics` domain when this service occupies the
+slot. These four routes are the whole surface:
+
+```
+POST   /api/v1/analytics/query           # execute an AnalyticsQuery
+GET    /api/v1/analytics/meta[?cube=]    # cube metadata for discovery
+POST   /api/v1/analytics/sql             # generate SQL without executing (dry-run)
+POST   /api/v1/analytics/dataset/query   # run a dataset selection (ADR-0021)
+```
+
+`POST /analytics/sql` answers 404 when the slot's occupant does not implement the
+optional `generateSql`.
+
+## Exports
 
 ```typescript
-// Daily revenue for the past 30 days
-const dailyRevenue = await analytics.timeSeries({
-  object: 'order',
-  dateField: 'created_at',
-  interval: 'day',
-  aggregations: [
-    { function: 'sum', field: 'amount', as: 'revenue' },
-    { function: 'count', as: 'orders' },
-  ],
-  filters: [
-    {
-      field: 'created_at',
-      operator: 'gte',
-      value: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-    },
-  ],
-});
-
-// Result format:
-// [
-//   { date: '2024-01-01', revenue: 12500, orders: 45 },
-//   { date: '2024-01-02', revenue: 15200, orders: 52 },
-// ]
+import {
+  AnalyticsService, AnalyticsServicePlugin, CubeRegistry, DatasetExecutor,
+  NativeSQLStrategy, ObjectQLStrategy,
+  compileDataset, compileScopedFilterToSql,
+  combineFilters, evaluateDerivedMeasures, fillEmptyGroups, mergeByDimensions, shiftRange,
+  createOrderLabelResolver, pickDisplayField, resolveDimensionLabels, withLabelFetchCache,
+} from '@objectstack/service-analytics';
 ```
 
-### Custom Metrics
+Types: `AnalyticsServiceConfig`, `AnalyticsServicePluginOptions`, `AnalyticsStrategy`,
+`StrategyContext`, `AnalyticsDriverCapabilities`, `CompiledDataset`,
+`DatasetCompileOptions`, `DatasetSelection`, `CompareTo`, `DerivedMeasureSpec`,
+`RelationshipResolver`, `RelationshipTarget`, `DimensionLabelDeps`, `FieldMetaLite`,
+`OrderLabelResolver`.
+
+## Advanced: constructing the service directly
+
+`AnalyticsService` is exported for hosts that wire their own kernel integration.
+`AnalyticsServiceConfig` is the wider surface the plugin builds — it adds `logger`,
+`strategies`, `fallbackService`, `coerceTemporalFilterValue`,
+`coerceTemporalFilterColumn`, `isExternalObject`, `getObjectDatasource`,
+`isRegisteredObject` and the dataset resolvers on top of the plugin options above.
 
 ```typescript
-// Define a metric
-analytics.defineMetric({
-  name: 'monthly_recurring_revenue',
-  description: 'MRR from active subscriptions',
-  calculation: {
-    object: 'subscription',
-    aggregation: 'sum',
-    field: 'amount',
-    filters: [{ field: 'status', operator: 'eq', value: 'active' }],
-  },
-});
+import { AnalyticsService, CubeRegistry } from '@objectstack/service-analytics';
 
-// Query the metric
-const mrr = await analytics.getMetric('monthly_recurring_revenue');
+const registry = new CubeRegistry();
+registry.registerAll([ordersCube]);
+
+const service = new AnalyticsService({ cubes: [ordersCube] });
 ```
-
-## Multi-Driver Strategy
-
-### When to Use Each Driver
-
-#### NativeSQL Driver
-**Best for**: Large datasets, complex joins, database-specific optimizations
-
-```typescript
-const result = await analytics.query({
-  driver: 'sql',
-  object: 'order',
-  aggregations: [{ function: 'sum', field: 'amount' }],
-  groupBy: ['customer_id'],
-  having: [{ field: 'sum_amount', operator: 'gt', value: 10000 }],
-});
-```
-
-**Advantages:**
-- Direct SQL execution for maximum performance
-- Leverages database indexes and query optimization
-- Handles millions of records efficiently
-
-**Limitations:**
-- Bypasses ObjectStack metadata layer
-- May miss field-level transformations
-- Less portable across databases
-
-#### ObjectQL Driver
-**Best for**: Metadata-aware analytics, cross-object aggregations
-
-```typescript
-const result = await analytics.query({
-  driver: 'objectql',
-  object: 'opportunity',
-  aggregations: [
-    { function: 'sum', field: 'amount' },
-    { function: 'count' },
-  ],
-  groupBy: ['account.industry'],
-});
-```
-
-**Advantages:**
-- Respects object/field metadata and permissions
-- Handles formula fields and computed values
-- Consistent with ObjectQL query behavior
-
-**Limitations:**
-- Slightly slower than direct SQL
-- Additional abstraction layer
-
-#### InMemory Driver
-**Best for**: Small datasets, pre-filtered results, real-time dashboards
-
-```typescript
-const result = await analytics.query({
-  driver: 'memory',
-  object: 'task',
-  aggregations: [{ function: 'count' }],
-  groupBy: ['status'],
-});
-```
-
-**Advantages:**
-- Zero database round-trips for cached data
-- Instant results for small datasets
-- Useful for client-side analytics
-
-**Limitations:**
-- Limited to `maxMemoryResults` (default: 10,000)
-- Requires data to be loaded into memory first
-
-## REST API Endpoints
-
-When used with `@objectstack/rest`:
-
-```
-POST   /api/v1/analytics/count          # Count records
-POST   /api/v1/analytics/sum             # Sum field values
-POST   /api/v1/analytics/avg             # Calculate average
-POST   /api/v1/analytics/min             # Find minimum
-POST   /api/v1/analytics/max             # Find maximum
-POST   /api/v1/analytics/group-by        # Group by aggregation
-POST   /api/v1/analytics/time-series     # Time series analysis
-GET    /api/v1/analytics/metrics         # List custom metrics
-GET    /api/v1/analytics/metrics/:name   # Get metric value
-```
-
-## Dashboard Integration
-
-```typescript
-// Define a dashboard with multiple metrics
-const salesDashboard = {
-  title: 'Sales Dashboard',
-  metrics: [
-    {
-      title: 'Total Revenue',
-      query: {
-        object: 'order',
-        aggregation: 'sum',
-        field: 'amount',
-      },
-    },
-    {
-      title: 'Revenue by Region',
-      query: {
-        object: 'order',
-        aggregations: [{ function: 'sum', field: 'amount', as: 'revenue' }],
-        groupBy: ['account.billing_region'],
-      },
-    },
-  ],
-};
-
-// Execute all dashboard queries
-const dashboardData = await analytics.executeDashboard(salesDashboard);
-```
-
-## Advanced Features
-
-### Query Caching
-
-```typescript
-// Enable caching for expensive queries
-const result = await analytics.query({
-  object: 'order',
-  aggregations: [{ function: 'sum', field: 'amount' }],
-  cache: {
-    enabled: true,
-    ttl: 600, // 10 minutes
-  },
-});
-
-// Invalidate cache when data changes
-analytics.invalidateCache('order');
-```
-
-### Comparative Analytics
-
-```typescript
-// Compare current vs. previous period
-const comparison = await analytics.compare({
-  object: 'order',
-  aggregation: 'sum',
-  field: 'amount',
-  currentPeriod: {
-    start: '2024-01-01',
-    end: '2024-01-31',
-  },
-  comparisonPeriod: {
-    start: '2023-12-01',
-    end: '2023-12-31',
-  },
-});
-
-// Result:
-// {
-//   current: 125000,
-//   comparison: 110000,
-//   change: 15000,
-//   percentChange: 13.64
-// }
-```
-
-### Funnel Analysis
-
-```typescript
-// Define a conversion funnel
-const funnel = await analytics.funnel({
-  steps: [
-    { object: 'lead', stage: 'new' },
-    { object: 'lead', stage: 'qualified' },
-    { object: 'opportunity', stage: 'proposal' },
-    { object: 'opportunity', stage: 'closed_won' },
-  ],
-  dateRange: {
-    start: '2024-01-01',
-    end: '2024-01-31',
-  },
-});
-
-// Result:
-// {
-//   steps: [
-//     { stage: 'new', count: 1000, percentage: 100 },
-//     { stage: 'qualified', count: 450, percentage: 45 },
-//     { stage: 'proposal', count: 200, percentage: 20 },
-//     { stage: 'closed_won', count: 75, percentage: 7.5 },
-//   ],
-//   overallConversion: 0.075
-// }
-```
-
-## Contract Implementation
-
-Implements `IAnalyticsService` from `@objectstack/spec/contracts`:
-
-```typescript
-interface IAnalyticsService {
-  count(options: CountOptions): Promise<number>;
-  sum(options: AggregationOptions): Promise<number>;
-  avg(options: AggregationOptions): Promise<number>;
-  min(options: AggregationOptions): Promise<number>;
-  max(options: AggregationOptions): Promise<number>;
-  groupBy(options: GroupByOptions): Promise<AggregationResult[]>;
-  timeSeries(options: TimeSeriesOptions): Promise<TimeSeriesResult[]>;
-  defineMetric(metric: MetricDefinition): void;
-  getMetric(name: string): Promise<number | AggregationResult[]>;
-}
-```
-
-## Performance Optimization
-
-1. **Choose the Right Driver**: Use SQL for large datasets, InMemory for small
-2. **Enable Caching**: Cache expensive queries with appropriate TTL
-3. **Optimize Filters**: Filter early to reduce dataset size
-4. **Use Indexes**: Ensure database indexes on frequently queried fields
-5. **Batch Queries**: Execute multiple metrics in a single dashboard query
-
-## Best Practices
-
-1. **Driver Selection**: Start with ObjectQL, optimize to SQL if needed
-2. **Metric Definitions**: Define reusable metrics for consistency
-3. **Cache Strategy**: Cache expensive queries, invalidate on data changes
-4. **Time Series**: Use appropriate intervals (hour/day/week/month)
-5. **Group By**: Limit grouping dimensions to avoid explosion of result sets
 
 ## License
 
@@ -391,5 +190,5 @@ Apache-2.0. See [LICENSING.md](../../../LICENSING.md).
 ## See Also
 
 - [@objectstack/objectql](../../objectql/)
-- [@objectstack/spec/contracts](../../spec/src/contracts/)
+- [@objectstack/driver-memory](../../drivers/driver-memory/) — ships `InMemoryStrategy`
 - [Analytics Guide](/content/docs/data-modeling/analytics.mdx)

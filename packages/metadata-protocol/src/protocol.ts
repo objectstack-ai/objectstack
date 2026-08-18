@@ -18208,6 +18208,17 @@ export class ObjectStackProtocolImplementation implements
      * `SEMANTIC_REFERENCE_SITES` carries the properties whose name does not
      * spell their target. Both are argued in `reference-sites.ts`.
      *
+     * [#9327] A TARGET type that could never MATCH is a third fact, and it is
+     * refused rather than answered. `field` items are addressed by the
+     * composite key `<object>.<field>` while every property that names a field
+     * holds the bare name, so the two sides are drawn from disjoint
+     * vocabularies and `{ references: [] }` was returned for every field, on
+     * every deployment, whatever was stored.
+     * {@link REFERENCE_SITES.unanswerableTargetTypes} carries that set and this
+     * method turns it into a `501 NOT_IMPLEMENTED` — the same code and envelope
+     * the route's sibling refusal (#9326) already uses, so no response field
+     * and no error code are added.
+     *
      * [#8896] A source type that could not be READ is a different fact and is
      * no longer answered the same way. This list is what an admin consults
      * before a rename / delete / type-narrowing, so a silently short answer
@@ -18259,6 +18270,54 @@ export class ObjectStackProtocolImplementation implements
         // Canonical by construction from the fold above — NOT a second fold.
         const singularTarget = request.type;
         const targetName = request.name;
+
+        // [#9327] REFUSE a target type whose addressing key no reference site
+        // can hold. This is the TARGET-side sibling of #9190's
+        // `unwalkableSourceTypes`, and it needed to be a sibling rather than a
+        // widening: that set records a source shape that could not be READ,
+        // while `field` reads perfectly, is walked as a source, and is named as
+        // a target by twelve derived sites — every one of which holds a BARE
+        // field name (`owner`) while this endpoint is addressed by the
+        // composite key (`account.owner`). Disjoint vocabularies, so the answer
+        // was `{ references: [] }` for every field, always, regardless of real
+        // usage.
+        //
+        // ⚠️ Why this refuses on the wire instead of being recorded at build
+        // time like its sibling. #9190 could move its discriminator OFF the
+        // response because the gap it records is BOUNDED — some answers get
+        // shorter. This gap is TOTAL: every answer for the type is empty, and
+        // the admin "Used by" panel renders that, verbatim, as "Nothing in the
+        // metadata graph points at this item. Safe to delete." A constant in a
+        // build does not reach the operator standing in front of that sentence,
+        // so recording it would leave the destructive clearance exactly where
+        // #8896 and ADR-0110 D3 say it must not be.
+        //
+        // ⛔ NOT the response-shape discriminator #9190 fenced to the spec seat.
+        // Nothing is added to the 200 body; this reuses the ADR-0112 nested
+        // envelope and the SAME `501 NOT_IMPLEMENTED` code the sibling refusal
+        // on this exact route already returns when the protocol cannot compute
+        // the graph at all (#9326). One route, one dialect for "the question
+        // was never asked".
+        //
+        // The message is prescriptive per ADR-0110 D3: it names the answerable
+        // question, because a field's dependents ARE reachable — through the
+        // object that owns it, which is where a field is authored and where the
+        // reference graph has real edges.
+        if (REFERENCE_SITES.unanswerableTargetTypes.includes(singularTarget)) {
+            const owner = targetName.includes('.') ? targetName.slice(0, targetName.indexOf('.')) : '<object>';
+            const err = new Error(
+                `[unanswerable_target] References to a '${singularTarget}' item cannot be computed. `
+                + `A '${singularTarget}' is addressed by the composite key '<object>.<field>' `
+                + `(here '${targetName}'), while every metadata property that names a field holds the `
+                + `BARE field name — so no reference site can ever match this key and an empty answer `
+                + `would mean "not computable", not "nothing depends on it". `
+                + `Ask the owning object instead: GET /api/v1/meta/object/${owner}/references.`,
+            );
+            (err as any).code = 'NOT_IMPLEMENTED';
+            (err as any).status = 501;
+            throw err;
+        }
+
         const sites = REFERENCE_SITES.byTarget.get(singularTarget);
         if (!sites || sites.length === 0) {
             return { references: [] };

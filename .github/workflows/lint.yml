@@ -224,6 +224,29 @@ jobs:
       - name: Part-of closing-keyword guard self-test
         run: pnpm check:partof-closing-keyword
 
+      # Single-claim path guard self-test (#9402). Same split as the step above
+      # and for the same reason: the guard is a PR-scoped blocking check in its
+      # own workflow, because its question is about OTHER open PRs and needs a
+      # pull request plus an API read that this job has neither of. What runs
+      # HERE is the half that needs no PR — the verdict layer, the exit-code
+      # contract, the short-circuit that makes the gate affordable, and the
+      # declared path list's own invariants.
+      #
+      # That last one is the reason this step is worth its second: the declared
+      # list IS the key, so the realistic way this gate turns into noise is a
+      # careless append to it. The self-test rejects an entry with no stated
+      # reason, rejects a duplicate, and pins that the three measured
+      # high-collision paths (the lock file, the root manifest, one plugin
+      # manifest — 33, 15 and 21 concurrent pairs in 300 PRs) stay OUT of it.
+      #
+      # It also pins the WIRING (the guard workflow still invokes the script,
+      # still subscribes to `synchronize` — without which a claim added in a
+      # second commit is never judged — and still passes the token), so
+      # unwiring the gate reddens here rather than going quiet.
+      # Dependency-free, reads two files; ~0.1s.
+      - name: Single-claim path guard self-test
+        run: pnpm check:single-claim-paths
+
       # PM half-state sweeper self-test (#8528). `scripts/pm/check-half-states.mjs`
       # carried a 79-case --self-test — the H1..H7 predicates, the seat-sticker
       # parser, the transport classifier and its measured container classes —
@@ -269,6 +292,37 @@ jobs:
       # the way an uninvoked self-test does (#4690).
       - name: Governed-merges audit self-test
         run: pnpm check:pm-governed-merges
+
+      # Release-rehearsal clone preflight self-test (#9555). A local
+      # `pnpm run version` rehearsal — the prescribed verification route for
+      # every release-machinery change — HANGS FOREVER in an agent container:
+      # every clone descends from a shallow checkout, so each `.changeset/*.md`
+      # resolves to the parentless shallow boundary, and @changesets/git answers
+      # a parentless add-commit by deepening and retrying in a loop with no
+      # attempt limit — against a remote that gains it nothing and exits 0 while
+      # doing so. Measured cost before diagnosis: ~2.5 h over two attempts,
+      # because full CPU with no output reads as slow progress, not as a hang.
+      # `scripts/pm/release-rehearsal-clone.mjs` is the refusal that turns that
+      # into a one-second diagnosis, plus the repair for a throwaway clone.
+      #
+      # What runs HERE is the self-test, not the live check: the live check
+      # judges whatever clone it is pointed at, and a CI checkout's depth is the
+      # workflow's business rather than a verdict this job can hold. The
+      # self-test pins BOTH directions on real git fixtures — the trapped shape
+      # refuses, while a healthy tree AND a merely-shallow one whose changesets
+      # sit after the boundary pass untouched (the predicate is the parentless
+      # add-commit, never `--is-shallow-repository` alone) — and it pins the
+      # WIRING, so unlinking the script from docs/releases-maintenance.md or
+      # from this step reddens instead of going quiet. Temp-dir fixtures, no
+      # network, ~1.7 s.
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias: that alias
+      # belongs in root package.json, which is declared territory of the
+      # @changesets/cli v3 migration lane (#9465) while it runs. Same shape as
+      # check-links.yml's ADR-link step, and dispatch-gates.mjs derives gate
+      # families from either spelling.
+      - name: Release-rehearsal clone preflight self-test
+        run: node scripts/pm/release-rehearsal-clone.mjs --self-test
 
       # Docs/skills authoring guard (#2035 / ADR-0059): TS code blocks in
       # Markdown/MDX are not type-checked or ESLinted, so skills/ and
@@ -431,6 +485,21 @@ jobs:
       # its own failure mode.
       - name: Quick-reference section counts match their tables
         run: pnpm check:quick-reference-counts
+
+      # #9604: the runtime-services chapter's pages are enumerated in three
+      # hand-written places (meta.json "pages", the chapter list in
+      # runtime-services/index.mdx, the services.* table in kernel/index.mdx) and
+      # nothing read any of them -- check:docs-audit-scope derives WHICH pages the
+      # accuracy audit covers, never whether an index enumerates them. #9604 found
+      # services.sms with a page, a meta.json entry, a registered slot and a
+      # canonical-source row, missing from BOTH index lists; #9588 was the same
+      # page drifting on a different line. The pages on disk are the source of
+      # truth and the gate holds all three enumerations (and the chapter list's
+      # order) to them. It lives in this job with the other docs guards: the edit
+      # that breaks it is a docs edit, so a packages/** paths filter would blind
+      # it to its own failure mode.
+      - name: Runtime-services indexes enumerate the chapter's real pages
+        run: pnpm check:runtime-services-index
 
       # #3723 ADR anchors: code an accepted ADR governs must keep naming it.
       # That incident reversed three accepted ADRs with a patch-level changeset,
