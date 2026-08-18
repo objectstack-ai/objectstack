@@ -1830,211 +1830,17 @@ export default class Serve extends Command {
 
       // Unknown-environment hostname guard.
       //
-      // In multi-tenant cloud deployments (e.g. *.objectos.ai), every
-      // public hostname is expected to map to a `sys_environment` row
-      // whose `hostname` column matches the request `Host`. Without this
-      // guard, an unknown subdomain like `demo-xxx.objectos.ai` happily
-      // renders the control-plane Console SPA (served statically by
-      // createConsoleStaticPlugin), making the deployment look like an
-      // empty env rather than a missing one. We respond with a clear
-      // 404 instead.
+      // Activation only: everything the guard decides, and why, lives on
+      // `createUnknownHostnameGuardPlugin()` below — exported (#9442) so the
+      // middleware, bypass matrix and refusal alike, is reachable from a test
+      // without booting a real `os serve`.
       //
-      // Activation: only when OS_ROOT_DOMAIN is set (e.g. "objectos.ai").
-      // Reserved subdomains (cloud/www/api/docs/admin/app and the apex)
-      // bypass the check so platform surfaces keep working. Non-root
-      // hostnames (custom domains, localhost, *.workers.dev) pass through
-      // unchanged. Infra paths under /_admin or /.well-known are always
-      // allowed so health checks / cert flows aren't broken.
-      //
-      // Implemented as a Plugin so the middleware is wired during init
-      // (when http.server is available) and BEFORE start() runs on the
-      // Console static plugin / route-registering plugins. Hono's
-      // `app.use('*')` is order-independent for matching, so as long as
-      // the middleware is added before kernel:listening fires, it
-      // intercepts every request regardless of which plugin registered
-      // its handler.
+      // Activated only when OS_ROOT_DOMAIN is set (e.g. "objectos.ai"); with no
+      // root domain there is no platform-host namespace to guard, so nothing is
+      // installed and every hostname passes through as before.
       const __rootDomain = (process.env.OS_ROOT_DOMAIN || '').trim().toLowerCase();
       if (__rootDomain) {
-        const RESERVED = new Set(['', 'cloud', 'www', 'api', 'docs', 'admin', 'app']);
-        const guardPlugin: any = {
-          name: 'com.objectstack.cli.unknown-hostname-guard',
-          version: '1.0.0',
-          // init() resolves the `http.server` service the hono server plugin
-          // provides — order-if-present so the middleware install is
-          // deterministic (ADR-0116, #4471). Soft: without a server plugin the
-          // guard degrades on purpose (warn + not installed).
-          optionalDependencies: ['com.objectstack.server.hono'],
-          init: async (ctx: any) => {
-            try {
-              const httpServer: any = ctx.getService?.('http.server') ?? ctx.getService?.('http-server');
-              const rawApp = httpServer?.getRawApp?.();
-              if (!rawApp || typeof rawApp.use !== 'function') {
-                ctx.logger?.warn?.('[unknown-hostname-guard] http.server unavailable; guard not installed');
-                return;
-              }
-              const getEnvRegistry = () => {
-                try {
-                  return ctx.getService?.('env-registry') ?? null;
-                } catch {
-                  return null;
-                }
-              };
-              rawApp.use('*', async (c: any, next: any) => {
-                const rawHost = c.req.header('host') || '';
-                const host = rawHost.split(':')[0].toLowerCase();
-                if (!host) return next();
-                const isPlatformHost = host === __rootDomain || host.endsWith('.' + __rootDomain);
-                if (!isPlatformHost) return next();
-                const sub = host === __rootDomain ? '' : host.slice(0, -(__rootDomain.length + 1));
-                const head = sub.split('.').pop() || '';
-                const p = c.req.path;
-                if (RESERVED.has(sub) || RESERVED.has(head)) {
-                  // A browser loading the Console on a bare/reserved platform host
-                  // (the apex or `www`/`app`/… — none bind a tenant env) gets the
-                  // Console SPA, but its `/api/v1/auth/*` calls 404 (no env → no
-                  // auth) → a dead "Auth request failed with status 404" login.
-                  // When this runtime is cloud-connected (`OS_CLOUD_URL` set), send
-                  // Console requests to the cloud control plane to pick/open an
-                  // environment instead. A self-hosted single-env runtime (no
-                  // `OS_CLOUD_URL`) keeps the prior pass-through. Non-console paths
-                  // (infra, health, /api) fall through below unchanged.
-                  const cloudUrl = (process.env.OS_CLOUD_URL || '').trim();
-                  if (cloudUrl && (p === '/_console' || p.startsWith('/_console/'))) {
-                    return c.redirect(`${cloudUrl.replace(/\/+$/, '')}/_console/`, 302);
-                  }
-                  return next();
-                }
-                if (p.startsWith('/_admin/') || p === '/_admin' || p.startsWith('/.well-known/')) {
-                  return next();
-                }
-                // Health and readiness endpoints must always answer 200
-                // regardless of whether the requested hostname maps to
-                // an env — Cloudflare's container probe (and any
-                // upstream load balancer) hits whatever Host header is
-                // currently bound to the worker. Returning 404 here on
-                // an unmapped hostname would kill the container.
-                if (p === '/api/v1/health' || p === '/api/v1/ready' || p === '/health') {
-                  return next();
-                }
-                // Resolve env-registry lazily on each request — it may
-                // not be registered yet at init() time (registered by
-                // ObjectOSEnvironmentPlugin's init which runs in plugin
-                // dependency order; we don't want to rely on ordering).
-                const registry: any = getEnvRegistry();
-                if (!registry || typeof registry.resolveByHostname !== 'function') {
-                  return next();
-                }
-                try {
-                  const hit = await registry.resolveByHostname(host);
-                  if (hit) return next();
-                } catch {
-                  return next();
-                }
-                // Content negotiation: browsers (Accept: text/html) get
-                // a clean 404 page; API clients (curl/fetch with JSON
-                // accept) get a structured error body.
-                const accept = (c.req.header('accept') || '').toLowerCase();
-                const wantsHtml = accept.includes('text/html');
-                if (wantsHtml) {
-                  const safeHost = host.replace(/[<>&"']/g, (ch: string) => ((({
-                    '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;',
-                  } as Record<string, string>)[ch]) ?? ch));
-                  const html = `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>404 — Environment not found</title>
-<style>
-  :root { color-scheme: light dark; }
-  * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; }
-  body {
-    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    background: #fafafa;
-    color: #111;
-    display: grid;
-    place-items: center;
-    padding: 24px;
-  }
-  @media (prefers-color-scheme: dark) {
-    body { background: #0b0b0c; color: #e8e8e8; }
-    .card { background: #141417; border-color: #26262b; }
-    .host { background: #1c1c20; border-color: #2d2d33; color: #d0d0d0; }
-    .muted { color: #8b8b94; }
-    a { color: #6ea8fe; }
-  }
-  .card {
-    max-width: 520px;
-    width: 100%;
-    background: #fff;
-    border: 1px solid #e6e6e6;
-    border-radius: 12px;
-    padding: 32px;
-    box-shadow: 0 1px 2px rgba(0,0,0,.04);
-    text-align: center;
-  }
-  .code { font: 600 64px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin: 0; letter-spacing: -2px; }
-  h1 { font-size: 20px; margin: 16px 0 8px; font-weight: 600; }
-  p { margin: 8px 0; }
-  .muted { color: #666; font-size: 14px; }
-  .host {
-    display: inline-block;
-    margin-top: 16px;
-    padding: 6px 12px;
-    background: #f4f4f5;
-    border: 1px solid #e4e4e7;
-    border-radius: 6px;
-    font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    color: #444;
-    word-break: break-all;
-  }
-  a { color: #2563eb; text-decoration: none; }
-  a:hover { text-decoration: underline; }
-</style>
-</head>
-<body>
-  <main class="card">
-    <p class="code">404</p>
-    <h1>Environment not found</h1>
-    <p class="muted">No ObjectStack environment is bound to this hostname.</p>
-    <div class="host">${safeHost}</div>
-    <p class="muted" style="margin-top:24px">
-      If you own this domain, bind it to an environment in the
-      <a href="https://cloud.objectos.ai/">ObjectStack Cloud console</a>.
-    </p>
-  </main>
-</body>
-</html>`;
-                  return c.html(html, 404);
-                }
-                // The declared `BaseResponseSchema` refusal envelope. This
-                // used to answer `{ error: 'environment_not_found', message,
-                // hostname }` — the pre-#3675 dialect, where `error` is a bare
-                // string so `body.error.message` reads `undefined`, with two
-                // stray top-level keys beside it. `hostname` is context and
-                // moved into `error.details`, which `ApiErrorSchema` declares
-                // for exactly that; the code is now the ADR-0112
-                // SCREAMING_SNAKE spelling of the same condition, in the
-                // semantic slot consumers branch on.
-                return c.json(
-                  {
-                    success: false,
-                    error: {
-                      code: 'ENVIRONMENT_NOT_FOUND',
-                      message: `No environment is bound to hostname '${host}'.`,
-                      details: { hostname: host },
-                    },
-                  },
-                  404,
-                );
-              });
-              ctx.logger?.info?.('[unknown-hostname-guard] installed', { rootDomain: __rootDomain });
-            } catch (err: any) {
-              ctx.logger?.warn?.('[unknown-hostname-guard] install failed', { error: err?.message ?? err });
-            }
-          },
-        };
+        const guardPlugin: any = createUnknownHostnameGuardPlugin({ rootDomain: __rootDomain });
         try {
           await kernel.use(guardPlugin);
           trackPlugin('UnknownHostnameGuard');
@@ -3540,6 +3346,289 @@ export default class Serve extends Command {
     }
   }
 
+}
+
+/**
+ * What {@link createUnknownHostnameGuardPlugin} is constructed with.
+ */
+export interface UnknownHostnameGuardOptions {
+  /**
+   * The platform apex, e.g. `objectos.ai` — `OS_ROOT_DOMAIN` in production.
+   * Normalized here (trim + lowercase) as well as at the call site, so the guard
+   * cannot be constructed with a casing the `Host` comparison would then miss.
+   */
+  rootDomain: string;
+  /**
+   * Reads the cloud control-plane URL for the `/_console` redirect branch.
+   *
+   * A FUNCTION, not a string, and called PER REQUEST — that is what production
+   * does (`process.env.OS_CLOUD_URL` was read inside the middleware, not at
+   * install time), and extracting the seam must not quietly move the read to
+   * construction time. Defaults to the same env read.
+   */
+  readCloudUrl?: () => string;
+}
+
+/** The plugin object {@link createUnknownHostnameGuardPlugin} returns. */
+export interface UnknownHostnameGuardPlugin {
+  name: string;
+  version: string;
+  optionalDependencies: string[];
+  init: (ctx: any) => Promise<void>;
+}
+
+/**
+ * Subdomains that bypass the guard, plus the apex (`''`).
+ *
+ * Exported so a test iterates the SAME list the middleware branches on. A copy
+ * in the test would go stale the day a subdomain is added here: the new one
+ * would ship uncovered while the suite stayed green.
+ */
+export const UNKNOWN_HOSTNAME_GUARD_RESERVED_SUBDOMAINS: ReadonlySet<string> = new Set([
+  '', 'cloud', 'www', 'api', 'docs', 'admin', 'app',
+]);
+
+/**
+ * Health and readiness paths that always pass through, whatever the hostname.
+ *
+ * Load-bearing, not a nicety: Cloudflare's container probe (and any upstream
+ * load balancer) hits whatever `Host` header is currently bound to the worker,
+ * so a 404 here would kill the container. Exported for the same reason as the
+ * reserved list — a probe path added here is covered the moment it is added.
+ */
+export const UNKNOWN_HOSTNAME_GUARD_HEALTH_PATHS: readonly string[] = [
+  '/api/v1/health', '/api/v1/ready', '/health',
+];
+
+/**
+ * The unknown-environment hostname guard, as a mountable plugin (#9442).
+ *
+ * In multi-tenant cloud deployments (e.g. *.objectos.ai), every public hostname
+ * is expected to map to a `sys_environment` row whose `hostname` column matches
+ * the request `Host`. Without this guard, an unknown subdomain like
+ * `demo-xxx.objectos.ai` happily renders the control-plane Console SPA (served
+ * statically by createConsoleStaticPlugin), making the deployment look like an
+ * empty env rather than a missing one. It answers a clear 404 instead.
+ *
+ * The bypass matrix, in the order the middleware applies it:
+ *
+ *   1. no `Host` header, or a host outside `rootDomain` (custom domains,
+ *      localhost, *.workers.dev) — pass through, unjudged;
+ *   2. a reserved subdomain or the apex ({@link
+ *      UNKNOWN_HOSTNAME_GUARD_RESERVED_SUBDOMAINS}) — pass through, except that
+ *      a cloud-connected runtime redirects `/_console` to the control plane so
+ *      the Console picks an environment rather than dying on a 404 login;
+ *   3. `/_admin`, `/_admin/*` and `/.well-known/*` — always through, so cert
+ *      flows are not broken;
+ *   4. {@link UNKNOWN_HOSTNAME_GUARD_HEALTH_PATHS} — always through;
+ *   5. no env-registry service, or a registry read that throws — through. Every
+ *      failure mode falls through rather than refusing;
+ *   6. registry hit — through. Registry MISS is the only refusal.
+ *
+ * Implemented as a Plugin so the middleware is wired during init (when
+ * `http.server` is available) and BEFORE start() runs on the Console static
+ * plugin / route-registering plugins. Hono's `app.use('*')` is order-independent
+ * for matching, so as long as the middleware is added before kernel:listening
+ * fires, it intercepts every request regardless of which plugin registered its
+ * handler. The env-registry is resolved lazily per request on purpose: it is
+ * registered by ObjectOSEnvironmentPlugin's init, and the guard must not depend
+ * on plugin ordering to work.
+ *
+ * ⛔ The refusal `c.json({ ... }, 404)` inside the middleware must stay an
+ * INLINE OBJECT LITERAL. `scripts/check-route-envelope.mjs` judges the object
+ * literal passed to `c.json(...)`; an identifier or a call expression reads to
+ * it as a relayed body it must not police. Hoisting that body into a helper —
+ * even into this file — leaves the file discovered (the `c.json(` call is still
+ * here) while every counter reads zero, so the `{}` entry this file carries in
+ * `PLUGIN_ROUTE_MODULES` keeps passing and stops asserting: the #9364
+ * conformance pin goes vacuous, silently, with the gate green.
+ */
+export function createUnknownHostnameGuardPlugin(
+  options: UnknownHostnameGuardOptions,
+): UnknownHostnameGuardPlugin {
+  const rootDomain = (options.rootDomain || '').trim().toLowerCase();
+  const readCloudUrl = options.readCloudUrl ?? (() => process.env.OS_CLOUD_URL || '');
+  const RESERVED = UNKNOWN_HOSTNAME_GUARD_RESERVED_SUBDOMAINS;
+  const HEALTH_PATHS = UNKNOWN_HOSTNAME_GUARD_HEALTH_PATHS;
+  return {
+    name: 'com.objectstack.cli.unknown-hostname-guard',
+    version: '1.0.0',
+    // init() resolves the `http.server` service the hono server plugin
+    // provides — order-if-present so the middleware install is
+    // deterministic (ADR-0116, #4471). Soft: without a server plugin the
+    // guard degrades on purpose (warn + not installed).
+    optionalDependencies: ['com.objectstack.server.hono'],
+    init: async (ctx: any) => {
+      try {
+        const httpServer: any = ctx.getService?.('http.server') ?? ctx.getService?.('http-server');
+        const rawApp = httpServer?.getRawApp?.();
+        if (!rawApp || typeof rawApp.use !== 'function') {
+          ctx.logger?.warn?.('[unknown-hostname-guard] http.server unavailable; guard not installed');
+          return;
+        }
+        const getEnvRegistry = () => {
+          try {
+            return ctx.getService?.('env-registry') ?? null;
+          } catch {
+            return null;
+          }
+        };
+        rawApp.use('*', async (c: any, next: any) => {
+          const rawHost = c.req.header('host') || '';
+          const host = rawHost.split(':')[0].toLowerCase();
+          if (!host) return next();
+          const isPlatformHost = host === rootDomain || host.endsWith('.' + rootDomain);
+          if (!isPlatformHost) return next();
+          const sub = host === rootDomain ? '' : host.slice(0, -(rootDomain.length + 1));
+          const head = sub.split('.').pop() || '';
+          const p = c.req.path;
+          if (RESERVED.has(sub) || RESERVED.has(head)) {
+            // A browser loading the Console on a bare/reserved platform host
+            // (the apex or `www`/`app`/… — none bind a tenant env) gets the
+            // Console SPA, but its `/api/v1/auth/*` calls 404 (no env → no
+            // auth) → a dead "Auth request failed with status 404" login.
+            // When this runtime is cloud-connected (`OS_CLOUD_URL` set), send
+            // Console requests to the cloud control plane to pick/open an
+            // environment instead. A self-hosted single-env runtime (no
+            // `OS_CLOUD_URL`) keeps the prior pass-through. Non-console paths
+            // (infra, health, /api) fall through below unchanged.
+            const cloudUrl = readCloudUrl().trim();
+            if (cloudUrl && (p === '/_console' || p.startsWith('/_console/'))) {
+              return c.redirect(`${cloudUrl.replace(/\/+$/, '')}/_console/`, 302);
+            }
+            return next();
+          }
+          if (p.startsWith('/_admin/') || p === '/_admin' || p.startsWith('/.well-known/')) {
+            return next();
+          }
+          // Health and readiness endpoints must always answer 200
+          // regardless of whether the requested hostname maps to
+          // an env — Cloudflare's container probe (and any
+          // upstream load balancer) hits whatever Host header is
+          // currently bound to the worker. Returning 404 here on
+          // an unmapped hostname would kill the container.
+          if (HEALTH_PATHS.includes(p)) {
+            return next();
+          }
+          // Resolve env-registry lazily on each request — it may
+          // not be registered yet at init() time (registered by
+          // ObjectOSEnvironmentPlugin's init which runs in plugin
+          // dependency order; we don't want to rely on ordering).
+          const registry: any = getEnvRegistry();
+          if (!registry || typeof registry.resolveByHostname !== 'function') {
+            return next();
+          }
+          try {
+            const hit = await registry.resolveByHostname(host);
+            if (hit) return next();
+          } catch {
+            return next();
+          }
+          // Content negotiation: browsers (Accept: text/html) get
+          // a clean 404 page; API clients (curl/fetch with JSON
+          // accept) get a structured error body.
+          const accept = (c.req.header('accept') || '').toLowerCase();
+          const wantsHtml = accept.includes('text/html');
+          if (wantsHtml) {
+            const safeHost = host.replace(/[<>&"']/g, (ch: string) => ((({
+              '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;',
+            } as Record<string, string>)[ch]) ?? ch));
+            const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>404 — Environment not found</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #fafafa;
+    color: #111;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #0b0b0c; color: #e8e8e8; }
+    .card { background: #141417; border-color: #26262b; }
+    .host { background: #1c1c20; border-color: #2d2d33; color: #d0d0d0; }
+    .muted { color: #8b8b94; }
+    a { color: #6ea8fe; }
+  }
+  .card {
+    max-width: 520px;
+    width: 100%;
+    background: #fff;
+    border: 1px solid #e6e6e6;
+    border-radius: 12px;
+    padding: 32px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.04);
+    text-align: center;
+  }
+  .code { font: 600 64px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin: 0; letter-spacing: -2px; }
+  h1 { font-size: 20px; margin: 16px 0 8px; font-weight: 600; }
+  p { margin: 8px 0; }
+  .muted { color: #666; font-size: 14px; }
+  .host {
+    display: inline-block;
+    margin-top: 16px;
+    padding: 6px 12px;
+    background: #f4f4f5;
+    border: 1px solid #e4e4e7;
+    border-radius: 6px;
+    font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: #444;
+    word-break: break-all;
+  }
+  a { color: #2563eb; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+  <main class="card">
+    <p class="code">404</p>
+    <h1>Environment not found</h1>
+    <p class="muted">No ObjectStack environment is bound to this hostname.</p>
+    <div class="host">${safeHost}</div>
+    <p class="muted" style="margin-top:24px">
+      If you own this domain, bind it to an environment in the
+      <a href="https://cloud.objectos.ai/">ObjectStack Cloud console</a>.
+    </p>
+  </main>
+</body>
+</html>`;
+            return c.html(html, 404);
+          }
+          // The declared `BaseResponseSchema` refusal envelope. This
+          // used to answer `{ error: 'environment_not_found', message,
+          // hostname }` — the pre-#3675 dialect, where `error` is a bare
+          // string so `body.error.message` reads `undefined`, with two
+          // stray top-level keys beside it. `hostname` is context and
+          // moved into `error.details`, which `ApiErrorSchema` declares
+          // for exactly that; the code is now the ADR-0112
+          // SCREAMING_SNAKE spelling of the same condition, in the
+          // semantic slot consumers branch on.
+          return c.json(
+            {
+              success: false,
+              error: {
+                code: 'ENVIRONMENT_NOT_FOUND',
+                message: `No environment is bound to hostname '${host}'.`,
+                details: { hostname: host },
+              },
+            },
+            404,
+          );
+        });
+        ctx.logger?.info?.('[unknown-hostname-guard] installed', { rootDomain });
+      } catch (err: any) {
+        ctx.logger?.warn?.('[unknown-hostname-guard] install failed', { error: err?.message ?? err });
+      }
+    },
+  };
 }
 
 /**
