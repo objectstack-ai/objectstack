@@ -19,6 +19,13 @@
 // object the member cannot read or write directly:
 //   • system flows succeed on the admin's note  → elevation is REAL,
 //   • user flows are RLS-denied on the same note → de-elevation is REAL.
+// The two user-mode legs are denied DIFFERENTLY, and both shapes are asserted:
+// the WRITE is refused at the record layer, so the run fails and the trigger
+// route answers 400 `FLOW_FAILED` (#9378 — it rode HTTP 200 with an inner
+// `{success:false}` until then); the READ is filtered by RLS, so the run
+// SUCCEEDS with an empty `found`. Neither is a status band: a write leg that
+// started answering 403/500, or a read leg that started failing outright, is a
+// different bug and must not pass here.
 // Before the #1888 fix the user flows wrongly succeed (CRUD nodes passed no
 // identity → security skipped) → this file is RED; after the fix → GREEN.
 
@@ -61,13 +68,68 @@ describe('objectstack verify FLOW: runAs identity enforcement (#flow-runas)', ()
     return (j.record ?? j).status;
   }
 
-  /** Trigger a flow as the restricted member; returns the inner AutomationResult. */
+  /**
+   * Trigger a flow as the restricted member and require the run to have
+   * COMPLETED; returns the inner AutomationResult.
+   *
+   * [#9378] Since the trigger route answers real HTTP status codes, this helper
+   * is also the discriminator it could not be before: a run that fails now
+   * comes back 400 and is rejected HERE. Until then a failed run rode HTTP 200
+   * with `{success:false}` inside, so the read leg below — which only checks
+   * that `found` is falsy — passed identically whether the RLS-scoped read
+   * returned EMPTY (the thing it means to prove) or the run DIED before
+   * reading anything at all.
+   */
   async function memberTrigger(flow: string, noteId: string): Promise<{ success?: boolean; output?: any }> {
     const res = await stack.apiAs(memberToken, 'POST', `/automation/${flow}/trigger`, { params: { noteId } });
     expect(res.status, `trigger ${flow} HTTP failed: ${res.status} ${await res.clone().text()}`).toBeLessThan(300);
     const body = (await res.json()) as { success?: boolean; data?: { success?: boolean; output?: any } };
     expect(body.success).toBe(true);
     return body.data ?? {};
+  }
+
+  /**
+   * Trigger a flow as the restricted member and require the run to have RUN AND
+   * FAILED on a record-access refusal — the de-elevation proof's write leg.
+   *
+   * [#9378] The transport contract this asserts, in full rather than by status
+   * band: the route answers **400** `FLOW_FAILED` (ADR-0112 envelope), the node
+   * failure is `error.message` verbatim, and the per-node accounting in
+   * `error.details.summary` names WHICH node failed. Asserting the band
+   * (`>= 400`) or the throw alone would keep passing if the refusal turned into
+   * a 403 authorization verdict or a 500 fault — both of which would mean the
+   * de-elevation broke in a different way, and both of which this file exists
+   * to catch.
+   *
+   * Before #9378 this same run answered `HTTP 200 {"success":true,"data":{
+   * "success":false,…}}`, so the ONLY visible trace of the denial was the
+   * record staying unchanged. That assertion is still below and still the
+   * primary proof; this one is the transport half that used to be invisible.
+   */
+  async function memberTriggerExpectingAccessRefusal(flow: string, noteId: string, failingNodeId: string) {
+    const res = await stack.apiAs(memberToken, 'POST', `/automation/${flow}/trigger`, { params: { noteId } });
+    const text = await res.clone().text();
+    expect(res.status, `trigger ${flow} should be 400 FLOW_FAILED: ${res.status} ${text}`).toBe(400);
+
+    const body = (await res.json()) as {
+      success?: boolean;
+      data?: unknown;
+      error?: { code?: string; message?: string; httpStatus?: number; details?: { summary?: { nodes?: any[] } } };
+    };
+    expect(body.success).toBe(false);
+    expect(body.error?.code, `expected FLOW_FAILED: ${text}`).toBe('FLOW_FAILED');
+    expect(body.error?.httpStatus).toBe(400);
+    // The double envelope is GONE, not re-labelled: nothing is left for a
+    // status-blind caller to misread as a successful run.
+    expect(body.data).toBeUndefined();
+    // The failure is the RLS refusal on the note, named node-first — not a
+    // generic "flow failed", which would pass while the run died of anything.
+    expect(body.error?.message).toContain(`Node '${failingNodeId}' failed`);
+    expect(body.error?.message).toMatch(/do not have access to this record/i);
+    // Which node failed survives the envelope change — the reason `summary`
+    // rides in `details` at all.
+    const failed = body.error?.details?.summary?.nodes?.find((n) => n?.nodeId === failingNodeId);
+    expect(failed?.status, `no failure entry for node '${failingNodeId}' in ${text}`).toBe('failure');
   }
 
   it('precondition: the automation service is wired and a flow is registered', async () => {
@@ -102,7 +164,13 @@ describe('objectstack verify FLOW: runAs identity enforcement (#flow-runas)', ()
 
   it("runAs:'user' DE-ELEVATES — member-triggered user flow is RLS-DENIED on the same record", async () => {
     const id = await adminCreateNote('user-touch');
-    await memberTrigger('runas_user_touch', id);
+    // The de-elevated run reaches the record layer as the MEMBER and the write
+    // is refused there, so the run fails on its `touch` node — surfaced since
+    // #9378 as 400 `FLOW_FAILED` instead of a 200 wrapping the inner failure.
+    // The refusal text is asserted in the helper: this leg proves the identity
+    // switch is real, so "denied because of WHO ran it" is the load-bearing
+    // part, not merely "something went wrong".
+    await memberTriggerExpectingAccessRefusal('runas_user_touch', id, 'touch');
     // The run executed as the member; the by-id write to the admin's note is
     // RLS-denied, so the record is unchanged. (Before the fix it would read
     // 'touched-user' — the privilege-boundary surprise this gate pins.)
