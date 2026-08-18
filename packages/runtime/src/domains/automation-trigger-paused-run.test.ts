@@ -98,9 +98,16 @@ describe('#9510 — a triggered run that PAUSED is answered as the third state',
 
         it(`${route.label}: a pause with no screen (approval, wait) is still the paused answer`, async () => {
             // `screen` is a screen-flow field; an `approval` or `wait` node
-            // pauses without one. The state is read off `status`, so its
-            // absence must change nothing — a door that keyed on `screen` would
-            // report every approval pause as a terminal success.
+            // pauses without one, and the body a caller resumes with must be
+            // the same either way.
+            //
+            // ⚠️ Honest about its own reach: this door answers a pause and a
+            // terminal success IDENTICALLY on the wire — deliberately, since
+            // both are `200` plus the engine result — so no route-level
+            // assertion can tell which arm produced the response. What it pins
+            // is the PAYLOAD (`status`, `runId`, no refusal envelope); that the
+            // arm reads the lifecycle verdict rather than sniffing `screen` is
+            // pinned on `isPausedRun` itself, below.
             const dispatcher = makeDispatcher({ success: true, status: 'paused', runId: 'run_b21', durationMs: 3 });
 
             const result = await dispatcher.handleAutomation(route.path('flaky_approval'), 'POST', {}, CTX);
@@ -119,14 +126,25 @@ describe('#9510 — the shared dispatch table names the non-terminal state', () 
     });
 
     it('reads the producer\'s lifecycle verdict, never the incidental fields', () => {
-        // `runId` and `screen` ride along on a pause; neither DEFINES it. A
-        // reader that sniffed them would call a resume refusal (which also
-        // carries a run id) a live pause.
+        // `runId` and `screen` ride along on a pause; neither DEFINES it.
         expect(isPausedRun(PAUSED)).toBe(true);
         expect(isPausedRun({ success: true, runId: 'run_x' })).toBe(false);
         expect(isPausedRun({ success: false, status: 'failed', error: 'boom' })).toBe(false);
         expect(isPausedRun(undefined)).toBe(false);
         expect(isPausedRun(null)).toBe(false);
+
+        // ⭐ The two cases that actually SEPARATE reading the verdict from
+        // sniffing a companion field — and the reason they are spelled out:
+        // every assertion above is satisfied by a predicate that returns
+        // `!!result.screen`, because a screen happens to accompany the paused
+        // fixture and to be absent from all the negatives. A pin that cannot
+        // fail against the tolerant-consumer shape PD #12 forbids is not
+        // pinning anything, so these two carry the sentence:
+        //
+        //  - an `approval` or `wait` pause has NO screen and is still a pause;
+        expect(isPausedRun({ success: true, status: 'paused', runId: 'run_b21' })).toBe(true);
+        //  - a screen on a result that is not parked does NOT make it one.
+        expect(isPausedRun({ success: true, status: 'completed', screen: PAUSED.screen })).toBe(false);
     });
 
     it('never promotes a paused run into the FLOW_FAILED row, even against the grain', () => {
