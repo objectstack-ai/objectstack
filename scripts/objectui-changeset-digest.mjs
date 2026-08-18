@@ -7,13 +7,21 @@
 //   node scripts/objectui-changeset-digest.mjs --from <sha> --to <sha> \
 //        [--objectui-root <path>] [--framework-root <path>] \
 //        [--out <file>] [--bump-override minor] [--max N] [--json]
+//   node scripts/objectui-changeset-digest.mjs --from <sha> --to <sha> --check-walkable
 //   node scripts/objectui-changeset-digest.mjs --self-test
 //
 // Prints the resolved bump level (`major` | `minor` | `patch`) on stdout; the
 // human-readable accounting goes to stderr. With `--out` the full changeset
 // file (frontmatter included) is written there, otherwise it goes to stdout
-// after the bump line is emitted to stderr instead. Exit code 2 means "the
-// range is not walkable in this checkout" — the caller degrades, loudly.
+// after the bump line is emitted to stderr instead.
+//
+// EXIT CODES. 2 means "the range is not walkable in this checkout" — the caller
+// degrades, loudly. That contract is unchanged and covers both of its causes.
+// `--check-walkable` derives nothing and only answers the precondition, and it
+// SPLITS the two so a caller can pick the right remedy: 2 = an endpoint is
+// missing (fetch it, or this is the initial pin), 3 = both endpoints are here
+// but the history STOPS INSIDE the range (deepen it) — see #9408 and
+// `findRangeTruncation`.
 //
 // WHY THIS EXISTS (#4731)
 // -----------------------
@@ -469,6 +477,86 @@ export function artifactDeclaresBreaking({ bump, body }) {
 }
 
 /**
+ * Does the `from..to` walk COMPLETE in this checkout, or does the history stop
+ * INSIDE the range? (#9408)
+ *
+ * `bump-objectui.sh` used to answer this with `git cat-file -e OLD_SHA` — "does
+ * the OLD endpoint exist as an object". That is a different question, and the
+ * gap between the two is measured, not theoretical: on the pin bump that landed
+ * `.changeset/console-82a94170c405.md`, `cat-file -e` PASSED, the guard reported
+ * a walkable range, and this script exited 0 having derived a complete-LOOKING
+ * release record from a history truncated at commit 110 of 191.
+ *
+ * THE MECHANISM — a truncated history does not merely stop early, it stops with
+ * a LIE. The oldest commit git can still see is presented as PARENTLESS, so git
+ * diffs it against the empty tree and reports every `.changeset/*.md` in its
+ * TREE as `A`dded by it. `collectAddedChangesets`'s `seen` dedup then hands that
+ * one commit exactly the paths no newer commit claimed, and a whole batch of
+ * upstream releases is credited to a single "sink" commit that really added one.
+ * Reproduced byte-for-byte on both containers that shipped a bad record: 36 of
+ * 119 entries credited to `183d09b78`, and 12 to `75444e38a`. Each of those
+ * adds exactly ONE changeset in a complete clone.
+ *
+ * WHY THE TEST IS "PARENTLESS INSIDE THE RANGE", NOT "IS THE CLONE SHALLOW".
+ * The sink IS the parentless commit, so this tests the HARM directly rather than
+ * one cause of it: a `--depth` clone, a hand-written `.git/shallow`, a graft, a
+ * `git replace`, and a range spanning unrelated histories all arrive here, and
+ * none of them has to be named. It is also strictly more PRECISE than asking
+ * about the clone — a shallow clone whose boundary sits AT OR BEFORE `from`
+ * walks the range completely, and refusing that would be a false positive on a
+ * checkout that can answer the question perfectly well. In an untruncated
+ * history `from..to` cannot contain a parentless commit at all: every commit in
+ * it has a parent, `from` itself at the far end. So a hit here is always real.
+ *
+ * WHY NOT THE ARITHMETIC CHECK #9408 SKETCHED — "no commit may be credited with
+ * more added changesets than `git show --name-only` attributes to it". Measured
+ * against both bad runs it fires on NEITHER (36 credited vs 72 attributed; 12 vs
+ * 47), and it cannot fire on any history: `git show --name-only` on the sink
+ * runs the very same empty-tree diff that produced the fault, and the credited
+ * set is that attributed set minus the `seen` dedup — a SUBSET, by construction.
+ * The comparison is a tautology with no false positives because it has no
+ * positives at all. Pinned as such in the self-test, so it cannot be restored as
+ * a "cheap backstop" later.
+ *
+ * @returns {{ truncated: boolean, sinks: string[], shallow: boolean }} `sinks`
+ *   are the parentless commits inside the range, newest first — the commits the
+ *   empty-tree diff would have made absorb a batch.
+ */
+export function findRangeTruncation(objectuiRoot, from, to) {
+  const sinks = git(objectuiRoot, ['rev-list', '--parents', `${from}..${to}`])
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    // "<sha> <parent> <parent>…" — exactly one field means no parent at all.
+    .filter((line) => !/\s/.test(line));
+  let shallow = false;
+  try {
+    shallow = git(objectuiRoot, ['rev-parse', '--is-shallow-repository']).trim() === 'true';
+  } catch {
+    // An old git without `--is-shallow-repository` still gets the real verdict
+    // above; this only enriches the diagnostic, so it must never be the thing
+    // that decides. Same reason the test is the parentless commit, not the flag.
+  }
+  return { truncated: sinks.length > 0, sinks, shallow };
+}
+
+/** The operator-facing account of a truncated range: what, where, and the fix. */
+export function describeTruncation({ objectuiRoot, from, to, truncation }) {
+  const { sinks, shallow } = truncation;
+  const n = sinks.length;
+  return [
+    `✗ objectui-changeset-digest: the history of ${objectuiRoot} STOPS INSIDE ` +
+      `${from.slice(0, 12)}..${to.slice(0, 12)} — the range cannot be walked completely.`,
+    `  ${n} commit${n === 1 ? '' : 's'} in this range ${n === 1 ? 'has' : 'have'} no parent ` +
+      `here${shallow ? ' (this is a shallow clone)' : ''}: ${sinks.map((s) => s.slice(0, 12)).join(', ')}`,
+    `  Deriving anyway would credit every changeset in ${n === 1 ? "that commit's" : "those commits'"} ` +
+      `TREE to ${n === 1 ? 'it' : 'them'} — git diffs a parentless commit against the empty tree — `,
+    `  and the artifact would look complete while naming the wrong commits (objectstack#9408).`,
+    `  Fix it: git -C ${objectuiRoot} fetch --unshallow`,
+  ].join('\n');
+}
+
+/**
  * Collect the `.changeset/*.md` files ADDED over `from..to`, newest first.
  *
  * Walks the log rather than diffing the two endpoints: a changeset consumed by
@@ -639,6 +727,16 @@ export function inPreMode(frameworkRoot) {
  * @returns {{ releasing: Array<object>, releaseNothingEntries: Array<object>, noChangesetCommits: Array<object>, releaseNothing: number, noChangeset: number, changesetsAdded: number, absentAtTo: number, totalCommits: number }}
  */
 export function classifyRange({ objectuiRoot, from, to }) {
+  // #9408: the precondition, asserted in the SINGLE SHARED implementation so no
+  // consumer can derive from a truncated walk. `objectui-range.mjs` catches this
+  // and dies with its own message; the digest CLI checks first and returns 2.
+  // Placing it here is what makes "never fabricate" structural rather than a
+  // habit each caller has to remember — the same argument that put the releasing
+  // criterion itself in this function.
+  const truncation = findRangeTruncation(objectuiRoot, from, to);
+  if (truncation.truncated) {
+    throw new Error(describeTruncation({ objectuiRoot, from, to, truncation }));
+  }
   const { entries, commits, totalCommits, commitsWithChangesetShas } = collectAddedChangesets(
     objectuiRoot,
     from,
@@ -936,6 +1034,26 @@ function main(argv) {
       `✗ objectui-changeset-digest: cannot walk ${from.slice(0, 12)}..${to.slice(0, 12)} in ${objectuiRoot}`,
     );
     return 2;
+  }
+
+  // #9408: the endpoints resolve — but does the WALK BETWEEN THEM? A truncated
+  // history answers `cat-file -e` perfectly and still yields a complete-looking
+  // record from a walk that stopped early. Asked HERE, before anything is
+  // derived, so the caller degrades instead of publishing a wrong attribution.
+  const truncation = findRangeTruncation(objectuiRoot, from, to);
+  if (truncation.truncated) {
+    console.error(describeTruncation({ objectuiRoot, from, to, truncation }));
+    // Under `--check-walkable` the caller wants to know WHICH failure it is, so
+    // it can deepen rather than degrade; on the deriving path the documented
+    // "not walkable" contract (2) is what every existing caller reads.
+    return has('--check-walkable') ? 3 : 2;
+  }
+  if (has('--check-walkable')) {
+    console.error(
+      `✓ objectui-changeset-digest: ${from.slice(0, 12)}..${to.slice(0, 12)} walks completely ` +
+        `in ${objectuiRoot}.`,
+    );
+    return 0;
   }
 
   const digest = buildDigest({ objectuiRoot, frameworkRoot, from, to, max, bumpOverride });
@@ -2059,6 +2177,296 @@ function selfTest() {
       parsedPkgs('\n"@object-ui/layout": major\n') === '{}' && parseChangeset('\n"@object-ui/layout": major\n').body === '"@object-ui/layout": major',
       `${parsedPkgs('\n"@object-ui/layout": major\n')} / ${JSON.stringify(parseChangeset('\n"@object-ui/layout": major\n').body)}`,
     );
+    // ---- #9408: WALK COMPLETENESS, not object presence ---------------------
+    //
+    // The guard this group pins used to ask `git cat-file -e OLD_SHA` — "is the
+    // OLD endpoint present as an object". A truncated history answers that
+    // perfectly and then LIES about everything else: git shows its oldest
+    // visible commit as parentless, diffs it against the empty tree, and reports
+    // every `.changeset/*.md` in that commit's TREE as added by it. The dedup in
+    // `collectAddedChangesets` hands it whatever no newer commit claimed, so one
+    // commit absorbs a batch and the artifact looks complete.
+    //
+    // ONE REPO, TWO WORLDS. The truncation is synthesized by writing `.git/
+    // shallow` (the reproduction #9408 used, and the shape the live containers
+    // were in), so the complete and truncated fixtures are the SAME commits and
+    // differ in exactly one file. That is what makes each assertion below a
+    // statement about the graft rather than about two repos that differ somehow.
+    //
+    // BOTH DIRECTIONS ARE PINNED, deliberately: a guard that refuses everything
+    // passes any refusal test. So the complete tree must still produce the full
+    // walk (C1), and — the sharper control — a tree that IS shallow with its
+    // boundary AT `from`, hence outside the range, must also walk completely
+    // (C7). C7 is the false positive that `--is-shallow-repository` alone would
+    // produce, and the reason the invariant is positional rather than a flag.
+    const ui6 = join(tmp, 'objectui-truncated');
+    mkdirSync(join(ui6, '.changeset'), { recursive: true });
+    const g6 = (...args) => git(ui6, args);
+    g6('init', '-q', '-b', 'main');
+    g6('config', 'user.email', 'selftest@objectstack.ai');
+    g6('config', 'user.name', 'self test');
+    g6('config', 'commit.gpgsign', 'false');
+    const commit6 = (subject, files) => {
+      for (const [path, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(ui6, path)), { recursive: true });
+        writeFileSync(join(ui6, path), content);
+      }
+      g6('add', '-A');
+      g6('commit', '-q', '-m', subject);
+      return g6('rev-parse', 'HEAD').trim();
+    };
+    const cs6 = (n) => ({
+      [`.changeset/entry-${n}.md`]:
+        `---\n"@object-ui/core": patch\n---\n\nUpstream change number ${n}.\n`,
+      [`src/f${n}.ts`]: `${n}\n`,
+    });
+    commit6('chore: root', { 'README.md': 'root\n' });
+    // `from` is deliberately NOT the root commit: grafting AT it (C7 below) has
+    // to be a real truncation of real history, or that control proves nothing.
+    const c6from = commit6('feat(core): the pinned starting point (#4001)', cs6(1));
+    const c6two = commit6('feat(core): second (#4002)', cs6(2));
+    const c6sink = commit6('feat(core): third — the future sink (#4003)', cs6(3));
+    const c6four = commit6('feat(core): fourth (#4004)', cs6(4));
+    const c6to = commit6('feat(core): fifth (#4005)', cs6(5));
+    const shallowFile = join(ui6, '.git', 'shallow');
+
+    const whole = buildDigest({
+      objectuiRoot: ui6,
+      frameworkRoot: fwPlain,
+      from: c6from,
+      to: c6to,
+    });
+    check(
+      '#9408 C1 a COMPLETE history walks the WHOLE range (the control a refuse-everything guard fails)',
+      whole.totalCommits === 4 && whole.changesetsAdded === 4 && whole.releasing.length === 4,
+      `commits=${whole.totalCommits} added=${whole.changesetsAdded} releasing=${whole.releasing.length}`,
+    );
+    const creditedTo = (digestLike, sha) =>
+      digestLike.releasing.filter((r) => r.sha === sha).length;
+    check(
+      '#9408 C2 every entry is credited to the commit that really added it — no sink',
+      [c6from, c6two, c6sink, c6four, c6to].every((sha) => creditedTo(whole, sha) <= 1) &&
+        creditedTo(whole, c6sink) === 1,
+      whole.releasing.map((r) => `${r.path}@${r.sha.slice(0, 7)}`).join(' '),
+    );
+
+    // Synthesize the boundary INSIDE the range — #9408's own reproduction.
+    writeFileSync(shallowFile, `${c6sink}\n`);
+
+    check(
+      '#9408 C3 the OLD guard is blind: `cat-file -e OLD_SHA` still PASSES on the truncated tree',
+      // The whole defect in one line. This is why the test had to change at all:
+      // object presence is answerable from a history that cannot be walked.
+      (() => {
+        try {
+          git(ui6, ['cat-file', '-e', `${c6from}^{commit}`]);
+          return true;
+        } catch {
+          return false;
+        }
+      })() && git(ui6, ['rev-parse', '--is-shallow-repository']).trim() === 'true',
+    );
+    const truncatedRaw = collectAddedChangesets(ui6, c6from, c6to);
+    const sinkCredited = truncatedRaw.entries.filter((e) => e.sha === c6sink).length;
+    check(
+      '#9408 C4 the HARM is real and measured here, not asserted: the boundary commit absorbs a batch',
+      // In the complete world this commit adds exactly one changeset (C2). Here
+      // it is handed three — itself plus the two the truncated tail would have
+      // claimed. The same shape as the 36-of-119 and 12-of-121 live records.
+      sinkCredited === 3 && truncatedRaw.totalCommits === 3,
+      `sinkCredited=${sinkCredited} totalCommits=${truncatedRaw.totalCommits}`,
+    );
+    check(
+      '#9408 C5 the count silently SHRINKS — a truncated walk and a complete one report alike',
+      whole.totalCommits === 4 && truncatedRaw.totalCommits === 3,
+    );
+    const trunc = findRangeTruncation(ui6, c6from, c6to);
+    check(
+      '#9408 C6 findRangeTruncation NAMES the sink, and knows the clone is shallow',
+      trunc.truncated === true &&
+        trunc.sinks.length === 1 &&
+        trunc.sinks[0] === c6sink &&
+        trunc.shallow === true,
+      JSON.stringify(trunc),
+    );
+
+    // THE FALSE-POSITIVE CONTROL. Same repo, still shallow, boundary moved to
+    // `from` — which is EXCLUDED from `from..to`, so the walk over the range is
+    // complete and refusing it would be wrong. A guard keyed on
+    // `--is-shallow-repository` fires here; the positional invariant does not.
+    writeFileSync(shallowFile, `${c6from}\n`);
+    const boundaryAtFrom = findRangeTruncation(ui6, c6from, c6to);
+    const stillWhole = buildDigest({
+      objectuiRoot: ui6,
+      frameworkRoot: fwPlain,
+      from: c6from,
+      to: c6to,
+    });
+    check(
+      '#9408 C7 a SHALLOW clone whose boundary is outside the range is NOT refused, and derives identically',
+      boundaryAtFrom.truncated === false &&
+        boundaryAtFrom.shallow === true &&
+        stillWhole.body === whole.body &&
+        stillWhole.totalCommits === 4,
+      `truncated=${boundaryAtFrom.truncated} shallow=${boundaryAtFrom.shallow} commits=${stillWhole.totalCommits}`,
+    );
+
+    // Back to the harmful boundary for the refusal assertions.
+    writeFileSync(shallowFile, `${c6sink}\n`);
+    let classifyThrew = '';
+    try {
+      classifyRange({ objectuiRoot: ui6, from: c6from, to: c6to });
+    } catch (err) {
+      classifyThrew = String(err?.message ?? err);
+    }
+    check(
+      '#9408 C8 the SHARED implementation refuses — so objectui-range.mjs cannot derive from it either',
+      classifyThrew.includes('STOPS INSIDE') && classifyThrew.includes(c6sink.slice(0, 12)),
+      classifyThrew,
+    );
+
+    const walkProbe = (extraArgs) =>
+      spawnSync(
+        process.execPath,
+        [selfPath, '--objectui-root', ui6, '--framework-root', fwPlain, '--from', c6from, '--to', c6to, ...extraArgs],
+        { encoding: 'utf8' },
+      );
+    const checkWalkable = walkProbe(['--check-walkable']);
+    check(
+      '#9408 C9 --check-walkable exits 3 (truncated) and names the remedy, deriving nothing',
+      checkWalkable.status === 3 &&
+        checkWalkable.stderr.includes('fetch --unshallow') &&
+        checkWalkable.stdout === '',
+      `status=${checkWalkable.status} stdout=${JSON.stringify(checkWalkable.stdout)}\n${checkWalkable.stderr}`,
+    );
+    const truncOut = join(tmp, 'cli-truncated.md');
+    const derivingRefused = walkProbe(['--out', truncOut]);
+    check(
+      '#9408 C10 the DERIVING path refuses with the documented 2 and writes NO artifact at all',
+      // Writing a wrong artifact is the failure; exiting non-zero without one is
+      // the fix. The file's absence is the load-bearing half.
+      derivingRefused.status === 2 && !existsSync(truncOut),
+      `status=${derivingRefused.status} wrote=${existsSync(truncOut)}`,
+    );
+    const walkableProbe = spawnSync(
+      process.execPath,
+      [selfPath, '--objectui-root', ui, '--framework-root', fwPlain, '--from', base, '--to', head, '--check-walkable'],
+      { encoding: 'utf8' },
+    );
+    check(
+      '#9408 C11 --check-walkable exits 0 on a complete tree — it is a test, not a refusal',
+      walkableProbe.status === 0 && walkableProbe.stderr.includes('walks completely'),
+      `status=${walkableProbe.status}\n${walkableProbe.stderr}`,
+    );
+
+    // THE REJECTED ALTERNATIVE, pinned so it cannot be reintroduced as a "cheap
+    // backstop". #9408 proposed asserting that no commit is credited with more
+    // added changesets than `git show --name-only` attributes to it. It cannot
+    // fire: `git show` on the sink runs the SAME empty-tree diff, so the
+    // credited set is that attributed set minus the dedup — a subset, always.
+    // Measured on the two live bad runs it caught neither (36 credited vs 72
+    // attributed; 12 vs 47), and it catches nothing here either.
+    const attributedToSink = git(ui6, [
+      'show', '--name-only', '--format=', '--diff-filter=A', c6sink, '--', '.changeset/',
+    ])
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.endsWith('.md')).length;
+    check(
+      '#9408 C12 the arithmetic check #9408 sketched is a TAUTOLOGY — it does not fire on this very fault',
+      sinkCredited === 3 && attributedToSink === 3 && !(sinkCredited > attributedToSink),
+      `credited=${sinkCredited} attributed=${attributedToSink}`,
+    );
+
+    // ---- #9408 through the shell driver: degrade, and say WHICH failure -----
+    const fwTrunc = join(tmp, 'fw-truncated');
+    mkdirSync(join(fwTrunc, 'scripts'), { recursive: true });
+    mkdirSync(join(fwTrunc, '.changeset'), { recursive: true });
+    writeFileSync(join(fwTrunc, '.objectui-sha'), `${c6from}\n`);
+    for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs']) {
+      writeFileSync(join(fwTrunc, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
+    }
+    // OBJECTUI_NO_DEEPEN=1 on purpose: a self-test must never reach the network,
+    // and this run is also the opt-out's only coverage.
+    const truncBump = spawnSync('bash', [join(fwTrunc, 'scripts', 'bump-objectui.sh'), '--no-commit', c6to], {
+      encoding: 'utf8',
+      env: { ...process.env, OBJECTUI_ROOT: ui6, OBJECTUI_NO_DEEPEN: '1' },
+    });
+    const truncCs = readFileSync(join(fwTrunc, '.changeset', `console-${c6to.slice(0, 12)}.md`), 'utf8');
+    check(
+      '#9408 C13 a truncated range takes the DEGRADED path instead of shipping a complete-looking record',
+      truncBump.status === 0 &&
+        truncCs.includes('**Degraded list**') &&
+        truncCs.includes('NOT a\ncomplete account'),
+      `status=${truncBump.status}\n${truncCs}`,
+    );
+    check(
+      '#9408 C14 the degraded artifact says WHICH failure it was, and names the fix',
+      // #4731 requires a degraded list to be distinguishable from a complete
+      // one. A truncated range must further be distinguishable from an absent
+      // endpoint: the remedies differ, and only one of them is a fetch away.
+      truncCs.includes('STOPS INSIDE') &&
+        truncCs.includes('fetch') &&
+        truncCs.includes('objectstack#9408') &&
+        !truncCs.includes('this is the initial pin'),
+      truncCs,
+    );
+    check(
+      '#9408 C15 the degraded artifact carries ONLY the tip subject — it never lists the truncated walk',
+      truncCs.includes('feat(core): fifth (#4005)') &&
+        !truncCs.includes('Upstream change number 3') &&
+        !truncCs.includes('Upstream change number 5'),
+      truncCs,
+    );
+    check(
+      '#9408 C16 the OPT-OUT is reported, not silent',
+      truncBump.stderr.includes('OBJECTUI_NO_DEEPEN=1'),
+      truncBump.stderr,
+    );
+
+    // A deepen that does not actually REPAIR the range must still degrade. The
+    // re-check is what decides, never the fetch's exit code — and that is not a
+    // hypothetical distinction: measured here, `git fetch --unshallow` in a
+    // repository with NO remote configured exits **0** and changes nothing at
+    // all. Trusting the remedy's status would have handed a truncated walk to
+    // the digest with RANGE_OK=1, which is this whole card's failure shape
+    // arriving one layer further in. Offline by construction, so the self-test
+    // never reaches the network.
+    const fwTrunc2 = join(tmp, 'fw-truncated-deepen-noop');
+    mkdirSync(join(fwTrunc2, 'scripts'), { recursive: true });
+    mkdirSync(join(fwTrunc2, '.changeset'), { recursive: true });
+    writeFileSync(join(fwTrunc2, '.objectui-sha'), `${c6from}\n`);
+    for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs']) {
+      writeFileSync(join(fwTrunc2, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
+    }
+    const noopDeepen = spawnSync('bash', [join(fwTrunc2, 'scripts', 'bump-objectui.sh'), '--no-commit', c6to], {
+      encoding: 'utf8',
+      env: { ...process.env, OBJECTUI_ROOT: ui6, GIT_TERMINAL_PROMPT: '0' },
+    });
+    const noopDeepenCs = readFileSync(
+      join(fwTrunc2, '.changeset', `console-${c6to.slice(0, 12)}.md`),
+      'utf8',
+    );
+    check(
+      '#9408 C17 a deepen that exits 0 WITHOUT repairing the range still degrades — the re-check decides, not the fetch status',
+      noopDeepen.status === 0 &&
+        noopDeepen.stdout.includes('deepening') &&
+        !noopDeepen.stdout.includes('the range walks completely now') &&
+        noopDeepenCs.includes('**Degraded list**') &&
+        noopDeepenCs.includes('STOPS INSIDE'),
+      `status=${noopDeepen.status}\nSTDOUT:${noopDeepen.stdout}\nSTDERR:${noopDeepen.stderr}\n${noopDeepenCs}`,
+    );
+    check(
+      '#9408 C18 the truncated tree is STILL truncated afterwards — the no-op fetch is pinned as a no-op',
+      // The positive guard on C17: without it, C17 would also pass if the fetch
+      // had silently repaired the repo and the degradation came from elsewhere.
+      findRangeTruncation(ui6, c6from, c6to).truncated === true,
+    );
+
+    // Leave the fixture complete, so nothing added after this group inherits a
+    // truncated tree by accident.
+    rmSync(shallowFile, { force: true });
+
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
