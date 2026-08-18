@@ -51,7 +51,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ErrorCode, standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
-import { mapDataError, sendThrownError, sendDeclaredFault } from './error-response';
+// `.js` extension deliberately: this package resolves `nodenext`, so an
+// extensionless relative import is a `tsc` error (TS2835). The neighbouring
+// suites omit it and are part of this package's frozen TEST_DEBT — a new file
+// must not add to a shrink-only ratchet.
+import { mapDataError, sendThrownError, sendDeclaredFault } from './error-response.js';
 
 // ---------------------------------------------------------------------------
 // Vehicles
