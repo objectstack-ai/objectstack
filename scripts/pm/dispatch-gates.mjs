@@ -9,7 +9,24 @@
  *   node scripts/pm/dispatch-gates.mjs <path> [<path> ...]   # e.g. packages/spec/src/data/filter.zod.ts
  *   node scripts/pm/dispatch-gates.mjs --residue <path> ...  # + name every family the derivation did not place
  *   node scripts/pm/dispatch-gates.mjs --tier <path> ...     # the tier verdict alone, for the claim comment
+ *   node scripts/pm/dispatch-gates.mjs                       # NO paths: derive them from git, off the merge base
+ *   node scripts/pm/dispatch-gates.mjs --changed             # the same, said out loud
  *   node scripts/pm/dispatch-gates.mjs --self-test
+ *
+ * ## Two input modes, because there are two questions (#9320)
+ *
+ * PATHS PASSED — the PM's form, at dispatch time. The card's file surface is a
+ * hypothesis about files that may not exist yet, so no git range can answer it
+ * and the caller's list is the only possible input. Unchanged, including
+ * `--tier <paths>`.
+ *
+ * NO PATHS — the dev's form, mid-branch: "which gates does the diff I actually
+ * wrote implicate?" That list used to be the caller's job too, and the obvious
+ * spelling of it (`<base>..HEAD`, two-dot) is wrong on any branch that outlived
+ * a sibling merge. It is computed here now, from the merge base, and the
+ * provenance goes to STDERR so `--tier` output stays paste-clean. See
+ * `changedPathsFromGit` for the measurement and for why a shallow checkout
+ * makes it refuse rather than fall back.
  *
  * The tier half is a FLOOR from paths only, and it says so on every run: see
  * MANDATORY_TIER_GLOBS for what it encodes (clause ①, a file-surface
@@ -96,11 +113,15 @@
  *
  * The output is print-only and exits 0 on a completed derivation; a run that
  * cannot read the workflows or package.json exits non-zero (#4690: unreadable
- * input must never look like an empty answer).
+ * input must never look like an empty answer). The no-path mode inherits that
+ * rule for its own input: a change set it cannot compute, and a change set that
+ * comes back empty, both exit non-zero rather than derive over nothing.
  */
 
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { readFileSync, readdirSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, dirname } from 'node:path';
 import process from 'node:process';
 import {
   anyConfigExtractsMetadataForms,
@@ -1775,6 +1796,135 @@ function derive(paths, { showResidue = false } = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// The change set, derived HERE rather than by the caller (#9320)
+// ---------------------------------------------------------------------------
+
+/**
+ * The base ref the change set is measured against, assembled from two
+ * UNSLASHED halves on purpose.
+ *
+ * `extractWatchHints` reads any quoted span that looks pathy, and "looks pathy"
+ * is "contains a slash". A module-body constant spelling the ref whole would
+ * therefore enter this file's own hint set as a path — a hint no repo path can
+ * ever reach, but a fabricated entry in the column reserved for real reads, in
+ * the one file whose header argues against exactly that. Neither half below
+ * carries a slash, so the joined value exists only at runtime. Same reasoning
+ * as the unquoting convention in the gate file next door; see its header.
+ */
+const DEFAULT_BASE_REMOTE = 'origin';
+const DEFAULT_BASE_BRANCH = 'main';
+const DEFAULT_BASE_REF = `${DEFAULT_BASE_REMOTE}/${DEFAULT_BASE_BRANCH}`;
+
+function runGit(args, cwd) {
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  if (r.error) throw new Error(`could not run git — ${r.error.message}`);
+  return { status: r.status ?? 1, stdout: r.stdout ?? '', stderr: (r.stderr ?? '').trim() };
+}
+
+function gitLines(args, cwd) {
+  const r = runGit(args, cwd);
+  if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed — ${r.stderr || `exit ${r.status}`}`);
+  return r.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * The paths this branch actually changes, from the MERGE BASE (#9320).
+ *
+ * ## Why the caller no longer supplies this list
+ *
+ * Every dispatch brief tells a dev to re-derive the gate union from the paths
+ * it really changed, and the obvious way to produce that list is the two-dot
+ * range `<base>..HEAD`. Two-dot means "reachable from HEAD but not from the
+ * base AS IT IS NOW", so on a branch cut an hour ago every sibling PR that
+ * landed on the base since the cut is attributed to your diff. Measured on
+ * PR #9312: three sibling PRs' files, on a branch hours old, in a repo that
+ * merges ~18 times a working day.
+ *
+ * The failure is silent and it fails toward looking diligent — over-derivation
+ * runs MORE gates than the change needs, so it stays green and nothing
+ * complains. What it corrupts is the record: this repo's review posture is
+ * "the dev states which gates it ran, and the PM reads that list", and a list
+ * inflated by other people's files makes that statement untrue in a direction
+ * nobody checks.
+ *
+ * A warning in the docs cannot close that, because the wrong list is produced
+ * OUTSIDE this tool by whoever typed the range. So the tool computes it, and
+ * the range it uses is not a caller's to get wrong. The explicit-path form is
+ * untouched and is still the PM's form: at dispatch time the card's file
+ * surface is a HYPOTHESIS about files that do not exist yet, and no git range
+ * can answer that. Derivation is what the no-path invocation means, never an
+ * override of paths that were passed.
+ *
+ * ## Why it refuses instead of falling back (the shallow boundary)
+ *
+ * Measured on a shallow checkout whose true base sits below the graft point:
+ * `git merge-base` exits 1 with EMPTY output and the three-dot diff exits 128
+ * (`no merge base`) — it fails loudly, it does not return a wrong base. The
+ * two-dot form in the same checkout exits 0 and prints the inflated list. So
+ * the honest reading of the shallow hazard is the reverse of the intuitive
+ * one: the merge-base form cannot lie here, only refuse, and the fallback a
+ * refusal tempts you into is the exact defect this function exists to remove.
+ * Hence no fallback, and an error that names the deepen remedy instead.
+ *
+ * Uncommitted and untracked files are included: a dev who re-derives before
+ * committing would otherwise get a SHORT list, and under-derivation is the one
+ * failure direction the original defect did not have.
+ */
+export function changedPathsFromGit({ cwd = ROOT, base = DEFAULT_BASE_REF } = {}) {
+  const inside = runGit(['rev-parse', '--is-inside-work-tree'], cwd);
+  if (inside.status !== 0 || inside.stdout.trim() !== 'true') {
+    throw new Error(`not inside a git work tree (${cwd}) — pass explicit paths instead`);
+  }
+
+  const baseSha = runGit(['rev-parse', '--verify', '--quiet', `${base}^{commit}`], cwd).stdout.trim();
+  if (!baseSha) {
+    throw new Error(
+      `base ref '${base}' does not resolve in this checkout — fetch it first ` +
+        `(git fetch ${DEFAULT_BASE_REMOTE} ${DEFAULT_BASE_BRANCH}), or pass explicit paths.`,
+    );
+  }
+
+  const mb = runGit(['merge-base', base, 'HEAD'], cwd);
+  const mergeBase = mb.stdout.trim();
+  if (mb.status !== 0 || !mergeBase) {
+    const shallow = runGit(['rev-parse', '--is-shallow-repository'], cwd).stdout.trim() === 'true';
+    throw new Error(
+      `no merge base between '${base}' and HEAD${shallow ? ' — this checkout is SHALLOW, so the branch point is very likely below the graft' : ''}. ` +
+        (shallow
+          ? `Deepen it (git fetch --unshallow ${DEFAULT_BASE_REMOTE}, or git fetch --deepen=200 ${DEFAULT_BASE_REMOTE} ${DEFAULT_BASE_BRANCH}) and re-run. `
+          : '') +
+        `Refusing to fall back to the two-dot range: it exits 0 here and would attribute other PRs' landed files to this branch (#9320).`,
+    );
+  }
+
+  // --no-renames so a moved file contributes BOTH names. Rename detection
+  // prints only the new one, and a gate watching the old directory is exactly
+  // as implicated by the move as one watching the new.
+  const committed = gitLines(['diff', '--name-only', '--no-renames', mergeBase, 'HEAD'], cwd);
+  const worktree = gitLines(['diff', '--name-only', '--no-renames', 'HEAD'], cwd);
+  const untracked = gitLines(['ls-files', '--others', '--exclude-standard'], cwd);
+
+  const paths = [...new Set([...committed, ...worktree, ...untracked])].sort();
+  return { paths, base, baseSha, mergeBase, counts: { committed: committed.length, worktree: worktree.length, untracked: untracked.length } };
+}
+
+/**
+ * Provenance for a derived run, on STDERR.
+ *
+ * `--tier` output is pasted verbatim into a claim comment, so stdout has to
+ * stay the answer and nothing else. The reader still needs to know which range
+ * produced the list — a derived run that looked identical to an explicit-path
+ * run would just move the unverifiable claim one level up.
+ */
+function derivationProvenance({ paths, base, mergeBase, counts }) {
+  return [
+    `dispatch-gates: change set derived from git — ${paths.length} path(s) vs merge base ${mergeBase.slice(0, 9)} of '${base}' and HEAD`,
+    `  (committed ${counts.committed}, working tree ${counts.worktree}, untracked ${counts.untracked}; three-dot semantics, never '${base}..HEAD')`,
+    ...paths.map((p) => `  · ${p}`),
+  ];
+}
+
+// ---------------------------------------------------------------------------
 // Self-test — extraction + matching over fixtures.
 //
 // The extraction and hint cases run over inline fixtures and touch no
@@ -2785,6 +2935,128 @@ function selfTest() {
   t('the suspect table is not empty and every entry carries its reason', SUSPECT_TIER_GLOBS.length > 0 && SUSPECT_TIER_GLOBS.every((g) => g.glob && g.why));
   t('the contract-review tier constant is a non-empty model id — the single source the PM skill points at', typeof CONTRACT_REVIEW_TIER === 'string' && CONTRACT_REVIEW_TIER.length > 0);
 
+  // ── The change set derived from git (#9320) ───────────────────────────────
+  //
+  // These build a real repository and run the real derivation over it. A
+  // fixture cannot stand in: the whole claim is about what a git RANGE means
+  // when history moved underneath a branch, and that is a property of git, not
+  // of a string this file could parse. Each scenario is built once and the
+  // cases read from it, so the git cost is three small repos, not one per case.
+  //
+  // The control case is the load-bearing one. Asserting only that the sibling's
+  // file is absent from the derived set would pass just as happily against a
+  // fixture that never reproduced the incident — so the same tree is diffed the
+  // WRONG way in the same breath, and the sibling has to show up there.
+  const gitTmp = mkdtempSync(join(tmpdir(), 'dispatch-gates-git-'));
+  try {
+    const g = (args, cwd) => {
+      const r = spawnSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args], {
+        cwd,
+        encoding: 'utf8',
+      });
+      if (r.status !== 0) throw new Error(`fixture git ${args.join(' ')} failed: ${r.stderr}`);
+      return (r.stdout ?? '').trim();
+    };
+    const write = (repo, rel, text) => {
+      mkdirSync(dirname(join(repo, rel)), { recursive: true });
+      writeFileSync(join(repo, rel), text);
+    };
+    const commit = (repo, rel, msg) => {
+      write(repo, rel, `${msg}\n`);
+      g(['add', '-A'], repo);
+      g(['commit', '-m', msg], repo);
+    };
+
+    // Scenario: branch cut, THEN a sibling PR lands on the base branch.
+    const up = join(gitTmp, 'up');
+    mkdirSync(up, { recursive: true });
+    g(['init', '--initial-branch=main', '.'], up);
+    commit(up, 'packages/spec/base.ts', 'root');
+    commit(up, 'packages/spec/branch-point.ts', 'branch point');
+    g(['checkout', '-b', 'feature'], up);
+    commit(up, 'packages/objectql/mine.ts', 'my own work');
+    g(['checkout', 'main'], up);
+    commit(up, 'packages/runtime/sibling-landed.ts', 'a sibling PR lands after the cut');
+    const mainSha = g(['rev-parse', 'main'], up);
+    g(['checkout', 'feature'], up);
+    // A local ref named like the remote-tracking one, so the derivation runs
+    // against the exact ref name it uses in anger without needing a network.
+    g(['update-ref', 'refs/remotes/origin/main', mainSha], up);
+
+    const derived = changedPathsFromGit({ cwd: up });
+    const twoDot = g(['diff', '--name-only', 'origin/main..HEAD'], up).split('\n').filter(Boolean);
+
+    t(
+      'the CONTROL reproduces the incident: the two-dot range really does claim the sibling PR file',
+      twoDot.includes('packages/runtime/sibling-landed.ts'),
+    );
+    t(
+      'the derived change set names this branch own commit',
+      derived.paths.includes('packages/objectql/mine.ts'),
+    );
+    t(
+      'the derived change set drops the sibling file the two-dot range attributed to us',
+      !derived.paths.includes('packages/runtime/sibling-landed.ts'),
+    );
+    t('the derived set reports the merge base it measured from', /^[0-9a-f]{40}$/.test(derived.mergeBase));
+
+    // Uncommitted and untracked work counts: a dev re-deriving before the
+    // commit must not be handed a SHORT list.
+    write(up, 'packages/spec/base.ts', 'edited, not committed\n');
+    write(up, 'packages/ddd/brand-new.ts', 'never added\n');
+    const withDirty = changedPathsFromGit({ cwd: up });
+    t('an uncommitted edit to a tracked file joins the change set', withDirty.paths.includes('packages/spec/base.ts'));
+    t('an untracked new file joins the change set', withDirty.paths.includes('packages/ddd/brand-new.ts'));
+    t('the sibling file stays out once the tree is dirty too', !withDirty.paths.includes('packages/runtime/sibling-landed.ts'));
+
+    // A branch that changes nothing derives an EMPTY set rather than the
+    // base branch history — the CLI turns that into a refusal, not "no gates".
+    const onBase = join(gitTmp, 'on-base');
+    mkdirSync(onBase, { recursive: true });
+    g(['init', '--initial-branch=main', '.'], onBase);
+    commit(onBase, 'packages/spec/only.ts', 'root');
+    g(['update-ref', 'refs/remotes/origin/main', g(['rev-parse', 'main'], onBase)], onBase);
+    t('a branch level with its base derives nothing at all', changedPathsFromGit({ cwd: onBase }).paths.length === 0);
+
+    // The shallow boundary. Measured, not assumed: with the true base below the
+    // graft, merge-base exits 1 EMPTY and the three-dot diff exits 128, while
+    // the two-dot form exits 0 with the inflated list. So the derivation must
+    // refuse — and must not quietly become the two-dot form it replaced.
+    const shallow = join(gitTmp, 'shallow');
+    spawnSync('git', ['clone', '--quiet', '--no-single-branch', '--depth', '1', `file://${up}`, shallow], { encoding: 'utf8' });
+    let shallowErr = null;
+    if (existsSync(join(shallow, '.git'))) {
+      g(['checkout', '-B', 'feature', 'origin/feature'], shallow);
+      t('the shallow fixture really is a shallow checkout', g(['rev-parse', '--is-shallow-repository'], shallow) === 'true');
+      try {
+        changedPathsFromGit({ cwd: shallow });
+      } catch (err) {
+        shallowErr = err;
+      }
+      t('a shallow checkout with no reachable merge base REFUSES instead of answering', shallowErr !== null);
+      t(
+        'and the refusal names the shallow cause and the deepen remedy',
+        !!shallowErr && /SHALLOW/.test(shallowErr.message) && /unshallow|deepen/.test(shallowErr.message),
+      );
+      t(
+        'and it says why it will not fall back to the two-dot range',
+        !!shallowErr && /two-dot/.test(shallowErr.message),
+      );
+    }
+
+    // An unresolvable base ref is the other input failure, and it must be told
+    // apart from "no merge base" — the remedies are different commands.
+    let missingBaseErr = null;
+    try {
+      changedPathsFromGit({ cwd: up, base: 'refs/remotes/origin/no-such-branch' });
+    } catch (err) {
+      missingBaseErr = err;
+    }
+    t('an unresolvable base ref is refused on its own terms', !!missingBaseErr && /does not resolve/.test(missingBaseErr.message));
+  } finally {
+    rmSync(gitTmp, { recursive: true, force: true });
+  }
+
   let failed = 0;
   for (const [name, cond] of cases) {
     if (!cond) failed++;
@@ -2798,13 +3070,46 @@ function selfTest() {
 }
 
 const argvPaths = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+const wantsChanged = process.argv.includes('--changed');
 if (process.argv.includes('--self-test')) {
   selfTest();
-} else if (argvPaths.length === 0) {
-  console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] [--tier] <path> [<path> ...] | --self-test');
+} else if (wantsChanged && argvPaths.length > 0) {
+  // The two input modes answer different questions and must never be blended:
+  // silently preferring one would make the other's arguments vanish without a
+  // word, which is the class of failure this whole file is about.
+  console.error('dispatch-gates: --changed derives the paths itself — do not pass paths with it.');
   process.exit(2);
 } else {
-  const paths = argvPaths.map((p) => p.replace(/^\.\//, ''));
+  let paths;
+  if (argvPaths.length > 0) {
+    paths = argvPaths.map((p) => p.replace(/^\.\//, ''));
+  } else {
+    // No paths: derive them. This is the dev-side form — "the gates my ACTUAL
+    // diff implicates" — and it is the default because the caller-supplied
+    // list was the thing getting it wrong (#9320). `--changed` spells the same
+    // thing out for a caller that would rather say it than imply it.
+    let derived;
+    try {
+      derived = changedPathsFromGit();
+    } catch (err) {
+      console.error(`dispatch-gates: could not derive the change set — ${err.message}`);
+      console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] [--tier] [<path> ...] | --changed | --self-test');
+      process.exit(2);
+    }
+    if (derived.paths.length === 0) {
+      // An empty derivation is an input problem far more often than an answer,
+      // and "no gates" is the most expensive thing this tool could say wrongly
+      // (#4690: an unreadable input must never look like an empty answer).
+      console.error(
+        `dispatch-gates: this branch changes nothing against '${derived.base}' (merge base ${derived.mergeBase.slice(0, 9)}) — ` +
+          'nothing to derive. On the base branch already, or in the wrong checkout? Pass explicit paths to ask about a hypothetical surface.',
+      );
+      process.exit(2);
+    }
+    for (const line of derivationProvenance(derived)) console.error(line);
+    console.error('');
+    paths = derived.paths;
+  }
   try {
     // `--tier` answers the claim-time question alone: it reads no workflow and
     // no check script, so it still answers on a tree where the gate derivation
