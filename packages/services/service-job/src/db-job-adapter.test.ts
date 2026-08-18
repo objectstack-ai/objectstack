@@ -235,6 +235,85 @@ describe('DbJobAdapter — kernel rebuild (#8362)', () => {
   });
 });
 
+// ─── #9631 — `recordRuns`, the flag two published `.d.ts` comments describe ──
+//
+// Until this block, NOTHING in this package referenced `recordRuns` in either
+// direction: not that `true` writes a row, not that `false` writes none, not
+// that the default is `true`. The class JSDoc and the field JSDoc both describe
+// the flag to every npm consumer through the emitted `index.d.ts`, and both
+// were free to drift from the code — which is exactly what #9611 and #9631
+// each found one of. These cases exist so the sentences stop being unenforced.
+//
+// The discriminator is case 2: it asserts the execution REALLY RAN (the handler
+// fired and `sys_job.run_count` bumped) and that no row was written anyway.
+// Without that half, "0 rows" would also pass for a job that never fired, which
+// is the way a test like this goes quietly blind.
+describe('DbJobAdapter — recordRuns (#9631)', () => {
+  const adapters: DbJobAdapter[] = [];
+  const build = (options?: { recordRuns?: boolean }) => {
+    const engine = makeFakeEngine();
+    const adapter = new DbJobAdapter({ engine, options });
+    adapters.push(adapter);
+    return { engine, adapter };
+  };
+  afterEach(async () => {
+    while (adapters.length) await adapters.pop()!.destroy();
+  });
+
+  it('defaults to true: a triggered execution writes one sys_job_run row', async () => {
+    const { engine, adapter } = build(); // no options at all — the documented default
+    await adapter.schedule('d', { type: 'cron', expression: '* * * * *' }, async () => {});
+    await adapter.trigger('d');
+    expect(engine.tables.get('sys_job_run') ?? []).toHaveLength(1);
+  });
+
+  it('recordRuns: false writes NO sys_job_run row, though the execution really ran', async () => {
+    const { engine, adapter } = build({ recordRuns: false });
+    let ran = 0;
+    await adapter.schedule('off', { type: 'cron', expression: '* * * * *' }, async () => { ran++; });
+    await adapter.trigger('off');
+
+    expect(ran, 'the handler must actually have run — otherwise "no rows" proves nothing').toBe(1);
+    expect(engine.tables.get('sys_job_run') ?? []).toHaveLength(0);
+  });
+
+  it('recordRuns: false does NOT gate the sys_job counters — only the per-attempt rows', async () => {
+    // The class JSDoc's fourth bullet: `bumpJob` is called from `settle`
+    // outside the `if (run.id)` guard, so the job row is updated either way.
+    const { engine, adapter } = build({ recordRuns: false });
+    await adapter.schedule('c', { type: 'cron', expression: '* * * * *' }, async () => {
+      throw new Error('boom');
+    });
+    await adapter.trigger('c');
+
+    const job = (engine.tables.get('sys_job') ?? [])[0];
+    expect(job.last_status).toBe('failed');
+    expect(job.run_count).toBe(1);
+    expect(job.failure_count).toBe(1);
+    expect(engine.tables.get('sys_job_run') ?? []).toHaveLength(0);
+  });
+
+  it('recordRuns: true is the same as the default', async () => {
+    const { engine, adapter } = build({ recordRuns: true });
+    await adapter.schedule('on', { type: 'cron', expression: '* * * * *' }, async () => {});
+    await adapter.trigger('on');
+    const runs = engine.tables.get('sys_job_run') ?? [];
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ job_name: 'on', trigger: 'schedule', status: 'success' });
+  });
+
+  // ─── the fifth case that stood here is GONE, by design ───
+  // It pinned "replay() writes its synthetic row even when recordRuns is
+  // false" — today's behaviour as the corrected JSDoc then stated it, never an
+  // endorsement — and it carried a comment saying it would change together
+  // with that JSDoc if #9633 ruled the carve-out shut. It did: the exception
+  // was an artifact of the gate landing on one of two `startRun` call sites,
+  // so `replay()` now honours the flag and this assertion became false.
+  // Deleting it IS the coupling that case was written to force. Its
+  // replacement is the block below, pinning the opposite direction on all
+  // three of replay()'s arms.
+});
+
 // ─── #9633 — replay() honours `recordRuns`, on all three of its arms ─────────
 //
 // `recordRuns` had exactly two `startRun` call sites and the gate landed on one

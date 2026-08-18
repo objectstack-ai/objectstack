@@ -218,6 +218,15 @@ client.data.find('project_task', { /* query */ });
 { name: 'project', type: 'lookup', reference: 'project', deleteBehavior: 'set_null' }
 ```
 
+<Callout type="info">
+On a `multiple: true` lookup, `set_null` clears only the **member** that was deleted —
+the child's other references survive — and a set emptied that way is stored as `[]`,
+never `null` (the `multiple` doc block in `packages/spec/src/data/field.zod.ts`,
+rendered in the [Field reference](/docs/references/data/field)). A cleanup query or
+client branch that looks for `null` to find cleared references will not match those
+rows; test for an empty array instead.
+</Callout>
+
 ---
 
 ### "defineStack() validation errors"

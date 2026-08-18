@@ -31,7 +31,18 @@ export interface JobLoggerLike {
 export interface DbJobAdapterOptions {
   /** Maximum executions kept in memory per job (default 100) */
   maxExecutions?: number;
-  /** Soft cap on sys_job_run rows recorded per job (defaults to none — handled by retention jobs) */
+  /**
+   * Record each scheduled or triggered execution as a `sys_job_run` row —
+   * inserted at the start of every attempt and updated to its terminal status
+   * when that attempt settles. Default **`true`**.
+   *
+   * This is an on/off switch for run history, NOT a retention cap: setting it to
+   * `false` means no rows are written at all — not the per-attempt rows above,
+   * and not {@link DbJobAdapter.replay}'s synthetic `trigger: 'replay'` row —
+   * so `sys_job_run` stays empty for this adapter and `listExecutionsByStatus`
+   * has nothing to read. The one thing unaffected either way is the `sys_job`
+   * row's own `last_status` / `run_count` / `failure_count` counters.
+   */
   recordRuns?: boolean;
 }
 
@@ -69,8 +80,13 @@ function uid(prefix: string): string {
  * Persisted side effects:
  *   - `schedule(name, …)` upserts a `sys_job` row (active=true)
  *   - `cancel(name)` marks the row inactive
- *   - every execution writes a `sys_job_run` row
- *   - every execution updates `sys_job.last_run_at / last_status / run_count / failure_count`
+ *   - every execution writes a `sys_job_run` row per attempt — unless
+ *     {@link DbJobAdapterOptions.recordRuns} is `false`, the on/off switch for
+ *     run history, which writes none of them, {@link DbJobAdapter.replay}'s
+ *     synthetic `trigger: 'replay'` row included.
+ *   - every execution updates `sys_job.last_run_at / last_status / run_count /
+ *     failure_count` — unconditionally: `recordRuns` gates the per-attempt rows
+ *     above, never these counters.
  *
  * The persistence is best-effort: a DB failure is logged but does not
  * break job execution. This keeps a healthy job system resilient to

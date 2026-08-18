@@ -105,3 +105,87 @@ describe('MemoryCacheAdapter', () => {
     expect(await cache.has('expiring')).toBe(false);
   });
 });
+
+// ─── eviction is insertion-order (FIFO), and the class JSDoc says so ─────────
+//
+// The class comment used to advertise "LRU-style eviction" while `get()` has
+// never re-inserted the key it reads, so eviction has always been oldest-
+// INSERTED, not least-recently-USED. The comment was corrected rather than the
+// code; these tests are what stops that corrected sentence from being another
+// unenforced claim.
+//
+// Every case below is written to be a DISCRIMINATOR: each one passes under the
+// shipped FIFO store and fails under an LRU store, because each performs a
+// read (or an overwrite) on the oldest entry and then asserts that the entry
+// was evicted anyway. A test that merely fills the cache past `maxSize` without
+// touching anything first cannot tell the two policies apart, which is how the
+// pre-existing eviction tests above sat green over a comment they contradicted.
+describe('MemoryCacheAdapter — insertion-order (FIFO) eviction', () => {
+  it('a read does NOT refresh eviction order — the read-hot oldest entry is still evicted', async () => {
+    const cache = new MemoryCacheAdapter({ maxSize: 2 });
+    await cache.set('a', 1);
+    await cache.set('b', 2);
+
+    // Read 'a' repeatedly: under LRU this promotes it to most-recently-used and
+    // makes 'b' the eviction candidate. Under FIFO it changes nothing at all.
+    expect(await cache.get('a')).toBe(1);
+    expect(await cache.get('a')).toBe(1);
+    expect(await cache.has('a')).toBe(true);
+
+    await cache.set('c', 3);
+
+    expect(await cache.has('a')).toBe(false); // oldest-inserted, evicted despite being hot
+    expect(await cache.get('b')).toBe(2);     // untouched, survives — the inverse of LRU
+    expect(await cache.get('c')).toBe(3);
+  });
+
+  it('an overwrite does NOT refresh eviction order either — Map.set keeps the original slot', async () => {
+    const cache = new MemoryCacheAdapter({ maxSize: 2 });
+    await cache.set('a', 1);
+    await cache.set('b', 2);
+
+    // Overwriting an existing key never evicts (it is not a new key) and never
+    // moves the entry: `Map.set` on a present key keeps its insertion position.
+    await cache.set('a', 10);
+    expect(await cache.get('a')).toBe(10);
+
+    await cache.set('c', 3);
+
+    expect(await cache.has('a')).toBe(false); // freshly written, still the oldest slot
+    expect(await cache.get('b')).toBe(2);
+    expect(await cache.get('c')).toBe(3);
+  });
+
+  it('evicts strictly in insertion order across a longer run, reads notwithstanding', async () => {
+    const cache = new MemoryCacheAdapter({ maxSize: 3 });
+    await cache.set('a', 1);
+    await cache.set('b', 2);
+    await cache.set('c', 3);
+
+    // Make 'a' the hottest key in the cache and 'c' the coldest.
+    await cache.get('a');
+    await cache.get('a');
+    await cache.get('a');
+
+    await cache.set('d', 4); // evicts 'a' (first in), not 'c' (least recently used)
+    expect(await cache.has('a')).toBe(false);
+    expect(await cache.has('c')).toBe(true);
+
+    await cache.set('e', 5); // evicts 'b' — the queue keeps advancing by age
+    expect(await cache.has('b')).toBe(false);
+
+    expect(await cache.get('c')).toBe(3);
+    expect(await cache.get('d')).toBe(4);
+    expect(await cache.get('e')).toBe(5);
+    expect((await cache.stats()).keyCount).toBe(3);
+  });
+
+  it('leaves the eviction path off entirely at the default maxSize of 0 (unlimited)', async () => {
+    const cache = new MemoryCacheAdapter(); // maxSize defaults to 0
+    for (let i = 0; i < 50; i++) await cache.set(`k${i}`, i);
+
+    expect(await cache.get('k0')).toBe(0); // the very first key is still there
+    expect(await cache.get('k49')).toBe(49);
+    expect((await cache.stats()).keyCount).toBe(50);
+  });
+});
