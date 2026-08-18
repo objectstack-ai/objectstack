@@ -52,6 +52,8 @@ import {
     uniqueViolationColumn,
     matchMissingColumnOfRelation,
     declaresServerFault,
+    resolveThrownHttpError,
+    demotedDeclaredCode,
     INTERNAL_ERROR_MESSAGE,
 } from '@objectstack/types';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
@@ -307,6 +309,64 @@ function declaredHttpStatus(error: any): number | undefined {
         (typeof error?.statusCode === 'number' ? error.statusCode : undefined);
     if (declared === undefined || !(declared >= 400 && declared < 600)) return undefined;
     return declared;
+}
+
+/**
+ * [#9232] The flat door's `code` fields for a THROWN error: the closed
+ * ADR-0112 `code`, plus the open `declaredCode` sibling when the producer's own
+ * spelling did not survive into it.
+ *
+ * ## Why this exists
+ *
+ * The 2026-08-16 ruling on #9106 made `error.code` a closed vocabulary at every
+ * door and demoted an unregistered thrown spelling to a `declaredCode` sibling.
+ * That ruling's scope named the doors served by `resolveThrownHttpError` — the
+ * dispatcher exits and the direct-mount package registrar — and left THIS one
+ * out, because the flat dialect puts `code` at the body's TOP level rather than
+ * in `error.code`. So the flat responder went on passing a caught error's
+ * `code` through verbatim, and an ADR sentence amended to read "closed at every
+ * door" was contradicted by an observable door: exactly the reader ambiguity
+ * #9106 was filed to remove, one door over. The 2026-08-17 ruling on #9232
+ * closed it — body POSITION is not a carve-out from the vocabulary.
+ *
+ * ## Why it delegates rather than restating the rule
+ *
+ * `resolveThrownHttpError` / {@link demotedDeclaredCode} (`@objectstack/types`,
+ * anchored in `scripts/adr-anchors/`) are the ONE definition of both spellings,
+ * and the three dispatcher exits read them rather than re-deriving them. A
+ * fourth open-coded `ErrorCode.safeParse(...)` here would be a second
+ * definition of one rule — the shape that let two doors answer differently in
+ * the first place. The status this boundary already resolved is passed in as
+ * the fallback, so the demote is computed against the status the client will
+ * actually receive.
+ *
+ * ## The three answers, and why "no code" stays "no code"
+ *
+ *  - the producer spelled a REGISTERED code  → `{ code }`, verbatim, unchanged.
+ *  - the producer spelled an UNREGISTERED one → `{ code, declaredCode }`: the
+ *    member the status derives, and the producer's string beside it. Presence
+ *    of `declaredCode` means demotion, exactly as `ApiErrorSchema.declaredCode`
+ *    documents for the nested envelope.
+ *  - the producer spelled NO string code → `{}`. Nothing is invented: ADR-0112
+ *    says the PRODUCER names the condition, so a half-declaration is honoured
+ *    for the half that was declared. That is the answer this file already gave
+ *    (see the 5xx arm of {@link mapDataError}) and it is deliberately preserved
+ *    — narrowing the vocabulary must not start ADDING codes to bodies that
+ *    carried none.
+ *
+ * ⚠️ "No string code" is what `resolveThrownHttpError` means by it, which is
+ * stricter than the truthiness check {@link resolveErrorResponse}'s two arms
+ * used to apply: a NON-string truthy `code` — a numeric driver errno — is
+ * context rather than a wire code (the drift #3842 removed), so it no longer
+ * reaches the flat body at all. It could not have been a legal ADR-0112 code in
+ * any case; a number in the field callers branch on is the loudest possible
+ * violation of a closed vocabulary. All four flat arms now ask ONE question.
+ */
+function thrownCodeFields(error: any, status: number): { code?: string; declaredCode?: string } {
+    const thrown = resolveThrownHttpError(error, status);
+    if (thrown.declaredCode === undefined) return {};
+    const demoted = demotedDeclaredCode(thrown);
+    return { code: thrown.code, ...(demoted !== undefined ? { declaredCode: demoted } : {}) };
 }
 
 /**
@@ -653,13 +713,20 @@ export function mapDataError(error: any, object?: string): { status: number; bod
         // ADR-0112 code silently dropped. The predicate's OWN read stays
         // `status`-only for its own callers — this is one call site handing it
         // the status this boundary just resolved.
+        //
+        // [#9232] The `code` that rides along is now the NARROWED one:
+        // {@link thrownCodeFields} answers with the closed member and puts an
+        // unregistered spelling in `declaredCode` beside it. `declaresServerFault`
+        // still decides WHETHER a code rides — its non-empty-string half is the
+        // same question `thrownCodeFields` asks internally, so the two agree by
+        // construction and this arm's body-shape decision is unchanged.
         if (declaredStatus >= 500) {
             return {
                 status: declaredStatus,
                 body: {
                     error: INTERNAL_ERROR_MESSAGE,
                     ...(declaresServerFault({ status: declaredStatus, code: error?.code })
-                        ? { code: error.code as string }
+                        ? thrownCodeFields(error, declaredStatus)
                         : {}),
                 },
             };
@@ -673,11 +740,16 @@ export function mapDataError(error: any, object?: string): { status: number; bod
         const msg = typeof error?.message === 'string' && error.message.length > 0
             ? truncateClientMessage(error.message)
             : 'Request failed';
+        // [#9232] Same narrowing as the 5xx arm above. The gate this replaces
+        // (`typeof error?.code === 'string' && error.code`) is exactly the
+        // question {@link thrownCodeFields} asks, so which bodies carry a
+        // `code` at all is unchanged here; only the VALUE can move, and only
+        // for a spelling the ADR-0112 union does not contain.
         return {
             status: declaredStatus,
             body: {
                 error: msg,
-                ...(typeof error?.code === 'string' && error.code ? { code: error.code } : {}),
+                ...thrownCodeFields(error, declaredStatus),
                 ...(object ? { object } : {}),
             },
         };
@@ -1053,12 +1125,23 @@ export function mapDataError(error: any, object?: string): { status: number; bod
  * reader off the same conflation. Prose had already failed; the names are
  * different now.
  *
- * ⛔ `error` stays `any` DELIBERATELY. This parameter is a caught value — a
- * driver error, a `TypeError`, anything a `catch` can bind — and narrowing
- * what a thrown error may carry would change what the REST door is allowed to
- * emit. That is a public-contract decision (ADR-0112), not an internal typing
- * one; the dispatcher door's equivalent required a maintainer ruling. What
+ * ⛔ `error` stays `any` DELIBERATELY, and that is now a statement about the
+ * PARAMETER only. This is a caught value — a driver error, a `TypeError`,
+ * anything a `catch` can bind — so there is no type to demand of it; what a
+ * caught error may CARRY is not narrowed at the signature and cannot be. What
  * #9098 closed is the AUTHOR-side hole: see {@link sendDeclaredFault}.
+ *
+ * [#9232] What IS narrowed now is the wire answer. The public-contract decision
+ * this docblock used to defer ("narrowing what a thrown error may emit is an
+ * ADR-0112 call, not an internal typing one") was made by the maintainer on
+ * 2026-08-17: `code` is a closed vocabulary at every door, with no carve-out for
+ * body position, so an unregistered thrown spelling is demoted to a
+ * `declaredCode` sibling in the flat body exactly as the dispatcher door demotes
+ * it in the nested one. The demote is computed by {@link thrownCodeFields},
+ * which reads the shared `resolveThrownHttpError` / `demotedDeclaredCode` pair
+ * rather than restating the rule. An `error: any` parameter and a closed wire
+ * vocabulary are no longer in tension: the door accepts anything and answers in
+ * the declared vocabulary, which is what a classification door is for.
  */
 export function sendThrownError(res: any, error: any, object?: string): void {
     const resolved = resolveErrorResponse(error, object);
@@ -1099,10 +1182,19 @@ export function sendThrownError(res: any, error: any, object?: string): void {
  * ⛔ In particular this is NOT a migration to the `@objectstack/types`
  * envelope writer. That one emits the NESTED `{ success: false, error: { code,
  * message } }` and applies no sanitization — routing these emissions through
- * it would move the envelope POSITION (open finding #7035, deliberately out of
- * #9098's scope) and would re-open the #5437 leak class by shipping a declared
- * 5xx's own prose. Narrowing the vocabulary and moving the dialect are two
- * separate decisions; this is only the first.
+ * it would move the envelope POSITION and would re-open the #5437 leak class by
+ * shipping a declared 5xx's own prose. Narrowing the vocabulary and moving the
+ * dialect are two separate decisions.
+ *
+ * Both halves of that sentence have since been settled, in opposite directions,
+ * so read it as a live boundary rather than as pending work: the VOCABULARY is
+ * closed at this door as of #9232 (see {@link thrownCodeFields}), while the
+ * POSITION is still the flat one and is held by the `check:route-envelope`
+ * ratchet's entry for this file — whose end state is converting these bodies
+ * onto the shared `sendOk` / `sendError` pair. ⚠️ #7035 is NOT that card and
+ * has not been since 2026-08-10: it closed with PR #7293 having converged three
+ * `/meta` 501 handlers only, and the citation that used to stand here called it
+ * an open finding long after it was neither.
  */
 export function sendDeclaredFault(
     res: any,
@@ -1255,12 +1347,17 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
         // boundary that sentence was written for. Producers that owe a caller
         // an actionable 5xx sentence should say it without interpolating the
         // driver's — tracked separately.
+        //
+        // [#9232] The surviving `code` is the NARROWED one — see
+        // {@link thrownCodeFields}. This arm's old gate was bare truthiness, so
+        // it also admitted a non-string `code`; that limb is gone with the
+        // narrowing, and the four flat arms now ask one question.
         if (error.status >= 500) {
             return {
                 status: error.status,
                 body: {
                     error: INTERNAL_ERROR_MESSAGE,
-                    ...(error.code ? { code: error.code } : {}),
+                    ...thrownCodeFields(error, error.status),
                 },
             };
         }
@@ -1270,11 +1367,12 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
         const safeMsg = typeof error.message !== 'string'
             ? 'Request failed'
             : truncateClientMessage(error.message);
+        // [#9232] Narrowed, same as the three arms above.
         return {
             status: error.status,
             body: {
                 error: safeMsg,
-                ...(error.code ? { code: error.code } : {}),
+                ...thrownCodeFields(error, error.status),
                 ...(Array.isArray(error.issues) ? { issues: error.issues } : {}),
             },
         };

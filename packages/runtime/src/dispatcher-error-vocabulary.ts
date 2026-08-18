@@ -83,7 +83,29 @@ export type CodeStampShape =
      * (`${…}` → `*`, e.g. `APPROVAL_*_FAILED`) and a row must classify it. The
      * only verdict that can honestly cover a family is `runtime-pinned`.
      */
-    | 'objlittemplate';
+    | 'objlittemplate'
+    /**
+     * [#9460] `err.code = CONST` — the assign position's constant sibling, and
+     * the last of the four stamp positions to get one. #9223 closed exactly
+     * this gap for object literals; the assign position kept it, so
+     * `err.code = DENY_CODE` matched NOTHING and was not reported as
+     * unresolved either.
+     */
+    | 'assignconst'
+    /**
+     * [#9460] The stamp inside a CODE-CARRYING HELPER: a file declares one
+     * factory — `postureError(code, message)`, `makeError(status, code,
+     * message)`, a `constructor(code, message)` — and throws through it
+     * everywhere. The stamp `(err as any).code = code` knows the token `code`
+     * but not the value; the CALL SITE knows the value and never writes the
+     * token. Every pattern in `check:dispatcher-error-vocabulary` AND in
+     * `check:error-code-casing` anchors on that token, so both gates read such
+     * a file and both reported nothing, each leaving it to the other — which is
+     * how `plugin-security`'s live 403 sat unswept through two ADR-0112
+     * batches. The scan joins the two halves through the PARAMETER, whose index
+     * names the argument to read at each call site.
+     */
+    | 'codehelper';
 
 /**
  * Where the stamped code can end up. `dispatcher` is the door this card is
@@ -334,7 +356,51 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
         why: 'Same driver errno, same migration sample, carried in the registry index.',
     },
 
+    // ── pending registration [#9460]: found by the widened scan ────────────
+    // Both rows are the deliverable of #9460, not a regression: the scan could
+    // not SEE either site before it learned the two stamp positions below, so
+    // "no finding" meant "not looked at", which is the failure this gate
+    // exists to prevent.
+    {
+        code: 'FLOW_CONVERSION_CONFLICT',
+        file: 'packages/metadata-protocol/src/protocol.ts',
+        shape: 'assign',
+        door: 'rest',
+        verdict: 'pending-registration',
+        why:
+            'A live 409 from the metadata write path: the conversion pass refuses a body whose token is a ' +
+            "live name in the environment, and stamps `(err as any).code = 'FLOW_CONVERSION_CONFLICT'` " +
+            'beside `status = 409` before throwing. [#9460] The `assign` shape demanded a BARE identifier ' +
+            'to the left of `.code`, and this site writes a cast — `(err as any)` puts a `)` exactly where ' +
+            'the anchor wanted a word character — so the single most common way this repo stamps a code ' +
+            'onto a constructed error was invisible in the shape named for it. Registering it is the ' +
+            "`packages/spec` lane's call (#8846's batch); this row records the measurement.",
+    },
+    {
+        code: 'owd_widening_forbidden',
+        file: 'packages/plugins/plugin-security/src/object-posture-gate.ts',
+        shape: 'codehelper',
+        door: 'rest',
+        verdict: 'pending-registration',
+        why:
+            'The ADR-0090 D7 / ADR-0086 D1 refusal: an environment overlay may only TIGHTEN a packaged ' +
+            "object's OWD. It reaches the wire verbatim — `packages/rest/src/meta-object-owd-gate.test.ts` " +
+            'drives `PUT /api/v1/meta/object/:name` and reads a 403 body whose `code` is this string. ' +
+            '[#9460] Invisible to BOTH vocabulary gates until now, and not for its casing: the file throws ' +
+            'through a code-carrying helper (`postureError(code, message)`), so the stamp `(err as any).code ' +
+            '= code` knows the token `code` but not the value, while the call site knows the value and never ' +
+            'writes the token. Every pattern in this gate and in `check:error-code-casing` anchors on that ' +
+            'token, so both read the file and both reported nothing. ⚠️ The spelling is LOWERCASE, so ' +
+            'ADR-0112 D1 forbids registering it as spelled — the rename-or-keep-the-#9106-demote call is ' +
+            "the `packages/spec` lane's, tracked as #9460 half (2) and NOT decided here. The row records " +
+            'that a live wire code is outside the vocabulary; it does not prescribe the remedy.',
+    },
+
     // ── boot refusals: no HTTP boundary exists yet ─────────────────────────
+    // [#9460] The four `MigrationJournalRefusal` codes below arrive through the
+    // same code-carrying-helper shape as `owd_widening_forbidden` — a class
+    // constructor `(code, message)` whose `this.code = code` names the token but
+    // not the value — and land on the OTHER side of the reachability question.
     {
         code: 'MONGODB_MULTI_TENANT_UNSUPPORTED',
         file: 'packages/drivers/driver-mongodb/src/mongodb-tenancy-guard.ts',
@@ -355,6 +421,58 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
         why:
             'The driver-memory twin of the row above — same guard shape, same MULTI_TENANT_UNSUPPORTED_CODE ' +
             'constant name, same pre-HTTP abort. Ruled by the same #8035 reasoning.',
+    },
+    {
+        code: 'NO_SUCH_RUN',
+        file: 'packages/core/src/utils/migration-journal.ts',
+        shape: 'codehelper',
+        door: 'none',
+        verdict: 'boot-refusal',
+        why:
+            'Raised by `MigrationJournalRefusal` when no journal rows exist for the requested run id. ' +
+            'Its only consumers are `packages/cli/src/commands/migrate/resume.ts` and `recorded-by.ts`, ' +
+            'which catch it with `instanceof` and print a message — no HTTP boundary exists on that path, ' +
+            'and grep finds no other consumer in `packages/`. Same class as the two rows above and ruled ' +
+            'by the same #8035 reasoning: a runner refusal the CLI rethrows is not wire vocabulary.',
+    },
+    {
+        code: 'NOT_COMPENSABLE',
+        file: 'packages/core/src/utils/migration-journal.ts',
+        shape: 'codehelper',
+        door: 'none',
+        verdict: 'boot-refusal',
+        why:
+            'Raised by `MigrationJournalRefusal` when a chunk cannot be compensated, so the runner refuses to resume. ' +
+            'Its only consumers are `packages/cli/src/commands/migrate/resume.ts` and `recorded-by.ts`, ' +
+            'which catch it with `instanceof` and print a message — no HTTP boundary exists on that path, ' +
+            'and grep finds no other consumer in `packages/`. Same class as the two rows above and ruled ' +
+            'by the same #8035 reasoning: a runner refusal the CLI rethrows is not wire vocabulary.',
+    },
+    {
+        code: 'PLAN_CHANGED',
+        file: 'packages/core/src/utils/migration-journal.ts',
+        shape: 'codehelper',
+        door: 'none',
+        verdict: 'boot-refusal',
+        why:
+            'Raised by `MigrationJournalRefusal` when the plan hash moved under a recorded run. ' +
+            'Its only consumers are `packages/cli/src/commands/migrate/resume.ts` and `recorded-by.ts`, ' +
+            'which catch it with `instanceof` and print a message — no HTTP boundary exists on that path, ' +
+            'and grep finds no other consumer in `packages/`. Same class as the two rows above and ruled ' +
+            'by the same #8035 reasoning: a runner refusal the CLI rethrows is not wire vocabulary.',
+    },
+    {
+        code: 'PREFLIGHT_FAILED',
+        file: 'packages/core/src/utils/migration-journal.ts',
+        shape: 'codehelper',
+        door: 'none',
+        verdict: 'boot-refusal',
+        why:
+            'Raised by `MigrationJournalRefusal` when the pre-resume checks refuse to start. ' +
+            'Its only consumers are `packages/cli/src/commands/migrate/resume.ts` and `recorded-by.ts`, ' +
+            'which catch it with `instanceof` and print a message — no HTTP boundary exists on that path, ' +
+            'and grep finds no other consumer in `packages/`. Same class as the two rows above and ruled ' +
+            'by the same #8035 reasoning: a runner refusal the CLI rethrows is not wire vocabulary.',
     },
 ];
 

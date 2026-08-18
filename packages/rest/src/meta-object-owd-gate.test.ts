@@ -376,6 +376,30 @@ describe('[#7674] R1 `owd_widening_forbidden` through PUT /api/v1/meta/object/:n
      * `not_overridable` is ITSELF scoped to `environmentId !== undefined`, so on
      * this topology the write sails past it and arrives at the posture gate
      * with nothing else in front of it.
+     *
+     * ## [#9232] Why the wire `code` is `PERMISSION_DENIED` and the gate's own
+     * ## spelling now rides `declaredCode`
+     *
+     * `objectPostureGate` throws `owd_widening_forbidden` — a lowercase,
+     * UNREGISTERED spelling. It is not an ADR-0112 member on two counts at
+     * once: D1 rules the value space `^[A-Z][A-Z0-9_]*$`, and the ledger does
+     * not carry it in any casing. Until #9232 the flat REST door passed it
+     * through verbatim, so this suite pinned a body that could never satisfy
+     * `ApiErrorSchema` — the door's own hole, recorded here as if it were the
+     * contract.
+     *
+     * Since #9232 that door narrows like every other: `code` carries the member
+     * the 403 derives (`PERMISSION_DENIED`) and the gate's own string survives,
+     * unchanged, in the open `declaredCode` channel beside it. Both are
+     * asserted below — the demote is only meaningful if the producer's spelling
+     * is still readable, which is the whole point of demoting rather than
+     * dropping.
+     *
+     * ⚠️ This is a REAL producer, not a test vehicle, and it is invisible to
+     * `check:dispatcher-error-vocabulary`: that scan matches SCREAMING_SNAKE
+     * shapes, so a lowercase code stamps no site it can see. Filed separately
+     * rather than fixed here — registering a code is the `packages/spec` lane's
+     * call, and this card narrows doors rather than editing the ledger.
      */
     it('refuses an env overlay that widens a packaged object\'s internal OWD', async () => {
         // Declared baseline: `public_read`. The overlay asks for
@@ -388,7 +412,10 @@ describe('[#7674] R1 `owd_widening_forbidden` through PUT /api/v1/meta/object/:n
         }));
 
         expect(res._status).toBe(403);
-        expect(res._json?.code).toBe('owd_widening_forbidden');
+        // [#9232] The closed member the 403 derives, with the gate's own
+        // spelling demoted beside it rather than dropped.
+        expect(res._json?.code).toBe('PERMISSION_DENIED');
+        expect(res._json?.declaredCode).toBe('owd_widening_forbidden');
         expect(String(res._json?.error)).toContain('TIGHTEN');
         expect(await storedRows('qa_packaged_account')).toEqual([]);
     }, 60_000);
@@ -409,7 +436,8 @@ describe('[#7674] R1 `owd_widening_forbidden` through PUT /api/v1/meta/object/:n
         }));
 
         expect(res._status).toBe(403);
-        expect(res._json?.code).toBe('owd_widening_forbidden');
+        expect(res._json?.code).toBe('PERMISSION_DENIED');
+        expect(res._json?.declaredCode).toBe('owd_widening_forbidden');
         expect(await storedRows('qa_packaged_account')).toEqual([]);
     }, 60_000);
 });

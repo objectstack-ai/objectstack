@@ -86,9 +86,13 @@ import {
 // is the difference that actually matters and the one still open. This one
 // emits the declared, NESTED `{ success: false, error: { code, message } }` for
 // a refusal the handler DECIDED; `sendDeclaredFault` emits the same refusal in
-// this package's FLAT `{ error, code }` dialect (open finding #7035). Both type
-// `code` to the closed ADR-0112 vocabulary rather than `string`, so the choice
-// between them is about POSITION only, never strictness.
+// this package's FLAT `{ error, code }` dialect, whose convergence onto the
+// nested position is held by the `check:route-envelope` ratchet (⚠️ NOT #7035,
+// which closed on 2026-08-10 with PR #7293 after converging this file's three
+// `/meta` 501 handlers only). Both type `code` to the closed ADR-0112
+// vocabulary rather than `string`, so the choice between them is about POSITION
+// only, never strictness — and since #9232 that is true of THROWN codes at both
+// doors too, not just of the two typed author-side responders.
 // Adding a call site here moves no `check:route-envelope` count:
 // the body literal lives in `@objectstack/types` (the pinned `SHARED_BUILDER`),
 // and this file is audited `dialectOnly` for the two non-conforming dialects it
@@ -8946,14 +8950,21 @@ export class RestServer {
             // already publish (`respondSharingError`), so no new contract.
             //
             // ⚠️ Built through the SHARED `sendError` envelope, unlike the three
-            // arms above it. Those are #7035's declared debt — `code` beside
-            // `error` instead of inside it, so `body.error.code` reads
-            // `undefined` — held down by the `check:route-envelope` ratchet,
-            // which only ticks DOWN. A new arm copying its neighbours' shape is
-            // exactly what that ratchet exists to stop, so this one answers the
-            // envelope `BaseResponseSchema` declares. The asymmetry is the
-            // ratchet working; converting the other three is #8111's unfinished
-            // half for this route family, not a rider on this card.
+            // arms above it. Those are the flat dialect — `code` beside `error`
+            // instead of inside it, so `body.error.code` reads `undefined` —
+            // held down by the `check:route-envelope` ratchet, which only ticks
+            // DOWN. A new arm copying its neighbours' shape is exactly what that
+            // ratchet exists to stop, so this one answers the envelope
+            // `BaseResponseSchema` declares. The asymmetry is the ratchet
+            // working; converting the other three is outstanding envelope-
+            // position work owned by that ratchet, not a rider on this card.
+            //
+            // ⚠️ Two card citations stood here and both were stale by the time
+            // anyone read them: #7035 closed 2026-08-10 (PR #7293, three `/meta`
+            // 501 handlers), and #8111 closed 2026-08-12 (PR #8212) having
+            // converged the record-sharing family it named. The ratchet's own
+            // baseline is the live owner of what is left; a closed card number
+            // is not.
             if (msg.startsWith('SHARING_NOT_ENABLED')) {
                 return sendEnvelopeError(
                     res, 422, 'SHARING_NOT_ENABLED',

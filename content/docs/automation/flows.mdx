@@ -1310,6 +1310,14 @@ to do it — never the message text:
 The first three never dispatched anything: no node executed, no record was
 written, and there is no run to look up. Only `400` describes a run.
 
+**The same table answers at the action door.** Invoking a `type: 'flow'`
+[action](/docs/ui/actions) through `POST /api/v1/actions/:object/:action`
+dispatches the same flow through the same service call, and it classifies the
+outcome the same way — the table above has one definition that both doors read,
+so they cannot answer one engine outcome differently. Declared endpoints
+(`type: 'flow'`) are the remaining exception: they still answer `200` for every
+outcome, so read `data.success` there rather than the status.
+
 ```
 POST /api/v1/automation/order_approval/trigger
 

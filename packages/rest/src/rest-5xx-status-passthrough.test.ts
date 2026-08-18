@@ -92,11 +92,24 @@ function uncompilableAggregateError(func: string) {
     );
 }
 
-/** The issue body's own measurement, with the `code` its producer would declare. */
+/**
+ * The issue body's own measurement, with the `code` its producer would declare.
+ *
+ * [#9232] The vehicle was the invented spelling `UPSTREAM_UNAVAILABLE` until
+ * this door started narrowing thrown codes to the closed ADR-0112 vocabulary.
+ * It was never a registered member — no producer anywhere emits it, and the
+ * real code for this condition is the ledger's `CONNECTOR_UPSTREAM_UNAVAILABLE`
+ * — so it only ever passed here because nothing checked. What these cases pin
+ * is the STATUS/MESSAGE rule (a declared 5xx keeps its status and its code, and
+ * loses its prose); a registered vehicle keeps that subject intact instead of
+ * quietly turning every case into a vocabulary assertion. Deliberately NOT the
+ * status-derived code for 502 (`EXTERNAL_SERVICE_ERROR`), so "the producer's
+ * own code survives" can still fail.
+ */
 function upstreamUnreachableError() {
     return Object.assign(
         new Error('connect ECONNREFUSED 10.0.0.5:5432 (internal pool)'),
-        { code: 'UPSTREAM_UNAVAILABLE', status: 502 },
+        { code: 'CONNECTOR_UPSTREAM_UNAVAILABLE', status: 502 },
     );
 }
 
@@ -129,7 +142,7 @@ describe('[#5582] mapDataError: a declared 5xx keeps its status and its code', (
         const r = mapDataError(upstreamUnreachableError(), 'showcase_account');
 
         expect(r.status).toBe(502);
-        expect(r.body.code).toBe('UPSTREAM_UNAVAILABLE');
+        expect(r.body.code).toBe('CONNECTOR_UPSTREAM_UNAVAILABLE');
         expect(r.body.error).toBe(INTERNAL_ERROR_MESSAGE);
         expect(JSON.stringify(r.body)).not.toContain('10.0.0.5');
         expect(JSON.stringify(r.body)).not.toContain('5432');
@@ -159,10 +172,18 @@ describe('[#5582] mapDataError: a declared 5xx keeps its status and its code', (
     });
 
     it('the whole band passes through, not a hand-picked list of statuses', () => {
+        // [#9232] Vehicle was the placeholder `X_FAULT`, which the narrowed door
+        // now demotes — the deep-equal would see a `declaredCode` sibling and
+        // fail for a reason that has nothing to do with this case's subject
+        // (the STATUS band). A registered member keeps the body two-keyed and
+        // is not the status-derived code for any status in the loop, so
+        // "the producer's code survives" can still fail here.
         for (const status of [500, 501, 502, 503, 504, 507, 599]) {
-            const r = mapDataError(Object.assign(new Error('internal detail'), { status, code: 'X_FAULT' }));
+            const r = mapDataError(
+                Object.assign(new Error('internal detail'), { status, code: 'CONNECTOR_UPSTREAM_UNAVAILABLE' }),
+            );
             expect(r.status).toBe(status);
-            expect(r.body).toEqual({ error: INTERNAL_ERROR_MESSAGE, code: 'X_FAULT' });
+            expect(r.body).toEqual({ error: INTERNAL_ERROR_MESSAGE, code: 'CONNECTOR_UPSTREAM_UNAVAILABLE' });
         }
     });
 
@@ -263,8 +284,8 @@ describe('[#5582] nothing of a 5xx message reaches the client', () => {
     });
 
     it('a missing message changes nothing — the generic sentence is unconditional', () => {
-        const r = mapDataError({ status: 502, code: 'UPSTREAM_UNAVAILABLE' });
-        expect(r.body).toEqual({ error: INTERNAL_ERROR_MESSAGE, code: 'UPSTREAM_UNAVAILABLE' });
+        const r = mapDataError({ status: 502, code: 'CONNECTOR_UPSTREAM_UNAVAILABLE' });
+        expect(r.body).toEqual({ error: INTERNAL_ERROR_MESSAGE, code: 'CONNECTOR_UPSTREAM_UNAVAILABLE' });
     });
 });
 
@@ -423,7 +444,7 @@ describe('[#5582] the CRUD data route, in process', () => {
         const res = await callDataList(rest, 'showcase_account');
 
         expect(res.statusCode).toBe(502);
-        expect(res.body.code).toBe('UPSTREAM_UNAVAILABLE');
+        expect(res.body.code).toBe('CONNECTOR_UPSTREAM_UNAVAILABLE');
         expect(JSON.stringify(res.body)).not.toContain('10.0.0.5');
         // No blind spot. 502 is an `isExpectedDataStatus` lifecycle outcome, so
         // it gets no "[REST] Unhandled error" line — `logWithheldServerFault`

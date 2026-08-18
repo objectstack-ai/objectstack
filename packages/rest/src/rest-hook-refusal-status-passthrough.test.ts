@@ -178,13 +178,21 @@ describe('[#7525] mapDataError: a hook refusal keeps the status it declared', ()
     });
 
     it('the whole 400-599 band is read off `statusCode`, not a hand-picked list', () => {
+        // [#9232] The vehicle was the invented spelling `HOOK_REFUSED` until
+        // this door started narrowing thrown codes to the closed ADR-0112
+        // vocabulary. Nothing in the repo emits it; the ledger's registered
+        // hook code is `ERR_HOOK_TARGET_REBIND`, which is what a hook refusal
+        // actually carries. The subject here is the STATUS read (`statusCode`
+        // across the whole band), and a registered vehicle keeps it that way.
+        // It differs from every status-derived code in the loop, so the `code`
+        // assertion below can still fail.
         for (const statusCode of [400, 403, 404, 409, 422, 429, 451, 499]) {
             const err: any = new Error('refused by hook');
-            err.code = 'HOOK_REFUSED';
+            err.code = 'ERR_HOOK_TARGET_REBIND';
             err.statusCode = statusCode;
             const r = mapDataError(err, 'showcase_task');
             expect(r.status).toBe(statusCode);
-            expect(r.body.code).toBe('HOOK_REFUSED');
+            expect(r.body.code).toBe('ERR_HOOK_TARGET_REBIND');
         }
     });
 
@@ -206,7 +214,7 @@ describe('[#7525] mapDataError: a hook refusal keeps the status it declared', ()
         // `errorResponseBase` read. Pinned so a future edit cannot silently
         // invert it.
         const err: any = new Error('refused');
-        err.code = 'HOOK_REFUSED';
+        err.code = 'ERR_HOOK_TARGET_REBIND';
         err.status = 409;
         err.statusCode = 403;
         expect(mapDataError(err, 'showcase_task').status).toBe(409);
