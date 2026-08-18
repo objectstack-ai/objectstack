@@ -159,11 +159,11 @@ describe('mapDataError: short 4xx messages are byte-for-byte unchanged (#5423)',
         const r = mapDataError(
             Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:5432 '.repeat(20)), {
                 status: 502,
-                code: 'UPSTREAM_UNAVAILABLE',
+                code: 'CONNECTOR_UPSTREAM_UNAVAILABLE',
             }),
         );
         expect(r.status).toBe(502);
-        expect(r.body.code).toBe('UPSTREAM_UNAVAILABLE');
+        expect(r.body.code).toBe('CONNECTOR_UPSTREAM_UNAVAILABLE');
         // Withheld, not truncated: no prefix of the original, no ellipsis.
         expect(r.body.error).toBe(INTERNAL_ERROR_MESSAGE);
         expect(String(r.body.error).endsWith('…')).toBe(false);

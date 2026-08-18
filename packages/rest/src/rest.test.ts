@@ -2402,12 +2402,12 @@ describe('mapDataError — schema/constraint envelopes', () => {
     const r = mapDataError(
       Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:5432 (internal pool)'), {
         status: 502,
-        code: 'UPSTREAM_UNAVAILABLE',
+        code: 'CONNECTOR_UPSTREAM_UNAVAILABLE',
       }),
     );
     // The declared status and the machine-readable code both survive...
     expect(r.status).toBe(502);
-    expect(r.body.code).toBe('UPSTREAM_UNAVAILABLE');
+    expect(r.body.code).toBe('CONNECTOR_UPSTREAM_UNAVAILABLE');
     // ...and neither is the degraded answer this used to give.
     expect(r.status).not.toBe(500);
     expect(r.body.code).not.toBe('INTERNAL_ERROR');
