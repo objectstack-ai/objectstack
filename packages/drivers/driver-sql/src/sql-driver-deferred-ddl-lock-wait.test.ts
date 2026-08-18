@@ -94,17 +94,27 @@ class FakeMysqlDriver extends SqlDriver {
 
   issued: Issued[] = [];
   /**
-   * [#9542] Every `logger.warn` the driver emitted.
+   * [#9542/#9609] Every log line the driver emitted, **with its level**.
    *
    * On the boot path this is the ONLY output a blocked widening produces — the
    * swallow eats the error itself — so "the bound fires and the operator is
    * told" and "the bound fires and nothing at all is printed" are the same
    * green suite without a sink to assert on.
+   *
+   * ⭐ #9609: the LEVEL is recorded, not just the text. The pins below assert
+   * `error`, because that is the observable that regresses: a future edit that
+   * puts this line back on `warn` keeps every message assertion green while
+   * removing it from the operator's alerting, which is the only signal there
+   * is. Recording the text alone cannot tell those two apart. The sink
+   * therefore also HAS an `error` channel — the previous fixture had only
+   * `warn`, which would have made an `error` call land nowhere and read as a
+   * missing line rather than as a level change.
    */
-  warnings: Array<{ msg: string; meta?: any }> = [];
+  logs: Array<{ level: 'warn' | 'error'; msg: string; meta?: any }> = [];
 
   protected override logger = {
-    warn: (msg: string, meta?: any) => { this.warnings.push({ msg, meta }); },
+    warn: (msg: string, meta?: any) => { this.logs.push({ level: 'warn', msg, meta }); },
+    error: (msg: string, meta?: any) => { this.logs.push({ level: 'error', msg, meta }); },
     info: () => {},
   };
 
@@ -168,6 +178,32 @@ class FakeMysqlDriver extends SqlDriver {
 
 function makeDriver(): FakeMysqlDriver {
   return new FakeMysqlDriver({
+    client: 'better-sqlite3',
+    connection: { filename: ':memory:' },
+    useNullAsDefault: true,
+  });
+}
+
+/**
+ * [#9609] The same driver behind a sink that has NO `error` channel.
+ *
+ * `SqlDriver.logger.error` is optional by declaration, and a host that injects
+ * `{ warn }` is a supported composition. This twin exists so the fallback in
+ * `logDurabilityFailure` is pinned by a test rather than by a comment: the
+ * obvious way to make the durability gate see this call site is
+ * `this.logger.error?.(…)`, which against THIS sink prints nothing at all —
+ * strictly worse than the `warn` it replaced, and invisible to every assertion
+ * that only looks at the driver with a full sink.
+ */
+class NoErrorSinkDriver extends FakeMysqlDriver {
+  protected override logger = {
+    warn: (msg: string, meta?: any) => { this.logs.push({ level: 'warn' as const, msg, meta }); },
+    info: () => {},
+  };
+}
+
+function makeNoErrorSinkDriver(): NoErrorSinkDriver {
+  return new NoErrorSinkDriver({
     client: 'better-sqlite3',
     connection: { filename: ':memory:' },
     useNullAsDefault: true,
@@ -361,27 +397,109 @@ describe('[#9354/#9542] a blocked widening ALTER — bounded on both paths, refu
     // boot, and correctness never depended on the widening having run.
   });
 
-  it('finally reaches the boot `logger.warn` — a bound that printed nothing would deliver nothing', async () => {
+  it('finally reaches the boot durability log — a bound that printed nothing would deliver nothing', async () => {
     driver = makeDriver();
     await driver.initObjects([WIDGET]);
     driver.issued.length = 0;
-    driver.warnings.length = 0;
+    driver.logs.length = 0;
 
     await expect(driver.initObjects([WIDGET])).resolves.toBeUndefined();
 
-    // ⭐ The card's whole claim. This warn was already written and was
+    // ⭐ The card's whole claim. This line was already written and was
     // UNREACHABLE in this scenario: the unbounded ALTER never returned, so the
     // catch that logs it never ran. A bound whose only effect is a quieter hang
     // delivers nothing and looks identical in a green suite, so the delivery is
     // asserted on the sink rather than inferred from the bound being armed.
-    const warn = driver.warnings.find((w) => /could not widen MySQL datetime columns/.test(w.msg));
-    expect(warn).toBeDefined();
-    expect(warn!.msg).toContain(WIDGET.name);
+    const line = driver.logs.find((w) => /widen MySQL datetime columns/.test(w.msg));
+    expect(line).toBeDefined();
+    expect(line!.msg).toContain(WIDGET.name);
     // Carrying the server's own diagnosis, not a swallowed blank.
-    expect(String(warn!.meta?.error)).toMatch(/Lock wait timeout exceeded/);
+    expect(String(line!.meta?.error)).toMatch(/Lock wait timeout exceeded/);
     // And it is the SERVER error that was swallowed, not the ADR-0112 refusal:
     // that envelope stays flush-only, so its operator sentence is absent here.
-    expect(String(warn!.meta?.error)).not.toMatch(/PROCESSLIST|No schema change was made/);
+    expect(String(line!.meta?.error)).not.toMatch(/PROCESSLIST|No schema change was made/);
+  });
+
+  // ───────────────────────────────────────────────────────────────
+  // #9609 — the LEVEL of that line, which is a separate question
+  // ───────────────────────────────────────────────────────────────
+
+  it('reports the un-run datetime widening at `error`, not `warn`', async () => {
+    driver = makeDriver();
+    await driver.initObjects([WIDGET]);
+    driver.logs.length = 0;
+
+    await expect(driver.initObjects([WIDGET])).resolves.toBeUndefined();
+
+    // AGENTS.md → "Degradation log levels" decides this with one question:
+    // after the degradation, does the system still look normal from the outside
+    // while something it claims is persisted has not landed? Here: yes. Boot
+    // completed, traffic is served, and the `error` limb names this exact case
+    // — "DDL that was supposed to run did not". The swallow is unchanged and
+    // deliberately so (#9542); only the level moved.
+    const line = driver.logs.find((w) => /widen MySQL datetime columns/.test(w.msg));
+    expect(line?.level).toBe('error');
+    // ⭐ Asserted as an ABSENCE too, because `find` above would happily return
+    // an `error` line while a second `warn` copy of the same degradation kept
+    // being emitted somewhere else on the path.
+    expect(driver.logs.filter((w) => w.level === 'warn')).toHaveLength(0);
+  });
+
+  it('reports the un-run TIME widening at `error` too — the twins do not diverge', async () => {
+    driver = makeDriver();
+    driver.legacyDatetimeColumns = [];
+    driver.legacyTimeColumns = [{ name: 'at', nullable: true }];
+    await driver.initObjects([WIDGET]);
+    driver.logs.length = 0;
+
+    await expect(driver.initObjects([WIDGET])).resolves.toBeUndefined();
+
+    // The `Field.time` twin loses fractional seconds by ROUNDING, which changes
+    // the wall clock that was asked for — if anything the louder of the two. It
+    // is pinned separately because the two catches are separate code: fixing one
+    // and not the other is the likeliest way this half-regresses.
+    const line = driver.logs.find((w) => /widen MySQL time columns/.test(w.msg));
+    expect(line?.level).toBe('error');
+    expect(line!.msg).toContain(WIDGET.name);
+  });
+
+  it('names the FIX, not only the consequence — the second thing an `error` owes', async () => {
+    driver = makeDriver();
+    await driver.initObjects([WIDGET]);
+    driver.logs.length = 0;
+
+    await expect(driver.initObjects([WIDGET])).resolves.toBeUndefined();
+
+    const line = driver.logs.find((w) => /widen MySQL datetime columns/.test(w.msg));
+    // AGENTS.md: an `error` owes BOTH the consequence and the fix, in the first
+    // line it prints. An operator woken at `error` with no next step is a worse
+    // outcome than the `warn` this replaced, so the actionable half is pinned as
+    // hard as the level. Same three moves the flush's refusal names, because it
+    // is the same blocker: find the lock holder, end it, re-run.
+    expect(line!.msg).toMatch(/PROCESSLIST|metadata_locks/);
+    expect(line!.msg).toMatch(/os migrate apply|restart/);
+    expect(line!.msg).toMatch(/idempotent/);
+    // And the consequence stays concrete rather than becoming "degraded".
+    expect(line!.msg).toMatch(/millisecond/i);
+  });
+
+  it('still delivers the line at `warn` when the injected sink has no `error`', async () => {
+    const noErrorSink = makeNoErrorSinkDriver();
+    driver = noErrorSink;
+    await noErrorSink.initObjects([WIDGET]);
+    noErrorSink.logs.length = 0;
+
+    await expect(noErrorSink.initObjects([WIDGET])).resolves.toBeUndefined();
+
+    // ⛔ The regression this guards is `this.logger.error?.(…)`: it satisfies the
+    // durability gate's matcher and prints NOTHING against this sink, converting
+    // a loud degradation into a silent one to please a checker. `SqlDriver`
+    // declares `logger.error` optional, so this composition is supported and the
+    // fallback is part of the contract, not a nicety.
+    const line = noErrorSink.logs.find((w) => /widen MySQL datetime columns/.test(w.msg));
+    expect(line).toBeDefined();
+    expect(line!.level).toBe('warn');
+    expect(line!.msg).toMatch(/PROCESSLIST|metadata_locks/);
   });
 
   it('clears the flush flag after a refusal, so a later boot sync is unaffected', async () => {
