@@ -991,8 +991,16 @@ function parseRegistrarSource(text) {
   const lines = maskComments(text).split('\n');
   const sites = [];
   for (let i = 0; i < lines.length; i++) {
+    // TWO QUESTIONS, AND THEY ARE NOT THE SAME ONE (#9503). "Does a registration's
+    // property list start here?" decides the WINDOW BOUNDARY; "what route is it?"
+    // decides the TAIL. Only the second one needs a literal. A site with no tail was
+    // always allowed here — 38 of today's 86 literal `path:` lines yield no tail (a
+    // bare `/api/v1`, a mount prefix) and the loop below already skips them for window
+    // production while still honouring them as the previous site's `next`. This makes a
+    // NON-LITERAL `path:` line behave the same way, which is the whole change.
+    if (!/(?:^|[\s{,(])path\s*:/.test(lines[i])) continue;
     const m = lines[i].match(/(?:^|[\s{,(])path\s*:\s*([`'"])(.*?)\1/);
-    if (m) sites.push({ line: i, tail: routeTailOf(m[2]) });
+    sites.push({ line: i, tail: m ? routeTailOf(m[2]) : null });
   }
   const byTail = new Map();
   for (let k = 0; k < sites.length; k++) {
@@ -1523,6 +1531,115 @@ function selfTest() {
   // false bridge.
   check('bridge', 'a diff touching only the symbol the comment MENTIONS selects no route', 'tails', JSON.stringify([]), JSON.stringify(tailsSelectedBy(new Set(['promoteDraftForPublish']), commentary)));
   check('bridge', 'a diff touching the symbol the handler CALLS still selects the publish route', 'tails', JSON.stringify(['/:type/:name/publish']), JSON.stringify(tailsSelectedBy(new Set(['publishMetaItem']), commentary)));
+
+  // ---- a registration BOUNDS the previous window even when its path is a variable (#9503) ----
+  // The third layer of the same family, and the only one with no measured wrong row on the
+  // tree that filed it — read that as the point of the block, not as a reason to skip it.
+  //
+  // MECHANISM (verified on e7daea169). `rest-server.ts:5661` registers
+  // `/:name/state/:field`; the next LITERAL `path:` is 255 lines later at 5916, so the
+  // window runs its full 150 lines to 5810 — straight over `path: publishedPath` at 5747,
+  // which registers a different route the scan cannot see. 64 lines of the `published`
+  // handler sat inside the `state` route's window.
+  //
+  // MEASURED HARM ON THAT TREE: ZERO identifiers, and the reason is worth writing down.
+  // 55 of those 64 lines are the ADR-0033/#8278 commentary, which #9432 masks to blank,
+  // and the remaining 9 are `for`/`register`/`method`/`handler`/`try`/`const` boilerplate
+  // whose every token already occurs earlier in the same window. Whole-tree before/after:
+  // 42 tails → 42, 3320 identifier slots → 3320, zero gained, zero lost. #9432's mask is
+  // what is holding this defect down, and it holds it down by ACCIDENT OF COMMENT LENGTH.
+  //
+  // WHAT IS UNDERNEATH: the same span measured against the foreign handler's own 150 lines
+  // carries 18 identifiers the `state` route does not otherwise see — `getMetaItemLayered`,
+  // `getPublished`, `resolveProtocol`, `publishedProtocol`, `overlayError`, `resolveExecCtx`
+  // … i.e. the `published` route's implementation, including the exact name
+  // `rest-route-ledger.ts` binds `/:type/:name/published` to (`meta.getPublished`). Shorten
+  // that comment block by a screenful and a `published`-handler diff starts putting the
+  // state-machine page on the advisory with a `via` that names a symbol it does implement —
+  // for a route it does not. The window's invariant is "this span is ONE route's handler";
+  // that invariant is false today and costs nothing today. Both halves are true.
+  //
+  // ⚠️ PINNED IN BOTH DIRECTIONS, and a third: the foreign handler's symbol must NOT bridge,
+  // the site's own symbol MUST still bridge (a boundary rule that over-truncates trades this
+  // precision bug for the recall hole the bridge exists to fill), and a `path:` written in a
+  // COMMENT must still bound nothing — that last one is new risk this change introduces and
+  // #9432 could not have pinned, because before this change a commented `path:` could only
+  // mint a phantom TAIL, and now it could also truncate a real window.
+  //
+  // NOT FIXED HERE, and deliberately: the variable-path route still gets no window of its
+  // own, so nothing bridges TO `/:type/:name/published`. Resolving `publishedPath` needs a
+  // one-hop binding lookup, and the recall hole it would dent is a small slice of a much
+  // larger one — 176 of the 221 client-bound ledger rows have no registrar tail at all
+  // today, most of them `plugin-auth` routes that never take a `path:` property. That is a
+  // different card with a different measurement; the tails assertion below states the
+  // omission as a fact rather than leaving it to be discovered.
+  const variablePathRegistrar = [
+    'export class RestServer {',
+    '    private registerStateRoutes() {',
+    "        for (const objectsSegment of ['objects', 'object']) {",
+    '            this.routeManager.register({',
+    "                method: 'GET',",
+    '                path: `${metaPath}/${objectsSegment}/:name/state/:field`,',
+    '                handler: async (req, res) => {',
+    '                    // Pre-#4432 this door also registered',
+    "                    //   path: '/api/v1/meta/legacy/:name/state',",
+    '                    // and both spellings reach the same primitive.',
+    '                    return this.legalNextStates(req.params);',
+    '                },',
+    '            });',
+    '        }',
+    '',
+    '        // The foreign registration: a real route whose path is a loop variable.',
+    '        for (const publishedPath of [`${metaPath}/:type/:name/published`]) {',
+    '            this.routeManager.register({',
+    "                method: 'GET',",
+    '                path: publishedPath,',
+    '                handler: async (req, res) => {',
+    '                    return this.getMetaItemLayered(req.params);',
+    '                },',
+    '            });',
+    '        }',
+    '    }',
+    '}',
+  ].join('\n');
+  const variablePath = parseRegistrarSource(variablePathRegistrar);
+  const stateIds = variablePath.get('/:name/state/:field');
+  check('parseRegistrarSource', 'the site\'s OWN implementation symbol still lands in its window', 'legalNextStates', true, !!stateIds?.has('legalNextStates'));
+  check('parseRegistrarSource', 'a `path:` written in a COMMENT bounds nothing — the boundary rides the same mask the tail does', 'legalNextStates after a commented `path:`', true, !!stateIds?.has('legalNextStates'));
+  check('parseRegistrarSource', 'the NEXT route\'s handler symbol is not this route\'s implementation', 'getMetaItemLayered', false, !!stateIds?.has('getMetaItemLayered'));
+  check('parseRegistrarSource', 'a variable `path:` bounds a window without claiming a tail — the recall half is untouched, not silently faked', 'tails', JSON.stringify(['/:name/state/:field']), JSON.stringify([...variablePath.keys()]));
+
+  // The counterfactual: `parseRegistrarSource` verbatim as it stood before this hop —
+  // literal `path:` lines are the only sites. Both halves have to be real for the block
+  // above to prove anything: the defect must reach the foreign symbol, and it must do so
+  // through the boundary and not through the 150-line cap.
+  const literalOnlySites = (src) => {
+    const ls = maskComments(src).split('\n');
+    const sites = [];
+    for (let i = 0; i < ls.length; i++) {
+      const m = ls[i].match(/(?:^|[\s{,(])path\s*:\s*([`'"])(.*?)\1/);
+      if (m) sites.push({ line: i, tail: routeTailOf(m[2]) });
+    }
+    const byTail = new Map();
+    for (let k = 0; k < sites.length; k++) {
+      const { line, tail } = sites[k];
+      if (!tail) continue;
+      const next = k + 1 < sites.length ? sites[k + 1].line : ls.length;
+      const end = Math.min(next, line + REGISTRAR_HANDLER_WINDOW, ls.length);
+      let ids = byTail.get(tail);
+      if (!ids) byTail.set(tail, (ids = new Set()));
+      for (let j = line; j < end; j++) for (const id of ls[j].matchAll(/[A-Za-z_$][\w$]*/g)) ids.add(id[0]);
+    }
+    return byTail;
+  };
+  const preFix = literalOnlySites(variablePathRegistrar);
+  check('parseRegistrarSource', 'counterfactual: the literal-only site scan DID swallow the next route\'s handler whole', 'getMetaItemLayered', true, !!preFix.get('/:name/state/:field')?.has('getMetaItemLayered'));
+  check('parseRegistrarSource', 'counterfactual: and the fixture is short enough that the 150-line cap is not what stops it', 'lines under the window', true, variablePathRegistrar.split('\n').length < REGISTRAR_HANDLER_WINDOW);
+
+  // End to end through the same selection step the bridge runs.
+  check('bridge', 'a diff touching only the FOREIGN handler\'s symbol selects no route', 'tails', JSON.stringify([]), JSON.stringify(tailsSelectedBy(new Set(['getMetaItemLayered']), variablePath)));
+  check('bridge', 'the pre-fix behaviour, held as the counterfactual: it DID select the state route', 'tails', JSON.stringify(['/:name/state/:field']), JSON.stringify(tailsSelectedBy(new Set(['getMetaItemLayered']), preFix)));
+  check('bridge', 'a diff touching the site\'s own symbol still selects its own route', 'tails', JSON.stringify(['/:name/state/:field']), JSON.stringify(tailsSelectedBy(new Set(['legalNextStates']), variablePath)));
 
   // ---- the CLI command anchor kind (#9230) ----------------------------------
   // The recall class: a CLI-surface change derives `MetaResync` / a lowercase `resync`,
