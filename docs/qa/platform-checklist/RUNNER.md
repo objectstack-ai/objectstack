@@ -112,9 +112,16 @@ contradicts it, and correct it here when it does.
   against `ls $PLAYWRIGHT_BROWSERS_PATH` (`/opt/pw-browsers` here, holding
   `chromium-1194` / `chromium_headless_shell-1194` only). The stock
   `examples/app-showcase/playwright.config.ts` sets no `executablePath`, so every test
-  dies at browser launch. Pass
-  `launchOptions.executablePath=/opt/pw-browsers/chromium-1194/chrome-linux/chrome` and
-  the same specs pass. **The discriminator is uniformity:** a launch/environment failure
+  dies at browser launch — the error names the **headless-shell** variant it wanted
+  (`Executable doesn't exist at .../chromium_headless_shell-1234/...`), which is the
+  signature to recognise. Pass `launchOptions.executablePath=/opt/pw-browsers/chromium`
+  and the same specs pass (verified: Playwright launches through it, reporting Chromium
+  141.0.7390.37, and drives a real page). ⚠️ Use that **alias**, not the versioned
+  `chromium-1194/chrome-linux/chrome` beneath it: `/opt/pw-browsers/chromium` is a
+  symlink maintained by the image build, so it still resolves after the image moves to
+  1234, while the versioned literal stops existing at exactly that moment — and a dead
+  path copied out of this section is the `absence-inference` trap one level up.
+  **The discriminator is uniformity:** a launch/environment failure
   takes down the whole run at once (`showcase-smoke.spec.ts` generates one test per
   `SURFACES` entry — 31 today, so "31 failed" means all of them), while a product defect
   fails selectively. ⛔ Do not file a whole-run red as a product defect before checking
