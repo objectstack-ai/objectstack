@@ -159,10 +159,20 @@
       "note": "Declarative new-tab control for STATIC type:'url' targets. ActionRunner.executeUrl reads action.openIn with priority over the legacy params.newTab/external-URL heuristic; action-button/icon/menu/group + basic/elements renderers forward it. Distinct from opensInNewTab/newTabUrl (async SSO pre-open)."
     },
     "onSuccess": {
-      "status": "planned",
-      "verifiedAt": "2026-08-18",
-      "evidenceScope": "cross-repo",
-      "note": "PLANNED, deliberately not `live` — the #9340 map / #9463 viewMode convention for a spec-first contract-split key. Declared by the #9566/#9474 maintainer ruling (2026-08-18, one navigation contract for both cards): `{ navigate, openIn: 'self'|'newTab' }` post-success navigation for type:'api'/'script' actions, with `${result.*}` (the server response) joining the navigate template's interpolation scope. No console consumer reads it yet: objectui's consoleServerAction.ts drives only the handler-return `{ redirectUrl }` convention (new-tab, objectui#2967/#2904), executeAPI returns {success,data} and never navigates, and interpolateTarget's scope has no `result` member — the SPA-navigation branch, executeAPI navigation handling and result-scope interpolation are the downstream objectui card(s) filed Blocked-by #9566/#9474 at this key's landing. Amend to `live` citing the consoleServerAction/executeAPI read and the interpolateTarget result member when that half lands — measured objectui per the #9566 issue audit at spec/console 17.0.0, 2026-08-18."
+      "children": {
+        "navigate": {
+          "status": "planned",
+          "verifiedAt": "2026-08-18",
+          "evidenceScope": "cross-repo",
+          "note": "PLANNED, deliberately not `live` — the #9340 map / #9463 viewMode convention for a spec-first contract-split key. Declared by the #9566/#9474 maintainer ruling (2026-08-18, one navigation contract for both cards): a post-success route/URL template for type:'api'/'script' actions whose interpolation scope gains `${result.*}` (the server response) beside `${param.*}`/`${ctx.*}`. No console consumer reads it yet: objectui's consoleServerAction.ts drives only the handler-return `{ redirectUrl }` convention (new-tab, objectui#2967/#2904), executeAPI returns {success,data} and never navigates, and interpolateTarget's scope has no `result` member — the SPA-navigation branch, executeAPI navigation handling and result-scope interpolation are the downstream objectui card(s) filed Blocked-by #9566/#9474 at this key's landing. Amend to `live` citing the consoleServerAction/executeAPI read and the interpolateTarget result member when that half lands — measured objectui per the #9566 issue audit at spec/console 17.0.0, 2026-08-18."
+        },
+        "openIn": {
+          "status": "planned",
+          "verifiedAt": "2026-08-18",
+          "evidenceScope": "cross-repo",
+          "note": "PLANNED with its sibling `navigate` (see that entry for the full cross-repo measurement). The closed enum 'self'|'newTab' with a MATERIALIZED .default('self') — parse output always carries the resolved member, so the future console branch reads it with no fallback of its own. The shipped handler-return surface `{ redirectUrl, openIn? }` keeps 17.0.0 semantics (absent openIn ⇒ new-tab); only this schema key defaults 'self'. Amend to `live` together with `navigate` when the objectui half (Blocked-by #9566/#9474) lands."
+        }
+      }
     },
     "aria": {
       "status": "live",
