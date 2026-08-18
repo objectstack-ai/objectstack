@@ -13,11 +13,19 @@ durable, **text-only** report (pass or fail alike):
 
 - the issue **body** hosts the per-clause verdict table (pass / partial / fail / blocked)
   and the scope — the selector that chose the items + the `revision` each ran against;
+  [../RUNNER.md](../RUNNER.md) carries the body contract in full, and this line
+  summarises only part of it;
 - **every `fail` carries a reproduction rule** in that same issue — ordered steps / API
   calls (method · path · body) / the ref-targeted selector path + expected-vs-actual;
   the run issue itself stays `qa-run`-only (protocol carrier, excluded from the triage
   sweep) — at close-out each product defect is extracted into its own standalone card
   (RUNNER.md, extraction obligation), and that card is what triages;
+  - **one exception — authentication and authorization findings.** Their reproduction is
+    **never published on GitHub**: not in this record, not in the extracted card, not in
+    a comment. Such a `fail` is still a completed verdict, and what it carries instead is
+    [../RUNNER.md](../RUNNER.md) rule 2's carve-out — read it there before you write the
+    record. This line is the flag that you are in that case; the rule itself is stated in
+    one place only;
 - **screenshots are never part of the report** — they are live judgment aids that die
   with the run environment, described in one line of text, never attached or linked.
 
