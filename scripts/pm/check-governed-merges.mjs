@@ -931,7 +931,7 @@ function selfTest() {
   const both = attributionChannels({ GITHUB_TOKEN: 'x' });
   assert('with-a-token-the-token-goes-first-and-anonymous-remains-the-fallback', both.map((c) => c.id).join(',') === 'env-token,anonymous', both.map((c) => c.id).join(','));
   assert('GH_TOKEN-is-honoured-too', attributionChannels({ GH_TOKEN: 'x' }).map((c) => c.id).join(',') === 'env-token,anonymous');
-  assert('the-token-channel-sends-an-authorization-header-and-anonymous-sends-none', both[0].headers.authorization === 'Bearer x' && Object.keys(both[1].headers).length === 0);
+  assert('the-token-channel-sends-an-authorization-header-and-anonymous-sends-none', both[0]?.headers?.authorization === 'Bearer x' && Object.keys(both[1]?.headers ?? { unset: 1 }).length === 0, JSON.stringify(both.map((c) => c.id)));
 
   // The transport branch (#9642's trap, measured again here): every channel
   // reads 401/403 when a proxied run's fetch bypasses the proxy, so the plan
