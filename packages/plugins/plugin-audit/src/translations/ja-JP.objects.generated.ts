@@ -22,6 +22,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "アクションタイプ（snake_case）",
         options: {
           create: "作成",
+          read: "閲覧",
           update: "更新",
           delete: "削除",
           login: "ログイン",
@@ -85,6 +86,13 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       auth_events: {
         label: "認証"
+      },
+      record_views: {
+        label: "レコード閲覧",
+        emptyState: {
+          title: "レコードの閲覧記録はありません",
+          message: "レコード閲覧の監査はオブジェクトごとのオプトインです。監査プラグインの readAudit.objects にオブジェクトを追加すると、そのレコードが開かれた際にここに表示されます。"
+        }
       },
       config_changes: {
         label: "構成変更"
