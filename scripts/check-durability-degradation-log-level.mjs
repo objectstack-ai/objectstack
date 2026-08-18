@@ -203,6 +203,10 @@ const DURABILITY_CRITICAL_CALLEES = new Map([
         'persistPackageCommitRow',
         "The ADR-0067 commit row for a publish/revert turn was never written — the artifacts are LIVE and `publishPackageDrafts` answers `success: true` with `commitId` merely absent, so the API, the metadata and every counter read clean, while the only record of that turn's revert plan (`existedBefore`/`prevVersion` per artifact) does not exist: `revertCommit` and `rollbackToPackageCommit` have nothing to act on and the turn can never be undone. A commit store that is failing stays failing, so every later publish loses its plan the same way (#9066).",
     ],
+    [
+        'runWideningAlters',
+        "The widening ALTER never ran — the MySQL column keeps its legacy zero-precision type (`TIMESTAMP` for a `Field.datetime`, `TIME` for a `Field.time`) while the object stays registered and served, so every subsequent write silently drops the milliseconds the canonical storage form promises are always present: a `TIMESTAMP` truncates them, and a `TIME(0)` ROUNDS a fractional literal, changing the wall clock it was asked to store. Reads come back looking clean because the value that was stored is the value that is returned, and nothing else reports the column is still un-widened (#9609).",
+    ],
 ]);
 
 /**

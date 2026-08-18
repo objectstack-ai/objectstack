@@ -117,17 +117,36 @@ export const SysUserPosition = ObjectSchema.create({
         'A row with delegated_from set is not itself delegatable and not self-renewable — chains are cut both ways.',
     }),
 
+    // [#9046] The same declared-but-inert D5 pair as on
+    // sys_user_permission_set, with the same disposition. The whole-tree sweep
+    // finds these two columns in the two declarations and the generated i18n
+    // bundles and nowhere else: nothing writes them, nothing reads them, no
+    // surface derives "never certified" or "certification stale" - while
+    // valid_from/valid_until (isGrantActive) and reason/delegated_from (the
+    // delegated-admin gate, the security-posture lint) on this same object all
+    // resolve to real enforcement. The old descriptions stated D5's intent as
+    // though it were the behavior, which on a compliance surface reads as
+    // evidence of an access review that never happened. ADR-0049
+    // enforce-or-remove, settled as sys_capability.active was (maintainer
+    // ruling, 2026-08-13): the claim is withdrawn in prose rather than the
+    // workflow built or the columns dropped. Full rationale sits with the
+    // sibling declaration in sys-user-permission-set.object.ts.
     last_certified_at: Field.datetime({
       label: 'Last Certified At',
       required: false,
       description:
-        '[ADR-0091 D5] When this grant was last attested in a recertification review. Null = never certified.',
+        '[ADR-0091 D5] Reserved for a future access-recertification workflow, which would stamp here when this grant was last attested. ' +
+        'Inert today: no platform code writes this column and none reads it — no resolution path, gate or lint consults it, and nothing derives ' +
+        '"never certified" or "certification stale" from it. Null therefore means the workflow does not exist, not that this grant went unreviewed.',
     }),
 
     certified_by: Field.lookup('sys_user', {
       label: 'Certified By',
       required: false,
-      description: '[ADR-0091 D5] Reviewer who last attested this grant.',
+      description:
+        '[ADR-0091 D5] Reserved for the same future access-recertification workflow: the reviewer who would attest this grant. ' +
+        'Inert today: no platform code writes or reads it. A value written here by a client is an unverified annotation — ' +
+        'the platform checks nothing about it and grants nothing on the strength of it.',
     }),
 
     created_at: Field.datetime({

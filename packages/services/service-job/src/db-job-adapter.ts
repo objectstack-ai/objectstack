@@ -81,8 +81,14 @@ function uid(prefix: string): string {
  * Persisted side effects:
  *   - `schedule(name, …)` upserts a `sys_job` row (active=true)
  *   - `cancel(name)` marks the row inactive
- *   - every execution writes a `sys_job_run` row
- *   - every execution updates `sys_job.last_run_at / last_status / run_count / failure_count`
+ *   - every execution writes a `sys_job_run` row per attempt — unless
+ *     {@link DbJobAdapterOptions.recordRuns} is `false`, the on/off switch for
+ *     run history, which writes none of them. The one row it does not govern is
+ *     {@link DbJobAdapter.replay}'s synthetic `trigger: 'replay'` row, written
+ *     either way.
+ *   - every execution updates `sys_job.last_run_at / last_status / run_count /
+ *     failure_count` — unconditionally: `recordRuns` gates the per-attempt rows
+ *     above, never these counters.
  *
  * The persistence is best-effort: a DB failure is logged but does not
  * break job execution. This keeps a healthy job system resilient to

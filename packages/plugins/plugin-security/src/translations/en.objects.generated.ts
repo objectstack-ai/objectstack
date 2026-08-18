@@ -323,11 +323,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       last_certified_at: {
         label: "Last Certified At",
-        help: "[ADR-0091 D5] When this grant was last attested in a recertification review. Null = never certified."
+        help: "[ADR-0091 D5] Reserved for a future access-recertification workflow, which would stamp here when this grant was last attested. Inert today: no platform code writes this column and none reads it — no resolution path, gate or lint consults it, and nothing derives \"never certified\" or \"certification stale\" from it. Null therefore means the workflow does not exist, not that this grant went unreviewed."
       },
       certified_by: {
         label: "Certified By",
-        help: "[ADR-0091 D5] Reviewer who last attested this grant."
+        help: "[ADR-0091 D5] Reserved for the same future access-recertification workflow: the reviewer who would attest this grant. Inert today: no platform code writes or reads it. A value written here by a client is an unverified annotation — the platform checks nothing about it and grants nothing on the strength of it."
       },
       created_at: {
         label: "Created At"
@@ -409,11 +409,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       last_certified_at: {
         label: "Last Certified At",
-        help: "[ADR-0091 D5] When this grant was last attested in a recertification review. Null = never certified."
+        help: "[ADR-0091 D5] Reserved for a future access-recertification workflow, which would stamp here when this grant was last attested. Inert today: no platform code writes this column and none reads it — no resolution path, gate or lint consults it, and nothing derives \"never certified\" or \"certification stale\" from it. Null therefore means the workflow does not exist, not that this grant went unreviewed."
       },
       certified_by: {
         label: "Certified By",
-        help: "[ADR-0091 D5] Reviewer who last attested this grant."
+        help: "[ADR-0091 D5] Reserved for the same future access-recertification workflow: the reviewer who would attest this grant. Inert today: no platform code writes or reads it. A value written here by a client is an unverified annotation — the platform checks nothing about it and grants nothing on the strength of it."
       },
       created_at: {
         label: "Created At"

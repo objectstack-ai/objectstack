@@ -124,9 +124,39 @@ import Slugger from 'github-slugger';
 
 import { stripCodeSpans, stripFencedBlocks } from './check-adr-links.mjs';
 
+/**
+ * The page population this gate sweeps, as the repo-relative glob it really
+ * reads — every `.md`/`.mdx` under the Fumadocs content root, `content/blog`
+ * and `content/docs` alike.
+ *
+ * ## Why the glob is the constant and the root is derived from it (#9626)
+ *
+ * `scripts/pm/dispatch-gates.mjs` builds every dispatch's gate list by scanning
+ * each gate's own source for the path literals it operates on, and a literal
+ * with no path separator is a WORD, not a path — it is refused as too generic,
+ * because `packages` and `apps` are path components dozens of gates join with
+ * something else. Spelled `'content'`, this gate's population therefore
+ * contributed no hint at all: `check:doc-anchors` scored `silent` for every
+ * card under `content/**`, while being REQUIRED in lint.yml and the only
+ * fragment coverage this repo has (`check-links.yml` sets
+ * `include_fragments = "none"` and says so in its own header — a link to a
+ * heading that does not exist is reported `[200] OK` there).
+ *
+ * Declaring the SUBTREE is what makes the declaration readable. The root is one
+ * substring of it rather than a second constant, so the two cannot drift apart
+ * — the failure that would otherwise replace a silent gate with a lying one.
+ *
+ * What this does NOT reach: `EXTRA_SOURCES` below. A top-level FILE name
+ * carries no separator either, and teaching the scanner to accept one would
+ * admit every `package.json` basename in the tree. A card editing only
+ * `README.md` or `ARCHITECTURE.md` still has to reach this gate by judgment;
+ * that residue is recorded in `hintCovers`' docblock as a decided loss.
+ */
+const CONTENT_GLOB = 'content/**';
+
 /** The Fumadocs content root — what `/` means in a site route, and what the
  *  lychee lane passes as `--root-dir`. */
-const CONTENT_ROOT = 'content';
+const CONTENT_ROOT = CONTENT_GLOB.slice(0, CONTENT_GLOB.indexOf('/'));
 
 /** Link sources outside `content/`, matching the lychee globs. */
 const EXTRA_SOURCES = ['README.md', 'ARCHITECTURE.md'];

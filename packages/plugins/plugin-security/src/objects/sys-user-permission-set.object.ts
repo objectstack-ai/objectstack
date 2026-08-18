@@ -98,17 +98,50 @@ export const SysUserPermissionSet = ObjectSchema.create({
         'A row with delegated_from set is not itself delegatable and not self-renewable.',
     }),
 
+    // [#9046] ADR-0091 D5 calls these two columns the recertification
+    // "substrate", and they are exactly that and nothing more. A whole-tree
+    // sweep (packages/, apps/, examples/, every .ts/.tsx, tests included)
+    // finds the pair in two kinds of place only: these declarations and the
+    // generated i18n bundles that carry their strings. No producer, no
+    // consumer - nothing stamps them, nothing reads them, and no surface
+    // derives "never certified" or "certification stale". Their siblings on
+    // this object are not like that: valid_from/valid_until are enforced by
+    // isGrantActive at resolution time, and reason/delegated_from are read by
+    // the delegated-admin gate and the security-posture lint.
+    //
+    // The old descriptions ("When this grant was last attested in a
+    // recertification review", "Reviewer who last attested this grant") stated
+    // D5's intent as though it were the behavior. Access recertification is a
+    // compliance control (SOX / ISO 27001 access review), so that misreading
+    // is the expensive kind: an admin walking these objects - or an AI agent
+    // authoring against this model - takes a populated "Last Certified At" as
+    // evidence of a review the platform never performed and never checked.
+    //
+    // ADR-0049 enforce-or-remove, settled the way sys_capability.active was
+    // (maintainer ruling, 2026-08-13): building the review workflow is a
+    // designed feature with no measured pull, and dropping shipped columns
+    // costs a migration over existing rows while buying nothing the prose fix
+    // does not - the harm here is the promise, not the storage. So the claim
+    // is withdrawn, and the descriptions state the inertness outright rather
+    // than merely omitting the promise: a reader who remembers the old wording
+    // has to be told it was wrong, not left to infer it. If D5 is ever
+    // implemented, these two descriptions are what must change with it.
     last_certified_at: Field.datetime({
       label: 'Last Certified At',
       required: false,
       description:
-        '[ADR-0091 D5] When this grant was last attested in a recertification review. Null = never certified.',
+        '[ADR-0091 D5] Reserved for a future access-recertification workflow, which would stamp here when this grant was last attested. ' +
+        'Inert today: no platform code writes this column and none reads it — no resolution path, gate or lint consults it, and nothing derives ' +
+        '"never certified" or "certification stale" from it. Null therefore means the workflow does not exist, not that this grant went unreviewed.',
     }),
 
     certified_by: Field.lookup('sys_user', {
       label: 'Certified By',
       required: false,
-      description: '[ADR-0091 D5] Reviewer who last attested this grant.',
+      description:
+        '[ADR-0091 D5] Reserved for the same future access-recertification workflow: the reviewer who would attest this grant. ' +
+        'Inert today: no platform code writes or reads it. A value written here by a client is an unverified annotation — ' +
+        'the platform checks nothing about it and grants nothing on the strength of it.',
     }),
 
     created_at: Field.datetime({
