@@ -359,6 +359,38 @@ jobs:
       - name: Docs redirect destinations resolve, and no chains
         run: pnpm check:docs-redirects
 
+      # #9632 published-README links: a README in a package's `files` array with
+      # `private` unset is rendered on npm and on GitHub as well as here, and
+      # NOTHING read its links. Measured before the gate was written: the lychee
+      # lane globs `content/**` plus the ROOT README.md/ARCHITECTURE.md, never
+      # `packages/**/README.md`; `check:doc-anchors` takes the same two
+      # EXTRA_SOURCES; `check:adr-links` is scoped to docs/adr/;
+      # `check:published-readme-exports` has exactly the right population but
+      # reads FENCED CODE BLOCKS ONLY and has no notion of a link. So seven links
+      # across five published service packages sat spelled `/content/docs/...` —
+      # a form that resolves on none of the three surfaces — and shipped to npm
+      # green. An npm tarball outlives any in-repo correction, which is why the
+      # gate is worth more than the seven fixes that came with it.
+      #
+      # Strict, with no baseline: the census that sized it found 149 outbound
+      # links across all 60 published markdown files, so per-link assertions are
+      # affordable. It reuses rather than re-derives — the POPULATION comes from
+      # check-published-readme-exports (`publishedDocs`), the page resolver from
+      # check-docs-redirects (`pageCandidates`, including its
+      # directory-without-an-index-is-a-404 subtlety), the heading ids from
+      # check-doc-anchors (`headingIds`), and the fence/code-span stripping from
+      # check-adr-links. Two gates deriving "published" separately would disagree
+      # the first time a `files` array changed, silently, each still green.
+      #
+      # This job for the same reason check:docs-redirects is here: it is a
+      # dependency-free filesystem check and this job carries "the whole check:*
+      # gate family". Runs its own --self-test first, where all three assertions
+      # are observed FAILING as well as silent — over the real tree the strict
+      # assertion has a small population, so a green run cannot by itself
+      # distinguish a working scanner from one that matches nothing.
+      - name: Published-README links are followable off the docs site
+        run: pnpm check:published-readme-links
+
       # #9018 docs image tags: the same "example image tag N majors behind
       # packages/cli" staleness was found and hand-fixed TWICE, independently —
       # content/docs/deployment/self-hosting.mdx (#8911, PR #8960) and
