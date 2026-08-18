@@ -333,8 +333,9 @@ Even inside your own worktree, operate defensively:
    yet"; `in_progress` is not a pass. Arming a red PR does not queue it, it hides it:
    every poll then misreads "not on `main` yet" as "queued". Always read *two* things
    when checking a landing: the queue branch **and** `origin/main`. And **the queue
-   enforces only the required set** — **ESLint** and **TypeScript Type Check** block by
-   maintainer decision (2026-08-07); everything else is advisory and rides through, and
+   enforces only the required set** — **Lint & Repo Gates** (called `ESLint` until the
+   #9325 rename) and **TypeScript Type Check** block by maintainer decision
+   (2026-08-07); everything else is advisory and rides through, and
    an advisory red that lands rides `main`'s merge ref into every following PR until
    stanched. That is why "arm only on green" is a rule, not a formality.
 
