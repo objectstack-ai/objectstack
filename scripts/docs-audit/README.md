@@ -352,17 +352,60 @@ Always follow a run with the docs build gate:
 pnpm --filter @objectstack/docs build   # must compile all pages clean
 ```
 
-## 4. Scheduled routine — periodic backstop
+## 4. Scheduled routine — periodic backstop ⛔ NOT RUNNING
 
-A cron routine (created via the `schedule` skill) runs on a cadence (default monthly /
-per-release) to catch drift the CI gate missed. It computes the change-scoped doc list
-since the last audit, runs the `docs-accuracy-audit` workflow on it, runs the build, and
-opens a PR when there are fixes. See the routine prompt for the exact steps.
+**Measured 2026-08-18: no live schedule runs this audit.** This section previously
+described the backstop in the present tense; it does not exist, so **it cannot be cited
+as coverage for what the part-1 scope leaves out.** Recorded rather than fixed on the
+spot: standing up a periodic LLM audit spends real budget on a cadence, which is the
+maintainer's call.
+
+The intended design, for whoever stands it up: a cron routine on a cadence (default
+monthly / per-release) catches drift the CI gate missed — it runs the
+`docs-accuracy-audit` workflow, runs the build, and opens a PR when there are fixes.
+
+**Two independent defects in the old text, both worth keeping in view:**
+
+1. **It never ran.** Checked four ways, all negative — repeat these rather than
+   re-deriving them:
+
+   - **GitHub Actions** — no workflow runs this audit at all. Of the 31 workflows
+     registered on the repo, the 11 carrying a `schedule:` trigger (`codeql`,
+     `coverage-nightly`, `cut-rc`, `engine-split-metric`, `prerelease-pin-watch`,
+     `publish-smoke`, `rerun-safety-nightly`, `scaffold-e2e`, `showcase-smoke`, `stale`,
+     `validate-deps`) are all unrelated.
+     ⚠️ **Read the registered workflow list and its run history, not the YAML on disk.**
+     The two disagree in *both* directions: a workflow can be registered in Actions with
+     no file on `main` (`matrix-aggregate-experiment.yml` is, today), and a scheduled
+     workflow that GitHub auto-disabled after 60 days of repo inactivity leaves its file
+     byte-identical. "The file is there" cannot answer "is it running" — the same
+     read-a-conclusion-off-a-field-that-cannot-carry-it failure this docs-audit subsystem
+     keeps paying for.
+   - **Routines** — the Claude Code Remote `list_triggers` tool lists every Routine the
+     agent-seat account owns, and this is the surface that answers the question (it was
+     once written off as unreadable by any agent; it is not). The only cron Routine is the
+     hourly triage seat, `18 * * * *`. There is no docs-audit Routine, enabled *or*
+     disabled. A cron Routine is never hidden by the `include_completed` filter, so the
+     absence is real rather than a listing artifact.
+   - **The creation mechanism this section named is gone** — there is no `schedule` skill
+     in `.claude/skills/`.
+   - **No trace of a periodic run.** Repo history holds exactly three docs-accuracy audit
+     PRs (#3243, #4219, #4312), every one hand-initiated against a named issue family, the
+     most recent 2026-07-31. Nothing on a cadence.
+
+2. **A change-scoped run is not a backstop.** The old text had the routine compute "the
+   change-scoped doc list since the last audit", while the cost note below calls part 4 the
+   "periodic **full** backstop". Those are two different runs and only the second is a
+   backstop — a change-scoped list is derived by the very anchor heuristic whose misses
+   the backstop exists to catch, so scoping it that way re-inherits the blind spot it is
+   meant to cover. A backstop has to run `--all`: all 178 hand-written docs (run
+   `check-audit-scope.mjs` for today's number rather than trusting this one).
 
 ---
 
 **Cost note:** a full audit is ~2 agents per doc — measured at ~2.8M output tokens /
 ~160 agents when the scope was 128 docs, and the hand-written set is 178 today (run
 `check-audit-scope.mjs` for the current number; don't trust a count written down here).
-Always prefer the change-scoped list (`affected-docs.mjs`) over `--all` except for the
-periodic full backstop.
+Always prefer the change-scoped list (`affected-docs.mjs`) over `--all`; reach for `--all`
+only for a deliberate full audit. (This sentence used to name the periodic full backstop as
+the exception — see part 4: that backstop is not running.)
