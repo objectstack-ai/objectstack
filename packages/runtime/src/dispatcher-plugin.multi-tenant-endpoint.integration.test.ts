@@ -256,11 +256,14 @@ describe('#5040 E5b — multi-tenant resolution finds no environment: decline + 
         // single-environment host that never had a resolver.
         expect(resolverCalls).toEqual([undefined]);
 
-        // Declining writes nothing, so the bare Hono 404 stands. The host
+        // Declining writes nothing, so the transport's own 404 stands. The host
         // DECLARES this path and could have served it: without the branch this
         // is a 200 carrying `servedBy: 'host'`.
         expect(res.status).toBe(404);
-        expect(await res.json()).toEqual({ error: 'Not found' });
+        expect(await res.json()).toEqual({
+            success: false,
+            error: { code: 'ENDPOINT_NOT_FOUND', message: 'Not found' },
+        });
 
         // The decline happened BEFORE the probe. A declaration must never be
         // consulted for a request that was not placed in an environment.
@@ -284,7 +287,10 @@ describe('#5040 E5b — multi-tenant resolution finds no environment: decline + 
 
         expect(resolverCalls).toEqual(['env-does-not-exist']);
         expect(res.status).toBe(404);
-        expect(await res.json()).toEqual({ error: 'Not found' });
+        expect(await res.json()).toEqual({
+            success: false,
+            error: { code: 'ENDPOINT_NOT_FOUND', message: 'Not found' },
+        });
         expect(matchQueries).toEqual([]);
     }, 60_000);
 });

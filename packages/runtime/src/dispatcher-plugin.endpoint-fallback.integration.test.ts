@@ -19,8 +19,8 @@
  *
  * The load-bearing assertion in most of these is a NEGATIVE one: that adding
  * this seam changed nothing for anybody who did not ask for it. The unmatched
- * answers — the bare 404 and the 405 + `Allow` — must come back byte for byte
- * for every path no declaration owns. Since the #5040 E7 publish flip that is
+ * answers — the transport's 404 and the 405 + `Allow` — must come back byte for
+ * byte for every path no declaration owns. Since the #5040 E7 publish flip that is
  * the assertion's whole weight: stacks CAN declare endpoints now, so "the
  * fallback stays silent unless a declaration matches" is a promise to live
  * deployments rather than a property of a surface nothing could reach.
@@ -123,8 +123,18 @@ async function shutdown(kernel: LiteKernel | undefined) {
     ]);
 }
 
-/** The transport's unmatched answer, captured from a boot with no seam armed. */
-const BARE_NOT_FOUND = { error: 'Not found' };
+/**
+ * The transport's unmatched answer, captured from a boot with no seam armed.
+ *
+ * The hono adapter's `unmatchedResponse()` — the declared refusal envelope
+ * since #9364, previously the bare `{ error: 'Not found' }`. Every use below
+ * is asserting "the transport answered, the seam did not", so the value has to
+ * track the adapter; what those cases pin is the ROUTING, not the wording.
+ */
+const TRANSPORT_NOT_FOUND = {
+    success: false,
+    error: { code: 'ENDPOINT_NOT_FOUND', message: 'Not found' },
+};
 
 describe('metadata slot carries no matchEndpoint — a fully working passthrough', () => {
     let kernel: LiteKernel;
@@ -139,7 +149,7 @@ describe('metadata slot carries no matchEndpoint — a fully working passthrough
     it('answers an endpoint-shaped path with the transport\'s own 404, unchanged', async () => {
         const res = await fetch(`${baseUrl}/api/v1/apps/showcase/tasks`);
         expect(res.status).toBe(404);
-        expect(await res.json()).toEqual(BARE_NOT_FOUND);
+        expect(await res.json()).toEqual(TRANSPORT_NOT_FOUND);
     });
 
     it('serves the dispatcher\'s own routes normally', async () => {
@@ -158,7 +168,7 @@ describe('no metadata service at all', () => {
     it('answers 404 rather than failing the request', async () => {
         const res = await fetch(`${baseUrl}/api/v1/apps/showcase/tasks`);
         expect(res.status).toBe(404);
-        expect(await res.json()).toEqual(BARE_NOT_FOUND);
+        expect(await res.json()).toEqual(TRANSPORT_NOT_FOUND);
     });
 });
 
@@ -198,7 +208,7 @@ describe('matcher present — the endpoint dispatch step (#5090)', () => {
     it('answers a MISS under the mount with the transport\'s 404, unchanged', async () => {
         const res = await fetch(`${baseUrl}/api/v1/apps/showcase/nope`);
         expect(res.status).toBe(404);
-        expect(await res.json()).toEqual(BARE_NOT_FOUND);
+        expect(await res.json()).toEqual(TRANSPORT_NOT_FOUND);
         expect(queries).toContainEqual({ path: '/api/v1/apps/showcase/nope', method: 'GET' });
     });
 
@@ -206,7 +216,7 @@ describe('matcher present — the endpoint dispatch step (#5090)', () => {
         queries.length = 0;
         const res = await fetch(`${baseUrl}/api/v1/nope`);
         expect(res.status).toBe(404);
-        expect(await res.json()).toEqual(BARE_NOT_FOUND);
+        expect(await res.json()).toEqual(TRANSPORT_NOT_FOUND);
         const notFoundOnRoot = await fetch(`${baseUrl}/totally/unrouted`);
         expect(notFoundOnRoot.status).toBe(404);
         expect(queries, 'the endpoint step ran for a path outside `/api/v1/apps/`').toEqual([]);
@@ -231,9 +241,16 @@ describe('matcher present — the endpoint dispatch step (#5090)', () => {
         const res = await fetch(`${baseUrl}/api/v1/apps/showcase/tasks`, { method: 'DELETE' });
         expect(res.status).toBe(405);
         expect(res.headers.get('Allow')).toBe('PUT');
-        const body = await res.json() as { code: string; allowed: string[] };
-        expect(body.code).toBe('METHOD_NOT_ALLOWED');
-        expect(body.allowed).toEqual(['PUT']);
+        // The adapter's 405, in the declared envelope since #9364 — `code` and
+        // the `allowed` hint moved from top-level siblings into `error` and
+        // `error.details` respectively. Same two facts, one level in.
+        const body = await res.json() as {
+            success: boolean;
+            error: { code: string; details: { allowed: string[] } };
+        };
+        expect(body.success).toBe(false);
+        expect(body.error.code).toBe('METHOD_NOT_ALLOWED');
+        expect(body.error.details.allowed).toEqual(['PUT']);
     });
 
     it('answers an execution result, never the "nothing was wired" 501', async () => {
@@ -518,11 +535,11 @@ describe('the wired chain — policies, then the real pipeline (#5129)', () => {
         queries.length = 0;
         const outside = await fetch(`${baseUrl}/api/v1/nope`);
         expect(outside.status).toBe(404);
-        expect(await outside.json()).toEqual(BARE_NOT_FOUND);
+        expect(await outside.json()).toEqual(TRANSPORT_NOT_FOUND);
 
         const missUnderMount = await fetch(`${baseUrl}/api/v1/apps/showcase/not-declared`);
         expect(missUnderMount.status).toBe(404);
-        expect(await missUnderMount.json()).toEqual(BARE_NOT_FOUND);
+        expect(await missUnderMount.json()).toEqual(TRANSPORT_NOT_FOUND);
 
         expect(queries).toEqual([{ path: '/api/v1/apps/showcase/not-declared', method: 'GET' }]);
     });

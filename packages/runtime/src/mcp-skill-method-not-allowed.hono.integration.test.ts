@@ -25,6 +25,15 @@ import { createDispatcherPlugin } from './dispatcher-plugin.js';
  * `{success:false, error:{code, message, httpStatus}}` carrying the documented
  * message "Method not allowed — use GET".
  *
+ * ⚠️ The quoted body above is the shape MEASURED IN #7627, and the adapter no
+ * longer emits it: #9364 converted `unmatchedResponse()` onto the same declared
+ * envelope, nesting `method`/`path`/`allowed` under `error.details`. The defect
+ * this file guards is unchanged — the wrong DOOR answering — but the two doors
+ * are no longer told apart by envelope shape, only by which optional member
+ * each fills (`httpStatus` for the domain, `details` for the adapter). See the
+ * note on the negative case below; several assertions here had to move for
+ * exactly that reason, and would otherwise have gone quietly vacuous.
+ *
  * ## Why the defect was invisible to the existing tests
  *
  * The 405 branch is NOT missing. `handleMcpSkillRequest` has had one since
@@ -146,13 +155,23 @@ describe('POST /api/v1/mcp/skill answers the standard 405 envelope (integration,
     it('POST does not answer with `unmatchedResponse()`\'s shape', async () => {
         const { body } = await call('POST');
 
-        // The four keys that identify the adapter's unmatched-route answer.
-        // `error` as a STRING is the tell — the standard envelope nests an
-        // object there, so this assertion cannot be satisfied by both shapes.
-        expect(typeof body.error).not.toBe('string');
-        expect(body).not.toHaveProperty('method');
-        expect(body).not.toHaveProperty('path');
-        expect(body).not.toHaveProperty('allowed');
+        // ⚠️ The tell CHANGED with #9364, and the old one would now pass
+        // vacuously. Before that card the adapter's 405 answered
+        // `error: 'Method Not Allowed'` (a STRING) with `method`/`path`/
+        // `allowed` as TOP-LEVEL siblings, so `typeof body.error !== 'string'`
+        // and three `not.toHaveProperty` checks genuinely separated the two
+        // doors. #9364 put the adapter's refusal into the same declared
+        // envelope, nesting its context under `error.details` — so all four of
+        // those assertions are now true of the ADAPTER answer as well, and
+        // would keep this test green in exactly the world it exists to catch.
+        //
+        // What still separates the doors is which OPTIONAL member each fills:
+        // the dispatcher's `buildApiError` carries `httpStatus` and no
+        // `details`; the adapter's `unmatchedResponse` carries
+        // `details.{method,path,allowed}` and no `httpStatus`. Both halves are
+        // asserted here so this case discriminates on its own.
+        expect(body.error).not.toHaveProperty('details');
+        expect(body.error.httpStatus).toBe(405);
     });
 
     // The `Allow` header CHANGES with this fix, which is worth stating exactly
@@ -201,6 +220,21 @@ describe('POST /api/v1/mcp/skill answers the standard 405 envelope (integration,
     it('PUT — unmounted — still falls through to the adapter (boundary, not a regression)', async () => {
         const { res, body } = await call('PUT');
         expect(res.status).toBe(405);
-        expect(body).toHaveProperty('allowed');
+
+        // The adapter's own 405. Since #9364 it speaks the SAME declared
+        // envelope as the domain branch, so `success`/`error.code` no longer
+        // tell the two apart — `error.details.allowed` is what does, and it is
+        // the direct successor of the top-level `allowed` this case used to
+        // read. Asserted by VALUE, not by presence — and the value is the
+        // whole four-verb set because #7649's fix mounts GET/POST/DELETE, with
+        // Hono registering HEAD implicitly alongside GET. That is precisely
+        // why PUT is the boundary probe: it is the one verb left unmounted.
+        expect(body.error.code).toBe('METHOD_NOT_ALLOWED');
+        expect(body.error.details.allowed).toEqual(['DELETE', 'GET', 'HEAD', 'POST']);
+        expect(body.error.details.method).toBe('PUT');
+        expect(body.error.details.path).toBe(SKILL_PATH);
+        // …and it is NOT the domain branch's answer, which fills `httpStatus`
+        // and no `details`.
+        expect(body.error).not.toHaveProperty('httpStatus');
     });
 });

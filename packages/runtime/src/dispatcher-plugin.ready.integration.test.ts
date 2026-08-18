@@ -59,14 +59,17 @@ describe('GET /ready over a real HTTP server (integration)', () => {
     expect(body.data.status).toBe('ok');
   });
 
-  it('proves the harness mirrors prod: an unmounted path 404s with the Hono not-found body', async () => {
+  it('proves the harness mirrors prod: an unmounted path 404s with the adapter not-found body', async () => {
     // This is the exact response /ready produced BEFORE the fix. Asserting it
     // here shows the test would have failed against the old code (the /ready
     // assertion above would have returned this body), not passed vacuously.
     const res = await fetch(`${baseUrl}/api/v1/this-route-does-not-exist`);
     expect(res.status).toBe(404);
     const body = await res.json();
-    expect(body).toEqual({ error: 'Not found' });
+    expect(body).toEqual({
+        success: false,
+        error: { code: 'ENDPOINT_NOT_FOUND', message: 'Not found' },
+    });
   });
 
   it('returns 503 while the kernel is shutting down (drain signal)', async () => {
