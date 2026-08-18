@@ -113,9 +113,19 @@
  *     (`const code = readFrom(x); err.code = code`) is out of reach for the
  *     same reason an interpolated template is, and — unlike a template, which
  *     at least has a stable family identity — has nothing to report under. It
- *     contributes no site. `packages/metadata-protocol/src/sys-metadata-repository.ts`
- *     is the live example worth closing next: `const code = intent === 'x' ? 'A' : 'B'`
- *     is a local TERNARY OF LITERALS, which a resolver could reduce.
+ *     contributes no site.
+ *   - [#9568] But "in a local variable" was doing too much work in that bound.
+ *     A local whose initializer is a TERNARY, or a `||`/`??` chain, OF LITERALS
+ *     is not a runtime value at all — every branch is right there in the
+ *     source, and `sys-metadata-repository.ts` stamped two live 403s
+ *     (`NOT_CREATABLE` / `NOT_OVERRIDABLE`) through one such local while both
+ *     this gate and `check:error-code-casing` reported nothing. `resolveConstant`
+ *     now reduces those to a SET of values, so the bound is what it always
+ *     meant: a value a source scan cannot evaluate is out of reach; a value
+ *     spelled out in every branch is not, whichever shape it arrives through.
+ *     Reduction is ALL-OR-NOTHING — a chain with one runtime limb reduces to
+ *     nothing rather than to its literal half, since half an expression's
+ *     values is a finding that is wrong in both directions at once.
  *   - A constant this gate cannot resolve is REPORTED as unresolved, never
  *     dropped: a deriver that goes quietly blind is the same failure one layer
  *     down. [#9223] A constant imported from a WORKSPACE package is resolved
@@ -221,8 +231,12 @@ export const SHAPES = [
   //
   // Two different indirections arrive through one regex, so it emits two shape
   // names rather than pretending they are one thing:
-  //   - `assignconst` — the identifier is a module constant `resolveConstant`
-  //     can reduce to a literal, exactly as in the object-literal position.
+  //   - `assignconst` — the identifier is a constant `resolveConstant` can
+  //     reduce to a literal, exactly as in the object-literal position.
+  //     [#9568] "Constant" is the resolver's question, not the casing's: a
+  //     lower-case LOCAL `const code = cond ? 'A' : 'B'` reduces to both of
+  //     its branches and is emitted under this same name (from the branch
+  //     below, since this regex reads the SCREAMING_SNAKE convention).
   //   - `codehelper`  — the identifier is a PARAMETER of the enclosing function
   //     or constructor, which makes that function a code-carrying helper
   //     (`postureError(code, message)`, `makeError(status, code, message)`).
@@ -236,6 +250,9 @@ export const SHAPES = [
   // textual: it fires only when the assigned identifier is a PARAMETER of the
   // enclosing function or constructor, which is what makes that declaration a
   // helper and its call sites the place the codes live. See `helperCodesFor`.
+  // [#9568] When it is NOT a parameter, this shape hands the identifier to
+  // `resolveConstant` before giving up on it — that is where a local ternary
+  // of literals is reduced, and it reports under `assignconst`.
   { name: 'codehelper', re: /\.code\s*=\s*([A-Za-z_$][\w$]*)\s*[;,\n)]/g, resolve: 'helper', lowercase: 'here' },
 ];
 
@@ -306,11 +323,210 @@ export function parsePackageDirs(manifests) {
 }
 
 /**
- * Resolve `NAME` to its string value: the declaring file first, then the module
- * it is imported from. Two packages export a `MULTI_TENANT_UNSUPPORTED_CODE`
- * with DIFFERENT values, so a repo-wide name lookup would answer confidently
- * and wrongly — the in-file declaration has to win, and the import has to be
- * followed to its own file rather than guessed.
+ * [#9568] The literal values an initializer EXPRESSION can hold, or `null` when
+ * any limb of it is something a source scan cannot reduce.
+ *
+ * ## Why a SET of values rather than one
+ *
+ * `const code = intent === 'runtime-only' ? 'NOT_CREATABLE' : 'NOT_OVERRIDABLE'`
+ * is a live 403 in `sys-metadata-repository.ts` that stamps TWO codes through
+ * one identifier. A resolver that answers with one string has to pick a branch,
+ * and picking is exactly what this gate refuses to do elsewhere (see the
+ * two-drivers hazard below) — so resolution is value-SET valued end to end and
+ * a ternary contributes both of its branches as sites.
+ *
+ * ## Why it stops where it does
+ *
+ * Reduction is ALL-OR-NOTHING per expression. `asSemanticCode(a) ?? asSemanticCode(b)`
+ * (`packages/client`) has no literal in it at all, and a rule that harvested
+ * the literal limbs of a partly-runtime expression would report a code the
+ * program may never stamp while staying silent about the limb it cannot see —
+ * a finding that is wrong in both directions at once. So: every limb reduces,
+ * or the expression does not, and an unreducible one keeps the treatment its
+ * shape already had (reported as unresolved where a constant was expected, out
+ * of reach where a runtime local was).
+ *
+ * Reduced: a quoted literal · a ternary of reducible branches (nested, and the
+ * CONDITION is never evaluated — only the branches must reduce) · a `||` / `??`
+ * chain whose every operand reduces · either wearing parentheses or `as const`.
+ * An identifier limb is handed to `resolveIdent`, which is how a ternary of two
+ * named constants reduces; `depth` bounds a self-referential one rather than
+ * spinning on it.
+ */
+export function literalCodeValues(expr, resolveIdent = () => null, depth = 0) {
+  if (depth > 8) return null;
+  const e = unwrapExpression(expr);
+  if (!e) return null;
+
+  const lit = /^'([A-Za-z][A-Za-z0-9_]*)'$/.exec(e) ?? /^`([A-Za-z][A-Za-z0-9_]*)`$/.exec(e);
+  if (lit) return [lit[1]];
+
+  const ternary = splitTernary(e);
+  if (ternary) {
+    const whenTrue = literalCodeValues(ternary[0], resolveIdent, depth + 1);
+    const whenFalse = literalCodeValues(ternary[1], resolveIdent, depth + 1);
+    if (!whenTrue || !whenFalse) return null;
+    return [...new Set([...whenTrue, ...whenFalse])];
+  }
+
+  const chain = splitChain(e);
+  if (chain) {
+    const out = new Set();
+    for (const operand of chain) {
+      const vals = literalCodeValues(operand, resolveIdent, depth + 1);
+      if (!vals) return null;
+      for (const v of vals) out.add(v);
+    }
+    return out.size ? [...out] : null;
+  }
+
+  if (/^[A-Za-z_$][\w$]*$/.test(e)) {
+    const via = resolveIdent(e, depth + 1);
+    return via && via.length ? via : null;
+  }
+  return null;
+}
+
+/** `('A')` and `'A' as const` are the same value wearing decoration. */
+function unwrapExpression(expr) {
+  let e = String(expr ?? '').trim();
+  for (let i = 0; i < 8; i += 1) {
+    const undecorated = e.replace(/\s+as\s+const$/, '').trim();
+    if (undecorated !== e) { e = undecorated; continue; }
+    if (e.startsWith('(') && sliceBalanced(e, 0) === e.slice(1, -1) && e.endsWith(')')) {
+      e = e.slice(1, -1).trim();
+      continue;
+    }
+    break;
+  }
+  return e;
+}
+
+/**
+ * Walk `src` calling `visit(char, index)` only at TOP level — inside no bracket,
+ * no string and no template. Brackets only: `<` and `>` are comparison operators
+ * far more often than generics inside a value expression, and counting them as
+ * depth reads `a < b ? 'A' : 'B'` as unbalanced and gives up on a reducible one.
+ */
+function scanTopLevel(src, visit) {
+  let depth = 0;
+  for (let i = 0; i < src.length; i += 1) {
+    const c = src[i];
+    if (c === '(' || c === '[' || c === '{') { depth += 1; continue; }
+    if (c === ')' || c === ']' || c === '}') { depth -= 1; continue; }
+    if (c === "'" || c === '"' || c === '`') {
+      const quote = c;
+      i += 1;
+      while (i < src.length && src[i] !== quote) i += src[i] === '\\' ? 2 : 1;
+      continue;
+    }
+    if (depth === 0 && visit(c, i) === false) return;
+  }
+}
+
+/** `cond ? A : B` → `[A, B]`, or `null`. Nested ternaries keep their own colon. */
+export function splitTernary(expr) {
+  let question = -1;
+  scanTopLevel(expr, (c, i) => {
+    if (c !== '?' || question >= 0) return;
+    // `??` and `?.` are not the conditional operator.
+    if (expr[i + 1] === '?' || expr[i + 1] === '.' || expr[i - 1] === '?') return;
+    question = i;
+    return false;
+  });
+  if (question < 0) return null;
+
+  let nested = 0;
+  let colon = -1;
+  scanTopLevel(expr.slice(question + 1), (c, i) => {
+    if (c === '?' ) {
+      const rest = expr.slice(question + 1);
+      if (rest[i + 1] === '?' || rest[i + 1] === '.' || rest[i - 1] === '?') return;
+      nested += 1;
+      return;
+    }
+    if (c !== ':') return;
+    if (nested === 0) { colon = question + 1 + i; return false; }
+    nested -= 1;
+  });
+  if (colon < 0) return null;
+  return [expr.slice(question + 1, colon), expr.slice(colon + 1)];
+}
+
+/** `A ?? B ?? C` / `A || B` → the operands, or `null` when there is no chain. */
+export function splitChain(expr) {
+  const cuts = [];
+  scanTopLevel(expr, (c, i) => {
+    if ((c === '|' && expr[i + 1] === '|') || (c === '?' && expr[i + 1] === '?')) {
+      if (cuts.length && i === cuts[cuts.length - 1] + 1) return; // the second char of the pair
+      cuts.push(i);
+    }
+  });
+  if (!cuts.length) return null;
+  const parts = [];
+  let start = 0;
+  for (const cut of cuts) {
+    parts.push(expr.slice(start, cut));
+    start = cut + 2;
+  }
+  parts.push(expr.slice(start));
+  return parts;
+}
+
+/**
+ * [#9568] Every `const NAME = …` in `source`, as raw initializer text — the
+ * declaration's own `;` terminates it, so a multi-line ternary survives intact.
+ */
+export function declaredInitializers(name, source, { exported = false } = {}) {
+  const head = new RegExp(
+    `\\b${exported ? 'export\\s+' : '(?:export\\s+)?'}const\\s+${name}\\s*(?::[^=;\\n]+)?=\\s*`,
+    'g',
+  );
+  const inits = [];
+  for (const m of source.matchAll(head)) {
+    const from = m.index + m[0].length;
+    let end = -1;
+    scanTopLevel(source.slice(from, from + 2000), (c, i) => {
+      if (c !== ';') return;
+      end = i;
+      return false;
+    });
+    if (end < 0) continue; // no terminator in reach — not something to reduce
+    inits.push(source.slice(from, from + end));
+  }
+  return inits;
+}
+
+/**
+ * [#9568] The values `name` can hold according to THIS source, or `null`.
+ *
+ * Two declarations of one name that reduce differently answer `null` rather
+ * than first-wins: a file-wide textual lookup has no scopes, so "the first
+ * `const code = …` in the file" is a guess exactly like the repo-wide lookup
+ * the two-drivers hazard rules out. Identifier limbs resolve within this same
+ * source only — following an import from inside a ternary would need the
+ * importing file's scope for each limb, and the shape that needs it has not
+ * appeared.
+ */
+function inFileValues(name, source, opts = {}, depth = 0) {
+  const inits = declaredInitializers(name, source, opts);
+  if (!inits.length) return null;
+  const sets = [];
+  for (const init of inits) {
+    const vals = literalCodeValues(init, (id, d) => (id === name ? null : inFileValues(id, source, opts, d)), depth);
+    if (!vals) return null;
+    sets.push(vals);
+  }
+  const distinct = new Set(sets.map((s) => [...s].sort().join('|')));
+  return distinct.size === 1 ? sets[0] : null;
+}
+
+/**
+ * Resolve `NAME` to the string values it can hold: the declaring file first,
+ * then the module it is imported from. Two packages export a
+ * `MULTI_TENANT_UNSUPPORTED_CODE` with DIFFERENT values, so a repo-wide name
+ * lookup would answer confidently and wrongly — the in-file declaration has to
+ * win, and the import has to be followed to its own file rather than guessed.
  *
  * [#9223] A bare specifier is followed too, but ONLY when it names a workspace
  * package: `import { ANONYMOUS_DENY_CODE } from '@objectstack/core'` points at
@@ -322,14 +538,14 @@ export function parsePackageDirs(manifests) {
  * to `null` and is reported rather than guessed. A genuine third-party
  * dependency has no workspace directory and stays out of reach.
  *
- * Returns `null` when it cannot be resolved; the caller reports that, never
+ * [#9568] Returns an ARRAY — a constant whose initializer is a ternary or a
+ * `||`/`??` chain of literals holds more than one code, and every branch is a
+ * real stamp. `null` when it cannot be resolved; the caller reports that, never
  * drops it.
  */
 export function resolveConstant(name, fileSource, fileRel, readFile, ctx = {}) {
-  const local = new RegExp(`\\b(?:export\\s+)?const\\s+${name}\\s*(?::[^=]+)?=\\s*'([A-Za-z][A-Za-z0-9_]*)'`).exec(
-    fileSource,
-  );
-  if (local) return local[1];
+  const local = inFileValues(name, fileSource);
+  if (local) return local;
 
   // `import { A, NAME, B } from './x.js'` — find the specifier that names it.
   const imports = [...fileSource.matchAll(/import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*'([^']+)'/g)];
@@ -342,10 +558,8 @@ export function resolveConstant(name, fileSource, fileRel, readFile, ctx = {}) {
       const abs = join(ROOT, cand);
       if (!existsSync(abs)) continue;
       const target = maskComments(readFile(abs));
-      const hit = new RegExp(
-        `\\bexport\\s+const\\s+${name}\\s*(?::[^=]+)?=\\s*'([A-Za-z][A-Za-z0-9_]*)'`,
-      ).exec(target);
-      if (hit) return hit[1];
+      const hit = inFileValues(name, target, { exported: true });
+      if (hit) return hit;
     }
     return null;
   }
@@ -382,14 +596,16 @@ function resolveFromWorkspacePackage(name, spec, { scanned, packageDirs } = {}) 
   if (!scanned || !packageDirs) return null;
   const dir = packageDirs.get(packageOfSpecifier(spec) ?? '');
   if (!dir) return null; // a genuine third-party dependency — out of scan reach
-  const re = new RegExp(`\\bexport\\s+const\\s+${name}\\s*(?::[^=]+)?=\\s*'([A-Za-z][A-Za-z0-9_]*)'`);
-  const values = new Set();
+  // [#9568] Unique-or-nothing over the VALUE SETS, not over single values: a
+  // ternary-valued export is one answer with two codes in it, and two files
+  // answering the same pair is still one answer.
+  const answers = new Map();
   for (const f of scanned) {
     if (!f.rel.startsWith(`${dir}/`)) continue;
-    const hit = re.exec(f.stripped);
-    if (hit) values.add(hit[1]);
+    const values = inFileValues(name, f.stripped, { exported: true });
+    if (values) answers.set([...values].sort().join('|'), values);
   }
-  return values.size === 1 ? [...values][0] : null;
+  return answers.size === 1 ? [...answers.values()][0] : null;
 }
 
 /**
@@ -542,12 +758,12 @@ export function helperCodesFor(ident, offset, src, resolveIdent = () => null) {
     if (args === null) continue;
     const parts = splitTopLevel(args);
     const arg = (parts[index] ?? '').trim();
-    const lit = /^'([A-Za-z][A-Za-z0-9_]*)'$/.exec(arg);
-    if (lit) { codes.add(lit[1]); continue; }
-    if (/^[A-Za-z_$][\w$]*$/.test(arg)) {
-      const viaConst = resolveIdent(arg);
-      if (viaConst) codes.add(viaConst);
-    }
+    // [#9568] One value-level reducer for all three argument spellings: a
+    // quoted literal, a constant (the MCP bridge's `exposureError(msg, CONST,
+    // 404)`), and — the class this widening adds — a ternary or `||`/`??`
+    // chain of literals handed straight to the helper.
+    const values = literalCodeValues(arg, resolveIdent);
+    if (values) for (const v of values) codes.add(v);
   }
   return [...codes];
 }
@@ -619,13 +835,21 @@ export function deriveSites({ registered, files, readFile, packageDirs = new Map
       for (const m of stripped.matchAll(shape.re)) {
         let code = m[1];
         let emitAs = shape.name;
+        const emit = (value, shapeName) => {
+          if (!keep(value, shapeName)) return;
+          if (sites.some((s) => s.code === value && s.file === rel && s.shape === shapeName)) return;
+          sites.push({ code: value, file: rel, shape: shapeName });
+        };
         if (shape.resolve === 'constant') {
-          const value = resolveConstant(code, stripped, rel, readFile, ctx);
-          if (value === null) {
+          // [#9568] A constant holds a SET of values — `const X = c ? 'A' : 'B'`
+          // stamps both, and each is its own site to classify.
+          const values = resolveConstant(code, stripped, rel, readFile, ctx);
+          if (values === null || values.length === 0) {
             addUnresolved(unresolved, { file: rel, shape: shape.name, value: code, reason: 'constant' });
             continue;
           }
-          code = value;
+          for (const value of values) emit(value, shape.name);
+          continue;
         } else if (shape.resolve === 'helper') {
           // [#9460] Structural: the identifier must be a PARAMETER of the
           // enclosing declaration. Anything else — a module constant, a local
@@ -635,7 +859,28 @@ export function deriveSites({ registered, files, readFile, packageDirs = new Map
           const helperCodes = helperCodesFor(code, m.index, stripped, (arg) =>
             resolveConstant(arg, stripped, rel, readFile, ctx),
           );
-          if (helperCodes === null) continue;
+          if (helperCodes === null) {
+            // [#9568] Not a parameter — so this is the OTHER indirection the
+            // assign position carries: an identifier holding a constant. It
+            // reaches here rather than `assignconst` only because that shape's
+            // regex reads the SCREAMING_SNAKE module-constant convention, and
+            // the live case is a lower-case LOCAL: `const code = intent === 'x'
+            // ? 'NOT_CREATABLE' : 'NOT_OVERRIDABLE'; err.code = code`, two live
+            // 403s in `sys-metadata-repository.ts` that both gates were blind
+            // to. Reduced by the same resolver and emitted under the same shape
+            // name, because it is the same thing: the assign position, one
+            // constant indirection away.
+            //
+            // Unreducible keeps its old treatment — no site, no unresolved.
+            // That is the header's RUNTIME-VALUE bound, not a silencing: a
+            // `const code = readFrom(x)` has no value to report and no family
+            // to report it under, and turning every domain field named `code`
+            // into a finding is what this branch already refuses to do.
+            const localValues = resolveConstant(code, stripped, rel, readFile, ctx);
+            if (localValues === null) continue;
+            for (const value of localValues) emit(value, 'assignconst');
+            continue;
+          }
           if (helperCodes.length === 0) {
             // A helper this scan CAN see but whose callers all pass variables.
             // Reported, never dropped — the bound this gate states for every
@@ -1173,6 +1418,101 @@ function selfTest() {
       'splitTopLevel counted a nested or templated comma as a separator',
     );
     ok(parseParamNames('readonly a: Map<string, number> = x, b?: string').join(',') === 'a,b', 'parseParamNames mis-read a parameter list');
+  }
+
+  // [#9568] The value-level reduction: a constant holding a TERNARY or a
+  // `||`/`??` chain of literals. Every assertion here is pinned on the property
+  // that was missing, and the block as a whole is what fails if the reduction
+  // is reverted — the widening's own regression test.
+  {
+    const one = (source) =>
+      deriveSites({ registered, files: [{ rel: 'packages/x/src/a.ts', source }], readFile: () => '' });
+    const codesOf = (r) => r.sites.map((s) => s.code).sort().join(',');
+
+    // The card's live producer, reduced to its shape: two 403 codes reaching
+    // the stamp through ONE lower-case local, which is neither a helper
+    // parameter nor a module constant, so before this widening the site
+    // contributed nothing at all.
+    const specimen =
+      `const code = intent === 'runtime-only' ? 'NOT_CREATABLE_ONE' : 'NOT_OVERRIDABLE_ONE';\n` +
+      `const err: any = new Error(\`[\${code}] x\`);\nerr.code = code;\nerr.status = 403;\nthrow err;`;
+    const reduced = one(specimen);
+    ok(
+      codesOf(reduced) === 'NOT_CREATABLE_ONE,NOT_OVERRIDABLE_ONE',
+      `a local ternary of literals did not reduce to BOTH branches: ${JSON.stringify(reduced.sites)}`,
+    );
+    ok(
+      reduced.sites.every((s) => s.shape === 'assignconst'),
+      'a reduced local reported under a shape other than the assign position it is stamped in',
+    );
+
+    // The same reduction in the other constant-resolving positions — it lives
+    // in `resolveConstant`, so every shape that routes through it gets it.
+    ok(
+      codesOf(one(`const PAIR = flag ? 'OBJ_TERNARY_A' : 'OBJ_TERNARY_B';\nthrow Object.assign(new Error('x'), { code: PAIR });`))
+        === 'OBJ_TERNARY_A,OBJ_TERNARY_B',
+      'objlitconst did not reduce a ternary constant to both branches',
+    );
+    ok(
+      codesOf(one(`const CHAIN = A ?? 'CHAIN_A';\nclass E { readonly code = CHAIN; }`)) === '',
+      'a chain with a runtime operand was harvested for its literal half',
+    );
+    ok(
+      codesOf(one(`const CHAIN = 'CHAIN_A' || 'CHAIN_B';\nerr.code = CHAIN;`)) === 'CHAIN_A,CHAIN_B',
+      'a `||` chain of literals did not reduce to its operands',
+    );
+    ok(
+      codesOf(one(`const N = a ? 'NEST_A' : b ? 'NEST_B' : 'NEST_C';\nerr.code = N;`)) === 'NEST_A,NEST_B,NEST_C',
+      'a nested ternary lost a branch',
+    );
+    ok(
+      codesOf(one(`const A_CODE = 'VIA_A';\nconst B_CODE = 'VIA_B';\nconst PICK = f ? A_CODE : B_CODE;\nerr.code = PICK;`))
+        === 'VIA_A,VIA_B',
+      'a ternary of two named constants did not resolve through the identifier limb',
+    );
+
+    // A ternary handed straight to a code-carrying helper is the same class.
+    ok(
+      codesOf(one(
+        `function boom(code: string, message: string): Error {\n` +
+        `  const e = new Error(message);\n  e.code = code;\n  return e;\n}\n` +
+        `throw boom(flag ? 'ARG_TERNARY_A' : 'ARG_TERNARY_B', 'x');`,
+      )) === 'ARG_TERNARY_A,ARG_TERNARY_B',
+      'a ternary argument to a helper did not reduce',
+    );
+
+    // ALL-OR-NOTHING, in both directions. `packages/client` builds its code as
+    // `asSemanticCode(a) ?? asSemanticCode(b)` — no literal anywhere — and a
+    // genuinely runtime local is the bound #9460 stated. Neither may become a
+    // site, and neither may become an `unresolved` finding either: turning
+    // every runtime-valued local named `code` into a red gate is the silencing
+    // pressure this family keeps re-learning.
+    for (const [what, source] of [
+      ['a chain of calls', `const errorCode = asSemanticCode(a) ?? asSemanticCode(b);\nerror.code = errorCode;`],
+      ['a runtime local', `const code = readFrom(x);\nerr.code = code;`],
+      ['a ternary of runtime values', `const code = flag ? readA() : readB();\nerr.code = code;`],
+    ]) {
+      const r = one(source);
+      ok(r.sites.length === 0, `${what} produced a site out of values no scan can see: ${JSON.stringify(r.sites)}`);
+      ok(r.unresolved.length === 0, `${what} was reported as an unresolvable code constant`);
+    }
+
+    // Two declarations of one name that reduce differently: REPORTED, never
+    // first-wins. A file-wide textual lookup has no scopes, so picking the
+    // first is the same guess the two-drivers hazard rules out repo-wide.
+    const twice = one(`const DUP = a ? 'DUP_A' : 'DUP_B';\nfunction g() { const DUP = 'DUP_C'; }\nerr.code = DUP;`);
+    ok(twice.sites.length === 0, `two declarations of one constant were resolved to one of them: ${JSON.stringify(twice.sites)}`);
+    ok(twice.unresolved.length === 1, 'an ambiguous in-file constant was not reported');
+
+    // The splitters' own hazards, pinned because both are silent when wrong.
+    ok(
+      JSON.stringify(splitTernary(`a < b ? 'LT' : 'GE'`)) === JSON.stringify([` 'LT' `, ` 'GE'`]),
+      'splitTernary read a comparison operator as a bracket and gave up on a reducible ternary',
+    );
+    ok(splitTernary(`a?.b ?? c`) === null, 'splitTernary read `?.` or `??` as the conditional operator');
+    ok(splitChain(`f(a || b) ?? 'X'`).length === 2, 'splitChain cut inside a nested call');
+    ok(literalCodeValues(`('WRAPPED' as const)`).join(',') === 'WRAPPED', 'a parenthesised / `as const` literal did not reduce');
+    ok(literalCodeValues(`x ? 'A' : y`) === null, 'a ternary with one runtime branch reduced to half its values');
   }
 
   // [#9223] Workspace-package resolution: `packages/` is inside the scan, so a
