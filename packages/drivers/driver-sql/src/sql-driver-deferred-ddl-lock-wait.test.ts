@@ -56,6 +56,22 @@ const WIDGET = {
 interface Issued { session: number; sql: string; bindings: unknown[] }
 
 /**
+ * [#9609] The driver's logger shape, with `error` OPTIONAL exactly as
+ * `SqlDriver` declares it.
+ *
+ * Spelled out rather than inferred from each fixture's object literal: an
+ * inferred type makes `error` REQUIRED on whichever fixture happens to supply
+ * it, and then the no-error-sink twin below cannot extend it — which reads as a
+ * TypeScript puzzle when it is really the contract under test. `error?` is the
+ * whole reason `logDurabilityFailure` needs a fallback.
+ */
+type FakeLogSink = {
+  warn: (msg: string, meta?: any) => void;
+  info?: (msg: string, meta?: any) => void;
+  error?: (msg: string, meta?: any) => void;
+};
+
+/**
  * MySQL's lock-wait timeout as mysql2 raises it, wrapped the way knex re-throws
  * it — the wrapper is the point: a recognizer reading only the top-level error
  * goes blind here, and blind means back to the year-long hang.
@@ -112,7 +128,7 @@ class FakeMysqlDriver extends SqlDriver {
    */
   logs: Array<{ level: 'warn' | 'error'; msg: string; meta?: any }> = [];
 
-  protected override logger = {
+  protected override logger: FakeLogSink = {
     warn: (msg: string, meta?: any) => { this.logs.push({ level: 'warn', msg, meta }); },
     error: (msg: string, meta?: any) => { this.logs.push({ level: 'error', msg, meta }); },
     info: () => {},
@@ -196,8 +212,8 @@ function makeDriver(): FakeMysqlDriver {
  * that only looks at the driver with a full sink.
  */
 class NoErrorSinkDriver extends FakeMysqlDriver {
-  protected override logger = {
-    warn: (msg: string, meta?: any) => { this.logs.push({ level: 'warn' as const, msg, meta }); },
+  protected override logger: FakeLogSink = {
+    warn: (msg: string, meta?: any) => { this.logs.push({ level: 'warn', msg, meta }); },
     info: () => {},
   };
 }
