@@ -265,7 +265,7 @@ import { fileURLToPath } from 'node:url';
  * required gate — that is the whole point — but it does silently falsify that
  * prose. Filed as its own card rather than solved here, since a pin for
  * "contract job names that are not required contexts" is a new mechanism and
- * this card is ledger hygiene.
+ * this card is ledger hygiene. Filed as #9793.
  *
  * ⛔ `carries` names the gate FAMILY and never a step count — assertion 10
  * enforces that, because prose here reads as measurement while being asserted
