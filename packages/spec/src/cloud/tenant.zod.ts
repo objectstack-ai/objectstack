@@ -44,10 +44,28 @@ export type TenantDatabaseStatus = z.input<typeof TenantDatabaseStatusSchema>;
  * `planAllowsAiStudio`) interpret specific values, and they own that
  * interpretation independently of this schema.
  *
- * Convention (not enforced here): an empty or unrecognized value is treated
- * as the free tier by cloud-side readers. Spec accepts any string, including
- * the empty one — the free-tier fallback is the cloud distribution's
- * normalization, not a spec-level default.
+ * Convention (not enforced here): as of the cloud#1380 ruling (2026-08-16,
+ * landed in cloud PR #1417, merged 2026-08-17), an empty or unrecognized
+ * value folds to the free tier on **both** cloud-side mirrors (the
+ * control-plane `planKey` reader and the tenant-runtime `isFreePlan`
+ * reader). The fold happens at the **entitlement layer**, not in
+ * normalization: `sys_environment.plan` keeps the raw value (case-normalized
+ * only), so an unrecognized tier stays distinguishable from the free tier to
+ * any reader, log line, or operator — cloud#1389's red line is normalize the
+ * spelling, never the vocabulary. Spec accepts any string, including the
+ * empty one — the free-tier fallback is a cloud-side entitlement decision,
+ * not a spec-level default.
+ *
+ * The two mirrors' vocabularies are **not** merged into one list: cloud#1380
+ * lands A over a copy of the vocabulary, pinned to the source by an
+ * element-for-element equality guard. Unifying them is cloud#1418 (ruled,
+ * not yet landed) — and even once it lands, a SHA-pinned image can still
+ * predate a vocabulary entry, so the two lists can disagree either way.
+ *
+ * The fold's premise is operational, not structural: new plan tiers are
+ * minted rarely, and images roll before a new tier goes on sale. If that
+ * discipline changes, this premise changes with it (see the cloud
+ * distribution's `isFreePlan` docstring, which carries the same premise).
  */
 export const TenantPlanSchema = lazySchema(() => z.string().describe(
   'Opaque plan/tier identifier. The vocabulary is control-plane config owned by the '
