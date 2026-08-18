@@ -190,14 +190,21 @@ dispatch prompt 只携带每单增量(裁决引文、裁决 / PM-机制假设分
   (删掉一个喂计数的读取,能让下游门禁*多出*一个发现);反转(canonical-first 的 `??`
   链:非法拼写落到 schema 的具名拒收 —— 规则绿、schema 红)。报告你实际观察到的方向;永
   不硬套模板的预设。
-- **dogfood ablation 跑在 `dist/` 上,所以要重建被 ablate 的包 —— 并在报告里说明你建
-  了。** `packages/qa/dogfood` 刻意从各包**构建产物 `dist/`** 解析被测代码,且两个方向
-  不对称:没 build 的修复是会被注意到的假红,没 build 的 **ablation** 跑的是变异前的构
-  建、保持**绿** —— 给一条可能永远失败不了的断言背书,对 CI 永久隐形。每一腿都是:变异
-  → `pnpm --filter <pkg> build` → **证明变异到达了产物** → 运行:
-  `node scripts/ablation-dist-preflight.mjs <pkg> '<marker>'`,ablation 删守卫时用
-  `--absent` —— 它同时是恢复腿,因为留在 `dist/` 里的 marker 会让变异代码在之后每次运行
-  里继续生效。
+- **ablation 的成立条件是解析路径,不是套件名 —— 变异腿与还原腿都要重建,并在报告里说
+  明你建了。** 条件:**被测主体经依赖的 `exports` 解析**(那指向该包的 `dist/`,不是
+  `src/`),且没有 vitest alias 把 specifier 拉回源码;这批 pair 有实测台账 ——
+  `scripts/check-test-source-alias.mjs` 的 `KNOWN_UNALIASED_TEST_IMPORTS`。
+  `packages/qa/dogfood` 是最眼熟的一例,不是定义:读成 dogfood 专属,普通单元套件里的
+  ablation 就会被当真(实测:plugin-email → platform-objects 消融后 375 试全绿,重建后
+  4 红;plugin-auth → core 那组「证明新门禁能红」的腿跑的是变异前产物)。两个方向不对
+  称:没 build 的修复是会被注意到的假红;没 build 的 **ablation** 保持**绿**,给一条可
+  能永远失败不了的断言背书,对 CI 永久隐形(CI 构建正确,那边永远绿)。⚠️ 消融本就为证
+  明**新门禁能失败**时,这份假绿不是空结果 —— 它读作「门禁没触发」,指向门禁坏了而不是
+  夹具坏了,于是有人去弱化一条本来正常的门禁。所以每一腿(变异**与**还原)都是:改动 →
+  `pnpm --filter <pkg> build` → **证明它到达了 `dist/`** → 才读运行结果:
+  `node scripts/ablation-dist-preflight.mjs <pkg> '<marker>'`(删守卫的消融、以及每个
+  **还原腿**,用 `--absent`)。⛔ 还原腿最常被跳过 —— 留在 `dist/` 里的 marker 会让变异
+  代码对该树之后的每次运行继续生效,后面的测量量的是错的树。
 
 ## Definition of done(按序)
 
