@@ -277,18 +277,25 @@ export const REQUIRED_CONTEXTS = [
  *     cannot be forgotten (self-test: 'the ledger cannot be forgotten').
  *   - `staleSites` is a per-file OCCURRENCE BUDGET, not a ban: the occurrence
  *     counts at rename time. Above budget = red (the dead name written
- *     FRESH); at or below = green with a notice. A ban would be wrong even
- *     for the fix PRs — the checklist's own fix keeps one `ESLint` as a
- *     deliberate historical mention ("改名前的 PR 仍列旧名"), and history is
+ *     FRESH); at or below = green with a notice. A ban would be wrong while
+ *     the fix PRs are in flight — a fix may legitimately keep the dead name
+ *     as a historical mention ("改名前的 PR 仍列旧名"), and history is
  *     legitimate prose everywhere. Budgets only ever ratchet down, by hand,
  *     notice-driven; a row whose budgets have been trimmed away is a standing
- *     ban on writing that dead name fresh anywhere in the scan set.
+ *     ban on writing that dead name fresh anywhere in the scan set. The
+ *     `ESLint` row reached that state on 2026-08-18: its checklist fix was
+ *     expected to keep one historical mention and dropped the name outright,
+ *     the trim notice fired, and the budget was deleted — measured, not
+ *     assumed, which is the whole point of the notice being notice-driven.
  *   - `renameInFlight: true` lets the OLD literal satisfy a `mustName`
  *     requirement while the instruction fixes are in flight. Once every
  *     required-set surface names the new literal itself, a notice asks for
  *     the flip to false. Flipping early is safe by construction: the flip PR
  *     goes red while any surface still leans on the grace, so it cannot merge
- *     before the fixes do — it self-orders, it never races.
+ *     before the fixes do — it self-orders, it never races. (The pin runs in
+ *     the `Lint & Repo Gates` job with no `if:`, asserted in the wiring block
+ *     below, so "red" there means the required context is red — that is what
+ *     makes the self-ordering hold rather than merely being claimed.)
  *
  * ## What this scan can and cannot recognise, measured before it was built
  *
@@ -353,15 +360,19 @@ export const RETIRED_CONTEXT_NAMES = [
     name: 'ESLint',
     replacedBy: 'Lint & Repo Gates',
     authorized: '#9325 maintainer ruling 2026-08-17; workflow + registry half landed via #9421 on 2026-08-18',
-    // The checklist's gate-clearance line: stale when this ledger row was
-    // written (the fix was in flight as its own PR), and that fix keeps one
-    // deliberate historical `ESLint` mention on the same line — the budget is
-    // 1 across both states on purpose.
-    staleSites: { '.claude/skills/pm-dispatch/references/review-checklist.md': 1 },
-    // While true, the old literal still satisfies mustName — the split-PR
-    // window. Flip to false once every required-set surface names
-    // 'Lint & Repo Gates' itself; the completion notice below says when.
-    renameInFlight: true,
+    // NO budgets: the rename is complete on every surface. The checklist's
+    // gate-clearance line was the one budgeted site (1 occurrence, in flight
+    // as its own PR when this row was written) and its fix was expected to
+    // keep that mention as deliberate history; it dropped the name entirely
+    // instead, the trim notice fired, and the budget was deleted on
+    // 2026-08-18. This row is therefore now a standing ban: writing `ESLint`
+    // fresh into ANY scanned surface is red. A future deliberate historical
+    // mention is still legitimate prose — it just has to re-record a budget
+    // here, in the same PR, saying why.
+    // The grace is closed for the same reason: every required-set surface
+    // names 'Lint & Repo Gates' itself, so the retired literal no longer
+    // satisfies mustName (self-test: "the shipped ledger's grace is closed").
+    renameInFlight: false,
   },
   {
     // Not a rename — the CHECK itself retired (2026-08-18 ruling: a human
@@ -1143,23 +1154,35 @@ async function selfTest() {
   );
 
   // A retired name written FRESH (beyond budget) ⇒ red, naming the file, the
-  // budget and the replacement. Additive on purpose: the budgeted file holds
-  // 1 occurrence before its fix PR and 1 after (the fix keeps a historical
-  // mention), and two appended mentions exceed the budget from either base.
-  const freshStale = judgeSurfaces({
-    files: surfaceMap({
-      [CHECKLIST_SURFACE]: surfaceSources[CHECKLIST_SURFACE] + '\n- 入队前亲核 ESLint job;确认 ESLint 已绿。\n',
-    }),
-  });
+  // budget and the replacement. Additive on purpose: no anchor into a region
+  // an in-flight PR edits. The `ESLint` row's budgets have been trimmed away,
+  // so the checklist tolerates ZERO occurrences and one appended mention is
+  // already the red — the standing-ban state, asserted rather than described.
+  const freshChecklistText = surfaceSources[CHECKLIST_SURFACE] + '\n- 入队前亲核 ESLint job 是否已绿。\n';
+  const freshStale = judgeSurfaces({ files: surfaceMap({ [CHECKLIST_SURFACE]: freshChecklistText }) });
   assert(
     freshStale.problems.some(
       (p) =>
         p.includes(CHECKLIST_SURFACE) &&
         p.includes("retired required context 'ESLint'") &&
-        p.includes('budgeted: 1') &&
+        p.includes('budgeted: 0') &&
         p.includes("'Lint & Repo Gates'"),
     ),
-    'a retired name written beyond its budget ⇒ red, naming the file, the budget and the replacement',
+    'a retired name written fresh into a trimmed row\'s surface ⇒ red, naming the file, the budget and the replacement',
+  );
+  // …and that red is the TRIM's doing, not something the scan would say
+  // anyway: the identical text under a row that still budgets 1 for this file
+  // is green. Without this ablation the assertion above keeps passing on the
+  // day someone restores the budget, and the standing ban would be untested.
+  const budgetRestored = judgeSurfaces({
+    retired: RETIRED_CONTEXT_NAMES.map((row) =>
+      row.name === 'ESLint' ? { ...row, staleSites: { [CHECKLIST_SURFACE]: 1 } } : row,
+    ),
+    files: surfaceMap({ [CHECKLIST_SURFACE]: freshChecklistText }),
+  });
+  assert(
+    budgetRestored.problems.length === 0,
+    `restoring a budget of 1 makes the same single mention green — the red above is the trimmed budget, nothing else — got ${JSON.stringify(budgetRestored.problems)}`,
   );
   const staleInAgents = judgeSurfaces({
     files: surfaceMap({ 'AGENTS.md': surfaceSources['AGENTS.md'] + '\nConfirm the ESLint job is green before arming.\n' }),
@@ -1169,36 +1192,54 @@ async function selfTest() {
     'a retired name in a zero-budget surface ⇒ red (budgets tolerate only the sites recorded at rename time)',
   );
 
-  // The post-fix state, synthesised from the fix PR's own line shape: current
-  // names present, ONE historical `ESLint` mention within budget ⇒ green —
-  // the fix itself must not be blocked by this scan — and the completion
-  // notice asks for the renameInFlight flip.
-  const postFix = judgeSurfaces({
-    files: surfaceMap({
-      [CHECKLIST_SURFACE]:
-        '- 入队前亲核 Lint & Repo Gates 与 TypeScript Type Check 两个 job 的 `conclusion` 已为 `success`(必需检查认 check-run 名,改名前的 PR 仍列旧名 `ESLint`)。\n',
-    }),
+  // The SHIPPED state of the #9325 rename, both halves of the housekeeping
+  // the notices drove (#9505). The grace is closed: a checklist that reverts
+  // to naming only the retired literal no longer satisfies mustName. Pinning
+  // this against the REAL ledger is the point — the synthetic pair further
+  // down proves the mechanism, this proves the mechanism is switched on in
+  // the row that ships.
+  const revertedText = '- 入队前亲核 ESLint 与 TypeScript Type Check 两个 job 的 `conclusion` 已为 `success`。\n';
+  const graceClosed = judgeSurfaces({ files: surfaceMap({ [CHECKLIST_SURFACE]: revertedText }) });
+  assert(
+    graceClosed.problems.some(
+      (p) => p.includes(CHECKLIST_SURFACE) && p.includes("'Lint & Repo Gates'") && p.includes('no longer names'),
+    ),
+    "the shipped ledger's grace is closed: a surface naming only 'ESLint' is red on the required literal (#9505)",
+  );
+  // Single-variable ablation of exactly that flip: re-open the grace on the
+  // real row and change NOTHING else (the budget stays trimmed, so the
+  // budget half still reds) — the NAMING red disappears. So the red above is
+  // renameInFlight: false, not the trim and not the file's other content.
+  const graceReopened = judgeSurfaces({
+    retired: RETIRED_CONTEXT_NAMES.map((row) => (row.name === 'ESLint' ? { ...row, renameInFlight: true } : row)),
+    files: surfaceMap({ [CHECKLIST_SURFACE]: revertedText }),
   });
   assert(
-    postFix.problems.length === 0,
-    `the post-rename checklist (current names + one budgeted historical mention) ⇒ green — got ${JSON.stringify(postFix.problems)}`,
-  );
-  assert(
-    postFix.notices.some((n) => n.includes('renameInFlight to false')),
-    'once every required-set surface names the current literal itself, the flip-to-false notice fires',
+    !graceReopened.problems.some((p) => p.includes("'Lint & Repo Gates'") && p.includes('no longer names')),
+    'flipping ONLY renameInFlight back to true clears the naming red — the red above is the flip, isolated',
   );
 
-  // A rewording that keeps the current literals and drops the historical
-  // mention ⇒ green, with the trim notice (budgets only ever ratchet down).
-  const reworded = judgeSurfaces({
-    files: surfaceMap({ [CHECKLIST_SURFACE]: '- 翻 ready 前确认 Lint & Repo Gates 与 TypeScript Type Check 均已 success。\n' }),
+  // The two notices that drove this housekeeping must go SILENT once it is
+  // done: a completion notice that keeps firing after the work is finished
+  // trains the seat reading it to ignore the next one. Read from the real
+  // ledger against the real surfaces — the same pair the pin prints.
+  const shipped = judgeSurfaces();
+  assert(
+    !shipped.notices.some((n) => n.includes("'ESLint'") || n.includes('renameInFlight to false')),
+    'after the flip and the trim, the ESLint row is silent — neither the trim notice nor the flip notice fires (#9505)',
+  );
+  // The notice LOGIC outlives this rename, so it keeps its coverage through a
+  // synthetic in-flight row: the real ledger no longer has one, and an
+  // untested notice is the next rename's silent no-op.
+  const inFlightAgain = judgeSurfaces({
+    retired: [{ name: 'ESLint', replacedBy: 'Lint & Repo Gates', renameInFlight: true, staleSites: { [CHECKLIST_SURFACE]: 1 } }],
   });
   assert(
-    reworded.problems.length === 0,
-    `a rewording that keeps the current literals ⇒ green — got ${JSON.stringify(reworded.problems)}`,
+    inFlightAgain.notices.some((n) => n.includes('renameInFlight to false')),
+    'the flip-completion notice still fires for an in-flight row whose surfaces have all moved to the current literal',
   );
   assert(
-    reworded.notices.some((n) => n.includes("'ESLint'") && n.includes('trimmed')),
+    inFlightAgain.notices.some((n) => n.includes("'ESLint'") && n.includes('trimmed')),
     'a budget larger than the surviving occurrence count ⇒ the trim notice',
   );
 
