@@ -10263,6 +10263,14 @@ export class ObjectQL implements IObjectQLEngine {
         // child FK is typically required, so set_null would be invalid). Only
         // an explicit `restrict` deviates. A plain lookup honors its
         // configured deleteBehavior (default set_null).
+        //
+        // [#9625] "Only an explicit `restrict` deviates" is the whole of it:
+        // every other value a master_detail can declare — including an
+        // explicit `deleteBehavior: 'set_null'`, which `FieldSchema` accepts
+        // on this type — resolves to `cascade` here, silently. Measured and
+        // pinned (`engine-cascade-delete.test.ts`); whether the spec should
+        // reject the combination at publish time instead of the engine
+        // dropping it at delete time is a judgement, carded separately.
         let behavior: string =
           fdef.type === 'master_detail'
             ? (fdef.deleteBehavior === 'restrict' ? 'restrict' : 'cascade')
@@ -10275,8 +10283,29 @@ export class ObjectQL implements IObjectQLEngine {
         // author's intent: a required FK means the child can't exist detached,
         // so deleting the parent must be RESTRICTed (SQL's default for a
         // NOT NULL FK). Authors who want the children gone set
-        // deleteBehavior:'cascade' explicitly. This only escalates the
-        // *defaulted* set_null; an explicit cascade/restrict is untouched.
+        // deleteBehavior:'cascade' explicitly.
+        //
+        // [#9625] The test reads the RESOLVED `behavior`, one statement above,
+        // which no longer records how the value got there. So it escalates
+        // BOTH the defaulted set_null and one the author wrote out as
+        // `deleteBehavior: 'set_null'` — the two are indistinguishable here by
+        // construction, and both are measured escalating
+        // (`engine-cascade-delete.test.ts`). Only `cascade` and `restrict` are
+        // untouched. The predecessor of this comment claimed the escalation
+        // applied to the *defaulted* set_null alone; that was true of
+        // `cascade`/`restrict` and false of an explicit `set_null`, which is
+        // the half-truth #9625 measured. Say it the way the code behaves: the
+        // escalation is a property of the RESOLVED behavior plus `required`,
+        // not of what the author typed.
+        //
+        // It also runs BEFORE the `multiValued` branch below and keys on
+        // `required` alone, so a `multiple: true` required lookup is refused
+        // even when the child's set holds other members and member removal
+        // would leave it non-empty — a state the #9447 ruling accepts.
+        // Measured, pinned as current behaviour, and carded separately rather
+        // than changed here: today `[]` still satisfies `required` in the
+        // record validator (#9476), so this blanket refusal is what keeps an
+        // emptied required set from landing silently.
         if (behavior === 'set_null' && fdef.required === true) {
           behavior = 'restrict';
         }

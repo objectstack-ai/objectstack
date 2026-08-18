@@ -134,10 +134,10 @@ interface SQLDriverConfig {
 The SQL driver implements the standard ObjectStack driver interface:
 
 ```typescript
-import type { IDriver } from '@objectstack/spec';
+import type { IDataDriver } from '@objectstack/spec/contracts';
 
-// All standard operations are supported:
-// find, findOne, insert, update, delete, count
+// `SqlDriver implements IDataDriver` — all standard operations are supported:
+// find, findOne, create, update, delete, count
 ```
 
 ### Advanced Queries

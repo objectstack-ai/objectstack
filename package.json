@@ -99,6 +99,7 @@
     "check:type-source-resolution": "node scripts/check-type-source-resolution.mjs --self-test && node scripts/check-type-source-resolution.mjs",
     "check:published-files": "node scripts/check-published-files.mjs --self-test && node scripts/check-published-files.mjs",
     "check:published-readme-exports": "node scripts/check-published-readme-exports.mjs --self-test && node scripts/check-published-readme-exports.mjs",
+    "check:published-readme-links": "node scripts/check-published-readme-links.mjs --self-test && node scripts/check-published-readme-links.mjs",
     "check:type-check-coverage": "node scripts/check-type-check-coverage.mjs --self-test && node scripts/check-type-check-coverage.mjs",
     "check:type-check-debt": "node scripts/check-type-check-coverage.mjs --self-test && node scripts/check-type-check-coverage.mjs --re-measure",
     "check:driver-conformance": "node scripts/check-driver-conformance.mjs --self-test && node scripts/check-driver-conformance.mjs",
