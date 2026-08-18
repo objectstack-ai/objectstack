@@ -258,7 +258,13 @@ export class HonoHttpServer implements IHttpServer {
     private wrap(handler: RouteHandler) {
         return async (c: any) => {
             const { response } = await this.runHandler(c, handler);
-            return response ?? c.json({ error: 'No response from handler' }, 500);
+            return response ?? c.json(
+                {
+                    success: false,
+                    error: { code: 'INTERNAL_ERROR', message: 'No response from handler' },
+                },
+                500,
+            );
         };
     }
 
@@ -707,7 +713,13 @@ export class HonoHttpServer implements IHttpServer {
                     // a broken consumer, and reporting its failure as this
                     // adapter's ordinary 404 would hide it behind the most
                     // unremarkable status on the wire.
-                    return c.json({ error: 'Fallback handler failed' }, 500);
+                    return c.json(
+                        {
+                            success: false,
+                            error: { code: 'INTERNAL_ERROR', message: 'Fallback handler failed' },
+                        },
+                        500,
+                    );
                 }
                 // Wrote nothing — the documented way to say "not mine". Fall
                 // through to the standard answer, unchanged.
@@ -723,28 +735,63 @@ export class HonoHttpServer implements IHttpServer {
      *
      * Hono routes a method mismatch to the SAME `notFound` sink as a genuinely
      * missing path, so a `POST` to a `PUT`-only route (e.g. the metadata save
-     * endpoint, see #2684) would otherwise return an opaque
-     * `{ error: 'Not found' }` 404 with no hint that the path exists under
-     * another verb. We re-match the request path against the registered route
-     * patterns: if it lines up with routes under other methods, answer `405
-     * Method Not Allowed` with an accurate `Allow` header so callers can
-     * self-correct. A path that matches nothing stays a 404. This is
-     * framework-wide — every registered endpoint benefits, not just metadata.
+     * endpoint, see #2684) would otherwise return an opaque 404 with no hint
+     * that the path exists under another verb. We re-match the request path
+     * against the registered route patterns: if it lines up with routes under
+     * other methods, answer `405 Method Not Allowed` with an accurate `Allow`
+     * header so callers can self-correct. A path that matches nothing stays a
+     * 404. This is framework-wide — every registered endpoint benefits, not
+     * just metadata.
+     *
+     * ## Envelope
+     *
+     * Both answers are the declared `BaseResponseSchema` refusal envelope —
+     * `{ success: false, error: { code, message } }` — with the ADR-0112
+     * semantic code in `error.code` and the HTTP status carried only by the
+     * response line. Until this was converted the two bodies spoke the
+     * pre-#3675 dialect (`error` a bare STRING, so `body.error.message` read
+     * `undefined`) and the 405 additionally put `code`/`method`/`path`/
+     * `allowed` BESIDE `error` (#7035's twin, so `body.error.code` read
+     * `undefined` too). The 405's three context keys moved into
+     * `error.details`, which `ApiErrorSchema` declares for exactly this.
+     *
+     * The wire `code` VALUES are unchanged — `METHOD_NOT_ALLOWED` was already
+     * the spelling this route shipped, and it is a `StandardErrorCode` member
+     * — so a caller that already branched on `body.code` reads the same string
+     * one level in. `ENDPOINT_NOT_FOUND` is the standard catalog's 404 member
+     * for "API endpoint not found"; the 404 previously carried no code at all.
+     *
+     * ⚠️ The literals here are deliberately INLINE rather than hoisted into a
+     * shared constant: `scripts/check-route-envelope.mjs` judges the object
+     * LITERAL passed to `c.json(...)`, and an identifier reads to it as a
+     * relayed body it must not police. Hoisting would zero this file's
+     * counters by hiding the bodies from the scanner rather than by
+     * conforming them — and would leave every later edit to them unaudited.
+     * `packages/qa/http-conformance`'s `NodeHttpServer` mirrors these bodies
+     * byte-for-byte and is locked to them cross-adapter by
+     * `fallback-seam.conformance.test.ts`; change one and you must change both.
      */
     private unmatchedResponse(c: any) {
         const allowed = this.allowedMethodsForPath(c.req.path);
         if (allowed.length > 0 && !allowed.includes(c.req.method)) {
             c.header('Allow', allowed.join(', '));
             return c.json({
-                error: 'Method Not Allowed',
-                code: 'METHOD_NOT_ALLOWED',
-                message: `${c.req.method} is not supported for ${c.req.path}. Allowed: ${allowed.join(', ')}.`,
-                method: c.req.method,
-                path: c.req.path,
-                allowed,
+                success: false,
+                error: {
+                    code: 'METHOD_NOT_ALLOWED',
+                    message: `${c.req.method} is not supported for ${c.req.path}. Allowed: ${allowed.join(', ')}.`,
+                    details: {
+                        method: c.req.method,
+                        path: c.req.path,
+                        allowed,
+                    },
+                },
             }, 405);
         }
-        return c.json({ error: 'Not found' }, 404);
+        return c.json({
+            success: false,
+            error: { code: 'ENDPOINT_NOT_FOUND', message: 'Not found' },
+        }, 404);
     }
 
     /**

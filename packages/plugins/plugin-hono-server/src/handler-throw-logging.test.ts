@@ -78,8 +78,16 @@ function serverWithLogger() {
 const call = (server: HonoHttpServer, path: string, init?: RequestInit) =>
     server.getRawApp().fetch(new Request(`http://localhost${path}`, init));
 
-/** The exact bytes `wrap()` answers when a handler produced no response. */
-const FALLBACK_BODY = '{"error":"No response from handler"}';
+/**
+ * The exact bytes `wrap()` answers when a handler produced no response.
+ *
+ * The declared `BaseResponseSchema` refusal envelope since #9364 — it was the
+ * bare `{"error":"No response from handler"}` (the pre-#3675 dialect) while
+ * that conversion was still undecided. The MESSAGE is unchanged; what moved is
+ * the shape around it and the ADR-0112 code beside it.
+ */
+const FALLBACK_BODY =
+    '{"success":false,"error":{"code":"INTERNAL_ERROR","message":"No response from handler"}}';
 
 describe('an escaped handler throw is reported', () => {
     it('logs the original Error — message AND stack — for an async rejection', async () => {
@@ -201,17 +209,23 @@ describe('the fallback (notFound) seam reports too', () => {
 
         const res = await call(server, '/nothing/here');
         expect(res.status).toBe(500);
-        expect(await res.text()).toBe('{"error":"Fallback handler failed"}');
+        expect(await res.json()).toEqual({
+            success: false,
+            error: { code: 'INTERNAL_ERROR', message: 'Fallback handler failed' },
+        });
         expect((errors()[0]!.error as Error).message).toBe('fallback exploded');
         expect(errors()[0]!.meta).toEqual({ method: 'GET', path: '/nothing/here' });
     });
 });
 
-describe('the response shape is unchanged (explicitly OUT of scope for #5848)', () => {
-    it('still answers the byte-identical bare 500 body', async () => {
-        // Folding this into a declared envelope would change a live response
-        // shape and is an undecided contract question. Pinned so it cannot
-        // arrive as a rider on the logging fix.
+describe('the response shape is the declared envelope (decided by #9364)', () => {
+    it('answers the byte-identical enveloped 500 body', async () => {
+        // #5848 deliberately left this body alone — folding it into a declared
+        // envelope was a live wire change and an undecided contract question,
+        // so it was pinned here to stop the conversion arriving as a rider on
+        // a logging fix. #9364 is where that question was answered; the pin
+        // survives with its new bytes, and still holds the shape against an
+        // unrelated change drifting it again.
         const { server } = serverWithLogger();
         server.get('/api/v1/shape', async () => { throw new Error('boom'); });
 

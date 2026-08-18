@@ -72,8 +72,11 @@ describe('notFound → 405 Method Not Allowed (#2684)', () => {
         const allow = (res.headers.get('Allow') || '').split(',').map((s) => s.trim());
         expect(allow).toEqual(expect.arrayContaining(['GET', 'PUT', 'DELETE']));
         const body = await res.json();
-        expect(body.code).toBe('METHOD_NOT_ALLOWED');
-        expect(body.allowed).toEqual(expect.arrayContaining(['PUT']));
+        expect(body.success).toBe(false);
+        expect(body.error.code).toBe('METHOD_NOT_ALLOWED');
+        expect(body.error.details.allowed).toEqual(expect.arrayContaining(['PUT']));
+        expect(body.error.details.method).toBe('POST');
+        expect(body.error.details.path).toBe('/api/v1/meta/view/my_view');
     });
 
     it('still routes the correct method to its handler (no false 405)', async () => {
@@ -85,6 +88,9 @@ describe('notFound → 405 Method Not Allowed (#2684)', () => {
     it('keeps a genuine 404 for a path that matches no registered route', async () => {
         const res = await fetch('POST', '/api/v1/does/not/exist');
         expect(res.status).toBe(404);
-        expect(await res.json()).toEqual({ error: 'Not found' });
+        expect(await res.json()).toEqual({
+            success: false,
+            error: { code: 'ENDPOINT_NOT_FOUND', message: 'Not found' },
+        });
     });
 });

@@ -542,25 +542,22 @@ const PLUGIN_ROUTE_MODULES = {
     ratchet: '#9364 (envelope the bare plugin-route payloads)',
     note: 'nine `{ authenticated, userId, … }` bodies with no `success` flag — the same bare-payload class as runtime-config, read directly by the Console',
   },
-  'packages/plugins/plugin-hono-server/src/adapter.ts': {
-    unenveloped: 4,
-    stringError: 4,
-    siblingCode: 1,
-    ratchet: '#9364 (convert the adapter refusals onto the declared envelope)',
-    note: 'the adapter\'s own refusals — `{ error: \'Not found\' }` 404, `{ error: \'No response from handler\' }` 500, `{ error: \'Fallback handler failed\' }` 500, and the 405 that adds `code`/`method`/`path`/`allowed` beside `error`. The pre-#3675 dialect and its #7035 sibling, alive at a door no scan reached',
-  },
+  // Converted by #9364: the four refusals now answer the declared envelope,
+  // `{ success: false, error: { code, message } }`, with the 405's
+  // `method`/`path`/`allowed` moved into `error.details`. Conformant, so it
+  // joins the zero-entries above — and `@objectstack/http-conformance`'s
+  // `NodeHttpServer` mirrors these bodies byte-for-byte, locked cross-adapter
+  // by `fallback-seam.conformance.test.ts`.
+  'packages/plugins/plugin-hono-server/src/adapter.ts': {},
   'packages/adapters/hono/src/index.ts': {
     unenveloped: 2,
-    errorCodeNotString: 1,
-    ratchet: '#9364 (envelope the hono adapter bodies)',
-    note: 'two `{ data }` discovery bodies with no `success`, plus a shared `errorJson` writing the HTTP status into `error.code` — a number where ApiErrorSchema declares a string enum',
+    ratchet: '#9436 (envelope the hono adapter discovery bodies; Blocked-by #9389)',
+    note: 'two `{ data }` discovery bodies with no `success`. #9364 removed this file\'s `errorCodeNotString 1` — the shared `errorJson` wrote the HTTP status into `error.code` and now derives the ADR-0112 member from it through `resolveThrownHttpError`. What is left is the same PRE-AUTH bare-payload fork #9389 rules on, but on a different consumer population (SDKs and codegen read this mount\'s discovery, not the Console SPA), so #9389\'s closed three-file list does not reach it',
   },
-  'packages/cli/src/commands/serve.ts': {
-    unenveloped: 1,
-    stringError: 1,
-    ratchet: '#9364 (envelope the serve host-resolution refusal)',
-    note: 'the unbound-hostname 404 — `{ error: \'environment_not_found\', message, hostname }`, a bare-string error with two stray top-level keys',
-  },
+  // Converted by #9364: `{ error: \'environment_not_found\', message, hostname }`
+  // became the declared envelope with `ENVIRONMENT_NOT_FOUND` in the semantic
+  // slot and `hostname` under `error.details`.
+  'packages/cli/src/commands/serve.ts': {},
   'packages/plugins/plugin-auth/src/auth-plugin.ts': {
     unenveloped: 3,
     ratchet: '#9364 (envelope the bare plugin-route payloads)',

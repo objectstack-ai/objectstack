@@ -175,7 +175,10 @@ describe('guarantee 4 — a fallback that writes nothing leaves the standard ans
         expect(res.status).toBe(404);
         expect(await res.text()).toBe(await baseline.text());
         expect(JSON.parse(await (await call(serverWithRoutes(), '/api/v1/nope')).text()))
-            .toEqual({ error: 'Not found' });
+            .toEqual({
+                success: false,
+                error: { code: 'ENDPOINT_NOT_FOUND', message: 'Not found' },
+            });
     });
 
     it('keeps the 405 + `Allow` answer for a method mismatch (#5040 §7-1)', async () => {
@@ -190,8 +193,9 @@ describe('guarantee 4 — a fallback that writes nothing leaves the standard ans
         expect(res.status).toBe(405);
         expect(res.headers.get('Allow')).toBe('PUT');
         const body = await res.json();
-        expect(body.code).toBe('METHOD_NOT_ALLOWED');
-        expect(body.allowed).toEqual(['PUT']);
+        expect(body.success).toBe(false);
+        expect(body.error.code).toBe('METHOD_NOT_ALLOWED');
+        expect(body.error.details.allowed).toEqual(['PUT']);
         expect(seen).toEqual(['DELETE /api/v1/only-put']);
     });
 
@@ -214,7 +218,10 @@ describe('failure modes', () => {
         server.setFallbackHandler(() => { throw new Error('boom'); });
         const res = await call(server, '/api/v1/apps/showcase/tasks');
         expect(res.status).toBe(500);
-        expect(await res.json()).toEqual({ error: 'Fallback handler failed' });
+        expect(await res.json()).toEqual({
+            success: false,
+            error: { code: 'INTERNAL_ERROR', message: 'Fallback handler failed' },
+        });
     });
 
     it('honours a status set without a body (the `res.end()` shape)', async () => {
@@ -229,7 +236,7 @@ describe('failure modes', () => {
         server.get('/api/v1/thing', (_req, res) => { res.json({ ok: true }); });
         const res = await server.getRawApp().fetch(new Request('http://localhost/api/v1/nope'));
         expect(res.status).toBe(404);
-        // Hono's built-in answer — NOT this adapter's `{ error: 'Not found' }`.
+        // Hono's built-in answer — NOT this adapter's enveloped 404 body.
         expect(await res.text()).toBe('404 Not Found');
     });
 });

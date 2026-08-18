@@ -241,7 +241,10 @@ describe.each(ADAPTERS)('IHttpServer.setFallbackHandler conformance on $label ad
         expect(baseline.status).toBe(404);
         expect(res.status).toBe(404);
         expect(await res.text()).toBe(baselineText);
-        expect(JSON.parse(baselineText)).toEqual({ error: 'Not found' });
+        expect(JSON.parse(baselineText)).toEqual({
+            success: false,
+            error: { code: 'ENDPOINT_NOT_FOUND', message: 'Not found' },
+        });
     });
 
     it('G4-b: a declining fallback keeps 405 + `Allow` for a method mismatch (#5040 §7-1)', async () => {
@@ -258,8 +261,9 @@ describe.each(ADAPTERS)('IHttpServer.setFallbackHandler conformance on $label ad
         expect(res.status).toBe(405);
         expect(res.headers.get('allow')).toBe('PUT');
         const body = await res.json();
-        expect(body.code).toBe('METHOD_NOT_ALLOWED');
-        expect(body.allowed).toEqual(['PUT']);
+        expect(body.success).toBe(false);
+        expect(body.error.code).toBe('METHOD_NOT_ALLOWED');
+        expect(body.error.details.allowed).toEqual(['PUT']);
         expect(seen).toEqual(['DELETE /api/v1/only-put']);
     });
 
@@ -277,6 +281,9 @@ describe.each(ADAPTERS)('IHttpServer.setFallbackHandler conformance on $label ad
 
         const res = await fetch(`${base}/api/v1/apps/showcase/tasks`);
         expect(res.status).toBe(500);
-        expect(await res.json()).toEqual({ error: 'Fallback handler failed' });
+        expect(await res.json()).toEqual({
+            success: false,
+            error: { code: 'INTERNAL_ERROR', message: 'Fallback handler failed' },
+        });
     });
 });

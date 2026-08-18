@@ -109,7 +109,7 @@ describe('NodeHttpServer (live socket)', () => {
     it('500s when a handler resolves without responding', async () => {
         const res = await fetch(`${base}/silent`);
         expect(res.status).toBe(500);
-        expect((await res.json()).error).toBe('No response from handler');
+        expect((await res.json()).error.message).toBe('No response from handler');
     });
 
     // Locks the formal streaming contract on `IHttpResponse.write`/`end`
@@ -125,7 +125,10 @@ describe('NodeHttpServer (live socket)', () => {
     it('404s unknown paths with the shared not-found body', async () => {
         const res = await fetch(`${base}/nope`);
         expect(res.status).toBe(404);
-        expect(await res.json()).toEqual({ error: 'Not found' });
+        expect(await res.json()).toEqual({
+            success: false,
+            error: { code: 'ENDPOINT_NOT_FOUND', message: 'Not found' },
+        });
     });
 
     it('405s a method mismatch with an accurate Allow header', async () => {
@@ -133,8 +136,9 @@ describe('NodeHttpServer (live socket)', () => {
         expect(res.status).toBe(405);
         expect(res.headers.get('allow')).toBe('POST');
         const body = await res.json();
-        expect(body.code).toBe('METHOD_NOT_ALLOWED');
-        expect(body.allowed).toEqual(['POST']);
+        expect(body.success).toBe(false);
+        expect(body.error.code).toBe('METHOD_NOT_ALLOWED');
+        expect(body.error.details.allowed).toEqual(['POST']);
     });
 
     it('answers HEAD from GET routes without a body', async () => {

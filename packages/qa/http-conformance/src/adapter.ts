@@ -224,18 +224,21 @@ export class NodeHttpServer implements IHttpServer {
             nodeRes.setHeader('Allow', allowed.join(', '));
             nodeRes.setHeader('Content-Type', 'application/json; charset=utf-8');
             nodeRes.end(JSON.stringify({
-                error: 'Method Not Allowed',
-                code: 'METHOD_NOT_ALLOWED',
-                message: `${method} is not supported for ${path}. Allowed: ${allowed.join(', ')}.`,
-                method,
-                path,
-                allowed,
+                success: false,
+                error: {
+                    code: 'METHOD_NOT_ALLOWED',
+                    message: `${method} is not supported for ${path}. Allowed: ${allowed.join(', ')}.`,
+                    details: { method, path, allowed },
+                },
             }));
             return;
         }
         nodeRes.statusCode = 404;
         nodeRes.setHeader('Content-Type', 'application/json; charset=utf-8');
-        nodeRes.end(JSON.stringify({ error: 'Not found' }));
+        nodeRes.end(JSON.stringify({
+            success: false,
+            error: { code: 'ENDPOINT_NOT_FOUND', message: 'Not found' },
+        }));
     }
 
     private match(method: string, path: string): { route: CompiledRoute; params: Record<string, string> } | undefined {
@@ -381,7 +384,10 @@ export class NodeHttpServer implements IHttpServer {
                         nodeRes.statusCode = 500;
                         nodeRes.setHeader('Content-Type', 'application/json; charset=utf-8');
                     }
-                    nodeRes.end(JSON.stringify({ error: 'Fallback handler failed' }));
+                    nodeRes.end(JSON.stringify({
+                        success: false,
+                        error: { code: 'INTERNAL_ERROR', message: 'Fallback handler failed' },
+                    }));
                 }
                 return;
             }
@@ -406,7 +412,10 @@ export class NodeHttpServer implements IHttpServer {
             if (!nodeRes.writableEnded && !streaming) {
                 nodeRes.statusCode = 500;
                 nodeRes.setHeader('Content-Type', 'application/json; charset=utf-8');
-                nodeRes.end(JSON.stringify({ error: 'No response from handler' }));
+                nodeRes.end(JSON.stringify({
+                    success: false,
+                    error: { code: 'INTERNAL_ERROR', message: 'No response from handler' },
+                }));
             }
         } catch (err: any) {
             if (!nodeRes.writableEnded) {

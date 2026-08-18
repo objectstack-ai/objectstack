@@ -2008,11 +2008,23 @@ export default class Serve extends Command {
 </html>`;
                   return c.html(html, 404);
                 }
+                // The declared `BaseResponseSchema` refusal envelope. This
+                // used to answer `{ error: 'environment_not_found', message,
+                // hostname }` — the pre-#3675 dialect, where `error` is a bare
+                // string so `body.error.message` reads `undefined`, with two
+                // stray top-level keys beside it. `hostname` is context and
+                // moved into `error.details`, which `ApiErrorSchema` declares
+                // for exactly that; the code is now the ADR-0112
+                // SCREAMING_SNAKE spelling of the same condition, in the
+                // semantic slot consumers branch on.
                 return c.json(
                   {
-                    error: 'environment_not_found',
-                    message: `No environment is bound to hostname '${host}'.`,
-                    hostname: host,
+                    success: false,
+                    error: {
+                      code: 'ENVIRONMENT_NOT_FOUND',
+                      message: `No environment is bound to hostname '${host}'.`,
+                      details: { hostname: host },
+                    },
                   },
                   404,
                 );

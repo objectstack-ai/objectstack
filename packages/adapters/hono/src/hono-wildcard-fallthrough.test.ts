@@ -140,6 +140,12 @@ describe('the enveloped 404 survives when nothing anywhere claims the path', () 
 
     expect(res.status).toBe(404);
     // Not Hono's bare "404 Not Found" text — the platform envelope is preserved.
-    expect(await res.json()).toEqual({ success: false, error: { message: 'Not Found', code: 404 } });
+    // `error.code` carries the ADR-0112 SEMANTIC member for the status, not the
+    // status itself: this body used to read `code: 404`, a number in the slot
+    // `ApiErrorSchema` declares as a closed string vocabulary (#9364).
+    expect(await res.json()).toEqual({
+      success: false,
+      error: { code: 'RESOURCE_NOT_FOUND', message: 'Not Found' },
+    });
   });
 });

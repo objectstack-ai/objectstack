@@ -191,7 +191,10 @@ describe.each(ADAPTERS)('IHttpServer conformance on $label adapter', ({ makePlug
     it('404s unknown paths with the shared not-found body', async () => {
         const res = await fetch(`${base}/api/v1/this-route-does-not-exist`);
         expect(res.status).toBe(404);
-        expect(await res.json()).toEqual({ error: 'Not found' });
+        expect(await res.json()).toEqual({
+            success: false,
+            error: { code: 'ENDPOINT_NOT_FOUND', message: 'Not found' },
+        });
     });
 
     it('405s a method mismatch with an Allow header', async () => {
@@ -201,7 +204,7 @@ describe.each(ADAPTERS)('IHttpServer conformance on $label adapter', ({ makePlug
         const res = await fetch(`${base}/api/v1/analytics/query`, { method: 'PUT' });
         expect(res.status).toBe(405);
         expect(res.headers.get('allow')).toContain('POST');
-        expect((await res.json()).code).toBe('METHOD_NOT_ALLOWED');
+        expect((await res.json()).error.code).toBe('METHOD_NOT_ALLOWED');
     });
 });
 
@@ -231,7 +234,10 @@ describe('analytics capability-conditional mounting (no service installed)', () 
     it.each(['POST', 'PUT', 'GET'])('%s /api/v1/analytics/query answers the shared 404', async (method) => {
         const res = await fetch(`${stack.base}/api/v1/analytics/query`, { method });
         expect(res.status).toBe(404);
-        expect(await res.json()).toEqual({ error: 'Not found' });
+        expect(await res.json()).toEqual({
+            success: false,
+            error: { code: 'ENDPOINT_NOT_FOUND', message: 'Not found' },
+        });
     });
 
     it('GET /api/v1/analytics/meta answers the shared 404 too', async () => {

@@ -11,6 +11,7 @@ import {
   readEnvWithDeprecation,
   looksLikeInternalErrorLeak,
   INTERNAL_ERROR_MESSAGE,
+  resolveThrownHttpError,
 } from '@objectstack/types';
 
 /**
@@ -202,8 +203,36 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
     }
   }
 
-  const errorJson = (c: any, message: string, code: number = 500) => {
-    return c.json({ success: false, error: { message, code } }, code);
+  /**
+   * This mount's shared refusal body, in the envelope `BaseResponseSchema`
+   * declares.
+   *
+   * `error.code` is the SEMANTIC slot: `ApiErrorSchema.code` is a closed
+   * STRING vocabulary (`StandardErrorCode` ∪ the ledger — ADR-0112 D3/D4).
+   * This helper used to write the HTTP **status** into it — `{ message, code }`
+   * with `code` the same number handed to `c.json` as the status — so every
+   * refusal from this adapter shipped `error.code: 404` / `500` where callers
+   * were promised a code they could branch on, and the body failed its own
+   * contract while looking correctly nested. That is #3842's drift, one door
+   * over.
+   *
+   * The status→member mapping is NOT re-spelled here. `resolveThrownHttpError`
+   * (`@objectstack/types`) is the one rule both the REST and dispatcher doors
+   * read for this question (ADR-0112, #9106), and it derives the standard
+   * member from the status whenever the producer declared no registered code
+   * of its own — so routing through it keeps this third door from becoming a
+   * fourth dialect. The numeric status stays where it is authoritative: the
+   * response line.
+   *
+   * The parameter is named `status`, not `code`, and that is load-bearing
+   * rather than cosmetic: `scripts/check-route-envelope.mjs` flags an
+   * `error.code` shorthand whose identifier is the SAME one passed as the
+   * status argument — precisely the shape this file shipped — so the old name
+   * would keep the counter alive even with the value fixed.
+   */
+  const errorJson = (c: any, message: string, status: number = 500) => {
+    const { code } = resolveThrownHttpError({ status }, status);
+    return c.json({ success: false, error: { code, message } }, status);
   };
 
   const toResponse = (c: any, result: HttpDispatcherResult) => {
