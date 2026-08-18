@@ -370,10 +370,12 @@ monthly / per-release) catches drift the CI gate missed — it runs the
    re-deriving them:
 
    - **GitHub Actions** — no workflow runs this audit at all. Of the 31 workflows
-     registered on the repo, the 11 carrying a `schedule:` trigger (`codeql`,
-     `coverage-nightly`, `cut-rc`, `engine-split-metric`, `prerelease-pin-watch`,
-     `publish-smoke`, `rerun-safety-nightly`, `scaffold-e2e`, `showcase-smoke`, `stale`,
-     `validate-deps`) are all unrelated.
+     registered on the repo, the 10 carrying a `schedule:` trigger (`codeql`,
+     `coverage-nightly`, `engine-split-metric`, `prerelease-pin-watch`, `publish-smoke`,
+     `rerun-safety-nightly`, `scaffold-e2e`, `showcase-smoke`, `stale`, `validate-deps`)
+     are all unrelated. Derive that list with `grep -rl '^\s*schedule:' .github/workflows/`
+     rather than copying it: an unanchored grep for `schedule:` also matches `cut-rc.yml`,
+     whose only hit is a comment saying it deliberately has no schedule.
      ⚠️ **Read the registered workflow list and its run history, not the YAML on disk.**
      The two disagree in *both* directions: a workflow can be registered in Actions with
      no file on `main` (`matrix-aggregate-experiment.yml` is, today), and a scheduled
