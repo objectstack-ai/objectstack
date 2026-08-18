@@ -41,7 +41,7 @@ import {
 } from './migrations/sys-setting-identity-index.js';
 import {
     backfillSeedTenancy,
-    resolveSeedTenancyExec,
+    resolveSeedTenancySeam,
 } from './migrations/seed-tenancy-backfill.js';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import type { MetadataAuthoringChannel } from './protocol.js';
@@ -75,10 +75,16 @@ export interface MetadataProtocolPluginOptions {
      * refusal to a loud log instead of silencing it.
      */
     authoringChannel?: MetadataAuthoringChannel;
+    /**
+     * [#9380] See {@link AssembleMetadataProtocolOptions.runPlatformMigrations}.
+     * Forwarded unchanged to the assembly; omitted ⇒ the historical
+     * `environmentId === undefined` deduction.
+     */
+    runPlatformMigrations?: boolean;
 }
 
 export function createMetadataProtocolPlugin(options: MetadataProtocolPluginOptions = {}): Plugin {
-    const { environmentId, authoringChannel } = options;
+    const { environmentId, authoringChannel, runPlatformMigrations } = options;
     return {
         name: 'com.objectstack.metadata.protocol',
         version: '1.0.0',
@@ -100,7 +106,7 @@ export function createMetadataProtocolPlugin(options: MetadataProtocolPluginOpti
                 );
             }
 
-            assembleMetadataProtocol(ctx, ql, environmentId, { authoringChannel });
+            assembleMetadataProtocol(ctx, ql, environmentId, { authoringChannel, runPlatformMigrations });
         },
     };
 }
@@ -112,6 +118,56 @@ export interface AssembleMetadataProtocolOptions {
      * Omitted ⇒ `'environment'` ⇒ the #4463 runtime authoring gate is active.
      */
     authoringChannel?: MetadataAuthoringChannel;
+    /**
+     * [#9380] Does THIS BOOT arm the `kernel:ready` platform-table repair
+     * migrations (#5839 / #8629 / #8686)?
+     *
+     * Declared, not deduced — the same lesson `authoringChannel` records one
+     * field above. The gate used to read `environmentId === undefined`, and
+     * `environmentId` is a ROW-SCOPING KEY, not a topology signal: the
+     * standalone stack stamps `'proj_local'` on every `os dev` / `os serve` /
+     * `os start` / `os migrate` boot (`runtime/src/standalone-stack.ts`), so
+     * the block the gate guards never ran on a self-hosted install at all —
+     * #8686's "repairs an install that is ALREADY in that state, which covers
+     * every existing deployment" covered none of them.
+     *
+     * TWO independent facts make this false, and each is known only by the
+     * host that assembles the kernel:
+     *
+     *  1. **This kernel does not own its local platform tables.** A
+     *     per-project (cloud) kernel sources metadata from the control plane
+     *     and must NOT provision or repair these tables locally. Cloud passes
+     *     no value here, so the default below keeps it excluded exactly as
+     *     before.
+     *  2. **This boot must not write.** A one-shot CLI boot
+     *     (`bootSchemaStack`) is an inspect-or-apply-exactly-what-was-asked
+     *     run: `os migrate plan`, `os migrate duplicates`, and every
+     *     dry-run-by-default `os migrate *` command are declared read-only,
+     *     and a repair that fires behind them destroys the very evidence they
+     *     were run to collect. Those boots pass `false`.
+     *
+     * Omitted ⇒ `environmentId === undefined`, the historical deduction, so
+     * every caller that does not declare keeps today's behaviour byte for
+     * byte.
+     */
+    runPlatformMigrations?: boolean;
+}
+
+/**
+ * [#9380] The arming predicate, pure and exported so it can be pinned without
+ * booting a kernel — and so there is exactly ONE place the default lives.
+ *
+ * `undefined` is not "false": it means the caller did not declare, and an
+ * undeclared caller gets the historical `environmentId === undefined`
+ * deduction. Making the default `false` instead would silently disarm the
+ * control-plane assembly (`createMetadataProtocolPlugin()` with no options),
+ * which is the one caller that has always been on the inside of this gate.
+ */
+export function shouldRunPlatformMigrations(
+    environmentId: string | undefined,
+    declared: boolean | undefined,
+): boolean {
+    return declared ?? environmentId === undefined;
 }
 
 /**
@@ -145,6 +201,21 @@ export function assembleMetadataProtocol(
             // metadata from the control plane and must NOT provision these
             // tables locally. registerApp is idempotent — a MetadataPlugin that
             // also registers them is harmless.
+            //
+            // [#9380] Deliberately NOT switched to the declared
+            // `runPlatformMigrations` gate below, even though the two blocks
+            // share a comment and a history. Measured: `MetadataPlugin` already
+            // registers `com.objectstack.metadata-objects` with EXACTLY these
+            // five objects (`queryableMetadataObjects` in
+            // `packages/metadata/src/plugin.ts`, gated on
+            // `registerSystemObjects !== false`, whose own note says it is
+            // registered there "not only in the ObjectQLPlugin
+            // `environmentId === undefined` standalone path"). So on a
+            // standalone boot this block is redundant, not missing — flipping
+            // it on would put five more registrations into a registry that
+            // already has them, and would show up as new pending schema work in
+            // `os migrate plan`'s output for no gain. Arming the migrations is
+            // this card's surface; provisioning is not.
             if (environmentId === undefined) {
                 ql.registerApp({
                     id: 'com.objectstack.metadata-objects',
@@ -193,10 +264,17 @@ export function assembleMetadataProtocol(
             // `registerProtocol !== false` convenience mode) — a hook on the
             // delegated plugin alone would miss the default mount entirely.
             //
-            // Gated on `environmentId === undefined` for exactly the reason the
-            // registerApp block above is: per-project (cloud) kernels do not
-            // provision these tables locally, so there is no index of ours to
-            // tighten there.
+            // Gated for exactly the reason the registerApp block above is:
+            // per-project (cloud) kernels do not provision these tables
+            // locally, so there is no index of ours to tighten there.
+            //
+            // [#9380] The gate is now DECLARED (`runPlatformMigrations`) rather
+            // than deduced from `environmentId === undefined`. The deduction was
+            // wrong in the direction that mattered: the standalone stack stamps
+            // `'proj_local'`, so this whole block never armed on a self-hosted
+            // boot and the three migrations below reached no self-hosted
+            // install. The registerApp block above keeps the old predicate on
+            // purpose — see the note there.
             //
             // Deferred to `kernel:ready` because the table has to EXIST first —
             // ObjectQLPlugin creates it in `start()` via `syncRegisteredSchemas`,
@@ -224,7 +302,7 @@ export function assembleMetadataProtocol(
             // Separate try/catch per migration, deliberately: they protect
             // different tables and one that could not be armed must not skip the
             // other.
-            if (environmentId === undefined) {
+            if (shouldRunPlatformMigrations(environmentId, options.runPlatformMigrations)) {
                 (ctx as any)?.hook?.('kernel:ready', async () => {
                     try {
                         await ensureViewDefinitionActiveIndex(resolveIndexExec(ql), ctx.logger);
@@ -256,7 +334,7 @@ export function assembleMetadataProtocol(
                     // organization exists yet — and is handled at the first-admin
                     // handoff instead (see runtime's app-plugin).
                     try {
-                        await backfillSeedTenancy(resolveSeedTenancyExec(ql), ctx.logger);
+                        await backfillSeedTenancy(resolveSeedTenancySeam(ql), ctx.logger);
                     } catch (e: unknown) {
                         ctx.logger.warn(
                             '[metadata-protocol] seed/API tenancy backfill skipped (#8686)',

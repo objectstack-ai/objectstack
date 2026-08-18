@@ -254,6 +254,32 @@ export async function bootSchemaStack(
     ...(opts.databaseUrl ? { databaseUrl: opts.databaseUrl } : {}),
     ...(defer ? { skipSeedData: true } : {}),
     ...(opts.readOnlyProbe ? { sqliteAbsentFile: 'empty-in-memory' as const } : {}),
+    // [#9380] No boot repair migrations on a one-shot CLI boot — unconditional,
+    // and NOT keyed on `deferSchemaDdl`.
+    //
+    // #9380 armed the three `kernel:ready` platform-table migrations on the
+    // standalone stack (they had never run on a self-hosted install, because
+    // the assembly deduced "cloud per-project kernel" from the `'proj_local'`
+    // the stack stamps). Every boot through THIS function inherits that default
+    // unless it is turned off here, and every one of them is a command that
+    // reports or applies exactly what the operator asked for:
+    //
+    //   • `os migrate plan` / `os migrate duplicates` boot deferred + read-only
+    //     and are declared dry runs;
+    //   • `os migrate meta` / `value-shapes` / `recorded-by` / `resume` /
+    //     `summary-nulls` / `files-to-references` boot NOT deferred and are
+    //     STILL dry-run-by-default ("a dry run writes NOTHING"). Keying this off
+    //     `defer` would have left that whole second group repairing rows behind
+    //     a report — the more dangerous half, and the quieter one;
+    //   • `os migrate apply` / `os meta resync` do write, but only the change
+    //     the operator confirmed. A repair riding along is a change they never
+    //     saw in the plan (which is #8725's separate complaint).
+    //
+    // The serving boots — `os dev`, `os serve`, `os start` — do not come
+    // through here and take the default, which is where an install gets
+    // repaired. `duplicates.integration.test.ts` pins this end of it: boot
+    // included, the run must leave the database byte-identical.
+    runPlatformMigrations: false,
   });
 
   // No HTTP, no cluster — this is a one-shot schema operation.

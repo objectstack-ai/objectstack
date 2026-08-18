@@ -1,0 +1,343 @@
+---
+title: Seed Tenancy Repair
+description: The automatic repair that stamps organization_id on untenanted seed rows and merges the __global__ autonumber counter — when it runs, what it changes, what it deliberately leaves alone, and the manual remedy for a multi-organization install.
+---
+
+# Seed Tenancy Repair
+
+ObjectStack ships one repair that **rewrites stored rows without an operator
+asking it to**. Every other row-rewriting migration on this platform is an
+explicit `os migrate … --apply` with a preview mode; this one is not. It has no
+preview, no flag, and no opt-out environment variable.
+
+This page exists so that an operator who asks *"did something change my data,
+and can I tell?"* can answer it.
+
+<Callout type="warn" title="The one-paragraph version">
+On a **single-posture** deployment holding exactly **one** organization, the
+platform will — unattended — stamp `organization_id` onto business rows that
+carry `NULL`, merge two autonumber counters into one, and delete the leftover
+counter. It runs at every boot and again the moment the first organization is
+created. On any other deployment shape it changes nothing and writes a warning
+naming the manual remedy.
+</Callout>
+
+---
+
+## The defect it repairs
+
+Two write paths disagreed about who stamps `organization_id`.
+
+The **seed loader** resolves the install's organization at seed time — and a
+first boot has none yet, because the admin signs up *after* the server is up. So
+the loader correctly declines and business seed rows land with
+`organization_id = NULL`. The **API path** writes with the signed-in user's
+organization.
+
+The SQL driver keys its autonumber counters by exactly that column, so one
+object ends up running **two** counters:
+
+```
+object=crm_case  tenant_id='__global__'            last_value=38   <- seed
+object=crm_case  tenant_id='org_mssymr19xzd645gv'  last_value=4    <- API
+```
+
+And the uniqueness index is partitioned by the same column —
+`COALESCE(organization_id, '__global__'), field` — so the two partitions can
+hold the *same* business identifier without the constraint ever firing.
+Measured on 17.0.0 GA: a fresh single-organization install seeded with
+`CASE-00001..38` minted `CASE-00001..4` again on its first four API creates.
+Four duplicated values on a field declared `unique`, zero 409s, no warning.
+
+<Callout type="info" title="Not a counter bug">
+Each counter is already correct *within its own scope*: the organization-scoped
+counter scans its own partition, correctly finds it empty on a fresh database,
+and correctly starts at 1. The defect is upstream of the counter, in who stamps
+`organization_id` on a seeded row — which is why the repair moves **rows**
+between partitions and then reconciles the counters to match, rather than
+touching allocation logic.
+</Callout>
+
+---
+
+## When it runs
+
+Two triggers, not one. Both call the same repair with the same guards.
+
+| Trigger | Where | When it fires |
+| :--- | :--- | :--- |
+| `kernel:ready` boot hook | `@objectstack/metadata-protocol` | Every **serving** boot of a self-hosted kernel — `os dev`, `os serve`, `os start`. Per-environment (cloud) kernels do not own these tables locally and are skipped, and so are the one-shot `os migrate` / `os meta` boots (see below). |
+| First-organization handoff | `@objectstack/runtime` | After any successful `create` on `sys_organization`. On a fresh install this is the **first admin sign-up**. |
+
+The second trigger is the one most operators will meet first, and it is not a
+boot at all. At `kernel:ready` on a fresh install no organization exists yet, so
+the boot hook can do nothing; the earliest it could act is the *next* restart —
+by which time the duplicates of this session have already been minted, and per
+the ruling they are not the platform's to renumber. `sys_organization` gaining
+its first row is exactly the event that makes the answer derivable, so the
+repair runs there too.
+
+<Callout type="info" title="One-shot CLI commands never trigger it">
+`os migrate *` and `os meta *` boot the same stack, but they declare
+themselves out of this repair (`runPlatformMigrations: false`) — so a dry-run
+report cannot destroy the evidence it was run to collect. Only a boot that
+STARTS THE SERVER repairs. Before #9380 no self-hosted boot ran the repair at
+all: the hook was gated on the kernel having no environment id, and the
+standalone stack stamps `proj_local` on every boot, so the gate never opened.
+</Callout>
+
+<Callout type="info" title="It runs on every boot, but is a no-op after the first success">
+The repair is idempotent. Once the rows carry an organization and the
+`__global__` counter is gone, the detection probe finds nothing and every later
+run stops at `no-split` — one indexed probe against `_objectstack_sequences`,
+nothing written, nothing logged.
+</Callout>
+
+Neither trigger can fail a boot or fail a sign-up. Both wrap the repair so that
+any error is caught and warned about; an organization that was just created
+stands whatever happens here.
+
+---
+
+## What it decides, in order
+
+The repair walks six gates. Only the last one writes anything, and only the last
+three say anything in the log.
+
+| Outcome | Condition | Logged? |
+| :--- | :--- | :--- |
+| `no-driver` | No raw-SQL-capable driver — a memory engine or a test double. | silent |
+| `absent` | No `_objectstack_sequences` table: nothing has ever allocated a number. | silent |
+| `no-split` | No object holds a `__global__` counter. **The healthy case.** | silent |
+| `skipped-multi-tenant` | The tenancy posture is `group` or `isolated`. | **warn** |
+| `skipped-ambiguous-organization` | Posture is `single`, but `sys_organization` does not hold exactly one row. | **warn** |
+| `applied` | Everything above passed. Rows were rewritten. | **info** |
+
+The two skip gates ask deliberately different questions. The **posture** is what
+the deployment asked for — the same fact the boot banner prints as
+`Tenancy: single`. The organization **count** is what the data actually holds.
+Both must agree before anything is adopted, because a deployment that requested
+a wall, or that holds more than one organization, has no derivable answer to
+*which organization owns these rows* — and the repair must not guess.
+
+<Callout type="warn" title="Silence is the healthy signal, and also the invisible one">
+`no-split` writes nothing to the log. That is correct — the overwhelming
+majority of boots are healthy and should not narrate. It also means **the
+absence of a message is not evidence the repair did not run**; it is evidence
+it found nothing to do. The only positive receipt is the `info` line described
+below.
+</Callout>
+
+---
+
+## What `applied` actually changes
+
+### It leaves the platform namespaces alone
+
+Objects whose names begin `sys_`, `cloud_` or `ai_` are never adopted. Those
+seeds are deliberately global, and it is the same rule the seed loader applies
+when it decides whether to stamp its single-organization fallback. A repair that
+adopted a namespace the loader deliberately leaves global would be manufacturing
+a *new* disagreement between the two write paths while claiming to remove one.
+
+### It reports the already-minted duplicates first
+
+Before anything moves, the repair lists every identifier held on **both** sides
+of the split, because once the stamp merges the two partitions they become
+indistinguishable. These are reported and **never renumbered**:
+
+> A record number that has already appeared on a document, a notification or
+> another system's idempotence key is not safe to rewrite automatically.
+
+You are handed the list and decide per record whether to renumber or retire it.
+
+### It stamps the rows that can move — and only those
+
+The rewrite is, per object:
+
+```sql
+UPDATE  your_object
+SET     organization_id = ?
+WHERE   organization_id IS NULL
+  AND   your_field NOT IN (
+          SELECT your_field FROM your_object
+          WHERE organization_id IS NOT NULL AND your_field IS NOT NULL
+        );
+```
+
+That exclusion is the part most worth understanding, and it is measured rather
+than defensive. Moving untenanted rows into the organization moves them into the
+*other side* of the partitioned unique index. On an install that has already
+minted duplicates the destination already holds those values, the statement
+violates the unique constraint, and the driver rolls back **all** of it: a
+38-row repair moved zero rows — including the 34 that had no conflict at all —
+while the counter merge behind it still reported success.
+
+So the movable rows move, and:
+
+<Callout type="warn" title="Colliding rows keep organization_id = NULL">
+A row whose identifier is already taken in the target organization is **not**
+moved. It stays exactly as it was, untenanted, and is named in the collision
+report. "Stamp the untenanted seed rows" and "already-minted duplicates are
+reported, not repaired" are in direct tension on such a row — it cannot enter the
+organization partition unless something renumbers it, and renumbering is
+precisely what is forbidden.
+</Callout>
+
+A row is unmovable if it collides on **any** split field of its object, not just
+one.
+
+### It merges the counters at `max(last_value)`
+
+The organization-scoped counter is raised to the greater of the two **counter**
+values, and then the `__global__` row is deleted.
+
+Counters, never data. The two differ in the direction that matters: a counter is
+allowed to sit *ahead* of its rows — numbers burned by a rolled-back transaction,
+rows deleted since. Taking the counter high-water mark can only ever skip
+numbers; taking the data maximum could re-issue one that a burned allocation
+already handed out.
+
+Where there was no organization-scoped counter at all — the fresh-install case —
+the delete *is* the whole reconciliation. No replacement row is written: the
+driver's own first-allocation bootstrap sees no row, scans the maximum numeric
+tail scoped to the resolved tenant (which, the stamp having just run, now
+includes the adopted seed rows), and starts at that maximum plus one.
+
+### If a stamp fails, that object's counters are left alone
+
+A per-object stamp failure is warned about, and the counter merge for that object
+is **skipped**. A counter describing a partition the rows never reached would be
+a false receipt. The split survives, the next run retries the whole repair, and
+nothing was lost.
+
+---
+
+## Telling whether it ran
+
+There is no report file, no CLI receipt and no stored history. The evidence is
+the boot/sign-up log, and there are exactly three lines to look for.
+
+**It repaired something** — `info`:
+
+```
+[metadata-protocol] seed/API tenancy split repaired for 3 object(s) (#8686):
+untenanted seed rows adopted organization org_… and the '__global__' counter was
+merged into the organization-scoped one.
+```
+
+<Callout type="info" title="That number counts OBJECTS, not rows">
+It is deliberately not a row count. The three supported dialects report an
+`UPDATE`'s affected-row count in three incompatible shapes, and raw hosts report
+none at all, so a row number would be a fabrication on at least one of them. The
+object list is exact everywhere.
+</Callout>
+
+**It found duplicates it will not fix** — `warn`, listing each
+`object.field=value` and how many rows hold it. Nothing failed and nothing is
+lost, but the install holds duplicate business identifiers the platform minted
+and will not rewrite. Now that the rows share one partition, the unique index
+will refuse any *further* duplicate.
+
+**It declined** — `warn`, naming the affected `object.field` pairs, the reason
+(walled posture, or an organization count that is not 1) and the manual remedy.
+
+To inventory what is actually in the data rather than what a log line said, use
+`os migrate duplicates` — see [Ordering](#ordering-run-the-report-before-the-repair)
+below and the [CLI reference](/docs/deployment/cli).
+
+---
+
+## Ordering: run the report before the repair
+
+`organization_id = NULL` is the marker that says *"this row came from the
+untenanted side"*, and it is exactly what this repair overwrites. `os migrate
+duplicates` reads that marker. So the report must be run **before** the repair is
+applied on an install.
+
+Be precise about what is lost, because the two halves behave differently:
+
+| | Survives the repair? |
+| :--- | :--- |
+| The inventory of identifiers **already** minted twice | **Yes.** Colliding rows deliberately keep `organization_id = NULL`, so they remain in two partitions and remain findable. |
+| The **live condition** — an install still holding a `__global__` counter beside an organization-scoped one, i.e. *about to mint more* | **No.** The repair deletes that counter row. Once it has run, this condition can never be produced again. |
+
+The live condition is the only forward-looking line in the report, and it is the
+perishable one. On a deployment you have not yet restarted since discovering the
+problem, run the report first.
+
+`os migrate duplicates` writes nothing: it boots read-only, declares itself out
+of the boot repair, issues `SELECT`s only, and emits JSON to stdout for you to
+archive.
+
+<Callout type="warn" title="This is easy to lose by accident">
+The repair fires at `kernel:ready` on a serving boot. Restarting the server to
+"have a look" is enough to consume the evidence — running `os migrate
+duplicates` is not.
+</Callout>
+
+---
+
+## Multi-organization installs: the manual remedy
+
+A deployment under the `group` or `isolated` posture — or any deployment whose
+`sys_organization` table does not hold exactly one row — is **skipped**. The
+defect is not repaired, and until it is resolved those objects run two autonumber
+counters and can mint the same "unique" identifier twice.
+
+Refusing to boot was considered and rejected: it blocks upgrades. Fixing forward
+only was also rejected: it leaves a known-broken population minting duplicates.
+So the deployment boots, keeps working, and is told exactly what to do.
+
+The remedy has to be applied per object, because deciding the owner is the part
+the platform cannot derive:
+
+**1. Decide which organization owns the untenanted rows**, then adopt them:
+
+```sql
+UPDATE  your_object
+SET     organization_id = 'org_your_id'
+WHERE   organization_id IS NULL;
+```
+
+**2. Merge that object's counter** — raise the organization-scoped row to the
+greater of the two `last_value`s, then retire the global row:
+
+```sql
+UPDATE  _objectstack_sequences
+SET     last_value  = 38,          -- the greater of the two last_value figures
+        updated_at  = CURRENT_TIMESTAMP
+WHERE   object = 'your_object' AND field = 'your_field'
+  AND   tenant_id = 'org_your_id';
+
+DELETE FROM _objectstack_sequences
+WHERE   object = 'your_object' AND field = 'your_field'
+  AND   tenant_id = '__global__';
+```
+
+If there is no organization-scoped counter row to raise, skip the `UPDATE` and
+run only the `DELETE` — the driver rebuilds the counter from the adopted rows on
+its next allocation.
+
+<Callout type="warn" title="Inventory first, and expect the UPDATE to be refused">
+Run `os migrate duplicates` before step 1. If any identifier is already held on
+both sides, the `UPDATE` will violate the partitioned unique index and roll back
+entirely — including every row that had no conflict. Exclude the colliding values
+the way the automatic repair does, and deal with those records deliberately.
+</Callout>
+
+`_objectstack_sequences` is a driver-private table. Nothing else in the platform
+asks you to write to it, and nothing here should be scripted into a routine
+migration — this is a one-time repair for a deployment that was told it needs one.
+
+---
+
+## Related
+
+- **[Tenancy Postures & Membership](/docs/deployment/tenancy-modes)** — how the
+  posture that gates this repair is resolved. Note that the *membership* backfill
+  documented there is a different mechanism with its own opt-out
+  (`OS_SKIP_MEMBERSHIP_BACKFILL`); that variable has no effect on this repair.
+- **[CLI reference](/docs/deployment/cli)** — the `os migrate` family, including
+  the `replace_unique_index` schema migration that creates the partitioned unique
+  index this page keeps referring to.

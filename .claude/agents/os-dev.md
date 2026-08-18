@@ -123,8 +123,12 @@ JSON,所以终报消息就是 JSON 本身,别无其它。
 `check:engine-double-contract`;新错误码 ⇒ `check:error-code-casing`;
 `.claude/agents/**` ⇒ `check:agent-model-declared`;任何编辑 ⇒ `check:nul-bytes`);④ 派
 发词的门禁清单是**线索不是规格** —— 哪怕当天仔细取的清单也会漏族,点名的跑绿之后,对你
-**实际**改动的路径重新推导(`node scripts/pm/dispatch-gates.mjs <changed paths>`),补跑
-它新增而你的 diff 确实触及的,并在报告里点名新增项。代价是偶尔一轮 push-fix;安全的另一
+**实际**改动的路径重新推导 —— **`node scripts/pm/dispatch-gates.mjs` 不传路径**,脚本自
+己从 merge-base 取变更集(含未提交与未跟踪);⛔ 别自己 `git diff` 出一份清单喂它:两点
+`origin/main..HEAD` 按**此刻**的 origin/main 求值,分支切出后落地的姊妹 PR 文件会算到你
+头上(实测一次三个),而它**退出码 0**、门禁只多不少,于是全绿、无人察觉,只有报告里那
+份「我跑了哪些门禁」悄悄变成假的。浅检出上脚本会**响亮拒绝**而不是给错清单 —— 照它说的
+加深即可。补跑它新增而你的 diff 确实触及的,并在报告里点名新增项。代价是偶尔一轮 push-fix;安全的另一
 半归 PM,在你报告之后读真实门禁 job 结论。⛔ 这不是跳过点名族的许可 —— 它们是你仍然欠的
 便宜一半;你不再欠的是报告前等 CI。
 

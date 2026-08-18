@@ -67,6 +67,27 @@
  *     (Same paradigm as `sys_setting`'s identity-index migration, which hands
  *     back the duplicate list rather than applying a keep-one rule.)
  *
+ * ## Dialects (#9381)
+ *
+ * Every statement here is compiled for the dialect the seam is connected to.
+ * That is not decoration: MySQL does not run with `ANSI_QUOTES`, so the ANSI
+ * `"identifier"` this module used to emit unconditionally is a STRING LITERAL
+ * there and every one of the five statements failed to parse — measured on a
+ * live MySQL 8.0.46, where all seven statements returned `ER_PARSE_ERROR`
+ * before the fix and all seven run after it. Two MySQL-specific traps beyond the
+ * quote character, both measured on the same server:
+ *
+ *   - `last_value` is RESERVED on MySQL 8.0 (`LAST_VALUE()`), so the COLUMN
+ *     names are quoted too, not just the tables — an unqualified `last_value`
+ *     is a parse error even when the table is spelled correctly;
+ *   - `UPDATE t … (SELECT … FROM t)` is refused outright with
+ *     `ER_UPDATE_TABLE_USED` (1093), so the stamp's exclusion sub-SELECTs go
+ *     through a derived table (see {@link buildStampSql}).
+ *
+ * The failure was invisible because a migration must never fail a boot: every
+ * call site catches and warns, so the symptom on MySQL was a skipped repair in
+ * the log, not an error — declared (the module claims MySQL) ≠ enforced.
+ *
  * ## Why `max(last_value)` and not `max(data)`
  *
  * The ruling says `max(last_value)`, and the two differ in the direction that
@@ -165,7 +186,39 @@ export interface SeedTenancyBackfillResult {
 }
 
 /**
- * Resolve a row-returning raw-SQL seam.
+ * The raw-SQL seam PLUS the dialect it speaks — resolved together, from one
+ * driver, on purpose (#9381).
+ *
+ * Every statement in this module interpolates identifiers, and the three
+ * supported dialects do not spell an identifier the same way. An `exec` handed
+ * around without the dialect beside it is an invitation to compile ANSI SQL for
+ * a server that does not parse it — which is exactly the defect #9381 records:
+ * `"x"` is an identifier on SQLite and PostgreSQL, and a STRING LITERAL on
+ * MySQL, whose `sql_mode` does not include `ANSI_QUOTES` (measured on MySQL
+ * 8.0.46: `ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,`
+ * `ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION` — no `ANSI_QUOTES`, and
+ * nothing in `driver-sql` sets one; its only session `SET` is `time_zone`).
+ *
+ * So the two travel as ONE value: a caller cannot obtain the exec without also
+ * obtaining the client name, and {@link backfillSeedTenancy} takes the pair
+ * rather than a bare function. That is the structural half of the fix — the
+ * quoting helper alone would still let a future caller lose the dialect.
+ */
+export interface SeedTenancySeam {
+  /** The row-returning raw-SQL seam. */
+  exec: SeedTenancyExec;
+  /**
+   * The knex client name of the driver behind {@link exec} — `'mysql2'`,
+   * `'mysql'`, `'pg'`, `'better-sqlite3'`, `'sqlite3'`. `undefined` on a host
+   * that exposes no config, where the ANSI spelling is the only sane default
+   * (it is what SQLite and PostgreSQL want, and what a MySQL running with
+   * `ANSI_QUOTES` would want too).
+   */
+  client?: string;
+}
+
+/**
+ * Resolve a row-returning raw-SQL seam, together with the dialect it speaks.
  *
  * `execute` is probed BEFORE `raw` — the opposite order to
  * `resolveIndexExecForTable` — because `execute(sql, params)` carries bound
@@ -176,8 +229,13 @@ export interface SeedTenancyBackfillResult {
  * `_objectstack_sequences`, which is driver-private and not a registered object,
  * so there is nothing to ask about. The engine's own default driver is the one
  * that owns it.
+ *
+ * The client name is read from the SAME driver object the exec came from
+ * (`driver.config.client`, the field `SqlDriver.isMysql` itself reads, and the
+ * same source `os migrate duplicates` uses for its own probes), so the dialect
+ * can never describe a different connection than the one the statements run on.
  */
-export function resolveSeedTenancyExec(engine: unknown): SeedTenancyExec | undefined {
+export function resolveSeedTenancySeam(engine: unknown): SeedTenancySeam | undefined {
   const engineAny = engine as any;
   const attempt = (fn: () => unknown): any => {
     try {
@@ -201,10 +259,48 @@ export function resolveSeedTenancyExec(engine: unknown): SeedTenancyExec | undef
     }
   }
   if (!canRun(driver)) return undefined;
+  const client = resolveClientName(driver);
   if (typeof driver.execute === 'function') {
-    return (sql: string, params?: unknown[]) => driver.execute(sql, params ?? []);
+    return { exec: (sql: string, params?: unknown[]) => driver.execute(sql, params ?? []), client };
   }
-  return (sql: string) => driver.raw(sql);
+  return { exec: (sql: string) => driver.raw(sql), client };
+}
+
+/**
+ * The knex client name of a driver, best-effort.
+ *
+ * `SqlDriver.config` is `protected` in TypeScript and an ordinary property at
+ * runtime; this module holds the engine as `unknown` and reads it the same way
+ * `os migrate duplicates` does. The knex instance is the fallback for a driver
+ * that keeps its config elsewhere. Anything unreadable is `undefined`, which
+ * means "quote the ANSI way" — today's behaviour, unchanged.
+ */
+function resolveClientName(driver: any): string | undefined {
+  const read = (fn: () => unknown): string | undefined => {
+    try {
+      const v = fn();
+      return typeof v === 'string' && v.length > 0 ? v : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  return (
+    read(() => driver?.config?.client) ??
+    read(() => driver?.knex?.client?.config?.client) ??
+    read(() => driver?.knex?.context?.client?.config?.client)
+  );
+}
+
+/**
+ * The exec half alone, for callers that resolve the dialect themselves.
+ *
+ * `os migrate duplicates` is the one: it reads `stack.driver.config.client` for
+ * its OWN probes and only borrows this resolver's driver-walk. Anything that
+ * compiles statements from THIS module must take {@link resolveSeedTenancySeam}
+ * instead, so the dialect cannot be dropped on the way.
+ */
+export function resolveSeedTenancyExec(engine: unknown): SeedTenancyExec | undefined {
+  return resolveSeedTenancySeam(engine)?.exec;
 }
 
 /**
@@ -245,14 +341,28 @@ function isSafeIdentifier(name: unknown): name is string {
   return typeof name === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
 }
 
-/** Quote an identifier for the target dialect. */
-function quoteIdent(name: string): string {
-  return `"${name}"`;
+/**
+ * Quote an identifier for the dialect actually connected (#9381).
+ *
+ * MySQL does not run with `ANSI_QUOTES`, so `"x"` there is a STRING LITERAL and
+ * not an identifier — measured on a live MySQL 8.0.46, where every statement
+ * this module builds failed with `ER_PARSE_ERROR` before this fix. One quoting
+ * style for every dialect cannot run on all three.
+ *
+ * The same shape, deliberately, as `quoteIdent` in the CLI's
+ * `migrate/duplicates.ts` (#8928), which took this route first for its own
+ * probes. Two copies is two copies; unifying them is a separate decision (see
+ * the PR discussion on #9381) and NOT a drive-by of this fix.
+ */
+function quoteIdent(name: string, client?: string): string {
+  const c = String(client ?? '').toLowerCase();
+  if (c === 'mysql' || c === 'mysql2') return `\`${name.replace(/`/g, '``')}\``;
+  return `"${name.replace(/"/g, '""')}"`;
 }
 
 /** Probe statement: does the counter table exist at all? */
-export function buildSequencesPresenceSql(): string {
-  return `SELECT tenant_id FROM ${quoteIdent(SEQUENCES_TABLE)} WHERE 1 = 0`;
+export function buildSequencesPresenceSql(client?: string): string {
+  return `SELECT ${quoteIdent('tenant_id', client)} FROM ${quoteIdent(SEQUENCES_TABLE, client)} WHERE 1 = 0`;
 }
 
 /**
@@ -275,14 +385,20 @@ export function buildSequencesPresenceSql(): string {
  * "close the split before it can do damage", which is the ruled contract
  * (Option 1) rather than merely its clean-up.
  */
-export function buildSplitProbeSql(): string {
-  const t = quoteIdent(SEQUENCES_TABLE);
+export function buildSplitProbeSql(client?: string): string {
+  const t = quoteIdent(SEQUENCES_TABLE, client);
+  const q = (name: string) => quoteIdent(name, client);
+  // `last_value` is a RESERVED word on MySQL 8.0 (the `LAST_VALUE()` window
+  // function), so even the bare column name is an `ER_PARSE_ERROR` there —
+  // measured. Every identifier is quoted, not just the table.
   return (
-    `SELECT g.object AS object, g.field AS field, ` +
-    `g.last_value AS global_last_value, o.last_value AS organization_last_value ` +
+    `SELECT g.${q('object')} AS ${q('object')}, g.${q('field')} AS ${q('field')}, ` +
+    `g.${q('last_value')} AS ${q('global_last_value')}, ` +
+    `o.${q('last_value')} AS ${q('organization_last_value')} ` +
     `FROM ${t} g LEFT JOIN ${t} o ` +
-    `ON g.object = o.object AND g.field = o.field AND o.tenant_id <> ? ` +
-    `WHERE g.tenant_id = ?`
+    `ON g.${q('object')} = o.${q('object')} AND g.${q('field')} = o.${q('field')} ` +
+    `AND o.${q('tenant_id')} <> ? ` +
+    `WHERE g.${q('tenant_id')} = ?`
   );
 }
 
@@ -302,8 +418,8 @@ export function buildSplitProbeSql(): string {
 const PLATFORM_NAMESPACE = /^(sys_|cloud_|ai_)/;
 
 /** The organizations the install has, capped — the single-tenant guard reads this. */
-export function buildOrganizationProbeSql(): string {
-  return `SELECT id FROM ${quoteIdent(ORGANIZATION_TABLE)}`;
+export function buildOrganizationProbeSql(client?: string): string {
+  return `SELECT ${quoteIdent('id', client)} FROM ${quoteIdent(ORGANIZATION_TABLE, client)}`;
 }
 
 /**
@@ -314,15 +430,16 @@ export function buildOrganizationProbeSql(): string {
  * handed the same statement the migration ran, so the report does not depend on
  * trusting this module's own summary.
  */
-export function buildCollisionProbeSql(object: string, field: string): string {
+export function buildCollisionProbeSql(object: string, field: string, client?: string): string {
   if (!isSafeIdentifier(object) || !isSafeIdentifier(field)) {
     throw new Error(`unsafe identifier in collision probe: ${object}.${field}`);
   }
-  const t = quoteIdent(object);
-  const f = quoteIdent(field);
-  const org = quoteIdent(ORGANIZATION_FIELD);
+  const t = quoteIdent(object, client);
+  const f = quoteIdent(field, client);
+  const org = quoteIdent(ORGANIZATION_FIELD, client);
   return (
-    `SELECT ${f} AS value, COUNT(*) AS rows_holding FROM ${t} ` +
+    `SELECT ${f} AS ${quoteIdent('value', client)}, ` +
+    `COUNT(*) AS ${quoteIdent('rows_holding', client)} FROM ${t} ` +
     `WHERE ${f} IN (SELECT ${f} FROM ${t} WHERE ${org} IS NULL) ` +
     `AND ${f} IN (SELECT ${f} FROM ${t} WHERE ${org} IS NOT NULL) ` +
     `GROUP BY ${f} ORDER BY ${f}`
@@ -354,41 +471,71 @@ export function buildCollisionProbeSql(object: string, field: string): string {
  *
  * `fields` is every split field of this object: a row is unmovable if it
  * collides on ANY of them.
+ *
+ * ## Why each guard sub-SELECT is wrapped in a derived table (#9381)
+ *
+ * MySQL refuses `UPDATE t … WHERE c NOT IN (SELECT … FROM t)` outright:
+ * `ER_UPDATE_TABLE_USED` (1093) — "You can't specify target table 't' for update
+ * in FROM clause". Measured on a live MySQL 8.0.46, and it is NOT a quoting
+ * problem: the statement stays refused after the identifiers are spelled the
+ * MySQL way. Selecting the same rows through a derived table makes MySQL
+ * materialize them first, which is exactly what the restriction asks for, and
+ * the form is plain ANSI — SQLite and PostgreSQL run it unchanged (both
+ * measured). The alias is per-field so a multi-autonumber object does not
+ * declare the same derived table twice in one statement.
  */
-export function buildStampSql(object: string, fields: string[]): string {
+export function buildStampSql(object: string, fields: string[], client?: string): string {
   if (!isSafeIdentifier(object)) {
     throw new Error(`unsafe identifier in stamp: ${object}`);
   }
-  const t = quoteIdent(object);
-  const org = quoteIdent(ORGANIZATION_FIELD);
-  const guards = fields.map((field) => {
+  const t = quoteIdent(object, client);
+  const org = quoteIdent(ORGANIZATION_FIELD, client);
+  const guards = fields.map((field, i) => {
     if (!isSafeIdentifier(field)) {
       throw new Error(`unsafe identifier in stamp: ${object}.${field}`);
     }
-    const f = quoteIdent(field);
-    return ` AND ${f} NOT IN (SELECT ${f} FROM ${t} WHERE ${org} IS NOT NULL AND ${f} IS NOT NULL)`;
+    const f = quoteIdent(field, client);
+    // The derived table's own column and alias are this module's literals, not
+    // data — but they are quoted like everything else so one rule covers the
+    // whole statement.
+    const taken = quoteIdent(`taken_${i}`, client);
+    const v = quoteIdent('v', client);
+    return (
+      ` AND ${f} NOT IN (SELECT ${taken}.${v} FROM ` +
+      `(SELECT ${f} AS ${v} FROM ${t} WHERE ${org} IS NOT NULL AND ${f} IS NOT NULL) AS ${taken})`
+    );
   });
   return `UPDATE ${t} SET ${org} = ? WHERE ${org} IS NULL${guards.join('')}`;
 }
 
 /** Raise the organization-scoped counter to the merged high-water mark. */
-export function buildCounterMergeSql(): string {
+export function buildCounterMergeSql(client?: string): string {
+  const q = (name: string) => quoteIdent(name, client);
+  // `last_value` unqualified is an `ER_PARSE_ERROR` on MySQL 8.0 — it is the
+  // reserved `LAST_VALUE()` window function there — so the columns are quoted
+  // and not only the table (measured).
   return (
-    `UPDATE ${quoteIdent(SEQUENCES_TABLE)} SET last_value = ?, updated_at = CURRENT_TIMESTAMP ` +
-    `WHERE object = ? AND field = ? AND tenant_id = ?`
+    `UPDATE ${q(SEQUENCES_TABLE)} SET ${q('last_value')} = ?, ` +
+    `${q('updated_at')} = CURRENT_TIMESTAMP ` +
+    `WHERE ${q('object')} = ? AND ${q('field')} = ? AND ${q('tenant_id')} = ?`
   );
 }
 
 /** Retire the `__global__` counter once its value has been merged. */
-export function buildGlobalCounterDeleteSql(): string {
-  return `DELETE FROM ${quoteIdent(SEQUENCES_TABLE)} WHERE object = ? AND field = ? AND tenant_id = ?`;
+export function buildGlobalCounterDeleteSql(client?: string): string {
+  const q = (name: string) => quoteIdent(name, client);
+  return (
+    `DELETE FROM ${q(SEQUENCES_TABLE)} ` +
+    `WHERE ${q('object')} = ? AND ${q('field')} = ? AND ${q('tenant_id')} = ?`
+  );
 }
 
 /** The organization-scoped counter rows for one split object/field. */
-function buildOrgCounterProbeSql(): string {
+function buildOrgCounterProbeSql(client?: string): string {
+  const q = (name: string) => quoteIdent(name, client);
   return (
-    `SELECT tenant_id, last_value FROM ${quoteIdent(SEQUENCES_TABLE)} ` +
-    `WHERE object = ? AND field = ? AND tenant_id <> ?`
+    `SELECT ${q('tenant_id')}, ${q('last_value')} FROM ${q(SEQUENCES_TABLE)} ` +
+    `WHERE ${q('object')} = ? AND ${q('field')} = ? AND ${q('tenant_id')} <> ?`
   );
 }
 
@@ -407,18 +554,23 @@ function toNumber(value: unknown): number {
  *
  * Idempotent: once the rows carry the organization and the `__global__` counter
  * is gone, the split probe finds nothing and a re-run is `no-split`.
+ *
+ * Takes the SEAM — exec plus dialect — rather than a bare exec (#9381). Every
+ * statement below is compiled for `seam.client`, so the pair has to arrive
+ * together or the statements would be spelled for a dialect nobody checked.
  */
 export async function backfillSeedTenancy(
-  exec: SeedTenancyExec | undefined,
+  seam: SeedTenancySeam | undefined,
   logger?: SeedTenancyLogger,
 ): Promise<SeedTenancyBackfillResult> {
   const empty = { splits: [], collisions: [], objectsStamped: 0 };
-  if (!exec) return { status: 'no-driver', ...empty };
+  if (!seam?.exec) return { status: 'no-driver', ...empty };
+  const { exec, client } = seam;
 
   // 1. Is there a counter table at all? Absent on a memory engine, and on any
   //    install that has never allocated an autonumber.
   try {
-    await exec(buildSequencesPresenceSql());
+    await exec(buildSequencesPresenceSql(client));
   } catch {
     return { status: 'absent', ...empty };
   }
@@ -429,7 +581,7 @@ export async function backfillSeedTenancy(
   //    loudly, because reaching it means a real defect is present.
   let splits: SeedTenancySplit[];
   try {
-    const rows = normalizeRows(await exec(buildSplitProbeSql(), [GLOBAL_TENANT, GLOBAL_TENANT]));
+    const rows = normalizeRows(await exec(buildSplitProbeSql(client), [GLOBAL_TENANT, GLOBAL_TENANT]));
     splits = rows
       .filter((r) => isSafeIdentifier(r.object) && isSafeIdentifier(r.field))
       // Platform seeds stay global — the loader's own rule, see PLATFORM_NAMESPACE.
@@ -473,7 +625,7 @@ export async function backfillSeedTenancy(
   // 4. Exactly one organization, or there is nothing derivable to adopt.
   let organizationIds: string[] = [];
   try {
-    organizationIds = normalizeRows(await exec(buildOrganizationProbeSql()))
+    organizationIds = normalizeRows(await exec(buildOrganizationProbeSql(client)))
       .map((r) => (r.id == null ? '' : String(r.id)))
       .filter((id) => id.length > 0);
   } catch {
@@ -501,7 +653,7 @@ export async function backfillSeedTenancy(
   const collisions: SeedTenancyCollision[] = [];
   for (const split of splits) {
     try {
-      const rows = normalizeRows(await exec(buildCollisionProbeSql(split.object, split.field)));
+      const rows = normalizeRows(await exec(buildCollisionProbeSql(split.object, split.field, client)));
       for (const r of rows) {
         if (r.value == null) continue;
         collisions.push({
@@ -515,7 +667,7 @@ export async function backfillSeedTenancy(
       logger?.warn?.(
         `[metadata-protocol] could not list already-minted duplicates for ${split.object}.${split.field} ` +
           `(#8686) — the backfill continues; verify manually with: ` +
-          `${buildCollisionProbeSql(split.object, split.field)}`,
+          `${buildCollisionProbeSql(split.object, split.field, client)}`,
         { error: (e as Error).message },
       );
     }
@@ -534,7 +686,7 @@ export async function backfillSeedTenancy(
   const stampFailures: string[] = [];
   for (const [object, fields] of fieldsByObject) {
     try {
-      await exec(buildStampSql(object, fields), [organizationId]);
+      await exec(buildStampSql(object, fields, client), [organizationId]);
       objectsStamped += 1;
     } catch (e) {
       stampFailures.push(object);
@@ -555,7 +707,7 @@ export async function backfillSeedTenancy(
     if (stampFailures.includes(split.object)) continue;
     try {
       const orgRows = normalizeRows(
-        await exec(buildOrgCounterProbeSql(), [split.object, split.field, GLOBAL_TENANT]),
+        await exec(buildOrgCounterProbeSql(client), [split.object, split.field, GLOBAL_TENANT]),
       );
       for (const row of orgRows) {
         const tenantId = row.tenant_id == null ? '' : String(row.tenant_id);
@@ -563,7 +715,7 @@ export async function backfillSeedTenancy(
         // The ruling's merge rule: the greater of the two COUNTERS, never the
         // data max — a counter is allowed to sit ahead of its rows.
         const merged = Math.max(split.globalLastValue, toNumber(row.last_value));
-        await exec(buildCounterMergeSql(), [merged, split.object, split.field, tenantId]);
+        await exec(buildCounterMergeSql(client), [merged, split.object, split.field, tenantId]);
       }
       // Retire the `__global__` counter last.
       //
@@ -579,7 +731,7 @@ export async function backfillSeedTenancy(
       // row, scans `scanMaxNumericTail` SCOPED TO THE RESOLVED TENANT — which, the
       // stamp above having just run, now includes the adopted seed rows — and
       // starts at that max + 1. One tested code path, no duplicated hashing.
-      await exec(buildGlobalCounterDeleteSql(), [split.object, split.field, GLOBAL_TENANT]);
+      await exec(buildGlobalCounterDeleteSql(client), [split.object, split.field, GLOBAL_TENANT]);
     } catch (e) {
       logger?.warn?.(
         `[metadata-protocol] seed tenancy backfill could not merge the counter for ` +

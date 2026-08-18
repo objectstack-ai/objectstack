@@ -100,6 +100,7 @@ const ALL_HANDWRITTEN = [
   "content/docs/deployment/index.mdx",
   "content/docs/deployment/production-readiness.mdx",
   "content/docs/deployment/publish-and-preview.mdx",
+  "content/docs/deployment/seed-tenancy-repair.mdx",
   "content/docs/deployment/self-hosting.mdx",
   "content/docs/deployment/single-project-mode.mdx",
   "content/docs/deployment/tenancy-modes.mdx",

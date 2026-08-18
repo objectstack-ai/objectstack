@@ -657,6 +657,7 @@ where the data lives.
 | `os migrate value-shapes` | Scan stored reference and structured-JSON field values against the platform's value contract, and record the deployment's migration flag when clean |
 | `os migrate summary-nulls` | Backfill roll-up `count` / `sum` columns still stored as `NULL` on parent rows created before the insert-time seed. Repairs values; no flag, nothing depends on it having run |
 | `os migrate meta --stored` | Replay the metadata conversion chain over this deployment's `sys_metadata` rows and rewrite the ones still carrying a pre-protocol shape. Hygiene, not a gate — nothing depends on it having run |
+| `os migrate duplicates` | Report business identifiers already minted twice across the organization partitions — a read-only inventory as JSON on stdout. Renumbers nothing and writes nothing at all; run it before the boot-time tenancy repair, which overwrites part of the evidence |
 
 ```bash
 os migrate files-to-references            # Dry run: full report, writes nothing
@@ -921,6 +922,69 @@ It returns the same report the CLI renders, and takes the same posture:
 not one item — and answers `403` otherwise. Flows need no extra setup on this
 path: the server already holds a live automation engine, so the run resolves the
 executor registry the conflict guard needs from the process it is running in.
+
+#### `os migrate duplicates`
+
+The one command in this family that is **not** a migration: it writes nothing
+under any flag, and there is nothing to apply. It inventories business
+identifiers the platform already handed out twice — one value held by rows in
+more than one of the organization partitions a
+[`unique: 'organization'`](/docs/data-modeling/indexing) index separates.
+
+The gap it reports is a real one and predates the repair for it. A seeded row
+written before any organization existed carries `organization_id = NULL`, an API
+row carries the signed-in organization, and the partitioned unique index
+`(COALESCE(organization_id, '__global__'), field)` does not bite across the two
+— so each side allocated from its own autonumber counter and both could mint
+`CASE-00001`.
+
+```bash
+os migrate duplicates                                  # The report — JSON on stdout
+os migrate duplicates > duplicates-2026-08-18.json     # Archive it; the file is the deliverable
+os migrate duplicates --object crm_case                # Restrict the scan to one object
+os migrate duplicates --database-url postgres://…      # Inspect a database directly
+```
+
+Output is **always** the JSON document. There is no `--json` flag and no
+human-rendered mode — the report is the deliverable, you archive it, and a
+second renderer would be a second contract to keep true. The boot behind it is
+read-only: no DDL, no seed, and a missing SQLite file is not brought into
+existence. A full run leaves the rows and the counters byte-identical, so
+pointing it at production changes nothing about production.
+
+**Run it before the repair reaches this deployment.** On its first boot after
+the upgrade, a single-organization deployment adopts those untenanted seed rows
+into its organization and merges the two counters — which is the same state
+this report reads. Half of what it can tell you does not survive that:
+
+| Reported | Survives the repair? |
+| :--- | :--- |
+| **The duplicates themselves** — every value held across two partitions, with the id, organization and creation time of each holder | **Yes.** The repair deliberately refuses to adopt a row whose identifier is already taken in the destination partition, so those rows keep `organization_id = NULL` and stay visible |
+| **The live condition** — an object still running a global counter beside an organization-scoped one, and therefore about to mint more duplicates | **No.** The repair merges the two counters and deletes the global one. Once that has happened, this line can never be produced again |
+
+Running it afterwards is still worth doing — the inventory is what you act on,
+and it is complete either way. What you cannot recover is the forward-looking
+half.
+
+A deployment holding **more than one organization** is skipped by that repair
+rather than guessed at: there is no derivable answer to which organization owns
+an untenanted row, so it logs the condition and the remedy and changes nothing.
+Its evidence therefore stays intact, and this report stays reproducible until
+somebody stamps those rows by hand.
+
+Nothing is renumbered, here or by the repair. A business identifier that has
+already left the building — on an invoice, in a notification, in another
+system's idempotence key — is not the platform's to rewrite, so both sides
+report and stop. Deciding what a duplicate should become is yours.
+
+The scan covers every organization-scoped object and, on it, every field that
+is an identifier: `type: 'autonumber'`, or carrying any `unique` spelling.
+Platform objects are **not** filtered out — that filter is right for a repair
+and wrong for a report, which must not silently omit a real duplicate. Anything
+that could not be probed is listed under `skipped` with its reason, because
+"found nothing" and "never looked" must not read the same. For the same reason
+a driver with no raw SQL seam (memory, MongoDB) fails the whole run with
+`error: "no_sql_seam"` rather than returning an empty inventory.
 
 ### Scaffolding
 

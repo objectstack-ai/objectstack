@@ -108,6 +108,7 @@
  */
 
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { maskComments } from './js-comment-mask.mjs';
 import { join, relative, dirname, resolve } from 'node:path';
 
 const ROOT = resolve(new URL('..', import.meta.url).pathname);
@@ -147,10 +148,7 @@ export function parseStandardCodes(source) {
 // The scan
 // ---------------------------------------------------------------------------
 
-/** Comments stripped: prose naming a retired code is not a producer. */
-export function stripComments(source) {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
-}
+
 
 /**
  * The recognised ways this repo stamps a semantic code onto a value.
@@ -283,7 +281,7 @@ export function resolveConstant(name, fileSource, fileRel, readFile, ctx = {}) {
     for (const cand of [`${base}.ts`, `${base}.mts`, `${base}/index.ts`]) {
       const abs = join(ROOT, cand);
       if (!existsSync(abs)) continue;
-      const target = stripComments(readFile(abs));
+      const target = maskComments(readFile(abs));
       const hit = new RegExp(
         `\\bexport\\s+const\\s+${name}\\s*(?::[^=]+)?=\\s*'([A-Za-z][A-Za-z0-9_]*)'`,
       ).exec(target);
@@ -354,7 +352,7 @@ export function deriveSites({ registered, files, readFile, packageDirs = new Map
   const unresolved = [];
   // Stripped once: the workspace resolver reads these same sources, and a
   // comment naming a constant must not resolve one either.
-  const scanned = files.map(({ rel, source }) => ({ rel, stripped: stripComments(source) }));
+  const scanned = files.map(({ rel, source }) => ({ rel, stripped: maskComments(source) }));
   const ctx = { scanned, packageDirs };
   for (const { rel, stripped } of scanned) {
     for (const shape of SHAPES) {
@@ -402,7 +400,7 @@ export function deriveSites({ registered, files, readFile, packageDirs = new Map
 export function parseDeclaration(source) {
   const start = source.indexOf('export const UNREGISTERED_CODE_SITES');
   if (start < 0) throw new Error(`${DECLARATION}: UNREGISTERED_CODE_SITES not found — the anchor moved.`);
-  const body = stripComments(source.slice(start));
+  const body = maskComments(source).slice(start);
   const end = body.indexOf('\n];');
   if (end < 0) throw new Error(`${DECLARATION}: UNREGISTERED_CODE_SITES terminator not found — the anchor moved.`);
   const rows = [];
@@ -579,7 +577,7 @@ export function checkDoorTyping({ doorSource, files }) {
         `Point REST_DOOR_FILE at the file that now owns the REST error doors.`);
     return findings;
   }
-  const stripped = stripComments(doorSource);
+  const stripped = maskComments(doorSource);
 
   // ① the author-side door narrows to the closed vocabulary
   const decl = /export\s+function\s+sendDeclaredFault\s*\(([\s\S]*?)\)\s*:\s*void/.exec(stripped);
@@ -604,7 +602,7 @@ export function checkDoorTyping({ doorSource, files }) {
   // ③ decided refusals do not travel through the `any` door
   for (const { rel, source } of files) {
     if (!rel.startsWith('packages/rest/')) continue;
-    const s = stripComments(source);
+    const s = maskComments(source);
     DECIDED_THROUGH_THROWN_RE.lastIndex = 0;
     for (const m of s.matchAll(DECIDED_THROUGH_THROWN_RE)) {
       add(`${rel}: hands the author-declared code '${m[1]}' to \`sendThrownError\`, whose \`error\` ` +

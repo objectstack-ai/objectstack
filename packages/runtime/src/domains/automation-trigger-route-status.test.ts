@@ -25,8 +25,11 @@
  * SDK actually calls — drift back to 200 unnoticed.
  *
  * The classification asserted here is the maintainer ruling recorded on the
- * card (2026-08-17). Two of its four rows are deliberately NOT implemented yet
- * and are pinned as unchanged, with the reason, at the bottom of this file.
+ * card (2026-08-17). Two of its four rows landed with #9413 (404, and 400
+ * `FLOW_FAILED`); the remaining two — 409 `FLOW_DISABLED` and 422
+ * `FLOW_NO_START_NODE` — landed with #9415 once the spec seat widened the
+ * closed `AutomationResult.code` union, and are at the bottom of this file.
+ * All four rows are implemented and pinned here now.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -218,41 +221,125 @@ describe('#9378 — a trigger that ran and failed answers 400 FLOW_FAILED, not 2
 /**
  * The route reads the ENGINE's classification; it does not infer one.
  *
- * These two exits — a DISABLED flow (the ruling's 409) and one with NO START
- * NODE (the ruling's 422) — never dispatched anything, and the engine cannot
- * yet say which is which: `AutomationResult.code` is a closed union of
- * resume-refusal members with no honest home for either, and the maintainer
- * ruling on #9384 (2026-08-17) keeps it closed, routing any new member to the
- * spec seat.
+ * ## History — these two assertions were written to flip, and #9415 flipped them
  *
- * So they keep TODAY's behaviour, pinned here rather than left unexamined —
- * and pinning them is what proves the 400 arm is not a shape heuristic: both
- * carry `success: false` exactly like the ran-and-failed exit, and both stay
- * 200 because they carry no `status: 'failed'`. When the union question is
- * ruled, these two assertions are the ones that flip.
+ * When #9378 landed (PR #9413) these same two exits — a DISABLED flow (the
+ * ruling's 409) and one with NO START NODE (the ruling's 422) — were pinned as
+ * **unchanged at 200**, because the engine could not yet say which was which:
+ * `AutomationResult.code` was a closed union of resume-refusal members with no
+ * honest home for either, and the maintainer ruling on #9384 (2026-08-17) keeps
+ * the union closed, routing any new member to the spec seat rather than letting
+ * a call site mint one. The pins carried their own flip condition: *"When the
+ * union question is ruled, these two assertions are the ones that flip."*
+ *
+ * **#9415 is that ruling delivered.** It widened the union with
+ * `'FLOW_DISABLED'` and `'FLOW_NO_START_NODE'` — a deliberate widening with
+ * measured need — the engine stamps them on the two exits, and the route reads
+ * them. So the assertions below now pin **409** and **422**, completing all
+ * four rows of the #9378 table.
+ *
+ * ## What is still load-bearing after the flip
+ *
+ * The reason these exits were worth pinning in the first place is unchanged and
+ * is now asserted more sharply, not less: the route must classify off the
+ * PRODUCER's verdict and nothing else. Both exits carry `success: false`
+ * exactly like the ran-and-failed one, so
+ *
+ *  - an exit carrying a `code` is answered by that code — even when it also
+ *    carries the incidental `summary` / `durationMs` of a failed run, and
+ *  - an exit carrying NO classification at all stays 200, even when it carries
+ *    those same incidental fields.
+ *
+ * Both directions are below. Together they say the arms read `code`, and only
+ * `code` — the message text and the shape are never consulted (PD #12).
  */
-describe('#9378 — the two never-dispatched exits the ruling leaves open stay unchanged', () => {
+describe('#9415 — the ruling\'s remaining two rows: never-dispatched exits answer 409 / 422', () => {
     for (const route of ROUTES) {
-        for (const [label, result] of [
-            ['a disabled flow', { success: false, error: "Flow 'welcome_flow' is disabled" }],
-            ['a flow with no start node', { success: false, error: 'Flow has no start node' }],
-        ] as Array<[string, AutomationResult]>) {
-            it(`${route.label}: ${label} is NOT reported as a failed run`, async () => {
+        for (const [label, result, status, code] of [
+            [
+                'a disabled flow',
+                { success: false, code: 'FLOW_DISABLED', error: "Flow 'welcome_flow' is disabled" },
+                409,
+                'FLOW_DISABLED',
+            ],
+            [
+                'a flow with no start node',
+                { success: false, code: 'FLOW_NO_START_NODE', error: 'Flow has no start node' },
+                422,
+                'FLOW_NO_START_NODE',
+            ],
+        ] as Array<[string, AutomationResult, number, string]>) {
+            it(`${route.label}: ${label} answers ${status} ${code}`, async () => {
                 const { dispatcher } = makeDispatcher({ result });
 
                 const r = await dispatcher.handleAutomation(route.path('welcome_flow'), 'POST', {}, CTX);
 
-                expect(r.response?.status).toBe(200);
+                expect(r.response?.status).toBe(status);
+                // The ADR-0112 envelope, asserted whole: a rejection test that
+                // only checked the status would stay green if the code drifted
+                // to a spelling no ledger knows, and the SDK branches on `code`.
+                expect(r.response?.body?.error?.code).toBe(code);
+                expect(r.response?.body?.error?.httpStatus).toBe(status);
+                // The engine's own words survive — an operator needs to know
+                // WHICH flow was refused.
+                expect(r.response?.body?.error?.message).toBe(result.error);
+                // Never a failed RUN: nothing dispatched, so `FLOW_FAILED`
+                // would be a false statement about what happened.
                 expect(r.response?.body?.error?.code).not.toBe('FLOW_FAILED');
-                expect(r.response?.body?.data?.success).toBe(false);
+                // The double envelope is GONE, not re-labelled — same bar the
+                // 400 arm is held to.
+                expect(r.response?.body?.data).toBeUndefined();
+                expect(r.response?.body?.success).toBe(false);
             });
         }
 
-        it(`${route.label}: does not classify off \`summary\` or \`durationMs\``, async () => {
-            // The tolerant-consumer shape PD #12 forbids, and the one #8684
-            // deliberately did not reproduce: a never-dispatched exit carrying
-            // the same incidental fields as a failed run must NOT be promoted
-            // to 400 by their presence.
+        it(`${route.label}: the two refusals are not collapsed into one status`, async () => {
+            // The distinction is the whole point of two members: a disabled
+            // flow is reversible operational state (flip the switch and the
+            // identical request succeeds), a start-node-less flow is an
+            // authoring defect no retry fixes. A mapper that answered both the
+            // same way would pass every assertion above if they shared a status.
+            const { dispatcher } = makeDispatcher({
+                result: { success: false, code: 'FLOW_DISABLED', error: 'x' },
+            });
+            const { dispatcher: other } = makeDispatcher({
+                result: { success: false, code: 'FLOW_NO_START_NODE', error: 'x' },
+            });
+
+            const a = await dispatcher.handleAutomation(route.path('welcome_flow'), 'POST', {}, CTX);
+            const b = await other.handleAutomation(route.path('welcome_flow'), 'POST', {}, CTX);
+
+            expect(a.response?.status).not.toBe(b.response?.status);
+            expect([a.response?.status, b.response?.status]).toEqual([409, 422]);
+        });
+
+        it(`${route.label}: classifies off \`code\`, never off \`summary\` / \`durationMs\``, async () => {
+            // A refused dispatch carrying the incidental fields of a failed run
+            // is still a refused dispatch. If the arms sniffed shape instead of
+            // reading the producer's verdict, this would answer 400.
+            const { dispatcher } = makeDispatcher({
+                result: {
+                    success: false,
+                    code: 'FLOW_DISABLED',
+                    error: "Flow 'welcome_flow' is disabled",
+                    durationMs: 45,
+                    summary: RAN_AND_FAILED.summary,
+                },
+            });
+
+            const r = await dispatcher.handleAutomation(route.path('welcome_flow'), 'POST', {}, CTX);
+
+            expect(r.response?.status).toBe(409);
+            expect(r.response?.body?.error?.code).toBe('FLOW_DISABLED');
+        });
+
+        it(`${route.label}: an UNCLASSIFIED never-dispatched exit still stays 200`, async () => {
+            // The other direction, and the half that survives from #9413's
+            // original pin: the route never PROMOTES an exit it was not told
+            // about. A producer that refuses a dispatch without saying so gets
+            // today's 200 — visibly unclassified — rather than a status the
+            // transport guessed from `summary` / `durationMs` (PD #12, and the
+            // shape #8684 deliberately did not reproduce on the resume route).
             const { dispatcher } = makeDispatcher({
                 result: {
                     success: false,
@@ -265,6 +352,8 @@ describe('#9378 — the two never-dispatched exits the ruling leaves open stay u
             const r = await dispatcher.handleAutomation(route.path('welcome_flow'), 'POST', {}, CTX);
 
             expect(r.response?.status).toBe(200);
+            expect(r.response?.body?.error?.code).not.toBe('FLOW_FAILED');
+            expect(r.response?.body?.data?.success).toBe(false);
         });
     }
 });

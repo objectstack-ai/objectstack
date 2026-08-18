@@ -23,7 +23,7 @@ export {
   omitInternalFieldsFromWriteResponse,
   collectInternalWriteResponseFields,
 } from './write-response-internal-fields.js';
-export { createMetadataProtocolPlugin, assembleMetadataProtocol } from './plugin.js';
+export { createMetadataProtocolPlugin, assembleMetadataProtocol, shouldRunPlatformMigrations } from './plugin.js';
 export type { MetadataProtocolPluginOptions, AssembleMetadataProtocolOptions } from './plugin.js';
 // [#6710] The declared authoring channel — the explicit expression of ADR-0005's
 // "package author's own bootstrap channel", replacing the `environmentId ===
@@ -79,6 +79,7 @@ export type {
 // twice (maintainer ruling 2026-08-15: contract option 1, stored data shape 2).
 export {
     backfillSeedTenancy,
+    resolveSeedTenancySeam,
     resolveSeedTenancyExec,
     normalizeRows,
     buildSequencesPresenceSql,
@@ -93,6 +94,7 @@ export {
     ORGANIZATION_FIELD,
     ORGANIZATION_TABLE,
 } from './migrations/seed-tenancy-backfill.js';
+export type { SeedTenancySeam } from './migrations/seed-tenancy-backfill.js';
 export type {
     SeedTenancyExec,
     SeedTenancyLogger,
