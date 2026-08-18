@@ -59,6 +59,12 @@ import {
   GetFieldLabelsResponseSchema,
 } from './protocol.zod';
 import type { ListNotificationsRequest } from './protocol.zod';
+import { expectTypeOf } from 'vitest';
+import type {
+  MetadataProtocol,
+  GetMetaItemLayeredRequest,
+  GetMetaItemLayeredResponse,
+} from './protocol.zod';
 
 describe('ObjectStack Protocol', () => {
 
@@ -1348,5 +1354,33 @@ describe('meta-read request schemas declare organizationId (#9726 — declared =
     expect(full.success).toBe(true);
     expect(GetMetaItemLayeredRequestSchema.safeParse({ type: 'view' }).success).toBe(false);
     expect(GetMetaItemLayeredRequestSchema.safeParse({ name: 'account_list' }).success).toBe(false);
+  });
+});
+
+describe('MetadataProtocol declares getMetaItemLayered (#9740)', () => {
+  // Type-level pins (compiled by the spec test typecheck, the
+  // translation-typegen.test.ts pattern). The member is an interface
+  // declaration with no runtime shadow, so its presence and shape are only
+  // observable to tsc — these pins are what turns red if the member is
+  // dropped again or drifts off the layered schemas.
+
+  it('declares the member optional, against the layered request/response schemas', () => {
+    // Optional like its `getMetaItemCached` / `deleteMetaItem` siblings:
+    // additive to a shipped contract, implementation predating declaration.
+    expectTypeOf<MetadataProtocol['getMetaItemLayered']>().toEqualTypeOf<
+      ((request: GetMetaItemLayeredRequest) => Promise<GetMetaItemLayeredResponse>) | undefined
+    >();
+  });
+
+  it("keeps the layered lockSource vocabulary closed — no 'overlay' arm", () => {
+    // The drift this card closed: the implementation's inline annotation
+    // carried an 'overlay' arm no producer on the layered read path can emit
+    // (the only `lockSource: 'overlay'` producer is `getEffectiveLock`, a
+    // write/delete-door helper). The declared wire enum stays
+    // artifact | package | env-forced; widening it without a producer is the
+    // declared-but-unenforced direction Prime Directive #10 forbids.
+    expectTypeOf<GetMetaItemLayeredResponse['lockSource']>().toEqualTypeOf<
+      'artifact' | 'package' | 'env-forced' | undefined
+    >();
   });
 });

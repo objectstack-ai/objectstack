@@ -117,12 +117,12 @@ export const StandardErrorCode = z.enum([
   'EXTERNAL_SERVICE_ERROR',     // External API call failed
   'INTEGRATION_ERROR',          // Integration service error
   'WEBHOOK_DELIVERY_FAILED',    // Webhook delivery failed
-  
-  // Batch Operation Errors
-  'BATCH_PARTIAL_FAILURE',      // Batch operation partially succeeded
-  'BATCH_COMPLETE_FAILURE',     // Batch operation completely failed
-  'TRANSACTION_FAILED',         // Transaction rolled back
 ]);
+// Retired (ADR-0112 amendment 2026-08-18, ADR-0049 enforce-or-remove, #9266):
+// BATCH_PARTIAL_FAILURE / BATCH_COMPLETE_FAILURE / TRANSACTION_FAILED — never
+// emitted by any producer in the repo's history; the batch surface reports these
+// conditions per row via the ledger-registered ROLLED_BACK / NOT_ATTEMPTED at
+// HTTP 200 instead of an envelope-level code.
 
 export type StandardErrorCode = z.input<typeof StandardErrorCode>;
 

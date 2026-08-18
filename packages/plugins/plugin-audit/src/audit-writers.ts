@@ -881,7 +881,7 @@ export function installAuditWriters(
       auditFailureReported = true;
       // The two things an `error` here owes, both in the first line it prints:
       // the CONSEQUENCE, concretely, and the FIX.
-      logger?.error?.(
+      const message =
         'Audit write FAILED — the compliance trail is now INCOMPLETE. The audited write itself SUCCEEDED and is on ' +
           'disk, so the API returned success and nothing downstream looks broken; only the `sys_audit_log` row that ' +
           'records who did it never landed, and nothing retries it. Every subsequent audited write is likely losing ' +
@@ -890,10 +890,16 @@ export function installAuditWriters(
           "lifecycle class routes it to the dedicated `telemetry` datasource whenever one is registered (`os dev` " +
           'provisions one by default as a SIBLING SQLite file), so a "no such table" here usually means the write ' +
           'executed against a DIFFERENT datasource than the one the table was created in — see framework#5226. ' +
-          'Set `OS_TELEMETRY_DB=0` to keep every lifecycle-classed object on the primary datasource.',
-        err instanceof Error ? err : new Error(detail),
-        { object, action },
-      );
+          'Set `OS_TELEMETRY_DB=0` to keep every lifecycle-classed object on the primary datasource.';
+      // `error` is OPTIONAL on this sink, so `logger?.error?.(…)` printed
+      // NOTHING when the host injected one without it — the durability
+      // degradation this text describes would then be reported by nobody at
+      // all (#9657). Reach for `error`, fall back to `warn`, never to silence.
+      if (logger?.error) {
+        logger.error(message, err instanceof Error ? err : new Error(detail), { object, action });
+      } else {
+        logger?.warn?.(message, { object, action, err: detail });
+      }
     } catch {
       /* logging must never break the audited write */
     }

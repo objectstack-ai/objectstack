@@ -2337,17 +2337,17 @@ export interface MetadataProtocol {
    */
   deleteMetaItem?(request: DeleteMetaItemRequest): Promise<DeleteMetaItemResponse>;
   getMetaItemCached?(request: GetMetaItemCachedRequest): Promise<GetMetaItemCachedResponse>;
-  // `getMetaItemLayered` is deliberately NOT declared here yet, although both
-  // its request and response schemas are (see them above). Declaring the
-  // member makes tsc check `metadata-protocol`'s implementation against
-  // `GetMetaItemLayeredResponse`, and that check currently fails on one
-  // member: the implementation's inline return type annotates `lockSource`
-  // with an `'overlay'` arm that its only producer (`resolveLockState`, whose
-  // return is typed `MetadataLockSource | undefined`) can never emit — an
-  // over-wide annotation, not enforced behaviour. Until that annotation is
-  // corrected at the implementation, adding the member here would either lie
-  // about the wire enum or hard-break the implementing class. Tracked as its
-  // own card (filed from #9726).
+  /**
+   * Three-layer diagnostic read (`GET /api/v1/meta/:type/:name/layers`) —
+   * packaged baseline, tenant overlay row and merged result side by side; see
+   * {@link GetMetaItemLayeredResponseSchema} for the shape and its #5882
+   * route-separation rationale. A declared-surface catch-up, not a new
+   * capability: `metadata-protocol` has shipped this verb since the layered
+   * route landed. Declared optional like its `getMetaItemCached` /
+   * `deleteMetaItem` siblings — additive to a shipped contract, with the
+   * implementation predating the declaration.
+   */
+  getMetaItemLayered?(request: GetMetaItemLayeredRequest): Promise<GetMetaItemLayeredResponse>;
   getUiView?(request: GetUiViewRequest): Promise<GetUiViewResponse>;
 }
 

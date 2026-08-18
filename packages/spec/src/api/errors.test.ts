@@ -42,9 +42,14 @@ describe('StandardErrorCode', () => {
     expect(StandardErrorCode.parse('INSUFFICIENT_PRIVILEGES')).toBe('INSUFFICIENT_PRIVILEGES');
   });
 
-  it('should accept batch operation error codes', () => {
-    expect(StandardErrorCode.parse('BATCH_PARTIAL_FAILURE')).toBe('BATCH_PARTIAL_FAILURE');
-    expect(StandardErrorCode.parse('TRANSACTION_FAILED')).toBe('TRANSACTION_FAILED');
+  it('refuses the retired batch-operation codes (ADR-0112 amendment 2026-08-18, #9266)', () => {
+    // Retired under ADR-0049 enforce-or-remove: no producer ever emitted them;
+    // the batch surface reports these conditions per row via the ledger-registered
+    // ROLLED_BACK / NOT_ATTEMPTED codes instead. The wrong spelling must fail at
+    // the vocabulary boundary rather than compile into a branch that never fires.
+    expect(StandardErrorCode.safeParse('BATCH_PARTIAL_FAILURE').success).toBe(false);
+    expect(StandardErrorCode.safeParse('BATCH_COMPLETE_FAILURE').success).toBe(false);
+    expect(StandardErrorCode.safeParse('TRANSACTION_FAILED').success).toBe(false);
   });
 });
 
