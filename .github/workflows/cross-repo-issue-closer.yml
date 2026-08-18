@@ -16,6 +16,64 @@
 # secret was never provisioned is the shape this repo keeps having to fix
 # (#4449: written, tested, exported, called by nothing). Missing credentials
 # must announce themselves.
+#
+# That second mode is a single `issues.createComment`, and its DELIVERY is
+# retried, never assumed (#9575). Until #9575 a transient answer from the
+# comments endpoint threw, github-script handed the throw to
+# `main().catch(handleError)` -> `core.setFailed`, and the run lost BOTH the
+# notice AND — because it sat after the `await` — the `core.warning` that named
+# what had been left open. All that remained was `Unhandled error: HttpError` on
+# a job nobody opens, and a set of foreign issues no longer on anyone's list. So
+# now: the transient class is retried (declared in the step's `retries:` inputs,
+# not hand-classified), the work order is announced BEFORE delivery is
+# attempted, and a refusal that outlives the retries writes the notice into the
+# run's job summary and then FAILS the job.
+#
+# The OTHER exit — the per-target close loop, the branch that runs when the
+# token IS present — reached the same rule one card later (#9595). Its `catch`
+# is unchanged and must stay so: it buys ISOLATION, and one unreachable target
+# taking the rest down with it would be a worse failure than the one being
+# fixed. What it did NOT buy is a verdict. `core.warning` leaves the job green,
+# so a refused close left the foreign issue open, put nothing on the PR, and
+# produced a conclusion identical to the ~2270 runs where there was nothing to
+# do at all — while the catch's own comment said "a failure here must not read
+# as success". Isolation and outcome are now separate: the loop records the
+# keys it could not close, runs to the end, and the verdict is passed after it.
+#
+# Failing is deliberate on BOTH exits, and it is the opposite of what
+# docs-drift-check.yml (#9373) chose for its advisory comment. The difference is
+# a property of this job, measured rather than inherited — and re-measured for
+# the loop on 2026-08-18 rather than carried over from the notice (#9595):
+#
+#   - its conclusion is in no required set — the context name `Close issues
+#     referenced in other repositories` is absent from the registry in
+#     scripts/check-required-contexts.mjs, and could not be enrolled there
+#     anyway: that pin's assertions 6 and 7 want a `merge_group:` trigger and an
+#     unfiltered `pull_request:` trigger, and this file has neither;
+#   - it runs only AFTER the merge (`pull_request_target: [closed]` plus
+#     `merged == true`), so its conclusion gates nothing that has not already
+#     happened;
+#   - no `workflow_run:` listener in this repo watches it (the only two listen
+#     for `CI` and `Release`), so a red starts no fan-out.
+#
+# The first of those three was re-derived on 2026-08-18 against the LIVE ruleset
+# rather than against the repo-side pin alone: `GET /repos/.../rulesets/12119582`
+# lists six required contexts (`Lint & Repo Gates`, `TypeScript Type Check`,
+# `Test Core`, `Dogfood Regression Gate`, `Build Core`, `Temporal Conformance
+# (live PG + MySQL)`) and this job's name is not among them.
+#
+# A red therefore costs one X on an already-merged PR. A green that delivered
+# nothing costs the foreign issues this workflow exists to stop losing — and
+# looks exactly like the 2000+ green runs where there was simply nothing to
+# report. That a red here is READ, meanwhile, is not an assumption either: this
+# job's only two script-level failures (2026-08-02, a `SyntaxError` that stopped
+# it running at all) were diagnosed and fixed 39 minutes after the first one,
+# and the second of them landed on an unrelated author's merge.
+#
+# Same trade merge-queue-triage.yml (#9424) made, for the same reason;
+# docs-drift-check.yml's opposite choice is right THERE because its conclusion
+# is a check on a live PR and its comment is a courtesy, neither of which is
+# true here.
 name: Cross-repo Issue Closer
 
 # `pull_request_target` (not `pull_request`) because the job needs repository
@@ -52,10 +110,53 @@ jobs:
           # resolvable from the script scope (`MODULE_NOT_FOUND`). Falling back
           # to GITHUB_TOKEN keeps the report path able to comment on this PR.
           github-token: ${{ secrets.CROSS_REPO_ISSUE_TOKEN || secrets.GITHUB_TOKEN }}
+          # The transient-retry policy, DECLARED rather than hand-written (#9575,
+          # and the point #9576 records): github-script has accepted these two
+          # inputs since v6 and every run of this job already echoes their
+          # defaults into its own log — `retries: 0`,
+          # `retry-exempt-status-codes: 400,401,403,404,422`. They drive octokit's
+          # retry plugin, which re-issues any request whose status is not exempt,
+          # plus network-level failures. Nothing is swallowed: a spent retry still
+          # throws. This widens how many times a request is ASKED and no verdict
+          # anywhere.
+          #
+          # It is a step input, so it covers the per-target loop below as well as
+          # the notice. The loop keeps its own `try`/`catch` unchanged — retries
+          # change how often a target is asked, never whether one unreachable
+          # target may take the rest down with it.
+          #
+          # 403 is dropped from the action's default exempt list on purpose:
+          # GitHub answers a SECONDARY rate limit with 403 as well as with 429, so
+          # the status alone cannot separate weather from a permission denial. The
+          # price is that a genuine denial — a cross-repo PAT without
+          # `issues: write` on a sibling repo — now takes four attempts per target
+          # to fail instead of one. It still fails, and the loop still names the
+          # target it failed on.
+          #
+          # 400/401/404/422 stay exempt: a malformed request, a wrong target, or a
+          # body past GitHub's 65536-character comment limit is this repo's own
+          # bug. It is answered correctly on the first try and asking again only
+          # spends runner minutes.
+          retries: 3
+          retry-exempt-status-codes: 400,401,404,422
           script: |
             const body = context.payload.pull_request.body || '';
             const prUrl = context.payload.pull_request.html_url;
             const thisRepo = `${context.repo.owner}/${context.repo.repo}`;
+
+            // ONE vocabulary for a refusal, used by both exits below: `HTTP 503`
+            // or `ECONNRESET` is what lets a reader separate platform weather
+            // from a 403/404 that means the credential is wrong. Hoisted rather
+            // than copied per call site — merge-queue-triage.yml declares the
+            // identical helper once, and a second hand-written copy here is the
+            // shape #9576 records as the thing to stop doing.
+            const describe = (error) => {
+              const kind = typeof error?.status === 'number'
+                ? `HTTP ${error.status}`
+                : (error?.code || 'error');
+              // Octokit messages usually end in a full stop; ours supplies its own.
+              return `${kind}: ${String(error?.message || '').replace(/\s*\.\s*$/, '')}`;
+            };
 
             // GitHub's own keyword set, restricted to the qualified
             // `owner/repo#N` form — the bare `#N` form already works natively
@@ -95,25 +196,87 @@ jobs:
               // Degrade VISIBLY. Someone has to close these by hand, and this
               // comment is the only thing that will tell them so.
               const list = [...targets.keys()].map((k) => `- \`${k}\``).join('\n');
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.payload.pull_request.number,
-                body:
+              const keys = [...targets.keys()].join(', ');
+
+              // The work order is announced BEFORE it is delivered, and it names
+              // the TARGETS rather than only how many there are (#9575). This
+              // annotation used to sit after the `await` below, which is the same
+              // as not existing on the one run where it matters: a throw from the
+              // post skipped it, so a refused notice lost the list AND the count.
+              // It costs one line of log when delivery succeeds.
+              core.warning(
+                `CROSS_REPO_ISSUE_TOKEN is not configured — ${targets.size} issue(s) must be `
+                + `closed BY HAND: ${keys}.`,
+                { title: 'Cross-repo issues left open' },
+              );
+
+              const notice =
                   `### ⚠️ 跨仓库 issue 未被自动关闭\n\n` +
                   `本 PR 的正文声明了跨仓库关闭关键字，但 GitHub 的关闭关键字**只在同仓库内生效**，` +
                   `因此以下 issue 仍处于 open 状态，需要**手工关闭**：\n\n${list}\n\n` +
                   `自动关闭需要仓库 secret \`CROSS_REPO_ISSUE_TOKEN\`（对目标仓库具备 \`issues: write\` 的` +
                   ` fine-grained PAT 或 GitHub App token）。\`GITHUB_TOKEN\` 只对当前仓库有写权限，无法胜任。\n\n` +
                   `配置该 secret 后本条提示会自动消失，改为直接关闭目标 issue。\n\n` +
-                  `---\n_Generated by [Claude Code](https://claude.ai/code)_`,
-              });
-              core.warning(
-                `CROSS_REPO_ISSUE_TOKEN is not configured — ${targets.size} issue(s) left open. ` +
-                `Reported on the pull request instead.`,
-              );
+                  `---\n_Generated by [Claude Code](https://claude.ai/code)_`;
+
+              // This comment IS the deliverable, not a courtesy about one — see
+              // the header. The step's `retries:` have already absorbed a blip by
+              // the time anything reaches the catch, so what is left there is a
+              // refusal that outlived them.
+              try {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.payload.pull_request.number,
+                  body: notice,
+                });
+                core.info(
+                  `Reported ${targets.size} unclosed cross-repo issue(s) on this pull request.`,
+                );
+              } catch (error) {
+                const reason = describe(error);
+                try {
+                  await core.summary.addRaw([
+                    '## ⚠️ 跨仓库关闭提示没能发到 PR 上',
+                    '',
+                    `\`issues.createComment\` 最终被拒绝：\`${reason}\`。`,
+                    '',
+                    `- 下面就是本次运行算出的完整提示 —— PR #${context.payload.pull_request.number} 上没有它。`,
+                    '- 可以直接复制到 PR 上；也可以在 API 恢复后 re-run 本 job。',
+                    '- 真正要做的事情是上面列出的那几个 issue：它们仍是 open，需要手工关闭。',
+                    '- 根治是配置仓库 secret `CROSS_REPO_ISSUE_TOKEN`，之后本分支不再运行。',
+                    '',
+                    '---',
+                    '',
+                    notice,
+                    '',
+                  ].join('\n')).write();
+                } catch (summaryError) {
+                  // The summary is the richer channel, the annotation the reliable
+                  // one. Losing the richer one must not restore the silence this
+                  // whole branch exists to break.
+                  core.info(`Could not write the job summary: ${summaryError.message}`);
+                }
+                core.setFailed(
+                  `${targets.size} cross-repo issue(s) were left open by this merge and the notice `
+                  + `saying so could NOT be posted on PR #${context.payload.pull_request.number} `
+                  + `(${reason}). Close these by hand: ${keys}. The full notice is reproduced in `
+                  + `this run's job summary; re-run this job to retry delivery.`,
+                );
+              }
               return;
             }
+
+            // ISOLATION and OUTCOME are separable, and the loop owns only the
+            // first (#9595). The `catch` below must keep swallowing — one
+            // unreachable target must not take the rest down — so the verdict
+            // is passed AFTER the loop, over the keys it collected. Until this
+            // split existed the two were fused into `core.warning` alone: a
+            // refused close left the foreign issue open, put no notice on the
+            // PR, and handed the run the same green conclusion as the ~2270
+            // runs that had nothing to do at all. The catch's own comment
+            // already stated the requirement; only the code was missing.
+            const failures = [];
 
             for (const [key, t] of targets) {
               try {
@@ -138,7 +301,49 @@ jobs:
                 core.info(`Closed ${key}.`);
               } catch (error) {
                 // One unreachable target must not swallow the rest, and a
-                // failure here must not read as success.
-                core.warning(`Could not close ${key}: ${error.message}`);
+                // failure here must not read as success. This half buys the
+                // first: the loop continues. The failure is RECORDED instead of
+                // dropped, and the second half is passed below.
+                const reason = describe(error);
+                failures.push({ key, reason });
+                core.warning(`Could not close ${key}: ${reason}`, {
+                  title: 'Cross-repo issue left open',
+                });
               }
             }
+
+            if (failures.length === 0) {
+              core.info(`All ${targets.size} cross-repo target(s) closed or already closed.`);
+              return;
+            }
+
+            // A spent failure IS the report. Announce it in both channels the
+            // notice branch uses, for the same reasons: the summary carries the
+            // full list a human needs, `setFailed` carries the conclusion that
+            // makes anyone open the run at all.
+            const failedKeys = failures.map((f) => f.key).join(', ');
+            const failedList = failures.map((f) => `- \`${f.key}\` —— ${f.reason}`).join('\n');
+            try {
+              await core.summary.addRaw([
+                '## ⚠️ 跨仓库 issue 没能自动关闭',
+                '',
+                `本次合并声明了 ${targets.size} 个跨仓库关闭目标，其中 ${failures.length} 个被拒绝，仍是 open：`,
+                '',
+                failedList,
+                '',
+                `- 修复它们的是 ${prUrl} —— 需要手工关闭，并把这条链接留在目标 issue 上。`,
+                '- 原因排除后可以直接 re-run 本 job：已经关闭的目标会被跳过，不会重复评论。',
+                '- 401/404 通常意味着 `CROSS_REPO_ISSUE_TOKEN` 对目标仓库没有 `issues: write`，而不是目标不存在 —— GitHub 对无权访问的仓库回 404。',
+                '',
+              ].join('\n')).write();
+            } catch (summaryError) {
+              // Same asymmetry as the notice branch: the summary is the richer
+              // channel, the conclusion the reliable one. Losing the richer one
+              // must not restore the silence.
+              core.info(`Could not write the job summary: ${summaryError.message}`);
+            }
+            core.setFailed(
+              `${failures.length} of ${targets.size} cross-repo issue(s) could NOT be closed by this merge and `
+              + `are still open: ${failedKeys}. Close them by hand (fixed by ${prUrl}), or re-run this job once `
+              + `the cause is cleared. The full list with reasons is in this run's job summary.`,
+            );

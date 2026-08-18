@@ -7,6 +7,10 @@
  *
  *   node scripts/check-required-contexts.mjs               # the pin (lint)
  *   node scripts/check-required-contexts.mjs --self-test   # verify the checker itself
+ *   node scripts/check-required-contexts.mjs --verify-required-set
+ *                                       # report-only live ruleset diff (#9642)
+ *   NODE_OPTIONS=--use-env-proxy node scripts/check-required-contexts.mjs --verify-required-set
+ *                                       # the same, from an agent container
  *
  * ## The defect
  *
@@ -72,22 +76,57 @@
  *      `test` job is named `Test Core (${{ matrix.shard }}/3)` and its gate is
  *      named `Test Core`; deleting the suffix collides them.
  *
- * ## What this pin does NOT assert, stated so nobody inherits false closure
+ * ## The required SET: readable, diffable, and deliberately not merge-blocking
  *
- * It CANNOT verify that any of these names is actually in `main`'s required set
- * or in the merge queue's check set. That configuration lives in repository
- * Settings → Rulesets, and no agent seat can read it: `GET
- * /repos/objectstack-ai/objectstack/branches/main/protection` answers HTTP 403
- * `GitHub access is not enabled for this session` (measured, #6865). Writing a
- * gate that claimed to check the required SET would be a gate that cannot read
- * the thing it names — the #4690 phantom-check shape.
+ * ⚠️ TWO DIFFERENT ENDPOINTS answer for "is this name actually required", and
+ * confusing them is how this header carried a false premise for weeks (#9642).
+ * Both are named here, with which one holds THIS repository's configuration, so
+ * a reader who doubts this paragraph tests the right URL:
  *
- * So the registry is the repo's declaration of what the settings are believed
- * to reference, sourced from the maintainer rulings on #5617, and the pin
- * enforces the half that lives in this repo: THESE NAMES DO NOT MOVE. If the
- * settings and this registry disagree, only a maintainer can see it and only a
- * maintainer can fix it — which is why every entry carries the ruling that
- * authorized it, so the two lists can be reconciled by hand in one reading.
+ *   • the CLASSIC BRANCH-PROTECTION endpoint,
+ *     GET /repos/objectstack-ai/objectstack/branches/main/protection,
+ *     answers HTTP 403 `Resource not accessible by integration` to an ordinary
+ *     agent seat. GitHub names its price in the response itself —
+ *     `X-Accepted-GitHub-Permissions: administration=read` — and no Actions
+ *     token can pay it either: `administration` is not among the 17 permissions
+ *     a workflow may grant its GITHUB_TOKEN. It is ALSO not where this repo's
+ *     configuration lives — `main` is governed by a repository RULESET, not by
+ *     classic branch protection. Testing this URL and concluding "the required
+ *     set is unreadable" is the exact error #9642 retired.
+ *   • the RULESET endpoints, GET /repos/objectstack-ai/objectstack/rulesets and
+ *     the same path plus /{id}, answer HTTP 200 to an ordinary agent seat.
+ *     Their price is `X-Accepted-GitHub-Permissions: metadata=read` — the
+ *     baseline every token carries, and not one of the 17 a workflow can toggle
+ *     because it cannot be given up. The required SET is readable.
+ *
+ * Measured 2026-08-18 (#9642): one ruleset, `main`, id 12119582, enforcement
+ * `active`, repository-sourced — `includes_parents=true` returns that one and
+ * only that one, so no organization ruleset is being missed — carrying six
+ * `required_status_checks` contexts and `strict_required_status_checks_policy:
+ * false`.
+ *
+ * So the two lists are machine-comparable, and `--verify-required-set` below
+ * compares them in BOTH directions. What that mode is NOT is a merge-blocking
+ * gate, for a structural reason rather than a squeamish one: the settings half
+ * of any required-set change is maintainer-only and lands AFTER the merge (the
+ * #9325 two-step). A required check reddening on registry-vs-settings
+ * disagreement would be red on precisely the PR carrying the repo half and
+ * could not go green before merging — it would deadlock the sitting it claims
+ * to protect. It is report-only, in `check-governed-merges.mjs`'s posture, and
+ * the pin proper stays entirely network-free so the required `Lint & Repo
+ * Gates` context can never redden on a GitHub blip (self-test: 'the pin stays
+ * network-free').
+ *
+ * ⚠️ What has NOT changed: this registry is still the repo's DECLARATION of
+ * what the settings are believed to reference, sourced from the maintainer
+ * rulings on #5617. Adding a row here does not make a context required, and
+ * only a maintainer can change the settings. What #9642 changed is that a
+ * disagreement is now MEASURED instead of invisible — and the first run found
+ * one: `Build Docs` and `Console Pin Gate` are registered here and are NOT in
+ * the live required set, i.e. both gate families are advisory today with no
+ * signal anywhere (#5617's unsignalled half, verbatim). Whether the fix is to
+ * drop the rows or to restore the contexts is #9533's maintainer decision; this
+ * file reports it and decides nothing.
  *
  * ## Why `if:` is deliberately NOT asserted
  *
@@ -840,6 +879,288 @@ export async function scanInstructionSurfaces(
   return judgeInstructionSurfaces({ registry, surfaces, retired, files });
 }
 
+// ── The live required SET (#9642) ───────────────────────────────────────────
+
+/**
+ * `--verify-required-set` — the half this file spent weeks calling unreadable.
+ *
+ *   node scripts/check-required-contexts.mjs --verify-required-set
+ *   node scripts/check-required-contexts.mjs --verify-required-set --json
+ *
+ * ## Why this is report-only and NOT wired into the required gate
+ *
+ * The settings half of any required-set change is MAINTAINER-ONLY and lands
+ * AFTER the merge — the #9325 rename two-step: merge the rename, then swap the
+ * Settings entry. A required check that reddened on registry-vs-settings
+ * disagreement would therefore be red on precisely the PR carrying the repo
+ * half, and could not go green before merging: it would deadlock the sitting it
+ * claims to protect, the same way required-izing `Console Pin Freshness`
+ * deadlocks the queue. Report-only is not timidity here, it is the only shape
+ * that does not self-block.
+ *
+ * The posture is `check-governed-merges.mjs`'s, verbatim in behaviour: a
+ * completed sweep exits 0 whether it found 0 or 40 disagreements, and a
+ * non-zero exit classifies the ENVIRONMENT, not the tree. Unreachable prints
+ * NOT VERIFIED and exits 2; it is never a pass (#4690).
+ *
+ * ## Both directions are reported, because they are different defects
+ *
+ *   A. a REGISTRY ROW whose context is absent from the live required set — the
+ *      gate family that row names is ADVISORY right now, with no signal
+ *      anywhere. #5617 verbatim: PR #5584 merged with its gate-carrying job red
+ *      for 19 minutes because that job was not in the required set at all.
+ *   B. a LIVE required context with no registry row — a required context whose
+ *      job `name:` literal nothing in this repo pins. Renaming that job detaches
+ *      its gate silently, which is the whole defect this file exists for; the
+ *      remedy is a registry row, not a settings change.
+ *
+ * Neither is judged here. A is the maintainer's to resolve (drop the row, or
+ * restore the context); B is a dev's (add the row with its authorizing ruling).
+ *
+ * ## Enforcement and target are read, not assumed
+ *
+ * A ruleset in `evaluate` (dry-run) or `disabled` enforcement blocks nothing,
+ * and a ruleset whose `conditions.ref_name` does not cover the default branch
+ * is about some other ref. Counting either as "required" would manufacture the
+ * exact false green this file was written to prevent, so their contexts are
+ * collected separately and reported as a SHADOW set.
+ */
+
+/** Does a ruleset's ref condition cover `defaultBranch`? */
+export function rulesetCoversDefaultBranch(ruleset, defaultBranch) {
+  const cond = ruleset?.conditions?.ref_name;
+  if (!cond) return false;
+  const spellings = [`refs/heads/${defaultBranch}`, '~DEFAULT_BRANCH', '~ALL'];
+  const exclude = Array.isArray(cond.exclude) ? cond.exclude : [];
+  if (exclude.some((p) => spellings.includes(p))) return false;
+  const include = Array.isArray(cond.include) ? cond.include : [];
+  return include.some((p) => spellings.includes(p));
+}
+
+/**
+ * The live-vs-registry verdict. Pure, so the self-test asserts on it offline —
+ * the predicates cannot rot unrun the way an uninvoked self-test does (#4690).
+ *
+ * `rulesets` is a list of FULL ruleset objects (the `/rulesets/{id}` shape,
+ * with `rules[]`), not the listing shape.
+ */
+export function judgeRequiredSet({ registry, rulesets, defaultBranch = 'main' }) {
+  const enforcing = [];
+  const shadowed = [];
+  for (const ruleset of rulesets ?? []) {
+    if (ruleset?.target !== 'branch') continue;
+    if (!rulesetCoversDefaultBranch(ruleset, defaultBranch)) continue;
+    (ruleset.enforcement === 'active' ? enforcing : shadowed).push(ruleset);
+  }
+
+  let strict = null;
+  const collect = (list, into, readStrict) => {
+    for (const ruleset of list) {
+      for (const rule of ruleset.rules ?? []) {
+        if (rule?.type !== 'required_status_checks') continue;
+        const parameters = rule.parameters ?? {};
+        if (readStrict && typeof parameters.strict_required_status_checks_policy === 'boolean') {
+          strict = parameters.strict_required_status_checks_policy;
+        }
+        for (const check of parameters.required_status_checks ?? []) {
+          const context = typeof check === 'string' ? check : check?.context;
+          if (typeof context !== 'string' || context === '') continue;
+          if (!into.has(context)) into.set(context, []);
+          into.get(context).push(`${ruleset.name ?? ruleset.id} (${ruleset.enforcement})`);
+        }
+      }
+    }
+  };
+  const live = new Map();
+  const shadow = new Map();
+  collect(enforcing, live, true);
+  collect(shadowed, shadow, false);
+
+  const registered = new Set(registry.map((entry) => entry.context));
+  return {
+    defaultBranch,
+    rulesetsRead: (rulesets ?? []).length,
+    enforcing: enforcing.map((r) => ({ id: r.id, name: r.name, source: r.source ?? null, sourceType: r.source_type ?? null })),
+    shadowed: shadowed.map((r) => ({ id: r.id, name: r.name, enforcement: r.enforcement })),
+    live: [...live.keys()],
+    shadow: [...shadow.keys()],
+    strict,
+    // Direction A — declared here, not required there.
+    advisory: registry.filter((entry) => !live.has(entry.context)),
+    // Direction B — required there, pinned by nothing here.
+    unpinned: [...live.keys()].filter((context) => !registered.has(context)).map((context) => ({ context, from: live.get(context) })),
+    noEnforcingRuleset: enforcing.length === 0,
+    noRequiredChecksRule: enforcing.length > 0 && live.size === 0,
+  };
+}
+
+/** The whole report as text — pure, so the self-test asserts on the words. */
+export function renderRequiredSetReport(verdict) {
+  const lines = [
+    `required-set sweep: ${verdict.live.length} live required context(s) on ${verdict.defaultBranch}, ` +
+      `${verdict.advisory.length} registered-but-not-required, ${verdict.unpinned.length} required-but-unpinned.`,
+    `  read ${verdict.rulesetsRead} ruleset(s); ${verdict.enforcing.length} active and covering the default branch` +
+      (verdict.strict === null ? '' : `; strict_required_status_checks_policy: ${verdict.strict}`),
+    `  Report-only by design (#9642): the settings half of any change is maintainer-only and lands AFTER the merge,`,
+    `  so a merge-blocking version of this diff would be red on the very PR that carries the repo half.`,
+  ];
+  for (const ruleset of verdict.enforcing) {
+    lines.push(`    • ruleset ${ruleset.name} (id ${ruleset.id}, ${ruleset.sourceType ?? 'unknown'}-sourced${ruleset.source ? ` — ${ruleset.source}` : ''})`);
+  }
+  for (const ruleset of verdict.shadowed) {
+    lines.push(`    ⚠️  ruleset ${ruleset.name} (id ${ruleset.id}) is enforcement=${ruleset.enforcement} — it blocks NOTHING; its contexts are SHADOW, not required.`);
+  }
+  for (const context of verdict.live) lines.push(`    required: ${context}`);
+  for (const context of verdict.shadow) lines.push(`    shadow (not enforced): ${context}`);
+
+  if (verdict.noEnforcingRuleset) {
+    lines.push(
+      '',
+      `  ⛔ NO active ruleset covers ${verdict.defaultBranch}. Every gate in the registry is advisory and the merge`,
+      '     queue enforces nothing. This is a reading, not an environment failure — the API answered.',
+    );
+  } else if (verdict.noRequiredChecksRule) {
+    lines.push('', `  ⛔ the active ruleset(s) carry NO required_status_checks rule — every registered gate is advisory.`);
+  }
+
+  if (verdict.advisory.length > 0) {
+    lines.push(
+      '',
+      `  ⛔ direction A — registered here, NOT in the live required set (${verdict.advisory.length}). Each of these gate`,
+      '     families is ADVISORY today, with no signal anywhere. That is #5617 verbatim: PR #5584 merged with its',
+      '     gate-carrying job red for 19 minutes because that job was not in the required set at all.',
+    );
+    for (const entry of verdict.advisory) {
+      lines.push(`       • ${entry.context} — ${entry.workflow} job '${entry.job}' — carries ${entry.carries}`);
+      lines.push(`           authorized: ${entry.authorized}`);
+    }
+    lines.push(
+      '     Resolving this is a MAINTAINER decision (drop the row, or restore the context in Settings → Rulesets);',
+      '     this script decides nothing. The open card for the current pair is #9533.',
+    );
+  }
+
+  if (verdict.unpinned.length > 0) {
+    lines.push(
+      '',
+      `  ⛔ direction B — required in the live set, pinned by NO registry row (${verdict.unpinned.length}). Renaming the job`,
+      '     that publishes one of these detaches its gate silently — the defect this whole file exists for. The remedy',
+      '     is a REQUIRED_CONTEXTS row naming the workflow, job id and authorizing ruling; no settings change.',
+    );
+    for (const entry of verdict.unpinned) lines.push(`       • ${entry.context} — from ${entry.from.join(', ')}`);
+  }
+
+  if (verdict.advisory.length === 0 && verdict.unpinned.length === 0 && !verdict.noEnforcingRuleset && !verdict.noRequiredChecksRule) {
+    lines.push('', '  ✅  the live required set and this registry agree in both directions.');
+  }
+  return lines.join('\n');
+}
+
+/**
+ * What an unreachable read prints. Never the word "verified" — #4690.
+ *
+ * The proxy hint is not politeness. In an agent container every GitHub call is
+ * routed through the session proxy, and Node's global fetch does NOT read
+ * HTTPS_PROXY on its own (Node 22): the read then answers HTTP 401 and a reader
+ * who stops there concludes "the ruleset is unreadable from this seat" — which
+ * is the EXACT false premise #9642 retired, re-derived from a different cause.
+ * Measured on the day this landed: unset, 401; with the flag, 200 and a full
+ * reading. `check-governed-merges.mjs` reaches the API the same way and shares
+ * the trap.
+ */
+export function renderRequiredSetUnverified(reason, env = process.env) {
+  const proxied = Boolean(env.HTTPS_PROXY || env.https_proxy) && !/--use-env-proxy/.test(env.NODE_OPTIONS ?? '');
+  return (
+    `required-set sweep: NOT VERIFIED — ${reason}\n` +
+    '  The live required set could not be read, so nothing is asserted about it in either direction.\n' +
+    '  NOT VERIFIED is not a pass and not a failure of the tree (#4690); exit 2 classifies the ENVIRONMENT.\n' +
+    '  The read needs only `metadata=read` (GitHub answers that in X-Accepted-GitHub-Permissions), so the usual\n' +
+    '  cause is a missing GITHUB_TOKEN / GH_TOKEN rather than a permission this repo would have to grant.' +
+    (proxied
+      ? '\n  ⚠️  HTTPS_PROXY is set and NODE_OPTIONS does not carry --use-env-proxy: Node fetch is bypassing the\n' +
+        '      session proxy, which answers 401 here. Re-run as NODE_OPTIONS=--use-env-proxy before concluding\n' +
+        '      anything about readability — that inference is how #9642 happened.'
+      : '')
+  );
+}
+
+/** Sweep complete (0 or N disagreements). */
+export const EXIT_SWEPT = 0;
+/** Could not read the live set — classifies the environment, never the tree. */
+export const EXIT_ENVIRONMENT = 2;
+
+function requiredSetApiContext(env) {
+  return {
+    apiUrl: (env.GITHUB_API_URL ?? 'https://api.github.com').replace(/\/+$/, ''),
+    repo: env.GITHUB_REPOSITORY ?? 'objectstack-ai/objectstack',
+    token: env.GITHUB_TOKEN || env.GH_TOKEN || null,
+  };
+}
+
+async function fetchGithubJson(url, token) {
+  let res;
+  try {
+    res = await fetch(url, {
+      headers: {
+        accept: 'application/vnd.github+json',
+        'x-github-api-version': '2022-11-28',
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+    });
+  } catch (error) {
+    throw new Error(`GET ${url} failed: ${error?.message ?? error}`);
+  }
+  if (!res.ok) throw new Error(`GET ${url} answered HTTP ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Read every ruleset that applies to this repository, INCLUDING organization
+ * rulesets inherited from above (`includes_parents`) — an org ruleset missed is
+ * a required context missed, which would understate the live set and turn
+ * direction B silently green.
+ *
+ * The listing shape carries no `rules[]`, so each entry is fetched by id. A
+ * failure on any of them is an ENVIRONMENT failure, never a partial reading:
+ * "some of the rulesets" cannot answer "is this context required".
+ */
+export async function fetchLiveRulesets({ apiUrl, repo, token }) {
+  const listing = await fetchGithubJson(`${apiUrl}/repos/${repo}/rulesets?includes_parents=true&per_page=100`, token);
+  if (!Array.isArray(listing)) throw new Error(`GET ${apiUrl}/repos/${repo}/rulesets did not answer a list`);
+  const full = [];
+  for (const entry of listing) {
+    const orgSourced = entry?.source_type === 'Organization' && typeof entry.source === 'string';
+    const url = orgSourced
+      ? `${apiUrl}/orgs/${entry.source}/rulesets/${entry.id}`
+      : `${apiUrl}/repos/${repo}/rulesets/${entry.id}`;
+    full.push(await fetchGithubJson(url, token));
+  }
+  return full;
+}
+
+/** `--verify-required-set`. Returns the exit code; never throws past here. */
+async function verifyRequiredSet(argv = process.argv.slice(2), env = process.env) {
+  const ctx = requiredSetApiContext(env);
+  if (!ctx.token) {
+    console.error(renderRequiredSetUnverified('no GITHUB_TOKEN / GH_TOKEN in the environment'));
+    return EXIT_ENVIRONMENT;
+  }
+  let rulesets;
+  let defaultBranch = 'main';
+  try {
+    const repo = await fetchGithubJson(`${ctx.apiUrl}/repos/${ctx.repo}`, ctx.token);
+    if (typeof repo?.default_branch === 'string' && repo.default_branch !== '') defaultBranch = repo.default_branch;
+    rulesets = await fetchLiveRulesets(ctx);
+  } catch (error) {
+    console.error(renderRequiredSetUnverified(error.message));
+    return EXIT_ENVIRONMENT;
+  }
+  const verdict = judgeRequiredSet({ registry: REQUIRED_CONTEXTS, rulesets, defaultBranch });
+  if (argv.includes('--json')) console.log(JSON.stringify(verdict, null, 2));
+  else console.log(renderRequiredSetReport(verdict));
+  return EXIT_SWEPT;
+}
+
 /** The pin. */
 async function main() {
   const root = scriptRepoRoot();
@@ -851,9 +1172,13 @@ async function main() {
     for (const problem of problems) console.error(`  • ${problem}`);
     for (const notice of surfaceVerdict.notices) console.error(`  ℹ ${notice}`);
     console.error(
-      `\n  This gate pins the job NAMES that branch protection references. It cannot read the required set itself\n` +
-        `  (Settings → Rulesets is maintainer-only; the API answers 403 to every agent seat), so a legitimate rename\n` +
-        `  is a two-step act: the maintainer updates the required set, then this registry follows — and the instruction\n` +
+      `\n  This gate pins the job NAMES that branch protection references. It does not itself read the required SET —\n` +
+        `  that read is \`node scripts/check-required-contexts.mjs --verify-required-set\`, report-only and off the\n` +
+        `  required path on purpose (#9642: the settings half of a rename is maintainer-only and lands AFTER the merge,\n` +
+        `  so a blocking version would be red on the very PR carrying the repo half). The ruleset IS readable from an\n` +
+        `  ordinary seat — /repos/OWNER/REPO/rulesets answers 200; it is the CLASSIC /branches/main/protection endpoint\n` +
+        `  that answers 403, and this repo does not use classic branch protection. A legitimate rename is still a\n` +
+        `  two-step act: the maintainer updates the required set, then this registry follows — and the instruction\n` +
         `  files that STATE the set follow in their own PRs, bridged by the RETIRED_CONTEXT_NAMES ledger (#9491).\n`,
     );
     process.exit(1);
@@ -1447,6 +1772,184 @@ async function selfTest() {
   // visible in a `.github/**` diff rather than a silent no-op, and closing it
   // entirely would need a gate outside this file asserting this file's wiring,
   // which is a coupling with its own cost.
+  // ── the live required SET (#9642): offline predicates + the measured read ──
+  //
+  // The live diff is report-only and deliberately never runs in CI (the
+  // header's deadlock argument), so without this block its predicates would rot
+  // unrun — #4690 with a network call attached. Everything below is offline:
+  // synthetic rulesets for each direction, plus one frozen copy of the real
+  // 2026-08-18 reading so the shape this code parses is the shape GitHub sends.
+  const RULESET_SNAPSHOT = {
+    id: 12119582,
+    name: 'main',
+    target: 'branch',
+    source_type: 'Repository',
+    source: 'objectstack-ai/objectstack',
+    enforcement: 'active',
+    conditions: { ref_name: { include: ['~DEFAULT_BRANCH'], exclude: [] } },
+    rules: [
+      { type: 'deletion' },
+      { type: 'non_fast_forward' },
+      { type: 'merge_queue', parameters: { merge_method: 'SQUASH', grouping_strategy: 'ALLGREEN', max_entries_to_build: 5 } },
+      { type: 'pull_request', parameters: { required_approving_review_count: 0, require_code_owner_review: false } },
+      {
+        type: 'required_status_checks',
+        parameters: {
+          strict_required_status_checks_policy: false,
+          required_status_checks: [
+            { context: 'TypeScript Type Check', integration_id: 15368 },
+            { context: 'Test Core', integration_id: 15368 },
+            { context: 'Dogfood Regression Gate', integration_id: 15368 },
+            { context: 'Build Core', integration_id: 15368 },
+            { context: 'Temporal Conformance (live PG + MySQL)', integration_id: 15368 },
+            { context: 'Lint & Repo Gates', integration_id: 15368 },
+          ],
+        },
+      },
+    ],
+  };
+  const judgeLive = (rulesets, registry = REQUIRED_CONTEXTS) => judgeRequiredSet({ registry, rulesets, defaultBranch: 'main' });
+
+  {
+    const snapshot = judgeLive([RULESET_SNAPSHOT]);
+    assert(snapshot.live.length === 6, `the 2026-08-18 reading carries six required contexts — got ${snapshot.live.length}`);
+    assert(snapshot.strict === false, 'strict_required_status_checks_policy is read, not assumed');
+    assert(snapshot.enforcing.length === 1 && !snapshot.noEnforcingRuleset, 'one active ruleset covers the default branch');
+    assert(snapshot.unpinned.length === 0, `every context in the 2026-08-18 reading has a registry row — got ${JSON.stringify(snapshot.unpinned)}`);
+    // Direction A is LIVE against the checked-in registry: `Build Docs` and
+    // `Console Pin Gate` are registered and not required (#9533's open
+    // decision). This asserts the SHAPE — that the difference is reported and
+    // reported as advisory — not the membership, which is the maintainer's to
+    // change; hardcoding the pair would red this self-test the day they resolve it.
+    const liveSet = new Set(snapshot.live);
+    assert(
+      snapshot.advisory.length === REQUIRED_CONTEXTS.filter((e) => !liveSet.has(e.context)).length &&
+        snapshot.advisory.every((e) => !liveSet.has(e.context)),
+      'direction A reports exactly the registry rows the live set does not carry',
+    );
+  }
+
+  // Direction A on a synthetic pair — the row is reported, and the report says
+  // ADVISORY and names #5617 rather than describing a mismatch neutrally.
+  {
+    const registry = [
+      { workflow: 'lint.yml', job: 'lint', context: 'Kept Gate', authorized: 'fixture', carries: 'the fixture family' },
+      { workflow: 'ci.yml', job: 'dropped', context: 'Dropped Gate', authorized: 'fixture', carries: 'the dropped family' },
+    ];
+    const verdict = judgeRequiredSet({
+      registry,
+      rulesets: [{ ...RULESET_SNAPSHOT, rules: [{ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'Kept Gate' }] } }] }],
+      defaultBranch: 'main',
+    });
+    assert(verdict.advisory.length === 1 && verdict.advisory[0].context === 'Dropped Gate', 'direction A: a registry row absent from the live set is reported');
+    assert(verdict.unpinned.length === 0, 'direction A fixture reports nothing in direction B');
+    const text = renderRequiredSetReport(verdict);
+    assert(/ADVISORY today/.test(text) && /#5617/.test(text), 'direction A names the consequence (advisory, no signal) and #5617');
+    assert(/#9533/.test(text) && /MAINTAINER decision/.test(text), 'direction A routes the remedy to the maintainer, deciding nothing itself');
+  }
+
+  // Direction B: required there, pinned by nothing here. Different remedy —
+  // a registry row, not a settings change — so the report must say so.
+  {
+    const registry = [{ workflow: 'lint.yml', job: 'lint', context: 'Kept Gate', authorized: 'fixture', carries: 'the fixture family' }];
+    const verdict = judgeRequiredSet({
+      registry,
+      rulesets: [
+        { ...RULESET_SNAPSHOT, rules: [{ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'Kept Gate' }, { context: 'Unpinned Gate' }] } }] },
+      ],
+      defaultBranch: 'main',
+    });
+    assert(verdict.unpinned.length === 1 && verdict.unpinned[0].context === 'Unpinned Gate', 'direction B: a live context with no registry row is reported');
+    assert(verdict.advisory.length === 0, 'direction B fixture reports nothing in direction A');
+    assert(/REQUIRED_CONTEXTS row/.test(renderRequiredSetReport(verdict)), 'direction B prescribes the registry row, not a settings change');
+  }
+
+  // enforcement=evaluate is a DRY RUN: it blocks nothing. Counting its contexts
+  // as required would manufacture the false green this file exists to prevent —
+  // so they land in the shadow set AND direction A fires for the same row.
+  {
+    const registry = [{ workflow: 'lint.yml', job: 'lint', context: 'Kept Gate', authorized: 'fixture', carries: 'the fixture family' }];
+    const evaluating = {
+      ...RULESET_SNAPSHOT,
+      enforcement: 'evaluate',
+      rules: [{ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'Kept Gate' }] } }],
+    };
+    const verdict = judgeRequiredSet({ registry, rulesets: [evaluating], defaultBranch: 'main' });
+    assert(verdict.live.length === 0 && verdict.shadow.includes('Kept Gate'), 'an evaluate-mode ruleset contributes SHADOW contexts, never required ones');
+    assert(verdict.advisory.length === 1, 'a context that is only shadow-required still reports as advisory');
+    assert(/blocks NOTHING/.test(renderRequiredSetReport(verdict)), 'the report says out loud that a dry-run ruleset blocks nothing');
+  }
+
+  // A ruleset about some OTHER ref is not about the default branch.
+  {
+    const elsewhere = { ...RULESET_SNAPSHOT, conditions: { ref_name: { include: ['refs/heads/release/*'], exclude: [] } } };
+    const verdict = judgeLive([elsewhere]);
+    assert(verdict.live.length === 0 && verdict.noEnforcingRuleset, 'a ruleset scoped to another ref is not read as the default branch required set');
+    assert(rulesetCoversDefaultBranch({ conditions: { ref_name: { include: ['~ALL'] } } }, 'main'), '~ALL covers the default branch');
+    assert(rulesetCoversDefaultBranch({ conditions: { ref_name: { include: ['refs/heads/main'] } } }, 'main'), 'an explicit refs/heads spelling covers it');
+    assert(
+      !rulesetCoversDefaultBranch({ conditions: { ref_name: { include: ['~ALL'], exclude: ['~DEFAULT_BRANCH'] } } }, 'main'),
+      'an explicit exclusion of the default branch wins over ~ALL',
+    );
+  }
+
+  // Zero active rulesets is a READING, not an environment failure — the API
+  // answered. It is also the loudest possible finding, so it must not render
+  // as the clean case.
+  {
+    const verdict = judgeLive([]);
+    const text = renderRequiredSetReport(verdict);
+    assert(verdict.noEnforcingRuleset && /NO active ruleset/.test(text), 'no active ruleset covering the default branch is reported loudly');
+    assert(!/✅/.test(text), 'the unprotected reading never renders as the clean case');
+  }
+
+  // The clean case, and the NOT-VERIFIED case that must never read as clean.
+  {
+    const registry = [{ workflow: 'lint.yml', job: 'lint', context: 'Kept Gate', authorized: 'fixture', carries: 'the fixture family' }];
+    const clean = judgeRequiredSet({
+      registry,
+      rulesets: [{ ...RULESET_SNAPSHOT, rules: [{ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'Kept Gate' }] } }] }],
+      defaultBranch: 'main',
+    });
+    assert(/✅/.test(renderRequiredSetReport(clean)), 'agreement in both directions renders as the clean case');
+    const unverified = renderRequiredSetUnverified('GET …/rulesets answered HTTP 502', {});
+    assert(/NOT VERIFIED/.test(unverified) && !/✅/.test(unverified), 'an unreachable read prints NOT VERIFIED and never the clean mark (#4690)');
+    assert(/HTTP 502/.test(unverified), 'the reason the read failed is printed, not swallowed');
+    assert(!/--use-env-proxy/.test(unverified), 'the proxy hint stays silent when no proxy is configured');
+    assert(
+      /--use-env-proxy/.test(renderRequiredSetUnverified('HTTP 401', { HTTPS_PROXY: 'http://127.0.0.1:1' })),
+      'a proxied environment without the flag is told so — concluding "unreadable" from that 401 is how #9642 happened',
+    );
+    assert(
+      !/--use-env-proxy/.test(renderRequiredSetUnverified('HTTP 401', { HTTPS_PROXY: 'http://127.0.0.1:1', NODE_OPTIONS: '--use-env-proxy' })),
+      'the hint stops once the flag is actually set',
+    );
+    assert(EXIT_SWEPT === 0 && EXIT_ENVIRONMENT === 2, 'a completed sweep exits 0; a non-zero exit classifies the ENVIRONMENT (check-governed-merges posture)');
+  }
+
+  // ── the live mode stays OFF the required path ────────────────────────────
+  //
+  // This is the assertion that keeps #9642's whole trade honest. The moment
+  // `--verify-required-set` is wired into a step of a job that publishes a
+  // required context, this gate can redden on a GitHub blip — and, worse, it
+  // reddens on the very PR that carries the repo half of a rename, deadlocking
+  // the two-step. Wiring it is a maintainer decision, and it goes red HERE
+  // first rather than silently in the queue.
+  {
+    const uncommentedYaml = (text) => text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+    for (const [file, text] of Object.entries(sources)) {
+      assert(
+        !/--verify-required-set/.test(uncommentedYaml(text)),
+        `wiring: ${file} must not RUN the live required-set read — report-only, off the required path (#9642)`,
+      );
+    }
+    const pkgJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    assert(
+      !Object.values(pkgJson.scripts ?? {}).some((s) => typeof s === 'string' && s.includes('--verify-required-set')),
+      'wiring: no package script runs the live read — a `check:*` script is how a thing reaches the required job (#9642)',
+    );
+  }
+
   {
     const uncommented = (text) => text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
     const lintJobStart = sources['lint.yml'].indexOf('\n  lint:');
@@ -1488,6 +1991,14 @@ async function selfTest() {
       /surfaceVerdict\.problems/.test(mainBody),
       "wiring: the pin merges the surface scan's problems into its exit verdict (#9491)",
     );
+    // The pin runs in a job that publishes a REQUIRED context. A network call
+    // reached from here would make that context able to redden on a GitHub
+    // outage, for reasons unrelated to any diff — and would re-create the
+    // two-step deadlock the live mode is report-only to avoid (#9642).
+    assert(
+      !/\bfetch\(|verifyRequiredSet\(|fetchLiveRulesets\(/.test(mainBody),
+      'wiring: the pin (main) stays network-free — the live required-set read is report-only and off the required path (#9642)',
+    );
   }
 
   if (failures.length > 0) {
@@ -1498,12 +2009,17 @@ async function selfTest() {
   console.log(
     `✓ check-required-contexts --self-test: ${checked} assertions ` +
       `(rename ablations across both workflows + matrix/continue-on-error/trigger shapes + the shard-name collision + ` +
-      `the \`carries\` step-count ban + the instruction-surface stale-name scan (#9491) + the #4690 pins).`,
+      `the \`carries\` step-count ban + the instruction-surface stale-name scan (#9491) + ` +
+      `the live required-set diff and its off-the-required-path wiring (#9642) + the #4690 pins).`,
   );
 }
 
 if (process.argv.includes('--self-test')) {
   await selfTest();
+} else if (process.argv.includes('--verify-required-set')) {
+  // Report-only, off the required path (#9642). Exit 0 = swept (0 or N
+  // disagreements); exit 2 = the live set could not be read (ENVIRONMENT).
+  process.exitCode = await verifyRequiredSet();
 } else {
   await main();
 }

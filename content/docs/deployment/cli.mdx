@@ -418,6 +418,9 @@ os compile --json                    # JSON output for CI pipelines
   Artifact: dist/objectstack.json (7.6 KB)
 ```
 
+Those counts are from a sample project, named in full under [`os info`](#os-info)
+below — the same fixture backs both output examples.
+
 The resulting `dist/objectstack.json` is a **portable, self-describing deployment unit** —
 you can hand it to `os start` (locally or on a server), publish it to a CDN, or fetch it
 over HTTP from another runtime. See [`os start`](#os-start) and
@@ -508,6 +511,23 @@ os info --json         # JSON output for tooling
 
   Loaded in 59ms
 ```
+
+<Callout type="info">
+**The project behind these counts.** The `os compile` and `os info` examples above were
+run against one fixture, so the numbers can be rebuilt and checked rather than taken on
+trust: the project this page scaffolds in
+[Your First App in 2 Minutes](#your-first-app-in-2-minutes) —
+`npm create objectstack@latest my-app`, whose `blank` starter supplies the two-field
+`my_app_note` object and the three connector plugins — plus the four-field ticket object,
+the view and the action listed under
+[Build with Claude Code](/docs/getting-started/build-with-claude-code#3-what-claude-code-writes),
+renamed out of that page's `support_desk_` namespace into `my_app_`. That page's `support`
+app is **not** added, and a zero count is never printed, which is why the `UI:` row reads
+`1 Views  1 Actions` with no `Apps`. The walkthrough's `os generate` commands are **not**
+part of the fixture — run those as well and the summary gains `my_app_customer` and a
+`Logic:` row. Timings are machine identity, and the rule count and artifact size track the
+CLI version; everything else is fixture identity and reproduces.
+</Callout>
 
 ### Schema migrations
 

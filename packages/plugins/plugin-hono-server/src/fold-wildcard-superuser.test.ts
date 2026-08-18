@@ -4,7 +4,9 @@ import { describe, it, expect } from 'vitest';
 import { foldWildcardSuperUser, clampManagedObjectWrites, type ManagedSchemaLike } from './current-user-endpoints.js';
 
 /**
- * ADR-0057 D10 / ADR-0092 D5 — the `/me/permissions` per-object FLS map must
+ * Server enforces, client is courtesy (cited as ADR-0057 D10 — an attribution,
+ * not a resolvable anchor, #9628) / ADR-0092 D5 — the `/me/permissions`
+ * per-object FLS map must
  * mirror the server's actual enforcement, which grants writes via a `'*'`
  * modifyAll super-user bypass regardless of another set's explicit per-object
  * deny (most-permissive merge, no deny-wins).

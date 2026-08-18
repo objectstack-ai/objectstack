@@ -315,7 +315,7 @@ Reference to a record in another object (foreign key).
 |:---|:---|:---|:---|
 | `reference` | `string` | **required** | Target object name (snake_case) |
 | `referenceFilters` | `string[]` | — | **Removed** (#2377, ADR-0049) — no longer a recognized field property (unknown keys are stripped by the schema). Use structured `lookupFilters` + `dependsOn` instead; see [Relationships](/docs/data-modeling/relationships) |
-| `deleteBehavior` | `'restrict' \| 'cascade' \| 'set_null'` | `'set_null'` | Behavior when referenced record is deleted (a *required* lookup left at the default `set_null` is escalated to `restrict`, since a NOT NULL foreign key cannot be cleared) |
+| `deleteBehavior` | `'restrict' \| 'cascade' \| 'set_null'` | `'set_null'` | Behavior when referenced record is deleted (a *required* lookup left at the default `set_null` is escalated to `restrict`, since a NOT NULL foreign key cannot be cleared). On a `multiple: true` lookup `set_null` removes only the deleted **member** — the other members are kept, and a set emptied that way is stored as `[]`, never `null` |
 
 ```typescript
 { name: 'company', label: 'Company', type: 'lookup', reference: 'account' }
@@ -655,7 +655,7 @@ These properties are available on **all** field types:
 | `type` | `FieldType` | **required** | One of the supported field types |
 | `required` | `boolean` | `false` | Whether the field is required |
 | `unique` | `boolean` | `false` | Enforce uniqueness |
-| `multiple` | `boolean` | `false` | Allow array of values |
+| `multiple` | `boolean` | `false` | Allow array of values (multi-record lookup, multi-select, multi-file). An emptied multi-value lookup reads back as `[]`, never `null` — the `multiple` doc block in [`FieldSchema`](/docs/references/data/field) |
 | `searchable` | `boolean` | `false` | Include in search index |
 | `sortable` | `boolean` | `true` | Allow sorting by this field |
 | `hidden` | `boolean` | `false` | Hide from default views |

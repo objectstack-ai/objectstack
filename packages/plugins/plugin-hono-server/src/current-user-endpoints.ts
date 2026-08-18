@@ -237,7 +237,8 @@ function allPathsMounted(rawApp: any, paths: readonly string[]): boolean {
  * (`admin_full_access` `'*': {modifyAllRecords}`) who ALSO holds
  * `organization_admin` (which denies writes on identity tables): the client
  * would see `sys_user.allowEdit:false` and disable a form the server accepts
- * (verified: `PATCH /data/sys_user {name}` → 200). ADR-0057 D10 makes the
+ * (verified: `PATCH /data/sys_user {name}` → 200). The rule this repo cites as
+ * ADR-0057 D10 — an attribution, not a resolvable anchor (#9628) — makes the
  * server the authoritative gate; the client must mirror it, never diverge.
  *
  * The super-user grant covers private/managed objects on the server, so folding
@@ -864,7 +865,8 @@ export function registerCurrentUserEndpoints(
             }
             // Make the client's per-object FLS reflect the server's ACTUAL
             // effective enforcement = permission-set grant ∩ identity write
-            // guard (ADR-0057 D10). (1) Fold the `'*'` super-user grant into
+            // guard (server enforces, client is courtesy — cited as ADR-0057
+            // D10, an attribution, #9628). (1) Fold the `'*'` super-user grant into
             // every object so an admin's wildcard is not shadowed by another
             // set's explicit deny; (2) re-clamp `better-auth` managed objects
             // by their write affordance, since the guard (ADR-0092 D2) blocks

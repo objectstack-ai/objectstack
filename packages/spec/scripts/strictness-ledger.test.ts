@@ -100,7 +100,10 @@ describe('site counting reads the AST, not the source text', () => {
     expect(countSites(at('kernel/metadata-protection.zod.ts'))).toBe(0);
     expect(countSites(at('shared/suggestions.zod.ts'))).toBe(0);
     // And the case that mattered, because this file IS triaged: 9 → 8.
-    expect(countSites(at('ui/action.zod.ts'))).toBe(8);
+    // (8 → 9 at #9566, which ADDED the `onSuccess` strictObject site — the
+    // count is incidental; what this case pins is that JSDoc examples are
+    // not counted.)
+    expect(countSites(at('ui/action.zod.ts'))).toBe(9);
   });
 
   it('counts a call the source wraps across lines (`z\\n  .object({`)', () => {

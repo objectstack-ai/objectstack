@@ -1,17 +1,9 @@
 # @objectstack/service-i18n
 
-I18n Service for ObjectStack — implements `II18nService` with file-based locale loading and translation management.
+The shipped provider for the kernel's **`i18n`** service slot — a file-based
+`II18nService` implementation that also mounts the `/api/v1/i18n/*` routes.
 
-## Features
-
-- **Multi-Language Support**: Manage translations for unlimited languages
-- **File-Based Locales**: Load translations from JSON/YAML files
-- **Namespace Support**: Organize translations by domain (e.g., `common`, `errors`, `ui`)
-- **Interpolation**: Dynamic variable replacement in translations
-- **Pluralization**: Language-specific plural rules
-- **Fallback Chain**: Graceful fallback from dialect → base language → default
-- **Type-Safe**: TypeScript support with type-safe translation keys
-- **Hot Reload**: Reload translations without restarting (development)
+Slot criticality: `core` (`ServiceRequirementDef` in `@objectstack/spec/system`).
 
 ## Installation
 
@@ -19,350 +11,180 @@ I18n Service for ObjectStack — implements `II18nService` with file-based local
 pnpm add @objectstack/service-i18n
 ```
 
-## Basic Usage
+## Usage
 
 ```typescript
-import { defineStack } from '@objectstack/spec';
-import { ServiceI18n } from '@objectstack/service-i18n';
+import { ObjectKernel } from '@objectstack/core';
+import type { II18nService } from '@objectstack/spec/contracts';
+import { I18nServicePlugin } from '@objectstack/service-i18n';
 
-const stack = defineStack({
-  services: [
-    ServiceI18n.configure({
-      defaultLocale: 'en-US',
-      supportedLocales: ['en-US', 'es-ES', 'fr-FR', 'de-DE'],
-      loadPath: './locales/{{lng}}/{{ns}}.json',
-    }),
-  ],
-});
+const kernel = new ObjectKernel();
+await kernel.use(new I18nServicePlugin({
+  defaultLocale: 'en',
+  localesDir: './i18n',
+  fallbackLocale: 'en',
+}));
+await kernel.bootstrap();
+
+const i18n = kernel.getService<II18nService>('i18n');
+i18n.t('objects.account.label', 'en');            // 'Account'
+i18n.t('greeting', 'en', { name: 'Alice' });      // 'Hello, Alice!'
 ```
 
-## Configuration
+⚠️ `t()` is **synchronous** and takes the locale as its **second positional argument** —
+`t(key, locale, params?)`. It is not `await`-able and there is no ambient "current
+locale" to set: every call names the locale it wants.
 
-```typescript
-interface I18nServiceConfig {
-  /** Default locale (e.g., 'en-US') */
-  defaultLocale: string;
+## Plugin options
 
-  /** List of supported locales */
-  supportedLocales: string[];
+`I18nServicePluginOptions` has exactly five fields, all optional.
 
-  /** Path template for locale files */
-  loadPath: string;
+| Option | Type | Default | Purpose |
+|:---|:---|:---|:---|
+| `defaultLocale` | `string` | `'en'` | Reported by `getDefaultLocale()`; used as the adapter's default. |
+| `localesDir` | `string` | none | Directory of `{locale}.json` files loaded at construction. |
+| `fallbackLocale` | `string` | none | Consulted when a key is missing in the requested locale. |
+| `registerRoutes` | `boolean` | `true` | Register the REST routes at `kernel:ready`. |
+| `basePath` | `string` | `'/api/v1/i18n'` | Base path for those routes. |
 
-  /** Fallback locale when translation is missing */
-  fallbackLocale?: string;
+With `registerRoutes: false` — or when no `http-server` service is present — the plugin
+logs a warning and the service stays available programmatically through
+`kernel.getService('i18n')`.
 
-  /** Enable hot reload in development */
-  hotReload?: boolean;
-}
+## Locale files
+
+One JSON file per locale, named `{locale}.json`, in `localesDir`. Files may be flat or
+nested; keys resolve by dot notation. There is no per-namespace file layout and no
+`{{lng}}`/`{{ns}}` path template.
+
+```
+i18n/
+├── en.json
+├── zh-CN.json
+└── ja-JP.json
 ```
 
-## Directory Structure
-
-```
-locales/
-├── en-US/
-│   ├── common.json
-│   ├── errors.json
-│   └── ui.json
-├── es-ES/
-│   ├── common.json
-│   ├── errors.json
-│   └── ui.json
-└── fr-FR/
-    ├── common.json
-    ├── errors.json
-    └── ui.json
-```
-
-Example `locales/en-US/common.json`:
+`i18n/en.json`:
 
 ```json
 {
-  "welcome": "Welcome to ObjectStack",
   "greeting": "Hello, {{name}}!",
-  "item_count": "You have {{count}} item",
-  "item_count_plural": "You have {{count}} items",
-  "save_button": "Save",
-  "cancel_button": "Cancel"
+  "objects": {
+    "account": { "label": "Account" }
+  }
 }
 ```
+
+Interpolation is `{{paramName}}` only, substituted from the third argument of `t()`. A
+parameter with no supplied value is left as the literal `{{name}}` placeholder. There is
+no pluralization, no `context` suffix resolution, no `returnObjects`, and no date /
+number / relative-time formatting in this package — use `Intl` for those.
 
 ## Service API
 
-```typescript
-// Get i18n service
-const i18n = kernel.getService<II18nService>('i18n');
-```
-
-### Basic Translation
+`II18nService` (from `@objectstack/spec/contracts`) declares four required members plus
+optional ones; `FileI18nAdapter` implements the required four and three of the optional.
 
 ```typescript
-// Simple translation
-const text = await i18n.t('common:welcome');
-// "Welcome to ObjectStack"
+import type { II18nService } from '@objectstack/spec/contracts';
 
-// With interpolation
-const greeting = await i18n.t('common:greeting', { name: 'Alice' });
-// "Hello, Alice!"
-
-// With pluralization
-const count1 = await i18n.t('common:item_count', { count: 1 });
-// "You have 1 item"
-
-const count5 = await i18n.t('common:item_count', { count: 5 });
-// "You have 5 items"
+// required
+//   t(key, locale, params?)               -> string   (the key itself when unresolved)
+//   getTranslations(locale)               -> Record<string, unknown>
+//   loadTranslations(locale, data)        -> void      (deep-merged into the locale)
+//   getLocales()                          -> string[]
+// optional, implemented here
+//   getDefaultLocale() / setDefaultLocale(locale)
+//   setSupportedLocales(locales | undefined)
 ```
 
-### Change Locale
+`t()` returns the **key itself** when nothing resolves — it never throws and never
+returns `undefined`, so a missing translation surfaces as a visible key rather than an
+empty string.
 
-```typescript
-// Set locale for current context
-await i18n.setLocale('es-ES');
+`loadTranslations` deep-merges, so several plugins can each contribute keys under the
+same nested path (every platform plugin pushes its own bundle at `kernel:ready`).
 
-// Get current locale
-const locale = i18n.getLocale();
-// "es-ES"
+### Which locales are reported
 
-// Translate in specific locale (without changing context)
-const text = await i18n.t('common:welcome', { locale: 'fr-FR' });
-```
+`getLocales()` reports what is **loaded**, narrowed by the app's declared
+`i18n.supportedLocales` when the runtime injects them via `setSupportedLocales`.
+The narrowing rules are contractual:
 
-### Namespaces
+- absent / empty / not an array ⇒ **no** narrowing (every loaded locale is reported);
+- a declared locale with no loaded bundle is still reported (declared-but-unserved is
+  visible rather than silently intersected away);
+- narrowing is applied at read time, never as a prune of what is stored — bundles keep
+  arriving after the app plugin has run.
 
-```typescript
-// Load translation from 'errors' namespace
-const errorMsg = await i18n.t('errors:not_found');
+### Runtime-authored translations
 
-// Load multiple namespaces
-await i18n.loadNamespaces(['common', 'ui', 'errors']);
+Translations authored in Studio persist as `translation` metadata. The plugin wires the
+shared core sync, which replaces the authored layer wholesale (`clear`-then-reload) at
+`kernel:ready`, on `metadata:reloaded`, and on `translation` protocol mutations — so a
+key deleted from an authored item stops resolving on the next sync, while the static
+bundle layer underneath is untouched.
 
-// Check if namespace is loaded
-const isLoaded = i18n.isNamespaceLoaded('common');
-```
+## REST API
 
-### Locale Management
-
-```typescript
-// Get all supported locales
-const locales = i18n.getSupportedLocales();
-// ['en-US', 'es-ES', 'fr-FR', 'de-DE']
-
-// Check if locale is supported
-const isSupported = i18n.isLocaleSupported('ja-JP');
-// false
-
-// Get locale metadata
-const metadata = i18n.getLocaleMetadata('en-US');
-// {
-//   name: 'English (United States)',
-//   nativeName: 'English (United States)',
-//   direction: 'ltr',
-//   pluralRules: 'en'
-// }
-```
-
-## Advanced Features
-
-### Nested Keys
-
-```json
-{
-  "user": {
-    "profile": {
-      "title": "User Profile",
-      "edit": "Edit Profile"
-    }
-  }
-}
-```
-
-```typescript
-await i18n.t('common:user.profile.title');
-// "User Profile"
-```
-
-### Arrays
-
-```json
-{
-  "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
-}
-```
-
-```typescript
-const days = await i18n.t('common:days', { returnObjects: true });
-// ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
-```
-
-### Context-Based Translations
-
-```json
-{
-  "friend": "A friend",
-  "friend_male": "A boyfriend",
-  "friend_female": "A girlfriend"
-}
-```
-
-```typescript
-await i18n.t('common:friend', { context: 'male' });
-// "A boyfriend"
-
-await i18n.t('common:friend', { context: 'female' });
-// "A girlfriend"
-```
-
-### Formatting
-
-```typescript
-// Date formatting
-const formatted = await i18n.formatDate(new Date(), {
-  locale: 'es-ES',
-  format: 'long',
-});
-// "15 de enero de 2024"
-
-// Number formatting
-const price = await i18n.formatNumber(1234.56, {
-  style: 'currency',
-  currency: 'EUR',
-  locale: 'fr-FR',
-});
-// "1 234,56 €"
-
-// Relative time
-const relative = await i18n.formatRelative(new Date('2024-01-01'), {
-  locale: 'en-US',
-});
-// "3 months ago"
-```
-
-### Dynamic Loading
-
-```typescript
-// Add a new locale dynamically
-await i18n.addLocale('ja-JP', {
-  loadPath: './locales/ja-JP/{{ns}}.json',
-});
-
-// Remove a locale
-await i18n.removeLocale('ja-JP');
-
-// Reload translations (useful in development)
-await i18n.reload();
-```
-
-## Integration with Metadata
-
-Translate metadata labels automatically:
-
-```typescript
-import { ObjectSchema, Field } from '@objectstack/spec/data';
-
-const contact = ObjectSchema.create({
-  name: 'contact',
-  label: 'i18n:objects.contact.label', // References translation key
-  fields: {
-    name: Field.text({
-      label: 'i18n:fields.contact.name',
-    }),
-  },
-});
-
-// Translation file: locales/en-US/metadata.json
-{
-  "objects": {
-    "contact": {
-      "label": "Contact",
-      "label_plural": "Contacts"
-    }
-  },
-  "fields": {
-    "contact": {
-      "name": "Full Name"
-    }
-  }
-}
-```
-
-## REST API Endpoints
+Registered by this plugin directly on the `http-server` service. These three routes are
+the whole surface (shown at the default `basePath`):
 
 ```
-GET    /api/v1/i18n/locales              # Get supported locales
-GET    /api/v1/i18n/translations/:locale # Get all translations for locale
-POST   /api/v1/i18n/translate            # Translate keys (batch)
+GET    /api/v1/i18n/locales                     # available locales
+GET    /api/v1/i18n/translations/:locale        # all translations for one locale
+GET    /api/v1/i18n/labels/:object/:locale      # field labels for one object
 ```
 
-## Client Integration
+⚠️ The locale is a **path** segment, not a `?locale=` query parameter — the query
+dialect was a wire-level 404 against every serving surface and was retired. Each route
+is expressed by the SDK (`i18n.getLocales`, `i18n.getTranslations`, `i18n.getFieldLabels`);
+`src/i18n-route-ledger.ts` is the audited list, and a conformance test fails when a
+mounted route has no entry or an entry names a route that is no longer mounted.
 
-### React Hook Example
+## Client integration
 
-```typescript
-import { useTranslation } from '@objectstack/client-react';
+There is no `useTranslation` hook in this repo. On the client, `@objectstack/client-react`
+carries the **active locale** so requests send a matching `Accept-Language`, and
+translations are fetched through `@objectstack/client`:
 
-function MyComponent() {
-  const { t, locale, setLocale } = useTranslation();
+```tsx
+import { ObjectStackProvider, useObjectStackLocale } from '@objectstack/client-react';
 
+function App({ client, language }) {
   return (
-    <div>
-      <h1>{t('common:welcome')}</h1>
-      <button onClick={() => setLocale('es-ES')}>
-        Español
-      </button>
-    </div>
+    <ObjectStackProvider client={client} locale={language}>
+      <Screen />
+    </ObjectStackProvider>
   );
 }
-```
 
-## Best Practices
-
-1. **Use Namespaces**: Organize translations by domain (common, ui, errors, metadata)
-2. **Consistent Keys**: Use dot notation for nested keys (e.g., `user.profile.title`)
-3. **Provide Context**: Use context for gender, formality, or pluralization variants
-4. **Fallback Values**: Always provide fallback translations in default locale
-5. **Avoid Hardcoding**: Never hardcode user-facing text; use translation keys
-6. **Professional Translation**: Use professional translators for production
-7. **Version Control**: Store translation files in version control
-
-## Locale Coverage Detection
-
-```typescript
-// Get coverage statistics
-const coverage = await i18n.getCoverage();
-// {
-//   'en-US': { total: 245, missing: 0, percentage: 100 },
-//   'es-ES': { total: 245, missing: 12, percentage: 95.1 },
-//   'fr-FR': { total: 245, missing: 45, percentage: 81.6 }
-// }
-
-// Get missing keys for a locale
-const missing = await i18n.getMissingKeys('es-ES');
-// ['errors.validation.email', 'ui.dashboard.title', ...]
-```
-
-## Performance Considerations
-
-- **Lazy Loading**: Namespaces are loaded on demand
-- **Caching**: Translations are cached in memory
-- **Hot Reload**: Only enable in development
-- **Bundle Size**: Load only required locales on client
-
-## Contract Implementation
-
-Implements `II18nService` from `@objectstack/spec/contracts`:
-
-```typescript
-interface II18nService {
-  t(key: string, options?: TranslationOptions): Promise<string>;
-  setLocale(locale: string): Promise<void>;
-  getLocale(): string;
-  getSupportedLocales(): string[];
-  loadNamespaces(namespaces: string[]): Promise<void>;
-  formatDate(date: Date, options?: FormatOptions): Promise<string>;
-  formatNumber(value: number, options?: FormatOptions): Promise<string>;
+function Screen() {
+  const locale = useObjectStackLocale();   // string | undefined
+  return <span>{locale}</span>;
 }
 ```
+
+```typescript
+import { ObjectStackClient } from '@objectstack/client';
+
+const client = new ObjectStackClient({ baseUrl: 'http://localhost:3000' });
+const locales = await client.i18n.getLocales();
+const bundle = await client.i18n.getTranslations('zh-CN');
+const labels = await client.i18n.getFieldLabels('crm_account', 'zh-CN');
+```
+
+## Exports
+
+```typescript
+import { I18nServicePlugin, FileI18nAdapter } from '@objectstack/service-i18n';
+```
+
+Types: `I18nServicePluginOptions`, `FileI18nAdapterOptions`.
+
+`FileI18nAdapter` is the implementation behind the plugin, exported for hosts that wire
+their own kernel integration. Beyond the contract it also exposes
+`replaceAuthoredTranslations(byLocale)`, which the authored-translation sync uses.
 
 ## License
 
@@ -370,6 +192,5 @@ Apache-2.0. See [LICENSING.md](../../../LICENSING.md).
 
 ## See Also
 
-- [i18next Documentation](https://www.i18next.com/)
-- [@objectstack/spec/system (Translation schema)](../../spec/src/system/)
-- [I18n Best Practices Guide](/content/docs/protocol/kernel/i18n-standard.mdx)
+- [@objectstack/spec/system](../../spec/src/system/) — the `translation` metadata schema
+- [I18n Standard](https://docs.objectstack.ai/docs/protocol/kernel/i18n-standard)

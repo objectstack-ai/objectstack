@@ -224,6 +224,29 @@ jobs:
       - name: Part-of closing-keyword guard self-test
         run: pnpm check:partof-closing-keyword
 
+      # Single-claim path guard self-test (#9402). Same split as the step above
+      # and for the same reason: the guard is a PR-scoped blocking check in its
+      # own workflow, because its question is about OTHER open PRs and needs a
+      # pull request plus an API read that this job has neither of. What runs
+      # HERE is the half that needs no PR — the verdict layer, the exit-code
+      # contract, the short-circuit that makes the gate affordable, and the
+      # declared path list's own invariants.
+      #
+      # That last one is the reason this step is worth its second: the declared
+      # list IS the key, so the realistic way this gate turns into noise is a
+      # careless append to it. The self-test rejects an entry with no stated
+      # reason, rejects a duplicate, and pins that the three measured
+      # high-collision paths (the lock file, the root manifest, one plugin
+      # manifest — 33, 15 and 21 concurrent pairs in 300 PRs) stay OUT of it.
+      #
+      # It also pins the WIRING (the guard workflow still invokes the script,
+      # still subscribes to `synchronize` — without which a claim added in a
+      # second commit is never judged — and still passes the token), so
+      # unwiring the gate reddens here rather than going quiet.
+      # Dependency-free, reads two files; ~0.1s.
+      - name: Single-claim path guard self-test
+        run: pnpm check:single-claim-paths
+
       # PM half-state sweeper self-test (#8528). `scripts/pm/check-half-states.mjs`
       # carried a 79-case --self-test — the H1..H7 predicates, the seat-sticker
       # parser, the transport classifier and its measured container classes —
@@ -269,6 +292,37 @@ jobs:
       # the way an uninvoked self-test does (#4690).
       - name: Governed-merges audit self-test
         run: pnpm check:pm-governed-merges
+
+      # Release-rehearsal clone preflight self-test (#9555). A local
+      # `pnpm run version` rehearsal — the prescribed verification route for
+      # every release-machinery change — HANGS FOREVER in an agent container:
+      # every clone descends from a shallow checkout, so each `.changeset/*.md`
+      # resolves to the parentless shallow boundary, and @changesets/git answers
+      # a parentless add-commit by deepening and retrying in a loop with no
+      # attempt limit — against a remote that gains it nothing and exits 0 while
+      # doing so. Measured cost before diagnosis: ~2.5 h over two attempts,
+      # because full CPU with no output reads as slow progress, not as a hang.
+      # `scripts/pm/release-rehearsal-clone.mjs` is the refusal that turns that
+      # into a one-second diagnosis, plus the repair for a throwaway clone.
+      #
+      # What runs HERE is the self-test, not the live check: the live check
+      # judges whatever clone it is pointed at, and a CI checkout's depth is the
+      # workflow's business rather than a verdict this job can hold. The
+      # self-test pins BOTH directions on real git fixtures — the trapped shape
+      # refuses, while a healthy tree AND a merely-shallow one whose changesets
+      # sit after the boundary pass untouched (the predicate is the parentless
+      # add-commit, never `--is-shallow-repository` alone) — and it pins the
+      # WIRING, so unlinking the script from docs/releases-maintenance.md or
+      # from this step reddens instead of going quiet. Temp-dir fixtures, no
+      # network, ~1.7 s.
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias: that alias
+      # belongs in root package.json, which is declared territory of the
+      # @changesets/cli v3 migration lane (#9465) while it runs. Same shape as
+      # check-links.yml's ADR-link step, and dispatch-gates.mjs derives gate
+      # families from either spelling.
+      - name: Release-rehearsal clone preflight self-test
+        run: node scripts/pm/release-rehearsal-clone.mjs --self-test
 
       # Docs/skills authoring guard (#2035 / ADR-0059): TS code blocks in
       # Markdown/MDX are not type-checked or ESLinted, so skills/ and
@@ -335,6 +389,38 @@ jobs:
       # observed failing.
       - name: Docs redirect destinations resolve, and no chains
         run: pnpm check:docs-redirects
+
+      # #9632 published-README links: a README in a package's `files` array with
+      # `private` unset is rendered on npm and on GitHub as well as here, and
+      # NOTHING read its links. Measured before the gate was written: the lychee
+      # lane globs `content/**` plus the ROOT README.md/ARCHITECTURE.md, never
+      # `packages/**/README.md`; `check:doc-anchors` takes the same two
+      # EXTRA_SOURCES; `check:adr-links` is scoped to docs/adr/;
+      # `check:published-readme-exports` has exactly the right population but
+      # reads FENCED CODE BLOCKS ONLY and has no notion of a link. So seven links
+      # across five published service packages sat spelled `/content/docs/...` —
+      # a form that resolves on none of the three surfaces — and shipped to npm
+      # green. An npm tarball outlives any in-repo correction, which is why the
+      # gate is worth more than the seven fixes that came with it.
+      #
+      # Strict, with no baseline: the census that sized it found 149 outbound
+      # links across all 60 published markdown files, so per-link assertions are
+      # affordable. It reuses rather than re-derives — the POPULATION comes from
+      # check-published-readme-exports (`publishedDocs`), the page resolver from
+      # check-docs-redirects (`pageCandidates`, including its
+      # directory-without-an-index-is-a-404 subtlety), the heading ids from
+      # check-doc-anchors (`headingIds`), and the fence/code-span stripping from
+      # check-adr-links. Two gates deriving "published" separately would disagree
+      # the first time a `files` array changed, silently, each still green.
+      #
+      # This job for the same reason check:docs-redirects is here: it is a
+      # dependency-free filesystem check and this job carries "the whole check:*
+      # gate family". Runs its own --self-test first, where all three assertions
+      # are observed FAILING as well as silent — over the real tree the strict
+      # assertion has a small population, so a green run cannot by itself
+      # distinguish a working scanner from one that matches nothing.
+      - name: Published-README links are followable off the docs site
+        run: pnpm check:published-readme-links
 
       # #9018 docs image tags: the same "example image tag N majors behind
       # packages/cli" staleness was found and hand-fixed TWICE, independently —
@@ -431,6 +517,21 @@ jobs:
       # its own failure mode.
       - name: Quick-reference section counts match their tables
         run: pnpm check:quick-reference-counts
+
+      # #9604: the runtime-services chapter's pages are enumerated in three
+      # hand-written places (meta.json "pages", the chapter list in
+      # runtime-services/index.mdx, the services.* table in kernel/index.mdx) and
+      # nothing read any of them -- check:docs-audit-scope derives WHICH pages the
+      # accuracy audit covers, never whether an index enumerates them. #9604 found
+      # services.sms with a page, a meta.json entry, a registered slot and a
+      # canonical-source row, missing from BOTH index lists; #9588 was the same
+      # page drifting on a different line. The pages on disk are the source of
+      # truth and the gate holds all three enumerations (and the chapter list's
+      # order) to them. It lives in this job with the other docs guards: the edit
+      # that breaks it is a docs edit, so a packages/** paths filter would blind
+      # it to its own failure mode.
+      - name: Runtime-services indexes enumerate the chapter's real pages
+        run: pnpm check:runtime-services-index
 
       # #3723 ADR anchors: code an accepted ADR governs must keep naming it.
       # That incident reversed three accepted ADRs with a patch-level changeset,
@@ -762,6 +863,44 @@ jobs:
       - name: Workflow status-function guard
         run: pnpm check:workflow-status-functions
 
+      # Cross-repo closer outcome contract (#9595, and #9575 before it).
+      # `cross-repo-issue-closer.yml` carries ~150 lines of inline
+      # github-script, and it is code nobody has ever seen run: over the 1176
+      # most recently merged PRs, ZERO bodies carry a qualified cross-repo
+      # closing keyword, so the branch that closes foreign issues has had no
+      # target in that whole window. Its defects are therefore found by reading
+      # — one card per silent exit — and each fix lands as more unexercised
+      # code. This step is the exercise: the shipped script is extracted from
+      # the YAML with a real parser (never retyped) and run under doubles the
+      # way actions/github-script runs it, as one AsyncFunction body. Ten
+      # scenarios pin the target parse and the outcome of EVERY exit — which of
+      # setFailed / warning / job summary fires, and which API calls were made.
+      #
+      # Assertion 0 is the compile, and it is not theoretical: this job failed
+      # twice on 2026-08-02 with `SyntaxError: Identifier 'octokit' has already
+      # been declared`, i.e. a script that never ran at all, on a post-merge
+      # workflow whose red nothing else in CI can see.
+      #
+      # Its --self-test runs first and is the half that stops the battery
+      # rotting into decoration: it mutates the shipped script seven ways —
+      # downgrade the verdict to a warning, stop collecting failed keys, break
+      # out of the loop instead of isolating, drop the same-repo skip, narrow
+      # the keyword set, drop the already-closed skip, downgrade the notice
+      # path's verdict — and requires the battery to go RED for each, naming the
+      # scenario that catches it. A mutation whose anchor no longer exists is a
+      # failure too, so a rewrite of the workflow cannot leave the mutations
+      # silently matching nothing.
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias: that alias
+      # belongs in root package.json, declared territory of the @changesets/cli
+      # v3 migration lane (#9465) while it runs. Same shape as the
+      # release-rehearsal step above; dispatch-gates.mjs derives gate families
+      # from either spelling. No network, no build; ~0.2 s.
+      - name: Cross-repo closer outcome contract
+        run: |
+          node scripts/check-cross-repo-closer-outcome.mjs --self-test
+          node scripts/check-cross-repo-closer-outcome.mjs
+
       # Shard positive-attestation gate (#6082). ci.yml's two aggregate gates
       # used to decide from one `needs.<matrix>.result` word, which cannot carry
       # three shards' verdicts: run 31120902911 read the undocumented
@@ -801,9 +940,14 @@ jobs:
       # the machine-readable form of #5617's audit exclusions. It deliberately
       # does NOT judge job-level `if:`: four of the enrolled ci.yml jobs carry a
       # filter-driven `if:` by design (#4928), and a skipped job still publishes
-      # a context. ⚠️ It cannot verify the required SET itself — Settings →
-      # Rulesets is unreadable from every agent seat (403) — so it asserts the
-      # repo-side half only, and the script's header says so at length.
+      # a context. ⚠️ It does not read the required SET itself — but not because
+      # it cannot: the rulesets API answers 200 to an ordinary seat (it is the
+      # CLASSIC branches/main/protection endpoint that answers 403, and this repo
+      # does not use classic branch protection — #9642). The live diff is a
+      # separate report-only mode, `--verify-required-set`, deliberately kept OFF
+      # this required path: the settings half of a rename is maintainer-only and
+      # lands after the merge, so a blocking version would be red on the very PR
+      # carrying the repo half. This step stays network-free.
       # Reads two YAML files; sub-second.
       - name: Required-context name pin
         run: pnpm check:required-contexts

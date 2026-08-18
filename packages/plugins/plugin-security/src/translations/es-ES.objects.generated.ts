@@ -323,11 +323,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       last_certified_at: {
         label: "Última certificación",
-        help: "[ADR-0091 D5] Cuándo se atestiguó por última vez esta concesión en una revisión de recertificación. Nulo = nunca certificada."
+        help: "[ADR-0091 D5] Reservada para un futuro flujo de recertificación de accesos, que registraría aquí cuándo se atestiguó por última vez esta concesión. Hoy es inerte: ningún código de la plataforma escribe esta columna ni la lee; ninguna ruta de resolución, control ni regla de lint la consulta, y nada deriva de ella «nunca certificada» ni «certificación obsoleta». Por tanto, un valor nulo significa que el flujo no existe, no que esta concesión no se haya revisado."
       },
       certified_by: {
         label: "Certificado por",
-        help: "[ADR-0091 D5] Revisor que atestiguó por última vez esta concesión."
+        help: "[ADR-0091 D5] Reservada para ese mismo futuro flujo de recertificación de accesos: el revisor que atestiguaría esta concesión. Hoy es inerte: ningún código de la plataforma la escribe ni la lee. Un valor escrito aquí por un cliente es una anotación sin verificar; la plataforma no comprueba nada sobre él ni concede nada en función de él."
       },
       created_at: {
         label: "Creado el"
@@ -409,11 +409,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       last_certified_at: {
         label: "Última certificación",
-        help: "[ADR-0091 D5] Cuándo se atestiguó por última vez esta concesión en una revisión de recertificación. Nulo = nunca certificada."
+        help: "[ADR-0091 D5] Reservada para un futuro flujo de recertificación de accesos, que registraría aquí cuándo se atestiguó por última vez esta concesión. Hoy es inerte: ningún código de la plataforma escribe esta columna ni la lee; ninguna ruta de resolución, control ni regla de lint la consulta, y nada deriva de ella «nunca certificada» ni «certificación obsoleta». Por tanto, un valor nulo significa que el flujo no existe, no que esta concesión no se haya revisado."
       },
       certified_by: {
         label: "Certificado por",
-        help: "[ADR-0091 D5] Revisor que atestiguó por última vez esta concesión."
+        help: "[ADR-0091 D5] Reservada para ese mismo futuro flujo de recertificación de accesos: el revisor que atestiguaría esta concesión. Hoy es inerte: ningún código de la plataforma la escribe ni la lee. Un valor escrito aquí por un cliente es una anotación sin verificar; la plataforma no comprueba nada sobre él ni concede nada en función de él."
       },
       created_at: {
         label: "Creado el"

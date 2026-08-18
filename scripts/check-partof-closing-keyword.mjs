@@ -98,8 +98,13 @@
  *
  * It also does not decide branch protection. This publishes a red check run;
  * whether that check run becomes a REQUIRED context is a settings change no
- * agent seat can make (the protection endpoint answers 403 here) and, per the
- * required-context registry convention, one that carries a maintainer ruling.
+ * agent seat can make — the seat reads the repository as a non-admin
+ * (permissions.admin false) — and, per the required-context registry
+ * convention, one that carries a maintainer ruling. ⚠️ Not-writable is the
+ * claim here, and only that: the required set is READABLE from an ordinary
+ * seat (the rulesets API answers 200; it is the classic branch-protection
+ * endpoint that answers 403, and this repo does not use classic branch
+ * protection — #9642, which retired that conflation elsewhere in this tree).
  * The duplicate-fix guard sits in exactly the same position.
  *
  * ## Why the paths above are unquoted

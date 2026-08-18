@@ -538,6 +538,102 @@ the dialect where going unnamed is the *normal* outcome rather than the
 exception, because its duplicate-entry message never carries a column at all.
 </Callout>
 
+### The migration metadata-lock bound
+
+Widening a legacy MySQL column — `TIMESTAMP` → `DATETIME(3)`, or a
+zero-precision `TIME` → `TIME(3)` — runs as `ALTER TABLE … MODIFY COLUMN`, and
+MySQL will not start one without an **exclusive metadata lock** on the table.
+Any other session holding a lock blocks it: a long-running transaction, an open
+`REPEATABLE READ` snapshot, a forgotten `BEGIN` in a shell, a stuck report
+query. (Why the platform stores `datetime` as `DATETIME(3)` rather than
+`TIMESTAMP` is covered in the [type system](/docs/protocol/objectql/types).)
+
+MySQL's own default wait for that lock, `lock_wait_timeout`, is **31,536,000
+seconds — one year**. Inherited, a blocked widening never returns and nothing
+prints, which no operator can tell apart from a crash. So `SqlDriver` sets
+`lock_wait_timeout = 120` on the session running the ALTER, and puts the
+session's previous value back afterwards so the bound never reaches unrelated
+runtime queries
+([#9354](https://github.com/objectstack-ai/objectstack/issues/9354),
+[#9542](https://github.com/objectstack-ai/objectstack/issues/9542)).
+
+The bound is armed on **both** paths that widen. What differs is what happens
+when it fires:
+
+| Path | When the bound fires |
+|------|----------------------|
+| `os migrate apply` (the deferred-DDL flush) | **Refuses** — exit 1, with a `DATABASE_ERROR` / 500 envelope naming the lock wait, the table and the remedy |
+| Boot schema sync (every boot against a managed MySQL datasource) | **Warns and carries on** — the widening did not happen, and the platform starts anyway |
+
+Two answers, because the paths differ in who is waiting and what they can do
+about it. `os migrate apply` is a command an operator ran, whose whole contract
+is to report what it did — a swallowed lock wait there prints
+`Applied 0 change(s)` and calls it success. Boot is the path nobody can retry
+from a prompt, and correctness never depended on the widening having run, so
+failing the boot would trade a silent hang for a dead platform.
+
+#### `os migrate apply` refuses
+
+The refusal is an ADR-0112 envelope — `DATABASE_ERROR`, HTTP status 500 (nothing
+about the operator's request is at fault; the blocker is another session). The
+CLI prints the message and exits 1; under `--json` it comes back as `error`:
+
+```text
+Migration of table 'contracts' timed out after 120s waiting for a MySQL metadata
+lock (lock_wait_timeout). Another session is holding a lock on the table — a
+long-running transaction or an open, uncommitted session. No schema change was
+made. Identify the holder with `SHOW PROCESSLIST` or by querying
+`performance_schema.metadata_locks`, end it, then re-run `os migrate apply` —
+the widening is idempotent, so re-running is safe.
+```
+
+**No schema change was made**, so there is nothing to undo. Find the session
+holding the lock, end it, and re-run: the widening re-reads `information_schema`
+and does nothing to a column that is already widened.
+
+#### Boot warns and carries on
+
+<Callout type="warn">
+On boot the bound ends the wait but **not** the boot. The warning is the only
+signal that the widening did not happen — the platform starts, serves traffic,
+and looks entirely normal.
+</Callout>
+
+```text
+[sql-driver] could not widen MySQL datetime columns on contracts; writes stay
+correct, but the 2038 ceiling and millisecond truncation remain
+
+[sql-driver] could not widen MySQL time columns on contracts; fractional-second
+writes keep rounding to whole seconds
+```
+
+The server's own lock-wait error travels with the entry, in its `error` field.
+Match on the messages above rather than on that one — MySQL and MariaDB word the
+lock-wait error differently and both translate it.
+
+What an un-widened column costs you is exactly what the warning says and no
+more: a `TIMESTAMP` column goes on accepting and returning the same UTC instants
+(the driver binds the same literal either way, and the session is pinned to
+UTC), it merely keeps the 32-bit 2038 ceiling and truncates milliseconds, and an
+un-widened `TIME` rounds fractional seconds away. The widening is idempotent, so
+the first boot after the blocker clears completes it — but nothing else reports
+that it is outstanding, so this line is worth alerting on wherever you collect
+logs.
+
+<Callout type="info">
+**Why boot waits the same 120 seconds** rather than being more patient: the
+number reasons about how long a legitimate metadata-lock holder can plausibly
+hold the lock — a property of the lock, not of who is waiting on it. Two minutes
+sits three orders of magnitude above the milliseconds a normal OLTP transaction
+holds one, so an ordinary busy table never trips it, and well below the point an
+operator gives up on a command that has printed nothing. Boot's difference from
+the flush is *what happens* when the bound fires, never how long it waits.
+</Callout>
+
+The bound is deliberately **not configurable and not retried**. Both wait for
+measured demand: a knob added now would have to be supported forever on the
+evidence of one stall, and `os migrate apply` is re-runnable anyway.
+
 ## MongoDB
 
 Configuration properties for the MongoDB driver.

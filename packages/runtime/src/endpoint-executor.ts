@@ -54,6 +54,12 @@ import { apiErrorResponse } from './error-envelope.js';
 import { isServiceServeable } from './service-serveable.js';
 import { validationFailure } from './validation-failure.js';
 import { buildAutomationContext } from './domains/automation.js';
+import {
+    classifyFlowRefusal,
+    flowIsUnknown,
+    flowNotFoundMessage,
+    FLOW_NOT_FOUND_STATUS,
+} from './flow-dispatch-status.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 
 // ============================================================================
@@ -446,6 +452,41 @@ async function executeObjectOperation(
  *
  * The request body is the flow input, exactly as on `POST
  * /automation/:name/trigger`.
+ *
+ * ## [#9462] The outcome is the #9378 status table, from the ONE definition
+ *
+ * | engine exit            | reality          | this door answers          |
+ * |------------------------|------------------|----------------------------|
+ * | flow not found         | never dispatched | `404`                      |
+ * | flow disabled          | never dispatched | `409` `FLOW_DISABLED`      |
+ * | flow has no start node | never dispatched | `422` `FLOW_NO_START_NODE` |
+ * | ran and failed         | ran, rejected    | `400` `FLOW_FAILED`        |
+ *
+ * Read from `../flow-dispatch-status.js` — the third and last door to converge
+ * on it (maintainer ruling, 2026-08-18, verbatim 「同意」: the table is a
+ * property of the flow-dispatch CONTRACT, not of the trigger route). ⛔ A
+ * fourth copy of the table, here or anywhere, is the defect by construction:
+ * three private readings of one engine result is exactly how a DISABLED flow
+ * came to be `409` at the trigger door, `400 FLOW_FAILED` at `/actions`, and
+ * `200` here, all at once.
+ *
+ * **This is a BREAKING change to what this seam answers.** Until now every
+ * outcome was `200` with the raw result in `data`, so a failing flow reached
+ * the caller as `{"success":true,"data":{"success":false,…}}` — the double
+ * envelope #3962 ruled out for `/actions`, on a surface an app publishes as
+ * its own public API. A consumer that branched on `data.success` now gets a
+ * 4xx whose `error.code` carries the same fact; one that branched on the HTTP
+ * status alone was reading failures as successes and now reads them correctly.
+ *
+ * `outputMapping` needs nothing here and deliberately gets nothing: it is
+ * applied by `api-endpoint-step.ts` on `answer.status < 400`, so the refusal
+ * rows fall outside it by the rule that was already written — which is also
+ * the fix for a real hole, since an `outputMapping` projection used to be
+ * applied to the `200`-wrapped FAILURE body and could present it as data. The
+ * policy chain is upstream of this function and is untouched: a refusal here
+ * is reached only by a request that already passed `rateLimit` /
+ * `authRequired`, and `Cache-Control` from `cacheTtl` rides success only,
+ * again on the same `status < 400` test.
  */
 async function executeFlow(
     ctx: EndpointExecutionContext,
@@ -479,8 +520,63 @@ async function executeFlow(
         });
     }
 
+    // [#9462] Row 1 of the table, answered by the SAME optional `getFlow`
+    // registry probe the trigger door and `/actions` use — the engine's
+    // not-found exit carries neither a `code` nor a `status`, so this is the
+    // only reading of it that is not a regex over its message (PD #12). A
+    // service that omits `getFlow` cannot be asked and dispatches as before,
+    // exactly as at the other two doors.
+    if (await flowIsUnknown(service, plan.flow)) {
+        return apiErrorResponse({
+            message: sanitizeMessage(flowNotFoundMessage(plan.flow), FLOW_NOT_FOUND_STATUS),
+            httpStatus: FLOW_NOT_FOUND_STATUS,
+        });
+    }
+
     const automationContext = buildAutomationContext(ctx.body, ctx.protocolContext) as AutomationContext;
-    return successAnswer(await automation.execute(plan.flow, automationContext));
+    const result = await automation.execute(plan.flow, automationContext);
+
+    // [#9462] Rows 2-4, read off the PRODUCER's classification through the one
+    // shared table. What stood here was an unconditional `successAnswer`, so
+    // EVERY refusal — a flow that never dispatched included — reached the
+    // caller as `200 {success:true,data:{success:false,…}}`: the double
+    // envelope #3962 removed from `/actions`, on a surface an app publishes as
+    // its own public API.
+    const refusal = classifyFlowRefusal(plan.flow, result);
+    if (refusal) {
+        // The run's own artefacts ride the 400 arm ONLY — they describe a run
+        // that happened, and a never-dispatched refusal has neither an author
+        // failure text nor a node log to point at. Byte-identical to the
+        // trigger door's details (`domains/automation.ts`), because #5040 §4
+        // makes that route's answer this seam's contract.
+        const runDetails = refusal.code === 'FLOW_FAILED'
+            ? {
+                ...(result.errorMessage !== undefined ? { errorMessage: result.errorMessage } : {}),
+                ...(result.summary !== undefined ? { summary: result.summary } : {}),
+            }
+            : {};
+        return apiErrorResponse({
+            message: sanitizeMessage(refusal.message, refusal.status),
+            httpStatus: refusal.status,
+            code: refusal.code,
+            ...(Object.keys(runDetails).length > 0 ? { details: runDetails } : {}),
+        });
+    }
+
+    // An UNCLASSIFIED `success: false` keeps today's 200 — this door reads it
+    // the TRIGGER door's way, not `/actions`'s, and the difference is decided
+    // by what a declared endpoint IS. #5040 §4 (this module's opening rule)
+    // makes a `type: 'flow'` endpoint a stable URL plus a policy layer over
+    // `POST /automation/:name/trigger`: same context builder, same `execute`
+    // call, so the same answer, or the alias has become the second execution
+    // dialect the whole module exists to prevent. `/actions` refuses the
+    // residual under its own #3962 ruling about ITS route; adopting that here
+    // would PROMOTE an exit the producer never classified — the one thing the
+    // shared table's note says a door must not do — and would do it by
+    // borrowing a ruling about a different door. If the residual should speak
+    // HTTP everywhere, that is a change to the shared table for all three
+    // doors, not a fourth reading invented at this one.
+    return successAnswer(result);
 }
 
 /**

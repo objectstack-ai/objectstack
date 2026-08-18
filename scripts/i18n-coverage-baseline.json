@@ -1,6 +1,6 @@
 {
   "examples/app-crm/objectstack.config.ts": 89,
-  "examples/app-showcase/objectstack.config.ts": 451,
+  "examples/app-showcase/objectstack.config.ts": 393,
   "examples/app-todo/objectstack.config.ts": 120,
   "packages/platform-objects/scripts/i18n-extract.config.ts": 0,
   "packages/plugins/plugin-approvals/scripts/i18n-extract.config.ts": 0,

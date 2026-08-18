@@ -11,10 +11,16 @@ Your source of truth is `node_modules/@objectstack/spec`.
 ## 2. Implementation Rules
 
 ### Rule #1: Never Redefine Types
-Do not create your own interfaces for `Object`, `Field`, or `Query`.
-ALWAYS import them:
+Do not create your own interfaces for object metadata, `Field`, or `Query`.
+ALWAYS import them, and derive any type you need from the schema:
 ```typescript
-import { type Object, ObjectSchema } from '@objectstack/spec/data';
+import { z } from 'zod';
+import { ObjectSchema, type Field, QuerySchema } from '@objectstack/spec/data';
+
+// The object metadata type is NOT exported under the name `Object` — that would
+// shadow the JS global and silently type-check against it. Derive it instead:
+type ObjectMetadata = z.infer<typeof ObjectSchema>;
+type Query = z.infer<typeof QuerySchema>;
 ```
 
 ### Rule #2: Schema-First Validation

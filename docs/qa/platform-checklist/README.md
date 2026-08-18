@@ -280,11 +280,12 @@ over this ledger**: `since == vN` (the new capabilities) ∪ all `P0` (the stand
 smoke) ∪ any item whose `source` cites a PR in the release. The tracking issue for the
 sweep links here and hosts discussion; results stay OUT of the repo — every run files
 one `qa-run` GitHub issue as its record (text only: the verdict table + a reproduction
-rule per failure, never screenshots; `runs/` is git-ignored), and a run that finds a real
-regression extracts it into its own standalone card at close-out (RUNNER.md, extraction
-obligation — the run issue itself stays `qa-run`-only, excluded from triage). Item text,
-fixtures learned, and new traps discovered flow **back into the ledger** as revisions —
-that is the accumulation the one-off checklists never had.
+rule per failure — RUNNER.md rule 2's authentication/authorization carve-out excepted,
+and it binds the extracted card too — never screenshots; `runs/` is git-ignored), and a
+run that finds a real regression extracts it into its own standalone card at close-out
+(RUNNER.md, extraction obligation — the run issue itself stays `qa-run`-only, excluded
+from triage). Item text, fixtures learned, and new traps discovered flow **back into the
+ledger** as revisions — that is the accumulation the one-off checklists never had.
 
 ## Relationship to what already exists
 

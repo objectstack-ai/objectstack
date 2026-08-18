@@ -12,6 +12,15 @@ repo's runtime, hook bodies reach scoped data operations through `ctx.api`,
 while plugin code resolves any registered service through `ctx.getService(...)` —
 a literal `services.*` object is not injected into hook contexts by the open
 framework today. Managed runtimes provide the `services.*` binding directly.
+
+**`services.*` is the accessor spelling, not necessarily the registry slot.** The name
+after `services.` is what this chapter documents each surface under; the string you pass
+to `ctx.getService(...)` is the slot the implementation is registered by. They are the
+same word for every service below **except storage**, whose slot is `file-storage`
+(there is no `storage` alias — see
+[`services.storage`](/docs/kernel/runtime-services/storage-service)). Each page states
+its own slot in a **Registry slot** bullet; `scripts/check-runtime-services-index.mjs`
+holds those to a real `registerService` call.
 </Callout>
 
 This chapter documents the runtime `services.*` APIs used in hook/action/flow/plugin code:
@@ -21,6 +30,7 @@ This chapter documents the runtime `services.*` APIs used in hook/action/flow/pl
 - `services.audit`
 - `services.queue`
 - `services.email`
+- `services.sms`
 - `services.settings`
 - `services.storage`
 
@@ -43,4 +53,15 @@ Each page links the canonical TypeScript source used to derive signatures.
 - SMS: `packages/spec/src/contracts/sms-service.ts`
 - Storage: `packages/spec/src/contracts/storage-service.ts`
 - Settings: `packages/services/service-settings/src/settings-service.ts`
-- Audit bridge: `packages/services/service-settings/src/settings-service.types.ts`
+- Audit: `packages/plugins/plugin-audit/src/auth-event-audit.ts`
+
+<Callout type="warn" title="Not this: the settings audit sink">
+A second audit shape shares the word and is easy to reach for by mistake.
+`SettingsAuditSink` — canonical source
+`packages/services/service-settings/src/settings-service.types.ts` — is
+**constructor-injected** into `service-settings`, which calls its `record()` after a
+settings write lands. It is never registered as, or resolved from, the `services.audit`
+slot: that slot's only registrant is `@objectstack/plugin-audit`, and the object it
+returns exposes `recordAuthEvent`, not `record`. See
+[`services.audit`](/docs/kernel/runtime-services/audit-service) for the full contrast.
+</Callout>

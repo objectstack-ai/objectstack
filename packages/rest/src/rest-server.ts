@@ -5333,7 +5333,53 @@ export class RestServer {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
                     const p = await this.resolveProtocol(environmentId, req);
                     if (typeof (p as any).auditMetaItem !== 'function') {
-                        res.json({ events: [] });
+                        // [#9426 / ADR-0110 D3] A MISS and a FAULT are different
+                        // facts, and this branch is the second one: the resolved
+                        // protocol cannot read an audit trail AT ALL, so the
+                        // question was never asked. Answering `{ events: [] }`
+                        // reported it as the first — "the trail WAS read and this
+                        // item has no entries" — on a COMPLIANCE surface, where
+                        // Studio's 审计日志 / Audit log tab renders the empty case
+                        // as *nobody touched this item*. That is precisely the
+                        // claim a compliance reader must not be given on false
+                        // pretenses.
+                        //
+                        // ⚠️ This is NOT the unprovisioned-table condition this
+                        // route's header comment describes. That one lives one
+                        // layer down, inside
+                        // `ObjectStackProtocolImplementation.auditMetaItem`,
+                        // which catches a failed read and returns `{ events: [] }`
+                        // after a `console.warn` — a path that requires the method
+                        // to EXIST and to be CALLED. The two are separate frames
+                        // in separate packages, and this branch returns BEFORE the
+                        // call, so refusing here leaves the unprovisioned-table
+                        // answer exactly as it was.
+                        //
+                        // Refusing HERE rather than asserting at assembly is
+                        // deliberate, and is the reasoning PR #9425 landed one
+                        // route over. `auditMetaItem` is not a member of
+                        // `RestProtocol` (= `DataProtocol & MetadataProtocol`) and
+                        // is not declared in `packages/spec` at all — it is an
+                        // ADR-0076 D9 server-only extension, which is why it is
+                        // reached through a runtime cast. A host that implements
+                        // the DECLARED contract exactly is therefore a CONFORMING
+                        // deployment that lands here with no type error, and a
+                        // boot-time assertion would promote an undeclared optional
+                        // extension into a required one — a `packages/spec`
+                        // contract decision, not a route one.
+                        //
+                        // Envelope per #7035: the ADR-0112 NESTED
+                        // `{ error: { code, message } }` the sibling `/meta` 501
+                        // refusals converged on — never the bare-string or
+                        // sibling-`code` dialects, which make `body.error.code`
+                        // read `undefined` and which `check:route-envelope`
+                        // counts, shrink-only, on this file.
+                        res.status(501).json({
+                            error: {
+                                code: 'NOT_IMPLEMENTED',
+                                message: 'protocol.auditMetaItem() is not available in this kernel',
+                            },
+                        });
                         return;
                     }
                     // [#6877] Same `Number(...)` → `NaN` → dropped-limit shape as
