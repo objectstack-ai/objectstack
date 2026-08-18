@@ -157,8 +157,19 @@ export const REQUIRED_CONTEXTS = [
   {
     workflow: 'lint.yml',
     job: 'lint',
-    context: 'ESLint',
-    authorized: '#5617 maintainer ruling 2026-08-07 — applied to the settings the same day',
+    // Renamed from 'ESLint' under the #9325 ruling: the old name described one
+    // of the job's steps and mis-routed the diagnosis of every other gate it
+    // carries. The rename lands in two halves that CANNOT be atomic — this
+    // registry + the workflow `name:` here, and the required-context entry in
+    // repository Settings → Rulesets — so it is done in one maintainer-present
+    // sitting: merge, then swap the Settings entry immediately. Either half
+    // alone is an outage (permanently-pending, or advisory-with-no-signal =
+    // #5617). If you are reading this while a required context named 'ESLint'
+    // is still live in Settings, that swap has not happened yet.
+    context: 'Lint & Repo Gates',
+    authorized:
+      '#5617 maintainer ruling 2026-08-07 (enrolment, applied to the settings the same day); ' +
+      'renamed from `ESLint` by the #9325 maintainer ruling 2026-08-17, swapped in the settings in the same sitting as the merge',
     carries: 'the whole check:* gate family — the job whose red did not block #5584',
   },
   {
@@ -540,12 +551,21 @@ async function selfTest() {
   // Predicted direction: RED, naming the job, the new name and the required
   // context. A rename is the whole defect #6865 is about, so a green here would
   // mean the gate is decorative.
-  const renamedEslint = fixture('rename ESLint', 'lint.yml', (s) => s.replace('    name: ESLint\n', '    name: ESLint (fast)\n'));
-  assert(
-    renamedEslint.problems.some((p) => p.includes("job 'lint'") && p.includes('"ESLint (fast)"') && p.includes("'ESLint'") && p.includes('The name IS the contract')),
-    "renaming lint.yml's ESLint job ⇒ red, naming the job, the new name and the required context",
+  // The anchor is the CURRENT name of the gate-family job (renamed away from
+  // `ESLint` by #9325); the mutation restores the OLD spelling on purpose, so
+  // this fixture doubles as the regression test for that rename: reverting
+  // lint.yml alone, without this registry, is exactly the half-landed state
+  // the #9325 sequencing exists to prevent, and it must be red.
+  const renamedGateJob = fixture('rename the gate-family job back to ESLint', 'lint.yml', (s) =>
+    s.replace('    name: Lint & Repo Gates\n', '    name: ESLint\n'),
   );
-  assert(renamedEslint.problems.length === 1, `renaming ESLint produces exactly the one finding — got ${JSON.stringify(renamedEslint.problems)}`);
+  assert(
+    renamedGateJob.problems.some(
+      (p) => p.includes("job 'lint'") && p.includes('"ESLint"') && p.includes("'Lint & Repo Gates'") && p.includes('The name IS the contract'),
+    ),
+    "renaming lint.yml's gate-family job ⇒ red, naming the job, the new name and the required context",
+  );
+  assert(renamedGateJob.problems.length === 1, `renaming the gate-family job produces exactly the one finding — got ${JSON.stringify(renamedGateJob.problems)}`);
 
   // The second-batch half: a name the maintainer approved on 2026-08-09, which
   // had no assertion of any kind before this script.
@@ -609,7 +629,7 @@ async function selfTest() {
   // ── (6) the merge_group trigger ──────────────────────────────────────────
   const noQueue = fixture('drop merge_group from lint.yml', 'lint.yml', (s) => s.replace('\n  merge_group:\n', '\n'));
   assert(
-    noQueue.problems.some((p) => p.includes('merge_group') && p.includes('ESLint') && p.includes('TypeScript Type Check')),
+    noQueue.problems.some((p) => p.includes('merge_group') && p.includes('Lint & Repo Gates') && p.includes('TypeScript Type Check')),
     'a required-context workflow without merge_group ⇒ red, naming every context it would strand',
   );
   assert(
@@ -782,7 +802,7 @@ async function selfTest() {
     const lintJob = uncommented(lintJobStart === -1 ? '' : sources['lint.yml'].slice(lintJobStart, lintJobEnd === -1 ? undefined : lintJobEnd));
     assert(
       /run: pnpm check:required-contexts\b/.test(lintJob),
-      'wiring: lint.yml\'s ESLint job must run `pnpm check:required-contexts` — an unwired pin verifies nothing (#4690)',
+      'wiring: lint.yml\'s `lint` job (the "Lint & Repo Gates" context) must run `pnpm check:required-contexts` — an unwired pin verifies nothing (#4690)',
     );
     const step = lintJob.split(/\n(?=      - name: )/).find((s) => /run: pnpm check:required-contexts\b/.test(s)) ?? '';
     assert(
@@ -794,8 +814,10 @@ async function selfTest() {
     assert(/check-required-contexts\.mjs --self-test/.test(wiring), 'wiring: `check:required-contexts` must run this file\'s --self-test first');
     assert(/check-required-contexts\.mjs(?! --self-test)/.test(wiring), 'wiring: `check:required-contexts` must also run the real pin, not only the self-test');
     // The pin lives in a job it also pins. That is deliberate and worth stating:
-    // renaming the ESLint job turns this gate red under the NEW name, while the
-    // old required context stops reporting — the PR is blocked from both sides.
+    // renaming the gate-family job turns this gate red under the NEW name, while
+    // the old required context stops reporting — the PR is blocked from both
+    // sides. That is also why the #9325 rename could not be self-serve: the
+    // repo-side half is checkable here, the Settings half is not reachable at all.
     assert(
       REQUIRED_CONTEXTS.some((entry) => entry.workflow === 'lint.yml' && entry.job === 'lint'),
       'wiring: the job this gate runs in is itself registered, so a rename of it cannot be the one rename nothing notices',

@@ -22,7 +22,21 @@ concurrency:
 jobs:
 
   lint:
-    name: ESLint
+    # ⚠️ This `name:` IS the required-status-check context in repository
+    # Settings → Rulesets (a job's check-run name is its `name:`), so it is
+    # pinned as contract by `scripts/check-required-contexts.mjs` and may only
+    # be changed together with that registry AND the Settings entry, in one
+    # maintainer-present sitting (#9325 ruling 2026-08-17). Either half alone
+    # is an outage: rename-first leaves the old context permanently pending,
+    # which wedges every open PR and the merge queue; settings-first drops the
+    # whole gate family to advisory with no signal anywhere, which is #5617
+    # verbatim.
+    #
+    # It is not called `ESLint` any more because it never was only that: the
+    # `pnpm lint` step below is one of ~70 sequential gate steps, so a red here
+    # was routinely read as "a lint problem" when it was a repo gate — three
+    # mis-routed diagnoses on 2026-08-17 alone (#9258, PRs #9256/#9291).
+    name: Lint & Repo Gates
     runs-on: ubuntu-latest
     permissions:
       contents: read
