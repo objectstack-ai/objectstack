@@ -128,17 +128,30 @@ describe('every published `@objectstack/spec` subpath resolves to spec SOURCE (#
     expect(PUBLISHED_SUBPATHS).toContain('@objectstack/spec/studio');
   });
 
-  it('imports every one of them — real Vite resolution, not a simulation of it', async () => {
-    const failures: string[] = [];
-    for (const specifier of PUBLISHED_SUBPATHS) {
-      try {
-        expect(await import(/* @vite-ignore */ specifier)).toBeTypeOf('object');
-      } catch (error) {
-        failures.push(`${specifier}: ${(error as Error).message}`);
+  // The explicit timeout is load-bearing rather than defensive. This case
+  // transforms up to fifteen spec namespaces through Vite, and when it is the
+  // first file in the run to reach one of them that is a cold transform:
+  // measured at ~5.3s for the set, against vitest's 5000ms default. A default
+  // timeout makes the case report `Test timed out in 5000ms` INSTEAD of the
+  // resolution failure it exists to name — measured in both directions, so it
+  // is a fault in both: flaky green-path noise when the file runs alone, and a
+  // misleading diagnostic on the red path, which is precisely the
+  // points-at-the-wrong-thing failure this card is about.
+  it(
+    'imports every one of them — real Vite resolution, not a simulation of it',
+    async () => {
+      const failures: string[] = [];
+      for (const specifier of PUBLISHED_SUBPATHS) {
+        try {
+          expect(await import(/* @vite-ignore */ specifier)).toBeTypeOf('object');
+        } catch (error) {
+          failures.push(`${specifier}: ${(error as Error).message}`);
+        }
       }
-    }
-    expect(failures, 'published subpaths this vitest config cannot resolve').toEqual([]);
-  });
+      expect(failures, 'published subpaths this vitest config cannot resolve').toEqual([]);
+    },
+    60_000,
+  );
 
   it('resolves a namespace the published `exports` map does NOT publish', async () => {
     // `packages/spec/src/conversions/` exists in source and is deliberately
