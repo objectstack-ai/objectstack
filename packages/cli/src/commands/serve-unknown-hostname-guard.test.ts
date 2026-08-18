@@ -137,7 +137,7 @@ function mountGuard(opts: {
       warnings,
       infos,
       asked,
-      call: (path: string, host: string, headers: Record<string, string> = {}) =>
+      call: async (path: string, host: string, headers: Record<string, string> = {}) =>
         rawApp.fetch(new Request(`http://placeholder${path}`, { headers: { host, ...headers } })),
     };
   });
@@ -355,7 +355,8 @@ describe('createUnknownHostnameGuardPlugin — the cloud /_console redirect', ()
     });
     await plugin.init({ getService: (n: string) => (n === 'http.server' ? { getRawApp: () => rawApp } : undefined) });
     rawApp.all('*', (c: { text: (body: string, status: number) => Response }) => c.text(PASSED_THROUGH, 200));
-    const call = () => rawApp.fetch(new Request('http://placeholder/_console/', { headers: { host: ROOT_DOMAIN } }));
+    const call = async () =>
+      rawApp.fetch(new Request('http://placeholder/_console/', { headers: { host: ROOT_DOMAIN } }));
 
     expect((await call()).status).toBe(200);
     cloudUrl = 'https://cloud.objectos.ai';
