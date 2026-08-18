@@ -300,37 +300,12 @@ every `update_pull_request` edit; the session-URL form survives both write paths
 this is unknown, and the guidance does not depend on the answer — do not spend a
 session establishing it. Comments are a different path and unaffected.
 
-**The platform also mutates body BYTES — two measured shapes; spell the poison
-tokens out in words, never write them literally.** (This clause obeys its own rule:
-a clause that cannot survive its own channel is self-defeating.) Both shapes are
-silent, ignore backticks and code fences, and leave text that still reads as
-intended prose or code:
-
-1. **Storage-side deletion** — the exclamation mark is deleted from the
-   markup-declaration opener: the byte sequence less-than, exclamation mark, open
-   square bracket, which is exactly the shape of a regex negative lookbehind before
-   a character class. Measured by two independent authors on the same construct;
-   the rendered web page shows the same loss, so the damage is at rest. The
-   surviving text still looks like code and no longer means what the author wrote
-   (a correct regex proposal read back as an apparent syntax error). A bare
-   less-than + exclamation mark without the bracket survives.
-2. **API-side truncation** — reading a body through the GitHub API/MCP tools cuts
-   it off at a literal script-tag-shaped token (a doctype opener and an
-   object-tag-shaped token also trigger it). Everything after vanishes with no
-   error or marker, while the web page carries the full text — the damage is in
-   the read path, not storage. ⛔ Never "repair" a card that reads short only
-   through the API: fetch the rendered page first; the stored body is probably
-   intact, and a rewrite destroys a correct card.
-
-The operative rule for authors: regex literals and script-tag-shaped tokens go in
-fenced code **with the dangerous character spelled out in words**, or are described
-entirely in words — fences do NOT protect them, and a load-bearing literal that
-cannot survive its own channel must not be entrusted to a GitHub body at all. After
-writing a body that must carry any less-than fragment, read it back and verify the
-fragment survived (write the HTML entity form when it must render literally). The
-older guidance — a less-than sign followed by a letter is stripped as an HTML tag —
-is one member of this family, not its boundary: probes measured that form
-*surviving* inside code fences while the two shapes above were destroyed there.
+**GitHub mutates body BYTES — spell poison-shaped tokens out in words, never literally.**
+Regex literals and script-tag-shaped tokens go in fenced code with the dangerous
+character spelled out, or are described in words (fences do NOT protect them); after
+writing any less-than fragment, read the body back and verify it survived. The two
+measured mutation shapes and their triggers live in pm-dispatch `references/platform-readings.md`.
+⛔ A body reading short only through the API is probably intact — check the rendered page before "repairing" it; a rewrite destroys a correct card.
 
 Even inside your own worktree, operate defensively:
 
