@@ -270,6 +270,37 @@ jobs:
       - name: Governed-merges audit self-test
         run: pnpm check:pm-governed-merges
 
+      # Release-rehearsal clone preflight self-test (#9555). A local
+      # `pnpm run version` rehearsal — the prescribed verification route for
+      # every release-machinery change — HANGS FOREVER in an agent container:
+      # every clone descends from a shallow checkout, so each `.changeset/*.md`
+      # resolves to the parentless shallow boundary, and @changesets/git answers
+      # a parentless add-commit by deepening and retrying in a loop with no
+      # attempt limit — against a remote that gains it nothing and exits 0 while
+      # doing so. Measured cost before diagnosis: ~2.5 h over two attempts,
+      # because full CPU with no output reads as slow progress, not as a hang.
+      # `scripts/pm/release-rehearsal-clone.mjs` is the refusal that turns that
+      # into a one-second diagnosis, plus the repair for a throwaway clone.
+      #
+      # What runs HERE is the self-test, not the live check: the live check
+      # judges whatever clone it is pointed at, and a CI checkout's depth is the
+      # workflow's business rather than a verdict this job can hold. The
+      # self-test pins BOTH directions on real git fixtures — the trapped shape
+      # refuses, while a healthy tree AND a merely-shallow one whose changesets
+      # sit after the boundary pass untouched (the predicate is the parentless
+      # add-commit, never `--is-shallow-repository` alone) — and it pins the
+      # WIRING, so unlinking the script from docs/releases-maintenance.md or
+      # from this step reddens instead of going quiet. Temp-dir fixtures, no
+      # network, ~1.7 s.
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias: that alias
+      # belongs in root package.json, which is declared territory of the
+      # @changesets/cli v3 migration lane (#9465) while it runs. Same shape as
+      # check-links.yml's ADR-link step, and dispatch-gates.mjs derives gate
+      # families from either spelling.
+      - name: Release-rehearsal clone preflight self-test
+        run: node scripts/pm/release-rehearsal-clone.mjs --self-test
+
       # Docs/skills authoring guard (#2035 / ADR-0059): TS code blocks in
       # Markdown/MDX are not type-checked or ESLinted, so skills/ and
       # content/docs/ can drift back to teaching the bare `: Page = {}` literal

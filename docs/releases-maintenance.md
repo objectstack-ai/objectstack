@@ -214,6 +214,47 @@ node scripts/check-objectui-pin-fresh.mjs --ref v17.0.0 --json
   the bump is that ratchet's only trigger), then re-source the Console section with
   `scripts/objectui-range.mjs`.
 
+## Rehearsing the version pass (throwaway clone)
+
+Release-machinery changes are verified by replaying a real version pass in a
+**throwaway clone** — never in a working checkout, because the pass consumes
+`.changeset/*.md`, rewrites every `packages/*/CHANGELOG.md` and moves the
+`package.json` versions. Run the preflight first; it is the difference between a
+one-second diagnosis and a hang that looks like progress:
+
+```bash
+git clone /home/user/objectstack /tmp/rehearsal && cd /tmp/rehearsal
+node scripts/pm/release-rehearsal-clone.mjs --prepare .   # refuse, or repair
+pnpm install --frozen-lockfile
+pnpm run version                                          # the rehearsal itself
+```
+
+### Why the preflight exists (#9555)
+
+A clone taken inside an agent container is **shallow** (it descends from a
+shallow checkout, and `.git/shallow` is inherited), and that breaks changesets in
+two places at once — same root cause, two entry points, and neither of them says
+so:
+
+| symptom | dies in | what you actually see |
+|---|---|---|
+| `changeset version` never finishes | `getCommitsThatAddFiles`: every changeset resolves to the parentless shallow boundary, so it deepens and retries in a loop with no attempt limit | full CPU, no output, clean `git status` — reads as slow progress; the first attempt was allowed to run 70 minutes |
+| `changeset status` cannot answer | `getDivergedCommit` (`git merge-base main HEAD`) — a clone of a container checkout has no local `main` at all | `Failed to find where HEAD diverged from "main"`, and the obvious workaround `--since origin/main` then exits 0 reporting **nothing**, which reads as "no packages to release" |
+
+Diagnosing that cost roughly two and a half hours the first time. The script
+carries the whole mechanism, the measurements and the two remedies in its
+header — `git fetch --unshallow` (10.2 s, +36 MB here, and it gives changelog
+links the *real* add-commits) or an offline two-commit scaffold that leaves the
+tree hash byte-identical. Run with no flags it only diagnoses and mutates
+nothing; `--prepare` repairs a throwaway clone and refuses to touch anything that
+looks like a real checkout. Its `--self-test` runs in `lint.yml` and pins both
+directions, so the refusal cannot rot into a guard that fires on everything or on
+nothing.
+
+**This is a local-rehearsal trap only.** `cut-rc.yml` and `release.yml` check out
+with `fetch-depth: 0`, so a real cut has full history and never enters that
+branch.
+
 ## Cutting a release
 
 Two routes, and the choice is not a preference — an rc and a GA release need
