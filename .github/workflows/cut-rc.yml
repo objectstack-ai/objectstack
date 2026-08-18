@@ -486,16 +486,46 @@ jobs:
       # cut: the pin bump and the version output are one atomic unit, and there is
       # never a main commit carrying a bumped pin but an unversioned tree.
       #
-      # WHAT MAY BE IN IT — measured on this train (17.0.0-rc.5 -> 17.0.0-rc.6, a
-      # full local `pnpm run version` over 1704 pending changesets), not assumed:
-      #   76 modified package.json, 76 modified CHANGELOG.md, and
-      #   .changeset/pre.json. Zero deletions, zero untracked files. In PRE mode
-      #   `changeset version` does NOT delete the consumed changesets — it records
-      #   them in pre.json and they are removed at `changeset pre exit` — so a cut
-      #   never races a lane PR over a `.changeset/*.md` file it wants to keep.
-      # Two more paths can appear at a major boundary and are allowed for that
-      # reason: packages/spec/src/kernel/protocol-version.ts and the blank
-      # template's objectstack.config.ts (both written by the sync scripts).
+      # WHAT MAY BE IN IT — re-measured on the 17.0.0 -> 18.0.0-rc.0 train (a full
+      # local `pnpm run version` in a throwaway clone over 199 pending changesets),
+      # not assumed. 160 paths:
+      #   77 modified package.json, 76 modified CHANGELOG.md,
+      #   .changeset/pre.json, the 3 major-boundary paths below, and the 3 doc
+      #   surfaces below. Zero deletions. `.changeset/pre.json` is UNTRACKED on the
+      #   first cut of a train (`changeset pre enter` just created it) and modified
+      #   on later ones; `git add -A` covers both. In PRE mode `changeset version`
+      #   does NOT delete the consumed changesets — it records them in pre.json and
+      #   they are removed at `changeset pre exit` — so a cut never races a lane PR
+      #   over a `.changeset/*.md` file it wants to keep.
+      # Three more paths can appear at a major boundary and are allowed for that
+      # reason, all written by `sync-protocol-version.mjs` /
+      # `sync-template-versions.mjs`: packages/spec/src/kernel/protocol-version.ts
+      # and the blank template's objectstack.config.ts (engines.protocol) and
+      # objectstack.manifest.json (specVersion). The manifest is named literally,
+      # like its sibling config.ts, rather than read the way the doc surfaces
+      # below are: `sync-template-versions.mjs` does declare its targets (a
+      # `TEXT_STAMPS` table plus a walk of `src/templates/`), but exports none of
+      # them and has no entry-point guard, so importing it would RUN the sync
+      # instead of reading its list. Give it those two things and this pathspec
+      # should read from it too.
+      #
+      # THE DOC SURFACES ARE READ, NOT RESTATED. `pnpm run version` ends with
+      # `sync-docs-image-tags.mjs`, which rewrites the doc surfaces that pin a
+      # concrete image tag / CLI version. That rewriter does not own the list — it
+      # imports `SURFACES` from `scripts/check-docs-image-tag.mjs`, the gate whose
+      # findings it exists to clear, on the stated principle "one list, two
+      # consumers". This step is the THIRD consumer and joins on the same terms:
+      # it resolves `SURFACES` at run time rather than copying the paths, because a
+      # fourth literal is a fourth contract and the two drifting apart is exactly
+      # the defect that reached this assertion in the first place — the rewriter
+      # joined the `version` script while this allowlist kept describing a train
+      # measured before it existed, and every cut since would have refused to push.
+      # Note what this deliberately is NOT: a wildcard over `content/docs/**`. Only
+      # the paths a reviewed declaration names are allowed, so a version pass that
+      # writes anywhere else — a new sync script, or this rewriter growing an
+      # output outside `SURFACES` — still fails loudly here, which is the whole
+      # point of the assertion. Onboarding a surface stays a one-line edit to
+      # `SURFACES` that a reviewer sees in the diff.
       #
       # The allowlist is ENFORCED rather than described. Only allowlisted paths are
       # staged, and then every staged path is re-checked against the same rule and
@@ -514,13 +544,36 @@ jobs:
           # the index, so bump + version become one commit on top of the snapshot.
           git reset --soft "$SNAPSHOT_SHA"
 
+          # The doc surfaces `sync-docs-image-tags.mjs` rewrites, read from the same
+          # declaration the rewriter reads. Import-safe by construction: the module
+          # carries an entry-point guard added for exactly this kind of consumer.
+          SURFACE_LIST="${RUNNER_TEMP:-/tmp}/cut-rc-docs-image-tag-surfaces.txt"
+          if ! node --input-type=module \
+                 -e 'import { SURFACES } from "./scripts/check-docs-image-tag.mjs"; for (const s of SURFACES) console.log(s.file);' \
+                 > "$SURFACE_LIST"; then
+            echo "::error::could not resolve SURFACES from scripts/check-docs-image-tag.mjs, so the doc half of the release file surface is unknown. Refusing to push."
+            exit 1
+          fi
+          # An empty list would silently re-open the hole this replaced: the docs the
+          # version pass rewrites would go unstaged and the assertion below would
+          # blame them. Unknown is a failure, never an empty allowlist.
+          if [ ! -s "$SURFACE_LIST" ]; then
+            echo "::error::SURFACES in scripts/check-docs-image-tag.mjs resolved EMPTY, so no doc surface would be staged even though the version pass rewrites them. Refusing to push."
+            exit 1
+          fi
+          mapfile -t DOCS_SURFACES < "$SURFACE_LIST"
+          echo "doc surfaces declared by SURFACES (${#DOCS_SURFACES[@]}):"
+          sed 's/^/  /' "$SURFACE_LIST"
+
           git add -A -- \
             '*package.json' \
             '*CHANGELOG.md' \
             .changeset \
             .objectui-sha \
             packages/spec/src/kernel/protocol-version.ts \
-            packages/create-objectstack/src/templates/blank/objectstack.config.ts
+            packages/create-objectstack/src/templates/blank/objectstack.config.ts \
+            packages/create-objectstack/src/templates/blank/objectstack.manifest.json \
+            "${DOCS_SURFACES[@]}"
 
           STAGED="$(git diff --cached --name-only)"
           if [ -z "$STAGED" ]; then
@@ -529,8 +582,14 @@ jobs:
           fi
 
           # Re-check every staged path against the allowlist. The pathspec above is
-          # convenience; THIS is the guarantee.
-          BAD="$(printf '%s\n' "$STAGED" | grep -vE '(^|/)package\.json$|(^|/)CHANGELOG\.md$|^\.changeset/|^\.objectui-sha$|^packages/spec/src/kernel/protocol-version\.ts$|^packages/create-objectstack/src/templates/blank/objectstack\.config\.ts$' || true)"
+          # convenience; THIS is the guarantee. Two filters, same allowlist the
+          # pathspec used: the fixed release paths by pattern, then the declared doc
+          # surfaces by WHOLE-LINE EXACT match (`-xF`) against the very list that was
+          # staged — so the second filter cannot accept a path `SURFACES` does not
+          # name, and needs no regex-escaping of the paths to stay exact.
+          BAD="$(printf '%s\n' "$STAGED" \
+            | grep -vE '(^|/)package\.json$|(^|/)CHANGELOG\.md$|^\.changeset/|^\.objectui-sha$|^packages/spec/src/kernel/protocol-version\.ts$|^packages/create-objectstack/src/templates/blank/objectstack\.config\.ts$|^packages/create-objectstack/src/templates/blank/objectstack\.manifest\.json$' \
+            | grep -vxF -f "$SURFACE_LIST" || true)"
           if [ -n "$BAD" ]; then
             echo "::error::the version commit would carry paths outside the release file surface. Refusing to push. Offending paths follow; if the version pass legitimately grew a new output, widen the allowlist in this workflow deliberately."
             printf '%s\n' "$BAD" | sed 's/^/::error::  unexpected: /'
