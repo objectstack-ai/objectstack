@@ -57,6 +57,14 @@ export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/references/landing-operations.md', 82],
   ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 101],
   ['.claude/agents/os-dev.md', 399],
+  // #9473: the other four `.claude/skills/` are read in full by the sessions
+  // that use them too — the erosion mechanism the ratchet exists to stop
+  // isn't specific to the pm-dispatch surface. Set at current counts on
+  // `origin/main` (headroom 0, same convention as the entries above).
+  ['.claude/skills/checklist-test/SKILL.md', 232],
+  ['.claude/skills/checklist-author/SKILL.md', 61],
+  ['.claude/skills/dogfood-verification/SKILL.md', 155],
+  ['.claude/skills/spec-property-retirement/SKILL.md', 328],
 ]);
 
 export function verdict(rel, lineCount, maxLines) {
@@ -117,6 +125,7 @@ function selfTest() {
     ['SKILL.md is covered', CEILINGS.has('.claude/skills/pm-dispatch/SKILL.md'), true],
     ['the dev-agent definition is covered', CEILINGS.has('.claude/agents/os-dev.md'), true],
     ['all five compressed references are covered', ['dispatch-runbook', 'platform-readings', 'review-checklist', 'landing-operations', 'seat-post-protocol'].every((n) => CEILINGS.has(`.claude/skills/pm-dispatch/references/${n}.md`)), true],
+    ['the other four skills are covered (#9473)', ['checklist-test', 'checklist-author', 'dogfood-verification', 'spec-property-retirement'].every((n) => CEILINGS.has(`.claude/skills/${n}/SKILL.md`)), true],
   ];
   let failed = 0;
   for (const [name, actual, expected] of cases) {
