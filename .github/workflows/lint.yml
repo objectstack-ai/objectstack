@@ -455,6 +455,21 @@ jobs:
       - name: Quick-reference section counts match their tables
         run: pnpm check:quick-reference-counts
 
+      # #9604: the runtime-services chapter's pages are enumerated in three
+      # hand-written places (meta.json "pages", the chapter list in
+      # runtime-services/index.mdx, the services.* table in kernel/index.mdx) and
+      # nothing read any of them -- check:docs-audit-scope derives WHICH pages the
+      # accuracy audit covers, never whether an index enumerates them. #9604 found
+      # services.sms with a page, a meta.json entry, a registered slot and a
+      # canonical-source row, missing from BOTH index lists; #9588 was the same
+      # page drifting on a different line. The pages on disk are the source of
+      # truth and the gate holds all three enumerations (and the chapter list's
+      # order) to them. It lives in this job with the other docs guards: the edit
+      # that breaks it is a docs edit, so a packages/** paths filter would blind
+      # it to its own failure mode.
+      - name: Runtime-services indexes enumerate the chapter's real pages
+        run: pnpm check:runtime-services-index
+
       # #3723 ADR anchors: code an accepted ADR governs must keep naming it.
       # That incident reversed three accepted ADRs with a patch-level changeset,
       # and the mechanism was simply that the edited file never mentioned them —
