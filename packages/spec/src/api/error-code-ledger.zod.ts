@@ -377,6 +377,19 @@ export const ERROR_CODE_LEDGER = {
     'COMMIT_NOT_FOUND',
     'CONCURRENT_UPDATE',
     'DESTRUCTIVE_CHANGE',         // change would drop data; needs an explicit opt-in
+    // [#9567] ADR-0078's rename guard refuses a metadata write whose `type`/
+    // `name` token is already a LIVE name owned by something else in the
+    // environment — persisting the un-renamed body would mint exactly the row
+    // that guard exists to prevent (`saveMetaItem`, `protocol.ts`, same posture
+    // as `duplicatePackage` / #4454). 409, not 422: the body may be perfectly
+    // valid — the refusal comes from environment state, so resubmitting the
+    // same body cannot help. Surfaced by the widened
+    // `check:dispatcher-error-vocabulary` scan (#9460, half 1); NOTE the
+    // producer's message prefix spells the code lowercase
+    // (`[flow_conversion_conflict]`) while the wire stamp is SCREAMING_SNAKE —
+    // a human-log inconsistency worth a glance, left as-is because the
+    // producer is outside this ledger's surface.
+    'FLOW_CONVERSION_CONFLICT',
     'INVALID_METADATA',
     'INVALID_REQUEST',
     'ITEM_LOCKED',                // _lock refuses the write/delete (ADR-0010 §3.3)

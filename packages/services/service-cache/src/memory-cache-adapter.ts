@@ -30,7 +30,13 @@ export interface MemoryCacheAdapterOptions {
 /**
  * In-memory cache adapter implementing ICacheService.
  *
- * Uses a Map-backed store with TTL-based expiry and LRU-style eviction.
+ * Uses a Map-backed store with TTL-based expiry and **insertion-order (FIFO)
+ * eviction**: once `maxSize` is reached, a new key evicts the oldest-inserted
+ * entry. This is deliberately **not** LRU — neither reading an entry nor
+ * overwriting its value moves it back in the queue, so a hot key is evicted on
+ * age like any other (pinned by the FIFO tests in `memory-cache-adapter.test.ts`).
+ * `maxSize` defaults to `0` (unlimited), which leaves the eviction path off.
+ *
  * Suitable for single-process environments, development, and testing.
  */
 export class MemoryCacheAdapter implements ICacheService {

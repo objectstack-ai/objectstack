@@ -96,6 +96,7 @@ const result = ActionSchema.parse(data);
 | **mode** | `Enum<'create' \| 'edit' \| 'delete' \| 'custom'>` | optional | Semantic mode of the action. |
 | **opensInNewTab** | `boolean` | optional | Open the action result in a new tab. The renderer pre-opens the tab synchronously on click (popup-blocker-safe) and navigates it to the handler's redirectUrl. |
 | **newTabUrl** | `string` | optional | Direct new-tab URL template (`{recordId}` placeholder). When set with opensInNewTab, the renderer navigates the pre-opened tab here immediately — no action POST. The endpoint must enforce auth itself. |
+| **onSuccess** | `{ navigate: string; openIn?: Enum<'self' \| 'newTab'> }` | optional | Post-success navigation for type:'api' and type:'script' actions (#9566/#9474). `navigate` is a route/URL template interpolating $`{param.*}`, $`{ctx.*}` and $`{result.*}` (the server response); `openIn` defaults 'self'. The handler-return convention (`{ redirectUrl }` without openIn) keeps its 17.0.0 new-tab behavior. |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
