@@ -105,6 +105,20 @@
  * `required_status_checks` contexts and `strict_required_status_checks_policy:
  * false`.
  *
+ * ⚠️ What is readable is the set as it is NOW, never how it got there. Both
+ * history routes are shut to a seat, re-measured 2026-08-18 (#9533) with the
+ * price GitHub names in each response:
+ *
+ *   GET .../rulesets/12119582/history        403  administration=write
+ *   GET .../rulesets/rule-suites             403  administration=read
+ *
+ * So "when did this context leave the set" and "was it ever in it" are NOT
+ * agent-answerable, and no amount of re-reading the live endpoint turns into
+ * an answer. A row's provenance therefore has to be carried in writing, here,
+ * by the PR that adds it — which is why `authorized` distinguishes a ruling
+ * that APPROVED a context from an application that was ATTESTED APPLIED. That
+ * distinction is not pedantry: #9533 turned on it (see the tombstone below).
+ *
  * So the two lists are machine-comparable, and `--verify-required-set` below
  * compares them in BOTH directions. What that mode is NOT is a merge-blocking
  * gate, for a structural reason rather than a squeamish one: the settings half
@@ -122,17 +136,19 @@
  * rulings on #5617. Adding a row here does not make a context required, and
  * only a maintainer can change the settings. What #9642 changed is that a
  * disagreement is now MEASURED instead of invisible — and the first run found
- * one: `Build Docs` and `Console Pin Gate` are registered here and are NOT in
- * the live required set, i.e. both gate families are advisory today with no
- * signal anywhere (#5617's unsignalled half, verbatim). Whether the fix is to
- * drop the rows or to restore the contexts is #9533's maintainer decision; this
- * file reports it and decides nothing.
+ * one: `Build Docs` and `Console Pin Gate` were registered here and were NOT
+ * in the live required set. That first finding is closed (#9533, 2026-08-18
+ * ruling — the two rows dropped; the tombstone below carries the provenance),
+ * so the two lists agree in both directions today and the sweep prints its
+ * ✅ line. The mechanism stays for the next disagreement; it reports and
+ * decides nothing.
  *
  * ## Why `if:` is deliberately NOT asserted
  *
  * #6865's own body proposed asserting the enrolled jobs carry no `if:`. That is
- * right for lint.yml's two and WRONG for four of the six the maintainer added
- * on 2026-08-09: `build-core`, `build-docs`, `console-pin` and
+ * right for lint.yml's two and WRONG for the four jobs the 2026-08-09 ruling
+ * approved (approved — how much of that batch reached the settings is #9533's
+ * finding below): `build-core`, `build-docs`, `console-pin` and
  * `temporal-conformance` each carry `if: ${{ !cancelled() && needs.filter…}}`
  * BY DESIGN — THE FILTER CONTRACT (#4928). A job-level `if:` that skips still
  * publishes a check run (conclusion `skipped`, which branch protection counts
@@ -197,6 +213,60 @@ import { fileURLToPath } from 'node:url';
  * the registry-follows half of the header's two-step; the Settings half is
  * the maintainer attestation above.
  *
+ * ⛔ TOMBSTONE — `Build Docs` (ci.yml:build-docs) and `Console Pin Gate`
+ * (ci.yml:console-pin), dropped 2026-08-18 by the #9533 ruling. Recorded at
+ * length because the shape here is NOT the one the ruling's wording assumed,
+ * and a future reader who re-derives it from git will otherwise reach the
+ * same wrong conclusion twice:
+ *
+ *   • What the rows claimed. Both carried `authorized: '#5617 closing ruling
+ *     2026-08-09, second batch'` — and that ruling reads «Second batch
+ *     approved: Build Core, Build Docs, Console Pin Gate, Temporal Conformance
+ *     (live PG + MySQL) join the required set … The maintainer applies this in
+ *     Settings alongside confirming item 2.» An APPROVAL, in the future tense,
+ *     of a Settings action. Contrast the two 2026-08-07 rows, whose
+ *     `authorized` says "applied to the settings the same day": those attest
+ *     an accomplished state. Nothing anywhere ever attested this batch applied.
+ *   • What the settings actually took. The one contemporaneous transcription
+ *     of the ruleset — the maintainer's 2026-08-10 screenshot, quoted on
+ *     #7022 — lists `ADR maintainer approval` "alongside TypeScript Type
+ *     Check / ESLint / Test Core / Dogfood Regression Gate / Build Core".
+ *     Of the four-name batch, only `Build Core` is there. `Temporal
+ *     Conformance` arrived later; these two never appear in any reading.
+ *   • So this is most likely a HALF-APPLIED approval, not a removal — the
+ *     #6865 two-step's other failure mode, and one no one could see while the
+ *     required set was believed unreadable. It cannot be proven: ruleset
+ *     history is 403 to a seat (see the header). Stated as the likelihood it
+ *     is, because the ruling's own veto clause ("if the removal was in fact
+ *     accidental, restore the contexts in Settings instead") is aimed at a
+ *     removal, and the maintainer re-reading this should know the choice on
+ *     the table is really "apply the standing 2026-08-09 approval, or let it
+ *     lapse". The ruling let it lapse; that is what these rows record.
+ *
+ * ⛔ And why this tombstone is PROSE and not a RETIRED_CONTEXT_NAMES row,
+ * against the #9523 precedent the ruling cited. That ledger bans a name from
+ * the instruction surfaces because the name is DEAD — no check-run reports it
+ * any more. Neither of these names is dead: both jobs still exist, still carry
+ * these `name:` literals, and still publish these check-runs on every PR that
+ * trips their filter. They lost REQUIRED status, which is a different fact.
+ * Ledgering them anyway was measured before it was rejected (2026-08-18):
+ * `docs/releases-maintenance.md` names `Console Pin Gate` 2× in correct,
+ * current prose that exists to keep it apart from `Console Pin Freshness`, so
+ * the row reds the scan there and prints the diagnostic "a seat following this
+ * text looks for a check-run that no longer reports" — false, about prose that
+ * is right. Budgeting around it would only arm the trap for the next author
+ * who legitimately names the live job.
+ *
+ * ⚠️ The cost of the drop, stated rather than discovered later: these two
+ * `name:` literals are now pinned by NOTHING, while five places still refer to
+ * the jobs by name (`docs/releases-maintenance.md`, `packages/console/README.md`,
+ * `scripts/check-objectui-pin-fresh.mjs`, `.github/workflows/objectui-pin-freshness.yml`
+ * and lint.yml's cross-reference). Renaming either job no longer detaches a
+ * required gate — that is the whole point — but it does silently falsify that
+ * prose. Filed as its own card rather than solved here, since a pin for
+ * "contract job names that are not required contexts" is a new mechanism and
+ * this card is ledger hygiene.
+ *
  * ⛔ `carries` names the gate FAMILY and never a step count — assertion 10
  * enforces that, because prose here reads as measurement while being asserted
  * by nothing. Both counts this registry used to carry were wrong on the day
@@ -257,28 +327,18 @@ export const REQUIRED_CONTEXTS = [
     workflow: 'ci.yml',
     job: 'build-core',
     context: 'Build Core',
-    authorized: '#5617 closing ruling 2026-08-09, second batch — "the highest-value addition"',
+    authorized:
+      '#5617 closing ruling 2026-08-09, second batch — "the highest-value addition"; ' +
+      'the only member of that batch the 2026-08-10 ruleset screenshot (#7022) shows applied, and live in the 2026-08-18 read',
     carries: 'the only compile-regression gate in the repo',
-  },
-  {
-    workflow: 'ci.yml',
-    job: 'build-docs',
-    context: 'Build Docs',
-    authorized: '#5617 closing ruling 2026-08-09, second batch',
-    carries: 'the docs-site build',
-  },
-  {
-    workflow: 'ci.yml',
-    job: 'console-pin',
-    context: 'Console Pin Gate',
-    authorized: '#5617 closing ruling 2026-08-09, second batch',
-    carries: 'the pinned-console build reconciliation',
   },
   {
     workflow: 'ci.yml',
     job: 'temporal-conformance',
     context: 'Temporal Conformance (live PG + MySQL)',
-    authorized: '#5617 closing ruling 2026-08-09, second batch',
+    authorized:
+      '#5617 closing ruling 2026-08-09, second batch; absent from the 2026-08-10 screenshot and present in the ' +
+      '2026-08-18 read, so it was applied somewhere between the two — no attestation names the day',
     carries: 'the live-server datetime conformance axis (#3912/#3942)',
   },
 ];
@@ -1036,7 +1096,8 @@ export function renderRequiredSetReport(verdict) {
     }
     lines.push(
       '     Resolving this is a MAINTAINER decision (drop the row, or restore the context in Settings → Rulesets);',
-      '     this script decides nothing. The open card for the current pair is #9533.',
+      '     this script decides nothing. File a card and follow the #6865 two-step; #9533 is the worked precedent',
+      '     (it dropped a pair, and its tombstone in REQUIRED_CONTEXTS records what a row does and does not attest).',
     );
   }
 
@@ -1272,18 +1333,24 @@ async function selfTest() {
   );
 
   // ── (2) the job disappearing entirely ─────────────────────────────────────
-  const droppedJob = fixture('drop the console-pin job', 'ci.yml', (s) => s.replace('\n  console-pin:\n', '\n  console-pin-disabled:\n'));
+  // Re-pointed from `console-pin` to `temporal-conformance` when #9533 dropped
+  // the console-pin row: a fixture must mutate a job the registry still
+  // REGISTERS, or it asserts nothing while reading exactly as before.
+  const droppedJob = fixture('drop the temporal-conformance job', 'ci.yml', (s) =>
+    s.replace('\n  temporal-conformance:\n', '\n  temporal-conformance-disabled:\n'),
+  );
   assert(
-    droppedJob.problems.some((p) => p.includes("job 'console-pin' no longer exists") && p.includes('Console Pin Gate')),
+    droppedJob.problems.some((p) => p.includes("job 'temporal-conformance' no longer exists") && p.includes('Temporal Conformance (live PG + MySQL)')),
     'a required context whose job id is gone ⇒ red',
   );
 
   // ── (4) growing a matrix on a registered job ──────────────────────────────
-  const matrixed = fixture('matrix on build-docs', 'ci.yml', (s) =>
-    s.replace('  build-docs:\n    name: Build Docs\n', '  build-docs:\n    name: Build Docs\n    strategy:\n      matrix:\n        shard: [1, 2]\n'),
+  // Re-pointed from `build-docs` for the same reason as (2) above.
+  const matrixed = fixture('matrix on build-core', 'ci.yml', (s) =>
+    s.replace('  build-core:\n    name: Build Core\n', '  build-core:\n    name: Build Core\n    strategy:\n      matrix:\n        shard: [1, 2]\n'),
   );
   assert(
-    matrixed.problems.some((p) => p.includes("job 'build-docs'") && p.includes('strategy.matrix')),
+    matrixed.problems.some((p) => p.includes("job 'build-core'") && p.includes('strategy.matrix')),
     'a matrix on a required-context job ⇒ red (its bare name would never report)',
   );
 
@@ -1816,11 +1883,13 @@ async function selfTest() {
     assert(snapshot.strict === false, 'strict_required_status_checks_policy is read, not assumed');
     assert(snapshot.enforcing.length === 1 && !snapshot.noEnforcingRuleset, 'one active ruleset covers the default branch');
     assert(snapshot.unpinned.length === 0, `every context in the 2026-08-18 reading has a registry row — got ${JSON.stringify(snapshot.unpinned)}`);
-    // Direction A is LIVE against the checked-in registry: `Build Docs` and
-    // `Console Pin Gate` are registered and not required (#9533's open
-    // decision). This asserts the SHAPE — that the difference is reported and
-    // reported as advisory — not the membership, which is the maintainer's to
-    // change; hardcoding the pair would red this self-test the day they resolve it.
+    // Direction A against the checked-in registry. It was LIVE when this was
+    // written (`Build Docs` / `Console Pin Gate`, #9533) and is EMPTY since
+    // that card dropped the two rows — which is exactly why the assertion is
+    // written on the SHAPE (the difference is reported, and reported as
+    // advisory) and not on the membership: hardcoding the pair would have
+    // reddened this self-test on the very PR that resolved it. It survived
+    // that resolution unchanged; leave it derived.
     const liveSet = new Set(snapshot.live);
     assert(
       snapshot.advisory.length === REQUIRED_CONTEXTS.filter((e) => !liveSet.has(e.context)).length &&
