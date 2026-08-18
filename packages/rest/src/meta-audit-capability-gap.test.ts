@@ -159,7 +159,8 @@ const A_DENIED_SAVE = {
     source: 'studio',
     operation: 'save',
     outcome: 'denied',
-    code: 'metadata_locked',
+    // adr0112-ok: D6b — persisted audit column, its own lowercase vocabulary
+    code: 'item_locked',
     lockState: 'locked',
     lockOverridden: false,
     requestId: 'req_1',
