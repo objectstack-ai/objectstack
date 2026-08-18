@@ -8,7 +8,7 @@
       "title": "transactionalBatch capability bit matches the mounted /batch behavior — atomicity, rollback codes, size cap",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -22,30 +22,30 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; GET /api/v1/discovery and read capabilities.transactionalBatch (also compare client.capabilities.transactionalBatch if driving via @objectstack/client)",
-        "POST /api/v1/batch with a well-formed cross-object atomic batch: operations = [create showcase_private_note {title}, create showcase_task {title}], options {\"atomic\": true}; verify both rows exist afterwards",
-        "POST /api/v1/batch with the same operations and options {\"atomic\": false}; capture status + error code",
+        "boot showcase isolated; GET /api/v1/discovery and read capabilities.transactionalBatch.enabled — on the wire each capability is a CapabilityDescriptor object { enabled, features?, description? } (discovery.zod.ts), never a bare boolean. The @objectstack/client getter is the exception: it FLATTENS each descriptor to a real boolean, so client.capabilities.transactionalBatch is a boolean and the two reads are spelled differently on purpose",
+        "POST /api/v1/batch with a well-formed cross-object atomic batch: operations = [create showcase_private_note {title}, create showcase_task {title}] and a TOP-LEVEL atomic: true; verify both rows exist afterwards. ⚠️ CrossObjectBatchRequestSchema declares operations + a top-level atomic and no options key at all — an options wrapper is silently STRIPPED by Zod, so the request runs with atomic defaulting to true",
+        "POST /api/v1/batch with the same operations and a TOP-LEVEL atomic: false; capture status + error code. ⛔ Spelled as options {atomic: false} the key is stripped, atomic defaults to true, and the batch simply SUCCEEDS — the clause below then reads as a product failure when nothing failed",
         "POST /api/v1/batch where a MIDDLE operation must fail (e.g. create showcase_invoice missing its required name), sandwiched between two valid creates; capture the per-operation results and re-read all three would-be rows",
         "POST /api/v1/batch with operations.length > maxBatchSize (201 no-op creates on the default config); capture the rejection",
         "POST /api/v1/data/showcase_private_note/batch (the PER-OBJECT batch door) with a mixed valid/invalid set and NO atomic flag; capture the per-row outcomes"
       ],
       "acceptance": [
         {
-          "clause": "the discovery bit is true exactly when /batch is mounted and transaction-capable — capability read and live behavior agree",
+          "clause": "the discovery capability is enabled exactly when /batch is mounted and transaction-capable — capability read and live behavior agree",
           "oracle": "api",
-          "verify": "GET /api/v1/discovery capabilities.transactionalBatch == true AND the atomic batch in step 2 succeeds end-to-end (or, on a runtime without tx support, the bit is false and /batch refuses atomically-dependent use)",
+          "verify": "GET /api/v1/discovery capabilities.transactionalBatch.enabled === true AND the atomic batch in step 2 succeeds end-to-end (or, on a runtime without tx support, enabled is false and /batch refuses atomically-dependent use). ⛔ A strict capabilities.transactionalBatch === true against the wire shape compares an object to a boolean and is always false",
           "evidence": "discovery body + batch trace"
         },
         {
-          "clause": "atomic:false on the CROSS-OBJECT /batch answers 400 BATCH_NOT_ATOMIC — the endpoint is all-or-nothing by construction (batch.zod.ts: atomic accepted for symmetry, MUST be true)",
+          "clause": "a TOP-LEVEL atomic:false on the CROSS-OBJECT /batch answers 400 BATCH_NOT_ATOMIC — the endpoint is all-or-nothing by construction (batch.zod.ts: atomic accepted for symmetry, MUST be true)",
           "oracle": "api",
           "verify": "step-3 response: status 400, error code BATCH_NOT_ATOMIC, message pointing at POST /data/:object/batch for non-atomic per-object batches",
           "evidence": "response"
         },
         {
-          "clause": "a failing member rolls the whole atomic batch back with the #4793 per-row codes: rows before the failure report ROLLED_BACK (written then undone), rows after report NOT_ATTEMPTED (never ran) — and NO row from the batch persists",
+          "clause": "a failing member rolls the whole atomic batch back and NO row from the batch persists. ⚠️ The #4793 per-row ROLLED_BACK / NOT_ATTEMPTED codes are NOT observable on this door: CrossObjectBatchResponseSchema is { results, droppedFields? } with no per-row error envelope — those codes live on the PER-OBJECT door (BatchResponseSchema.errors, step 6), which is where they were proved. Score the rollback here from the follow-up reads",
           "oracle": "api",
-          "verify": "step-4 per-operation results carry the two codes in the right positions; follow-up GETs find none of the three records",
+          "verify": "follow-up GETs find none of the three records (the authoritative oracle here); the per-row #4793 codes are read on the per-object door instead, since this response carries no errors array",
           "evidence": "batch response + the absent-row reads"
         },
         {
@@ -86,7 +86,8 @@
           "date": "2026-08-07",
           "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
           "ref": "claude/platform-test-checklist-ocwugl"
-        }
+        },
+        { "revision": 3, "date": "2026-08-18", "change": "corrected three separate wrong shapes, each of which made correct behaviour read as a defect. (a) capabilities.transactionalBatch is a CapabilityDescriptor object on the wire, so the clause's literal == true is always false — only the @objectstack/client getter flattens it to a boolean. (b) Steps 2-3 sent atomic inside an options wrapper; CrossObjectBatchRequestSchema declares a TOP-LEVEL atomic and no options, so Zod strips the wrapper and atomic defaults to true — the atomic:false probe therefore succeeds instead of answering BATCH_NOT_ATOMIC. (c) Clause 3 attached the #4793 per-row codes to the cross-object door, whose response schema is { results, droppedFields? } with no per-row error envelope; those codes live on the per-object door (#9417)", "ref": "#9386" }
       ]
     },
     {
@@ -298,7 +299,7 @@
       "title": "Data-API query contract: every filter operator gives known answers; $-params, select, sort, expand honored; malformed input 400s with the exact code",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -410,7 +411,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/objectql/src/engine.test.ts ([#2850] expand sub-read through the secured find path) + packages/objectql/src/filter-comparand-shape.ts (#5869 gate)"
+        "ref": "packages/objectql/src/engine.test.ts ([#2850] expand sub-read through the secured find path = C4 only) + packages/objectql/src/engine-filter-array-lowering.test.ts (the #5869 list-comparand shape gate). ⚠️ The REST-contract clauses (operator answer sets, $top/$skip windowing, $select narrowing, sort + INVALID_SORT, INVALID_FILTER, UNSUPPORTED_QUERY_PARAM, the $in/$nin empty-list boundary) are NOT reached by these engine unit suites and remain manual"
       },
       "traps": [
         "seed-data-thin",
@@ -431,7 +432,8 @@
           "date": "2026-08-07",
           "change": "new — query-contract matrix over the spec operator vocabulary with known-answer checks, per the deep-test contract",
           "ref": "claude/platform-test-checklist-ocwugl"
-        }
+        },
+        { "revision": 2, "date": "2026-08-18", "change": "re-pointed automated.ref off a source module. packages/objectql/src/filter-comparand-shape.ts is not a test — it exports invalidFilterError / assertListComparandShapes / assertFilterIsMaterializable and declares no describe block; the #5869 gate is actually pinned by engine-filter-array-lowering.test.ts. Also recorded the pin's real reach, since it spans one clause of nine and a pass read off it would be a false green (#9401)", "ref": "#9386" }
       ]
     },
     {
@@ -439,7 +441,7 @@
       "title": "Sampled endpoints return the standard error envelope with ledgered codes — no invented codes, no retired keys, statuses match the map",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -462,13 +464,13 @@
         "not-found: GET /api/v1/data/not_a_real_object and GET /api/v1/data/showcase_task/nonexistent-id-0000 — the two 404 flavors",
         "batch: POST /api/v1/batch with options {\"atomic\": false} — the registered-extension-code sample (BATCH_NOT_ATOMIC)",
         "query-rejection: GET /api/v1/data/showcase_account?$pageSize=5 — the UNSUPPORTED_QUERY_PARAM sample",
-        "validate every captured body against the spec: code membership in StandardErrorCode ∪ ERROR_CODE_LEDGER, envelope shape per ErrorResponseSchema/EnhancedApiErrorSchema (noting the REST flat dialect where it is the declared shape), fields[] entries against FieldErrorCode"
+        "validate every captured body against the spec: code membership in ErrorCode (error-code-ledger.zod.ts — the canonical ADR-0112 D4 union, StandardErrorCode.options ∪ REGISTERED_ERROR_CODES), envelope shape per ErrorResponseSchema/EnhancedApiErrorSchema (noting the REST flat dialect where it is the declared shape), fields[] entries against FieldErrorCode"
       ],
       "acceptance": [
         {
-          "clause": "every sampled error code is LEDGERED: code ∈ StandardErrorCode (errors.zod.ts) ∪ ERROR_CODE_LEDGER (error-code-ledger.zod.ts) — an unregistered code is a FAIL per ADR-0112 D3/D4 (no silent fourth state)",
+          "clause": "every sampled error code is LEDGERED: code ∈ ErrorCode (error-code-ledger.zod.ts) — an unregistered code is a FAIL per ADR-0112 D3/D4 (no silent fourth state). ⚠️ Check against ErrorCode itself, or against StandardErrorCode.options ∪ REGISTERED_ERROR_CODES: ERROR_CODE_LEDGER is a package-name to code-array MAP, not a flat code list, and several sampled codes (VALIDATION_FAILED, UNSUPPORTED_QUERY_PARAM, BATCH_NOT_ATOMIC) are absent from StandardErrorCode and reachable only through the flattened union",
           "oracle": "api",
-          "verify": "for each captured body, membership check of error code against the two spec files",
+          "verify": "for each captured body, membership check of error code against ErrorCode (the single export that already IS the union — no hand-unioning of two spec files, which is where the flat-vs-map shape trips runners up)",
           "evidence": "the captured bodies + the membership table"
         },
         {
@@ -530,7 +532,8 @@
           "date": "2026-08-07",
           "change": "new — error-envelope conformance sampling grounded in the two-tier code ledger, per the deep-test contract",
           "ref": "claude/platform-test-checklist-ocwugl"
-        }
+        },
+        { "revision": 2, "date": "2026-08-18", "change": "re-pointed clause 1 and steps 8/9 at ErrorCode, the canonical ADR-0112 D4 union export. The item asked the runner to hand-union StandardErrorCode with ERROR_CODE_LEDGER, but the latter is a Record of package name to code array rather than a flat code list, and three of the item's own sampled codes (VALIDATION_FAILED, UNSUPPORTED_QUERY_PARAM, BATCH_NOT_ATOMIC) are not in StandardErrorCode at all — they resolve only through REGISTERED_ERROR_CODES. error-code-ledger.zod.ts already exports ErrorCode as exactly that union, so the clause now names one export instead of prescribing a union the runner has to rebuild (#9417)", "ref": "#9386" }
       ]
     },
     {

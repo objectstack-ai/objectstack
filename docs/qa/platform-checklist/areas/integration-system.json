@@ -982,7 +982,7 @@
       "title": "A declared external datasource federates: its objects query in place over REST, read-only",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -999,7 +999,7 @@
         "GET /api/v1/meta and confirm the federated objects are registered",
         "GET /api/v1/data/<external object> and read fixture rows",
         "attempt a write (POST/PATCH) against the read-only external object; capture the refusal",
-        "open Setup → Datasources and confirm the connection is listed with its health"
+        "confirm the connection is listed with its health over the admin API that backs the Setup → Datasources page: GET /api/v1/datasources (both connections, showcase_external carrying schemaMode:external, origin:code, active:true, status ok) and GET /api/v1/datasources/showcase_external for the full descriptor. The console page renders from exactly this, so the server read is the oracle; if the page is driven instead, record that as a substitution"
       ],
       "acceptance": [
         {
@@ -1015,9 +1015,9 @@
           "evidence": "the refusal"
         },
         {
-          "clause": "the connection is visible and health-badged in Setup → Datasources",
+          "clause": "the connection is visible and health-badged: the datasources admin API reports it active with an ok status (the Setup → Datasources page renders from this response)",
           "oracle": "screenshot",
-          "verify": "the datasources admin page shows the external connection",
+          "verify": "GET /api/v1/datasources lists the external connection with status ok; GET /api/v1/datasources/showcase_external returns its descriptor",
           "evidence": "screenshot"
         }
       ],
@@ -1038,7 +1038,8 @@
           "date": "2026-08-08",
           "change": "initial — the coverage.json `datasource` waiver was STALE (showcase ships a read-only SQLite external fixture); un-waived. NOTE: the external-datasource ADMIN CRUD lifecycle is a separate item (datasource-admin-lifecycle)",
           "ref": "claude/platform-test-checklist-ocwugl"
-        }
+        },
+        { "revision": 2, "date": "2026-08-18", "change": "re-worded clause 3 and step 5 for this item's declared api surface. Both named the Setup → Datasources console page inside an item whose surface is api, so the clause could only ever be scored by a substitution the item did not authorize. The datasources admin API is what the page renders from, so it is now the oracle and the page is the optional substitution — surface left as api rather than widened to mixed, since every other clause here is a server read (#9417)", "ref": "#9386" }
       ]
     },
     {

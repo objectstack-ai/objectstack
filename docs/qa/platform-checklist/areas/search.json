@@ -155,7 +155,7 @@
       "title": "Search honors RLS both ways: a restricted member gets no hits — and no total leakage — from rows they cannot see; the entitled persona finds the same rows",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (sees all invoices)", "signed-up member bound to the contributor position (invoice_own_rows RLS: owner == current_user.email)"],
@@ -187,7 +187,7 @@
         {
           "clause": "no count leakage: a searched list's total/hasMore derive from the caller-scoped result set — with `search` present the protocol computes a page-local total from the RLS-filtered find (it never runs a raw count for searched lists), and engine.count itself rides the same read middleware (#2737)",
           "oracle": "api",
-          "verify": "the member's paged totals reconcile exactly with the rows they can enumerate; no response reveals the true seeded population (12 rows, plus whatever the run itself created — read the count from the seed rather than from this clause)",
+          "verify": "the member's paged totals reconcile exactly with the rows they can enumerate WHILE skip <= their visible count — the total is computed page-locally from the RLS-filtered find, so a skip past the visible set has no page to count and the reconciliation stops being the right question there; no response reveals the true seeded population (12 rows, plus whatever the run itself created — read the count from the seed rather than from this clause)",
           "evidence": "the paged responses + reconciliation table"
         },
         {
@@ -216,7 +216,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: RLS × $search both-personas contract; total-leakage clause grounded in the protocol's page-local total for searched lists and the #2737 count middleware fix, persona provisioning gap recorded honestly", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-11", "change": "stale fixture count corrected against the seed (run #7629): the showcase now ships 12 invoices INV-1001..INV-1012, not 8. Three places carried the stale number — the fixtures requirement, the no-count-leakage clause's 'true 8-row population', and the seed source citation. The leakage clause no longer hard-codes a population at all (a run reconciles against the seed and its own created rows, which is what #7629 actually did: 3 visible to the member, 15 to admin); the owner spread is now stated as counts (ada ×5 / linus ×4 / grace ×3) with INV-1003 named as linus's, so the invisible-row premise is checkable without opening the seed. Item substance and all four acceptance clauses are otherwise unchanged — #7629 scored this item 4/4 PASS", "ref": "#7647" }
+        { "revision": 2, "date": "2026-08-11", "change": "stale fixture count corrected against the seed (run #7629): the showcase now ships 12 invoices INV-1001..INV-1012, not 8. Three places carried the stale number — the fixtures requirement, the no-count-leakage clause's 'true 8-row population', and the seed source citation. The leakage clause no longer hard-codes a population at all (a run reconciles against the seed and its own created rows, which is what #7629 actually did: 3 visible to the member, 15 to admin); the owner spread is now stated as counts (ada ×5 / linus ×4 / grace ×3) with INV-1003 named as linus's, so the invisible-row premise is checkable without opening the seed. Item substance and all four acceptance clauses are otherwise unchanged — #7629 scored this item 4/4 PASS", "ref": "#7647" },
+        { "revision": 3, "date": "2026-08-18", "change": "bounded clause 2's reconciliation to skip <= the caller's visible count. The page-local total is derived from the RLS-filtered find, so paging past the visible set leaves nothing to reconcile and a runner comparing totals there reads a non-result as a leak. The security property the clause exists for (no count leakage of rows the caller cannot see) is untouched and was observed intact (#9417)", "ref": "#9386" }
       ]
     },
     {
@@ -224,7 +225,7 @@
       "title": "Pinyin recall is gated end-to-end by OS_SEARCH_PINYIN_ENABLED: on, latin pinyin (full + initials) hits CJK names; off, it does not — while CJK terms keep matching",
       "since": "v15.1",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["seeded admin (admin@objectos.ai)"],
@@ -263,7 +264,7 @@
           "evidence": "the contrast query"
         },
         {
-          "clause": "flag OFF (explicit false, restart): 'zhangwei'/'zw' no longer return 张伟 — the companion is gone from the schema view and the filter never ORs it — while '张' still matches via the source column",
+          "clause": "flag OFF (explicit false, restart): the INITIALS forms ('zw' for 张伟, 'hnkj'/'wf' for the account) go to zero — the companion is gone from the schema view and the filter never ORs it — while '张' still matches via the source column. ⛔ Do NOT expect full-pinyin 'zhangwei' to go to zero on the stock fixture: showcase_contact.email is searchable:true and the seeded row carries email zhangwei@huaning.example, so that term still matches through the SOURCE column with pinyin off (likewise 'huaning' on the account via website / billing_email). The initials are the real discriminator because no source column spells them",
           "oracle": "api",
           "verify": "the same three queries after the flagged restart split exactly that way, with no errors",
           "evidence": "post-restart response bodies"
@@ -304,7 +305,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: both sides of the pinyin flag with toggle semantics read from resolveSearchPinyinEnabled's source (explicit-wins + zh-locale default), recall variants pinned to the seeded CJK rows, backfill contract from the plugin source", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-11", "change": "the OFF-inertness clause now names an oracle that exists. It demanded a specific plugin log line ('OS_SEARCH_PINYIN_ENABLED is off — inert') which run #7629 proved unobtainable under CLI serving: the flag gates one layer upstream, the CLI omits pinyin-search from `requires`, the plugin is never loaded, and a 1.2 MB debug boot log contained zero occurrences of 'pinyin' (47 loaded plugins off vs 48 on). That is a STRONGER proof of inertness than the log line would have been, so the clause now reads the plugin roster / `requires` difference plus the zero-hit grep, and keeps the inert line only as the alternative oracle for a host that loads the plugin unconditionally — the run is told which route it is on by the roster itself. Step 7, the fixtures requirement and the plugin source citation follow; knownGaps records the unobtainability so the next author does not restore the log-line oracle. This was the item's ONLY partial in #7629 — the substance (both flag sides, per-variant recall, backfill) is unchanged", "ref": "#7647" }
+        { "revision": 2, "date": "2026-08-11", "change": "the OFF-inertness clause now names an oracle that exists. It demanded a specific plugin log line ('OS_SEARCH_PINYIN_ENABLED is off — inert') which run #7629 proved unobtainable under CLI serving: the flag gates one layer upstream, the CLI omits pinyin-search from `requires`, the plugin is never loaded, and a 1.2 MB debug boot log contained zero occurrences of 'pinyin' (47 loaded plugins off vs 48 on). That is a STRONGER proof of inertness than the log line would have been, so the clause now reads the plugin roster / `requires` difference plus the zero-hit grep, and keeps the inert line only as the alternative oracle for a host that loads the plugin unconditionally — the run is told which route it is on by the roster itself. Step 7, the fixtures requirement and the plugin source citation follow; knownGaps records the unobtainability so the next author does not restore the log-line oracle. This was the item's ONLY partial in #7629 — the substance (both flag sides, per-variant recall, backfill) is unchanged", "ref": "#7647" },
+        { "revision": 3, "date": "2026-08-18", "change": "re-targeted clause 3's OFF-side expectation at the initials forms. It demanded that 'zhangwei' stop returning 张伟 with the flag off, but the seeded contact carries email zhangwei@huaning.example and email is searchable:true, so the term still matches through the source column — correct behaviour that the clause scores as the flag failing to disable. The initials (zw / hnkj / wf) have no source-column spelling and are the honest discriminator (#9467 CF-4)", "ref": "#9386" }
       ]
     },
     {

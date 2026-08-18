@@ -8,7 +8,7 @@
       "title": "Row-level security: restricted member sees only their rows; admin sees all",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -29,7 +29,7 @@
         "as A: GET /api/v1/data/showcase_private_note/<B's id> (foreign by-id read); as A: PATCH /api/v1/data/showcase_private_note/<B's id> {\"body\": \"forged\"} (foreign by-id write)",
         "as admin: GET /api/v1/data/showcase_private_note and confirm the full row set (A's + B's rows) is visible — the entitled side of the gate",
         "re-read B's note as admin and confirm the forged PATCH left it byte-identical",
-        "run the app-agnostic sweep: runRlsProofs from @objectstack/verify (objectstack verify) over every showcase object; capture the per-object verdicts"
+        "run the app-agnostic sweep: runRlsProofs from @objectstack/verify over every showcase object; capture the per-object verdicts. ⚠️ The invocation is `objectstack verify --rls` — the flag is load-bearing: verify.ts declares rls: Flags.boolean({ default: false }) and both the proofs and their report sit behind if (flags.rls), so a BARE `objectstack verify` prints no RLS section at all and a run citing it has not consulted this oracle"
       ],
       "acceptance": [
         {
@@ -59,7 +59,7 @@
         {
           "clause": "runRlsProofs reports rls-consistent (or member-visible on deliberately public objects) for every non-skipped showcase object; any rls-hole verdict is a FAIL and files an issue",
           "oracle": "test",
-          "verify": "run runRlsProofs(stack, adminToken, memberToken, config) from packages/verify/src/rls.ts; summary.holes must be 0",
+          "verify": "run `objectstack verify --rls` (or runRlsProofs(stack, adminToken, memberToken, config) from packages/verify/src/rls.ts directly); summary.holes must be 0. A bare `objectstack verify` emits no PROVEN/HOLES line and cannot satisfy this clause",
           "evidence": "formatRlsReport output"
         },
         {
@@ -107,7 +107,8 @@
           "date": "2026-08-11",
           "change": "dedupe of the private D11 defect (#7637 found it on this item's clause 5 AND on owd-sharing-matrix clause 4, one defect counted twice): clause 5 becomes the CANONICAL expected-fail probe, non-disclosing and referenced by the FOLLOW-UPS D11 handle only, with a negative pinning the one-count rule and the ADR-0090-D11 naming collision; owd-sharing-matrix clause 4 now cross-references here",
           "ref": "#7687"
-        }
+        },
+        { "revision": 4, "date": "2026-08-18", "change": "named the --rls flag on step 7 and clause 4. runRlsProofs runs only behind it (packages/cli/src/commands/verify.ts: rls: Flags.boolean({ default: false }), proofs and report both inside if (flags.rls)), so bare `objectstack verify` emits no RLS section — two rounds cited plain verify believing they had consulted an RLS oracle (#9334)", "ref": "#9386" }
       ]
     },
     {
@@ -384,7 +385,7 @@
       "title": "CRUD × permission-set matrix: every access-matrix.json row holds — allowed verbs succeed, withheld verbs 403, VAMA bounded",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -471,7 +472,7 @@
       ],
       "automated": {
         "kind": "verify",
-        "ref": "packages/verify/src/verify.ts (runCrudVerification) + packages/verify/src/rls.ts (runRlsProofs) — objectstack verify; persona-grained cells remain manual"
+        "ref": "packages/verify/src/verify.ts (runCrudVerification) + packages/verify/src/rls.ts (runRlsProofs) — `objectstack verify --rls` for the RLS half (the flag is load-bearing: bare verify prints no RLS section); persona-grained cells remain manual"
       },
       "traps": [
         "wrong-persona",
@@ -489,7 +490,8 @@
           "date": "2026-08-07",
           "change": "new — CRUD × permission matrix grounded in access-matrix.json, per the deep-test contract",
           "ref": "claude/platform-test-checklist-ocwugl"
-        }
+        },
+        { "revision": 2, "date": "2026-08-18", "change": "named the --rls flag in automated.ref. The ref pointed at runRlsProofs while spelling the invocation as bare `objectstack verify`, which never runs the proofs (#9334)", "ref": "#9386" }
       ]
     },
     {
@@ -701,7 +703,7 @@
       "title": "Scope depth (readScope/writeScope): org-wide read with own-only write, per persona — depth widens along geometry, never bypasses",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -774,7 +776,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/showcase-scope-depth.dogfood.test.ts (+ showcase-scope-depth-write, showcase-scope-depth-fallback)"
+        "ref": "packages/qa/dogfood/test/showcase-scope-depth.dogfood.test.ts + packages/qa/dogfood/test/showcase-scope-depth-write.dogfood.test.ts + packages/qa/dogfood/test/showcase-scope-depth-fallback.dogfood.test.ts"
       },
       "traps": [
         "wrong-persona"
@@ -790,7 +792,8 @@
           "date": "2026-08-07",
           "change": "new — scope-depth read/write asymmetry matrix, per the deep-test contract",
           "ref": "claude/platform-test-checklist-ocwugl"
-        }
+        },
+        { "revision": 2, "date": "2026-08-18", "change": "spelled the two companion refs as full paths instead of bare names. Both resolve, but a bare name costs the next runner a search before the pin can be consulted (#9401)", "ref": "#9386" }
       ]
     },
     {
@@ -1097,7 +1100,7 @@
       "title": "The audit-log browser surfaces attributable events over sys_audit_log with correct actor/object, filters, and a before/after payload drawer",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1117,7 +1120,7 @@
         "generate 3 attributable events with distinct action/actor/object: (a) a fresh member SIGNS IN (action 'login', actor = the member); (b) as admin DELETE a showcase_task via /api/v1/data/showcase_task/<id> (action 'delete', object_name showcase_task, record_id set); (c) write a setting (action 'config_change')",
         "open /system/audit-log; wait for the table to settle; screenshot",
         "locate all three events in the page and read their action / object / actor cells",
-        "set the Action filter to 'delete' and confirm only the delete event remains; capture the re-issued /api/v1/data/sys_audit_log request with its $filter",
+        "narrow to writes and confirm the narrowing is server-side; capture the re-issued /api/v1/data/sys_audit_log request with its $filter. ⚠️ There is no Action dropdown on this console: use the prebuilt filtered views (Recent / Writes / Auth / Config) or the generic Filter Records → Where → Add filter builder to constrain action",
         "click the delete row → the side drawer opens; screenshot the Before (old_value) / After (new_value) JSON panels",
         "cross-check the API twin directly: GET /api/v1/data/sys_audit_log?$filter=... for each of the three actions and compare actor/object/action to the page",
         "attempt to forge the trail: POST and PATCH /api/v1/data/sys_audit_log — both must be refused (get+list only)"
@@ -1136,9 +1139,9 @@
           "evidence": "screenshot + the row DOM read"
         },
         {
-          "clause": "the Action filter narrows to exactly one event, and the narrowing is server-side",
+          "clause": "narrowing by action is server-side, not a client-side table filter — the Writes view (or an equivalent Where clause on action) constrains the result set at the server",
           "oracle": "network",
-          "verify": "setting Action=delete re-issues GET /api/v1/data/sys_audit_log with $filter carrying action=delete; the table then shows only the delete event",
+          "verify": "selecting the Writes view (or adding a Where clause on action) re-issues GET /api/v1/data/sys_audit_log with an action constraint in its $filter, and the table then shows only the matching events. ⛔ Do not look for an 'Action filter' dropdown — the console offers the prebuilt views plus the generic Filter Records builder, and a runner hunting the named control reads its absence as a missing capability",
           "evidence": "the filtered request + the single-row table"
         },
         {
@@ -1180,7 +1183,8 @@
           "date": "2026-08-08",
           "change": "new — audit-log browser over sys_audit_log: attributable events, server-side filter, before/after payload drawer, API cross-check, append-only guard",
           "ref": "claude/platform-test-checklist-ocwugl"
-        }
+        },
+        { "revision": 2, "date": "2026-08-18", "change": "re-pointed clause 2 and step 5 at controls that exist. The item named an 'Action filter' dropdown; this console offers prebuilt filtered views (Recent / Writes / Auth / Config) plus a generic Filter Records / Where / Add filter builder. Server-side narrowing — the property the clause is actually for — is provable through the Writes view; naming a control that does not exist invites the absence-inference trap (#9453 CF-9)", "ref": "#9386" }
       ]
     },
     {
@@ -1188,7 +1192,7 @@
       "title": "OWD save gate: external ≤ internal on every object write, and a packaged object's OWD can only be tightened at runtime — Studio inline AND server-side",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1209,8 +1213,8 @@
       "steps": [
         "boot showcase with the console; admin session",
         "Studio inline (browser): open the object designer Settings for a writable/draft object; set sharingModel=private and externalSharingModel=public_read; screenshot — the panel must flag the D11 external-wider violation inline (owd-sharing.ts isExternalWider) and not offer a clean save",
-        "server R2 reject: PUT /api/v1/meta/object/qa_owd_probe?mode=draft with sharingModel:'private' + externalSharingModel:'public_read' — capture the 4xx + error code",
-        "server R2 admit: PUT the same draft with externalSharingModel:'private' (≤ private) — capture the 2xx (the gate orders, it does not blanket-deny)",
+        "server reject: PUT /api/v1/meta/object/qa_owd_probe with sharingModel:'private' + externalSharingModel:'public_read' — capture the 4xx + error code. ⚠️ Drive this at the ACTIVE-state door, NOT ?mode=draft: the D11 refusal is raised by the runtime lint block (validateSecurityPosture, rule security-external-wider-than-internal), and draft saves deliberately defer it to the draft→active promotion gate (#4463 D1), so a ?mode=draft PUT is ADMITTED and the clause cannot be observed there",
+        "server admit: PUT the same object with externalSharingModel:'private' (≤ private) — capture the 2xx (the gate orders, it does not blanket-deny)",
         "packaged tighten (R1): PUT /api/v1/meta/object/showcase_announcement widening sharingModel private→public_read_write (or externalSharingModel private→public_read) — capture the 4xx AND its code (WRITABLE_PACKAGE_REQUIRED on stock; owd_widening_forbidden under OS_METADATA_WRITABLE=object)",
         "GET /api/v1/meta/object/showcase_announcement before and after the denied PUT — confirm byte-identical",
         "cross-check the shipped declarations: GET /api/v1/meta/object/showcase_account and showcase_announcement — both satisfy external ≤ internal"
@@ -1223,13 +1227,13 @@
           "evidence": "the designer screenshot"
         },
         {
-          "clause": "server R2 rejects external > internal on ANY object write: the writable-object PUT with externalSharingModel wider than sharingModel answers 4xx (403) code owd_external_wider",
+          "clause": "the server rejects external > internal on ANY active-state object write: the writable-object PUT with externalSharingModel wider than sharingModel answers 422 INVALID_METADATA carrying rule security-external-wider-than-internal",
           "oracle": "api",
-          "verify": "PUT /api/v1/meta/object/qa_owd_probe?mode=draft status >=400 and body code 'owd_external_wider' (packages/plugins/plugin-security/src/object-posture-gate.ts R2)",
+          "verify": "PUT /api/v1/meta/object/qa_owd_probe (active state) answers 422 with code INVALID_METADATA and the failing rule security-external-wider-than-internal. ⛔ 403 owd_external_wider is the RETIRED spelling: object-posture-gate.ts R2 was retired by the maintainer ruling on #8310 (2026-08-13) as a duplicate of the runtime lint door, and its file header records that saveMetaItem runs assertRuntimeAuthoringRules BEFORE runAuthoringGate, so the lint answers first",
           "evidence": "the PUT trace"
         },
         {
-          "clause": "server R2 admits external ≤ internal: the same object with externalSharingModel no wider than sharingModel saves 2xx — the gate keys on the width ordering, not on the key's presence",
+          "clause": "the server admits external ≤ internal: the same object with externalSharingModel no wider than sharingModel saves 2xx — the gate keys on the width ordering, not on the key's presence",
           "oracle": "api",
           "verify": "PUT with externalSharingModel:'private' answers 2xx and a follow-up GET shows the value",
           "evidence": "the PUT trace + read"
@@ -1279,7 +1283,8 @@
           "date": "2026-08-08",
           "change": "new — OWD save gate both-sides: Studio inline external-wider warning + server object-posture-gate (R2 external≤internal on every write, R1 packaged tighten-only); external-principal evaluation carried as a knownGap (#2696 planned)",
           "ref": "claude/platform-test-checklist-ocwugl"
-        }
+        },
+        { "revision": 2, "date": "2026-08-18", "change": "corrected clauses 1-2 and steps 2-3 for the #8310 retirement (maintainer ruling 2026-08-13). The item tested R2 owd_external_wider / 403 at the ?mode=draft door; R2 is RETIRED from object-posture-gate.ts as a duplicate of the runtime lint door, whose refusal is 422 INVALID_METADATA rule security-external-wider-than-internal raised at the ACTIVE-state door — and draft saves deliberately defer to the draft-to-active promotion gate (#4463 D1), so the clause was unobservable where it was pointed (#9453 CF-2). ⚠️ #9453 CF-3 (that the R1 knownGap mispredicts which layer answers) was NOT applied: object-posture-gate.ts states verbatim that R1 applies only to overlay writes over an artifact-backed object and that 'the default deploy already 403s these before this gate runs' (if (!ctx.isArtifactBacked) return), which is what the knownGap and clause 4 already say", "ref": "#9386" }
       ]
     },
     {
@@ -1713,7 +1718,7 @@
       "title": "Editing the permission matrix and publishing flips an affected persona's live API access; revoke flips it back; assign/unassign moves access",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1746,9 +1751,9 @@
           "evidence": "the baseline trace"
         },
         {
-          "clause": "the matrix edit saves and publishes: flipping the verb in the console and publishing answers 2xx on PUT /api/v1/meta/permission/S and the publish call, and the published set carries the new verb",
+          "clause": "the matrix edit saves and takes effect: flipping the verb in the console answers 2xx on PUT /api/v1/meta/permission/S and the published set carries the new verb. The publish CALL is 2xx only when the save was staged as a draft (?mode=draft); a plain PUT — which is what the console editor issues — lands state:'active' directly, and POST .../publish then answers 404 [no_draft] because nothing is pending. Record WHICH path the console took",
           "oracle": "api",
-          "verify": "PUT + POST .../publish both 2xx; GET /api/v1/meta/permission/S (published) shows delete:true on showcase_task",
+          "verify": "PUT 2xx and GET /api/v1/meta/permission/S (published) shows delete:true on showcase_task. The publish call is 2xx after a ?mode=draft save, or 404 [no_draft] after a plain active-state PUT (rest-server.ts mounts POST /meta/:type/:name/publish for every type and answers 404 [no_draft] when there is nothing to promote) — either is a pass provided the published set carries the verb",
           "evidence": "PUT + publish + GET"
         },
         {
@@ -1804,7 +1809,8 @@
           "date": "2026-08-08",
           "change": "new — permission-matrix WRITE/edit loop: flip a verb in the console matrix → publish → affected persona's live API access flips, revoke flips back, assign/unassign moves access (enforcement + lock covered by sibling items)",
           "ref": "claude/platform-test-checklist-ocwugl"
-        }
+        },
+        { "revision": 2, "date": "2026-08-18", "change": "corrected clause 1, which demanded a 2xx from POST /api/v1/meta/permission/S/publish. That route is mounted type-generically, but it answers 404 [no_draft] when no pending draft exists — and the console's permission save is a plain PUT that lands state:'active' directly, so there is nothing to promote. As written the clause was unsatisfiable on the path the item's own fixture block describes (#9453 CF-5). The clause now keys on the published set carrying the verb and records which save path was taken", "ref": "#9386" }
       ]
     },
     {
@@ -1812,7 +1818,7 @@
       "title": "A package-declared capability bootstraps into sys_capability and resolves across the grant/require three-way (ADR-0066) on the PLATFORM action path; platform names cannot be shadowed",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1825,7 +1831,7 @@
         "requires": [
           "the shipped capability declaration examples/app-showcase/src/security/capabilities.ts (showcase.export_data, org-scoped, defineCapability) — the DEFINE side of ADR-0066",
           "OpsPermissionSet granting it via systemPermissions (examples/app-showcase/src/security/permission-sets.ts) — the GRANT side",
-          "the shipped REQUIRE-side specimens examples/app-showcase/src/ui/actions/predicate-matrix.action.ts: showcase_zoo_perm_held (requires showcase.export_data — the GRANTED capability), showcase_zoo_perm_missing (requires showcase.restricted_ops — DEFINED but granted to nobody), showcase_zoo_perm_and (requires BOTH — the gate is an AND), showcase_zoo_perm_empty (requiredPermissions:[] — always passes). All four are type:'script' on the `zoo` object, so the platform action path can invoke them"
+          "the shipped REQUIRE-side specimens examples/app-showcase/src/ui/actions/predicate-matrix.action.ts: showcase_zoo_perm_held (requires showcase.export_data — the GRANTED capability), showcase_zoo_perm_missing (requires showcase.restricted_ops — DEFINED but granted to nobody), showcase_zoo_perm_and (requires BOTH — the gate is an AND), showcase_zoo_perm_empty (requiredPermissions:[] — always passes). All four are type:'script' on the **showcase_field_zoo** object (predicate-matrix.action.ts binds objectName to a local const zoo = 'showcase_field_zoo' — `zoo` is the TS variable, never the object name), so the platform action path can invoke them"
         ],
         "knownGaps": [
           "the require side is exercised on the PLATFORM action path only — there is NO REST action-invoke route on this build and its absence is deliberate (#7680, ruling 2026-08-12): see the `data-actions` block comment in packages/rest/src/rest-route-ledger.ts. Which platform surface is reachable depends on the HTTP front the build under test boots (@objectstack/rest mounts neither /actions nor /mcp); the runner picks whichever of the dispatcher /actions domain, the MCP run_action bridge, or in-process ql.executeAction/invokeBusinessAction this build exposes, and RECORDS which — all three funnel through the single-sourced actionPermissionError"
@@ -1908,7 +1914,8 @@
           "date": "2026-08-12",
           "change": "re-pointed the REQUIRE clause at the surface that enforces it (#7680, maintainer ruling 2026-08-12). The clause asked for a 403 from a REST resource carrying requiredPermissions; no such surface exists — @objectstack/rest mounts no action-invoke route, deliberately — so the clause was unrunnable as written and the run fell back to a platform capability. Now: grant/deny/regrant driven through the platform action path (actionPermissionError via the dispatcher /actions domain, MCP run_action, or ql.executeAction) against the four shipped predicate-matrix specimens, with the fail-open / stale-grant / over-block / AND-vs-OR failure modes spelled out in `negative`, and REST 404s explicitly scoring nothing. The knownGap moved from 'no resource REQUIREs it' (false — four actions do) to 'which platform surface the build exposes, recorded per run'",
           "ref": "claude/issue-7680-package-capability-doctrine"
-        }
+        },
+        { "revision": 3, "date": "2026-08-18", "change": "named the specimens' object correctly: showcase_field_zoo, not `zoo`. The fixture block quoted the local TS const from predicate-matrix.action.ts (const zoo = 'showcase_field_zoo'), so an invoke keyed on `zoo` answers 'Action ... not found on object zoo' — which reads like a missing specimen rather than a wrong object name (#9453 CF-6)", "ref": "#9386" }
       ]
     },
     {
@@ -1916,7 +1923,7 @@
       "title": "A session with no active organization is a LEGAL state with fail-closed semantics: tenant-scoped reads resolve to nothing, tenant-scoped writes are refused loudly naming the missing org, and nothing is ever NULL-stamped",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -1934,6 +1941,11 @@
           "The state is timing-derived on the signup path (better-auth defers the membership write past the signup transaction, ADR-0093), so reproducing it by racing signup is flaky. The DURABLE reproduction is the removed-member path, or a multi-organization deployment whose reconciler binds nobody (ADR-0093 D1 `no-target-org`). Record WHICH producer the run used — a clause proven only on a racy producer is weaker evidence and must say so.",
           "No stock showcase fixture is known to configure `invite-only` or SSO-JIT-pending; those two producers are blocked(fixture) unless the run configures them."
         ]
+      },
+      "blocked": { "by": "fixture", "ref": "#9334" },
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-security/src/no-active-organization-write-refusal.test.ts — pins every clause of this item at unit level, INCLUDING a control asserting that the `single` posture has no wall, i.e. the test itself agrees the stock showcase configuration makes the item vacuous"
       },
       "steps": [
         "establish the state and PROVE it: obtain a session whose `activeOrganizationId` is null, and cite the evidence (session row / session endpoint payload) — do not infer the state from the symptom you are about to test",
@@ -2017,7 +2029,8 @@
           "date": "2026-08-17",
           "change": "new — the ADR-0123 tenant-semantics wall had ZERO checklist coverage. Neither ratchet could see it: no new metadata kind (it is new behavior across the already-mapped permission/object kinds) and no new enum member. Authored P0 because the ADR records three independently measured production-shaped defects in three subsystems for one state, two of which are silent (a row invisible to its own creator; audit rows invisible to every RLS reader) and therefore invisible to any test that only asserts 'no error'",
           "ref": "#9299"
-        }
+        },
+        { "revision": 2, "date": "2026-08-18", "change": "added the two markers this item was missing. blocked {by: fixture, ref: #9334} — three independent rounds (#9334, #9417, and the wave sweep) each re-derived the same dead end: the stock deployment is tenancy: single, so ADR-0095 Layer 0 is inert (tenant-layer.ts postureEnforcesWall returns null) and booting OS_TENANCY_POSTURE=isolated is correctly refused because @objectstack/organizations is not declared; without the marker the selector keeps listing it runnable and a fourth round pays for it again. automated.ref — no-active-organization-write-refusal.test.ts pins every clause at unit level and was already green, which RUNNER rule 6's converse says should have been recorded here", "ref": "#9386" }
       ]
     }
   ]

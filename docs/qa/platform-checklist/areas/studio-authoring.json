@@ -8,7 +8,7 @@
       "title": "The first-run authoring loop closes: package → object → record → app → publish → end-user, zero code, zero restarts",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P0",
       "surface": "mixed",
       "personas": ["admin (seeded admin@objectos.ai)", "end user (same account driving the published app)"],
@@ -31,7 +31,7 @@
         "create a record in the runtime-faithful Records grid with a Status value chosen",
         "Create app 'Repair Center' (identifier auto-suggested) → Interfaces pillar → add a nav item bound to repair_ticket → Publish",
         "return Home: the launcher must show Repair Center; open it and drive the end-user list",
-        "verify server truth after each publish: GET /api/v1/meta/object/repair_ticket, GET /api/v1/data/repair_ticket, GET /api/v1/meta/app?id=<new app id>",
+        "verify server truth after each publish: GET /api/v1/meta/object/repair_ticket, GET /api/v1/data/repair_ticket, GET /api/v1/meta/app?id=<the new app NAME, e.g. repair_center> — ?id= matches the App document name, NOT the package id com.example.repairs; fetch /api/v1/meta/app with no query first to read the name the wizard actually minted",
         "negative probe: on the READ-ONLY com.example.showcase package, attempt 'New object' (or 'Add field') and drive the save through to the server; capture the server response"
       ],
       "acceptance": [
@@ -56,7 +56,7 @@
         {
           "clause": "the published app is live in the Home launcher and the end-user list renders the record with the picklist LABEL chip (label resolution, not the raw value)",
           "oracle": "screenshot",
-          "verify": "launcher screenshot shows Repair Center; end-user list screenshot shows the record row with the label chip; GET /api/v1/meta/app?id=<app id> carries the nav item bound to the object",
+          "verify": "launcher screenshot shows Repair Center; end-user list screenshot shows the record row with the label chip; GET /api/v1/meta/app?id=<the new app NAME> carries the nav item bound to the object",
           "evidence": "the two screenshots + the app meta read"
         },
         {
@@ -84,7 +84,8 @@
         "access-security.readonly-package-locks-studio (client-side lock — cross-referenced, not duplicated)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new area item: the full first-run authoring loop, grounded step-by-step in the 2026-07 Studio dogfood audit ('The loop closes'), with the audit's open UX findings carried as knownGaps instead of asserted", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new area item: the full first-run authoring loop, grounded step-by-step in the 2026-07 Studio dogfood audit ('The loop closes'), with the audit's open UX findings carried as knownGaps instead of asserted", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-18", "change": "corrected the ?id= spelling in step 8 and clause 4, which said <new app id> in an item whose step 2 creates the package com.example.repairs — inviting the package-id spelling that answers with an empty items array (#9334's class). Found by grounding rather than from a report: this item was not on the #9334 list. ⚠️ The card's other instruction for this item — drop any inherited 'Studio is not installed' assumption (#9453 CF-4) — needed NO edit: the item never carried one. It has no blocked marker, no such knownGap, and its steps drive the App Builder directly; the assumption lived in the wave briefing and the run records, not here", "ref": "#9386" }
       ]
     },
     {

@@ -8,7 +8,7 @@
       "title": "agent / tool / skill metadata kinds author, persist and list over the meta surface — retired keys reject with prescriptions, the closed agent kind has no runtime write door",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": ["admin"],
@@ -67,7 +67,7 @@
         {
           "clause": "the runtime write door matches the declared registry posture — BOTH sides: PUT ?mode=draft succeeds for skill (and tool), while the agent kind has NO governed runtime write path (allowRuntimeCreate:false; 'for agents, the code is the record', metadata-plugin.zod.ts — migrateStoredMetadata reports agent rows 'skipped' by design)",
           "oracle": "api",
-          "verify": "skill draft PUT returns 200 and the draft is readable; the agent runtime save is refused/unsupported (capture the actual status), and that refusal is recorded as CORRECT, not filed as a bug",
+          "verify": "skill draft PUT returns 200 and the draft is readable via GET /api/v1/meta/skill/qa_probe_skill?state=draft — ⚠️ the READ parameter is ?state=draft, not ?mode=draft: rest-server.ts keys the draft projection on req.query.state, while ?mode=draft is the WRITE-side parameter, so re-reading with ?mode=draft serves the active item (or 404s when none is active) and reads like the draft never landed. The agent runtime save is refused/unsupported (capture the actual status), and that refusal is recorded as CORRECT, not filed as a bug",
           "evidence": "the two PUT responses"
         },
         {
@@ -99,7 +99,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial — closes the AI hole in capability coverage (no area covered agent/tool/skill kinds)", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 3, "date": "2026-08-18", "change": "named the draft READ parameter in clause 4. The clause said the draft is readable after PUT ?mode=draft without saying how; ?mode=draft is the write-side parameter and the read projection keys on req.query.state === 'draft' (rest-server.ts), so a runner re-reading with ?mode=draft gets the active item or a 404 and concludes the draft write silently failed (#9417)", "ref": "#9386" }
       ]
     },
     {

@@ -104,7 +104,7 @@
       "title": "os build's own contract: no computed value in the exit slot, located errors for schema and author-time rule failures, artifact + stats output, warnings never flip the exit",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "build",
       "personas": ["operator (local shell)"],
@@ -133,9 +133,9 @@
           "evidence": "exit code + artifact listing + the JSON payload"
         },
         {
-          "clause": "a schema violation fails the build with exit 1 and a LOCATED error naming the failing path — never a bare 'validation failed'",
+          "clause": "a schema violation fails the build with a LOCATED error naming the failing path — never a bare 'validation failed' — and the exit code is 1 under --json or 2 on the human path",
           "oracle": "build",
-          "verify": "the formatted Zod error names the object/field path of the deliberate break; echo $? is 1",
+          "verify": "the formatted Zod error names the object/field path of the deliberate break; echo $? is 1 for `--json` (compile.ts emits the failure payload then calls this.exit(1)) and 2 for a plain human-format run (the same catch ends at oclif's this.error(), whose default exit is 2). Both are legitimate — clause 5 of this item blesses exactly that oclif 2 — so record WHICH invocation was measured rather than failing the clause on a 2",
           "evidence": "the error output + exit code"
         },
         {
@@ -178,7 +178,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: the build command's own contract (exit-code discipline, located schema + rule errors, --json parity, advisory both-sides) read from compile.ts, with the gate-content items cross-referenced instead of re-proven", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-11", "change": "narrowed the exit-code clause to the #4873 duration-leak it exists to pin. As phrased ('exactly 0 or 1') it also forbade oclif's standard ExitError 2, which compile.ts's human-path this.error() catches legitimately produce on a config-load-time throw — so it contradicted cli.flag-command-error-ux, which asserts that same 2 is correct, and a run reported the collision as a product violation (#7648). The clause now pins what #4873 was: a computed value (duration/count) reaching the exit slot, detectable as a nonzero on success or a code that moves between identical runs; 0/1 via CliExitCode and oclif's fixed 2 on the human path are named as legitimate. Still load-bearing — a duration in the exit slot FAILS it — with a repeat-run step and a negative added to keep it falsifiable, and the CliExitCode source note corrected to say it narrows the emitJson/emitText slot, not oclif's error exit", "ref": "#7648" }
+        { "revision": 2, "date": "2026-08-11", "change": "narrowed the exit-code clause to the #4873 duration-leak it exists to pin. As phrased ('exactly 0 or 1') it also forbade oclif's standard ExitError 2, which compile.ts's human-path this.error() catches legitimately produce on a config-load-time throw — so it contradicted cli.flag-command-error-ux, which asserts that same 2 is correct, and a run reported the collision as a product violation (#7648). The clause now pins what #4873 was: a computed value (duration/count) reaching the exit slot, detectable as a nonzero on success or a code that moves between identical runs; 0/1 via CliExitCode and oclif's fixed 2 on the human path are named as legitimate. Still load-bearing — a duration in the exit slot FAILS it — with a repeat-run step and a negative added to keep it falsifiable, and the CliExitCode source note corrected to say it narrows the emitJson/emitText slot, not oclif's error exit", "ref": "#7648" },
+        { "revision": 3, "date": "2026-08-18", "change": "reconciled clause 2 with clause 5, which contradicted each other. Clause 2 demanded exit 1 on a schema violation while clause 5 explicitly blesses 'an oclif 2 from a this.error() path'. Measured in compile.ts (build is an alias of it): the --json failure path emits the payload and calls this.exit(1); the human path falls through the same catch to this.error(), which exits 2. The clause now names both and asks which was run (#9417)", "ref": "#9386" }
       ]
     },
     {
@@ -433,7 +434,7 @@
       "title": "os test: a Quality Protocol suite is validated at LOAD, executed against a booted app, and its verdict is the exit code — capture/interpolation thread state, an unevaluable assertion FAILS",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell)", "suite author (writes qa/*.test.json)"],
@@ -448,7 +449,7 @@
         "knownGaps": [
           "`run_script` has no adapter branch and fails by name (`Unsupported action type in HttpAdapter: run_script`) — the variant sweep records ONE refusal and that is the honest verdict, not a fixture gap to work around. The other seven members execute since #7848; the five record-shaped ones did not until then (see `negative`), so a sweep transcript predating that fix shows five 404s and is not comparable",
           "the record action types resolve the Data Protocol mount from the server's own `/discovery` (`routes.data`) since #7983, so a deployment that sets `crud.dataPrefix` IS reached; what remains out of reach is `api.apiPath`, which moves the discovery document itself out from under the probe (measured: `{apiBase}/discovery` 404s, and `/.well-known/objectstack` reports the DISPATCHER's `/api/v1/data`, not the REST mount). Against such a host the adapter falls back to the convention and says so — it names the mount it addressed, the probe that failed and the remedy, on the warning AND on every 404 — and those steps must still be written as `api_call`. The fixture boot is stock, so neither case bites here",
-          "no scenario SELECTION exists: `os test` has exactly two flags (--url, --token), `scenario.tags` filters nothing and `scenario.requires` is never checked (packages/spec/liveness/qa.json rows `tags`/`requires`), so the whole glob always runs and a suite cannot declare a precondition it will be skipped for"
+          "no scenario SELECTION exists: `os test` has exactly three flags (--url, --token, --fail-on-empty — commands/test.ts), none of which selects scenarios, `scenario.tags` filters nothing and `scenario.requires` is never checked (packages/spec/liveness/qa.json rows `tags`/`requires`), so the whole glob always runs and a suite cannot declare a precondition it will be skipped for"
         ]
       },
       "steps": [
@@ -551,7 +552,8 @@
       "history": [
         { "revision": 1, "date": "2026-08-11", "change": "new item: the `qa` capability's coverage.json mapping, authored rather than waived (#7347 triage ruling). `os test` is a shipped, documented CLI command, so the honest mapping is a surface:cli item that authors a real qa/*.test.json suite and drives it against a booted app — the fixture suite examples/app-showcase/qa/platform-smoke.test.json lands with this item and is the repo's first Quality Protocol suite. Every clause was measured on showcase before it was written: the green path, capture/interpolation, the #6247 load refusal, the #7256 unevaluable-contains failure, teardown-after-failure, the 8-member action-type sweep and the #7363 glob. `since: v17` records the release in which the surface became GOVERNED (liveness ledger seeded + TestSuiteSchema enforced at the load site, #6247 / PR #7255); the command itself predates it. No `automated` entry: the three unit pins cover pieces, none of them proves a suite reaches a real server", "ref": "#7347" },
         {"revision": 2, "date": "2026-08-12", "change": "the adapter was repaired, which this item's own `negative` clause declared to be a revision rather than a silent green (#7848). Item 1: the five record-shaped action types now round-trip against a stock server — the `${baseUrl}/api/data/:object` literal became a prefix DERIVED from the two schemas RestServer itself resolves from (RestApiConfigSchema `apiPath ?? {basePath}/{version}` + CrudEndpointsConfigSchema.dataPrefix), and `update_record` PATCHes where it used to PUT a route that has no PUT sibling. Re-measured on a booted showcase, one scenario per member with NO shared setup so no member's verdict is inferred from a sibling: 7 of 8 execute and assert, `run_script` still refuses by name. The `negative` clause is inverted accordingly — a 404 from a record action type is the regression now — and the knownGap it rested on is replaced by the narrower one that survives: the record types address the DEFAULT mount only, so a host that moves it with `api.apiPath`/`crud.dataPrefix` still needs `api_call`. Item 2: a zero-match glob still exits 0, deliberately (a repo that legitimately ships no suites must not start failing CI), but the posture is now DECLARED — stated in `--help`, opt out with the new `--fail-on-empty`, and `Found N test suites.` is emitted on EVERY run including `Found 0 test suites.`, which is the line this item's first acceptance clause already asks a run record to quote", "ref": "#7848"},
-        {"revision": 3, "date": "2026-08-17", "change": "the record action types stopped ASSUMING the mount (#7983). They now resolve it from the server: one memoised `GET {apiBase}/discovery` per run, addressing whatever `routes.data` advertises, with the RestApiConfigSchema + CrudEndpointsConfigSchema convention as the fallback — the `@objectstack/client` `getRoute` pattern, copied rather than re-invented. Measured on a booted stack (REST generator + dispatcher bridge) before and after, three configs: stock stays green; `crud.dataPrefix: '/objects'` went from `HTTP Error 404` to a created record, so that row of the gap is CLOSED; `api.apiPath: '/api/2026-01'` still 404s and is NOT closed — `apiPath` moves the discovery document itself, and the one fixed-path document (`/.well-known/objectstack`) advertises the dispatcher's `/api/v1/data` under all three configs, so trusting it would attach a false provenance to the same 404. That row is narrowed instead: the fallback is announced (a warning naming the mount, the failed probe and the remedy) and every 404 from a record action now carries the mount it addressed and where that mount came from, so the failure can no longer read as the suite author's own URL mistake. `api_call` is unchanged and probes nothing — it remains the escape hatch for a host the probe cannot reach", "ref": "#7983"}
+        {"revision": 3, "date": "2026-08-17", "change": "the record action types stopped ASSUMING the mount (#7983). They now resolve it from the server: one memoised `GET {apiBase}/discovery` per run, addressing whatever `routes.data` advertises, with the RestApiConfigSchema + CrudEndpointsConfigSchema convention as the fallback — the `@objectstack/client` `getRoute` pattern, copied rather than re-invented. Measured on a booted stack (REST generator + dispatcher bridge) before and after, three configs: stock stays green; `crud.dataPrefix: '/objects'` went from `HTTP Error 404` to a created record, so that row of the gap is CLOSED; `api.apiPath: '/api/2026-01'` still 404s and is NOT closed — `apiPath` moves the discovery document itself, and the one fixed-path document (`/.well-known/objectstack`) advertises the dispatcher's `/api/v1/data` under all three configs, so trusting it would attach a false provenance to the same 404. That row is narrowed instead: the fallback is announced (a warning naming the mount, the failed probe and the remedy) and every 404 from a record action now carries the mount it addressed and where that mount came from, so the failure can no longer read as the suite author's own URL mistake. `api_call` is unchanged and probes nothing — it remains the escape hatch for a host the probe cannot reach", "ref": "#7983"},
+        { "revision": 4, "date": "2026-08-18", "change": "corrected the flag count from two to three. packages/cli/src/commands/test.ts declares url, token AND fail-on-empty; the same revision's own acceptance already describes --fail-on-empty, so the knownGap contradicted its own item. The gap's point is unchanged and now stated directly: none of the three flags selects scenarios (#9417)", "ref": "#9386" }
       ]
     },
     {
@@ -652,14 +654,14 @@
       "title": "os migrate meta actually rewrites authored sources across a spec major — the prescription hundreds of retirement messages point at is honest, idempotent, and refuses below its floor",
       "since": "v14.7",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "cli",
       "personas": ["build-time author (no session)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a scratch copy of an authored source tree (never the repo's own working tree — this command REWRITES files in place)",
+          "a scratch copy of an authored source tree. ⚠️ NOT because the command rewrites in place — it does not: the authored-source chain reads the config and writes nothing but --out (commands/migrate/meta.ts: 'The command does not silently rewrite TS config source (that AST rewrite is unsafe and lossy)'), and the --stored arm is a read-only preview until --apply. A scratch copy is still the right hygiene for planting retired spellings, and --stored --apply IS a real write — to this deployment's sys_metadata ROWS, not to files",
           "authored sources deliberately carrying retired spellings from the previous major, so the codemod has something to rewrite"
         ],
         "knownGaps": [
@@ -739,7 +741,8 @@
           "date": "2026-08-17",
           "change": "new — cli.migrate-plan-apply-json lists `meta` among its eight subcommand variants, but every one of its acceptance clauses is about the DATABASE lane (plan/apply/destructive/busy/--json), so the source-rewriting codemod was named but never exercised. It is load-bearing well beyond its own command: retirement messages throughout the spec prescribe it by name as THE way to clear a retired spelling, so if it does not rewrite what it claims, every one of those prescriptions is a dead end. Authored against a registry that now holds nearly 200 entries across the two most recent majors",
           "ref": "#9299"
-        }
+        },
+        { "revision": 2, "date": "2026-08-18", "change": "corrected the fixture warning, which claimed the command REWRITES files in place. commands/migrate/meta.ts states the opposite in its own header and code: the authored-source chain writes nothing but --out (a JSON snapshot), and --apply is documented as '--stored: rewrite the rows (default is a read-only preview)'. The warning both misdescribed the safe default and hid where the real write actually lands (the sys_metadata rows under --stored --apply) — md5sum-confirmed untouched sources in the run (#9417)", "ref": "#9386" }
       ]
     },
     {
@@ -747,7 +750,7 @@
       "title": "The documented newcomer verification loop closes on a FRESHLY SCAFFOLDED project: os validate passes and the Console actually paints at /_console/ — the seam between the scaffold item and the showcase boot item",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["a brand-new developer following content/docs/getting-started/quick-start.mdx, with no prior project"],
@@ -757,8 +760,8 @@
           "a scratch dir and network access for `npx create-objectstack` (same prerequisite as cli.scaffold-first-run)"
         ],
         "knownGaps": [
-          "This item deliberately does NOT re-prove what two existing items already cover. The scaffold→install→validate→build→artifact-boot chain belongs to cli.scaffold-first-run (automated by .github/workflows/scaffold-e2e.yml); the console-on-a-populated-app half belongs to cli.dev-boot-contract, which drives examples/app-showcase. What is untested is the SEAM: the Console rendering against a freshly scaffolded BLANK project — one object, no seed data, and no seeded admin unless one is requested. Score only the seam; cite the two siblings for the halves.",
-          "Whether a blank scaffold has any loginable identity out of the box is exactly what clause 4 measures — do not assume either answer, and do not import showcase credentials to make the console open."
+          "This item deliberately does NOT re-prove what two existing items already cover. The scaffold→install→validate→build→artifact-boot chain belongs to cli.scaffold-first-run (automated by .github/workflows/scaffold-e2e.yml); the console-on-a-populated-app half belongs to cli.dev-boot-contract, which drives examples/app-showcase. What is untested is the SEAM: the Console rendering against a freshly scaffolded BLANK project — one object and no seed data. Score only the seam; cite the two siblings for the halves.",
+          "A blank scaffold DOES have a loginable identity out of the box: `seed-admin` is default-ON in dev (commands/dev.ts: flags['seed-admin'] ?? true, 'Default: on (idempotent — only acts on a zero-user DB, never overwrites an existing account)'), so bare `objectstack dev` seeds admin@objectos.ai / admin123 on an empty DB and the banner prints the credentials. Clause 4 therefore scores whether the newcomer can COMPLETE the documented visual check with that identity, not whether one exists. Still do not import showcase credentials."
         ]
       },
       "steps": [
@@ -820,7 +823,8 @@
           "date": "2026-08-17",
           "change": "new — angle-5 (docs claims) probe of the published first-run. Covers a real seam between two existing items: cli.scaffold-first-run boots the scaffold headless via `os start --artifact`, cli.dev-boot-contract drives the console against the fully-populated showcase, and nobody drives the console against a fresh BLANK scaffold — where there is no seed data and no seeded admin unless one is requested. Checked and CLEAN on three questions the sweep raised: no doc anywhere in content/docs/ prescribes a retired template (`todo`/`compliance`/`content`/`contracts`/`procurement`), every documented invocation is a bare `npx create-objectstack my-app` resolving to the only catalog entry, and `npm run validate` is the same binary as `npx os validate`. REFUTED during authoring, recorded here so it is not re-derived: the sweep first read the blank template's bare `\"dev\": \"objectstack dev\"` against the quick-start's `os dev --ui` and inferred that `npm run dev` would strand a newcomer with no console. Source-checking the chain disproves it — dev.ts:370 forwards `--ui` only when set and never forwards `--no-ui`, serve.ts:221 declares `ui` `default: true`, and cli.mdx:139 states outright that the console is 'already on by default in dev'. The bare script is CORRECT; `--ui` on `dev` is a no-op forwarder. Clause 3 accordingly asserts the two invocations AGREE, and a difference is the failure",
           "ref": "#9299"
-        }
+        },
+        { "revision": 2, "date": "2026-08-18", "change": "corrected the stale 'no seeded admin unless one is requested' assumption in both knownGaps. commands/dev.ts resolves seed-admin as flags['seed-admin'] ?? true and documents it 'Default: on', so a bare `objectstack dev` on an empty DB seeds admin@objectos.ai / admin123 and prints it in the banner. Clause 4's open question ('is there any identity a newcomer can sign in with?') has a definite answer, and leaving the gap as written told the runner not to assume the answer the tree already fixes (#9467 CF-6)", "ref": "#9386" }
       ]
     }
   ]

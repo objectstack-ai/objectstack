@@ -149,6 +149,29 @@ contradicts it, and correct it here when it does.
   the real port). This is "zero hits needs a positive control" applied to one tool: a
   negative from a command that never ran is not evidence.
 
+- **Console session auth is a bearer token in `localStorage`, and a form sign-in ALSO
+  sets a cookie — you need both halves.** The console's auth client stores the session
+  under `auth-session-token` (objectui `packages/auth/src/createAuthClient.ts`:
+  `TOKEN_STORAGE_KEY = 'auth-session-token'`) and sends it as an `Authorization` header;
+  its own metadata-client note says outright that *"there is no session cookie"* for that
+  path. Two consequences, and each has already misled a round on its own:
+  1. **A `clearCookies()` gesture expires nothing.** The bearer token survives it, so the
+     shell keeps rendering fully authed data — which reads exactly like the "dead shell
+     serving stale data as if authed" failure the console-login item warns about, and
+     nearly produced a false P0. **Check:** after the gesture, an in-page
+     `fetch('/api/v1/meta/app?id=showcase_app')` still answers **200**. True expiry is
+     server-side: `POST /api/v1/auth/sign-out` (clearing `localStorage` is the
+     client-side equivalent); after either, the same fetch answers **401**.
+  2. **The cookie is not decorative — some routes need it.** `better-auth.session_token`
+     is set by a real form sign-in, and the storage family resolves its caller through
+     better-auth's own `getSession` (`resolveSessionData` in
+     `packages/runtime/src/security/resolve-session-principal.ts`) rather than the REST
+     bearer seam. So a session driven with the localStorage token alone gets **401
+     `AUTH_REQUIRED`** from `POST /api/v1/storage/upload/presigned` while
+     `GET /auth/get-session` on the same page returns 200 — a convincing fake "avatar
+     upload is broken". ⛔ Do not drive any storage/upload surface from an injected
+     token: **sign in through the form** so both halves exist.
+
 - **A cold tree cannot boot the app from the console-build recipe alone.**
   `pnpm objectui:build` runs `scripts/build-console.sh`, which builds the **console**, not
   the framework CLI. On a fresh tree `packages/cli` has no `dist`, and the bare binary

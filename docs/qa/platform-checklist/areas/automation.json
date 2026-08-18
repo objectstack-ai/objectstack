@@ -520,7 +520,7 @@
       "title": "A failing node inside try_catch is handled (catch region, $error binding) and the failed attempt is still recorded; outside it fails the run loudly",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -538,7 +538,7 @@
         "handled case: POST a showcase_task and PATCH status→'done' — showcase_resilient_sync runs, its try-region http node fails against the unroutable host, retries, then the catch region runs",
         "GET /api/v1/automation/showcase_resilient_sync/runs/:runId — record the overall status, the try_catch container step's own status, EVERY step carrying regionKind='try' (nodeId, status, error, retryAttempt) in log order, the catch step's status/regionKind, and the run duration",
         "re-read the task over /api/v1/data/showcase_task/:id — sync_status and sync_error",
-        "unhandled case: POST /api/v1/automation a minimal autolaunched probe flow (start → http POST to the same unroutable URL, NOT wrapped in try_catch → end) in the scratch package; trigger it via POST /api/v1/automation/<probe>/trigger",
+        "unhandled case: POST /api/v1/automation a minimal autolaunched probe flow (start → http POST to the same unroutable URL, NOT wrapped in try_catch → end) in the scratch package. Fire it from a TRIGGER (a record-change specimen, or a shipped trigger-fired flow such as showcase_declarative_connector_ping / showcase_task_completed_rest_ping) — ⛔ NOT via POST /api/v1/automation/<probe>/trigger, because clause 7 cannot observe an api-triggered failure: the ERROR line exists precisely because no caller holds the result, and a manual/api trigger returns the envelope to its caller. Use the api-triggered run for clauses 5-6 (run status and run-level error) if convenient, but score clause 7 from a trigger-fired specimen",
         "GET the probe run: overall status and the run-level error",
         "open the designer Runs panel for both runs; screenshot the failed step marked with its error and the catch-body nesting",
         "capture the server log lines for the probe run's failure"
@@ -583,7 +583,7 @@
         {
           "clause": "the unhandled failure is loud in the server log",
           "oracle": "log",
-          "verify": "an ERROR-level line naming the probe flow/run accompanies the failed run",
+          "verify": "an ERROR-level line naming the flow and its trigger accompanies the failed TRIGGER-FIRED run — service-automation/src/engine.ts logs it inside trigger.start's callback with the text 'no caller holds this result and nothing retries the run'. A clean log after an api-triggered failure is CORRECT, not a missing diagnostic: that path hands the failure envelope back to its caller",
           "evidence": "log excerpt"
         }
       ],
@@ -620,7 +620,8 @@
           "date": "2026-08-11",
           "change": "recorded the #7546 ruling. The handled-case clause asserted that the try-region's failing step appears with regionKind='try' — a contract the engine had never promised, so QA run #7516 read a by-design silence as a FAIL. Rather than weaken the clause to match the engine, the ruling implemented it: failed try attempts are now surfaced. The clause set is re-cut accordingly — container 'success' pinned as by-design (Option C's 'recovered' status was considered and rejected), the failed-attempt steps promoted to their own clause with the ordering requirement, and the retry evidence upgraded from the weak duration oracle to a retryAttempt count with duration as cross-check. The negative now names post-#7546 silence as the regression shape and forbids re-filing the container's 'success'",
           "ref": "#7546 (ruling 2026-08-11; QA run #7516; #1479 splice plumbing)"
-        }
+        },
+        { "revision": 3, "date": "2026-08-18", "change": "re-pointed step 5 and clause 7 at a trigger-fired specimen. The step prescribed an api-triggered probe, whose failure clause 7 structurally cannot observe: service-automation/src/engine.ts emits the ERROR line only inside trigger.start's callback, and its own text and #4632 verdict give the reason — 'no caller holds this result'. For a manual or api trigger the caller DOES hold it, so no line is written and a clean log reads as a missing diagnostic (#9467 CF-5)", "ref": "#9386" }
       ]
     },
     {

@@ -484,7 +484,7 @@
       "title": "Active-session list is owner-scoped, and each revoke primitive terminates exactly the sessions it names",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["user A (two devices)", "user B (unrelated, second live session)", "platform admin"],
@@ -534,7 +534,7 @@
         {
           "clause": "the admin Sessions surface lists ALL users' sessions with revoke metadata: the all_sessions view shows rows for both A and B (user_id column) and surfaces revoked_at / revoke_reason on terminated rows",
           "oracle": "screenshot",
-          "verify": "Setup → Sessions shows cross-user rows; a revoked row shows revoked_at set and a revoke_reason from the {idle_timeout, absolute_max, concurrent_cap, admin} vocabulary",
+          "verify": "Setup → Sessions shows cross-user rows; a revoked row shows revoked_at set and a NON-EMPTY revoke_reason. ⚠️ It is not a closed vocabulary: sys-session.object.ts declares revoke_reason as Field.text (maxLength 64) whose description lists idle_timeout / absolute_max / concurrent_cap only as EXAMPLES, and revoke-other-sessions was observed writing user_revoked — a legitimate value, not a violation. Score the field's presence and plausibility; a value outside the examples is a finding only if it is empty or meaningless",
           "evidence": "the admin sessions screenshot + a data-API read of a revoked row"
         },
         {
@@ -557,7 +557,8 @@
         "packages/platform-objects/src/apps/setup-nav.contributions.ts (nav_sessions → Setup Sessions, objectName sys_session)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-08", "change": "new item: owner-scoped active-session list (RLS) + per-primitive revoke semantics (revoke-session by token, revoke-other-sessions keeps current) + admin all-sessions view with revoked_at/revoke_reason, grounded in the auth route ledger and sys_session object (PENDING-GAPS §B)", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-08", "change": "new item: owner-scoped active-session list (RLS) + per-primitive revoke semantics (revoke-session by token, revoke-other-sessions keeps current) + admin all-sessions view with revoked_at/revoke_reason, grounded in the auth route ledger and sys_session object (PENDING-GAPS §B)", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-18", "change": "softened clause 5, which described revoke_reason as a closed {idle_timeout, absolute_max, concurrent_cap, admin} vocabulary. packages/platform-objects/src/identity/sys-session.object.ts declares it as free text (Field.text, maxLength 64) and its description names those as examples with a trailing ellipsis; the observed value after revoke-other-sessions is user_revoked, which the clause as written scores as a violation (#9467 CF-7). Either the clause softens or the field declares a select — softened here, since the ledger cannot change the declaration", "ref": "#9386" }
       ]
     },
     {

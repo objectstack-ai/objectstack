@@ -8,7 +8,7 @@
       "title": "Showcase boots clean: health + ready 200, no degraded startup banners, console + app metadata served",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P0",
       "surface": "mixed",
       "preconditions": [
@@ -20,7 +20,7 @@
         "GET /api/v1/ready and record the status (the readiness probe is a separate route — packages/runtime/src/route-ledger.ts)",
         "read the FULL boot log: capture the Flows: banner, any ⚠ lines, any ERROR-level lines, and every SeedLoader line",
         "GET /_console/ and confirm the console shell HTML is served (200, text/html)",
-        "GET /api/v1/meta/app?id=com.example.showcase and capture the merged app/nav metadata",
+        "GET /api/v1/meta/app?id=showcase_app and capture the merged app/nav metadata (?id= matches the App document's NAME, never the package id — ?id=com.example.showcase answers an empty items array, which reads exactly like missing metadata)",
         "cross-check the nav payload: the grp_data group lists the seeded objects (showcase_project, showcase_task, showcase_account, showcase_contact, showcase_invoice, showcase_field_zoo, …)"
       ],
       "acceptance": [
@@ -45,7 +45,7 @@
         {
           "clause": "the console shell is served at /_console/ and the seeded app's merged metadata resolves",
           "oracle": "api",
-          "verify": "GET /_console/ → 200 text/html; GET /api/v1/meta/app?id=com.example.showcase returns the merged app/nav metadata (dogfood skill §1 names this exact endpoint)",
+          "verify": "GET /_console/ → 200 text/html; GET /api/v1/meta/app?id=showcase_app returns the merged app/nav metadata (dogfood skill §1 names this exact endpoint)",
           "evidence": "response statuses + top-level keys"
         },
         {
@@ -68,7 +68,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial — standing P0 smoke distilled from the dogfood boot protocol", "ref": "#3358" },
-        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 3, "date": "2026-08-18", "change": "corrected the ?id= spelling from the package id com.example.showcase to the app NAME showcase_app in step 6 and clause 3. rest-server.ts filters app documents on a.name === id and App declares no id of its own, so the package-id spelling returns an empty items array — a false-P0 shape (#9334, re-confirmed #9453 CF-1)", "ref": "#9386" }
       ]
     },
     {
@@ -76,7 +77,7 @@
       "title": "Seed integrity: row counts match the authored seed, values land verbatim, replay is idempotent",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P0",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -88,7 +89,7 @@
       },
       "steps": [
         "after a clean fresh boot, derive the expected per-object row counts from the app's own seed module (examples/app-showcase/src/data/seed/index.ts — count the records arrays; re-derive rather than trusting a stale list if seeds changed)",
-        "authoring-time baseline for cross-checking the derivation: showcase_account=14, showcase_contact=33 (9 named + 24 bulk prospects), showcase_project=5, showcase_task=10, showcase_invoice=12, showcase_invoice_line=5, showcase_expense_report=4, showcase_expense_line=13, showcase_field_zoo=2",
+        "authoring-time baseline for cross-checking the derivation: showcase_account=14, showcase_contact=32 (8 named + 24 bulk prospects), showcase_project=5, showcase_task=10, showcase_invoice=12, showcase_invoice_line=5, showcase_expense_report=4, showcase_expense_line=13, showcase_field_zoo=2",
         "for each seeded object, GET /api/v1/data/<object>?$top=1 and read the server total; build the expected-vs-actual table",
         "GET the Field Zoo 'Specimen — Full' row and spot-diff authored values (f_multiselect ['red','green'] as a set, f_lookup resolving to the Northwind account id, f_json nested object intact)",
         "re-read the boot log's seed lines: every seed reports success; no rejection or partial-load line",
@@ -139,7 +140,8 @@
         "RUNNER.md trap 'seed-data-thin'"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "initial — makes the #3408/#3415 class of silent seed failure a standing P0 check with exact authored baselines", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "initial — makes the #3408/#3415 class of silent seed failure a standing P0 check with exact authored baselines", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-18", "change": "corrected the showcase_contact baseline from 33 (9 named + 24 bulk) to 32 (8 named + 24 bulk) — re-derived from examples/app-showcase/src/data/seed/index.ts, whose contacts block authors 8 literal records plus Array.from({length: 24}); the server serves 32. Every other count in the baseline re-derived unchanged. The stale value made a correct seed read as a silent partial load (#9334, #9417)", "ref": "#9386" }
       ]
     },
     {
@@ -147,7 +149,7 @@
       "title": "Seeded admin signs in through the console; the session survives reload and re-authenticates cleanly after expiry",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P0",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -156,7 +158,7 @@
         "sign in with the seeded admin credentials — drive the React controlled inputs with the native setter + input/change events, or POST the auth endpoint from the page (dogfood skill §4; naive fills submit empty)",
         "screenshot the post-login shell; capture the first authed API responses",
         "reload the page; capture the first authed API request after reload",
-        "expire the session: clear the auth cookies for the origin; then trigger an authed navigation/API call",
+        "expire the session SERVER-side: POST /api/v1/auth/sign-out; then trigger an authed navigation/API call. ⛔ Do NOT use a clearCookies() gesture: the console authenticates with a bearer token in localStorage under `auth-session-token`, sent as an Authorization header, so clearing cookies expires NOTHING and the shell legitimately keeps rendering authed data — which reads exactly like the dead-shell failure clause 3 exists to catch (this nearly produced a false P0). Clearing localStorage as well is the client-side equivalent",
         "observe the console's reaction (redirect to login vs dead shell); screenshot",
         "sign in again and verify the console restores a working session on the same route",
         "negative pass: sign out, then attempt login with a wrong password; capture the auth response and the UI"
@@ -171,7 +173,7 @@
         {
           "clause": "the session survives a reload — the first authed API call after reload returns 200 with no redirect back to login",
           "oracle": "network",
-          "verify": "network trace of the first authed request after reload (e.g. GET /api/v1/meta/app?id=com.example.showcase)",
+          "verify": "network trace of the first authed request after reload (e.g. GET /api/v1/meta/app?id=showcase_app — the app NAME; the package-id spelling answers 200 with an empty items array and proves nothing about the session)",
           "evidence": "the trace"
         },
         {
@@ -205,7 +207,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial", "ref": "#3358" },
-        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 3, "date": "2026-08-18", "change": "corrected step 5's expiry gesture and the clause-2 ?id= example. The console authenticates by bearer token in localStorage (auth-session-token), so the documented clearCookies() gesture expires nothing and leaves a fully authed shell rendering — the exact shape of the c3 failure mode, which nearly produced a false P0 (#9453 CF-8). True expiry is POST /api/v1/auth/sign-out. Also corrected ?id=com.example.showcase to the app name showcase_app (#9334)", "ref": "#9386" }
       ]
     },
     {
@@ -213,7 +216,7 @@
       "title": "Every showcase nav surface renders without page errors, and failures surface the error boundary — never a blank page",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P0",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -225,7 +228,7 @@
       },
       "steps": [
         "run the pinned suite: pnpm -C examples/app-showcase test:smoke (the SURFACES array in e2e/showcase-smoke.spec.ts — 31 surfaces: pages, object lists, dashboards, reports, the view-gallery pages)",
-        "GET /api/v1/meta/app?id=com.example.showcase and extract every nav destination from the response",
+        "GET /api/v1/meta/app?id=showcase_app and extract every nav destination from the response (?id= matches the app NAME; the package-id spelling returns an empty items array and would yield zero destinations)",
         "diff the served nav destinations against the SURFACES array; hand-walk any destination the suite does not cover (screenshot first, then DOM)",
         "on each hand-walked surface: wait for render, screenshot, then check for pageerror / empty <main> / placeholder leaks ('no actions configured')",
         "chart surfaces (the chart:true entries in SURFACES — Delivery Operations, Chart Gallery, Command Center): the suite now POLLS boundingBox against a bounded deadline (SURFACE_BUDGET_MS in the spec) instead of reading it once after a fixed wait, so a chart red here is a real finding and not the measurement window — #7569 measured the difference: 3 fresh loads each drew 5 real charts, and polling every 400 ms returned null ONLY at t = 1.5 s, the old fixed measurement instant and exactly the recharts ResponsiveContainer initial-layout window, then non-null on all 19 later samples. Read WHICH assertion failed: 'no chart SVG laid out' means the box stayed null for the whole budget; a width/height failure means the chart laid out but collapsed (#2616 D). If you hand-walk a chart surface outside the suite, poll the same way — never sleep-then-read-once",
@@ -274,7 +277,8 @@
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial — wraps the existing automated smoke as a checklist row so runs report it alongside manual items", "ref": "#3358" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 3, "date": "2026-08-11", "change": "de-flaked the chart clause's MEASUREMENT, both halves in one change: a null boundingBox read once at a fixed instant is the recharts ResponsiveContainer layout window, not a product defect (measured: null only at t=1.5s, non-null on all 19 later samples, 5 real charts on each of 3 fresh loads). The clause now requires a bounded poll-until-non-null, and the pinned suite was changed to match — showcase-smoke.spec.ts's fixed page.waitForTimeout(1500) plus single boundingBox() read are gone, replaced by deadline-bounded polling (the #7472/#7409 shape), keeping the last non-null sample so a collapsed panel (#2616 D) still fails on its width rather than as 'no chart SVG'", "ref": "#7569" }
+        { "revision": 3, "date": "2026-08-11", "change": "de-flaked the chart clause's MEASUREMENT, both halves in one change: a null boundingBox read once at a fixed instant is the recharts ResponsiveContainer layout window, not a product defect (measured: null only at t=1.5s, non-null on all 19 later samples, 5 real charts on each of 3 fresh loads). The clause now requires a bounded poll-until-non-null, and the pinned suite was changed to match — showcase-smoke.spec.ts's fixed page.waitForTimeout(1500) plus single boundingBox() read are gone, replaced by deadline-bounded polling (the #7472/#7409 shape), keeping the last non-null sample so a collapsed panel (#2616 D) still fails on its width rather than as 'no chart SVG'", "ref": "#7569" },
+        { "revision": 4, "date": "2026-08-18", "change": "corrected the ?id= spelling from com.example.showcase to showcase_app. Found by grounding the #9334 finding against the tree rather than by report: this item was not among the two named there, yet carries the same defect and is load-bearing here — the step extracts every nav destination from a response the package-id spelling leaves empty", "ref": "#9386" }
       ]
     },
     {
@@ -458,7 +462,7 @@
       "title": "The three built-in apps (Setup / Studio / Account) render every merged-nav destination; app-level and entry-level gates are enforced, not errored",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -468,7 +472,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the three platform apps ship with @objectstack/platform-objects and register as one-app packages @objectstack/{setup,studio,account} (ADR-0048), so their ids are com.objectstack.setup / com.objectstack.studio / com.objectstack.account — present on any stock boot, no showcase-specific fixture",
+          "the three platform apps ship with @objectstack/platform-objects and register as one-app packages @objectstack/{setup,studio,account} (ADR-0048), so their PACKAGE ids are com.objectstack.setup / com.objectstack.studio / com.objectstack.account — but the App documents themselves are NAMED setup / studio / account (setup.app.ts, studio.app.ts, account.app.ts), and every ?id= below matches the NAME — present on any stock boot, no showcase-specific fixture",
           "a second, non-admin persona: sign up a fresh user in-run to drive the app-level and entry-level permission gates (do not reuse the admin — wrong-persona masks the guard)"
         ],
         "knownGaps": [
@@ -476,14 +480,14 @@
         ]
       },
       "steps": [
-        "as admin, GET /api/v1/meta/app?id=com.objectstack.setup and extract every merged nav destination — Setup is a SHELL of empty group anchors (packages/platform-objects/src/apps/setup.app.ts: group_overview/apps/people_org/access_control/approvals/configuration/diagnostics/integrations/advanced) filled by SETUP_NAV_CONTRIBUTIONS (setup-nav.contributions.ts) plus capability-plugin contributions (plugin-security Positions/Permission Sets, plugin-sharing Sharing Rules/Record Shares, plugin-approvals, plugin-webhooks)",
-        "GET /api/v1/meta/app?id=com.objectstack.studio (studio.app.ts — static nav: Overview, Data Model, User Experience, Logic, Automation, AI, Developer, Integration) and GET /api/v1/meta/app?id=com.objectstack.account (account.app.ts — Profile + Inbox/Security/Developer groups)",
+        "as admin, GET /api/v1/meta/app?id=setup and extract every merged nav destination — Setup is a SHELL of empty group anchors (packages/platform-objects/src/apps/setup.app.ts: group_overview/apps/people_org/access_control/approvals/configuration/diagnostics/integrations/advanced) filled by SETUP_NAV_CONTRIBUTIONS (setup-nav.contributions.ts) plus capability-plugin contributions (plugin-security Positions/Permission Sets, plugin-sharing Sharing Rules/Record Shares, plugin-approvals, plugin-webhooks)",
+        "GET /api/v1/meta/app?id=studio (studio.app.ts — static nav: Overview, Data Model, User Experience, Logic, Automation, AI, Developer, Integration) and GET /api/v1/meta/app?id=account (account.app.ts — Profile + Inbox/Security/Developer groups)",
         "as admin, hand-walk each destination in each app: navigate, wait for render, SCREENSHOT FIRST, then read the DOM — assert no pageerror, no 'failed to load', no blank <main>, no 'no actions configured' placeholder",
         "Setup detail: confirm each settings URL entry (nav_settings_* → /apps/setup/system/settings/<namespace>) opens the settings namespace form (localization/company/branding/auth/mail/storage/ai/knowledge/feature_flags), and Users / Organization / Business Units / Teams / Sessions / OAuth Applications / Identity Links / User Preferences render",
         "Studio detail: confirm each metadata:resource list (object/app/view/page/dashboard/report/dataset/action/hook/flow/agent/tool/skill/email_template) renders, and the component surfaces render (App Builder studio:builder, All Metadata Types metadata:directory, Packages developer:packages, API Console developer:api-console, Flow Runs developer:flow-runs, Public Forms developer:public-forms)",
         "Account detail: confirm Profile (account:profile_card), Notifications (sys_inbox_message/mine), Approvals (sys_approval_request/my_pending), Linked Accounts (sys_account), Active Sessions (sys_session/mine), API Keys (sys_api_key/mine), OAuth Applications (sys_oauth_application/mine) each render",
         "confirm the gated entries resolve to ABSENT-not-erroring for the admin: nav_organizations (requiresService org-scoping) is absent in single-org mode; nav_jwks Signing Keys is ABSENT for EVERY persona, admin included — the entry was removed in #7544 because sys_jwks declares apiEnabled:false, so its list answers OBJECT_API_DISABLED (404) for all callers and no permission gate could prune it; SSO Providers is absent unless OS_SSO_ENABLED (knownGap)",
-        "sign in as the plain member: attempt to open Setup (com.objectstack.setup) and Studio (com.objectstack.studio) — capture the app-level refusal (App.requiredPermissions setup.access / studio.access); open Account (declares no requiredPermissions) — capture it opening",
+        "sign in as the plain member: attempt to open Setup (app name setup) and Studio (app name studio) — capture the app-level refusal (App.requiredPermissions setup.access / studio.access); open Account (declares no requiredPermissions) — capture it opening",
         "as the member, GET /api/v1/meta/app for a reachable app and confirm every manage_platform_settings-gated entry (API Keys, the manage_platform_settings settings URLs) is ABSENT from the member's payload — the server prunes, the client does not merely hide. JWKS is deliberately NOT in this list any more: it is absent for admins too, so finding it absent for a member proves nothing about the gate (#7544)",
         "cross-check served-vs-rendered: diff each app's meta/app nav destinations against what actually rendered so nothing is silently outside the walk"
       ],
@@ -507,7 +511,7 @@
           "evidence": "three screenshots"
         },
         {
-          "clause": "the app-level gate is server-side, not a client courtesy: a forged member GET /api/v1/meta/app?id=com.objectstack.setup is denied/empty at the server, not merely hidden in the launcher (ADR-0057 D10 both-sides)",
+          "clause": "the app-level gate is server-side, not a client courtesy: a forged member GET /api/v1/meta/app?id=setup is denied/empty at the server, not merely hidden in the launcher (ADR-0057 D10 both-sides)",
           "oracle": "api",
           "verify": "the forged request's status/body proves server-side denial",
           "evidence": "the forged response"
@@ -546,7 +550,8 @@
         "ADR-0048 (Setup/Studio/Account as one-app packages com.objectstack.{setup,studio,account}); ADR-0029 (nav contributions); ADR-0066 (sys_jwks private)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-08", "change": "initial — the big built-in-apps nav sweep (Setup/Studio/Account merged nav render + app-level and entry-level gates both-sides), complementing nav-surfaces-render which only walks the showcase app", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-08", "change": "initial — the big built-in-apps nav sweep (Setup/Studio/Account merged nav render + app-level and entry-level gates both-sides), complementing nav-surfaces-render which only walks the showcase app", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-18", "change": "corrected every ?id= from the package id (com.objectstack.setup/.studio/.account) to the App document NAME (setup/studio/account) across steps 0, 1, 7 and clause 4. rest-server.ts matches a.name === id, so the package-id spelling returns an empty items array on every one of them — indistinguishable from a missing built-in app (#9334). Kept the package ids where they are genuinely the subject (the ADR-0048 one-app-package note), spelled as PACKAGE ids", "ref": "#9386" }
       ]
     },
     {
@@ -554,7 +559,7 @@
       "title": "Settings hub round-trip: a value saves, PERSISTS, reaches an observable consumer, audits, env-locks, tests honestly, and stores secrets as handles served MASKED — anonymous denied",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -564,7 +569,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the 10 open-framework settings namespaces registered by @objectstack/service-settings (packages/services/service-settings/src/manifests: localization, company, branding, auth, mail, sms, storage, ai, knowledge, feature_flags)",
+          "the 11 open-framework settings namespaces a stock boot serves: the 10 in builtinSettingsManifests (packages/services/service-settings/src/manifests: localization, company, branding, auth, mail, sms, storage, ai, knowledge, feature_flags) PLUS lifecycle (5 specifiers), which is NOT in that aggregate — ObjectQLPlugin registers it at kernel:ready whenever a SettingsService is present (packages/objectql/src/lifecycle/lifecycle-settings.ts). Enumerating only the manifests directory undercounts by one",
           "the settings service wired with a data engine so it swaps from in-memory to the sys_setting table, and with the sys_secret store + auditWriter (SettingsServicePlugin binds these on kernel:ready; the showcase stack mounts the engine)"
         ],
         "knownGaps": [
@@ -572,7 +577,7 @@
         ]
       },
       "steps": [
-        "as admin, GET /api/settings — capture the visible manifests (the 10 open-framework namespaces above; the route is the SettingsService REST surface in settings-routes.ts)",
+        "as admin, GET /api/settings — capture the visible manifests (the 11 open-framework namespaces above; the route is the SettingsService REST surface in settings-routes.ts)",
         "pick localization (an OBSERVABLE-CONSUMER namespace — packages/core/src/security/resolve-authz-context.ts reads localization.timezone/locale/currency onto ExecutionContext). GET /api/settings/localization — capture {manifest, values}; note timezone value 'UTC' with source 'default'",
         "change it: PUT /api/settings/localization { timezone: 'Asia/Tokyo' }; re-read GET /api/settings/localization and confirm the value persists and source FLIPS default→tenant (localization scope is 'tenant')",
         "prove EFFECT (not just the saved form): re-derive an ExecutionContext-dependent output — an analytics date-bucket aggregate or a today()/rendered-datetime on showcase_task — and confirm it now resolves against Asia/Tokyo, not UTC. If the deployment surfaces no observable localization effect, fall back to branding.workspace_name visible in the console shell — but never tick effect off the form alone",
@@ -661,7 +666,7 @@
           "evidence": "the 403 + the empty list"
         },
         {
-          "clause": "each of the 10 open-framework namespaces resolves GET /api/settings/:ns with its manifest + values — no namespace 500s or serves an empty manifest",
+          "clause": "each of the 11 open-framework namespaces resolves GET /api/settings/:ns with its manifest + values — no namespace 500s or serves an empty manifest",
           "oracle": "api",
           "verify": "one GET per variant in variants[]; each returns {manifest, values} with the manifest's specifiers",
           "evidence": "the per-namespace responses"
@@ -703,7 +708,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "initial — settings hub round-trip with persistence + observable-consumer effect (honoring the ai.json form-is-not-effect caveat), sys_setting_audit, env-lock server refusal, honest test action, sys_secret handle-not-plaintext, anonymous deny", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-11", "change": "secret clauses strengthened from negative-only ('never returns the plaintext', which omission and a vanished key also satisfy) to the POSITIVE contract #7522/PR #7554 pinned at the route level: set→mask / unset→null presence-preserving, masking across values.<key>.value AND every cascadeChain entry, source/locked/lockedReason unchanged, both specifier flavours, plus the distinct echoed-mask-PUT-is-a-no-op round-trip clause and the in-process-path-is-NOT-masked guard", "ref": "#7573" }
+        { "revision": 2, "date": "2026-08-11", "change": "secret clauses strengthened from negative-only ('never returns the plaintext', which omission and a vanished key also satisfy) to the POSITIVE contract #7522/PR #7554 pinned at the route level: set→mask / unset→null presence-preserving, masking across values.<key>.value AND every cascadeChain entry, source/locked/lockedReason unchanged, both specifier flavours, plus the distinct echoed-mask-PUT-is-a-no-op round-trip clause and the in-process-path-is-NOT-masked guard", "ref": "#7573" },
+        { "revision": 3, "date": "2026-08-18", "change": "corrected the open-framework namespace count from 10 to 11 in the fixture list, step 0 and the per-namespace clause. builtinSettingsManifests holds 10, but lifecycle is registered separately by ObjectQLPlugin at kernel:ready (packages/objectql/src/lifecycle/lifecycle-settings.ts, 5 specifiers) and is served alongside them — so a runner enumerating only the manifests directory undercounts, and the clause could never be satisfied as written (#9453 CF-7)", "ref": "#9386" }
       ]
     },
     {

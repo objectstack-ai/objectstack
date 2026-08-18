@@ -169,7 +169,7 @@
       "title": "Every translatable surface localizes on a zh-CN session — one pass over the full translation-group vocabulary, plus the runtime i18n routes it resolves through",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "browser",
       "personas": ["admin on a zh-CN session"],
@@ -181,7 +181,7 @@
         ],
         "knownGaps": [
           "the showcase's declared surface carries FROZEN untranslated debt, ratcheted by scripts/check-i18n-coverage.mjs + i18n-coverage-baseline.json — expect some declared strings to legitimately fall back to en; the per-surface check is 'translated keys render translated, untranslated keys render the SOURCE label (never a raw dotted key)', not 100% coverage",
-          "objects._views.<view>.emptyState has NO stock fixture: examples/app-showcase authors no emptyState on any view (a grep for emptyState across examples/app-showcase/src returns nothing), so no translated key exists to render and the variant is blocked(fixture). Waived here rather than faked — the debt is authoring an emptyState onto a showcase view plus its zh-CN bundle entry, which is showcase-code work outside this ledger's file surface — tracked at #7714 (#7640 found it)",
+          "objects._views.<view>.emptyState WAS unafforded and no longer is: the #7714 specimen has landed. examples/app-showcase/src/ui/views/task.view.ts authors an emptyState on the `urgent` view (its comment block cites #7714) and src/system/translations/index.ts carries the zh-CN half under objects.showcase_task._views.urgent.emptyState.{title,message}. The variant is runnable; the only setup it needs is an empty `urgent` view (demote the two urgent seed rows)",
           "objects._sections is addressable, but ONLY on sections that declare a `name`: examples/app-showcase/src/ui/pages/task-detail.page.ts's record:details block authors label-only sections, and packages/spec/src/ui/component.zod.ts documents that a nameless section renders its authored label in EVERY locale (packages/lint's translation-section-name-missing rule exists to nudge authors toward the name). #7640 read that record page, saw English headings next to a bundle that does carry 概览/排期/详细信息, and nearly filed a resolver defect — drive the named-section form views instead (task.view.ts tabbed/wizard/split, contact.view.ts default form)"
         ]
       },
@@ -192,7 +192,7 @@
         "list headers — the showcase_task list columns (objects.<object>.fields.<field>.label; the bundle translates every surfaced column incl. status/priority OPTION labels)",
         "form labels + placeholders on a task edit form (fields group), and select options in the form and list filters (fields.<field>.options)",
         "an action dialog — trigger an object action with confirmText/successMessage and capture the confirm prompt and the success toast (_actions group: label/confirmText/successMessage)",
-        "a view empty state (_views.<view>.emptyState) — ⚠️ NOT AFFORDED BY THE STOCK FIXTURE: no view in examples/app-showcase authors an emptyState at all, so there is no translated key to render. Record this variant as blocked(fixture) citing the knownGap below; ⛔ do not manufacture coverage from the console's built-in zero-row placeholder, which is console chrome and not an objects._views.<view>.emptyState resolution",
+        "a view empty state (_views.<view>.emptyState) — RUNNABLE on the stock fixture since the #7714 specimen landed: examples/app-showcase/src/ui/views/task.view.ts authors an emptyState on the filtered `urgent` view, and the zh-CN bundle carries objects.showcase_task._views.urgent.emptyState.{title,message}. Demote the two urgent seed rows (or filter them away) so the view renders empty, then read the copy — it resolves to 暂无紧急任务 / 当前没有需要立即处理的事项。任务优先级调整为「紧急」后会出现在这里。 ⛔ Still do not manufacture coverage from the console's built-in zero-row placeholder, which is console chrome and not an objects._views.<view>.emptyState resolution",
         "section labels (_sections group) — read them off a NAMED-section surface, not the record page: showcase_task's tabbed / wizard / split form views (examples/app-showcase/src/ui/views/task.view.ts) and showcase_contact's default edit form (ui/views/contact.view.ts) declare a stable `name` per section, which is the only thing that makes objects.<object>._sections.<name>.label resolvable — the showcase bundle carries 概览/排期/详细信息 and 联系方式/工作信息/状态/备注 for exactly those names. The task DETAIL page's record:details block authors label-only sections and renders its EN headings in every locale by design — see the knownGap below",
         "a dashboard — Chart Gallery's title and widget titles (dashboards.<name>.label / widgets.<id>.title)",
         "a page — a seeded page's header title/subtitle (pages.<name> group)",
@@ -203,7 +203,7 @@
         "GET /api/v1/i18n/translations/zh-CN — record whether it is non-empty and whether every key path sits under a declared translation group",
         "GET /api/v1/i18n/labels/showcase_task/zh-CN — record its { object, locale, labels } and hold it next to the zh-CN list-header the browser rendered for showcase_task",
         "unknown-locale probe: GET /api/v1/i18n/translations/zz-ZZ and GET /api/v1/i18n/labels/showcase_task/zz-ZZ — capture WHICH degradation the running server does (the FileI18nAdapter returns an empty {} map for an unloaded locale; getTranslations does NOT synthesize the default bundle — record the observed shape, do not assume a fallback)",
-        "feed/audit verb variant (E11): trigger an activity-feed / audit entry (e.g. an assignment or a record edit) and, on the zh-CN session, screenshot its rendered verb/template — the feed/audit verb copy is a translatable surface",
+        "feed/audit verb variant (E11): set the TENANT locale to zh-CN first (PUT /api/settings/localization {values:{locale:'zh-CN'}}), THEN trigger an activity-feed / audit entry (an assignment or a record edit) and screenshot its rendered verb/template — the verb is localized and frozen at write time, so an entry created before the flip stays in its original locale no matter which session reads it",
         "record a per-variant verdict table with the screenshot evidence"
       ],
       "acceptance": [
@@ -268,9 +268,9 @@
           "evidence": "the two unknown-locale responses"
         },
         {
-          "clause": "the activity-feed / audit verb template localizes on the zh-CN session (E11) — the feed/audit entry's verb renders its zh-CN copy, not an English verb and not a raw key",
+          "clause": "the activity-feed / audit verb template localizes on the WRITE locale (E11) — the stored verb renders its zh-CN copy, not an English verb and not a raw key. ⚠️ It does NOT key on the reader's session: plugin-audit/src/audit-writers.ts renders the summary ONCE at write time via resolveWriteLocale(tenantId, userId) and STORES the string, with an EN literal as the fallback. Switching only the browser session locale therefore changes nothing, and reading that as a broken resolver is a false FAIL",
           "oracle": "screenshot",
-          "verify": "a feed/audit entry's verb/template renders zh-CN on the switched session; a raw key or English verb here is the E11 gap (record which group backs it — the messages/globalActions area is the likely home)",
+          "verify": "flip the TENANT locale (PUT /api/settings/localization {values:{locale:'zh-CN'}}), then perform the write; the newly stored entry's verb renders zh-CN. An entry written BEFORE the flip keeps its original string by design — re-reading it in a zh-CN session proves nothing. A raw key or an English verb on a post-flip write is the E11 gap (record which group backs it — the messages/globalActions area is the likely home)",
           "evidence": "the feed/audit screenshot"
         }
       ],
@@ -312,7 +312,8 @@
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new matrix item: per-surface localization pass over the spec's full translation-group vocabulary, grounded in the showcase bundle and the coverage ratchet", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-08", "change": "clause-extension: runtime i18n routes (/i18n/locales configured set, /translations/:locale ⊂ declared vocabulary, /labels/:object/:locale matches the UI, unknown-locale honest degradation), plus the E11 activity-feed/audit verb-localization variant; traps gain dispatcher-vs-hono-route (the plugin mount and dispatcher /i18n domain must answer one shape, #3636/#3833)", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 3, "date": "2026-08-11", "change": "two variants reconciled with what the stock fixture actually affords (#7640). _sections: the step pointed at the task DETAIL page, whose record:details block authors label-only sections — unaddressable by design per component.zod.ts. The variant is NOT unreachable, as first read: task.view.ts's tabbed/wizard/split form views and contact.view.ts's default form declare stable section names the bundle already translates, so the step now names those surfaces and the nameless record page is recorded as a knownGap plus a qualifier on the resolver negative. emptyState: no showcase view authors one, so the variant is waived as blocked(fixture) with the debt written down, never faked from console chrome", "ref": "#7686" }
+        { "revision": 3, "date": "2026-08-11", "change": "two variants reconciled with what the stock fixture actually affords (#7640). _sections: the step pointed at the task DETAIL page, whose record:details block authors label-only sections — unaddressable by design per component.zod.ts. The variant is NOT unreachable, as first read: task.view.ts's tabbed/wizard/split form views and contact.view.ts's default form declare stable section names the bundle already translates, so the step now names those surfaces and the nameless record page is recorded as a knownGap plus a qualifier on the resolver negative. emptyState: no showcase view authors one, so the variant is waived as blocked(fixture) with the debt written down, never faked from console chrome", "ref": "#7686" },
+        { "revision": 4, "date": "2026-08-18", "change": "two corrections. (1) The #7714 emptyState waiver is stale: the specimen has landed — task.view.ts authors an emptyState on the urgent view and the zh-CN bundle carries objects.showcase_task._views.urgent.emptyState.{title,message} — so step 7 and the knownGap now describe a runnable variant instead of instructing blocked(fixture) (#9467 CF-1). (2) Clause 11 asserted the feed/audit verb localizes on the READER's session; audit-writers.ts renders the summary once at write time via resolveWriteLocale(tenantId, userId) and stores it, so only the tenant setting at write time moves it. The clause and its step now flip the tenant locale before writing — this premise nearly produced a false resolver FAIL (#9467 CF-2)", "ref": "#9386" }
       ]
     },
     {
@@ -320,7 +321,7 @@
       "title": "Unknown, legacy-dialect, and retired translation keys are rejected loudly at BOTH authoring doors — never silently stripped",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin"],
@@ -334,7 +335,7 @@
         "item door — via the metadata API, attempt to save a zh-CN `translation` item carrying each variant in turn (one save per variant), always alongside one VALID key (e.g. objects.showcase_task.label) so the rejection provably targets the bad key, not the document",
         "capture the exact error text for each attempted save",
         "after each rejection, read the item back and record that nothing (including the valid key) was persisted by the failed save",
-        "bundle door — in a scratch script inside the worktree, call defineTranslation / defineTranslationBundle from @objectstack/spec with the same variants and capture each parse error (this is the door #3778's item-only guard missed; #4001's strict shapes must cover both)",
+        "bundle door — in a scratch script inside the worktree, call defineTranslation and defineTranslationBundle with the same variants and capture each parse error (this is the door #3778's item-only guard missed; #4001's strict shapes must cover both). ⚠️ They are NOT on the same entry point: defineTranslationBundle is re-exported from the package ROOT (@objectstack/spec), while defineTranslation resolves only through the @objectstack/spec/system subpath. Importing both from the root yields 'defineTranslation is not a function', which reads exactly like a missing guard",
         "verify the alias suggestion channel: a near-miss key (helpText on a FIELD translation, label on a WIDGET translation) must be rejected WITH the did-you-mean pointing at the declared spelling (help; title)",
         "verify the guidance channel: legacy object-first keys (o, app, nav, dashboard, errors, _meta) and retired validationMessages must carry their prescription (where the content belongs now, or that it has no home), not just 'unrecognized key'",
         "save a correct version of the same content and confirm it persists and resolves (the gate rejects keys, not translations)"
@@ -399,7 +400,8 @@
         "packages/spec/src/shared/strict-object.ts (surface/aliases/guidance rejection contract)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item: strict-key rejection at both translation doors, variants from the spec's own legacy/guidance/alias tables", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item: strict-key rejection at both translation doors, variants from the spec's own legacy/guidance/alias tables", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-18", "change": "named the two bundle-door entry points separately in step 4. packages/spec/src/index.ts re-exports only defineTranslationBundle; defineTranslation is reachable solely through the @objectstack/spec/system subpath (system/index.ts re-exports translation.zod). A scratch script importing both from the root fails with 'defineTranslation is not a function' and reads as an absent guard rather than a wrong import path (#9467 CF-3)", "ref": "#9386" }
       ]
     },
     {
