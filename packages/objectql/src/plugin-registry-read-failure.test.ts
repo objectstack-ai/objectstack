@@ -82,7 +82,14 @@ const remoteAcct: ServiceObject = {
 /** An object that DECLARES the action the engine has a handler for. */
 const acctWithAction: ServiceObject = {
   ...acct,
-  actions: [{ name: 'ping', label: 'Ping', type: 'script' as const, body: 'return 1;' }],
+  actions: [
+    {
+      name: 'ping',
+      label: 'Ping',
+      type: 'script' as const,
+      body: { language: 'js' as const, source: 'return 1;' },
+    },
+  ],
 };
 
 interface Recorded {
