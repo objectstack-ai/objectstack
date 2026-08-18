@@ -43,6 +43,7 @@
     "check:docs-image-tag-sync": "node scripts/sync-docs-image-tags.mjs --self-test",
     "check:role-word": "node scripts/check-role-word.mjs --self-test && node scripts/check-role-word.mjs",
     "check:quick-reference-counts": "node scripts/check-quick-reference-counts.mjs --self-test && node scripts/check-quick-reference-counts.mjs",
+    "check:runtime-services-index": "node scripts/check-runtime-services-index.mjs --self-test && node scripts/check-runtime-services-index.mjs",
     "check:skill-frame-sync": "node scripts/check-skill-frame-sync.mjs --self-test && node scripts/check-skill-frame-sync.mjs",
     "check:skill-frame-freshness": "node scripts/check-skill-frame-freshness.mjs --self-test && node scripts/check-skill-frame-freshness.mjs",
     "check:skill-compatibility": "node scripts/check-skill-compatibility-version.mjs --self-test && node scripts/check-skill-compatibility-version.mjs",

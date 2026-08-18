@@ -22,26 +22,5 @@
     "Key format: `<package>|<file>|<kind>|<specifier>[|<symbol>]`. Run the checker to see the",
     "exact key it computes for a finding."
   ],
-  "entries": [
-    {
-      "id": "@objectstack/spec|packages/spec/prompts/create-new-project.md|import|@objectstack/spec/data|Object",
-      "why": "@objectstack/spec/data exports `ObjectSchema`. `Object` resolves to the JS global instead of failing loudly — the worst shape for a published AGENT-AUTHORING prompt."
-    },
-    {
-      "id": "@objectstack/spec|packages/spec/prompts/implement-objectos.md|import|@objectstack/spec/system|ManifestSchema",
-      "why": "@objectstack/spec/system exports `AppManifestSchema` and `DeployManifestSchema`; there is no bare `ManifestSchema`. Published agent-authoring prompt."
-    },
-    {
-      "id": "@objectstack/spec|packages/spec/prompts/implement-objectos.md|import|@objectstack/spec/system|IdentitySchema",
-      "why": "@objectstack/spec/system exports `Identity`; there is no `IdentitySchema`. Published agent-authoring prompt."
-    },
-    {
-      "id": "@objectstack/spec|packages/spec/prompts/implement-objectos.md|import|@objectstack/spec/system|PolicySchema",
-      "why": "@objectstack/spec/system has no bare `PolicySchema` — only qualified ones (`KeyRotationPolicySchema`, `IncidentResponsePolicySchema`, `DataClassificationPolicySchema`, …). Published agent-authoring prompt."
-    },
-    {
-      "id": "@objectstack/spec|packages/spec/prompts/implement-objectql.md|import|@objectstack/spec/data|Object",
-      "why": "Same fabrication as create-new-project.md: `ObjectSchema` is the real export."
-    }
-  ]
+  "entries": []
 }

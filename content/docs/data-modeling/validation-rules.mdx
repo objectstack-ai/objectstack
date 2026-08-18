@@ -244,9 +244,25 @@ These properties apply to **all** field types and are validated by the base `Fie
 | `reference` | `string` | — | **Required.** Target object name |
 | `referenceFilters` | `string[]` | — | **Removed** (#2377, ADR-0049) — no longer part of the `Field` schema; use `lookupFilters` + `dependsOn` instead |
 | `deleteBehavior` | `enum` | `set_null` | `set_null`, `cascade`, or `restrict` |
-| `multiple` | `boolean` | `false` | Allow multiple references |
+| `multiple` | `boolean` | `false` | Allow multiple references; the value is validated as an array of ids |
 
 **Default constraints:** Validates that referenced record exists. Foreign key integrity enforced.
+
+**Multi-value lookups (`multiple: true`).** The empty set is representable: an emptied
+multi-value lookup is stored and read back as `[]`, never `null` — including when
+`deleteBehavior: 'set_null'` removes the last remaining member. The declared contract
+lives in the `multiple` and `required` doc blocks of
+`packages/spec/src/data/field.zod.ts` (rendered in the
+[Field reference](/docs/references/data/field)), and it makes `required` on a
+multi-value lookup mean **non-empty array**.
+
+<Callout type="warn">
+The `required`-means-non-empty half is **declared but not yet enforced** by the record
+validator: today `[]` passes the required check on both insert and update, because the
+check treats only `undefined`, `null` and blank strings as missing. Validate emptiness
+in application code until that lands (tracked in #9476). The representation guarantee
+above (`[]`, never `null`) is live.
+</Callout>
 
 ### `master_detail`
 
