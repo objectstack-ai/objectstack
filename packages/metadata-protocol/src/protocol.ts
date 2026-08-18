@@ -9244,7 +9244,18 @@ export class ObjectStackProtocolImplementation implements
     // Metadata Caching
     // ==========================================
 
-    async getMetaItemCached(request: { type: string, name: string, cacheRequest?: MetadataCacheRequest, locale?: string }): Promise<MetadataCacheResponse> {
+    /**
+     * [#9454] `organizationId` — the sole meta read verb that could not express
+     * an org, which is why the CACHED door (`view` and every org-overridable
+     * type that is not `dashboard`) served nothing back after a runtime `PUT`.
+     * Its siblings `getMetaItem` / `getMetaItems` / `getMetaItemLayered` have
+     * carried the member all along; this one hard-coded a two-key delegation
+     * and dropped whatever the caller knew. Threaded into `getMetaItem` below,
+     * so the ADR-0005 read order (`sys_metadata` org row → env-wide row →
+     * registry → MetadataService) is honoured at the same scope the caller
+     * named — the whole reason this method delegates rather than re-reading.
+     */
+    async getMetaItemCached(request: { type: string, name: string, cacheRequest?: MetadataCacheRequest, locale?: string, organizationId?: string }): Promise<MetadataCacheResponse> {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. The ETag
         // and the cache entry are keyed by type, so two spellings would cache
         // the same item twice and invalidate only one of them.
@@ -9253,7 +9264,18 @@ export class ObjectStackProtocolImplementation implements
             // Delegate to getMetaItem so the customization-overlay read order
             // (sys_metadata → registry → MetadataService) is honoured here too
             // (ADR-0005). Without this, cached reads silently bypass overlays.
-            const result = await this.getMetaItem({ type: request.type, name: request.name });
+            const result = await this.getMetaItem({
+                type: request.type,
+                name: request.name,
+                // [#9454] Spread, not an unconditional member: `getMetaItem`
+                // branches on `organizationId !== undefined`, so passing an
+                // explicit `undefined` is not the same statement as passing
+                // nothing. Mirrors the conditional-spread idiom the REST read
+                // doors use to reach here.
+                ...(request.organizationId !== undefined
+                    ? { organizationId: request.organizationId }
+                    : {}),
+            });
             const item = (result as any)?.item;
 
             if (!item) {
@@ -9284,8 +9306,36 @@ export class ObjectStackProtocolImplementation implements
             // carrying a stale-locale body — labels/headers stuck in the old
             // language until a hard refresh (issue #1319). Folding the resolved
             // locale into the hash gives each locale a distinct validator.
+            //
+            // [#9454] The ETag MUST also state the ORGANIZATION scope, and the
+            // mechanism differs from `locale` above in a way worth stating
+            // rather than glossing. `locale` is INVISIBLE to the hash (the body
+            // is translated AFTER this runs), so folding it in was the only way
+            // it could vary the validator at all. `organizationId` is VISIBLE —
+            // the org-resolved document is the very thing hashed — so two orgs
+            // whose overlays differ already get different validators, and no
+            // leak is claimed here: `Cache-Control` is `private, no-cache` and
+            // there is no server-side cache ENTRY keyed by type+name.
+            //
+            // It is folded in anyway because that makes the scope a DECLARED
+            // property of the validator instead of an emergent property of the
+            // body. Two orgs whose documents are byte-identical today share a
+            // validator by coincidence, not by statement; and any future path
+            // that resolves an org row but falls back to the env-wide body
+            // would answer a 304 pinning the caller to a wrong-scope document
+            // with nothing in the validator to show it. Prepended, and ONLY
+            // when present, so an org-less caller's validator stays byte-for-
+            // byte the one it is issued today.
             const content = JSON.stringify(item);
-            const hash = simpleHash(request.locale ? `${request.locale}\u0000${content}` : content);
+            const scope = [
+                request.organizationId ? `org:${request.organizationId}` : undefined,
+                request.locale || undefined,
+            ].filter((part): part is string => part !== undefined);
+            const hash = simpleHash(
+                scope.length > 0
+                    ? `${scope.join('\u0000')}\u0000${content}`
+                    : content,
+            );
             const etag = { value: hash, weak: false };
 
             // Check If-None-Match header

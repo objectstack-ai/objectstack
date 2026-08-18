@@ -221,25 +221,31 @@ export const TypographySchema = lazySchema(() => strictObject(
         base: z.string().optional().describe('Base font family (default: system fonts)'),
 
         heading: retiredKey(
-          '`theme.typography.fontFamily.heading` was removed in @objectstack/spec 17.0.0 (#5021, ADR-0049 D2) — it emitted `--font-heading`, which no objectui component or stylesheet reads, so headings always rendered in the base font stack. `base` is the ONE font-family key with a live consumer (it emits `--font-sans`) and is unchanged. Delete the key; if your own CSS reads the variable, declare it under `customVars` (`{ "font-heading": "Georgia, serif" }` emits exactly the same `--font-heading`). Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+          '`theme.typography.fontFamily.heading` was removed in @objectstack/spec 17.0.0 (#5021, ADR-0049 D2) — it emitted `--font-heading`, which no objectui component or stylesheet reads, so headings always rendered in the base font stack. `base` is the ONE font-family key with a live consumer (it emits `--font-sans`) and is unchanged. Delete the key; if your own CSS reads the variable, declare it under `customVars` (`{ "font-heading": "Georgia, serif" }` emits exactly the same `--font-heading`). '
+            + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
         ),
         mono: retiredKey(
-          '`theme.typography.fontFamily.mono` was removed in @objectstack/spec 17.0.0 (#5021, ADR-0049 D2) — it emitted `--font-mono`, which no objectui component or stylesheet reads, so code always rendered in the browser default monospace. `base` is the ONE font-family key with a live consumer (it emits `--font-sans`) and is unchanged. Delete the key; if your own CSS reads the variable, declare it under `customVars` (`{ "font-mono": "ui-monospace, monospace" }` emits exactly the same `--font-mono`). Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+          '`theme.typography.fontFamily.mono` was removed in @objectstack/spec 17.0.0 (#5021, ADR-0049 D2) — it emitted `--font-mono`, which no objectui component or stylesheet reads, so code always rendered in the browser default monospace. `base` is the ONE font-family key with a live consumer (it emits `--font-sans`) and is unchanged. Delete the key; if your own CSS reads the variable, declare it under `customVars` (`{ "font-mono": "ui-monospace, monospace" }` emits exactly the same `--font-mono`). '
+            + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
         ),
       },
     ).optional(),
 
     fontSize: retiredKey(
-      '`theme.typography.fontSize` was removed in @objectstack/spec 17.0.0 (#5021, ADR-0049 D2) — the engine emitted `--font-size-xs` … `--font-size-4xl` faithfully and NO first-party component or stylesheet has ever read one, so a declared type scale was real CSS that styled nothing. Delete the key; if your own CSS reads those variables, declare them under `customVars` (`{ "font-size-lg": "1.125rem" }` emits exactly the same `--font-size-lg`). Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+      '`theme.typography.fontSize` was removed in @objectstack/spec 17.0.0 (#5021, ADR-0049 D2) — the engine emitted `--font-size-xs` … `--font-size-4xl` faithfully and NO first-party component or stylesheet has ever read one, so a declared type scale was real CSS that styled nothing. Delete the key; if your own CSS reads those variables, declare them under `customVars` (`{ "font-size-lg": "1.125rem" }` emits exactly the same `--font-size-lg`). '
+        + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
     ),
     fontWeight: retiredKey(
-      '`theme.typography.fontWeight` was removed in @objectstack/spec 17.0.0 (#5021, ADR-0049 D2) — the engine emitted `--font-weight-*` and nothing read it, so text rendered at the inherited weight whatever you declared. Delete the key; if your own CSS reads those variables, declare them under `customVars` (`{ "font-weight-semibold": "600" }` emits exactly the same `--font-weight-semibold`). Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+      '`theme.typography.fontWeight` was removed in @objectstack/spec 17.0.0 (#5021, ADR-0049 D2) — the engine emitted `--font-weight-*` and nothing read it, so text rendered at the inherited weight whatever you declared. Delete the key; if your own CSS reads those variables, declare them under `customVars` (`{ "font-weight-semibold": "600" }` emits exactly the same `--font-weight-semibold`). '
+        + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
     ),
     lineHeight: retiredKey(
-      '`theme.typography.lineHeight` was removed in @objectstack/spec 17.0.0 (#5021, ADR-0049 D2) — the engine emitted `--line-height-*` and nothing read it, so every block kept its inherited leading. Delete the key; if your own CSS reads those variables, declare them under `customVars` (`{ "line-height-relaxed": "1.75" }` emits exactly the same `--line-height-relaxed`). Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+      '`theme.typography.lineHeight` was removed in @objectstack/spec 17.0.0 (#5021, ADR-0049 D2) — the engine emitted `--line-height-*` and nothing read it, so every block kept its inherited leading. Delete the key; if your own CSS reads those variables, declare them under `customVars` (`{ "line-height-relaxed": "1.75" }` emits exactly the same `--line-height-relaxed`). '
+        + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
     ),
     letterSpacing: retiredKey(
-      '`theme.typography.letterSpacing` was removed in @objectstack/spec 17.0.0 (#5021, ADR-0049 D2) — the engine emitted `--letter-spacing-*` and nothing read it, so tracking never moved. Delete the key; if your own CSS reads those variables, declare them under `customVars` (`{ "letter-spacing-wide": "0.025em" }` emits exactly the same `--letter-spacing-wide`). Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+      '`theme.typography.letterSpacing` was removed in @objectstack/spec 17.0.0 (#5021, ADR-0049 D2) — the engine emitted `--letter-spacing-*` and nothing read it, so tracking never moved. Delete the key; if your own CSS reads those variables, declare them under `customVars` (`{ "letter-spacing-wide": "0.025em" }` emits exactly the same `--letter-spacing-wide`). '
+        + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
     ),
   },
 ));
@@ -352,10 +358,12 @@ const THEME_RETIRED_KEY_GUIDANCE: Readonly<Record<string, string>> = {
  * does not make the tombstone redundant.
  */
 const THEME_ANIMATION_RETIRED =
-  '`theme.animation` was removed in @objectstack/spec 17.0.0 (#5021, ADR-0049 D2) — unlike the #3494 props above, the engine DID emit `--duration-*` and `--timing-*`, faithfully and for years; what never existed was a reader. No first-party component or stylesheet has ever consumed one, so every transition ran at the renderer default whatever you declared. Delete the key; if your own CSS reads those variables, declare them under `customVars` (`{ "duration-fast": "150ms", "timing-ease_in": "cubic-bezier(0.4, 0, 1, 1)" }` emits exactly the same properties). Run `os migrate meta --from 16` to rewrite existing sources automatically.';
+  '`theme.animation` was removed in @objectstack/spec 17.0.0 (#5021, ADR-0049 D2) — unlike the #3494 props above, the engine DID emit `--duration-*` and `--timing-*`, faithfully and for years; what never existed was a reader. No first-party component or stylesheet has ever consumed one, so every transition ran at the renderer default whatever you declared. Delete the key; if your own CSS reads those variables, declare them under `customVars` (`{ "duration-fast": "150ms", "timing-ease_in": "cubic-bezier(0.4, 0, 1, 1)" }` emits exactly the same properties). '
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
 const THEME_ZINDEX_RETIRED =
-  '`theme.zIndex` was removed in @objectstack/spec 17.0.0 (#5021, ADR-0049 D2) — the engine emitted `--z-base` … `--z-tooltip` and nothing read one, so an overlay you "lifted" still stacked by document order. Delete the key; if your own CSS reads those variables, declare them under `customVars` (`{ "z-modal": "1050" }` emits exactly the same `--z-modal`). Run `os migrate meta --from 16` to rewrite existing sources automatically.';
+  '`theme.zIndex` was removed in @objectstack/spec 17.0.0 (#5021, ADR-0049 D2) — the engine emitted `--z-base` … `--z-tooltip` and nothing read one, so an overlay you "lifted" still stacked by document order. Delete the key; if your own CSS reads those variables, declare them under `customVars` (`{ "z-modal": "1050" }` emits exactly the same `--z-modal`). '
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
 /**
  * Theme Configuration Schema

@@ -13,15 +13,45 @@ import { registerDatasourceAdminRoutes } from '../admin-routes.js';
  * service.
  */
 
+/**
+ * The credential every request in this file carries, and the fake `auth`
+ * service that admits it.
+ *
+ * This family requires authentication (#9391), so a fixture that presented no
+ * identity would answer 401 to every case below — a suite measuring the guard
+ * instead of the routing and failure-attribution it exists to measure. The
+ * guard itself has its own both-sides pin, `admin-routes-auth-guard.test.ts`;
+ * here an authenticated caller is the premise, not the subject.
+ */
+const SESSION = 'Bearer test-session';
+const authService = {
+  api: {
+    getSession: async ({ headers }: { headers: Headers }) =>
+      headers?.get?.('authorization') === SESSION ? { user: { id: 'u_test' } } : null,
+  },
+};
+
+/**
+ * Wrap a `getService` so `auth` resolves to the fake above and every other
+ * lookup keeps the behaviour the case under test wired — including throwing,
+ * which is what drives the resolver's catch arm.
+ */
+const withAuth = (getService: (name: string) => unknown) =>
+  vi.fn((name: string) => (name === 'auth' ? authService : getService(name)));
+
 const json = (path: string, init?: RequestInit) =>
   new Request(`http://local${path}`, {
     ...init,
-    headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
+    headers: {
+      'content-type': 'application/json',
+      authorization: SESSION,
+      ...(init?.headers ?? {}),
+    },
   });
 
 function mount(svc: unknown) {
   const server = new HonoHttpServer(0);
-  const ctx = { getService: vi.fn().mockReturnValue(svc) } as any;
+  const ctx = { getService: withAuth(() => svc) } as any;
   registerDatasourceAdminRoutes(server, ctx, '/api/v1');
   return server.getRawApp();
 }
@@ -37,7 +67,7 @@ function mount(svc: unknown) {
  */
 function mountServices(services: Record<string, unknown>) {
   const server = new HonoHttpServer(0);
-  const ctx = { getService: vi.fn((name: string) => services[name]) } as any;
+  const ctx = { getService: withAuth((name: string) => services[name]) } as any;
   registerDatasourceAdminRoutes(server, ctx, '/api/v1');
   return server.getRawApp();
 }
@@ -174,7 +204,7 @@ describe('registerDatasourceAdminRoutes (real HonoHttpServer)', () => {
     // this file returns `undefined` instead, so nothing else drives this branch.
     const server = new HonoHttpServer(0);
     const ctx = {
-      getService: vi.fn(() => {
+      getService: withAuth(() => {
         throw new Error('service "datasource-admin" is not registered');
       }),
     } as any;

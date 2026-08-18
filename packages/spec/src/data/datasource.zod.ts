@@ -58,7 +58,8 @@ const RETIRED_CAPABILITIES: Record<string, string> = {
     + 'Pushdown is decided by the runtime driver\'s own `supports.*` object, not by datasource '
     + 'metadata, so declaring a capability here never changed which engine path ran. Delete the '
     + 'block. If you wrote `readOnly: true`, read its note below — it did NOT make anything '
-    + 'read-only. Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    + 'read-only. '
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   readOnly:
     CAPABILITIES_REMOVED_PREFIX
     + '`readOnly` in particular NEVER made a datasource read-only: no write path consulted it, '
@@ -90,7 +91,8 @@ const RETIRED_DATASOURCE_BLOCKS: Record<string, string> = {
     + 'CAREFUL — do NOT "fix" this by renaming keys: `hook.retryPolicy` and `job.retryPolicy` ARE '
     + 'enforced, but they are a DIFFERENT key on a different type and spell the delay `backoffMs`, '
     + 'not `baseDelayMs`. Moving these values onto a hook or a job only makes sense if you '
-    + 'actually want that hook or job retried. Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    + 'actually want that hook or job retried. '
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   healthCheck:
     '`datasource.healthCheck` was removed in @objectstack/spec 17.0.0 (#4583, ADR-0049) — no '
     + 'health-check loop ever read it, so `enabled: true` scheduled nothing and the two timeouts '
@@ -98,18 +100,20 @@ const RETIRED_DATASOURCE_BLOCKS: Record<string, string> = {
     + '(`ping()` / `checkHealth()`), which the datasource admin service calls for "Test '
     + 'connection". The only recurring datasource timer is `external.validation.checkIntervalMs`, '
     + 'which checks SCHEMA DRIFT — a different concern, not a liveness probe. Delete the block. '
-    + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   externalLabel:
     '`external.label` was removed in @objectstack/spec 17.0.0 (#4583, ADR-0049) — nothing read '
     + "the federation block's own label. Use the datasource's TOP-LEVEL `label`, which is what "
-    + 'Setup → Datasources actually renders. Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    + 'Setup → Datasources actually renders. '
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   externalRequirePermission:
     '`external.requirePermission` was removed in @objectstack/spec 17.0.0 (#4583, ADR-0049) — no '
     + 'authorization check ever consulted it, so a permission named here gated nothing. Access to '
     + "a federated datasource's data is governed by the ordinary object permission sets and RLS, "
     + 'exactly as for a managed datasource. Naming a permission that is never required is the '
     + 'false-compliance shape ADR-0049 exists to remove — grant or withhold the object '
-    + 'permissions instead. Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    + 'permissions instead. '
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
 };
 
 /**
@@ -167,7 +171,7 @@ const RETIRED_READ_REPLICAS =
   + 'Delete the key. There is no read-replica routing to migrate to — if your database fronts '
   + 'its replicas behind one endpoint (pgpool, ProxySQL, an RDS reader endpoint), point '
   + '`config` at that endpoint, which is the only read-scaling path that works today. '
-  + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.';
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
 export const DriverType = z.string().describe('Underlying driver identifier');
 export type DriverType = z.input<typeof DriverType>;

@@ -22,26 +22,5 @@
     "Key format: `<package>|<file>|<kind>|<specifier>[|<symbol>]`. Run the checker to see the",
     "exact key it computes for a finding."
   ],
-  "entries": [
-    {
-      "id": "@objectstack/driver-sql|packages/drivers/driver-sql/README.md|import|@objectstack/spec|IDriver",
-      "why": "IDriver is not on @objectstack/spec's root entry — it is exported from @objectstack/spec/contracts. Wrong subpath, not a missing export."
-    },
-    {
-      "id": "@objectstack/mcp|packages/mcp/README.md|member|@objectstack/mcp|MCPServerPlugin.configure",
-      "why": "MCPServerPlugin is a REAL exported class (packages/mcp/src/plugin.ts:96) with no static `configure`. The #9532 shape at its worst: the import resolves, so only the call-site half can see it."
-    },
-    {
-      "id": "@objectstack/mcp|packages/mcp/README.md|import|@objectstack/driver-sql|DriverSql",
-      "why": "@objectstack/driver-sql exports `SqlDriver`. `DriverSql` has never existed, and the README then calls `DriverSql.configure({...})` on it."
-    },
-    {
-      "id": "@objectstack/objectql|packages/objectql/README.md|member|@objectstack/objectql|SchemaRegistry.registerObject",
-      "why": "registerObject is an INSTANCE method (`engine.registry.registerObject(...)`); the README calls it on the class. The import resolves, so only the call-site half can see it."
-    },
-    {
-      "id": "@objectstack/spec|packages/spec/README.md|import|@objectstack/spec/ai|MCPServerConfigSchema",
-      "why": "@objectstack/spec/ai exports `MCPServerRefSchema`; there is no `MCPServerConfigSchema`. This is the protocol package's own front page."
-    }
-  ]
+  "entries": []
 }

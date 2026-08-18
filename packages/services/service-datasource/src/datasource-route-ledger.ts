@@ -27,6 +27,15 @@
  * catalog, schema introspection — sat in the pre-#3563 posture: mounted,
  * working, and guarded by nothing.
  *
+ * That last clause was a live description of this family for as long as it
+ * stood here, and #7744 — which wrote it — added ledger rows rather than a
+ * guard. #9391 closed it: the registrar now applies the platform's shared
+ * anonymous-deny decision to all eleven routes before any of them dispatches,
+ * so every row below is reachable only by an authenticated caller. The
+ * sentence is kept rather than deleted because it is the reason the ledger
+ * exists — a mount style no ledger could see is how the posture went unnoticed
+ * — but it is history now, not the current posture.
+ *
  * WHAT #7744 ACTUALLY FOUND, and what it is NOT. The REST ledger carries five
  * `datasources` rows and every one of them is the FEDERATION family, spelled
  * `/api/v1/datasources/:name/external/…`. Read quickly that looks like the

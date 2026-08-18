@@ -388,8 +388,8 @@ const step16: MigrationStep = {
  * The three conversions are `retiredFromLoadPath` from the day they land: 17
  * gives the aliases no acceptance window at all, and each schema tombstones its
  * key with a fix-it error instead. This step is what makes that affordable —
- * `os migrate meta --from <N>` rewrites the consumer's source rather than
- * leaving them to hand-edit against a changelog.
+ * `os migrate meta --from <N>` lists the consumer's edits site by site rather
+ * than leaving them to hand-edit against a changelog.
  */
 const step17: MigrationStep = {
   toMajor: 17,
@@ -825,7 +825,7 @@ const step17: MigrationStep = {
     + 'default-true flags gated nothing), and the `.strict()` capabilities block rejects them '
     + 'with the prescription. This step registers the migration surface that removal was '
     + 'missing: stored 16.x rows replay clean instead of flagging `metadata_spec_invalid`, '
-    + 'and `os migrate meta --from 16` rewrites authored sources. Soft delete stays parked at '
+    + 'and `os migrate meta --from 16` lists the mechanical edits for authored sources. Soft delete stays parked at '
     + '#3146; if built it returns as a live enforced flag rather than by reviving these keys.\n\n'
     + 'The same enforce-or-remove pass retires the `RestServerConfig.openApi31` block (#4579): '
     + '`OpenApi31ExtensionsSchema` (`webhooks` / `callbacks` / `jsonSchemaDialect` / '

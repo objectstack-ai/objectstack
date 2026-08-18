@@ -5,7 +5,7 @@ Orchestrator implementing `IKnowledgeService` over pluggable
 — that's the job of adapter plugins (`knowledge-memory`,
 `knowledge-ragflow`, …).
 
-See [`content/docs/protocol/knowledge.mdx`](../../../content/docs/protocol/knowledge.mdx).
+See [Knowledge Protocol](https://docs.objectstack.ai/docs/protocol/knowledge).
 
 ## License
 

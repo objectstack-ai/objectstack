@@ -102,7 +102,7 @@
 
 import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** The docs site's `baseUrl` (apps/docs/lib/source.ts). */
@@ -685,8 +685,14 @@ async function main() {
   process.exit(report(findings, stats, 'apps/docs/redirects.mjs'));
 }
 
-if (process.argv.includes('--self-test')) {
-  await selfTest();
-} else {
-  await main();
+/* Run only when invoked as a program — `docsRelative`, `pageCandidates` and
+ * `firstMatchingSource` are exported so a sibling gate can ask "would Fumadocs
+ * serve this /docs/... URL?" without the import itself checking the redirect
+ * table (and calling `process.exit` out from under its caller). */
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  if (process.argv.includes('--self-test')) {
+    await selfTest();
+  } else {
+    await main();
+  }
 }

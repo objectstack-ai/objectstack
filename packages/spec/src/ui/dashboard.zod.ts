@@ -278,7 +278,7 @@ const COMPARE_TO_OFFSET_RETIRED =
   + "(`'7d'`, `'1M'`, …) there is no faithful one-key rewrite: state the window you want on the "
   + "widget's own `filter` and compare it with `previousPeriod`, which shifts by whatever length "
   + 'that window resolves to. '
-  + 'Run `os migrate meta --from 16` to rewrite the `1y` case automatically; the other durations '
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for the `1y` case; the other durations '
   + 'are reported for you to re-state.';
 
 // The two string arms. They parsed, and on a dataset widget they then did
@@ -292,7 +292,8 @@ const COMPARE_TO_STRING_RETIRED = (kind: 'previousPeriod' | 'previousYear') =>
   + `Write \`compareTo: { kind: '${kind}' }\` instead — same comparison, spelled the way the `
   + 'analytics executor actually reads it (`DatasetSelection.compareTo`). Add `dimension` only '
   + 'when the selection has more than one dated time dimension; with one, the executor resolves '
-  + 'it. Run `os migrate meta --from 16` to rewrite existing sources automatically.';
+  + 'it. '
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
 // ── Per-widget action button prescriptions (#5010) ───────────────────────────
 //
@@ -315,7 +316,7 @@ const WIDGET_ACTION_RETIRED = (key: 'actionUrl' | 'actionType' | 'actionIcon') =
   + '(`DashboardHeaderAction`, same vocabulary, and `icon` is the header spelling of '
   + '`actionIcon`). For a per-ROW affordance, the widget to reach for is a `table`/`pivot` '
   + 'bound to a dataset: its rows are clickable and drill through the semantic layer. '
-  + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.';
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
 /**
  * Dashboard Widget Schema
@@ -599,7 +600,7 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
     'The shared `ResponsiveConfig` shape is NOT gone — it stays live on `page.components[].responsive`, ' +
     'which objectui `useResponsiveConfig` really does read; move the layout there if you need ' +
     'breakpoint behaviour today. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
 
   // `aria` REMOVED (#5010, ADR-0049 D2): the same "false compliance" the
@@ -627,7 +628,7 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
     '`description`) on the widget instead — those ARE what the renderer labels the card with. ' +
     'The shared `AriaProps` shape is NOT gone: it stays live on `page.aria`, ' +
     '`page.components[].aria` and the list view `aria`. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   // ADR-0021 single-form: every widget binds a `dataset` and selects `values`
   // (both required above) — there is no inline-query shape to disambiguate.
@@ -917,13 +918,13 @@ export const DashboardSchema = lazySchema(() => strictObject({
     '`dashboard.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no ' +
     'dashboard renderer ever applied it, so declared ARIA attributes silently did not reach ' +
     'the DOM. Delete the key. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   performance: retiredKey(
     '`dashboard.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit ' +
     'close-out) — no renderer or runtime read it; dashboard performance tuning was never ' +
     'implemented. Delete the key. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package

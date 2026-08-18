@@ -126,6 +126,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, posix, resolve } from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
 // Anchored to the script, not to cwd: the verdict must not depend on where the
@@ -682,7 +683,20 @@ function freshRemedy() {
 // Run
 // ---------------------------------------------------------------------------
 
-function run() {
+/**
+ * THE published-markdown population, derived once for every gate that needs it.
+ *
+ * "Published" is `private` unset AND a non-empty `files` array AND the file
+ * matched by one of its patterns, minus `MARKDOWN_EXCLUDED`. That definition is
+ * load-bearing for more than one gate now, and two gates deriving it separately
+ * would disagree the first time a package's `files` array changed — silently,
+ * each still green. So it is computed HERE and imported, never re-derived.
+ *
+ * @param {string} [caller] gate name to attribute an empty-population error to
+ * @returns {{ members: {dir: string, manifest: any}[], byName: Map<string, any>,
+ *             docs: {pkg: string, file: string, text: string}[] }}
+ */
+export function publishedDocs(caller = SELF) {
   const members = workspaceDirs().map((dir) => ({
     dir,
     manifest: JSON.parse(readFileSync(join(ROOT, dir, 'package.json'), 'utf8')),
@@ -703,9 +717,16 @@ function run() {
       });
     }
   }
+  // A scan that read nothing is the #4690 failure: indistinguishable from a
+  // clean tree in the output, and green either way. Never a skip.
   if (docs.length === 0) {
-    throw new Error(`${SELF}: no published markdown found — the scan read nothing (#4690).`);
+    throw new Error(`${caller}: no published markdown found — the scan read nothing (#4690).`);
   }
+  return { members, byName, docs };
+}
+
+function run() {
+  const { byName, docs } = publishedDocs();
 
   // Pass 1: which workspace type entries do the READMEs actually reach?
   const targets = new Map(); // "<name><subpath>" -> { name, subpath, abs, declared, missing }
@@ -1187,14 +1208,18 @@ function selfTest() {
   );
 }
 
-if (process.argv.includes('--self-test')) {
-  selfTest();
-  process.exit(0);
-}
-
-try {
-  process.exit(run());
-} catch (err) {
-  console.error(`✗ check:published-readme-exports — ${err.message}`);
-  process.exit(1);
+/* Run only when invoked as a program — `publishedDocs` and the extractors are
+ * exported so a sibling gate can reuse this gate's population without the
+ * import itself building a TypeScript program and sweeping the workspace. */
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  if (process.argv.includes('--self-test')) {
+    selfTest();
+    process.exit(0);
+  }
+  try {
+    process.exit(run());
+  } catch (err) {
+    console.error(`✗ check:published-readme-exports — ${err.message}`);
+    process.exit(1);
+  }
 }

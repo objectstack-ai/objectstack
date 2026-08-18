@@ -51,7 +51,7 @@ The `type` field selects how an action is dispatched. The complete enum is **`sc
 | `api` | Call an API endpoint (`method` defaults to `POST`). | Yes |
 | `form` | Open a FormView by name, routed to `/_console/forms/:name` **inside the console shell**; the submit lands on the created record. | Yes |
 
-`target` is the canonical binding for every non-`script` type, and since protocol 17 it is the **only** one. The deprecated `execute` alias was removed (#3855): authoring it is rejected with an error naming the replacement, not silently stripped. Run `os migrate meta --from 16` to rewrite existing sources automatically — the removal also ships in the machine-readable change manifest (`spec-changes.json`), which composes across however many majors you are jumping.
+`target` is the canonical binding for every non-`script` type, and since protocol 17 it is the **only** one. The deprecated `execute` alias was removed (#3855): authoring it is rejected with an error naming the replacement, not silently stripped. Run `os migrate meta --from 16` to list the mechanical edits for existing sources, then apply them by hand — the removal also ships in the machine-readable change manifest (`spec-changes.json`), which composes across however many majors you are jumping.
 
 ### Script Actions
 
