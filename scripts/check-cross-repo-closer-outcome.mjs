@@ -56,7 +56,12 @@
 // ## What is asserted, and what is deliberately not
 //
 // Asserted: the target parse (which keyword spellings qualify, which forms do
-// not, that a same-repo reference is skipped), and the OUTCOME of every exit --
+// not, that a same-repo reference is skipped), the target KIND (#9711: a pull
+// request is also an issue to `issues.get`, so `owner/repo#N` naming a PR
+// reaches the loop like anything else -- the scenarios pin that it is REFUSED
+// rather than closed, and that the refusal happens before the already-closed
+// branch can leave a comment on somebody else's pull request), and the OUTCOME
+// of every exit --
 // which of `core.setFailed` / `core.warning` / a job summary fires, and which
 // API calls were made. Those are the properties both cards are about.
 //
@@ -198,7 +203,21 @@ function makeDoubles({ body, token, issues = {}, prCommentError = null, summaryE
       // `state_reason` is nullable on a real closed issue -- objectui#4478
       // answers `null` from this very endpoint -- so the default models that
       // rather than inventing a value the API does not promise.
-      return { data: { state: t.state ?? 'open', state_reason: t.stateReason ?? null } };
+      //
+      // `pull_request` is how the same endpoint says the number is a PULL
+      // REQUEST, and it is modelled as ABSENCE rather than as `undefined`
+      // because that is what was measured: objectstack-ai/objectstack#9716 (a
+      // PR) answers `{ url, html_url, diff_url, patch_url, merged_at }`, and
+      // #9711 (an issue) carries no such key at all. A fixture that always
+      // spelled the key would let a truthiness test pass here that the real
+      // API would fail. (#9711)
+      return {
+        data: {
+          state: t.state ?? 'open',
+          state_reason: t.stateReason ?? null,
+          ...(t.pullRequest ? { pull_request: t.pullRequest } : {}),
+        },
+      };
     },
     async listComments({ owner, repo, issue_number: n }) {
       const key = `${owner}/${repo}#${n}`;
@@ -384,6 +403,27 @@ const FOREIGN = ['objectstack-ai/objectui#456', 'my-org/some.repo#22', 'third/pa
 
 /** The target the already-closed scenarios (L2, L6-L9) work on. */
 const CLOSED_TARGET = 'objectstack-ai/objectui#456';
+
+/** The target the PULL REQUEST scenarios (L12, L13) work on (#9711). */
+const PR_TARGET = 'my-org/some.repo#22';
+
+/**
+ * The `pull_request` key GitHub returns when an issue number is a pull request.
+ *
+ * Copied from a real response rather than invented: `GET /repos/
+ * objectstack-ai/objectstack/issues/9716` answers exactly these five fields,
+ * and `.../issues/9711` -- an issue -- answers with the key absent. The loop
+ * reads only its truthiness, but the shape is pinned so that a change in what
+ * the script reads out of it (`html_url` reaches the job summary) fails here
+ * instead of printing `undefined` into somebody's run.
+ */
+const PR_KEY = {
+  url: 'https://api.github.com/repos/my-org/some.repo/pulls/22',
+  html_url: 'https://github.com/my-org/some.repo/pull/22',
+  diff_url: 'https://github.com/my-org/some.repo/pull/22.diff',
+  patch_url: 'https://github.com/my-org/some.repo/pull/22.patch',
+  merged_at: null,
+};
 const PR_URL = 'https://github.com/objectstack-ai/objectstack/pull/1234';
 
 /**
@@ -730,6 +770,84 @@ export const SCENARIOS = [
       t(r.log.warning.length === 0, 'L11 run 2 warns about nothing -- an idempotent re-run is a normal outcome'),
     ],
   },
+  {
+    id: 'L12',
+    name: 'the target is an OPEN pull request -- refused out loud, never closed (#9711)',
+    scenario: () => ({
+      body: MIXED_BODY,
+      token: 'pat',
+      issues: { [PR_TARGET]: { state: 'open', pullRequest: PR_KEY } },
+    }),
+    check: (r, t) => [
+      t(r.calls.get.includes(PR_TARGET), 'L12 reads the target -- the kind is only knowable from the response'),
+      t(
+        !r.calls.update.some((u) => u.key === PR_TARGET),
+        "L12 does NOT close the pull request -- GitHub's own keyword parser never closes one, and this "
+          + 'workflow exists to carry that behaviour across repos, not to exceed it. A closed PR also loses '
+          + 'its merge-queue membership and any armed auto-merge in the same step, and neither returns by itself',
+      ),
+      t(!r.calls.comment.some((c) => c.key === PR_TARGET), 'L12 posts nothing on the foreign pull request either'),
+      t(
+        !r.calls.list.includes(PR_TARGET),
+        'L12 does not even list its comments -- the target KIND settles it before idempotency can matter',
+      ),
+      t(
+        r.log.warning.some((w) => w.message.includes(PR_TARGET) && /PULL REQUEST/.test(w.message)),
+        'L12 ANNOUNCES the refusal and names the target -- a quiet `continue` here would have been the '
+          + "eleventh silent exit in a file whose ten known ones were each found by somebody reading it",
+      ),
+      t(
+        r.log.failed.length === 1,
+        `L12 fails the job: the merged body declares a close that can never fire, and this run is the only `
+          + `thing that will ever know; got ${r.log.failed.length}`,
+      ),
+      t((r.log.failed[0] ?? '').includes(PR_TARGET), 'L12 setFailed names the malformed target'),
+      t(
+        !/re-run this job once the cause is cleared/.test(r.log.failed[0] ?? ''),
+        'L12 verdict does not send the reader to re-run -- unlike every other red path here the refusal is '
+          + 'deterministic, and only the PR body can change it',
+      ),
+      t((r.log.summary[0] ?? '').includes(PR_TARGET), 'L12 summary carries it too, with the PR url'),
+      t(r.calls.update.length === 2, `L12 still closes the other two targets -- isolation holds; got ${r.calls.update.length}`),
+      t(r.threw === null, 'L12 does not let anything escape the script'),
+    ],
+  },
+  {
+    id: 'L13',
+    name: 'the target is a MERGED pull request -- refused BEFORE the already-closed branch comments on it (#9711)',
+    scenario: () => ({
+      body: MIXED_BODY,
+      token: 'pat',
+      // A merged pull request answers `state: 'closed'` with
+      // `state_reason: null` from the issues endpoint -- measured on
+      // objectstack-ai/objectstack#9143. That is the very fixture L9 uses to
+      // prove a closed ISSUE gets its backlink, which makes this scenario the
+      // ORDERING test: a `pull_request` guard placed after the state branch
+      // would sail past it and comment on somebody else's pull request.
+      issues: {
+        [PR_TARGET]: {
+          state: 'closed',
+          stateReason: null,
+          comments: [],
+          pullRequest: { ...PR_KEY, merged_at: '2026-08-16T14:56:58Z' },
+        },
+      },
+    }),
+    check: (r, t) => [
+      t(
+        !r.calls.comment.some((c) => c.key === PR_TARGET),
+        'L13 leaves NO backlink on a merged pull request -- the path L9 pins for a closed issue must not be reached here',
+      ),
+      t(
+        !r.calls.list.includes(PR_TARGET),
+        'L13 never reaches the idempotency check, which is what proves the kind guard runs FIRST',
+      ),
+      t(!r.calls.update.some((u) => u.key === PR_TARGET), 'L13 does not touch its state'),
+      t(r.log.failed.length === 1, `L13 fails the job for the same reason L12 does, got ${r.log.failed.length}`),
+      t((r.log.failed[0] ?? '').includes(PR_TARGET), 'L13 setFailed names it'),
+      t(r.calls.update.length === 2, `L13 still closes the other two, got ${r.calls.update.length}`),
+    ],
+  },
 ];
 
 // ── The battery ─────────────────────────────────────────────────────────────
@@ -850,9 +968,11 @@ const MUTATIONS = [
   {
     id: 'M1',
     what: 'the post-loop verdict is downgraded back to a warning (the #9595 defect, restored)',
-    from: 'core.setFailed(\n  `${failures.length} of ${targets.size}',
-    to: 'core.warning(\n  `${failures.length} of ${targets.size}',
-    expect: ['L3', 'L4', 'L5'],
+    from: "core.setFailed(verdict.join(' '));",
+    to: "core.warning(verdict.join(' '));",
+    // Since #9711 the verdict carries both red classes, so this one mutation
+    // now has to be caught by an API refusal AND by a malformed target.
+    expect: ['L3', 'L4', 'L5', 'L12', 'L13'],
   },
   {
     id: 'M2',
@@ -921,6 +1041,27 @@ const MUTATIONS = [
     from: 'failures.push({ key, reason, lost });',
     to: 'failures.push({ key, reason });',
     expect: ['L10'],
+  },
+  {
+    id: 'M12',
+    what: 'the pull-request guard is dropped, so a keyword aimed at a foreign PR comments on it and CLOSES it (#9711)',
+    from: 'if (issue.pull_request) {',
+    to: 'if (false) {',
+    expect: ['L12', 'L13'],
+  },
+  {
+    id: 'M13',
+    what: 'a refused pull-request target stops being recorded, so the run refuses it and still reports green',
+    from: 'malformed.push({ key, url: issue.pull_request.html_url });',
+    to: '',
+    expect: ['L12', 'L13'],
+  },
+  {
+    id: 'M14',
+    what: 'the refusal is downgraded to an info line, so nothing annotates the run it happened in',
+    from: 'core.warning(\n        `${key} is a PULL REQUEST',
+    to: 'core.info(\n        `${key} is a PULL REQUEST',
+    expect: ['L12'],
   },
   {
     id: 'M7',
