@@ -234,3 +234,89 @@ describe('DbJobAdapter — kernel rebuild (#8362)', () => {
     await rebuilt.db.destroy();
   });
 });
+
+// ─── #9631 — `recordRuns`, the flag two published `.d.ts` comments describe ──
+//
+// Until this block, NOTHING in this package referenced `recordRuns` in either
+// direction: not that `true` writes a row, not that `false` writes none, not
+// that the default is `true`. The class JSDoc and the field JSDoc both describe
+// the flag to every npm consumer through the emitted `index.d.ts`, and both
+// were free to drift from the code — which is exactly what #9611 and #9631
+// each found one of. These cases exist so the sentences stop being unenforced.
+//
+// The discriminator is case 2: it asserts the execution REALLY RAN (the handler
+// fired and `sys_job.run_count` bumped) and that no row was written anyway.
+// Without that half, "0 rows" would also pass for a job that never fired, which
+// is the way a test like this goes quietly blind.
+describe('DbJobAdapter — recordRuns (#9631)', () => {
+  const adapters: DbJobAdapter[] = [];
+  const build = (options?: { recordRuns?: boolean }) => {
+    const engine = makeFakeEngine();
+    const adapter = new DbJobAdapter({ engine, options });
+    adapters.push(adapter);
+    return { engine, adapter };
+  };
+  afterEach(async () => {
+    while (adapters.length) await adapters.pop()!.destroy();
+  });
+
+  it('defaults to true: a triggered execution writes one sys_job_run row', async () => {
+    const { engine, adapter } = build(); // no options at all — the documented default
+    await adapter.schedule('d', { type: 'cron', expression: '* * * * *' }, async () => {});
+    await adapter.trigger('d');
+    expect(engine.tables.get('sys_job_run') ?? []).toHaveLength(1);
+  });
+
+  it('recordRuns: false writes NO sys_job_run row, though the execution really ran', async () => {
+    const { engine, adapter } = build({ recordRuns: false });
+    let ran = 0;
+    await adapter.schedule('off', { type: 'cron', expression: '* * * * *' }, async () => { ran++; });
+    await adapter.trigger('off');
+
+    expect(ran, 'the handler must actually have run — otherwise "no rows" proves nothing').toBe(1);
+    expect(engine.tables.get('sys_job_run') ?? []).toHaveLength(0);
+  });
+
+  it('recordRuns: false does NOT gate the sys_job counters — only the per-attempt rows', async () => {
+    // The class JSDoc's fourth bullet: `bumpJob` is called from `settle`
+    // outside the `if (run.id)` guard, so the job row is updated either way.
+    const { engine, adapter } = build({ recordRuns: false });
+    await adapter.schedule('c', { type: 'cron', expression: '* * * * *' }, async () => {
+      throw new Error('boom');
+    });
+    await adapter.trigger('c');
+
+    const job = (engine.tables.get('sys_job') ?? [])[0];
+    expect(job.last_status).toBe('failed');
+    expect(job.run_count).toBe(1);
+    expect(job.failure_count).toBe(1);
+    expect(engine.tables.get('sys_job_run') ?? []).toHaveLength(0);
+  });
+
+  it('recordRuns: true is the same as the default', async () => {
+    const { engine, adapter } = build({ recordRuns: true });
+    await adapter.schedule('on', { type: 'cron', expression: '* * * * *' }, async () => {});
+    await adapter.trigger('on');
+    const runs = engine.tables.get('sys_job_run') ?? [];
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ job_name: 'on', trigger: 'schedule', status: 'success' });
+  });
+
+  it("replay() writes its synthetic row even when recordRuns is false — the exception the JSDoc names", async () => {
+    // This pins TODAY'S behaviour, which is what the class JSDoc now states;
+    // it is not an endorsement of it. #9633 holds the open disposition on
+    // whether `replay()` should honour the flag. If that lands, this case and
+    // the class-JSDoc bullet it mirrors change together — which is the whole
+    // point of writing it down here: the sentence cannot go stale in silence
+    // again.
+    const { engine, adapter } = build({ recordRuns: false });
+    await adapter.schedule('rp', { type: 'cron', expression: '* * * * *' }, async () => {});
+    await adapter.replay('rp');
+
+    const runs = engine.tables.get('sys_job_run') ?? [];
+    // Exactly one: the synthetic replay row. The wrapped execution the replay
+    // drives underneath it is gated by the flag and writes nothing.
+    expect(runs.map((r) => r.trigger)).toEqual(['replay']);
+    expect(runs[0].status).toBe('success');
+  });
+});
