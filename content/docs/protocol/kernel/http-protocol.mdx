@@ -1216,7 +1216,7 @@ declaration to shadow a built-in route:
 | Endpoint declares | Answer |
 |:---|:---|
 | `type: 'object_operation'` | delegated to the same `callData` binding that serves `/api/v1/data/{object}` — byte-identical `data` |
-| `type: 'flow'` | delegated to the same automation pipeline as `POST /api/v1/automation/{name}/trigger` |
+| `type: 'flow'` | delegated to the same automation pipeline as `POST /api/v1/automation/{name}/trigger` — the same execution context builder and the same `execute` call, so the run itself is identical. **The response is not**: the trigger route classifies a refused or failed run into real status codes (404 / 409 `FLOW_DISABLED` / 422 `FLOW_NO_START_NODE` / 400 `FLOW_FAILED`), while this seam still answers `200` with the result in `data` for every outcome ([#9446](https://github.com/objectstack-ai/objectstack/issues/9446)). Read `data.success` here, not the status |
 | `authRequired: true` (or omitted) + anonymous caller | `401` `UNAUTHENTICATED`, the same envelope every seam answers |
 | `rateLimit` armed and exhausted | `429` + `Retry-After`, never with a cache directive |
 | `cacheTtl: 30` on a successful GET | `Cache-Control: private, max-age=30` — `private` is a security rule, not tuning: any response can be RLS-trimmed |

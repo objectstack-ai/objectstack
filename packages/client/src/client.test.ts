@@ -1425,6 +1425,68 @@ describe('ObjectStackClient.automation', () => {
         expect(err.message).toContain('no_such_flow');
     });
 
+    // [#9415] The ruling's remaining two rows, mirrored on the SDK because the
+    // SDK is where the distinction is consumed. Both are NEVER-DISPATCHED
+    // refusals: nothing ran, nothing was written, and a caller that retries a
+    // 422 is retrying an authoring defect. `err.code` is what a caller branches
+    // on — a pin asserting only that the promise rejected would stay green if
+    // both refusals collapsed onto one status, which is the whole thing the two
+    // new union members exist to prevent.
+    //
+    // Both spellings are pinned again for the reason the FLOW_FAILED pins give:
+    // `trigger()` reads `res.json()` while `execute()` reads `unwrapResponse()`,
+    // so a regression in either unwrap path is invisible from the other's test.
+    it('should reject with 409 FLOW_DISABLED when the flow is switched off (legacy trigger)', async () => {
+        const { client } = createMockClient({
+            success: false,
+            error: { code: 'FLOW_DISABLED', message: "Flow 'welcome_flow' is disabled", httpStatus: 409 },
+        }, 409);
+
+        const err: any = await client.automation
+            .trigger('welcome_flow', {})
+            .then(() => { throw new Error('expected the disabled flow to reject'); }, (e) => e);
+
+        expect(err.code).toBe('FLOW_DISABLED');
+        expect(err.httpStatus).toBe(409);
+        expect(err.message).toContain('is disabled');
+        // Not a failed RUN: the operator's remedy is to enable the flow, and
+        // FLOW_FAILED would send them to look at a run that never existed.
+        expect(err.code).not.toBe('FLOW_FAILED');
+    });
+
+    it('should reject with 422 FLOW_NO_START_NODE when the definition cannot run', async () => {
+        const { client } = createMockClient({
+            success: false,
+            error: { code: 'FLOW_NO_START_NODE', message: 'Flow has no start node', httpStatus: 422 },
+        }, 422);
+
+        const err: any = await client.automation
+            .execute('startless_flow', {})
+            .then(() => { throw new Error('expected the startless flow to reject'); }, (e) => e);
+
+        expect(err.code).toBe('FLOW_NO_START_NODE');
+        expect(err.httpStatus).toBe(422);
+        expect(err.message).toContain('no start node');
+        expect(err.code).not.toBe('FLOW_FAILED');
+    });
+
+    it('should keep the two never-dispatched refusals distinguishable from each other', async () => {
+        // One member per condition is the point of the #9415 widening; a caller
+        // deciding "retry after enabling" vs "fix the definition" reads exactly
+        // this difference.
+        const disabled: any = await createMockClient({
+            success: false,
+            error: { code: 'FLOW_DISABLED', message: 'x', httpStatus: 409 },
+        }, 409).client.automation.execute('f', {}).then(() => null, (e) => e);
+        const startless: any = await createMockClient({
+            success: false,
+            error: { code: 'FLOW_NO_START_NODE', message: 'x', httpStatus: 422 },
+        }, 422).client.automation.execute('f', {}).then(() => null, (e) => e);
+
+        expect(disabled.code).not.toBe(startless.code);
+        expect(disabled.httpStatus).not.toBe(startless.httpStatus);
+    });
+
     it('should still resolve when a triggered flow succeeds', async () => {
         // The other half of the contract: a successful dispatch is untouched,
         // including the paused screen-flow shape the runner drives.

@@ -27,7 +27,7 @@ const result = ApiErrorSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +283 more>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +285 more>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
 | **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
 | **message** | `string` | ✅ | Readable error message |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
@@ -179,7 +179,9 @@ const result = ApiErrorSchema.parse(data);
 * `FILE_NOT_FOUND`
 * `FILTER_TOKEN_UNKNOWN`
 * `FILTER_TOKEN_UNRESOLVED`
+* `FLOW_DISABLED`
 * `FLOW_FAILED`
+* `FLOW_NO_START_NODE`
 * `FORBIDDEN`
 * `FORM_NOT_FOUND`
 * `FORM_RESOLVE_FAILED`

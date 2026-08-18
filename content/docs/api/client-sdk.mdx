@@ -385,6 +385,17 @@ await client.i18n.getFieldLabels('account', 'zh-CN');
 // Automation — Trigger workflows and automations
 await client.automation.trigger('send_welcome_email', { userId });
 
+// A flow that does not run REJECTS — it does not resolve with an inner
+// `{ success: false }`. Branch on `err.code`, not on the resolved value:
+try {
+  await client.automation.execute('order_approval', { params: { orderId } });
+} catch (err) {
+  err.httpStatus;             // 409 | 422 | 400 | 404
+  err.code;                   // 'FLOW_DISABLED' | 'FLOW_NO_START_NODE' | 'FLOW_FAILED'
+  err.details?.errorMessage;  // the flow author's own text, on a FLOW_FAILED
+  err.details?.summary;       // which node failed, on a FLOW_FAILED
+}
+
 // Screen flows pause for user input instead of completing. `execute()` returns
 // `{ status: 'paused', runId, screen }`; render the screen, then resume the run
 // with the collected values. A wizard pauses again for each further step.
