@@ -290,7 +290,22 @@ export default class MigrateMeta extends Command {
 
     try {
       if (!flags.json) printStep('Loading configuration…');
-      const { config, absolutePath } = await loadConfig(args.config);
+      // `authoredSource`: read the config as the author WROTE it, not as the
+      // current schema would have it (#9418). A retired key is a `retiredKey()`
+      // tombstone — the schema rejects it rather than stripping it — and a real
+      // config runs that schema itself: `os init` scaffolds
+      // `export default defineStack({ … })`, and every `define*` helper is a
+      // `Schema.parse()`. So the refusal used to happen while the config module
+      // was being EVALUATED, inside the load, before this command reached its
+      // first conversion — leaving the codemod unable to open the one input
+      // class it exists for, while the message it printed was the prescription
+      // telling the author to run it.
+      //
+      // This is where "convert before validating" has to land, because the CLI
+      // has no validation step of its own to move: the load is tolerant, and
+      // the schema verdict is taken below on the MIGRATED stack instead
+      // (`schemaValid`), which is the stack the author is being asked to adopt.
+      const { config, absolutePath } = await loadConfig(args.config, { authoredSource: true });
 
       // Map→array normalization ONLY (convert:false): the chain must replay the
       // conversions itself against the raw authored source so each rewrite is
