@@ -753,8 +753,16 @@ export const FieldSchema = lazySchema(() => strictObject({
   // a custom column name was silently ignored. External/federated objects map
   // physical columns via `external.columnMap` (ADR-0062 D7 / ADR-0015).
 
-  /** Write contract (ADR-0113 — NOT a column constraint; see `storage.notNull`) */
-  required: z.boolean().default(false).describe('Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field.'),
+  /**
+   * Write contract (ADR-0113 — NOT a column constraint; see `storage.notNull`).
+   *
+   * On a multi-value lookup (`multiple: true`), `required` means NON-EMPTY
+   * array: an emptied required set fails validation loudly — `[]` does not
+   * satisfy `required` (#9447, maintainer ruling 2026-08-18). The empty set is
+   * always representable (it reads back as `[]`, never `null` — see
+   * `multiple`), so the required check judges emptiness, not absence.
+   */
+  required: z.boolean().default(false).describe('Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. On a multi-value lookup (`multiple: true`) required means NON-EMPTY array — an emptied required set fails validation loudly; `[]` does not satisfy it (#9447, maintainer ruling 2026-08-18). NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field.'),
 
   /**
    * Physical storage constraints (ADR-0113). Deliberately separate from the
@@ -772,7 +780,17 @@ export const FieldSchema = lazySchema(() => strictObject({
   }).strict().optional().describe('Physical storage constraints (ADR-0113). Owns the DDL the write contract deliberately does not imply. Absent = no storage-level constraint requested.'),
 
   searchable: z.boolean().default(false).describe('Is searchable'),
-  multiple: z.boolean().default(false).describe('Allow multiple values (Stores as Array/JSON). Applicable for select, lookup, file, image.'),
+  /**
+   * Multi-value empty representation (#9447, maintainer ruling 2026-08-18):
+   * an emptied multi-value lookup reads back as `[]`, never `null`. This
+   * binds the field's empty representation for EVERY writer — cascade repair
+   * (`set_null` member removal), form clears, API writes — not as a
+   * cascade-only convention: an array field always reads as an array, so
+   * readers (generated code, formula/filter predicates) never need a null
+   * branch. Same ruling: `required` on a multi-value lookup means non-empty
+   * array (see `required` above).
+   */
+  multiple: z.boolean().default(false).describe('Allow multiple values (Stores as Array/JSON). Applicable for select, lookup, file, image. An emptied multi-value lookup reads back as `[]`, never `null` — the rule binds every writer (cascade repair, form clears, API writes), not just cascade repair (#9447, maintainer ruling 2026-08-18).'),
   // `true` = unique WITHIN the tenant on a tenant-scoped object (composite
   // `(tenantField, field)` index); `'global'` = platform-wide single-column
   // unique. See {@link UniqueScopeSchema} for the scope vocabulary (ADR-0120).
