@@ -363,6 +363,19 @@ export const RETIRED_CONTEXT_NAMES = [
     // 'Lint & Repo Gates' itself; the completion notice below says when.
     renameInFlight: true,
   },
+  {
+    // Not a rename — the CHECK itself retired (2026-08-18 ruling: a human
+    // merge IS the review record for a governed surface; detection moved to
+    // the post-merge audit, scripts/pm/check-governed-merges.mjs — the
+    // registry's removal note above carries the two-step provenance). No
+    // budgets: no instruction surface named it when this row was written, so
+    // the row is purely the standing ban on writing the dead name fresh.
+    name: 'ADR maintainer approval',
+    replacedBy: null,
+    authorized:
+      'maintainer ruling 2026-08-18 (「同意。」 on the retirement package); registry row removed in the same PR, ' +
+      'Settings half attested by the maintainer the same day',
+  },
 ];
 
 /** Repository root, resolved from this file rather than from the cwd. */
