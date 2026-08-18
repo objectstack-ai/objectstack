@@ -150,14 +150,17 @@ function makeManualTimers(): ReadAuditTimers & { run(): void; armed(): boolean }
   };
 }
 
+/** Owning package for the harness objects — `registerObject` requires one. */
+const HARNESS_PACKAGE = 'com.objectstack.audit.test';
+
 async function makeEngine() {
   const engine = new ObjectQL();
   const { driver } = makeStubDriver();
   engine.registerDriver(driver, true);
   await engine.init();
-  engine.registry.registerObject(contactObject as any);
-  engine.registry.registerObject(invoiceObject as any);
-  engine.registry.registerObject(auditLogObject as any);
+  engine.registry.registerObject(contactObject as any, HARNESS_PACKAGE);
+  engine.registry.registerObject(invoiceObject as any, HARNESS_PACKAGE);
+  engine.registry.registerObject(auditLogObject as any, HARNESS_PACKAGE);
   return engine;
 }
 
