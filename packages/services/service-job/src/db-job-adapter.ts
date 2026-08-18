@@ -31,7 +31,19 @@ export interface JobLoggerLike {
 export interface DbJobAdapterOptions {
   /** Maximum executions kept in memory per job (default 100) */
   maxExecutions?: number;
-  /** Soft cap on sys_job_run rows recorded per job (defaults to none — handled by retention jobs) */
+  /**
+   * Record each scheduled or triggered execution as a `sys_job_run` row —
+   * inserted at the start of every attempt and updated to its terminal status
+   * when that attempt settles. Default **`true`**.
+   *
+   * This is an on/off switch for run history, NOT a retention cap: setting it to
+   * `false` means no per-attempt rows are written at all, so `sys_job_run` holds
+   * nothing for these executions and `listExecutionsByStatus` has nothing to
+   * read. Two things are unaffected either way — the `sys_job` row's own
+   * `last_status` / `run_count` / `failure_count` counters, and
+   * {@link DbJobAdapter.replay}, which writes its synthetic `trigger: 'replay'`
+   * row regardless of this flag.
+   */
   recordRuns?: boolean;
 }
 
