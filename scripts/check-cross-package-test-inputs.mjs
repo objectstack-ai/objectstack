@@ -96,6 +96,17 @@ const CROSS_PACKAGE_TEST_INPUTS = {
       'content/docs/references/**',
       // scripts/dist-freshness.test.ts stages a fixture around the root scripts dir
       'scripts/**',
+      // `serve.ts` is named in a comment rather than read, the same shape as
+      // `check-nul-bytes.mjs` / `sync-template-versions.mjs` / the realtime
+      // protocol page below, and settled the same way: the literal collector
+      // takes quoted paths without parsing, so a mention forces a declaration,
+      // and declaring the file is cheaper than rewording prose to dodge the
+      // scanner. scripts/publish-smoke-port-collision.test.ts cites it for the
+      // measurement that justifies its whole existence — `serve.ts` auto-shifts
+      // off a busy port whenever `flags.dev` is set, which is the only reason
+      // publish-smoke.sh cannot trust the port it asked for. One file, not the
+      // commands tree: the test reads publish-smoke.sh and nothing else.
+      'packages/cli/src/commands/serve.ts',
       // scripts/liveness/evidence.test.ts resolves the evidence paths the
       // liveness ledgers cite, so those files' existence is a spec input.
       'packages/runtime/src/**',
