@@ -33,6 +33,7 @@
     "ui/Action:name",
     "ui/Action:newTabUrl",
     "ui/Action:objectName",
+    "ui/Action:onSuccess",
     "ui/Action:openIn",
     "ui/Action:opensInNewTab",
     "ui/Action:order",
