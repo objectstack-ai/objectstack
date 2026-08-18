@@ -83,7 +83,29 @@ export type CodeStampShape =
      * (`${…}` → `*`, e.g. `APPROVAL_*_FAILED`) and a row must classify it. The
      * only verdict that can honestly cover a family is `runtime-pinned`.
      */
-    | 'objlittemplate';
+    | 'objlittemplate'
+    /**
+     * [#9460] `err.code = CONST` — the assign position's constant sibling, and
+     * the last of the four stamp positions to get one. #9223 closed exactly
+     * this gap for object literals; the assign position kept it, so
+     * `err.code = DENY_CODE` matched NOTHING and was not reported as
+     * unresolved either.
+     */
+    | 'assignconst'
+    /**
+     * [#9460] The stamp inside a CODE-CARRYING HELPER: a file declares one
+     * factory — `postureError(code, message)`, `makeError(status, code,
+     * message)`, a `constructor(code, message)` — and throws through it
+     * everywhere. The stamp `(err as any).code = code` knows the token `code`
+     * but not the value; the CALL SITE knows the value and never writes the
+     * token. Every pattern in `check:dispatcher-error-vocabulary` AND in
+     * `check:error-code-casing` anchors on that token, so both gates read such
+     * a file and both reported nothing, each leaving it to the other — which is
+     * how `plugin-security`'s live 403 sat unswept through two ADR-0112
+     * batches. The scan joins the two halves through the PARAMETER, whose index
+     * names the argument to read at each call site.
+     */
+    | 'codehelper';
 
 /**
  * Where the stamped code can end up. `dispatcher` is the door this card is
