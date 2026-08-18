@@ -10108,6 +10108,97 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#9362] The dependents probe's `where`, spelled for the KIND of reference
+   * field it is aimed at.
+   *
+   * A single-valued `lookup` / `master_detail` stores a scalar foreign key, and
+   * bare equality is the right question about it. A field declaring
+   * `multiple: true` stores an ARRAY — "Stores as Array/JSON"
+   * (`FieldSchema.multiple`) — and every SQL backend in this repo puts that
+   * array in a JSON TEXT column. Aiming bare equality at THAT column compares
+   * the whole serialization (`["a","b"]`) against one id, which can never hold;
+   * `driver-sql` refuses the spelling outright (`INVALID_FILTER` / 400, #7398),
+   * and that refusal is correct and stays. Until this method existed the probe
+   * built bare equality for both kinds, so every object pointed at by any
+   * registered `multiple: true` lookup had its delete refused with a 400 — on
+   * the stock showcase, `showcase_account`, with an EMPTY dependent table:
+   * the fault is schema-driven, not data-driven, because the probe runs per
+   * DECLARED relation.
+   *
+   * The multi-value spelling is `$contains`, which is what the refusal itself
+   * prescribes and the one membership spelling every driver here answers:
+   * `driver-sql` (and `driver-sqlite-wasm` / `driver-turso`, which extend it)
+   * lowers it to `LIKE '%v%'` over the serialization, `driver-mongodb` to
+   * `$regex` over the array, and `driver-memory` to a mingo `$regex`, which
+   * matches per ELEMENT. No public filter surface is widened: `$contains` is
+   * already declared, and this is the only construction site that changes.
+   *
+   * `$contains` is a SUBSTRING test, so on every one of those backends it
+   * answers a SUPERSET: with ids `acc_1` and `acc_10`, a row holding `acc_10`
+   * also matches a probe for `acc_1`. That is why the caller narrows the rows
+   * exactly through {@link ObjectQL.storedReferenceIncludes} — over-matching
+   * here would make `cascade` DELETE and `set_null` clear rows that never
+   * referenced this record, which is worse than the 400 being fixed. The
+   * pushdown's only job is to keep the probe from reading the whole table.
+   *
+   * The `$or` limb covers the other direction — a FALSE NEGATIVE, which on an
+   * integrity guard is the fail-OPEN that #8895 ruled out. An id needing JSON
+   * escaping (a quote, a backslash) appears in a SQL backend's serialized text
+   * in its ESCAPED form, so a probe for the raw id would miss the row that
+   * holds it; a document/in-memory backend compares the element itself and
+   * needs the RAW form. Both are asked whenever they differ, and the exact
+   * narrowing discards whatever the extra limb over-matched. Identical for an
+   * ordinary id, which is every id this engine generates.
+   */
+  private referenceProbeFilter(
+    fieldName: string,
+    fdef: { multiple?: unknown },
+    id: string | number,
+  ): Record<string, unknown> {
+    if (fdef?.multiple !== true) return { [fieldName]: id };
+    const raw = String(id);
+    // The BODY of the JSON string form — `JSON.stringify('a"b')` is `"a\"b"`,
+    // and the quotes are the serialization's, not the id's.
+    const escaped = JSON.stringify(raw).slice(1, -1);
+    if (escaped === raw) return { [fieldName]: { $contains: raw } };
+    return {
+      $or: [
+        { [fieldName]: { $contains: raw } },
+        { [fieldName]: { $contains: escaped } },
+      ],
+    };
+  }
+
+  /**
+   * [#9362] Does this STORED reference value point at `id`? The exact answer
+   * the `$contains` pushdown in {@link ObjectQL.referenceProbeFilter} can only
+   * approximate.
+   *
+   * Element-wise over the array, comparing `String(v)` — the same reading
+   * `dangling-reference-audit.ts` already applies to a stored reference
+   * (`Array.isArray(raw) ? raw : [raw]`), so the two integrity surfaces cannot
+   * disagree about what "this row references that record" means. An EXPANDED
+   * record in the slot is a read shape rather than an id write, and is skipped
+   * there for that reason; it is skipped here too.
+   *
+   * A non-array value is still compared rather than dismissed. A
+   * `multiple: true` slot holding a bare scalar is off-shape, and the two
+   * dispositions available are not symmetric: reading it as "references
+   * nothing" would drop a `restrict` refusal and let a referenced record be
+   * deleted — the fail-OPEN direction #8895 ruled out for this same guard —
+   * while reading it as a reference at most refuses a delete loudly.
+   */
+  private static storedReferenceIncludes(stored: unknown, id: string | number): boolean {
+    const wanted = String(id);
+    const values = Array.isArray(stored) ? stored : [stored];
+    for (const v of values) {
+      if (v == null || typeof v === 'object') continue;
+      if (String(v) === wanted) return true;
+    }
+    return false;
+  }
+
+  /**
    * Apply referential delete behavior for relations pointing AT this record,
    * before it is removed. For every registered object with a `master_detail`
    * or `lookup` field referencing `object`, honor the field's `deleteBehavior`:
@@ -10184,9 +10275,17 @@ export class ObjectQL implements IObjectQLEngine {
           behavior = 'restrict';
         }
 
+        // [#9362] The probe's filter is spelled for the KIND of reference field
+        // it is aimed at, and a multi-value one is narrowed EXACTLY afterwards.
+        // See `referenceProbeFilter` / `storedReferenceIncludes` for why both
+        // halves are needed.
+        const multiValued = fdef.multiple === true;
         let dependents: any[];
         try {
-          dependents = await this.find(childName, { where: { [fieldName]: id }, context } as any);
+          dependents = await this.find(
+            childName,
+            { where: this.referenceProbeFilter(fieldName, fdef, id), context } as any,
+          );
         } catch (error) {
           // [#8895] Discriminate by error TYPE — this probe IS the referential
           // guard, so `continue` is only truthful for the one failure that
@@ -10223,6 +10322,17 @@ export class ObjectQL implements IObjectQLEngine {
           // the probe's own failure, envelope intact.
           if (isMissingTableError(error)) continue;
           throw error;
+        }
+        // [#9362] The multi-value pushdown above is a SUPERSET, so the exact
+        // answer is taken here, on the rows themselves. Everything below —
+        // the `restrict` count in the 409 envelope, the `cascade` recursion,
+        // the `set_null` write — reads `dependents`, so narrowing anywhere
+        // later would leave one of them acting on a row that never referenced
+        // this record.
+        if (multiValued && dependents) {
+          dependents = dependents.filter((row) =>
+            ObjectQL.storedReferenceIncludes(row?.[fieldName], id),
+          );
         }
         if (!dependents || dependents.length === 0) continue;
 
