@@ -39,6 +39,7 @@ import {
     // (`domains/meta.ts`), not a REST-local restatement of it. See the module's
     // own header for why the decision belongs to the caller and why it lives in
     // `metadata-core`.
+    organizationIdForMetaRead,
     organizationIdForMetaWrite,
 } from '@objectstack/metadata-core';
 import { RouteManager, type RouteEntry } from './route-manager.js';
@@ -2420,11 +2421,29 @@ export class RestServer {
         // not in its two callers, so both entry points answer identically.
         if (refuseRepeatedQueryParams(req, res, ['package'])) return;
         const layeredPackageId = req.query?.package || undefined;
+        // [#9454] State the ORG scope, exactly as the `/published` overlay read
+        // already does. Without it the layered view resolved the env-wide row
+        // only, so an author who had just saved an org overlay opened Studio to
+        // `overlay: null` and the code layer — the write receipted as live, the
+        // editor reporting it absent. This is the DIAGNOSTIC view of what is
+        // stored per layer, so an unstated scope does not merely miss a row: it
+        // misreports the very thing being diagnosed.
+        // ⚠️ NOT a new org-resolution seam — `resolveExecCtx` is memoised per
+        // request (WeakMap keyed by `req`), the same result 40+ handlers here
+        // already share. Registry-gated via `organizationIdForMetaRead` so a
+        // non-overridable type keeps reading env-wide (see that predicate for
+        // why naming the org unconditionally would resurrect #6190's phantoms).
+        const layeredCtx = await this.resolveExecCtx(environmentId, req)
+            .catch(() => undefined);
+        const layeredOrganizationId = organizationIdForMetaRead(
+            req.params.type, layeredCtx?.tenantId,
+        );
         const layered = await p.getMetaItemLayered({
             type: req.params.type,
             name: req.params.name,
             ...(layeredPackageId ? { packageId: layeredPackageId } : {}),
             ...(environmentId ? { environmentId } : {}),
+            ...(layeredOrganizationId ? { organizationId: layeredOrganizationId } : {}),
         });
         // [ADR-0106 D5(4)] The layered view is a schema-bearing exit —
         // `code`, `overlay` and `effective` are each a full object schema.
@@ -3805,11 +3824,25 @@ export class RestServer {
                         // published-only world.
                         const previewDrafts = typeof req.query?.preview === 'string'
                             && req.query.preview.toLowerCase() === 'draft';
+                        // [#9454] The scoped listing is the second door the
+                        // card measured absent (`?object=` unchanged after a
+                        // runtime PUT). `getMetaItems` unions the env-wide and
+                        // org scopes under org-wins precedence — but only when
+                        // the caller names an org; unnamed, it returns the
+                        // env-wide partition alone and the author's new item is
+                        // simply not in the list. Same memoised `resolveExecCtx`
+                        // and same registry gate as every other read door here.
+                        const listCtx = await this.resolveExecCtx(environmentId, req)
+                            .catch(() => undefined);
+                        const listOrganizationId = organizationIdForMetaRead(
+                            req.params.type, listCtx?.tenantId,
+                        );
                         const items = await p.getMetaItems({
                             type: req.params.type,
                             packageId,
                             ...(previewDrafts ? { previewDrafts: true } : {}),
                             ...(environmentId ? { environmentId } : {}),
+                            ...(listOrganizationId ? { organizationId: listOrganizationId } : {}),
                         } as any);
 
                         // RBAC-filter app metadata for authenticated users so
@@ -4616,6 +4649,22 @@ export class RestServer {
                         // the cache exclusion here AND by the gate itself in
                         // the uncached branch below; one predicate, two sites.
                         const isAudienceGatedType = metaType === 'book' || metaType === 'doc';
+                        // [#9454] ONE org resolution for BOTH arms of the fork
+                        // below, computed ABOVE it on purpose. `view` takes the
+                        // cached arm; `dashboard` bypasses it via
+                        // `isDashboardType` and takes the uncached arm. A scope
+                        // threaded into only one arm fixes exactly ONE of the
+                        // five org-overridable types while the receipt keeps
+                        // claiming success for the rest — the half-fix this
+                        // card's pin exists to forbid. Hoisting it makes the
+                        // two arms incapable of disagreeing about scope.
+                        // ⚠️ NOT a new seam: memoised per request, and this
+                        // handler resolves the same context again further down.
+                        const readCtx = await this.resolveExecCtx(environmentId, req)
+                            .catch(() => undefined);
+                        const readOrganizationId = organizationIdForMetaRead(
+                            req.params.type, readCtx?.tenantId,
+                        );
                         if (metadata.enableCache && p.getMetaItemCached && !isAppType && !isDashboardType && !isDraftRead && !previewDrafts && !packageScoped && !isAudienceGatedType) {
                             // [ADR-0106 D3] When a projection applies, the
                             // protocol is NOT allowed to judge the conditional
@@ -4646,6 +4695,14 @@ export class RestServer {
                                 cacheRequest,
                                 ...(cacheLocale ? { locale: cacheLocale } : {}),
                                 ...(environmentId ? { environmentId } : {}),
+                                // [#9454] The cached door is the `view` arm, and
+                                // it used to hard-code a two-key delegation to
+                                // `getMetaItem` — it could not express an org at
+                                // all, so this threading is paired with a widened
+                                // signature in `metadata-protocol`. The org also
+                                // enters the ETag there, so the validator states
+                                // the scope rather than inheriting it.
+                                ...(readOrganizationId ? { organizationId: readOrganizationId } : {}),
                             } as any);
 
                             if (result.notModified) {
@@ -4756,6 +4813,11 @@ export class RestServer {
                                 packageId,
                                 ...(stateParam === 'draft' ? { state: 'draft' } : {}),
                                 ...(previewDrafts ? { previewDrafts: true } : {}),
+                                // [#9454] The uncached arm — `dashboard`'s route
+                                // (`isDashboardType`), and every read the cache
+                                // exclusions divert here. Same hoisted scope as
+                                // the cached arm above, by construction.
+                                ...(readOrganizationId ? { organizationId: readOrganizationId } : {}),
                             } as any) as Record<string, any>;
 
                             // [#5563] `getMetaItem` answers the envelope
@@ -5973,10 +6035,23 @@ export class RestServer {
                         // read this route mirrors.
                         if (refuseRepeatedQueryParams(req, res, ['package'])) return;
                         const packageId = req.query?.package || undefined;
+                        // [#9454] The compound-name door serves EVERY type
+                        // through one generic `getMetaItem` — including the
+                        // org-overridable ones — so it needs the same scope the
+                        // single-segment read it mirrors now states. Left
+                        // org-blind it would be the surviving route that keeps
+                        // answering from the wrong partition after the other
+                        // doors are fixed.
+                        const compoundCtx = await this.resolveExecCtx(environmentId, req)
+                            .catch(() => undefined);
+                        const compoundOrganizationId = organizationIdForMetaRead(
+                            req.params.type, compoundCtx?.tenantId,
+                        );
                         const envelope = await p.getMetaItem({
                             type: req.params.type,
                             name: compoundName,
                             packageId,
+                            ...(compoundOrganizationId ? { organizationId: compoundOrganizationId } : {}),
                         } as any) as Record<string, any>;
                         // [ADR-0106 D5(4)] Compound names express sub-resources,
                         // and no object uses one today — but this route serves
