@@ -11,6 +11,7 @@ import { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
 import type { DanglingReferenceAuditOptions } from './integrity/dangling-reference-audit.js';
 import { runActionGovernanceInventory } from './action-governance.js';
 import type { IMetadataService } from '@objectstack/spec/contracts';
+import type { ServiceObject } from '@objectstack/spec/data';
 
 export type { Plugin, PluginContext };
 
@@ -1094,6 +1095,61 @@ export class ObjectQLPlugin implements Plugin {
    */
 
   /**
+   * Read every registered object — or FAIL. The ONE registry read the three
+   * seams below share, and it exists so that none of them can answer a read
+   * that could not run with an invented *"the registry holds nothing"*.
+   *
+   * [#9285] All three used to spell the read
+   * `this.ql.registry?.getAllObjects?.() ?? []`, which folds three different
+   * facts into one value:
+   *
+   *   1. the registry answered, and holds no objects;
+   *   2. the engine exposes no `registry` at all;
+   *   3. the registry exposes no `getAllObjects` — a STRUCTURAL omission that
+   *      never throws, so it is invisible precisely when it is wrong.
+   *
+   * Only (1) is truthfully "no objects". #8895 ruled this family
+   * *discriminate or propagate*; #9002 and #9154 applied it to the two
+   * delete-cascade seams and the roll-up summary index. There is no benign
+   * failure class to discriminate here either, so (2) and (3) become a thrown
+   * error that names the consequence, and a registry that THROWS propagates
+   * its own error verbatim — this helper adds no `catch` of its own.
+   *
+   * What each caller DOES with that failure is the caller's decision, taken at
+   * the seam and justified there: {@link syncRegisteredSchemas} lets it
+   * propagate (a boot that could not read the registry must not report a clean
+   * start against a store whose DDL never ran), while the two diagnostic
+   * passes report it once, loudly, and degrade — an audit that did not run
+   * must never be spelled the same way as an audit that found nothing.
+   *
+   * ⚠️ A STRUCTURAL close, not a live defect — re-derived on this tree:
+   * `SchemaRegistry.getAllObjects()` is a walk over in-memory `Map`s calling
+   * `resolveObject()`, which returns `undefined` on every failure branch it
+   * models and never throws, and `ObjectQL.registry` is a getter over a
+   * field-initialized `SchemaRegistry`, so for a real engine neither optional
+   * link can short-circuit. The only reach is a duck-typed `ql` — which is
+   * exactly the incomplete test double #9154 measured.
+   *
+   * @param seam - the calling method, named in the thrown message.
+   */
+  private readRegisteredObjects(seam: string): ServiceObject[] {
+    const registry: any = (this.ql as any)?.registry;
+    const read: unknown = registry?.getAllObjects;
+    if (registry == null || typeof read !== 'function') {
+      throw new Error(
+        `[ObjectQLPlugin] ${seam}: the object registry could not be read — ` +
+          (registry == null
+            ? 'the engine exposes no `registry`.'
+            : '`registry.getAllObjects` is not a function.') +
+          ' This is NOT "no objects are registered": that answer was never obtained, and the two have opposite ' +
+          'consequences (nothing to sync vs. nothing synced). Give the engine a registry that implements ' +
+          '`getAllObjects()` — a duck-typed engine or an incomplete test double is the only way to reach this line.',
+      );
+    }
+    return (read as () => ServiceObject[]).call(registry);
+  }
+
+  /**
    * Bind every declared FEDERATED (external) object to its remote table —
    * once, at `kernel:ready`, when the boot has finished moving (#7737).
    *
@@ -1141,7 +1197,37 @@ export class ObjectQLPlugin implements Plugin {
   private async reconcileFederatedBindings(ctx: PluginContext): Promise<void> {
     if (!this.ql) return;
 
-    const allObjects = this.ql.registry?.getAllObjects?.() ?? [];
+    // [#9285] The read no longer invents an empty registry. This pass exists
+    // to NAME what it could not bind — "a boot with nothing to report says
+    // nothing" (above) — so a read that could not RUN must not be spelled as a
+    // boot with nothing to report; that is precisely the silence the pass was
+    // written to prevent. It is reported and the pass degrades rather than
+    // throwing: this is a post-hoc reconciliation, deliberately run after every
+    // `start()` has completed so that a late-connecting datasource is not a
+    // boot failure, and propagating here would turn a diagnostic into the hard
+    // stop it was written not to be. (By then {@link syncRegisteredSchemas} has
+    // already read the same registry successfully on every boot that does not
+    // set `skipSchemaSync`, so a failure at THIS line is a registry that became
+    // unreadable mid-boot, not the boot-wide condition seam 2 catches.)
+    // `error`, not `warn`, per the AGENTS.md degradation-log-level rule and for
+    // the same reason the report below it is: from the outside the deployment
+    // looks healthy while declared data is simply not reachable.
+    let allObjects: ServiceObject[];
+    try {
+      allObjects = this.readRegisteredObjects('reconcileFederatedBindings');
+    } catch (e: unknown) {
+      ctx.logger.error(
+        'Federated (external) object reconciliation did NOT run — the object registry could not be read, so this boot ' +
+          'never determined which declared external objects are bound to their remote tables, and never re-drove the ' +
+          'bindings this pass exists to install. Any object left unbound stays registered and served: it keeps its REST ' +
+          'routes and keeps rendering in the UI, while every read against it resolves to a table named after the OBJECT ' +
+          'instead of the remote table it declares — so those reads fail with "no such table", or answer from the wrong ' +
+          'table. This is NOT "no federated objects to bind": that answer was never obtained. Fix the registry error ' +
+          'below and restart (or trigger a metadata reload) to re-run this binding.',
+        e instanceof Error ? e : new Error(String(e)),
+      );
+      return;
+    }
     const federated = allObjects.filter((o: any) => o?.external != null);
     if (federated.length === 0) return;
 
@@ -1211,7 +1297,17 @@ export class ObjectQLPlugin implements Plugin {
   private async syncRegisteredSchemas(ctx: PluginContext) {
     if (!this.ql) return;
 
-    const allObjects = this.ql.registry?.getAllObjects?.() ?? [];
+    // [#9285] The read PROPAGATES — no `?.`, no `?? []`. The next line turns
+    // "no objects" into an early return, i.e. NO registered object's schema is
+    // synced to any driver: no table created, no column added, silently, at
+    // boot, with the plugin reporting a clean start. "The registry holds
+    // nothing" and "the registry could not be read" have opposite consequences
+    // here and only the first is a truthful reason to skip, so a read that
+    // could not run fails the boot instead — more truthful than starting
+    // against a store whose DDL was never run. On the `metadata:reloaded` path
+    // the caller already catches this and reports it at `error` (#4632), so
+    // propagation there is a loud durability report, not a dead kernel.
+    const allObjects = this.readRegisteredObjects('syncRegisteredSchemas');
     if (allObjects.length === 0) return;
 
     let synced = 0;
@@ -1997,9 +2093,39 @@ export class ObjectQLPlugin implements Plugin {
         loadStandaloneActions = () => loadMany.call(meta, 'action');
       }
     } catch { /* no metadata service — registry objects still audit */ }
+    // [#9285] BOTH swallows are gone. The old spelling —
+    // `(() => { try { return ql.registry?.getAllObjects?.() ?? []; } catch { return []; } })()`
+    // — carried two independent inventions on one expression (`?.()` for a
+    // registry that does not implement the method, `catch` for one that
+    // throws), and handed the result to an audit that then ran against an
+    // invented empty object set. That is worse than silence: with no objects
+    // every handler declared ON an object reconciles as an "undeclared handler
+    // … REFUSED at dispatch", so an unreadable registry produced a page of
+    // false accusations against a healthy deployment. This inventory is
+    // warn-only and exception-proof BY CONTRACT (above: a diagnostic must never
+    // be the reason a kernel fails to boot), so it does not propagate — it
+    // reports once and skips, leaving `lastGovernanceFingerprint` untouched so
+    // the next successful run reports in full rather than being suppressed as
+    // "unchanged". `warn`, not `error`, per the AGENTS.md degradation-log-level
+    // rule: an audit that did not run is a FUNCTIONAL degradation — nothing
+    // here claims to have been persisted.
+    let objects: ServiceObject[];
+    try {
+      objects = this.readRegisteredObjects('runGovernanceInventory');
+    } catch (e: unknown) {
+      ctx.logger.warn(
+        '[action-governance] inventory SKIPPED — the object registry could not be read, so this run audited nothing: ' +
+          'registered handlers with no declaration (REFUSED at dispatch, ADR-0110 D3) and declared actions with no ' +
+          'handler are neither found nor named. Deliberately NOT audited against an empty object set — that would ' +
+          'report every object-declared action as an undeclared handler. The audit re-runs at the next boot or on the ' +
+          'next `metadata:reloaded`; fix the registry error named here.',
+        { error: e instanceof Error ? e.message : String(e) },
+      );
+      return;
+    }
     this.lastGovernanceFingerprint = await runActionGovernanceInventory({
       registered: ql.listRegisteredActions(),
-      objects: (() => { try { return ql.registry?.getAllObjects?.() ?? []; } catch { return []; } })(),
+      objects,
       loadStandaloneActions,
       logger: ctx.logger,
       lastFingerprint: this.lastGovernanceFingerprint,
