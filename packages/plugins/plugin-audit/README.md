@@ -1,17 +1,20 @@
 # @objectstack/plugin-audit
 
-Audit Plugin for ObjectStack — System audit log object and audit trail for compliance and security monitoring.
+System audit-trail objects for ObjectStack: the immutable `sys_audit_log` ledger, the
+`sys_activity` stream, `sys_comment`, and the ObjectQL hooks that write them.
 
-## Features
+## What this package actually does
 
-- **Comprehensive Audit Trail**: Track all CRUD operations across all objects
-- **User Activity Logging**: Record who did what, when, and from where
-- **Field-Level Changes**: Capture before/after values for all field changes
-- **Compliance Ready**: Meet SOC 2, HIPAA, GDPR audit requirements
-- **Query Filtering**: Search audit logs by user, object, action, date range
-- **Retention Policies**: Auto-archive or delete old audit logs
-- **Security Events**: Track authentication, authorization, and security-related events
-- **Immutable Logs**: Audit records cannot be modified or deleted (only archived)
+`AuditPlugin` does two things when the kernel starts it:
+
+1. **Registers three system objects** — `sys_audit_log`, `sys_activity`, `sys_comment`.
+2. **Installs ObjectQL hook subscribers** that write ledger and activity rows on data
+   mutations, plus record-level access gates for `sys_comment`.
+
+⚠️ **There is no audit service you call to log a record change.** Record-level audit rows
+are produced by `afterInsert` / `afterUpdate` / `afterDelete` hooks, not by application
+code. The one registered service slot (`audit`) is the **auth-event write ingress** and has
+exactly one method — see [The `audit` service slot](#the-audit-service-slot) below.
 
 ## Installation
 
@@ -19,386 +22,204 @@ Audit Plugin for ObjectStack — System audit log object and audit trail for com
 pnpm add @objectstack/plugin-audit
 ```
 
-## Basic Usage
+## Usage
+
+The plugin is a class, registered on the kernel. It takes no configuration:
 
 ```typescript
-import { defineStack } from '@objectstack/spec';
-import { PluginAudit } from '@objectstack/plugin-audit';
+import { AuditPlugin } from '@objectstack/plugin-audit';
 
-const stack = defineStack({
-  plugins: [
-    PluginAudit.configure({
-      enabled: true,
-      trackObjects: '*', // Track all objects
-      trackFields: '*', // Track all field changes
-    }),
-  ],
-});
+await kernel.use(new AuditPlugin());
 ```
 
-## Configuration
+That is the whole setup surface. Coverage is not configured per object — see
+[Coverage](#coverage-subtraction-not-an-allow-list).
+
+The plugin depends on the ObjectQL engine (`com.objectstack.engine.objectql`) and resolves
+it at `kernel:ready`. If no engine is available it logs a warning and installs no writers.
+
+## What lands on the ledger
+
+`sys_audit_log.action` is a closed enum. Every value has a writer in the platform, and
+these are the only values that are ever written:
+
+| `action` | Written by | On |
+|---|---|---|
+| `create` | `installAuditWriters` (this package) | `afterInsert` |
+| `update` | `installAuditWriters` (this package) | `afterUpdate`, only when the diff is non-empty |
+| `delete` | `installAuditWriters` (this package) | `afterDelete` |
+| `login` | `createAuthEventAuditSink` (this package), called by `@objectstack/plugin-auth` | session start |
+| `logout` | `createAuthEventAuditSink` (this package), called by `@objectstack/plugin-auth` | session end |
+| `config_change` | `@objectstack/service-settings` | every successful settings write |
+| `import` | `@objectstack/plugin-auth` admin user import | one run-level row, with `record_id: null` |
+
+Action values are snake_case. There is no namespaced `domain:action` spelling — the enum
+above is the complete accepted set, and a value outside it is not a form this object takes.
+
+## `sys_audit_log` fields
+
+These are the columns the object declares. Every field is `readonly: true`; rows are
+written only by internal system hooks running under `sudo()`, never through UI forms.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | text | Audit log entry id |
+| `created_at` | datetime | When the action occurred (`NOW()` default) |
+| `action` | select | One of the seven values above |
+| `user_id` | lookup → `sys_user` | Null for non-user / service actions |
+| `actor` | text | Principal label: a user id, `svc:<name>`, or null. Attributes service-token writes that `user_id` structurally cannot hold |
+| `object_name` | text | Target object, e.g. `sys_user` |
+| `record_id` | text | Id of the affected record |
+| `old_value` | textarea | JSON-serialized previous state |
+| `new_value` | textarea | JSON-serialized new state |
+| `ip_address` | text | Auth events only — see below |
+| `user_agent` | textarea | Auth events only — see below |
+| `tenant_id` | lookup → `sys_organization` | Tenant context for multi-tenant isolation |
+| `metadata` | textarea | JSON-serialized additional context |
+
+**Secret masking.** `old_value` / `new_value` are written through a ledger view that masks
+the object's credential fields, using the same contract predicate the read path masks with.
+A credential *rotation* still produces a row — the raw values are compared for change
+detection before masking is applied — so the audit trail of a secret change survives
+without the secret itself reaching the ledger.
+
+**`ip_address` / `user_agent` are populated on auth events only.** The record-level writer
+does not stamp them: a `create` / `update` / `delete` row records who and what, not from
+where. Do not read a null client fingerprint on a CRUD row as "the request had none".
+
+## Coverage: subtraction, not an allow list
+
+The audit hooks are registered against **all objects minus an exclusion list**, not against
+an enumerated set of tracked objects.
+
+This is deliberate and load-bearing: the object universe is open — `/meta` PUT registers
+new objects into a running engine — so an enumerated allow list would freeze at boot and
+silently stop auditing everything created afterwards. For a compliance ledger that is a
+regression that reports nothing. Subtraction has no such failure mode: **an object nobody
+had heard of at install time is audited by default.**
+
+Excluded objects fall into two groups:
+
+- **Recursion and auth noise** — the audit/activity tables themselves, plus session,
+  presence and account tables.
+- **Operational telemetry and plumbing** (ADR-0057) — platform-internal event/log/queue
+  objects with a `telemetry` / `transient` / `event` lifecycle class. These are not
+  user-attributable changes, and mirroring them into the ledger was the dominant source of
+  unbounded row growth.
+
+The exclusion list is one definition consumed on both the registration face and inside the
+handlers, so the two cannot drift.
+
+## What the ledger does not record
+
+Stated explicitly, because a gap in an audit surface is easily mistaken for coverage:
+
+- **Reads and views are not on the ledger.** No writer emits a read action, and the record
+  writers subscribe only to `after*` write events. `sys_audit_log` answers "who changed
+  this record", not "who looked at it".
+- **Failed operations are not on the ledger.** There is no success/failure column, and the
+  writers fire only on `after*` events — that is, only on operations that succeeded. A
+  failed write is not distinguishable from an absent one here.
+- **Field-level read access is not on the ledger.**
+
+## Reading audit rows
+
+`sys_audit_log` declares `apiMethods: ['get', 'list']` — it is read-only over the API, and
+there is no dedicated audit REST namespace. Rows are read like any other object, through
+the standard object API or `services.data`, and through the shipped list views:
+
+| View | Shows |
+|---|---|
+| `recent` | Everything, newest first |
+| `writes_only` | `create` / `update` / `delete` |
+| `auth_events` | `login` / `logout` |
+| `config_changes` | `config_change` / `import` |
+| `all_events` | Everything, larger page size |
+
+Indexes are declared on `created_at`, `user_id`, `(object_name, record_id)`, `action` and
+`tenant_id`.
+
+## The `audit` service slot
+
+`AuditPlugin` registers one service, `audit`, in `init()`. It is the **write ingress for
+non-CRUD events**, and its entire surface is:
 
 ```typescript
-interface AuditPluginConfig {
-  /** Enable audit logging (default: true) */
-  enabled?: boolean;
-
-  /** Objects to track ('*' for all, or array of object names) */
-  trackObjects?: '*' | string[];
-
-  /** Fields to track ('*' for all, or object-specific config) */
-  trackFields?: '*' | Record<string, string[]>;
-
-  /** Track system events (login, logout, failed auth, etc.) */
-  trackSystemEvents?: boolean;
-
-  /** Retention period in days (default: 365) */
-  retentionDays?: number;
-
-  /** Auto-archive after retention period (default: true) */
-  autoArchive?: boolean;
-
-  /** Exclude certain users from audit (e.g., system users) */
-  excludeUsers?: string[];
+interface AuthEventAuditSink {
+  recordAuthEvent(event: AuthSessionAuditEvent): Promise<void>;
 }
 ```
 
-## Audit Log Schema
+`AuthSessionAuditEvent.action` is the closed union `'login' | 'logout'`. `@objectstack/plugin-auth`
+resolves this slot lazily and calls it from the session lifecycle. It is not a query API:
+to read audit history, query the `sys_audit_log` object.
 
-The plugin automatically creates the `audit_log` object:
+## Retention and archival
 
-```typescript
-{
-  id: string;              // Unique audit log entry ID
-  timestamp: datetime;     // When the action occurred
-  userId: string;          // User who performed the action
-  userName: string;        // User's name at time of action
-  userEmail: string;       // User's email at time of action
-  action: string;          // 'insert', 'update', 'delete', 'read'
-  object: string;          // Object type (e.g., 'opportunity')
-  recordId: string;        // Record ID that was affected
-  recordName: string;      // Record display name
-  changes: json;           // Field-level changes (before/after)
-  metadata: json;          // Additional context (IP, user agent, etc.)
-  ipAddress: string;       // Client IP address
-  userAgent: string;       // Client user agent
-  sessionId: string;       // Session ID
-  status: string;          // 'success' | 'failed'
-  errorMessage: string;    // Error message if action failed
-}
-```
+`sys_audit_log` declares an ADR-0057 `audit` lifecycle class: retain hot for 90 days, then
+archive to the `archive` datasource and keep for 7 years.
 
-## Automatic Audit Logging
+⚠️ **The archival half needs an `archive` datasource to be registered, and fails closed to
+retention without one.** When no archive target resolves, the LifecycleService retains
+every row rather than deleting it, and reports the object as `archive-pending` — a
+compliance ledger is never dropped unarchived. So on a deployment with no archive
+datasource, the practical behaviour is: **nothing is ever deleted, and the table grows.**
 
-All CRUD operations are automatically audited:
+## Where the rows live
 
-```typescript
-// This operation is automatically audited
-await kernel.getDriver().insert({
-  object: 'opportunity',
-  data: {
-    name: 'Big Deal',
-    amount: 100000,
-    stage: 'prospecting',
-  },
-});
+`sys_audit_log` (`lifecycle.class: 'audit'`) and `sys_activity` (`lifecycle.class:
+'telemetry'`) are routed by ADR-0057 §3.6 to a dedicated `telemetry` datasource whenever
+one is registered — which `os dev` provisions by default as a **sibling SQLite file**
+(`dev.db` → `dev.telemetry.db`). `sys_comment` carries no lifecycle class and stays on the
+primary datasource.
 
-// Audit log entry created:
-// {
-//   action: 'insert',
-//   object: 'opportunity',
-//   recordId: '123',
-//   recordName: 'Big Deal',
-//   changes: {
-//     name: { from: null, to: 'Big Deal' },
-//     amount: { from: null, to: 100000 },
-//     stage: { from: null, to: 'prospecting' }
-//   }
-// }
-```
+⚠️ Anything that reads these tables **without naming the object** — raw SQL against the
+default datasource — will report "no such table" even though provisioning succeeded. The
+plugin logs the resolved datasource per object at startup, and calls out the split when it
+is in effect.
 
-## Querying Audit Logs
+The plugin provisions all three tables at `kernel:ready` rather than letting them be
+lazy-created on first write, so an environment that reads one first does not log errors.
+
+## Who can read audit rows
+
+Access to `sys_audit_log` is governed by the ordinary permission system, with one boundary
+worth naming here.
+
+Permission sets that use the **hierarchy-relative depth scopes** (`own_and_reports` /
+`unit` / `unit_and_below`, ADR-0057) need the enterprise hierarchy resolver shipped by
+`@objectstack/security-enterprise`. The open edition ships no resolver, so those scopes
+**fail closed to `own`** — they never widen visibility without it. A grant written to let
+managers read their reports' audit rows will, on an open build, show them only their own.
+See [Access depth](/docs/permissions/permission-sets#access-depth--readscope--writescope-adr-0057-d1).
+
+`sys_comment`'s record-level edit gates resolve the `sharing` service lazily; without it
+those checks degrade to parent-record read visibility. If the engine exposes no middleware
+seam, `sys_comment` read visibility is not installed at all and the plugin logs a warning
+naming the consequence.
+
+## Exports
 
 ```typescript
-// Get audit logs via kernel
-const auditService = kernel.getService('audit');
+// Plugin
+export { AuditPlugin };
 
-// Get all changes for a specific record
-const recordHistory = await auditService.getRecordHistory({
-  object: 'opportunity',
-  recordId: '123',
-});
+// Writer installation + test probe
+export { installAuditWriters, createFieldPresenceProbe };
 
-// Get user activity
-const userActivity = await auditService.getUserActivity({
-  userId: 'user:456',
-  from: '2024-01-01',
-  to: '2024-01-31',
-});
-
-// Search audit logs
-const logs = await auditService.searchLogs({
-  action: 'delete',
-  object: 'account',
-  from: '2024-01-01',
-  to: '2024-01-31',
-});
-
-// Get failed actions (security monitoring)
-const failures = await auditService.getFailedActions({
-  from: '2024-01-01',
-  limit: 100,
-});
-```
-
-## Selective Tracking
-
-### Track Specific Objects
-
-```typescript
-PluginAudit.configure({
-  trackObjects: ['opportunity', 'account', 'contact'],
-  // Only these objects will be audited
-});
-```
-
-### Track Specific Fields
-
-```typescript
-PluginAudit.configure({
-  trackFields: {
-    opportunity: ['stage', 'amount', 'close_date'], // Only track these fields
-    account: '*', // Track all fields for accounts
-    contact: ['email', 'phone'], // Only email and phone for contacts
-  },
-});
-```
-
-### Exclude System Users
-
-```typescript
-PluginAudit.configure({
-  excludeUsers: [
-    'system:integration',
-    'system:cron',
-    'service:automation',
-  ],
-  // These users' actions won't be audited
-});
-```
-
-## Advanced Features
-
-### Manual Audit Entries
-
-```typescript
-// Log custom security event
-await auditService.log({
-  action: 'security:password_reset',
-  userId: 'user:456',
-  metadata: {
-    resetMethod: 'email',
-    ipAddress: '192.168.1.100',
-  },
-});
-
-// Log business process event
-await auditService.log({
-  action: 'workflow:approval',
-  object: 'opportunity',
-  recordId: '123',
-  metadata: {
-    approver: 'manager:789',
-    decision: 'approved',
-  },
-});
-```
-
-### Audit Snapshots
-
-```typescript
-// Create snapshot of record state at a specific time
-const snapshot = await auditService.getRecordSnapshot({
-  object: 'opportunity',
-  recordId: '123',
-  asOf: '2024-01-15T10:30:00Z',
-});
-
-// Returns: Record state as it existed on Jan 15, 2024 at 10:30 AM
-```
-
-### Audit Reports
-
-```typescript
-// Generate compliance report
-const report = await auditService.generateReport({
-  type: 'compliance',
-  from: '2024-01-01',
-  to: '2024-03-31',
-  format: 'pdf',
-});
-
-// Generate user activity report
-const userReport = await auditService.generateReport({
-  type: 'user_activity',
-  userId: 'user:456',
-  from: '2024-01-01',
-  to: '2024-01-31',
-  includeDetails: true,
-});
-```
-
-### Data Retention & Archival
-
-```typescript
-// Archive old audit logs
-await auditService.archiveLogs({
-  olderThan: '2023-01-01',
-  destination: 's3://audit-archive/2023/',
-});
-
-// Permanently delete archived logs (compliance approved)
-await auditService.purgeLogs({
-  olderThan: '2020-01-01',
-  confirmed: true, // Safety check
-});
-```
-
-## Security Events
-
-The plugin automatically logs security-related events:
-
-- **Authentication**: Login, logout, password changes
-- **Authorization**: Permission denied, role changes
-- **Data Access**: Read operations on sensitive fields
-- **Configuration**: System setting changes
-- **API**: API key usage, rate limit violations
-
-```typescript
-// Automatically logged:
-// - Login attempts (success/failure)
-// - Permission denied errors
-// - Sensitive field access
-// - API authentication failures
-```
-
-## Compliance Integration
-
-### GDPR Compliance
-
-```typescript
-// Right to be forgotten - audit trail for deletions
-await auditService.logDataDeletion({
-  userId: 'user:456',
-  reason: 'gdpr_right_to_be_forgotten',
-  deletedRecords: [
-    { object: 'user', recordId: '456' },
-    { object: 'contact', recordId: '789' },
-  ],
-});
-
-// Right of access - audit trail for data exports
-await auditService.logDataExport({
-  userId: 'user:456',
-  reason: 'gdpr_data_access_request',
-  exportedObjects: ['user', 'contact', 'activity'],
-});
-```
-
-### SOC 2 Compliance
-
-```typescript
-// Log administrative actions
-await auditService.logAdminAction({
-  adminId: 'admin:123',
-  action: 'user_role_change',
-  targetUserId: 'user:456',
-  changes: {
-    roles: { from: ['user'], to: ['user', 'admin'] },
-  },
-});
-```
-
-### HIPAA Compliance
-
-```typescript
-// Track PHI access
-PluginAudit.configure({
-  trackFields: {
-    patient: ['ssn', 'medical_record_number', 'diagnosis'], // PHI fields
-  },
-  trackSystemEvents: true,
-});
-```
-
-## REST API Endpoints
-
-```
-GET    /api/v1/audit                      # List audit logs
-GET    /api/v1/audit/:id                  # Get specific log entry
-GET    /api/v1/audit/record/:object/:id   # Get record history
-GET    /api/v1/audit/user/:userId         # Get user activity
-POST   /api/v1/audit/report               # Generate report
-POST   /api/v1/audit/archive              # Archive old logs
-```
-
-## Dashboard Integration
-
-```typescript
-// Audit dashboard widget
-const auditWidget = {
-  title: 'Recent Activity',
-  query: {
-    object: 'audit_log',
-    limit: 50,
-    sort: [{ field: 'timestamp', direction: 'desc' }],
-  },
+// Auth-event ingress (the `audit` service slot)
+export { createAuthEventAuditSink };
+export type {
+  AuthEventAuditLogger, AuthEventAuditSink, AuthEventAuditSinkOptions,
+  AuthSessionAuditAction, AuthSessionAuditEvent,
 };
 
-// Security alerts dashboard
-const securityWidget = {
-  title: 'Failed Login Attempts',
-  query: {
-    object: 'audit_log',
-    filters: [
-      { field: 'action', operator: 'eq', value: 'auth:login' },
-      { field: 'status', operator: 'eq', value: 'failed' },
-      { field: 'timestamp', operator: 'gte', value: 'today' },
-    ],
-  },
+// sys_comment record-level access
+export { installCommentAccessHooks, installCommentReadVisibility, parseCommentThreadId };
+export type {
+  CommentAccessEngine, CommentAccessLogger, CommentReadMiddlewareCtx,
+  CommentSharingLike, CommentThreadTarget,
 };
-```
-
-## Best Practices
-
-1. **Selective Tracking**: Only audit what's necessary for compliance
-2. **Retention Policy**: Set appropriate retention based on regulations
-3. **Performance**: Archive old logs to keep query performance high
-4. **Security**: Restrict access to audit logs (admin only)
-5. **Immutability**: Never allow modification of audit records
-6. **Monitoring**: Set alerts for suspicious activity patterns
-7. **Regular Review**: Periodically review audit logs for anomalies
-
-## Performance Considerations
-
-- **Async Logging**: Audit writes happen asynchronously (no performance impact)
-- **Indexing**: Automatically indexes `userId`, `object`, `recordId`, `timestamp`
-- **Partitioning**: Consider table partitioning for high-volume deployments
-- **Archival**: Move old logs to cold storage (S3, Glacier)
-
-## Contract Implementation
-
-Implements audit logging hooks from `@objectstack/spec/contracts`:
-
-```typescript
-interface IAuditService {
-  log(entry: AuditLogEntry): Promise<void>;
-  getRecordHistory(options: RecordHistoryOptions): Promise<AuditLog[]>;
-  getUserActivity(options: UserActivityOptions): Promise<AuditLog[]>;
-  searchLogs(filter: AuditLogFilter): Promise<AuditLog[]>;
-  getRecordSnapshot(options: SnapshotOptions): Promise<any>;
-  archiveLogs(options: ArchiveOptions): Promise<void>;
-}
 ```
 
 ## License
@@ -407,8 +228,5 @@ Apache-2.0. See [LICENSING.md](../../../LICENSING.md).
 
 ## See Also
 
-- [SOC 2 Compliance Guide](https://www.aicpa.org/interestareas/frc/assuranceadvisoryservices/sorhome)
-- [GDPR Requirements](https://gdpr.eu/)
-- [HIPAA Compliance](https://www.hhs.gov/hipaa/)
-- [@objectstack/plugin-security](../plugin-security/)
-- [Audit Logging Best Practices](/content/docs/kernel/runtime-services/audit-service.mdx)
+- [@objectstack/plugin-security](../plugin-security/) — permissions, RLS and field-level security
+- [@objectstack/plugin-auth](../plugin-auth/) — the caller of the `audit` slot's auth-event ingress
