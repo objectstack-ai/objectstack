@@ -55,6 +55,18 @@ test-run output the clause's `evidence` field names.
      issue. A `fail` with no reproduction rule in its issue is not a completed verdict.
      (The screenshot that convinced you is a live judgment aid, not report content —
      describe what it showed in one line; never attach it.)
+   - **Carve-out — authentication and authorization findings only.** ⛔ Never publish a
+     reproduction for an authentication or authorization hole **anywhere on GitHub**: not
+     the run issue, not a tracking or extracted card, not a comment. Relocating it is not a
+     mitigation — a tracking card is a public issue in a public repo just the same. Such a
+     `fail` **is a completed verdict** when it records the item id, the clause, and `detail
+     withheld pending maintainer`; the reproduction stays in the runner session, and the
+     runner stops there and waits for the maintainer. Existence published, recipe withheld,
+     is a complete and actionable report — getting a defect fixed never requires handing
+     anyone a working exploit. (Maintainer disclosure ruling, 2026-08-18, recorded on
+     #9387; the `checklist-test` skill states the same guardrail in the same terms — one
+     rule written in both places, not a precedence claim by either.) **No other failure
+     class is softened by this**: everything else owes its reproduction rule in full.
 3. **Classify blockers honestly.** Missing seed/persona/fixture → `blocked(fixture)`,
    and *record the gap on the item* (`fixtures.knownGaps` or `blocked`) so the next
    sweep doesn't rediscover it. A defect in the fixture itself (seed silently failing,
@@ -213,7 +225,9 @@ in the repo** — not the JSON, not screenshots; `runs/` is git-ignored except i
 reach a verdict — never report artifacts. What the report carries for a defect is the
 **reproduction rule**: ordered steps / API calls (method · path · body) / the
 ref-targeted selector path + expected-vs-actual from the oracle, enough to re-hit it on a
-fresh boot with no picture. A clause whose oracle was a screenshot is recorded as a
+fresh boot with no picture — **except under rule 2's authentication/authorization
+carve-out**, where the report carries the item, the clause and `detail withheld pending
+maintainer`, and nothing else. A clause whose oracle was a screenshot is recorded as a
 one-line text description of what it showed, not a link.
 
 The in-environment JSON scratch (RUNNER shape, never committed):
@@ -246,10 +260,10 @@ The in-environment JSON scratch (RUNNER shape, never committed):
 ```
 
 The issue body is: env fingerprint · scope (selector + per-item `revision`) · the
-per-clause verdict table (text oracle evidence) · a reproduction rule per `fail` ·
-derived item verdicts + fixture gaps. The durable, version-controlled truth is still the
-checklist under `areas/`; a run is a dated assertion about one build, and it lives in its
-issue, not the tree.
+per-clause verdict table (text oracle evidence) · a reproduction rule per `fail` (rule 2's
+carve-out excepted) · derived item verdicts + fixture gaps. The durable,
+version-controlled truth is still the checklist under `areas/`; a run is a dated assertion
+about one build, and it lives in its issue, not the tree.
 
 ### Extraction obligation — the run record is a protocol carrier, not work
 
@@ -264,7 +278,9 @@ closing out the report includes the extraction, owed by the runner:
 - **Product defects found during the run**: at close-out, extract each one into its own
   standalone issue — self-contained title, reproduction and mechanism itemized in the
   card, a pointer back to the run record for the full evidence chain. A defect card does
-  not carry `qa-run`; it enters triage first-touch normally.
+  not carry `qa-run`; it enters triage first-touch normally. ⛔ An authentication or
+  authorization defect is extracted under rule 2's carve-out — item, clause, `detail
+  withheld pending maintainer`, no recipe. The extracted card is public too.
 - **Checklist-accuracy findings and fixture gaps** close out through the wave's anchor
   card (the sweep's tracking issue) — ⛔ not extracted.
 - **Environment blockers**: recorded in the run record is enough.
