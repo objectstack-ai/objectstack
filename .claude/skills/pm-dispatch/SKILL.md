@@ -142,10 +142,10 @@ references);② 创建后手动 fire 一轮烟测,判据取**GitHub 上的产出
 
 产品横跨三仓,依赖方向固定:`objectstack`(后端;`packages/spec` 是唯一契约)→ `objectui`(前端,构
 建产物经 `pnpm objectui:refresh` 回流)与 `cloud`。第四仓 `objectos`(纯文档与站点,不入上述依赖链):
-分诊照扫,执行折入 `domain:devx`(已辖 `content/docs/**` + `apps/docs`),⛔ 现在不铸 `repo:objectos`
-座位;规则 4 预登记的拆分触发任一命中(单轮逼近 fire 周期 / objectos 队列持续断粮)⇒ 升格完整座位,
-是记录在案的转换(维护者 2026-08-18:「就按 B,带你补的两条,落地吧」)。该仓无 changeset 流、无
-`packages/`、无合并队列(落地 = 人工合并),CI 形状与三仓不同 —— 派发预期照实设,⛔ 不要求不存在的机制。
+分诊照扫(分诊座位保持四仓唯一),执行已自 `domain:devx` 折入迁出、归 `repo:objectos` 执行座位 ——
+座位已存在,维护者 2026-08-18 亲自提前行使规则 4 预登记的升格(「objectos 是新开的项目经理,是不是
+少了座位帖。」),同其它 `repo:*` 座位一套执行座位纪律(⛔ 不产 `domain:*`/type/定级)。该仓无
+changeset 流、无 `packages/`;合并队列 + required `build` + `merge_group` 自 2026-08-18 起已上线 —— 派发预期照实设,⛔ 不要求不存在的机制。
 
 1. **Issue 住在修复落地的仓,分诊时按判据严格执行**(维护者 2026-08-10 裁决;2026-08-16 重申收紧)。判
    据:正文抽掉 objectstack 还成立 ⇒ file-at-destination,分诊当场转仓 —— console/UI 缺陷即转 objectui
@@ -271,6 +271,8 @@ objectui pin 落后且其队列已空 ⇒ 在本仓立/刷新 console bump 单;�
 **必带四棱卡面块**(见「升级与决策」),⛔ 不留待有人接手再补;**`finding`** —— 观察类(死代码、未演
 练漂移、抛光;真实但今天没有用户撞上),待首次定级;**先修复(repair first)** —— 正文被 sanitizer 截断的卡不
 可派发,评论修复指令后跳过;停摆指令判据必须比其它分类更硬(双读取),事后证伪同处公开作废。
+**决策箱勤务(常设)**:落卡入箱时校验/补全标准四棱卡面块;存量卡低频子轮回填;摘要 issue 按轮刷新
+—— 块形状、批量决裁通道与脚本化出口见「升级与决策」。
 
 **原生 issue 类型 Bug/Feature/Task 是分诊的固定产出**(维护者 2026-08-12 裁定「同意」):分诊
 座位是 `type` 字段的唯一权威生产者(立单者可预填,分诊校正 —— 与 `domain:*` 同一纪律);判据即
@@ -437,11 +439,10 @@ dev 侧推分支要早 —— 远程分支是在飞工作最硬的证据。**死
 作、浏览器/dogfood 验证、逐卡判断的 build 重 M 卡(论证见 `references/dispatch-runbook.md`)。**归档义
 务只落在云卡**;OOM 死的单独重派;判定连同档位写进认领评论。
 
-**云卡四课**(细则见 `references/dispatch-runbook.md`;一次性云卡用 `create_session`,⛔ 不用
-create_trigger+fire —— 维护者 2026-08-07 拍板,trigger 流只留给定时/重复型):① 授权面随
-source 不随环境;② 派发词必带**自驱条款**;③ 交付通道 = dev 自开 draft PR + 终报以 issue 评论
-交付;④ **云卡 draft PR 一存在立即 `subscribe_pr_activity` —— 硬步骤**。云会话 `SendMessage`
-not-reachable 是设计非故障(维护者 2026-08-11 裁定)⛔ 不复测;**接手中断的 dev**:先试 SendMessage 复活,不可用才走接手协议(四条增量见 runbook,⛔ 不重跑原派发词)。
+**云卡四课(① 授权面随 source 不随环境;② 派发词必带自驱条款;③ 交付通道 = 自开 draft PR + 终报
+issue 评论;④ draft PR 一存在立即 `subscribe_pr_activity` 硬步骤)全文见 runbook**;一次性云卡用
+`create_session`,⛔ 不用 create_trigger+fire(维护者 2026-08-07 拍板,trigger 流只留给定时/重复型)。
+云会话 `SendMessage` not-reachable 是设计非故障(维护者 2026-08-11 裁定)⛔ 不复测;**接手中断的 dev**:先试 SendMessage 复活,不可用才走接手协议(四条增量见 runbook,⛔ 不重跑原派发词)。
 
 ### 收集
 
@@ -477,20 +478,13 @@ not-reachable 是设计非故障(维护者 2026-08-11 裁定)⛔ 不复测;**接
 你是记录在案的复核人(reviewer of record)—— **对 GitHub 核验,不对报告的自述核验**;逐项判据展开
 在 `references/review-checklist.md`,每份报告对着它过。骨架:
 
-- **PR 形态与范围**:draft、目标 `main`、首行 **`Fixes #<n>` 仅当合并应当关卡** ——半实施必
-  须 `Part of #<n>`,否则合并静默关掉决策箱里的卡(收件箱过滤只看 open);翻 ready 前亲核首行。
-  **`Fixes` 卡随关单自动离开在飞视图,`Part of` 卡合并后仍开着**:MERGED 的同一动作里摘
-  `pm:dispatched` 换回 `pm:queue`(或按剩余物定级)+ 评论写明已交付/还剩/归谁。changed files 范围
-  检查(⛔ 不看报告自述);tests/docs-only 按仓库分流:本仓库 `skip-changeset` 标签是真实机制;
-  objectui 无此标签,空 frontmatter changeset 即声明,⛔ 永不铸标签;测试证据要真实命令与输出。
+- **PR 形态与范围**:draft、目标 `main`、`Fixes`/`Part of` 首行判据(翻 ready 前亲核)、`Part of`
+  卡 MERGED 时点收口、changed files 范围与 changeset/`skip-changeset` 分流、测试证据 —— 判据全文见 checklist 与 landing-operations B。
 - **报告在草稿 PR 时点到达,CI 收敛读数只属于复核侧**(维护者 2026-08-10 裁定):gate
   `in_progress` 是诚实读数;放行前亲核判据、收敛期补丁轮与「本单等 CI」例外见 checklist。
-- **绿色输出 ≠ 该绿证明了被测风险**:拒收用例查 `code`+`status` 断言;「N 个包全绿」问方向与时
-  序;裁决实施 PR 查全仓 pin 翻转 + 拒收断言仍在;收益穿过必经边界后还在吗(必要时端到端验一次)。
-- **证伪是好运行**:`premise_still_valid: false` 是再分诊输入不是失败;dev 纠正 PM要当众认;验
-  收判据被测量推翻 = 好运行,但过程要写在 PR 正文并附实测信噪比。
-- **删除与二进制**:死代码删除在 `origin/main` 亲核引用面再 ACCEPT;`+0/-0` 先疑NUL。sweep 类
-  交付的范围外产出在 ACCEPT 评论成组列出。
+- **绿色输出 ≠ 该绿证明了被测风险**(拒收断言、全绿方向与时序、pin 翻转、边界后收益 —— 判据在 checklist)。
+- **证伪是好运行**:`premise_still_valid: false` 是再分诊输入;dev 纠正 PM 当众认;判据被测量推翻照 ACCEPT,证据要件在 checklist。
+- **删除与二进制**:死代码删除亲核引用面;`+0/-0` 先疑 NUL;sweep 范围外产出成组列出(判据在 checklist)。
 
 **判决**:**ACCEPT** 短格式(issue 英文评论):核对清单结论 + 抽查读数 + 偏差,链接 PR —— 论证指
 向 PR 本身,⛔ 不复述其叙事 → 驱动落地;**REWORK**(逐项反馈,同认领重派;补丁轮优先 SendMessage
@@ -500,8 +494,8 @@ not-reachable 是设计非故障(维护者 2026-08-11 裁定)⛔ 不复测;**接
 取一次 PR 的路径面(`get_files`,⛔ 不看报告自述)。governed 面统一定义(维护者 2026-08-18
 「同意」):`docs/adr/**` + `.claude/**`(全量,含 agents/hooks/settings)+ `skills/**` +
 `AGENTS.md` + `CLAUDE.md`;agent 指令文件按此跨仓同判 —— objectui、cloud、objectos 一并在内(维护者
-2026-08-18:「任何对 agents.md 等文件的修改…包括 objectui cloud仓库」→「同意」;objectos 执行虽折
-入 devx,其指令面 PR 照样 draft/人工合并)。路径面**一条命中** ⇒ ACCEPT 换终局三件套:① 复核结论照常写在
+2026-08-18:「任何对 agents.md 等文件的修改…包括 objectui cloud仓库」→「同意」;objectos 指令面
+PR 照样 draft/人工合并)。路径面**一条命中** ⇒ ACCEPT 换终局三件套:① 复核结论照常写在
 issue 上(不能合 ≠ 不复核;技能面 PR 的复核席须跑在契约复审档位,档位单源见条款②闸门);
 ② PR 留给维护者,**看得见地悬着** —— **人工合并即审核记录,本条座位纪律是唯一的 merge 前防线**
 (per-PR 事前门已退役,没有机器会替你挡):⛔ 永不翻 ready、永不入队、永不挂 auto-merge;③ 轮次报
@@ -519,26 +513,19 @@ issue 上(不能合 ≠ 不复核;技能面 PR 的复核席须跑在契约复审
 - **`needs:contract-review` 复审链**:复审资格双条件,同时满足 —— ① 跑在契约复审档位;② 非该卡派发席(犯规席在结构上无资格补救自己的犯规)。归属:常设 = 分诊席(Routine 模型由维护者在 Routines UI
   钉在契约复审档位),分诊轮新增子轮清该标签 —— 只审契约增量 diff、结论一行写在卡上、清标签后卡方可入队;每小时一轮即天然攒批;过渡期(分诊 Routine 未建成前)由 skills 席代行。**降档保险丝**:
   子轮开场自检当前模型,非契约复审档位 ⇒ 该子轮整体跳过、标签原样留置 —— 卡在队列外等待是安全态;契约复审 ⛔ 不适用额度耗尽豁免降档(豁免的对象是派发;复审的存在意义就是补偿一次低于地板的派发)。**载体不迁移**(维护者 2026-08-18,原话:「中期把闸门迁到 PR review 的 Request Changes 上 我觉得没必要」):闸门载体保持本标签,⛔ 不迁 PR review / Request Changes、不为迁移留门;挂与清皆按标签纪律的 read-modify-write 硬步骤写。
-- **碰生成物的 PR,入队前先同步 + 整体重生成** —— os-regen 驱动会零冲突标记地**静默丢掉一侧改
-  动**,只有重生成才暴露;四步序已机械化(`bash scripts/pm/os-regen-merge.sh`,**先 commit
-  merge 再重生成**);两个陷阱、断言措辞、清单读法与锚点禁令细则见 landing-operations A。
-- **跟到 MERGED 为止;入队后的看护同归车道 PM 的落地窗口。** 车道 PM 管验收、首次入队(flip 定点
-  与判据见 landing-operations B)、确认 MERGED(两个读数);落地窗口给关键 PR
-  挂`subscribe_pr_activity`(⛔ 不订阅 dev 交报告前的 PR —— 双驾驶员互踩;**MERGED/关闭即退订 +
-  云卡 `archive_session`**,⛔ 合并前不归档,不留孤儿订阅);落地后再核一次落地判据仍是车道 PM 的
-  活(队列合并同样走 os-regen 驱动)。**落地记账**:座位贴落地清单即账本,逐轮即时记;确需全仓
-  核对时首选 `head:claude/` 精确过滤。
+- **碰生成物的 PR,入队前先同步 + 整体重生成**(os-regen 驱动零冲突标记地**静默丢掉一侧改动**):
+  四步序已机械化 `bash scripts/pm/os-regen-merge.sh`;陷阱、断言措辞与锚点禁令见 landing-operations A。
+- **跟到 MERGED 为止;入队后的看护同归车道 PM 的落地窗口**:验收、首次入队 flip 定点、MERGED 两读
+  数、关键 PR 订阅与退订/归档、落地后再核落地判据 —— 操作细则全在 landing-operations B。**落地记
+  账**:座位贴落地清单即账本,逐轮即时记;确需全仓核对时首选 `head:claude/` 精确过滤。
 - **红/踢出处置在同一落地窗口内做**:机器输入是 merge-queue triage workflow 落在被踢 PR 上的分诊
   评论(失败签名与计数,细节以该 workflow 头为权威);判据唯一来源是签名台账,优先于现场判断 ——
   台账留在其锚点 issue 上作查表数据,**只有人工能升级**(疑似新 flaky 只留提请,⛔ 不自行加表;纯
   计数不追记,只有改变修法作用域时才记)。四分支:已知 flaky ⇒ 原样重投;**已修签名再现 ⇒ ⛔ 不重
   投**,判新问题重新诊断;基上缺已合修复 ⇒ merge main 推新提交(重跑无效);新签名 ⇒ ⛔ 不重投,
   在 PR 与其 `Fixes` 卡各留完整签名与初判;每次处置留审计评论(重投写签名与台账依据)。
-- **依赖前棒才能转绿的 PR:draft 停放 + 签名级预期红清单** + 解除条件(「几条测试会红」不够用
-  );CI-failure 事件与清单比对,新签名才是真问题;依赖合入后同步 → 红清零→ 转 ready → 入队。**
-  多个已实现 PR 全碰生成物 ⇒ 串行接力,一次只放行一个**:每一棒都是一整圈(每棒重走);相邻两棒交
-  接的是**语义不是文本**(意图叠加,⛔ 禁止机械取一边 —— 各自绿、合起来错);散文互锁的分工
-  由 PM 在**两侧**接力指令里写明谁动谁不动(两种漏法在 CI 上都是绿的)。
+- **依赖前棒才能转绿的 PR:draft 停放 + 签名级预期红清单 + 解除条件**;**多个已实现 PR 全碰生成物
+  ⇒ 串行接力一次只放行一个,每棒一整圈、交接语义不是文本** —— 两式全文见 landing-operations C/D。
 
 ### 轮次报告与节奏
 
@@ -617,13 +604,25 @@ grep <branch>`),复升级时逐条**跑**一遍,零命中/变形的就地改写�
   收紧(严格 schema、publish 时响亮拒绝)优于消费端宽容(`??` 回退、静默容错)—— 宽容恰是 AI 批
   量犯错被掩盖的温床;声明即强制,绝不让 AI 声明一个运行时不兑现的能力。
 
-推荐意见必须基于这三条轴给出理由;三轴冲突时如实呈现权衡,交维护者拍板。**四棱卡面块是落卡与升
-级的必备件**(维护者 2026-08-11 接受),每张 `needs-user-decision` 卡带四行,每棱一行,⛔ 不留待
-维护者到场再补:① platform long-term coherence(缩小还是扩大特例/契约增生);② measured business
-pull(今天谁撞上;零拉动默认 defer/ remove);③ AI-agent error-resistance(闭合枚举优于自由结构、
-响亮拒绝优于静默容忍);④ startup scope discipline(remove 优于 declare-and-maintain,每个已声明
-的键都是永久义务)。四棱是三条评估轴的卡面序列化,同一个框架不是第二套;它也是分诊代裁置信门的
-输入(见分诊职责)。交互会话可另发 `AskUserQuestion`,带标签的 issue 恒为持久记录。
+推荐意见必须基于这三条轴给出理由;三轴冲突时如实呈现权衡,交维护者拍板。**标准四棱卡面块是落卡与
+升级的必备件**(四棱维护者 2026-08-11 接受;标准块/摘要视图/批量决裁通道 2026-08-18 裁定「同意」——
+块标准化把提取从 LLM 理解题降级成 grep),每张 `needs-user-decision` 卡落卡即带、⛔ 不留待维护者到
+场再补。固定形状:首行**机器可寻固定标记** `<!-- os-decision-facets -->`(转义拼写写入,写后回读核
+验存活;提取按字面文本 grep,不依赖注释形状 —— sanitizer 纪律见平台读数);四棱各一行 —— ① platform
+long-term coherence(缩小还是扩大特例/契约增生);② measured business pull(今天谁撞上;零拉动默认
+defer/remove);③ AI-agent error-resistance(闭合枚举优于自由结构、响亮拒绝优于静默容忍);④ startup
+scope discipline(remove 优于 declare-and-maintain,每个已声明的键都是永久义务);一行推荐 + 字母选
+项(A/B/…);**一行强制置信缺口(「本分析看不见什么」)** —— 案例(2026-08-15):两张四棱同向、低风
+险、全绿、已复核的 PR 仍因分析看不见的方向性前提被整体作废 —— 推荐是输入,永不是放行,人工地板不变。
+四棱是三条评估轴的卡面序列化,同一个框架不是第二套;也是分诊代裁置信门的输入(见分诊职责)。交互会
+话可另发 `AskUserQuestion`,带标签的 issue 恒为持久记录。
+
+**摘要视图与批量决裁**(同一 2026-08-18 裁定;实施既有批量裁决 2026-08-15 原话「还是等我批量决裁
+吧。」):恒设一张钉住的摘要 issue,分诊 Routine 以通用查询 + 标记提取刷其**正文**(编辑历史即存档)
+,逐卡**逐字粘贴**标准块,⛔ 零转述;权威恒在卡上 —— 摘要是生成视图,永不是第二跟踪器(one-board 规
+则)。维护者可在摘要下一条评论批量裁多张(逐卡「编号 + 选项字母」对);分诊席把每条裁决转录回其卡,
+走既有裁决记录原子四件,引批量评论为出处。**脚本化升级触发(记录在案的出口,不是重设计)**:收件箱
+持续 >20 张 open,或刷新节奏到达每日(内联命令开始跨 fire 漂移)⇒ 把提取冻结进 `scripts/pm/` rollup 脚本。
 
 ## 护栏(Guardrails,有约束力)
 
