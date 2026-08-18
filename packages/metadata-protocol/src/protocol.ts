@@ -6334,6 +6334,21 @@ export class ObjectStackProtocolImplementation implements
      * prior to ADR-0010) the call returns `{ events: [] }` instead of
      * raising, keeping the Studio tab harmless.
      *
+     * [#9638] `{ events: [] }` means "the audit trail was read and this item
+     * has no entries" and NOTHING else. Exactly two causes answer it without a
+     * read: the unprovisioned table above, and a host engine that exposes no
+     * `find` (the `typeof` probe before the read). Every other failure — a
+     * connection drop, a permission denial, a timeout, a malformed row, a query
+     * bug — RAISES, because the rows may well exist and simply were not seen,
+     * and a compliance reader must never be handed "nobody touched this item"
+     * on those terms (ADR-0110 D3). The unqualified `catch` that used to report
+     * all of them as an empty trail is what this closes.
+     *
+     * @throws {@link metadataStoreUnavailableError} — a 503 carrying the driver
+     *         error as `cause`, for every read failure that is not an
+     *         unprovisioned table. The `/audit` route's existing
+     *         `handleRouteError` turns it into an honest 5xx.
+     *
      * `organizationId` SCOPES the read and is enforced in the query below:
      * rows for that organization plus env-wide (`organization_id IS NULL`)
      * rows, and nothing else. Omitted (or `null`) reads the env-wide rows
@@ -6437,6 +6452,35 @@ export class ObjectStackProtocolImplementation implements
         // organization reads exactly the env-wide rows an org-less write
         // produces. Fail-closed, and symmetric with the write path.
         const organizationId = request.organizationId ?? null;
+        // [#9638] The FIRST of the two benign causes the catch below used to
+        // name, asked as a PRECONDITION rather than as an error shape.
+        //
+        // `MetadataHostEngine` carries `[key: string]: any`, so a metadata-only
+        // store or a partial test double with no `find` satisfies the type and
+        // reaches here. That is a real, documented deployment shape and it must
+        // keep answering `{ events: [] }`.
+        //
+        // ⚠️ Asked HERE, before the `try`, because it cannot be asked soundly
+        // INSIDE the catch. Measured: a missing method raises
+        // `TypeError: this.engine.find is not a function`, which
+        // `isMissingTableError` correctly reports as NOT benign — but the only
+        // signal separating it from a genuine `TypeError` raised *inside* a
+        // real driver's `find` (a malformed row, a null deref — actual faults)
+        // is the V8 message text. Sniffing that text would re-open exactly the
+        // fail-open this card closes, one error class narrower. A `typeof`
+        // probe is a fact about the engine, not a guess about an error, so it
+        // cannot misclassify a fault as a capability gap.
+        //
+        // Same shape as the sibling limb one layer up: the `/audit` route's own
+        // capability probe (`typeof p.auditMetaItem !== 'function'`, #9426)
+        // likewise decides BEFORE the call rather than classifying its failure.
+        if (typeof (this.engine as { find?: unknown }).find !== 'function') {
+            console.warn(
+                `[Protocol] auditMetaItem: host engine exposes no \`find\`; `
+                + `reporting no audit entries for ${request.type}/${request.name}`,
+            );
+            return { events: [] };
+        }
         try {
             // Org-scoped lookup: include rows for the specific org AND
             // env-wide (organization_id IS NULL) rows so the editor
@@ -6496,8 +6540,31 @@ export class ObjectStackProtocolImplementation implements
             }));
             return { events };
         } catch (err: any) {
-            // Table not provisioned (legacy env) or driver doesn't
-            // expose `find` — return empty rather than 500ing the tab.
+            // [#9638] Benign (the table has not been provisioned in this legacy
+            // env) falls through to the empty answer; everything else is a read
+            // that DID NOT HAPPEN and leaves as a 503. Byte-for-byte the shape
+            // the sibling {@link listCommits} carries (#5980), and the same
+            // {@link isMissingTableError} predicate `DatabaseLoader` (#5108) and
+            // `SysMetadataRepository` (#4867) ask — a driver quirk is taught to
+            // the platform once rather than re-spelled per seam.
+            //
+            // This `catch` used to be UNQUALIFIED. A connection drop, a
+            // permission denial, a malformed row, a query bug or a timeout was
+            // reported to the caller as the well-formed statement "this item has
+            // no audit entries" — ADR-0110 D3 broken (a miss and a fault are
+            // different facts) on the COMPLIANCE surface. `auditMetaItem` is the
+            // read behind `GET /api/v1/meta/:type/:name/audit`, which exists so
+            // Studio's 审计日志 tab can show who tried what and whether a lock
+            // blocked it; an empty answer there reads as *nobody touched this
+            // item*. Worse than the static capability gap #9426 fixed one layer
+            // up, because a transient read failure makes the same item report a
+            // full trail one minute and a clean one the next. The `console.warn`
+            // below is on the SERVER; it was never an answer to the reader.
+            //
+            // The second cause the old comment named — a host engine with no
+            // `find` — is decided by the precondition probe above the `try`, so
+            // it never reaches here and this arm has exactly ONE benign cause.
+            this.rethrowUnlessMetadataStoreUnprovisioned(err);
             console.warn(
                 `[Protocol] auditMetaItem read failed for ${request.type}/${request.name}: ${err?.message ?? err}`,
             );
