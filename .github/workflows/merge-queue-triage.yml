@@ -32,6 +32,24 @@ name: Merge Queue Triage
 # main before it fires, it never checks out or runs PR code, and it holds the
 # minimum permissions (actions: read for logs, pull-requests: write for the
 # comment).
+#
+# Delivery is retried, never assumed (#9424). A transient GitHub API failure used
+# to kill this job outright — github-script hands any throw from the script to
+# `main().catch(handleError)` → `core.setFailed` — and it took the diagnosis with
+# it, because the comment body exists NOWHERE but the failed request. The step now
+# retries the transient class (declared in its `retries:` inputs below) and, when
+# delivery is refused anyway, writes the whole triage into the run's job summary
+# before failing. That leaves one invariant worth keying on:
+#
+#     this job is green  ⇔  the triage comment is on the PR
+#
+# It is deliberately NOT green-on-undelivered, which is what the sibling fix in
+# docs-drift-check.yml (#9373) chose. There the job's conclusion is a check on the
+# PR and its comment is a courtesy, so a red costs a reader's attention for nothing.
+# Here the job is `workflow_run`: its conclusion is on no check list, gates nothing
+# and is in no required context, so a red costs nothing — while a green that
+# quietly delivered nothing is the same silence this workflow exists to break, one
+# layer further in.
 
 on:
   workflow_run:
@@ -55,6 +73,25 @@ jobs:
       - name: Post the triage comment
         uses: actions/github-script@v9
         with:
+          # The transient-retry policy, declared rather than hand-written (#9424):
+          # octokit's retry plugin re-issues any request whose status is NOT exempt
+          # below, plus network-level failures. Nothing here is swallowed — a spent
+          # retry still throws, so this widens no verdict, only the number of times
+          # the request is asked.
+          #
+          # 403 is REMOVED from the action's default exempt list
+          # (400,401,403,404,422) on purpose: GitHub answers a SECONDARY rate limit
+          # with 403 as well as with 429, and this job is rate-limit-shaped — it
+          # paginates the run's jobs, pulls up to four job logs, then paginates 24 h
+          # of merge_group runs. The price is that a genuine permission denial (a
+          # wrong `permissions:` block) now takes four attempts to fail instead of
+          # one. It still fails.
+          #
+          # 400/401/404/422 stay exempt: a malformed request, a wrong target, or a
+          # body past GitHub's 65536-character comment limit is this repo's own bug,
+          # answered on the first try and not improved by asking again.
+          retries: 3
+          retry-exempt-status-codes: 400,401,404,422
           script: |
             const run = context.payload.workflow_run;
             const { owner, repo } = context.repo;
@@ -68,11 +105,44 @@ jobs:
             const prNumber = Number(m[1]);
             const marker = `<!-- merge-queue-triage:${run.id} -->`;
 
+            // `HTTP 503: No server is currently available to service your request`,
+            // `ECONNRESET: ...` — enough for a reader to tell platform weather from
+            // a 403 that means the `permissions:` block above is wrong.
+            const describe = (error) => {
+              const kind = typeof error?.status === 'number'
+                ? `HTTP ${error.status}`
+                : (error?.code || 'error');
+              return `${kind}: ${String(error?.message || '').replace(/\s*\.\s*$/, '')}`;
+            };
+
             // Idempotency: workflow_run deliveries can repeat; one comment per run.
-            const existing = await github.rest.issues.listComments({
-              owner, repo, issue_number: prNumber, per_page: 100,
-            });
-            if (existing.data.some((c) => (c.body ?? '').includes(marker))) {
+            // The marker is scoped to THIS run id, so the only thing this listing can
+            // prevent is a second copy of this very comment.
+            //
+            // When the listing cannot be read at all, this degrades to AT-LEAST-ONCE
+            // on purpose and posts without knowing. The two mistakes are not
+            // symmetric here: a duplicate is inert — same run, same text, and the
+            // shared marker makes the pair self-evident — while a miss is the whole
+            // defect, since this comment IS the machine-readable signal the PM
+            // dispatch loop keys on and the cross-PR flake evidence lives in it.
+            // #9423 chose the opposite for docs-drift-check.yml, and correctly: that
+            // marker is STABLE across runs, so posting blind there strands a second
+            // advisory which the dedup then updates forever alongside the first.
+            let alreadyPosted = false;
+            try {
+              const existing = await github.rest.issues.listComments({
+                owner, repo, issue_number: prNumber, per_page: 100,
+              });
+              alreadyPosted = existing.data.some((c) => (c.body ?? '').includes(marker));
+            } catch (error) {
+              core.warning(
+                `Could not read #${prNumber}'s comments to check for an existing triage `
+                + `comment (${describe(error)}). Posting anyway: a duplicate triage comment `
+                + `is inert, a missing one loses the queue-failure signal.`,
+                { title: 'Triage comment de-duplication skipped' },
+              );
+            }
+            if (alreadyPosted) {
               core.info('triage comment for this run already exists — skipping.');
               return;
             }
@@ -159,5 +229,49 @@ jobs:
               '_Generated by [Claude Code](https://claude.ai/code) · merge-queue-triage workflow (#4859)_',
             ].join('\n');
 
-            await github.rest.issues.createComment({ owner, repo, issue_number: prNumber, body });
-            core.info(`triage comment posted on #${prNumber}.`);
+            // Everything above is the DIAGNOSIS; the call below only carries it to
+            // the PR. The step's `retries:` have already absorbed a blip by the time
+            // anything lands here, so what is left is a refusal that outlived them —
+            // and `body` exists nowhere else, so letting it throw (which is what this
+            // step did until #9424) loses the entire queue-failure triage and leaves
+            // the run page showing `Unhandled error: HttpError` and nothing more.
+            //
+            // So the diagnosis is written where it outlives the request, and THEN the
+            // job fails. Failing is the point: see the invariant in this file's header
+            // — green means delivered, and nothing about this workflow_run job's
+            // conclusion costs anything to anybody. Tolerance is scoped to the retry,
+            // never to the outcome, and it never reaches detection: a failure above
+            // this line still fails exactly as it always did.
+            try {
+              await github.rest.issues.createComment({ owner, repo, issue_number: prNumber, body });
+              core.info(`triage comment posted on #${prNumber}.`);
+            } catch (error) {
+              const reason = describe(error);
+              try {
+                await core.summary.addRaw([
+                  `## ⚠️ 队列失败分诊已生成，但没能发到 PR #${prNumber}`,
+                  '',
+                  `\`issues.createComment\` 最终被拒绝：\`${reason}\`。`,
+                  '',
+                  `- 这是**投递**失败，不是分诊失败。下面就是本次运行算出来的完整分诊内容 —— PR #${prNumber} 上没有它。`,
+                  '- 可以直接复制到 PR 上；也可以在 API 恢复后 re-run 本 job，重复投递会被评论里的 marker 挡掉。',
+                  '- 怎么分辨：5xx / 429 / 网络错误码是平台抖动，re-run 即可；4xx（422 正文超长、403 权限）是本仓自己的 bug，re-run 不会变绿，去修它。',
+                  '- 本 job 判红是有意的：这个 workflow 的结论不出现在任何 check 列表上，红的代价是零，而绿会让「信号丢了」跟「信号送到了」长得一模一样。',
+                  '',
+                  '---',
+                  '',
+                  body,
+                  '',
+                ].join('\n')).write();
+              } catch (summaryError) {
+                // The summary is the richer channel, the annotation the reliable one.
+                // Losing the richer one must not restore the silence this prevents.
+                core.info(`Could not write the job summary: ${summaryError.message}`);
+              }
+              core.setFailed(
+                `The queue-failure triage for PR #${prNumber} was computed but could NOT be `
+                + `posted (${reason}). It is reproduced in full in this run's job summary: copy `
+                + `it onto the PR, or re-run this job to retry delivery once the API recovers. `
+                + `Queue run ${run.id}: ${run.html_url}`,
+              );
+            }
