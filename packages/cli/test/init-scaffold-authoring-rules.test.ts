@@ -42,8 +42,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { authoringRulesFor } from '@objectstack/lint';
-import { TEMPLATES, sanitizeNamespace, writeTemplateSrcFiles } from '../src/commands/init';
-import { validateScaffold, SCAFFOLD_RULE_COMMAND } from '../src/utils/scaffold-validate';
+import { TEMPLATES, sanitizeNamespace, writeTemplateSrcFiles } from '../src/commands/init.js';
+import { validateScaffold, SCAFFOLD_RULE_COMMAND } from '../src/utils/scaffold-validate.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TMP_ROOT = path.resolve(HERE, '../tmp');
