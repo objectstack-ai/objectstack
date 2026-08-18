@@ -1,7 +1,7 @@
 {
   "packages/cli/src/commands/migrate/files-to-references.ts": 1,
   "packages/cli/src/commands/migrate/value-shapes.ts": 1,
-  "packages/cli/src/commands/serve.ts": 10,
+  "packages/cli/src/commands/serve.ts": 9,
   "packages/client/src/client.hono.test.ts": 2,
   "packages/cloud-connection/src/cloud-connection-plugin.ts": 5,
   "packages/cloud-connection/src/marketplace-install-local-plugin.ts": 16,

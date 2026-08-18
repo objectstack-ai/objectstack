@@ -35,9 +35,11 @@
  *
  * ## Why the vocabulary parse maps `{ code, error }` → `{ code, message }`
  *
- * These data-door bodies are the FLAT dialect (`code` beside `error`), #7035's
- * declared debt held by the `check:route-envelope` ratchet — the envelope
- * POSITION is that card's business, not this one's. What THIS card owes is the
+ * These data-door bodies are the FLAT dialect (`code` beside `error`), declared
+ * debt held by the `check:route-envelope` ratchet — the envelope POSITION is
+ * that ratchet's business, not this one's. (⚠️ It was cited here as #7035's
+ * business; that card closed on 2026-08-10 with PR #7293, having converged three
+ * `/meta` 501 handlers and nothing else.) What THIS card owes is the
  * VOCABULARY: `ApiErrorSchema.code` is the closed union
  * (`StandardErrorCode ∪ ERROR_CODE_LEDGER`), so each case parses the wire
  * code + message through `ApiErrorSchema` slots to assert union membership,

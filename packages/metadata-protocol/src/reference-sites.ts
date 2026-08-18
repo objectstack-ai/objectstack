@@ -89,6 +89,19 @@
  * `reference-sites.derivation.test.ts` pins that set, so a type that stops
  * being walkable is a red test rather than a silently shorter list.
  *
+ * ⚠️ [#9327] That build-time discriminator covers the SOURCE side only, and the
+ * distinction is load-bearing rather than pedantic. A source type that cannot
+ * be read shortens some answers; a TARGET type whose key form no site can hold
+ * makes EVERY answer for it empty, and moving that fact into the build leaves
+ * the operator reading "Safe to delete." exactly as before. A build-time record
+ * is the right home for a bounded gap and the wrong home for a total one, so
+ * {@link ReferenceSiteIndex.unanswerableTargetTypes} is consumed as a REFUSAL
+ * at the protocol seam (`findReferencesToMeta`) rather than merely recorded —
+ * through the ADR-0112 error envelope the same route already refuses through
+ * (#9326's `501 NOT_IMPLEMENTED`), so it adds no response field and no new
+ * error code. The success-shape discriminator remains fenced to `packages/spec`
+ * and is deliberately NOT what this uses.
+ *
  * ⚠️ Two residues remain open and are NOT closed here — see this module's
  * card. Neither can be closed inside this package.
  *
@@ -129,6 +142,14 @@ export interface ReferenceSiteIndex {
      * module header on why this lives here and not on the response.
      */
     readonly unwalkableSourceTypes: readonly string[];
+    /**
+     * Declared types that cannot be answered FOR as a target, because the key
+     * the endpoint addresses them by is not a string any reference site can
+     * hold. The SOURCE-side sibling above records a shape that could not be
+     * read; this one records a shape that was read fine and still cannot
+     * match. See {@link COMPOSITE_KEYED_TARGET_TYPES}.
+     */
+    readonly unanswerableTargetTypes: readonly string[];
 }
 
 /**
@@ -158,6 +179,111 @@ export interface ReferenceSiteIndex {
 const SEMANTIC_REFERENCE_SITES: readonly ReferenceSite[] = [
     { fromType: 'object', property: 'reference', target: 'object' },
 ];
+
+/**
+ * The declared metadata-type universe, as a TYPE. Seeds below are keyed to it
+ * so a member naming a type the registry does not declare is a compile error
+ * rather than a row that silently never matches.
+ */
+type DeclaredMetadataType = (typeof DEFAULT_METADATA_TYPE_REGISTRY)[number]['type'];
+
+/**
+ * Target types whose ADDRESSABLE KEY is COMPOSITE — the string
+ * `GET /api/v1/meta/:type/:name/references` is addressed by is built from more
+ * than the item's own `name`, so it is not a value any reference site holds.
+ *
+ * ## Why this is a different fact from `unwalkableSourceTypes`
+ *
+ * The SOURCE-side record above is about a shape that could not be READ:
+ * `external_catalog` resolves no schema, so nothing can be said about what it
+ * points at. This set is the TARGET-side sibling and its cause is the
+ * opposite — the shape reads perfectly. `field` is walked as a source, and
+ * twelve derived sites across nine source types name it as a target. Every one
+ * of them still misses, on every deployment, for every field, because the two
+ * sides spell the same field differently:
+ *
+ *  - the ENDPOINT addresses a field item as `<object>.<field>` — the composite
+ *    key `isNestedArtifactField` splits on its first dot (`account.owner`);
+ *  - every SITE holds the bare field name (`owner`). Measured across the
+ *    declared schemas: `view.list.columns[].field`, `dataset.dimensions[].field`,
+ *    `object.validations[].field`, `object.fields{}` (a `z.record` keyed by the
+ *    bare name), and 150 further non-recursive paths — all of them documented
+ *    as *"Field name (snake_case)"*, none of them as a metadata item key.
+ *
+ * So the answer was `{ references: [] }` for every field, always, regardless of
+ * real usage — and the admin "Used by" panel renders that empty case, verbatim,
+ * as *"Nothing in the metadata graph points at this item. Safe to delete."*
+ * An unanswerable question rendered as a positive clearance, on the screen
+ * where someone decides to delete. ADR-0110 D3: a MISS and a FAULT are
+ * different facts, and this one was never a miss.
+ *
+ * ## Why a seed here rather than a derivation
+ *
+ * "This type is addressed by a composite key" is a PROTOCOL fact, stated in
+ * prose on `isNestedArtifactField` and nowhere a machine can read — the same
+ * class as {@link SEMANTIC_REFERENCE_SITES}, and it gets the same treatment: a
+ * seed small enough to argue, never a table to grow. `field` is the only member
+ * and that is measured, not assumed — #7743 swept the whole registry and found
+ * `field` is the ONE declared type whose artifacts are not standalone registry
+ * items.
+ *
+ * ⛔ Do NOT add a member to make some other type "refuse cleanly". The seed is
+ * a statement about KEY FORM, not a severity dial; a type whose key IS its
+ * `name` answers honestly already, and refusing for it would trade this card's
+ * false clearance for a false fault one type over.
+ *
+ * What is NOT hand-written is whether the seed is still TRUE — see
+ * {@link nameVocabularyRejectsKey}. A member whose premise dissolves drops out
+ * of the derived set on the next boot, so widening `FieldSchema.name` to admit
+ * a dot turns the pin red instead of leaving a stale refusal in place.
+ */
+const COMPOSITE_KEYED_TARGET_TYPES: readonly {
+    readonly type: DeclaredMetadataType;
+    readonly separator: string;
+}[] = [
+    { type: 'field', separator: '.' },
+];
+
+/**
+ * Is `type`'s composite key provably OUTSIDE the vocabulary its own `name`
+ * declares — i.e. can no legal `name` ever equal the key the endpoint uses?
+ *
+ * This is the derived half of {@link COMPOSITE_KEYED_TARGET_TYPES}. `FieldSchema`
+ * declares `name` as `^[a-z_][a-z0-9_]*$`, which cannot contain `.`, while the
+ * key is `<object>.<field>` — so a site value and an addressed key are drawn
+ * from disjoint sets and the match is impossible rather than merely absent.
+ *
+ * Deliberately conservative in both directions:
+ *
+ *  - an UNREADABLE shape answers `true` (it cannot promise the key is
+ *    representable, and this module never converts an unknown into a clearance);
+ *  - an UNCONSTRAINED `name` answers `false` — `email_template` and `capability`
+ *    both declare dotted names, where the name IS the key and the question is
+ *    answerable. Refusing those would be this card's harm inverted.
+ */
+function nameVocabularyRejectsKey(type: DeclaredMetadataType, separator: string): boolean {
+    const schema = getMetadataTypeSchema(type);
+    if (!schema) return true;
+    let json: JsonSchemaNode;
+    try {
+        json = z.toJSONSchema(schema, { unrepresentable: 'any', io: 'input' }) as JsonSchemaNode;
+    } catch {
+        return true;
+    }
+    const nameNode = (json.properties as Record<string, JsonSchemaNode> | undefined)?.name;
+    const pattern = nameNode?.pattern;
+    if (typeof pattern !== 'string') return false;
+    let compiled: RegExp;
+    try {
+        compiled = new RegExp(pattern);
+    } catch {
+        return false;
+    }
+    // A two-segment probe is enough: if the declared vocabulary admits the
+    // separator at all, some composite key is representable and the type is
+    // not unanswerable BY KEY FORM.
+    return !compiled.test(`a${separator}b`);
+}
 
 /** `external_catalog` → `externalCatalog`. Identity for a type with no underscore. */
 function camelCaseOf(type: string): string {
@@ -379,7 +505,17 @@ export function deriveReferenceSites(): ReferenceSiteIndex {
         bucket.sort((a, b) => a.fromType.localeCompare(b.fromType) || a.property.localeCompare(b.property));
     }
 
-    return { byTarget, unwalkableSourceTypes: unwalkable.sort() };
+    // The TARGET-side honest record. Derived from the declared universe like
+    // everything else here: a seeded type that is not declared contributes
+    // nothing, and a seeded type whose `name` vocabulary has since widened to
+    // admit its own key drops out. See COMPOSITE_KEYED_TARGET_TYPES.
+    const declared = new Set(declaredTypes);
+    const unanswerableTargets = COMPOSITE_KEYED_TARGET_TYPES
+        .filter(({ type, separator }) => declared.has(type) && nameVocabularyRejectsKey(type, separator))
+        .map(({ type }) => type)
+        .sort();
+
+    return { byTarget, unwalkableSourceTypes: unwalkable.sort(), unanswerableTargetTypes: unanswerableTargets };
 }
 
 /**

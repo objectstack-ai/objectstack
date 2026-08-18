@@ -1,0 +1,67 @@
+{
+  "$comment": [
+    "Known published-README symbol claims that do not resolve, enforced by",
+    "scripts/check-published-readme-exports.mjs (#9532).",
+    "",
+    "⛔ SHRINK-ONLY and ⛔ MAINTAINER-ONLY. Reconciled in BOTH directions: an entry whose",
+    "finding no longer occurs is STALE and fails, so fixing a README forces its entry to be",
+    "deleted in the same PR. There is deliberately no `--fix`/`--update` flag — a generator",
+    "would let a new fabrication be admitted by 'just run the update command', which is",
+    "precisely how a gate stops meaning anything.",
+    "",
+    "Every entry pins ONE symbol, not a file. A baselined package that invents a SECOND",
+    "fabricated symbol still goes red; a file-level mute would be the very button this gate",
+    "was written to replace.",
+    "",
+    "Seeded from the five instances #9532 measured. They are the worklist for the per-package",
+    "README rewrites (the other half of that card) — when a rewrite lands, its entry goes.",
+    "The sixth instance, @objectstack/plugin-audit, was fixed by PR #9531 before this gate",
+    "landed and is deliberately ABSENT: it is the negative control, and the PR that added",
+    "this gate reports it clean.",
+    "",
+    "Key format: `<package>|<file>|<kind>|<specifier>[|<symbol>]`. Run the checker to see the",
+    "exact key it computes for a finding."
+  ],
+  "entries": [
+    {
+      "id": "@objectstack/driver-sql|packages/drivers/driver-sql/README.md|import|@objectstack/spec|IDriver",
+      "why": "IDriver is not on @objectstack/spec's root entry — it is exported from @objectstack/spec/contracts. Wrong subpath, not a missing export."
+    },
+    {
+      "id": "@objectstack/mcp|packages/mcp/README.md|member|@objectstack/mcp|MCPServerPlugin.configure",
+      "why": "MCPServerPlugin is a REAL exported class (packages/mcp/src/plugin.ts:96) with no static `configure`. The #9532 shape at its worst: the import resolves, so only the call-site half can see it."
+    },
+    {
+      "id": "@objectstack/mcp|packages/mcp/README.md|import|@objectstack/driver-sql|DriverSql",
+      "why": "@objectstack/driver-sql exports `SqlDriver`. `DriverSql` has never existed, and the README then calls `DriverSql.configure({...})` on it."
+    },
+    {
+      "id": "@objectstack/objectql|packages/objectql/README.md|member|@objectstack/objectql|SchemaRegistry.registerObject",
+      "why": "registerObject is an INSTANCE method (`engine.registry.registerObject(...)`); the README calls it on the class. The import resolves, so only the call-site half can see it."
+    },
+    {
+      "id": "@objectstack/spec|packages/spec/README.md|import|@objectstack/spec/ai|MCPServerConfigSchema",
+      "why": "@objectstack/spec/ai exports `MCPServerRefSchema`; there is no `MCPServerConfigSchema`. This is the protocol package's own front page."
+    },
+    {
+      "id": "@objectstack/spec|packages/spec/prompts/create-new-project.md|import|@objectstack/spec/data|Object",
+      "why": "@objectstack/spec/data exports `ObjectSchema`. `Object` resolves to the JS global instead of failing loudly — the worst shape for a published AGENT-AUTHORING prompt."
+    },
+    {
+      "id": "@objectstack/spec|packages/spec/prompts/implement-objectos.md|import|@objectstack/spec/system|ManifestSchema",
+      "why": "@objectstack/spec/system exports `AppManifestSchema` and `DeployManifestSchema`; there is no bare `ManifestSchema`. Published agent-authoring prompt."
+    },
+    {
+      "id": "@objectstack/spec|packages/spec/prompts/implement-objectos.md|import|@objectstack/spec/system|IdentitySchema",
+      "why": "@objectstack/spec/system exports `Identity`; there is no `IdentitySchema`. Published agent-authoring prompt."
+    },
+    {
+      "id": "@objectstack/spec|packages/spec/prompts/implement-objectos.md|import|@objectstack/spec/system|PolicySchema",
+      "why": "@objectstack/spec/system has no bare `PolicySchema` — only qualified ones (`KeyRotationPolicySchema`, `IncidentResponsePolicySchema`, `DataClassificationPolicySchema`, …). Published agent-authoring prompt."
+    },
+    {
+      "id": "@objectstack/spec|packages/spec/prompts/implement-objectql.md|import|@objectstack/spec/data|Object",
+      "why": "Same fabrication as create-new-project.md: `ObjectSchema` is the real export."
+    }
+  ]
+}

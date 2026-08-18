@@ -385,7 +385,7 @@
       "title": "CRUD × permission-set matrix: every access-matrix.json row holds — allowed verbs succeed, withheld verbs 403, VAMA bounded",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -400,7 +400,8 @@
           "seeded permission sets showcase_contributor/manager/executive/auditor/ops/member_default/guest_portal/field_ops_delegate (security bootstrap)"
         ],
         "knownGaps": [
-          "every authenticated member ALSO holds the everyone baseline showcase_member_default additively (ADR-0090 D5) — the effective expectation per cell is the UNION of the tested set's row and the baseline's row for that object; compute the union before judging a cell, or a baseline-granted read will look like a matrix violation"
+          "every authenticated member ALSO holds the everyone baseline showcase_member_default additively (ADR-0090 D5) — the effective expectation per cell is the UNION of the tested set's row and the baseline's row for that object; compute the union before judging a cell, or a baseline-granted read will look like a matrix violation. Measured on the committed table: 9 of the 100 showcase_* cells are granted ONLY by the baseline (showcase_auditor and showcase_executive can CREATE an inquiry and create+edit a private note; guest_portal can READ an inquiry; showcase_manager and showcase_ops can CREATE an inquiry). showcase-crud-persona-matrix.dogfood.test.ts computes the union and asserts those 9 as allowed.",
+          "access-matrix.json is the APP's declared matrix; the platform's own baseline permission sets are additionally in force and grant some sys_* surface the app matrix never mentions (measured: a plain member reads /data/sys_user 200, self-scoped). So the absence of a row is NOT a prediction of denial on sys_* objects, and the automated sweep judges the showcase_* rows only — see automated.ref."
         ]
       },
       "steps": [
@@ -472,7 +473,7 @@
       ],
       "automated": {
         "kind": "verify",
-        "ref": "packages/verify/src/verify.ts (runCrudVerification) + packages/verify/src/rls.ts (runRlsProofs) — `objectstack verify --rls` for the RLS half (the flag is load-bearing: bare verify prints no RLS section); persona-grained cells remain manual"
+        "ref": "packages/verify/src/verify.ts (runCrudVerification) + packages/verify/src/rls.ts (runRlsProofs) — `objectstack verify --rls` for the OBJECT-level CRUD and cross-owner RLS half (the flag is load-bearing: bare verify prints no RLS section) + packages/qa/dogfood/test/showcase-crud-persona-matrix.dogfood.test.ts for the PERSONA-grained cells: all 25 showcase_* rows of access-matrix.json driven over all four verbs by one fresh member per permission set — 100 cells, 50 effective-allow and 50 effective-deny, each judged against the BASELINE-UNIONED expectation (row OR showcase_member_default row, ADR-0090 D5), which is also asserted as load-bearing on the 9 cells whose only grant is the baseline. Reaches clauses 0, 1, 2, 3, 4 and 6 for those rows; every denial is checked to be 403 PERMISSION_DENIED specifically, every allow to persist, and an admin payload control runs first so a persona 403 cannot be a 400 in disguise. STILL MANUAL: (a) the 6 showcase_field_ops_delegate x sys_* rows — the platform's OWN baseline sets grant part of that surface independently of the app matrix (measured: a member holding nothing but the app baseline reads /data/sys_user 200, self-scoped, though the matrix lists sys_user read only for the delegate), and the delegate's sys_user_position writes are decided by the ADR-0090 D12 adminScope subtree gate that showcase-permission-zoo.dogfood.test.ts already pins on both sides — a raw cell verdict there would be false in one direction or the other; (b) clause 5's guest-anchor intake asymmetry (guest_portal create-without-read) — NOT observable on a member persona at all, because the everyone baseline grants read on showcase_inquiry and capability is a union, so the member-persona expectation is READ ALLOWED; the asymmetry lives on the unauthenticated guest anchor, a different admission lane."
       },
       "traps": [
         "wrong-persona",
@@ -491,7 +492,13 @@
           "change": "new — CRUD × permission matrix grounded in access-matrix.json, per the deep-test contract",
           "ref": "claude/platform-test-checklist-ocwugl"
         },
-        { "revision": 2, "date": "2026-08-18", "change": "named the --rls flag in automated.ref. The ref pointed at runRlsProofs while spelling the invocation as bare `objectstack verify`, which never runs the proofs (#9334)", "ref": "#9386" }
+        { "revision": 2, "date": "2026-08-18", "change": "named the --rls flag in automated.ref. The ref pointed at runRlsProofs while spelling the invocation as bare `objectstack verify`, which never runs the proofs (#9334)", "ref": "#9386" },
+        {
+          "revision": 3,
+          "date": "2026-08-18",
+          "change": "persona-grained cells pinned (QA run #9401 scored this item partial: verify proves object-level CRUD + cross-owner RLS, never the persona x cell matrix). automated.ref now names the dogfood sweep over the 25 showcase_* rows and states precisely what stays manual — the 6 sys_* delegate rows, whose verdicts are not plain cells, and clause 5's guest-anchor asymmetry, which a member persona structurally cannot observe. knownGaps records the measured baseline-union flip count and the fact that a missing row is not a prediction of denial on sys_* objects",
+          "ref": "#9481"
+        }
       ]
     },
     {
@@ -614,7 +621,7 @@
       "title": "Field-level security: editable:false strips/denies writes API-side and renders read-only in the UI; masked-read half needs an authored readable:false grant",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -628,7 +635,8 @@
           "a seeded showcase_project row with a non-null budget"
         ],
         "knownGaps": [
-          "stock showcase authors NO readable:false FLS grant, so the read-MASKING half (field absent/nulled on GET, plugin-security/src/field-masker.ts) has no stock fixture; to run it, author a scratch permission set carrying readable:false on a showcase_project field and grant it to a fresh member — if the run cannot author one through a supported surface, record that half blocked(fixture) rather than ticking on the write half alone"
+          "[API half CLOSED by #9481; the seed gap itself stays open] stock showcase authors NO readable:false FLS grant, so the read-MASKING half (field absent/nulled on GET, plugin-security/src/field-masker.ts) has no stock fixture; to run it, author a scratch permission set carrying readable:false on a showcase_project field and grant it to a fresh member — if the run cannot author one through a supported surface, record that half blocked(fixture) rather than ticking on the write half alone. What changed: showcase-fls-read-mask-strip.dogfood.test.ts does exactly that at runtime, so the SERVER half no longer waits on the seed. The UI half still does — a console render cannot be driven off a permission set that exists only inside a test's stack — and #9308 fixture 4 is the card that would land the stock grant.",
+          "MASKED and STRIPPED are two different mechanisms with two different wire shapes, and this item's clause 4 (\"absent or nulled\") predates the measurement. Measured answer: a permission-set readable:false DELETES the key (strip); the #8993 `maskingRule` path REPLACES the value and leaves the key present (mask). A test that only checks \"I did not get the real value\" passes for both and pins neither, so the pin asserts key-absence. The masked half has no fixture at all — do not tick it off the strip pin."
         ]
       },
       "steps": [
@@ -682,7 +690,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/showcase-permission-zoo.dogfood.test.ts (FLS budget case — write half only)"
+        "ref": "packages/qa/dogfood/test/showcase-permission-zoo.dogfood.test.ts (FLS budget case — WRITE half: the showcase's own readable:true/editable:false grant) + packages/qa/dogfood/test/showcase-fls-read-mask-strip.dogfood.test.ts (READ half, asserted server-side: a readable:false field is STRIPPED — the KEY is absent from the by-id record, from every listed row and from an explicit `select` that names it, and it is neither nulled nor replaced by a placeholder — while the entitled caller still receives it on the same row and request; filtering or sorting on the stripped field is refused 403 PERMISSION_DENIED naming the field, and the entitled caller can still do both; the read-deny's write complement is refused and the stored value is unchanged. The scratch readable:false set is authored at runtime, per this item's own steps). STILL MANUAL: (a) clause 3 and the UI half of clause 4 — the console render of the FLS state — have no pin; (b) the partial-MASKING path (#8993 `maskingRule`: key PRESENT, value replaced by a mask image) is unpinned and has no fixture anywhere in this repo — NO object declares a maskingRule, so the masked-value wire shape cannot be asserted on the stock showcase. The read pin covers the STRIP mechanism only; do not read it as covering the masked one."
       },
       "source": [
         "examples/app-showcase/src/security/permission-sets.ts (contributor FLS)",
@@ -695,6 +703,12 @@
           "date": "2026-08-07",
           "change": "new — FLS item per the deep-test contract; read-mask half carries an explicit fixture gap instead of an ungrounded step",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-18",
+          "change": "READ half pinned (QA run #9401 scored this item partial on a write-only pin). automated.ref now names the read pin and states what it does NOT reach: the UI render, and the #8993 maskingRule path, which has no fixture in this repo. knownGaps records the measured mask-vs-strip distinction — readable:false DELETES the key, it does not null it — so the next runner does not tick the masked half off the strip pin",
+          "ref": "#9481"
         }
       ]
     },

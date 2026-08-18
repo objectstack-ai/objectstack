@@ -58,7 +58,7 @@
  * string literal in one of a handful of syntactic positions, and the positions
  * are more varied than an AST shape for "the value of an error's code property"
  * would cover (class field, constructor-side object literal, post-hoc
- * assignment, a constant one module over). The six shapes below are published
+ * assignment, a constant one module over). The eight shapes below are published
  * rather than left inside the implementation, and `--self-test` pins each one —
  * because the price of a source scan is that it sees only the spellings it
  * knows, and an unrecognised one produces no finding, SILENTLY. Reaching for a
@@ -82,8 +82,40 @@
  *     (the ledger's own rule, and #4984's phantom-check family).
  *   - Reported: only codes the registered vocabulary does NOT contain. A
  *     registered code is by construction parseable, whatever door it reaches.
- *   - Only SCREAMING_SNAKE literals. Lowercase code literals are a different
- *     defect with its own gate (`check:error-code-casing`, ADR-0112 D6/D6b/D6c).
+ *   - [#9460] Lowercase and mixed-case codes are REPORTED, except in the two
+ *     positions where a better-equipped gate already sees the identical text.
+ *     ADR-0112 D1 rules the value space `^[A-Z][A-Z0-9_]*$`, so a lowercase
+ *     code is outside the vocabulary by definition and the only real question
+ *     is WHICH gate reports it. `check:error-code-casing` owns the lowercase
+ *     sweep, and every pattern it has needs a QUOTED lowercase literal beside
+ *     the token `code` — `code: 'x'`, `.code = 'x'`, `code === 'x'`,
+ *     `code?: 'x' | 'y'`. In those positions (`objlit`, `assign`) the
+ *     delegation is real: that gate reads the same characters and carries the
+ *     D6/D6b/D6c discrimination — field-addressed catalogs, persisted audit
+ *     columns, diagnostics payloads, Zod's own issue codes — that decides which
+ *     lowercase literals are legitimate. Reporting them here would duplicate a
+ *     gate that answers better and would call Zod's `code: 'custom'` an
+ *     unregistered ObjectStack error code, which is false. Measured, not
+ *     assumed: reporting every lowercase stamp took this gate from 12 sites to
+ *     94, and 82 of the 82 new findings were D6/D6b/D6c or Zod.
+ *
+ *     Everywhere else the delegation was a HOLE, not a hand-off. A code
+ *     arriving through a constant, a template, or a helper parameter has no
+ *     quoted literal at the stamp site, so `check:error-code-casing` is
+ *     structurally blind to it — and this gate dropping it for its casing meant
+ *     NOBODY reported it. Two gates, each assuming the other. `plugin-security`
+ *     threw a live 403 `owd_widening_forbidden` through both for two vocabulary
+ *     batches. Those shapes carry `lowercase: 'here'` and are reported.
+ *
+ *     So what is measured is "outside the vocabulary AND unowned by the gate we
+ *     delegate lowercase to", never "is it SCREAMING_SNAKE".
+ *   - [#9460] A code assembled from RUNTIME values in a local variable
+ *     (`const code = readFrom(x); err.code = code`) is out of reach for the
+ *     same reason an interpolated template is, and — unlike a template, which
+ *     at least has a stable family identity — has nothing to report under. It
+ *     contributes no site. `packages/metadata-protocol/src/sys-metadata-repository.ts`
+ *     is the live example worth closing next: `const code = intent === 'x' ? 'A' : 'B'`
+ *     is a local TERNARY OF LITERALS, which a resolver could reduce.
  *   - A constant this gate cannot resolve is REPORTED as unresolved, never
  *     dropped: a deriver that goes quietly blind is the same failure one layer
  *     down. [#9223] A constant imported from a WORKSPACE package is resolved
@@ -156,27 +188,55 @@ export function parseStandardCodes(source) {
  */
 export const SHAPES = [
   // `err.code = 'X'` — stamped onto a value about to be thrown.
-  { name: 'assign', re: /(?:^|[^\w.$])[\w$]+\.code\s*=\s*'([A-Za-z][A-Za-z0-9_]*)'/g, resolve: 'literal' },
+  // [#9460] The left-hand side is no longer required to be a BARE identifier.
+  // The old anchor (`[^\w.$][\w$]+\.code`) demanded a word character where
+  // `(err as any).code = 'X'` puts a `)`, so the single most common way this
+  // repo stamps a code onto a caught-or-constructed value — through a cast —
+  // was invisible in the very shape named for it.
+  { name: 'assign', re: /\.code\s*=\s*'([A-Za-z][A-Za-z0-9_]*)'/g, resolve: 'literal', lowercase: 'casing-gate' },
   // `readonly code = 'X'` / `readonly code: T = 'X'` — an error class's identity.
-  { name: 'classfield', re: /\breadonly\s+code\s*(?::[^=;\n]+)?=\s*'([A-Za-z][A-Za-z0-9_]*)'/g, resolve: 'literal' },
+  { name: 'classfield', re: /\breadonly\s+code\s*(?::[^=;\n]+)?=\s*'([A-Za-z][A-Za-z0-9_]*)'/g, resolve: 'literal', lowercase: 'here' },
   // `readonly code = CONST` — the same, one indirection away.
-  { name: 'classconst', re: /\breadonly\s+code\s*(?::[^=;\n]+)?=\s*([A-Z][A-Z0-9_]*)\s*[;,\n]/g, resolve: 'constant' },
+  { name: 'classconst', re: /\breadonly\s+code\s*(?::[^=;\n]+)?=\s*([A-Z][A-Z0-9_]*)\s*[;,\n]/g, resolve: 'constant', lowercase: 'here' },
   // `code: 'X'` in an object literal (constructor options, Object.assign, a
   // returned envelope). The broadest shape, and the reason verdicts exist:
   // plenty of these are not wire codes at all.
-  { name: 'objlit', re: /\bcode:\s*'([A-Za-z][A-Za-z0-9_]*)'/g, resolve: 'literal' },
+  { name: 'objlit', re: /\bcode:\s*'([A-Za-z][A-Za-z0-9_]*)'/g, resolve: 'literal', lowercase: 'casing-gate' },
   // [#9223] `code: CONST` in an object literal — the SAME indirection
   // `classconst` already follows, in the shape that stamps most of this repo's
   // codes. Left out of the original four, it was the gate's own blind spot:
   // `objlit` required a quoted literal, so a constant in an object literal
   // matched nothing at all and was never even reported as unresolved.
-  { name: 'objlitconst', re: /\bcode:\s*([A-Z][A-Z0-9_]*)\s*[,;}\n]/g, resolve: 'constant' },
+  { name: 'objlitconst', re: /\bcode:\s*([A-Z][A-Z0-9_]*)\s*[,;}\n]/g, resolve: 'constant', lowercase: 'here' },
   // [#9223] A template-literal `code:`. Evaluating one needs the RUNTIME values
   // of its interpolations, which a source scan does not have — so it is
   // reported as unresolved, which is what the header's bound requires of any
   // value this gate cannot reduce to a literal. A template with no
   // interpolation is just a literal wearing backticks and is treated as one.
-  { name: 'objlittemplate', re: /\bcode:\s*`([^`]*)`/g, resolve: 'template' },
+  { name: 'objlittemplate', re: /\bcode:\s*`([^`]*)`/g, resolve: 'template', lowercase: 'here' },
+  // [#9460] `x.code = ident` — the assign position's INDIRECT sibling, and the
+  // last of the four stamp positions to get one. `objlitconst` (#9223) closed
+  // this exact gap for object literals; the assign position kept it, so
+  // `err.code = DENY_CODE` and `err.code = code` both matched nothing at all.
+  //
+  // Two different indirections arrive through one regex, so it emits two shape
+  // names rather than pretending they are one thing:
+  //   - `assignconst` — the identifier is a module constant `resolveConstant`
+  //     can reduce to a literal, exactly as in the object-literal position.
+  //   - `codehelper`  — the identifier is a PARAMETER of the enclosing function
+  //     or constructor, which makes that function a code-carrying helper
+  //     (`postureError(code, message)`, `makeError(status, code, message)`).
+  //     The literal then lives at the CALL SITES, at that parameter's index,
+  //     and nowhere near a `code` token — so no `code`-anchored pattern in
+  //     either this gate or `check:error-code-casing` can see it. See
+  //     `helperCodesFor`.
+  { name: 'assignconst', re: /\.code\s*=\s*([A-Z][A-Z0-9_]*)\s*[;,\n)]/g, resolve: 'constant', lowercase: 'here' },
+  // [#9460] `x.code = param` inside a CODE-CARRYING HELPER — the one stamp
+  // position whose literal is nowhere near the token `code`. Structural, not
+  // textual: it fires only when the assigned identifier is a PARAMETER of the
+  // enclosing function or constructor, which is what makes that declaration a
+  // helper and its call sites the place the codes live. See `helperCodesFor`.
+  { name: 'codehelper', re: /\.code\s*=\s*([A-Za-z_$][\w$]*)\s*[;,\n)]/g, resolve: 'helper', lowercase: 'here' },
 ];
 
 const isTestFile = (rel) =>
@@ -333,6 +393,166 @@ function resolveFromWorkspacePackage(name, spec, { scanned, packageDirs } = {}) 
 }
 
 /**
+ * [#9460] The code-carrying-helper resolver.
+ *
+ * ## The shape, and why no `code`-anchored pattern can see it
+ *
+ * A file declares one small factory and throws through it everywhere:
+ *
+ *     function postureError(code: string, message: string): Error {
+ *       const err = new Error(`[${code}] ${message}`);
+ *       (err as any).code = code;                 // ← the stamp
+ *       return err;
+ *     }
+ *     throw postureError('owd_widening_forbidden', '…');   // ← the value
+ *
+ * The stamp knows the token `code` but not the value; the call site knows the
+ * value but never writes the token `code`. Every pattern in this gate AND every
+ * pattern in `check:error-code-casing` anchors on the token — so both gates
+ * read this file and both report nothing, each leaving it to the other. That is
+ * how a live 403 refusal carrying a lowercase code sat unswept through two
+ * vocabulary batches: not a missing table row, and not a case-sensitive regex,
+ * but a stamp position with no `code` token next to its literal.
+ *
+ * The join is the PARAMETER: the assigned identifier is one of the enclosing
+ * declaration's parameters, so its INDEX names the argument to read at each
+ * call site. The index is derived, never assumed to be zero —
+ * `makeError(status, code, message)` and `exposureError(message, code, status)`
+ * both put it second, and a first-argument rule would have read a number and an
+ * English sentence as error codes.
+ *
+ * Bounds, stated because a resolver that goes quietly blind is this gate's own
+ * failure mode one layer down:
+ *   - IN-FILE call sites only. These factories are file-local by construction
+ *     (none is exported); an exported one resolves to no literals and is
+ *     REPORTED as unresolved rather than passed.
+ *   - An argument is read as a quoted literal, or as a CONSTANT put through the
+ *     same `resolveConstant` the other indirect shapes use — the MCP bridge
+ *     throws `exposureError(msg, OBJECT_API_DISABLED, 404)`, so a literals-only
+ *     rule would have found the helper, seen no literal, and reported an
+ *     unresolvable it could in fact resolve. An argument that reduces to
+ *     neither contributes no site, and a helper that yields NOTHING at all is
+ *     reported, never dropped.
+ */
+
+/** The substring inside the parentheses opening at `open`, brackets balanced. */
+export function sliceBalanced(src, open) {
+  let depth = 0;
+  for (let i = open; i < src.length; i += 1) {
+    const c = src[i];
+    if (c === '(' || c === '[' || c === '{') depth += 1;
+    else if (c === ')' || c === ']' || c === '}') {
+      depth -= 1;
+      if (depth === 0) return src.slice(open + 1, i);
+    } else if (c === "'" || c === '"' || c === '`') {
+      const quote = c;
+      i += 1;
+      while (i < src.length && src[i] !== quote) i += src[i] === '\\' ? 2 : 1;
+    }
+  }
+  return null;
+}
+
+/** Split on TOP-LEVEL commas — a nested call, generic or template keeps its own. */
+export function splitTopLevel(args) {
+  const out = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < args.length; i += 1) {
+    const c = args[i];
+    if (c === '(' || c === '[' || c === '{' || c === '<') depth += 1;
+    else if (c === ')' || c === ']' || c === '}' || c === '>') depth -= 1;
+    else if (c === "'" || c === '"' || c === '`') {
+      const quote = c;
+      i += 1;
+      while (i < args.length && args[i] !== quote) i += args[i] === '\\' ? 2 : 1;
+    } else if (c === ',' && depth === 0) {
+      out.push(args.slice(start, i));
+      start = i + 1;
+    }
+  }
+  out.push(args.slice(start));
+  return out;
+}
+
+/** Parameter NAMES, in order: `readonly a: T = x` → `a`. */
+export function parseParamNames(params) {
+  if (!params.trim()) return [];
+  return splitTopLevel(params).map((raw) => {
+    const cleaned = raw.replace(/^\s*(?:readonly|public|private|protected|\.\.\.)\s+/g, '').trim();
+    const m = /^([A-Za-z_$][\w$]*)/.exec(cleaned.replace(/^\.\.\./, ''));
+    return m ? m[1] : '';
+  });
+}
+
+/** Declaration headers that own a parameter list, with the offset of their `(`. */
+const DECL_HEADER_RE =
+  /\bfunction\s+([A-Za-z_$][\w$]*)\s*\(|\bconstructor\s*\(|\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=\n]+)?=\s*(?:async\s+)?(?:function\s*[A-Za-z_$][\w$]*\s*)?\(/g;
+
+/**
+ * The declaration enclosing `offset`: `{ name, params, isConstructor }`, or
+ * `null`. Nearest-preceding-header, which is what a textual scan can honestly
+ * offer — a helper is a handful of lines and its stamp sits inside it.
+ */
+export function enclosingDeclaration(src, offset) {
+  DECL_HEADER_RE.lastIndex = 0;
+  let best = null;
+  for (const m of src.matchAll(DECL_HEADER_RE)) {
+    if (m.index >= offset) break;
+    const open = m.index + m[0].length - 1;
+    const params = sliceBalanced(src, open);
+    if (params === null) continue;
+    const isConstructor = /\bconstructor\s*\($/.test(m[0]);
+    let name = m[1] ?? m[2] ?? null;
+    if (isConstructor) {
+      const before = src.slice(0, m.index);
+      // The LAST class declared before this constructor, not the first — a
+      // greedy `[\s\S]*$` anchor answers with the file's first class and
+      // silently mis-names every helper in a multi-class file.
+      let cls = null;
+      for (const c of before.matchAll(/\bclass\s+([A-Za-z_$][\w$]*)/g)) cls = c[1];
+      name = cls;
+    }
+    if (!name) continue;
+    best = { name, params, isConstructor, end: open + params.length + 2 };
+  }
+  return best;
+}
+
+/**
+ * Literal codes a code-carrying helper is called with, or `null` when the
+ * assigned identifier is not one of the enclosing declaration's parameters
+ * (so the site is an ordinary unresolvable constant, reported as such).
+ */
+export function helperCodesFor(ident, offset, src, resolveIdent = () => null) {
+  const decl = enclosingDeclaration(src, offset);
+  if (!decl) return null;
+  const index = parseParamNames(decl.params).indexOf(ident);
+  if (index < 0) return null;
+
+  const callRe = decl.isConstructor
+    ? new RegExp(`\\bnew\\s+${decl.name}\\s*\\(`, 'g')
+    : new RegExp(`(?:^|[^\\w.$])${decl.name}\\s*\\(`, 'g');
+  const codes = new Set();
+  for (const call of src.matchAll(callRe)) {
+    const open = call.index + call[0].length - 1;
+    // The declaration's own header is not a call to itself.
+    if (/\b(?:function|const|let|var)\s*$/.test(src.slice(Math.max(0, call.index - 12), call.index + call[0].length - decl.name.length - 1))) continue;
+    const args = sliceBalanced(src, open);
+    if (args === null) continue;
+    const parts = splitTopLevel(args);
+    const arg = (parts[index] ?? '').trim();
+    const lit = /^'([A-Za-z][A-Za-z0-9_]*)'$/.exec(arg);
+    if (lit) { codes.add(lit[1]); continue; }
+    if (/^[A-Za-z_$][\w$]*$/.test(arg)) {
+      const viaConst = resolveIdent(arg);
+      if (viaConst) codes.add(viaConst);
+    }
+  }
+  return [...codes];
+}
+
+/**
  * One entry per (file, shape, value). The same constant stamped six times in
  * one file is one unresolved value to go and fix, not six lines of noise —
  * but the file is part of the key, so the same name in two files (the
@@ -354,11 +574,51 @@ export function deriveSites({ registered, files, readFile, packageDirs = new Map
   // comment naming a constant must not resolve one either.
   const scanned = files.map(({ rel, source }) => ({ rel, stripped: maskComments(source) }));
   const ctx = { scanned, packageDirs };
+
+  /**
+   * [#9460] Is this value this gate's to report?
+   *
+   * A SCREAMING_SNAKE code always is. A lowercase or mixed-case one is outside
+   * the ADR-0112 value space (D1) by definition, so the only question is WHICH
+   * gate reports it — and the answer is the one that can actually see it.
+   *
+   * `check:error-code-casing` owns the lowercase sweep, and every pattern it
+   * has requires a QUOTED lowercase literal sitting next to the token `code`:
+   * `code: 'x'`, `.code = 'x'`, `code === 'x'`, `code?: 'x' | 'y'`. Where this
+   * gate finds a lowercase code in one of those same positions — `objlit`,
+   * `assign` — the delegation is real: that gate sees the identical text, and
+   * it carries the D6/D6b/D6c discrimination (field-addressed catalogs,
+   * persisted audit columns, diagnostics payloads, Zod's own issue codes) that
+   * decides which lowercase literals are legitimate. Reporting those here would
+   * duplicate a gate that answers better, and would call Zod's `code: 'custom'`
+   * an unregistered ObjectStack error code, which is simply false.
+   *
+   * But a code that arrives through a CONSTANT, a TEMPLATE, or a HELPER
+   * PARAMETER has no quoted literal at the stamp site for a `code`-anchored
+   * pattern to match, so that gate is structurally blind to it — and this gate
+   * dropping it for its casing meant NOBODY reported it. That is not a
+   * delegation; it is a hole between two gates, each assuming the other. Those
+   * shapes are marked `lowercase: 'here'` and are reported.
+   *
+   * So the measured question is "is this code outside the vocabulary and unowned
+   * by the gate we hand lowercase to", never "is it SCREAMING_SNAKE".
+   */
+  const keep = (value, shapeName, isFamily = false) => {
+    const screaming = isFamily ? /^[A-Z*][A-Z0-9_*]*$/ : /^[A-Z][A-Z0-9_]*$/;
+    if (!screaming.test(value)) {
+      const shape = SHAPES.find((sh) => sh.name === shapeName);
+      const owner = shapeName === 'codehelper' ? 'here' : shape?.lowercase ?? 'here';
+      if (owner === 'casing-gate') return false;
+    }
+    return !registered.has(value);
+  };
+
   for (const { rel, stripped } of scanned) {
     for (const shape of SHAPES) {
       shape.re.lastIndex = 0;
       for (const m of stripped.matchAll(shape.re)) {
         let code = m[1];
+        let emitAs = shape.name;
         if (shape.resolve === 'constant') {
           const value = resolveConstant(code, stripped, rel, readFile, ctx);
           if (value === null) {
@@ -366,21 +626,44 @@ export function deriveSites({ registered, files, readFile, packageDirs = new Map
             continue;
           }
           code = value;
+        } else if (shape.resolve === 'helper') {
+          // [#9460] Structural: the identifier must be a PARAMETER of the
+          // enclosing declaration. Anything else — a module constant, a local
+          // holding a runtime value — is not this shape, and `null` here means
+          // "not a helper", not "a code I dropped": the constant case is
+          // `assignconst`'s, and the runtime case is a declared bound above.
+          const helperCodes = helperCodesFor(code, m.index, stripped, (arg) =>
+            resolveConstant(arg, stripped, rel, readFile, ctx),
+          );
+          if (helperCodes === null) continue;
+          if (helperCodes.length === 0) {
+            // A helper this scan CAN see but whose callers all pass variables.
+            // Reported, never dropped — the bound this gate states for every
+            // value it cannot reduce to a literal.
+            addUnresolved(unresolved, { file: rel, shape: shape.name, value: code, reason: 'helper' });
+            continue;
+          }
+          for (const hc of helperCodes) {
+            if (!keep(hc, shape.name)) continue;
+            if (sites.some((x) => x.code === hc && x.file === rel && x.shape === shape.name)) continue;
+            sites.push({ code: hc, file: rel, shape: shape.name });
+          }
+          continue;
         } else if (shape.resolve === 'template' && !/^[A-Za-z][A-Za-z0-9_]*$/.test(code)) {
           // Interpolated: no literal exists to check against the registry. It
           // becomes a site under its FAMILY identity (`${…}` → `*`) rather than
           // being dropped — see `templateFamily`.
           code = templateFamily(code);
-          if (!/^[A-Z*][A-Z0-9_*]*$/.test(code)) continue; // lowercase → check:error-code-casing
+          if (!/^[A-Za-z*][A-Za-z0-9_*]*$/.test(code)) continue;
+          if (!keep(code, shape.name, true)) continue;
           if (!sites.some((s) => s.code === code && s.file === rel && s.shape === shape.name)) {
             sites.push({ code, file: rel, shape: shape.name });
           }
           continue;
         }
-        if (!/^[A-Z][A-Z0-9_]*$/.test(code)) continue; // lowercase → check:error-code-casing
-        if (registered.has(code)) continue;
-        if (sites.some((s) => s.code === code && s.file === rel && s.shape === shape.name)) continue;
-        sites.push({ code, file: rel, shape: shape.name });
+        if (!keep(code, emitAs)) continue;
+        if (sites.some((s) => s.code === code && s.file === rel && s.shape === emitAs)) continue;
+        sites.push({ code, file: rel, shape: emitAs });
       }
     }
   }
@@ -634,6 +917,12 @@ function selfTest() {
     // [#9223] the two shapes that used to match nothing at all.
     objlitconst: `const OBJ_CONST = 'OBJ_CONST_ONE';\nthrow Object.assign(new Error('x'), { code: OBJ_CONST });`,
     objlittemplate: 'send(res, { code: `TEMPLATE_${action.toUpperCase()}_FAILED`, status: 500 });',
+    // [#9460] the two shapes in the ASSIGN position that used to match nothing.
+    assignconst: `const ASSIGN_CONST = 'ASSIGN_CONST_ONE';\nconst err = new Error('x'); err.code = ASSIGN_CONST;`,
+    codehelper:
+      `function fail(code: string, msg: string): Error {\n` +
+      `  const e = new Error(msg);\n  (e as any).code = code;\n  return e;\n}\n` +
+      `throw fail('HELPER_ONE', 'x');`,
   };
   const registered = new Set(['ALREADY_REGISTERED']);
   for (const [name, source] of Object.entries(samples)) {
@@ -763,12 +1052,127 @@ function selfTest() {
       'a registered code in backticks was still reported',
     );
 
-    // Lowercase stays with check:error-code-casing, in both new shapes.
-    ok(one('a({ code: `lower_${x}_thing` });').sites.length === 0, 'a lowercase template family was claimed by this gate');
+    // [#9460] A lowercase TEMPLATE family is now claimed here, and that flip is
+    // the point: `check:error-code-casing` has no pattern for a backtick, so
+    // leaving it "to that gate" left it to nobody.
+    ok(
+      one('a({ code: `lower_${x}_thing` });').sites.some((s) => s.code === 'lower_*_thing'),
+      'a lowercase template family was still delegated to a gate that cannot see a backtick',
+    );
+    // `objlitconst` reads SCREAMING constant NAMES only, so a lowercase-named
+    // one is not this shape at all — unchanged by #9460, and stated so the
+    // bound is not mistaken for the casing rule above.
     ok(
       one(`const lc = 'lower_thing';\na({ code: lc });`).sites.length === 0,
-      'a lowercase-named constant was claimed by this gate',
+      'a lowercase-NAMED constant was read as an objlitconst',
     );
+  }
+
+  // [#9460] The lowercase ownership rule, in BOTH directions — the whole point
+  // of the widening, so a regression must fail here rather than go quiet.
+  {
+    const one = (source) =>
+      deriveSites({ registered, files: [{ rel: 'packages/x/src/a.ts', source }], readFile: () => '' });
+
+    // Delegated: `check:error-code-casing` reads these exact characters and
+    // carries the D6/D6b/D6c discrimination this gate does not have.
+    ok(one(`err.code = 'lowercase_thing';`).sites.length === 0, 'a quoted lowercase assign was claimed by this gate');
+    ok(one(`f({ code: 'lowercase_thing' });`).sites.length === 0, 'a quoted lowercase objlit was claimed by this gate');
+    ok(one(`ctx.addIssue({ code: 'custom' });`).sites.length === 0, "Zod's own `custom` was called an ObjectStack code");
+
+    // Owned here: no quoted literal sits at the stamp site, so that gate is
+    // structurally blind and dropping it reported the code to NOBODY.
+    ok(
+      one(`const LC = 'lower_const';\nclass E { readonly code = LC; }`).sites.some((s) => s.code === 'lower_const'),
+      'a lowercase value reached through a constant was delegated to a gate that cannot see it',
+    );
+    ok(
+      one(`class E extends Error { readonly code = 'lower_field'; }`).sites.some((s) => s.code === 'lower_field'),
+      'a lowercase classfield was delegated — that gate has no pattern for `readonly code =`',
+    );
+
+    // The card's own producer, reduced to its shape: the stamp knows the token
+    // `code` and not the value; the call site knows the value and never writes
+    // the token. Both gates read it and both reported nothing.
+    const posture =
+      `function postureError(code: string, message: string): Error {\n` +
+      `  const err = new Error(message);\n  (err as any).code = code;\n  return err;\n}\n` +
+      `throw postureError('owd_widening_forbidden', 'x');`;
+    ok(
+      one(posture).sites.some((s) => s.code === 'owd_widening_forbidden' && s.shape === 'codehelper'),
+      'the code-carrying-helper producer this widening exists for was not reported',
+    );
+  }
+
+  // [#9460] The helper resolver's own machinery.
+  {
+    const one = (source) =>
+      deriveSites({ registered, files: [{ rel: 'packages/x/src/a.ts', source }], readFile: () => '' });
+
+    // The parameter INDEX is derived, never assumed to be zero: two live
+    // helpers put `code` second, and a first-argument rule reads a number and
+    // an English sentence as error codes.
+    const second =
+      `function makeError(status: number, code: string, message: string): Error {\n` +
+      `  const err = new Error(message);\n  err.code = code;\n  return err;\n}\n` +
+      `throw makeError(422, 'SECOND_ARG_ONE', 'x');`;
+    const secondSites = one(second);
+    ok(secondSites.sites.some((s) => s.code === 'SECOND_ARG_ONE'), 'the helper read the wrong argument index');
+    ok(!secondSites.sites.some((s) => s.code === '422'), 'the helper read argument zero regardless of the parameter');
+
+    // A CONSTRUCTOR is a helper too, and its call sites are `new Class(...)`.
+    const ctor =
+      `class Refusal extends Error {\n  readonly code: string;\n` +
+      `  constructor(code: string, message: string) {\n    super(message);\n    this.code = code;\n  }\n}\n` +
+      `throw new Refusal('CTOR_ONE', 'x');`;
+    ok(one(ctor).sites.some((s) => s.code === 'CTOR_ONE'), 'a code-carrying constructor was not resolved');
+
+    // …and it must name the ENCLOSING class, not the file's first one.
+    const twoClasses = `class Unrelated { constructor(x: string) {} }\n${ctor}`;
+    ok(one(twoClasses).sites.some((s) => s.code === 'CTOR_ONE'), 'the constructor resolved against the wrong class');
+
+    // An argument that is a CONSTANT resolves through the same machinery the
+    // indirect shapes use — the MCP bridge throws `exposureError(msg, CONST, 404)`.
+    const viaConst =
+      `const BRIDGE_CODE = 'VIA_CONST_ONE';\n` +
+      `function boom(message: string, code: string): Error {\n` +
+      `  const e = new Error(message);\n  e.code = code;\n  return e;\n}\n` +
+      `throw boom('x', BRIDGE_CODE);`;
+    ok(one(viaConst).sites.some((s) => s.code === 'VIA_CONST_ONE'), 'a constant argument to a helper did not resolve');
+
+    // A helper this scan CAN see but whose callers all pass runtime values is
+    // REPORTED, never dropped — the bound the header states.
+    const opaque =
+      `function boom(code: string, message: string): Error {\n` +
+      `  const e = new Error(message);\n  e.code = code;\n  return e;\n}\n` +
+      `throw boom(pickCode(), 'x');`;
+    ok(one(opaque).unresolved.length === 1, 'a helper with no resolvable argument produced no finding');
+
+    // An identifier that is NOT a parameter is not this shape — it is either
+    // `assignconst`'s (a module constant) or a runtime value, and calling it a
+    // helper would invent a call site that does not exist.
+    ok(
+      one(`for (const rec of rows) { slot.code = rec; }`).sites.length === 0,
+      'a plain domain field named `code` was read as a code stamp',
+    );
+    ok(
+      one(`for (const rec of rows) { slot.code = rec; }`).unresolved.length === 0,
+      'a plain domain field named `code` was reported as an unresolvable code',
+    );
+
+    // The declaration's own header is not a call to itself.
+    ok(
+      one(`function boom(code: string): Error { const e = new Error('x'); e.code = code; return e; }`)
+        .sites.length === 0,
+      'the helper declaration was read as its own call site',
+    );
+
+    // The argument splitter keeps nested commas out of the count.
+    ok(
+      splitTopLevel(`a, f(b, c), \`t${'${x}'}\`, d`).length === 4,
+      'splitTopLevel counted a nested or templated comma as a separator',
+    );
+    ok(parseParamNames('readonly a: Map<string, number> = x, b?: string').join(',') === 'a,b', 'parseParamNames mis-read a parameter list');
   }
 
   // [#9223] Workspace-package resolution: `packages/` is inside the scan, so a

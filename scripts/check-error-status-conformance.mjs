@@ -606,6 +606,34 @@ export function reconcile({ vocabulary, emitted, claimed, covered, documented })
   return { emittedNotDocumented, documentedNotReachable, unpinned: unpinned.sort(), reconciledCodes, reconciledPairs };
 }
 
+/**
+ * The two causes a BASELINED-as-unpinned code can leave the `unpinned` census
+ * on a later run — split at the same `documented.has(code)` juncture
+ * `reconcile()` branches on, rather than assuming the first cause for a
+ * subtraction that has two:
+ *
+ *   'producer'    a producer now declares a status for it (`runtime.size > 0`
+ *                 in `reconcile()`), while the code is still documented.
+ *   'doc-removed' its doc entry was removed — nothing documents the code any
+ *                 more (`!documented.has(code)`), and no producer appeared
+ *                 either, or `reconcile()` would already have counted it as a
+ *                 reconciled code, not an unpinned one.
+ *
+ * A code cannot leave `unpinned` for any OTHER reason: `reconcile()` only
+ * ever adds a code to `unpinned` when `runtime.size === 0 && documented.has
+ * (code)`, so losing that membership means one of those two flipped.
+ *
+ * @param {string[]} baselined codes recorded unpinned in the baseline file
+ * @param {{ unpinned: string[], vocabulary: string[], documented: Set<string> }} input
+ * @returns {{ code: string, reason: 'producer' | 'doc-removed' }[]}
+ */
+export function nowPinned({ baselined, unpinned, vocabulary, documented }) {
+  return baselined
+    .filter((c) => !unpinned.includes(c) && vocabulary.includes(c))
+    .sort()
+    .map((code) => ({ code, reason: documented.has(code) ? 'producer' : 'doc-removed' }));
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // Messages — named and pure, so the self-test can assert the exact text
 // ───────────────────────────────────────────────────────────────────────────
@@ -649,8 +677,15 @@ export function unreadableHeadingMessage(u) {
   );
 }
 
-export function nowPinnedMessage(code) {
+export function nowPinnedProducerMessage(code) {
   return `${code}: baselined as unpinned, but a producer now declares its status — ratchet the baseline down with --update.`;
+}
+
+export function nowPinnedDocRemovedMessage(code) {
+  return (
+    `${code}: baselined as unpinned, but its doc entry was removed, so nothing claims a status for it any more `
+    + '— ratchet the baseline down with --update.'
+  );
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -725,6 +760,7 @@ function runFixture({ files, handling, catalog, members }) {
     ungraded: ungradedEntries(doc),
     unresolved: derived.unresolved,
     emitted: derived.emitted,
+    documented: doc.documented,
   };
 }
 
@@ -841,8 +877,9 @@ function selfTest() {
   // 11 — the ratchet-authority convention holds on the weakening remedy only.
   check('11 the baseline-expanding remedy is marked maintainer-only',
     RATCHET_EXPANSION_OFFER.test(newUnpinnedMessage('X')) && newUnpinnedMessage('X').includes(RATCHET_AUTHORITY_MARKER));
-  check('11b the ratchet-DOWN remedy stays the author\'s own',
-    !nowPinnedMessage('X').includes(RATCHET_AUTHORITY_MARKER));
+  check('11b both ratchet-DOWN remedies stay the author\'s own',
+    !nowPinnedProducerMessage('X').includes(RATCHET_AUTHORITY_MARKER)
+    && !nowPinnedDocRemovedMessage('X').includes(RATCHET_AUTHORITY_MARKER));
 
   // 12 — the vocabulary bound: a ledger code is derived but not reconciled.
   const ledger = runFixture({
@@ -992,7 +1029,42 @@ function selfTest() {
   check('20c an entry that DOES publish a graded status is not in the census',
     ungradedEntries({ entries: [{ code: 'TIMEOUT', where: 'x:1' }], claimed: new Map([['TIMEOUT', new Map([[504, []]])]]), covered: new Map() }).length === 0);
 
-  const CASES = 36;
+  // 21 — nowPinned, the PRODUCER branch: a baselined code that GAINS a
+  //      producer while remaining documented is named a producer, never a
+  //      doc removal.
+  const producerCase = runFixture({
+    files: { 'a/e.ts': "export class E extends Error {\n  readonly code = 'TRANSACTION_FAILED';\n  readonly status = 500;\n}" },
+    handling: '#### `TRANSACTION_FAILED`\n**HTTP Status:** 500  \n', catalog: '', members: ['TRANSACTION_FAILED'],
+  });
+  const producerFindings = nowPinned({
+    baselined: ['TRANSACTION_FAILED'], unpinned: producerCase.unpinned,
+    vocabulary: producerCase.vocabulary, documented: producerCase.documented,
+  });
+  check('21 nowPinned names the producer branch when the code stays documented',
+    producerFindings.length === 1 && producerFindings[0].code === 'TRANSACTION_FAILED' && producerFindings[0].reason === 'producer',
+    JSON.stringify(producerFindings));
+  check('21b the producer message names a producer, not a doc removal',
+    nowPinnedProducerMessage('TRANSACTION_FAILED').includes('a producer now declares its status')
+    && !nowPinnedProducerMessage('TRANSACTION_FAILED').includes('doc entry was removed'));
+
+  // 22 — nowPinned, the DOC-REMOVED branch: the #9266/#9563 counterfactual,
+  //      reduced to a fixture. No producer, and the catalog entry is gone —
+  //      the real cause the old single-cause message misdiagnosed as "a
+  //      producer now declares its status" when the `## Batch Operation
+  //      Errors` entries were deleted on `main`.
+  const docRemovedCase = runFixture({ files: {}, handling: '', catalog: '', members: ['TRANSACTION_FAILED'] });
+  const docRemovedFindings = nowPinned({
+    baselined: ['TRANSACTION_FAILED'], unpinned: docRemovedCase.unpinned,
+    vocabulary: docRemovedCase.vocabulary, documented: docRemovedCase.documented,
+  });
+  check('22 nowPinned names the doc-removed branch when nothing documents the code any more',
+    docRemovedFindings.length === 1 && docRemovedFindings[0].code === 'TRANSACTION_FAILED' && docRemovedFindings[0].reason === 'doc-removed',
+    JSON.stringify(docRemovedFindings));
+  check('22b the doc-removed message names a removed doc entry, not a producer',
+    nowPinnedDocRemovedMessage('TRANSACTION_FAILED').includes('doc entry was removed')
+    && !nowPinnedDocRemovedMessage('TRANSACTION_FAILED').includes('a producer now declares'));
+
+  const CASES = 40;
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\n✗ check-error-status-conformance --self-test: ${failures.length}/${CASES} case(s) failed.\n`);
@@ -1004,8 +1076,9 @@ function selfTest() {
     + '(positive control), both directions fire independently, section headings absolve but never demand, '
     + 'narrated envelopes in comments are not producers, unresolvable declarations are reported, a LEDGER code '
     + 'the docs publish a status for is reconciled in both directions while one no page publishes stays out of '
-    + 'the vocabulary, an entry heading in an unrecognised shape is reported instead of silently dropped, and '
-    + 'the baseline-expanding remedy stays maintainer-only.',
+    + 'the vocabulary, an entry heading in an unrecognised shape is reported instead of silently dropped, the '
+    + 'baseline-expanding remedy stays maintainer-only, and a baselined code leaving the unpinned census is '
+    + 'named a producer or a removed doc entry — never the wrong one of the two.',
   );
   process.exit(0);
 }
@@ -1058,7 +1131,9 @@ const baseline = existsSync(BASELINE_PATH)
   : { unpinned: [] };
 const baselined = new Set(baseline.unpinned ?? []);
 const newlyUnpinned = result.unpinned.filter((c) => !baselined.has(c));
-const nowPinned = [...baselined].filter((c) => !result.unpinned.includes(c) && vocabulary.includes(c)).sort();
+const nowPinnedFindings = nowPinned({
+  baselined: [...baselined], unpinned: result.unpinned, vocabulary, documented: doc.documented,
+});
 
 if (update) {
   writeFileSync(
@@ -1143,7 +1218,9 @@ for (const f of result.emittedNotDocumented) failures.push(emittedNotDocumentedM
 for (const f of result.documentedNotReachable) failures.push(documentedNotReachableMessage(f));
 for (const u of doc.unreadableHeadings) failures.push(unreadableHeadingMessage(u));
 for (const c of newlyUnpinned) failures.push(newUnpinnedMessage(c));
-for (const c of nowPinned) failures.push(nowPinnedMessage(c));
+for (const f of nowPinnedFindings) {
+  failures.push(f.reason === 'producer' ? nowPinnedProducerMessage(f.code) : nowPinnedDocRemovedMessage(f.code));
+}
 
 if (failures.length) {
   console.error('');

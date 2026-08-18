@@ -16,6 +16,17 @@
  * whose code comes from the closed vocabulary and names the lock wait. No retry
  * logic, no configurability.
  *
+ * # #9542 — the same bound on boot, deliberately without the refusal
+ *
+ * The seam above separates "bound the wait" from "escape the swallow", and
+ * #9354 armed only the flush, leaving boot schema-sync on the one-year default
+ * (pinned here as intended behaviour, which is how it stayed a recorded gap
+ * rather than an unnoticed one). Triage's 2026-08-18 auto-adjudication took the
+ * card's Option 1: arm the bound unconditionally, keep the REFUSAL gated on the
+ * flush, keep boot's SWALLOW. So this suite now pins two different answers on
+ * one code path — the flush refuses, boot warns — and every pin below says by
+ * name which of the two it is guarding.
+ *
  * # What this suite pins, and why it is pinned THIS way
  *
  * ⭐ The observable is the **refusal**, never "a `SET SESSION` string was
@@ -82,6 +93,21 @@ class FakeMysqlDriver extends SqlDriver {
   private sessions = 0;
 
   issued: Issued[] = [];
+  /**
+   * [#9542] Every `logger.warn` the driver emitted.
+   *
+   * On the boot path this is the ONLY output a blocked widening produces — the
+   * swallow eats the error itself — so "the bound fires and the operator is
+   * told" and "the bound fires and nothing at all is printed" are the same
+   * green suite without a sink to assert on.
+   */
+  warnings: Array<{ msg: string; meta?: any }> = [];
+
+  protected override logger = {
+    warn: (msg: string, meta?: any) => { this.warnings.push({ msg, meta }); },
+    info: () => {},
+  };
+
   /** What the ALTER should do; `undefined` = succeed. */
   alterFails: (() => Error) | undefined = lockWaitTimeoutError;
   legacyDatetimeColumns: Array<{ name: string; nullable: boolean }> = [
@@ -170,7 +196,7 @@ const setStatements = (d: FakeMysqlDriver) =>
 const alterStatements = (d: FakeMysqlDriver) =>
   d.issued.filter((s) => /^alter table/i.test(s.sql));
 
-describe('[#9354] deferred-DDL flush — a blocked widening ALTER refuses, loudly', () => {
+describe('[#9354/#9542] a blocked widening ALTER — bounded on both paths, refusing on one', () => {
   let driver: FakeMysqlDriver;
 
   afterEach(async () => {
@@ -299,16 +325,63 @@ describe('[#9354] deferred-DDL flush — a blocked widening ALTER refuses, loudl
     await expect(driver.flushDeferredSchemaDdl()).resolves.toBeDefined();
   });
 
-  it('leaves BOOT sync unbounded and swallowing — it is not the flush', async () => {
+  // ───────────────────────────────────────────────────────────────
+  // BOOT (#9542) — the same bound, the opposite answer when it fires
+  // ───────────────────────────────────────────────────────────────
+
+  it('bounds BOOT sync too, and still swallows — boot is not the flush', async () => {
     driver = makeDriver();
     await driver.initObjects([WIDGET]);
     driver.issued.length = 0;
 
     // A second boot-time sync over the existing table reaches the same widening,
-    // but off the deferred path. Boot must never be taken down by a migration,
-    // and nobody is waiting at a prompt to read a refusal.
+    // but off the deferred path. This pin used to read the other way round:
+    // boot ran the ALTER through the pool at MySQL's one-year default, so a boot
+    // behind another session's metadata lock stopped at schema-sync, printed
+    // nothing, and could not be told from a crash. #9542 arms the bound here.
     await expect(driver.initObjects([WIDGET])).resolves.toBeUndefined();
-    expect(setStatements(driver)).toHaveLength(0);
+
+    const set = setStatements(driver);
+    const alter = alterStatements(driver);
+    expect(alter).toHaveLength(1);
+    expect(set[0].bindings).toEqual([120]);
+    // On the ALTER's OWN session, for the reason the flush needs it: through the
+    // pool the bound lands on a connection the ALTER never uses, and the boot
+    // hangs exactly as before with this pin still green.
+    expect(set[0].session).toBe(alter[0].session);
+    expect(driver.issued.indexOf(set[0])).toBeLessThan(driver.issued.indexOf(alter[0]));
+    // And the prior value goes back — a boot must not hand the pool a
+    // connection carrying a migration's lock bound into unrelated runtime work.
+    expect(set).toHaveLength(2);
+    expect(set[1].bindings).toEqual([MYSQL_DEFAULT_LOCK_WAIT]);
+
+    // ⭐ What stays boot-only is the SWALLOW: `resolves` above is the assertion,
+    // and it is the half of the old pin that does NOT invert. Bounding boot was
+    // never a licence to throw here — that trades a silent hang for a failed
+    // boot, and correctness never depended on the widening having run.
+  });
+
+  it('finally reaches the boot `logger.warn` — a bound that printed nothing would deliver nothing', async () => {
+    driver = makeDriver();
+    await driver.initObjects([WIDGET]);
+    driver.issued.length = 0;
+    driver.warnings.length = 0;
+
+    await expect(driver.initObjects([WIDGET])).resolves.toBeUndefined();
+
+    // ⭐ The card's whole claim. This warn was already written and was
+    // UNREACHABLE in this scenario: the unbounded ALTER never returned, so the
+    // catch that logs it never ran. A bound whose only effect is a quieter hang
+    // delivers nothing and looks identical in a green suite, so the delivery is
+    // asserted on the sink rather than inferred from the bound being armed.
+    const warn = driver.warnings.find((w) => /could not widen MySQL datetime columns/.test(w.msg));
+    expect(warn).toBeDefined();
+    expect(warn!.msg).toContain(WIDGET.name);
+    // Carrying the server's own diagnosis, not a swallowed blank.
+    expect(String(warn!.meta?.error)).toMatch(/Lock wait timeout exceeded/);
+    // And it is the SERVER error that was swallowed, not the ADR-0112 refusal:
+    // that envelope stays flush-only, so its operator sentence is absent here.
+    expect(String(warn!.meta?.error)).not.toMatch(/PROCESSLIST|No schema change was made/);
   });
 
   it('clears the flush flag after a refusal, so a later boot sync is unaffected', async () => {
@@ -320,6 +393,13 @@ describe('[#9354] deferred-DDL flush — a blocked widening ALTER refuses, loudl
     // `os migrate apply` keeps the stack alive to shut it down; a flag left set
     // by the throw would turn every later widening on this driver into a refusal.
     await expect(driver.initObjects([WIDGET])).resolves.toBeUndefined();
-    expect(setStatements(driver)).toHaveLength(0);
+    // ⚠️ This pin guards FLAG HYGIENE, not boot policy — it only ever shared an
+    // assertion with the pin above. It used to read `setStatements → 0`, which
+    // since #9542 says nothing about the flag: a clean boot arms the bound too,
+    // so that count is 2 either way. The observable that still discriminates is
+    // the swallow on the line above (a stuck flag makes this same lock wait
+    // escape `initObjects` as a refusal), and this line keeps it from passing
+    // vacuously by pinning that the widening genuinely ran and genuinely hit it.
+    expect(alterStatements(driver)).toHaveLength(1);
   });
 });

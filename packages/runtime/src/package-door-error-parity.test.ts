@@ -170,15 +170,31 @@ describe('#8016 — the dispatcher package door answers the shared mapping', () 
      *     symmetrically with this door", which was true on 2026-08-16 and is
      *     the half #9106 changed; the ADR-0112 public-contract decision that
      *     paragraph said was required is exactly the ruling this file now pins.
-     *   - THROWN errors through `packages/rest`'s FLAT `sendThrownError`: still
-     *     passed through verbatim, and out of #9106's ruled scope (which named
-     *     the actions door and the resolver both doors above share). That path
-     *     puts `code` at the body's TOP level rather than in `error.code`, so
-     *     it is not the field this ruling closed. Filed as #9232 rather than
-     *     fixed here; `check:dispatcher-error-vocabulary` sweeps its platform
-     *     producers meanwhile. ⚠️ #9098's note pointed at #7035 for the
-     *     envelope-position half — that card is CLOSED (PR #7293, three /meta
-     *     501 handlers), so #9232 is the live one to read.
+     *   - THROWN errors through `packages/rest`'s FLAT `sendThrownError`:
+     *     NARROWED TOO, since the #9232 ruling (maintainer, 2026-08-17). That
+     *     path puts `code` at the body's TOP level rather than in `error.code`,
+     *     which is why #9106's scope — the actions door and the resolver both
+     *     doors above share — did not reach it by construction. It was filed as
+     *     #9232 rather than fixed there, and #9232 ruled that body POSITION is
+     *     NOT a carve-out from the vocabulary: an unregistered thrown spelling
+     *     is demoted to a top-level `declaredCode` sibling in the flat body,
+     *     computed by the same `resolveThrownHttpError` / `demotedDeclaredCode`
+     *     pair this file reads. Pinned at that door by
+     *     `packages/rest/src/rest-thrown-code-vocabulary.test.ts`.
+     *
+     * ⚠️ This paragraph carried the opposite claim until #9232 landed. #9098
+     * wrote it as "NOT narrowed, deliberately and symmetrically with this
+     * door", which was true on 2026-08-16; #9106 narrowed THIS door the next
+     * day and took the symmetry with it, leaving a sentence that read as a
+     * deliberate design decision while describing nothing that existed. That
+     * gap is the same declared-≠-actual defect class as the door hole itself,
+     * which is why #9232's ruling required both to be fixed in one change: a
+     * pin whose prose asserts a symmetry the code abandoned teaches the next
+     * reader a rule the platform does not have.
+     *
+     * The envelope POSITION is a separate, still-open line — the flat dialect
+     * has not moved and is held by the `check:route-envelope` ratchet. It was
+     * explicitly NOT a precondition for the vocabulary fix.
      *
      * History: #8087 first ruled the verbatim spelling stays and gated the
      * producer set (`dispatcher-error-vocabulary.ts`,
