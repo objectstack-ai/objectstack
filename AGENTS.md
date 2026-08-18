@@ -333,11 +333,13 @@ Even inside your own worktree, operate defensively:
    yet"; `in_progress` is not a pass. Arming a red PR does not queue it, it hides it:
    every poll then misreads "not on `main` yet" as "queued". Always read *two* things
    when checking a landing: the queue branch **and** `origin/main`. And **the queue
-   enforces only the required set** — **Lint & Repo Gates** (called `ESLint` until the
-   #9325 rename) and **TypeScript Type Check** block by maintainer decision
-   (2026-08-07); everything else is advisory and rides through, and
-   an advisory red that lands rides `main`'s merge ref into every following PR until
-   stanched. That is why "arm only on green" is a rule, not a formality.
+   enforces only the required set** — **Lint & Repo Gates** (the whole `check:*` gate
+   family, formerly published under a name that described only one of its steps) and
+   **TypeScript Type Check** block by maintainer decision (2026-08-07); everything else
+   is advisory and rides through, and an advisory red that lands rides `main`'s merge ref
+   into every following PR until stanched. A required context is matched by check-run
+   name, so a job rename detaches its gate silently — treat those names as contract.
+   That is why "arm only on green" is a rule, not a formality.
 
    **Re-arm awareness** — none of these is a reason to avoid the queue; all are reasons
    to confirm a PR is still *in* it: a red queue build **ejects** your entry and drops
