@@ -58,8 +58,9 @@
  *      so dropping one of the three from a hand-written list produces NO
  *      check run on that activity — neither is a skip, both are an absence,
  *      which is permanent pending (the audit's `Spec property liveness`
- *      exclusion for the `paths:` half; #8304 for the `types:` half, live
- *      since `adr-merge-approval.yml` started naming `types:` in #8302).
+ *      exclusion for the `paths:` half; #8304 for the `types:` half — no
+ *      enrolled workflow names `types:` today, and this guard is what makes
+ *      growing such a list safe).
  *
  * Plus two whole-registry properties:
  *
@@ -136,6 +137,18 @@ import { fileURLToPath } from 'node:url';
  * job id), and every matrix shard name. Assertions 4, 6 and 7 below are exactly
  * the machine-readable form of the first three exclusions, so enrolling one of
  * them by mistake fails here instead of in the merge queue.
+ *
+ * ⛔ And one name REMOVED rather than excluded, recorded so nobody re-enrolls
+ * it from git archaeology: `ADR maintainer approval` (adr-merge-approval.yml)
+ * was registered here on a 2026-08-10 screenshot of the ruleset, but the
+ * maintainer's own reading of the required set on 2026-08-18 listed exactly
+ * the entries above and not it — the screenshot had gone stale, and a PR
+ * carrying that check at `failure` merged through the queue the same day,
+ * confirming it empirically. The 2026-08-18 ruling then retired the check
+ * entirely (human merge IS the review record for governed surfaces; the
+ * post-merge audit is scripts/pm/check-governed-merges.mjs). This removal is
+ * the registry-follows half of the header's two-step; the Settings half is
+ * the maintainer attestation above.
  *
  * ⛔ `carries` names the gate FAMILY and never a step count — assertion 10
  * enforces that, because prose here reads as measurement while being asserted
@@ -220,16 +233,6 @@ export const REQUIRED_CONTEXTS = [
     context: 'Temporal Conformance (live PG + MySQL)',
     authorized: '#5617 closing ruling 2026-08-09, second batch',
     carries: 'the live-server datetime conformance axis (#3912/#3942)',
-  },
-  {
-    workflow: 'adr-merge-approval.yml',
-    job: 'adr-merge-approval',
-    context: 'ADR maintainer approval',
-    authorized: '#7022 maintainer settings action, confirmed to the devx PM seat 2026-08-10 ~02:3xZ (screenshot of the `main` ruleset)',
-    // The context STRING is load-bearing (it is what the ruleset requires) and
-    // must not change; the word "maintainer" in it is now historical — see
-    // #8161. What the check actually enforces is stated below.
-    carries: 'the rule that a docs/adr/** diff may not merge without an APPROVED review on the PR — any approver, per the maintainer ruling of 2026-08-12 (#8161), which superseded the #6741 own-account proxy (#6942/#6962 landed unapproved while this context sat outside the required set)',
   },
 ];
 
@@ -517,7 +520,6 @@ async function selfTest() {
   const sources = {
     'lint.yml': readFileSync(join(root, '.github', 'workflows', 'lint.yml'), 'utf8'),
     'ci.yml': readFileSync(join(root, '.github', 'workflows', 'ci.yml'), 'utf8'),
-    'adr-merge-approval.yml': readFileSync(join(root, '.github', 'workflows', 'adr-merge-approval.yml'), 'utf8'),
   };
 
   /** Judge the real workflows with one file's text replaced by `source`. */
@@ -582,20 +584,6 @@ async function selfTest() {
     'dropping the "(live PG + MySQL)" suffix ⇒ red — the parenthetical is part of the contract, not decoration',
   );
 
-  // The #7022 addition: a third workflow file, registered for the first time.
-  // Same reverse-verification shape as the ESLint/Build Core renames above —
-  // a pin that has never been exercised for its own entry is exactly the
-  // "registered but nothing checks it" gap this script exists to close.
-  const renamedAdrApproval = fixture('rename ADR maintainer approval', 'adr-merge-approval.yml', (s) =>
-    s.replace('    name: ADR maintainer approval\n', '    name: ADR Merge Approval\n'),
-  );
-  assert(
-    renamedAdrApproval.problems.some(
-      (p) => p.includes("job 'adr-merge-approval'") && p.includes('"ADR Merge Approval"') && p.includes("'ADR maintainer approval'"),
-    ),
-    'renaming adr-merge-approval.yml\'s job ⇒ red, naming the job, the new name and the required context (#7022)',
-  );
-
   // ── (2) the job disappearing entirely ─────────────────────────────────────
   const droppedJob = fixture('drop the console-pin job', 'ci.yml', (s) => s.replace('\n  console-pin:\n', '\n  console-pin-disabled:\n'));
   assert(
@@ -649,42 +637,30 @@ async function selfTest() {
   assert(noPr.problems.some((p) => p.includes('no `pull_request:` trigger')), 'a required-context workflow with no pull_request trigger ⇒ red');
 
   // ── (7b) a `types:` list that drops a GitHub default ──────────────────────
-  // adr-merge-approval.yml is (as of #8302) the only required-context
-  // workflow that names `types:` at all — its list hand-restates the three
-  // defaults alongside the two auto-merge activities #8012 needs, which is
-  // exactly the load-bearing-but-unverified shape #8304 is about.
-  const droppedReopened = fixture('drop reopened from adr-merge-approval.yml types', 'adr-merge-approval.yml', (s) =>
-    s.replace(
-      'types: [opened, synchronize, reopened, auto_merge_enabled, auto_merge_disabled]',
-      'types: [opened, synchronize, auto_merge_enabled, auto_merge_disabled]',
-    ),
+  // No enrolled workflow names `types:` today (the one that hand-restated the
+  // defaults retired with its check), so the guard is exercised by GROWING a
+  // list onto ci.yml's plain trigger — which is exactly the future edit this
+  // guard exists to catch: naming any `types:` REPLACES GitHub's default
+  // `[opened, synchronize, reopened]`, so a hand-written list that misses one
+  // is the same permanent-pending wedge as a `paths:` filter (#8304). The
+  // no-`types:`-at-all ⇒ green half is the checked-in baseline itself,
+  // asserted green at the top of this self-test.
+  const droppedReopened = fixture('grow a types: list that omits reopened onto ci.yml', 'ci.yml', (s) =>
+    s.replace('  pull_request:\n    branches:\n      - main\n', '  pull_request:\n    types: [opened, synchronize]\n    branches:\n      - main\n'),
   );
   assert(
-    droppedReopened.problems.some((p) => p.includes('adr-merge-approval.yml') && p.includes("omits GitHub's default activity type(s) 'reopened'")),
-    "pruning 'reopened' from a hand-restated types: list ⇒ red, naming the dropped default (#8304)",
+    droppedReopened.problems.some((p) => p.includes('ci.yml') && p.includes("omits GitHub's default activity type(s) 'reopened'")),
+    "a hand-restated types: list missing 'reopened' ⇒ red, naming the dropped default (#8304)",
   );
-  const droppedTwo = fixture('drop opened and synchronize from adr-merge-approval.yml types', 'adr-merge-approval.yml', (s) =>
-    s.replace(
-      'types: [opened, synchronize, reopened, auto_merge_enabled, auto_merge_disabled]',
-      'types: [reopened, auto_merge_enabled, auto_merge_disabled]',
-    ),
+  const droppedTwo = fixture('grow a types: list that omits opened and synchronize onto ci.yml', 'ci.yml', (s) =>
+    s.replace('  pull_request:\n    branches:\n      - main\n', '  pull_request:\n    types: [reopened]\n    branches:\n      - main\n'),
   );
   assert(
     droppedTwo.problems.some((p) => p.includes("'opened', 'synchronize'")),
     'dropping two defaults at once ⇒ red naming both, in default order',
   );
-  const noTypesAtAll = fixture('remove the types: key entirely from adr-merge-approval.yml', 'adr-merge-approval.yml', (s) =>
-    s.replace('    types: [opened, synchronize, reopened, auto_merge_enabled, auto_merge_disabled]\n', ''),
-  );
-  assert(
-    noTypesAtAll.problems.length === 0,
-    `a pull_request trigger with no \`types:\` key at all ⇒ green — GitHub's own defaults apply, nothing was replaced (got ${JSON.stringify(noTypesAtAll.problems)})`,
-  );
-  const supersetTypes = fixture('extend adr-merge-approval.yml types with an extra activity', 'adr-merge-approval.yml', (s) =>
-    s.replace(
-      'types: [opened, synchronize, reopened, auto_merge_enabled, auto_merge_disabled]',
-      'types: [opened, synchronize, reopened, auto_merge_enabled, auto_merge_disabled, ready_for_review]',
-    ),
+  const supersetTypes = fixture('grow a strict-superset types: list onto ci.yml', 'ci.yml', (s) =>
+    s.replace('  pull_request:\n    branches:\n      - main\n', '  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review]\n    branches:\n      - main\n'),
   );
   assert(
     supersetTypes.problems.length === 0,

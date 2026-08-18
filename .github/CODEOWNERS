@@ -7,21 +7,25 @@
 # ADR requests his review automatically, and a ruleset / branch-protection
 # rule "require review from Code Owners" has an entry to bind to (Half 2 of
 # #6785 — a repo-settings change only the maintainer can apply; the
-# button-by-button instructions are in the PR that added this file). The CI
-# half of the same enforcement is .github/workflows/adr-merge-approval.yml +
-# scripts/check-adr-merge-approval.mjs.
+# button-by-button instructions are in the PR that added this file).
+#
+# The per-PR CI half that used to sit beside this file (`ADR maintainer
+# approval`) retired under the 2026-08-18 ruling (#9495): a human merge IS
+# the review record for a governed surface, the pre-merge line of defense is
+# seat discipline (no AI seat flips ready / enqueues / arms auto-merge on a
+# governed PR — AGENTS.md Prime Directive #14), and detection moved to the
+# report-only post-merge audit, scripts/pm/check-governed-merges.mjs, whose
+# header carries the incident history that used to live in the gate script.
 #
 # `hotlong` is verified against the repo history, not assumed: 2,153 commits
 # on main are authored as 50353452+hotlong@users.noreply.github.com — GitHub's
 # {id}+{login} noreply address form ties the login to the account.
 #
 # The enforcement chain itself is routed the same way, deliberately: a PR
-# that edits the gate script, its workflow, or this file is a governance
-# change — without these entries the docs/adr/ rule could be lifted by
-# editing the enforcers instead of the ADRs, and the CI check alone must stay
-# scoped to docs/adr/** (its own PR has to pass the not-an-ADR-diff path).
+# that edits the audit script or this file is a governance change — without
+# these entries the docs/adr/ rule could be lifted by editing the enforcers
+# instead of the ADRs.
 
 /docs/adr/ @hotlong
 /.github/CODEOWNERS @hotlong
-/.github/workflows/adr-merge-approval.yml @hotlong
-/scripts/check-adr-merge-approval.mjs @hotlong
+/scripts/pm/check-governed-merges.mjs @hotlong
