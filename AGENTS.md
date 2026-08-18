@@ -650,6 +650,9 @@ agent playbooks live in `.claude/skills/` and must carry `metadata.internal: tru
 `dogfood-verification` (boot and drive the real app in a browser) and
 `spec-property-retirement` (ADR-0049 enforce-or-remove — the full retirement kit).
 
+⛔ **Both roots are governed surfaces**: a PR touching either is human-merge only and may
+never be queued or armed — **Prime Directive #14**, machine-enforced, not advisory.
+
 ---
 
 ## Patterns
