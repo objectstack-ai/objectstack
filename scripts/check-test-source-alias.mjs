@@ -172,6 +172,7 @@
 //   node scripts/check-test-source-alias.mjs --self-test
 
 import { readFileSync, readdirSync, statSync, existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { stripComments } from './js-comment-mask.mjs';
 import { join, resolve, relative, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -672,66 +673,23 @@ function findVitestConfig(dir) {
   return null;
 }
 
-const REGEX_CAN_START_AFTER = new Set(['(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '+', '-', '*', '%', '~', '^', '<', '>', '']);
-
 /**
- * Remove comments, leaving strings, template literals and regex literals
- * intact. Needed because these configs carry long rationale comments that name
- * the very specifiers being matched — reading one as an alias would report a
- * package as safe on the strength of a paragraph about why it is not.
+ * Comment stripping, shared. See `scripts/js-comment-mask.mjs` for the scanner
+ * and for why this gate takes the deleting projection rather than the blanking
+ * one (its import regex is lazy, and blanking is quadratic over what it leaves).
+ *
+ * Needed because these configs carry long rationale comments that name the very
+ * specifiers being matched -- reading one as an alias would report a package as
+ * safe on the strength of a paragraph about why it is not.
+ *
+ * The private copy this replaces knew about strings AND regex literals, but
+ * decided "is this `/` a regex?" from the preceding CHARACTER alone. That misses
+ * the keyword forms -- `return /["`]/.test(s)`, `case /['`]/.test(x)` -- where a
+ * value character precedes and only the keyword tells regex from division. The
+ * shared scanner carries the keyword set. Latent on today's corpus (34 vitest
+ * configs, none carrying the shape), which is why it is pinned by shape in the
+ * shared module's self-test rather than by this gate's corpus.
  */
-function stripComments(src) {
-  let out = '';
-  let previous = '';
-  let i = 0;
-  while (i < src.length) {
-    const c = src[i];
-    const next = src[i + 1];
-    if (c === '/' && next === '/') {
-      while (i < src.length && src[i] !== '\n') i++;
-      continue;
-    }
-    if (c === '/' && next === '*') {
-      i += 2;
-      while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) i++;
-      i += 2;
-      continue;
-    }
-    if (c === '"' || c === "'" || c === '`') {
-      out += c;
-      i++;
-      while (i < src.length) {
-        if (src[i] === '\\') {
-          out += src[i] + (src[i + 1] ?? '');
-          i += 2;
-          continue;
-        }
-        out += src[i];
-        if (src[i] === c) {
-          i++;
-          break;
-        }
-        i++;
-      }
-      previous = c;
-      continue;
-    }
-    if (c === '/' && REGEX_CAN_START_AFTER.has(previous)) {
-      const end = scanRegexLiteral(src, i);
-      if (end > 0) {
-        out += src.slice(i, end);
-        i = end;
-        previous = '/';
-        continue;
-      }
-    }
-    out += c;
-    if (!/\s/.test(c)) previous = c;
-    i++;
-  }
-  return out;
-}
-
 /** End index (exclusive) of the regex literal starting at `start`, or -1. */
 function scanRegexLiteral(src, start) {
   let i = start + 1;

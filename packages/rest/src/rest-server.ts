@@ -4203,7 +4203,42 @@ export class RestServer {
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const p = await this.resolveProtocol(environmentId, req);
                         if (typeof (p as any).findReferencesToMeta !== 'function') {
-                            res.json({ references: [] });
+                            // [#9326 / ADR-0110 D3] A MISS and a FAULT are
+                            // different facts, and this branch is the second
+                            // one: the resolved protocol cannot compute the
+                            // reference graph AT ALL, so the question was never
+                            // asked. Answering `{ references: [] }` reported it
+                            // as the first — "nothing depends on this item" —
+                            // and the admin "Used by" panel renders that empty
+                            // case as "Nothing in the metadata graph points at
+                            // this item. Safe to delete.", shown to an operator
+                            // about to delete something.
+                            //
+                            // Refusing HERE rather than asserting at assembly is
+                            // deliberate. `findReferencesToMeta` is not a member
+                            // of `RestProtocol` (= `DataProtocol &
+                            // MetadataProtocol`) — it is an ADR-0076 D9
+                            // server-only extension, which is why it is reached
+                            // through a runtime cast at all. So a host that
+                            // implements the DECLARED contract exactly is a
+                            // CONFORMING deployment that lands here with no type
+                            // error, and a boot-time assertion would promote an
+                            // undeclared optional extension into a required one
+                            // — a `packages/spec` contract decision, not a
+                            // route one. What the route owes is that an
+                            // unanswerable question comes back unanswered.
+                            //
+                            // Envelope per #7035: the ADR-0112 NESTED
+                            // `{ error: { code, message } }` that the sibling
+                            // `/meta` 501 refusals converged on — never the
+                            // bare-string or sibling-`code` dialects, which make
+                            // `body.error.code` read `undefined`.
+                            res.status(501).json({
+                                error: {
+                                    code: 'NOT_IMPLEMENTED',
+                                    message: 'protocol.findReferencesToMeta() is not available in this kernel',
+                                },
+                            });
                             return;
                         }
                         const result = await (p as any).findReferencesToMeta({

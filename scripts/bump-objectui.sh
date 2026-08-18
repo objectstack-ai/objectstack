@@ -20,6 +20,13 @@
 #                             # changesets added over the range; see #4731)
 #   CONSOLE_CHANGES_MAX=<n>   # cap the rendered list (default 100). A cap that
 #                             # fires says so, with the real count — never silently.
+#   OBJECTUI_NO_DEEPEN=1      # do NOT run 'git fetch --unshallow' on the objectui
+#                             # checkout when the pin range is truncated inside it.
+#                             # Default is to deepen: measured on objectui the fetch
+#                             # costs ~6s and ~4MB and turns a 110-commit walk into
+#                             # the true 191 (#9408). Set this offline, or when the
+#                             # checkout must not be touched — the bump then takes
+#                             # the DEGRADED path and says why.
 #
 # Assumes sibling layout:
 #   ~/work/objectui
@@ -135,9 +142,74 @@ if [[ "$NO_CHANGESET" -eq 0 ]]; then
   # a first-ever pin may not have OLD reachable — degrade to the tip subject,
   # and SAY SO in the artifact: a degraded list and a complete one must never
   # look alike, #4731.)
+  #
+  # THE TEST IS WALK COMPLETENESS, NOT OBJECT PRESENCE (#9408). It used to be
+  # `git cat-file -e OLD_SHA` — "does the OLD endpoint exist" — which is a
+  # different question, and the gap between them is measured: on the bump that
+  # landed `.changeset/console-82a94170c405.md` that test PASSED against a
+  # history truncated at commit 110 of 191, so this guard set RANGE_OK=1, the
+  # degraded path below never fired, and the digest exited 0 on a record
+  # crediting 36 of its 119 entries to one commit that adds exactly one. A
+  # truncated history is worse than an absent endpoint precisely because it
+  # ANSWERS: git shows its oldest visible commit as parentless, diffs it against
+  # the empty tree, and that one commit absorbs a whole batch.
+  #
+  # The question is asked IN THE DIGEST (`--check-walkable`) so there is one
+  # implementation of the rule rather than a shell copy that can drift from the
+  # thing it guards — see `findRangeTruncation`. Exit 2 = an endpoint is missing,
+  # 3 = the endpoints are here but the history stops inside the range.
+  range_walkable() {
+    node "${FRAMEWORK_ROOT}/scripts/objectui-changeset-digest.mjs" \
+      --objectui-root "$OBJECTUI_ROOT" --from "$1" --to "$2" --check-walkable
+  }
+
   RANGE_OK=0
-  if [[ "$OLD_SHA" != "<none>" ]] && git -C "$OBJECTUI_ROOT" cat-file -e "${OLD_SHA}^{commit}" 2>/dev/null; then
-    RANGE_OK=1
+  TRUNCATED=0
+  if [[ "$OLD_SHA" != "<none>" ]]; then
+    WALK_RC=0
+    range_walkable "$OLD_SHA" "$NEW_SHA" || WALK_RC=$?
+    if [[ "$WALK_RC" -eq 0 ]]; then
+      RANGE_OK=1
+    elif [[ "$WALK_RC" -eq 3 ]]; then
+      TRUNCATED=1
+      # REPAIR THE INPUT BEFORE LABELLING A DERIVATION OF IT. A console changeset
+      # becomes published CHANGELOG text, so a degraded record is permanent —
+      # while the correct history is one fetch away and cheap: measured on
+      # objectui, `fetch --unshallow` costs ~6s and ~4MB and takes the walk from
+      # 110 commits to the true 191. The fetch is ADDITIVE by construction (it
+      # adds objects and drops .git/shallow; it moves no branch and touches no
+      # working tree), which is what makes doing it on the operator's checkout
+      # defensible rather than presumptuous. Announced before and after, and
+      # skippable with OBJECTUI_NO_DEEPEN=1 for an offline run.
+      if [[ "${OBJECTUI_NO_DEEPEN:-0}" == "1" ]]; then
+        echo "→ objectui history is truncated inside the range; OBJECTUI_NO_DEEPEN=1, not deepening." >&2
+      elif [[ "$(git -C "$OBJECTUI_ROOT" rev-parse --is-shallow-repository 2>/dev/null)" != "true" ]]; then
+        # Not shallow, yet the walk stops: a graft, a `git replace`, or unrelated
+        # histories. `--unshallow` cannot repair those and errors out on a
+        # complete repository, so do not pretend it might.
+        echo "→ objectui history is truncated inside the range but the clone is NOT shallow" >&2
+        echo "  (graft, git replace, or unrelated histories) — 'fetch --unshallow' cannot repair that." >&2
+      else
+        # RE-CHECK, never trust the fetch's exit code. Measured: `git fetch
+        # --unshallow` in a checkout with no remote configured exits 0 and
+        # changes nothing at all, so a status-only test would set RANGE_OK=1 on
+        # a still-truncated tree — this card's failure, one layer further in.
+        echo "→ objectui is a shallow clone and the pin range is truncated inside it — deepening…"
+        DEEPEN_RC=0
+        git -C "$OBJECTUI_ROOT" fetch --unshallow || DEEPEN_RC=$?
+        if [[ "$DEEPEN_RC" -eq 0 ]]; then
+          WALK_RC=0
+          range_walkable "$OLD_SHA" "$NEW_SHA" || WALK_RC=$?
+          if [[ "$WALK_RC" -eq 0 ]]; then
+            RANGE_OK=1
+            TRUNCATED=0
+            echo "✓ deepened — the range walks completely now."
+          fi
+        else
+          echo "✗ 'git fetch --unshallow' failed (exit ${DEEPEN_RC}) — falling back to the degraded path." >&2
+        fi
+      fi
+    fi
   fi
 
   CS_FILE="${FRAMEWORK_ROOT}/.changeset/console-${SHORT}.md"
@@ -169,6 +241,16 @@ if [[ "$NO_CHANGESET" -eq 0 ]]; then
     if [[ "$OLD_SHA" == "<none>" ]]; then
       RANGE_LABEL="(initial pin) → ${NEW_SHA:0:12}"
       WHY="this is the initial pin, so there is no previous SHA to walk from"
+    elif [[ "${TRUNCATED:-0}" -eq 1 ]]; then
+      # A degraded list must be distinguishable from a complete one (#4731); a
+      # TRUNCATED range must further be distinguishable from an ABSENT endpoint,
+      # because the two take different remedies and only one of them is a fetch
+      # away. Naming the remedy here is the difference between a reader who
+      # re-runs the bump correctly and one who edits the table by hand.
+      WHY="the objectui history at \`${OBJECTUI_ROOT}\` STOPS INSIDE the range \`${RANGE_LABEL}\`, so \
+walking it would credit a whole batch of upstream releases to the single commit where the \
+history is cut off (objectstack#9408). Deepen the checkout — \`git -C ${OBJECTUI_ROOT} fetch \
+--unshallow\` — and re-run this bump to get the real list"
     fi
     cat > "$CS_FILE" <<EOF
 ---

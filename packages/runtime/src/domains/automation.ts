@@ -473,12 +473,14 @@ function flowDefinitionRefusal(err: any): unknown {
  * route. A caller that branches on the HTTP status alone read a failed run as
  * a successful one, and this is the door every app dispatches flows through.
  *
- * Implements the maintainer ruling on #9378 (2026-08-17) for the two rows it
- * can answer without inventing vocabulary:
+ * Implements the maintainer ruling on #9378 (2026-08-17) — all four rows,
+ * completed by #9415:
  *
  * | engine exit                | reality            | answer                |
  * |----------------------------|--------------------|-----------------------|
  * | flow not found             | never dispatched   | `404`                 |
+ * | flow disabled              | never dispatched   | `409` `FLOW_DISABLED` |
+ * | flow has no start node     | never dispatched   | `422` `FLOW_NO_START_NODE` |
  * | ran and failed (incl. the retry-strategy exits) | ran, rejected | `400` `FLOW_FAILED` |
  *
  * **404 is answered by the registry probe, not by reading the result.** It is
@@ -504,19 +506,37 @@ function flowDefinitionRefusal(err: any): unknown {
  * author's words silently. `summary` rides along for the same reason it was on
  * the 200 body — it is how a caller finds WHICH node failed.
  *
- * ⛔ **The ruling's other two rows are NOT mapped here, deliberately.** A
- * DISABLED flow (⇒ 409) and one with NO START NODE (⇒ 422) are both
- * never-dispatched exits, and telling them apart needs the producer to say
- * which is which — `AutomationResult.code` is a closed union of resume-refusal
- * members with no honest home for either, and the maintainer ruling on #9384
- * (2026-08-17) keeps it closed, routing any new member to the spec seat. The
- * two alternatives were both rejected rather than quietly taken: matching the
- * engine's message text is a regex on prose, and probing enable-state here
- * would put a second copy of the engine's own execution policy in the
- * transport, with a window in which a flow disabled between probe and dispatch
- * is answered as a malformed definition. So those two exits keep TODAY's
- * behaviour (200 with the inner failure) until the union question is ruled;
- * nothing about them is guessed. See #9378 for the escalation.
+ * **409 and 422 are answered the SAME way as 400 — by reading the producer's
+ * classification (#9415).** Both are never-dispatched exits, and telling them
+ * apart needed the producer to say which is which. When #9413 landed, the
+ * closed `AutomationResult.code` union had no honest member for either, so
+ * both kept today's 200 and the question went to the spec seat under the
+ * #9384 ruling (which keeps the union closed — a new member is a deliberate
+ * widening, not a call-site mint). #9415 is that widening: the engine's
+ * disabled-flow exit stamps `'FLOW_DISABLED'`, its start-node-less exit
+ * stamps `'FLOW_NO_START_NODE'`, and the two arms below read those.
+ *
+ * ⛔ The two workarounds this replaced were measured and REJECTED, and neither
+ * becomes tempting again just because the arms now exist: matching the
+ * engine's message text is a regex on prose (PD #12), and probing enable-state
+ * here would put a second copy of the engine's own execution policy in the
+ * transport, with a TOCTOU window in which a flow disabled between probe and
+ * dispatch is answered as a malformed definition. Nothing below inspects
+ * `summary`, `durationMs` or the message.
+ *
+ * Why these statuses and not one shared 4xx: a DISABLED flow is well-formed
+ * and well-defined — only its current *state* conflicts with running it, and
+ * flipping the switch makes the identical request succeed, which is 409's
+ * meaning. A flow with NO START NODE is understood, exists, and cannot be
+ * executed as stored: an authoring defect no retry fixes, which is 422's.
+ * Collapsing them would tell an operator to flip a switch that will not help.
+ *
+ * ⚠️ **Ordering: the never-dispatched arms come FIRST.** They are exclusive of
+ * the `status: 'failed'` arm today (a refused dispatch has no lifecycle
+ * verdict), so the order is not load-bearing for correctness — but it states
+ * the intended precedence, and it keeps a future producer that stamped both by
+ * mistake from being reported as a run that failed, which is the wrong of the
+ * two answers.
  */
 async function respondToFlowTrigger(
     deps: DomainHandlerDeps,
@@ -532,6 +552,22 @@ async function respondToFlowTrigger(
         }
     }
     const result = await automationService.execute(flowName, buildAutomationContext(body, context));
+    if (result?.success === false && result.code === 'FLOW_DISABLED') {
+        return {
+            handled: true,
+            response: deps.error(result.error ?? `Flow '${flowName}' is disabled`, 409, {
+                code: 'FLOW_DISABLED',
+            }),
+        };
+    }
+    if (result?.success === false && result.code === 'FLOW_NO_START_NODE') {
+        return {
+            handled: true,
+            response: deps.error(result.error ?? `Flow '${flowName}' has no start node`, 422, {
+                code: 'FLOW_NO_START_NODE',
+            }),
+        };
+    }
     if (result?.success === false && result.status === 'failed') {
         return {
             handled: true,
@@ -560,8 +596,9 @@ async function respondToFlowTrigger(
  *   PUT    /:name                → updateFlow
  *   DELETE /:name                → deleteFlow (unregisterFlow)
  *   POST   /:name/trigger        → execute (legacy: trigger/:name also supported;
- *                                  unknown name → 404, a run that ran and failed →
- *                                  400 `FLOW_FAILED`, #9378)
+ *                                  unknown name → 404, disabled → 409 `FLOW_DISABLED`,
+ *                                  no start node → 422 `FLOW_NO_START_NODE`, a run that
+ *                                  ran and failed → 400 `FLOW_FAILED`; #9378 + #9415)
  *   POST   /:name/toggle         → toggleFlow (unknown name → 404, #7535)
  *   GET    /:name/runs           → listRuns (query: limit, cursor — validated, #7300;
  *                                  status — validated AND honoured, #7359)
@@ -659,8 +696,8 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // (Prime Directive #12); the dead branch is gone instead.
     //
     // [#9378] Both doors answer through `respondToFlowTrigger` — see its
-    // docblock for the status table, and for the two rows it deliberately
-    // leaves on today's 200 pending the closed-union ruling.
+    // docblock for the status table, complete since #9415 delivered the
+    // ruling's remaining two rows (409 / 422).
     if (parts[0] === 'trigger' && parts[1] && m === 'POST') {
         const triggerName = parts[1];
         if (typeof automationService.execute === 'function') {

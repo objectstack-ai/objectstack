@@ -1296,6 +1296,43 @@ curl -b cookies.txt -X POST \
 | `POST /api/v1/automation/:name/runs/:runId/resume` | Resume a paused run — body `{ inputs, output, branchLabel }` |
 | `GET /api/v1/automation/:name/runs/:runId/screen` | The pending screen of a screen-flow run |
 
+**Failures answer real HTTP status codes.** A flow that does not run is not a
+`200`. The route classifies four outcomes, and it reads the engine's own verdict
+to do it — never the message text:
+
+| Status | `error.code` | What happened | What to do |
+|:---|:---|:---|:---|
+| `404` | — | No flow by that name in this deployment | Check the name; nothing was dispatched |
+| `409` | `FLOW_DISABLED` | The flow exists but is switched off | Enable it — the identical request then succeeds |
+| `422` | `FLOW_NO_START_NODE` | The stored definition has no `start` node | Fix the flow; retrying cannot help |
+| `400` | `FLOW_FAILED` | The flow **ran** and was rejected | Read `error.details.summary` for the failing node |
+
+The first three never dispatched anything: no node executed, no record was
+written, and there is no run to look up. Only `400` describes a run.
+
+```
+POST /api/v1/automation/order_approval/trigger
+
+409  { "success": false,
+       "error": { "code": "FLOW_DISABLED",
+                  "message": "Flow 'order_approval' is disabled",
+                  "httpStatus": 409 } }
+```
+
+A `400` additionally carries the flow author's own `errorMessage` (when the flow
+declares one) at `error.details.errorMessage`, and the run's per-node accounting
+at `error.details.summary`.
+
+<Callout type="warn">
+**Upgrading from v16 or earlier?** All four of these used to answer `200` with
+the failure wrapped inside `data`
+(`{"success":true,"data":{"success":false,"error":"..."}}`). A caller that
+branched on the HTTP status alone read every failed run as a successful one.
+There is no inner envelope on a failure any more — the error is at the top
+level. SDK callers must move from inspecting the resolved value to a `catch`;
+see [the SDK reference](/docs/api/client-sdk).
+</Callout>
+
 **Passing inputs.** Declare variables with `isInput: true`, then send them in
 `params` under the same names — only declared inputs are bound. `recordId` and
 `objectName` are lifted into `params` for you (plus an `<objectName>Id` alias),
@@ -1310,13 +1347,15 @@ row-level security. See [API Authentication](/docs/api#authentication) for
 credentials.
 
 <Callout type="warn">
-**`success: true` doesn't always mean "it ran".** If the start condition isn't
-met, the response is a *successful* skip — the run result rides in `data`, and
-the skip marker sits on its `output`:
+**A `200` doesn't always mean "it ran".** The failure statuses above cover
+flows that were refused or that died; a *skip* is neither. If the start
+condition isn't met, the response is a **successful** skip — the run result
+rides in `data`, and the skip marker sits on its `output`:
 `{ "success": true, "data": { "success": true, "output": { "skipped": true, "reason": "condition_not_met" } } }`.
 A self-triggering flow caught by the loop guard reports
-`reason: "reentrancy_loop_guard"` the same way. Check `data.output.skipped`
-before assuming the work happened.
+`reason: "reentrancy_loop_guard"` the same way. So checking the status is not
+enough on its own: check `data.output.skipped` before assuming the work
+happened.
 </Callout>
 
 ## Console Flow Viewer & Test Runner

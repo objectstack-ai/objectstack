@@ -96,6 +96,74 @@ contradicts it, and correct it here when it does.
   lock the console renders is a *different* gate (see
   `access-security.readonly-package-locks-studio`).
 
+- **`objectstack verify --rls` is a separate invocation — bare `verify` prints no RLS
+  section at all.** `runRlsProofs` runs only behind the flag
+  (`packages/cli/src/commands/verify.ts`: `rls: Flags.boolean({ default: false })`, the
+  proofs sit inside `if (flags.rls)`, and the report prints `if (rls)`). **Check:** the
+  last block of a bare run is the CRUD summary — `── 15 verified, 0 gaps, 0 FAILED, 1
+  needs-fixture, 7 skipped` on stock showcase — with no `PROVEN`/`HOLES` line anywhere.
+  Adding `--rls` appends the RLS block: `20 PROVEN (20 consistent, 0 HOLES)` over 23
+  objects, plus `9 of 9 declared position(s) probed`. ⛔ Do not cite plain `verify`
+  output as the oracle for an RLS clause — that run never consulted one.
+
+- **Playwright needs an explicit `executablePath` on these containers.**
+  `@playwright/test` 1.62.1 resolves chromium build **1234**; only **1194** is installed.
+  **Check:** `grep -A2 '"name": "chromium"' node_modules/playwright-core/browsers.json`
+  against `ls $PLAYWRIGHT_BROWSERS_PATH` (`/opt/pw-browsers` here, holding
+  `chromium-1194` / `chromium_headless_shell-1194` only). The stock
+  `examples/app-showcase/playwright.config.ts` sets no `executablePath`, so every test
+  dies at browser launch — the error names the **headless-shell** variant it wanted
+  (`Executable doesn't exist at .../chromium_headless_shell-1234/...`), which is the
+  signature to recognise. Pass `launchOptions.executablePath=/opt/pw-browsers/chromium`
+  and the same specs pass (verified: Playwright launches through it, reporting Chromium
+  141.0.7390.37, and drives a real page). ⚠️ Use that **alias**, not the versioned
+  `chromium-1194/chrome-linux/chrome` beneath it: `/opt/pw-browsers/chromium` is a
+  symlink maintained by the image build, so it still resolves after the image moves to
+  1234, while the versioned literal stops existing at exactly that moment — and a dead
+  path copied out of this section is the `absence-inference` trap one level up.
+  **The discriminator is uniformity:** a launch/environment failure
+  takes down the whole run at once (`showcase-smoke.spec.ts` generates one test per
+  `SURFACES` entry — 31 today, so "31 failed" means all of them), while a product defect
+  fails selectively. ⛔ Do not file a whole-run red as a product defect before checking
+  the browser resolved.
+
+- **`?id=` on `/api/v1/meta/app` keys on the app NAME, never the package id.** The filter
+  matches `a.name === id` against the App document's identity (`packages/rest/src/rest-server.ts`),
+  and App declares no `id` of its own. `?id=com.example.showcase` (the package id, from
+  `objectstack.config.ts`) returns `{"items":[]}` — which reads exactly like "the app
+  metadata is gone", the highest-value false P0 shape there is. Real names: `showcase_app`
+  (showcase), `setup` / `studio` / `account` (platform built-ins). ⚠️ **An empty
+  `items` has two distinct causes** — a wrong spelling, or an app that is genuinely not
+  installed. `studio` is defined (`packages/platform-objects/src/apps/studio.app.ts`) but
+  the showcase does **not** install it, so `?id=studio` is legitimately empty there; a
+  stock admin list is `["showcase_app","setup","account"]`. **Check:** fetch
+  `/api/v1/meta/app` with no query first and read the names it actually returns, then
+  filter.
+
+- **`ss` is not installed in these containers — read liveness with `curl`, never a socket
+  table.** `ss` and `netstat` are both absent (`command not found`); `lsof` and `fuser`
+  are present. The trap is that the usual spelling hides the cause: `ss -ltn | grep :3000`
+  sends the error to stderr and prints nothing, so a **live** server is indistinguishable
+  from a dead one — empty stdout, exit 1, no clue why. **Check instead:**
+  `curl -s -o /dev/null -w '%{http_code}' http://localhost:PORT/api/v1/health` (substitute
+  the real port). This is "zero hits needs a positive control" applied to one tool: a
+  negative from a command that never ran is not evidence.
+
+- **A cold tree cannot boot the app from the console-build recipe alone.**
+  `pnpm objectui:build` runs `scripts/build-console.sh`, which builds the **console**, not
+  the framework CLI. On a fresh tree `packages/cli` has no `dist`, and the bare binary
+  then answers `Error: command dev not found` (exit 2) — a message that names neither the
+  cause nor the fix. **Check:** `node scripts/check-dev-prereqs.mjs`; it reports every
+  package whose declared `dist/` entry point is missing, and exits non-zero. **Fix:
+  `pnpm build`** — that is what the guard itself prescribes, and it is what turns the
+  guard green. ⛔ A targeted `turbo run build --filter=@objectstack/cli...
+  --filter=@objectstack/example-showcase...` is **not** enough: it makes the `objectstack`
+  binary resolve `dev`, but measured here it still left 8 of 67 packages unbuilt, so
+  `check:dev-prereqs` stays red and `pnpm dev` still refuses to boot. Note the root
+  `pnpm dev` script runs that guard **before** booting, so a runner who uses `pnpm dev`
+  gets the diagnostic and the fix; the cryptic `command dev not found` only appears when
+  the bare binary is invoked directly.
+
 ### Trap vocabulary (`traps` field)
 
 | trap | what it fakes | counter |
@@ -110,6 +178,7 @@ contradicts it, and correct it here when it does.
 | `dispatcher-vs-hono-route` | route exists in unit tests, 404s on the real server | oracle = live server trace, never simulated dispatch |
 | `wrong-panel` | feature looks missing on a sibling surface | item's `steps` name the exact surface; check it |
 | `wrong-persona` | admin privileges mask a guard | run guard checks as the non-privileged persona |
+| `absence-inference` | a missing flag/key/script read as a missing capability | follow the forwarding chain to where the default is actually decided, before writing the finding down. A scaffold's bare `objectstack dev` still serves the console: `serve`'s `ui` flag is `default: true, allowNo: true`, so `--no-ui` is the off switch and absence means on |
 
 ## Run records — the GitHub issue is the report
 

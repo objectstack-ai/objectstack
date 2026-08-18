@@ -252,12 +252,29 @@ export const ERROR_CODE_LEDGER = {
   ],
   '@objectstack/runtime': [
     'EXPIRED_OR_REVOKED',         // share link
+    // [#9415] the trigger door refused to dispatch a flow that is switched off
+    // — `respondToFlowTrigger` (`domains/automation.ts`) reads the engine's
+    // own `AutomationResult.code` and answers 409. Registered HERE and not
+    // under the engine's package for the same reason FLOW_FAILED is: this
+    // door, not the producer, is where the wire vocabulary is named. NOT a
+    // synonym of `CONFLICT` in the detector's sense and not one in meaning
+    // either — it names WHICH state conflicts, which is what an operator acts
+    // on. Never carries `status`: nothing dispatched (#9378 row 3).
+    'FLOW_DISABLED',
     // [#8846] a flow that RAN and rejected — a deliberate business rejection,
     // served as a 400 (#3962) with the semantic code kept on the wire so
     // callers can branch on it; `/actions` serves the throw through
     // `errorFromThrown` (`action-execution.ts`). Reported by the #8087
     // dispatcher-vocabulary gate.
     'FLOW_FAILED',
+    // [#9415] the trigger door refused a flow whose stored definition has no
+    // `start` node — there is nothing to dispatch, so the run never began.
+    // Answered 422 by `respondToFlowTrigger`: understood request, existing
+    // flow, unexecutable definition. Deliberately distinct from
+    // FLOW_DISABLED — one is reversible operational state, the other an
+    // authoring defect — and from FLOW_FAILED, which means the flow ran
+    // (#9378 row 4).
+    'FLOW_NO_START_NODE',
     'INVALID_OR_EXPIRED',         // share-link token
     'NEEDS_PASSWORD',             // share link requires a password
     // [#7557] `DELETE /packages/:id` on the DISPATCHER door — per-item failures
@@ -378,7 +395,7 @@ export const ERROR_CODE_LEDGER = {
     'QUERY_OBJECT_MISMATCH',
     'REGISTRY_TYPE_NOT_CANONICAL',  // [#9111] a SchemaRegistry overlay entry was offered a non-canonical metadata `type` — the mint door asserts, the caller folds
     'ROLLED_BACK',             // atomic data-batch row was written, then undone by the batch rollback (#4793)
-    'STORED_TYPE_NOT_CANONICAL',  // [#8908] a package draft is stored under a non-canonical metadata type (pre-#7894 second-namespace residue) — refused at the publish pre-flight, batch-atomic
+    'STORED_TYPE_NOT_CANONICAL',  // [#8908] a package draft is stored under a non-canonical metadata type (pre-#7894 second-namespace residue) — refused at the publish pre-flight, batch-atomic; [#9174] also refused on `revertCommit`'s restore limb, per-item on `failed[]`, NOT batch-atomic
     'TENANT_SCOPE_REQUIRED',      // [#7780] destructive call named neither an organization nor an explicit cross-tenant intent; needs an explicit opt-in
     'UNSUPPORTED_QUERY_PARAM',
     'VALIDATION_FAILED',

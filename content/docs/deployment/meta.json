@@ -6,6 +6,7 @@
     "production-readiness",
     "backup-restore",
     "tenancy-modes",
+    "seed-tenancy-repair",
     "single-project-mode",
     "publish-and-preview",
     "validating-metadata",
