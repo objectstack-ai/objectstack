@@ -54,9 +54,23 @@ function lockWaitTimeoutError(): Error {
     new Error('Lock wait timeout exceeded; try restarting transaction'),
     { errno: 1205, code: 'ER_LOCK_WAIT_TIMEOUT', sqlState: 'HY000' },
   );
-  return new Error('alter table `widgets_9354` modify column … - Lock wait timeout exceeded', {
-    cause: driverErr,
+  const wrapped = new Error(
+    'alter table `widgets_9354` modify column … - Lock wait timeout exceeded',
+  );
+  // Attached by hand rather than through `new Error(msg, { cause })`: that
+  // overload needs the ES2022 lib and this package targets ES2020, so the
+  // constructor form does not type-check here. `defineProperty` is the shape the
+  // driver's own refusals in `sql-driver.ts` use, and it reproduces what the
+  // constructor produces at runtime exactly — including NON-enumerability, which
+  // an `Object.assign` spelling would silently get wrong and make this fixture a
+  // weaker stand-in for the real knex re-throw than it looks.
+  Object.defineProperty(wrapped, 'cause', {
+    value: driverErr,
+    enumerable: false,
+    writable: true,
+    configurable: true,
   });
+  return wrapped;
 }
 
 /** The server's default, so the restore has a prior value to put back. */
