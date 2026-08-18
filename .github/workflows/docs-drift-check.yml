@@ -17,6 +17,13 @@ name: Docs Drift Check
 # because they document it through the SDK, which does not depend on the implementing
 # package. The comment now also states what the run could NOT see — the derivation being
 # read past its precision, with its silence taken for absence, is what #9192 records.
+#
+# And since #9519 it states WHICH TREE it read. On `pull_request`, actions/checkout gives
+# the MERGE of base and head, so the row set is a fact about a commit that exists on no
+# branch a reader can name — while the comment's own re-derivation command sent them to
+# run the tool on their own worktree. A reader who did that got a different list and
+# reported a correct row as a false positive, and the investigation of the non-existent
+# defect cost a full round. Same posture, one more thing the run knows and used not to say.
 
 on:
   pull_request:
@@ -98,7 +105,89 @@ jobs:
             const crossCutting = data.crossCuttingSymbols || [];
             const weak = data.weakAnchorsDropped || [];
             const coarse = data.packageMentionDocs || [];
-            const rederive = `node scripts/docs-audit/affected-docs.mjs --json origin/${baseRef}`;
+            // ── WHICH TREE THIS WAS COMPUTED ON (#9519) ─────────────────────────────
+            // The row set is a fact about two commits and this comment named neither.
+            // Pages are read with `readFileSync` from the WORKING TREE, and on a
+            // `pull_request` run `actions/checkout` gives us merge(base, head) — a tree
+            // that exists on no branch a reader can name and that GitHub drops once the
+            // PR closes. The change set is a diff whose base was published only as
+            // `origin/<base>`, a moving NAME. The re-derivation command below then sent
+            // the reader to run the tool against THEIR tree, so a page that gained or
+            // lost an anchor token on the base branch after their worktree was cut
+            // produced a row they could not reproduce, with nothing here to say why.
+            //
+            // Measured: a reader did exactly that, grepped, found nothing, and reported
+            // a correct row as a false positive; the follow-up then investigated a
+            // defect class that does not exist in this tool — the anchor set is derived
+            // fresh per run, with no cache, index or snapshot anywhere — at the cost of
+            // a full round. Naming the tree is this file's own #9192 posture (say what
+            // the run could not see) applied to one more thing the run already knows.
+            //
+            // The mapper change behind this is strictly ADDITIVE: `computedOn` is read
+            // off git at the emit boundary, after every derivation has finished, so no
+            // row above depends on it. Verified byte-for-byte against the pre-change
+            // mapper on three refs — the `computedOn` block is the entire diff.
+            const computedOn = data.computedOn || {};
+            const parents = Array.isArray(computedOn.headParents) ? computedOn.headParents : [];
+            // Parent ORDER on `refs/pull/N/merge` (base first, head second) is GitHub's
+            // convention, not git's, so it is CHECKED against the event payload rather
+            // than assumed — the pair is labelled only when the payload says which is
+            // which, and stays unlabelled otherwise. A confidently wrong label would
+            // send a reader off to rebuild the mirror image of the tree.
+            const prHeadSha = context.payload.pull_request.head.sha;
+            const mergedHead = parents.find(p => p === prHeadSha) || null;
+            const mergedBase = mergedHead ? (parents.find(p => p !== mergedHead) || null) : null;
+            // The COMMIT the mapper measured its diff from — the three-dot merge-base it
+            // had already resolved, not `origin/<base>` re-read later. Naming the commit
+            // is what makes the command replayable from any clone; naming the branch is
+            // what made it a trap.
+            const diffBase = computedOn.diffBase || null;
+            const rederive = `node scripts/docs-audit/affected-docs.mjs --json ${diffBase || `origin/${baseRef}`}`;
+            const treeBlock = (() => {
+              // ⛔ Never degrade to silence here. An unnamed tree is the exact state this
+              // block exists to end, so a missing identity is SAID, not omitted.
+              if (!computedOn.head) {
+                return ['', '> ⚠️ This run could not identify the commit it read, so the list above cannot be'
+                  + ' tied to a tree. Re-derive against your own checkout and compare by hand.'];
+              }
+              const lines = [
+                '',
+                '<details><summary>Which tree this was computed on</summary>',
+                '',
+                mergedHead && mergedBase
+                  ? `This run read \`content/docs\` from \`${computedOn.head}\` — the merge of head`
+                    + ` \`${mergedHead}\` into base \`${mergedBase}\`, which is what \`actions/checkout\``
+                    + ` gives a \`pull_request\` run. **Not** the PR head.`
+                  : `This run read \`content/docs\` from \`${computedOn.head}\`.`,
+                '',
+                `A worktree cut from an older \`${baseRef}\` holds a different \`content/docs\`, so re-deriving`
+                  + ` there can legitimately return a different list — that is a **different tree, not a wrong`
+                  + ` row**. To answer on the same tree:`,
+                '',
+                '```sh',
+              ];
+              if (mergedHead && mergedBase) {
+                lines.push(
+                  '# while this PR is open — GitHub drops the merge commit once it closes',
+                  `git fetch origin ${computedOn.head} && git checkout ${computedOn.head}`,
+                  '# afterwards, rebuild it from the two parents, which stay fetchable',
+                  `git fetch origin ${mergedBase} ${mergedHead} && git checkout -B drift-repro ${mergedBase} && git merge --no-ff ${mergedHead}`,
+                  '',
+                );
+              } else {
+                lines.push(`git fetch origin ${computedOn.head} && git checkout ${computedOn.head}`);
+              }
+              lines.push(rederive, '```');
+              // A sha that misidentifies the tree is worse than no sha, so the one
+              // condition under which it does is stated right where the sha is.
+              if (computedOn.dirty === true) {
+                lines.push('', '⚠️ That checkout carried **uncommitted changes**, so the commit above does not fully identify what was read.');
+              } else if (computedOn.dirty === null) {
+                lines.push('', '⚠️ This run could not check whether its checkout was clean, so the commit above may not fully identify what was read.');
+              }
+              lines.push('</details>');
+              return lines;
+            })();
             const limits = [];
             if (anchorless.length) limits.push(`**${anchorless.length}** changed file(s) yielded no anchor (\`${anchorless.slice(0, 3).join('`, `')}\`${anchorless.length > 3 ? ', …' : ''}) — pages documenting those are invisible to this run`);
             if (crossCutting.length) limits.push(`**${crossCutting.length}** cross-cutting symbol(s) contributed no route anchor: \`${crossCutting.join('`, `')}\``);
@@ -137,7 +226,13 @@ jobs:
               const headline = anchorList.length === 0
                 ? `Nothing in this diff resolved to a documentable surface (no symbol, route or SDK anchor derived from **${pkgs.length}** changed package(s)), so **this run has no opinion** about the docs.`
                 : `**${anchorList.length}** anchor(s) derived from **${pkgs.length}** changed package(s); no hand-written page names any of them. ✅`;
-              body = [marker, '### 📓 Docs Drift Check', headline, ...limitsBlock].join('\n');
+              // The tree identity is rendered here only when anchors WERE derived: that
+              // is the run with an opinion ("no page names any of them"), and a reader
+              // whose own tree does yield a row is owed the reason. With no anchors the
+              // run has no opinion to disagree with, and the bytes would be pure noise on
+              // every docs-tooling-only PR (#9037 — every byte here is relayed).
+              body = [marker, '### 📓 Docs Drift Check', headline, ...limitsBlock,
+                ...(anchorList.length ? treeBlock : [])].join('\n');
             } else {
               const detail = (data.detail || []).reduce((m, d) => (m[d.doc] = d.via, m), {});
               const row = d => `- \`${d}\`${detail[d] ? `  _(via ${detail[d].join(', ')})_` : ''}`;
@@ -154,7 +249,7 @@ jobs:
                 // fidelity is one command away, never lost.
                 body.push(
                   '',
-                  `**${editable.length}** hand-written doc(s) name something this change touched — list omitted above ${EDITABLE_ROW_CAP} rows. Re-derive: \`node scripts/docs-audit/affected-docs.mjs --json origin/${baseRef}\`.`,
+                  `**${editable.length}** hand-written doc(s) name something this change touched — list omitted above ${EDITABLE_ROW_CAP} rows. Re-derive on the tree named below: \`${rederive}\`.`,
                 );
                 if (readOnly.length) {
                   body.push(
@@ -186,13 +281,21 @@ jobs:
                 }
               }
               body.push(...limitsBlock);
+              body.push(...treeBlock);
               body.push(
                 '',
                 '> Advisory only, and a **precision-first** one (#9192): a page is listed because it names a',
                 '> symbol, wire route or SDK method this diff touched — not because it mentions a changed',
                 '> package. Each row says which anchor put it there, so a wrong row is reportable rather than',
                 '> merely annoying. To re-verify, run the `docs-accuracy-audit` workflow scoped to these files:',
-                '> `node scripts/docs-audit/affected-docs.mjs origin/' + baseRef + '` → pass the list as `args.docs`.',
+                // Pinned to the commit the mapper measured from, and pointed at the tree
+                // named above (#9519): run this against a different tree and a different
+                // list is the CORRECT answer — which is exactly how a right row once got
+                // reported as a wrong one.
+                '> `node scripts/docs-audit/affected-docs.mjs ' + (diffBase || `origin/${baseRef}`) + '` → pass the list as',
+                computedOn.head
+                  ? '> `args.docs`, on the commit named under **Which tree this was computed on**.'
+                  : '> `args.docs`.',
               );
               body = body.join('\n');
             }
