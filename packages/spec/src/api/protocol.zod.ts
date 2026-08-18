@@ -217,6 +217,13 @@ export const GetMetaTypesResponseSchema = lazySchema(() => z.object({
 export const GetMetaItemsRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name (e.g., "object", "plugin")'),
   packageId: z.string().optional().describe('Optional package ID to filter items by'),
+  organizationId: z.string().optional().describe(
+    'Organization (tenant) scope for the read. Selects the org partition in the '
+    + 'ADR-0005 overlay read order — org overlay wins over env-wide overlay wins '
+    + 'over packaged artifact — so it decides which tenant\'s customization rows '
+    + 'are merged into the list. Absent = environment-wide read: only env-level '
+    + 'overlays apply and no org partition is consulted.',
+  ),
 }));
 
 /**
@@ -235,6 +242,13 @@ export const GetMetaItemRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
   name: z.string().describe('Item name (snake_case identifier)'),
   packageId: z.string().optional().describe('Optional package ID to filter items by'),
+  organizationId: z.string().optional().describe(
+    'Organization (tenant) scope for the read. Selects the org partition in the '
+    + 'ADR-0005 overlay read order — org overlay wins over env-wide overlay wins '
+    + 'over packaged artifact — so it decides which tenant\'s customization row '
+    + 'is served as the item. Absent = environment-wide read: only env-level '
+    + 'overlays apply and no org partition is consulted.',
+  ),
 }));
 
 /**
@@ -347,6 +361,30 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
   name: z.string().describe('Item name'),
   item: z.unknown().describe('Metadata item definition'),
   ...MetadataProtectionEnvelopeFields,
+}));
+
+/**
+ * Get Metadata Item — LAYERED Request
+ *
+ * Request shape for `GET /api/v1/meta/:type/:name/layers` (the
+ * `getMetaItemLayered` protocol method). Mirrors the implementation's
+ * parameter type in `@objectstack/metadata-protocol` member for member — a
+ * declared-surface catch-up, not a new capability: the verb and every member
+ * here already ship and are enforced.
+ */
+export const GetMetaItemLayeredRequestSchema = lazySchema(() => z.object({
+  type: z.string().describe('Metadata type name'),
+  name: z.string().describe('Item name'),
+  packageId: z.string().optional().describe(
+    'Optional package ID — scopes the `code` layer so a same-name collision '
+    + 'resolves to the requested package\'s artifact (ADR-0048).',
+  ),
+  organizationId: z.string().optional().describe(
+    'Organization (tenant) scope for the read. Selects the org partition in the '
+    + 'ADR-0005 overlay read order, so it decides which tenant\'s customization '
+    + 'row is reported as the `overlay` layer (and merged into `effective`). '
+    + 'Absent = environment-wide read: `overlay` reports the env-level row only.',
+  ),
 }));
 
 /**
@@ -920,6 +958,13 @@ export const GetMetaItemCachedRequestSchema = lazySchema(() => z.object({
     'Resolved response locale. Folded into the ETag so a language switch '
     + 'never returns a stale-locale 304 — metadata is translated *after* the '
     + 'cache validator check (issue #1319).',
+  ),
+  organizationId: z.string().optional().describe(
+    'Organization (tenant) scope for the read. Selects the org partition in the '
+    + 'ADR-0005 overlay read order — org overlay wins over env-wide overlay wins '
+    + 'over packaged artifact — exactly as on the uncached read (#9454). Also '
+    + 'folded into the ETag, so a scope switch never returns a stale 304 from '
+    + 'another scope\'s cached representation. Absent = environment-wide read.',
   ),
 }));
 
@@ -2035,6 +2080,7 @@ export type GetMetaItemsRequest = z.input<typeof GetMetaItemsRequestSchema>;
 export type GetMetaItemsResponse = z.input<typeof GetMetaItemsResponseSchema>;
 export type GetMetaItemRequest = z.input<typeof GetMetaItemRequestSchema>;
 export type GetMetaItemResponse = z.input<typeof GetMetaItemResponseSchema>;
+export type GetMetaItemLayeredRequest = z.input<typeof GetMetaItemLayeredRequestSchema>;
 export type GetMetaItemLayeredResponse = z.input<typeof GetMetaItemLayeredResponseSchema>;
 /**
  * One #4463 runtime authoring-gate finding. The SINGLE declaration of the shape;
@@ -2291,6 +2337,17 @@ export interface MetadataProtocol {
    */
   deleteMetaItem?(request: DeleteMetaItemRequest): Promise<DeleteMetaItemResponse>;
   getMetaItemCached?(request: GetMetaItemCachedRequest): Promise<GetMetaItemCachedResponse>;
+  // `getMetaItemLayered` is deliberately NOT declared here yet, although both
+  // its request and response schemas are (see them above). Declaring the
+  // member makes tsc check `metadata-protocol`'s implementation against
+  // `GetMetaItemLayeredResponse`, and that check currently fails on one
+  // member: the implementation's inline return type annotates `lockSource`
+  // with an `'overlay'` arm that its only producer (`resolveLockState`, whose
+  // return is typed `MetadataLockSource | undefined`) can never emit — an
+  // over-wide annotation, not enforced behaviour. Until that annotation is
+  // corrected at the implementation, adding the member here would either lie
+  // about the wire enum or hard-break the implementing class. Tracked as its
+  // own card (filed from #9726).
   getUiView?(request: GetUiViewRequest): Promise<GetUiViewResponse>;
 }
 

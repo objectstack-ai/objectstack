@@ -1286,3 +1286,67 @@ describe('PublishPackageDraftsResponseSchema published[].advisories (#9343 — #
     ).toBe(false);
   });
 });
+
+// Deliberately its own import line, matching the file's later blocks: this
+// group pins one change (#9726) and reads as one unit.
+import {
+  GetMetaItemsRequestSchema,
+  GetMetaItemRequestSchema,
+  GetMetaItemCachedRequestSchema,
+  GetMetaItemLayeredRequestSchema,
+} from './protocol.zod';
+
+describe('meta-read request schemas declare organizationId (#9726 — declared = enforced)', () => {
+  // The implementation (`@objectstack/metadata-protocol`) accepts and HONOURS
+  // `organizationId` on all four read verbs: it selects the org partition in
+  // the ADR-0005 overlay read order, i.e. it decides which tenant's row is
+  // served. These pins hold the DECLARED surface to that enforced shape.
+  //
+  // Why the accept-pin asserts the parsed VALUE, not just `success`: these are
+  // non-strict objects, so before #9726 a request carrying `organizationId`
+  // still parsed green — the member was silently STRIPPED. Presence in the
+  // parse OUTPUT is the observable that actually changed.
+  const cases = [
+    ['GetMetaItemsRequestSchema', GetMetaItemsRequestSchema, { type: 'object' }],
+    ['GetMetaItemRequestSchema', GetMetaItemRequestSchema, { type: 'view', name: 'account_list' }],
+    ['GetMetaItemCachedRequestSchema', GetMetaItemCachedRequestSchema, { type: 'view', name: 'account_list' }],
+    ['GetMetaItemLayeredRequestSchema', GetMetaItemLayeredRequestSchema, { type: 'view', name: 'account_list' }],
+  ] as const;
+
+  it.each(cases)('%s accepts organizationId and PRESERVES it through parse', (_n, schema, base) => {
+    const result = schema.safeParse({ ...base, organizationId: 'org_alpha' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect((result.data as { organizationId?: string }).organizationId).toBe('org_alpha');
+    }
+  });
+
+  it.each(cases)('%s keeps organizationId OPTIONAL — an env-wide (org-less) read stays valid', (_n, schema, base) => {
+    const result = schema.safeParse(base);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect('organizationId' in (result.data as object)).toBe(false);
+    }
+  });
+
+  it.each(cases)('%s rejects a non-string organizationId — the scope key is a value, not a bag', (_n, schema, base) => {
+    expect(schema.safeParse({ ...base, organizationId: 42 }).success).toBe(false);
+    expect(schema.safeParse({ ...base, organizationId: { id: 'org_alpha' } }).success).toBe(false);
+  });
+
+  it('GetMetaItemLayeredRequestSchema mirrors the implementation inline type member for member', () => {
+    // `{ type, name, packageId?, organizationId? }` — the exact parameter type
+    // of `getMetaItemLayered` in metadata-protocol. packageId scopes the code
+    // layer (ADR-0048); nothing else is declared because nothing else is
+    // enforced.
+    const full = GetMetaItemLayeredRequestSchema.safeParse({
+      type: 'view',
+      name: 'account_list',
+      packageId: 'pkg_crm',
+      organizationId: 'org_alpha',
+    });
+    expect(full.success).toBe(true);
+    expect(GetMetaItemLayeredRequestSchema.safeParse({ type: 'view' }).success).toBe(false);
+    expect(GetMetaItemLayeredRequestSchema.safeParse({ name: 'account_list' }).success).toBe(false);
+  });
+});
