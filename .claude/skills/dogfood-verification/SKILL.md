@@ -48,7 +48,13 @@ dev 工作树、dev-server 端口、preview 浏览器全是**共享的**:并行�
       `curl -s -m3 -o /dev/null -w '%{http_code}' http://localhost:<port>/api/v1/health` → 200。
 - [ ] Console UI 在 `/_console/`;应用在 `/_console/apps/<appId>`(如
       `com.objectstack.setup`、`com.objectstack.studio`)。API 根 `/api/v1`,设置
-      `/api/settings`,合并后的应用/导航 `/api/v1/meta/app?id=<appId>`。
+      `/api/settings`,合并后的应用/导航 `/api/v1/meta/app?id=<appName>`。
+- [ ] ⚠️ **`?id=` 键的是应用 `name`,不是包 id。** 真实 name 是 `showcase_app` /
+      `setup` / `studio` / `account` —— 不是上一行那种 `com.objectstack.setup` /
+      `com.example.showcase`(那是包 id,只在 `/_console/apps/` 的路径段上成立)。传
+      包 id 得到的是 `{"items":[]}`,读起来和「应用元数据没了」一模一样 —— 最高价值
+      的假 P0 形状。**先不带 query 取一次 `/api/v1/meta/app`,读它真正返回的 name,
+      再去过滤。**
 
 ## 2. 构建/运行时模型 —— 攒一批,然后一次重启
 
