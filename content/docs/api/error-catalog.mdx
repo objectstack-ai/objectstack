@@ -5,7 +5,7 @@ description: Complete reference for all ObjectStack error codes with causes, fix
 
 # Error Code Catalog
 
-ObjectStack uses a structured error system with **9 error categories** and **53 standardized error codes**. Every error includes a machine-readable code, HTTP status mapping, and retry guidance.
+ObjectStack uses a structured error system with **9 error categories** and **50 standardized error codes**. Every error includes a machine-readable code, HTTP status mapping, and retry guidance.
 
 <Callout type="info">
 **Source:** `packages/spec/src/api/errors.zod.ts`  
@@ -456,25 +456,6 @@ runtime can actually emit.
 ### `WEBHOOK_DELIVERY_FAILED`
 **Cause:** A webhook delivery attempt failed (target unreachable or returned error).  
 **Fix:** Verify the webhook URL is accessible. The system will auto-retry per delivery policy.  
-**Retry:** `retry_backoff`
-
----
-
-## Batch Operation Errors
-
-### `BATCH_PARTIAL_FAILURE`
-**Cause:** Some operations in a batch request succeeded while others failed.  
-**Fix:** Check the `details` for individual operation results. Retry only the failed operations.  
-**Retry:** `retry_immediate` (failed operations only)
-
-### `BATCH_COMPLETE_FAILURE`
-**Cause:** All operations in the batch request failed.  
-**Fix:** Check the `details` for root cause. Fix and retry the entire batch.  
-**Retry:** `retry_backoff`
-
-### `TRANSACTION_FAILED`
-**Cause:** A database transaction failed and was rolled back.  
-**Fix:** Check the `details` for the specific failure. Retry the entire transaction.  
 **Retry:** `retry_backoff`
 
 ---
