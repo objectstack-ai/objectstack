@@ -809,7 +809,7 @@ const AREA_ORDER_RETIRED =
   + 'authored, so declaration order already IS display order. Delete the key and reorder the '
   + '`areas` array itself. NOTE the neighbour that behaves differently: a navigation ITEM\'s '
   + '`order` is genuinely sorted — this removal does not touch it. Run '
-  + '`os migrate meta --from 16` to rewrite existing sources automatically.';
+  + '`os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
 /**
  * `app.areas[].visible` and `app.areas[].requiredPermissions`, retired in
@@ -860,7 +860,7 @@ const AREA_VISIBLE_RETIRED =
   + 'server-side since #4722. The distinction survives at every level: `visible` is CEL '
   + 'evaluated in the browser, so it hides an entry that has already been sent, while '
   + '`requiredPermissions` stops that entry from being served at all. Run '
-  + '`os migrate meta --from 16` to rewrite existing sources automatically.';
+  + '`os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
 const AREA_REQUIRED_PERMISSIONS_RETIRED =
   '`areas[].requiredPermissions` was removed in @objectstack/spec 17.0.0 (#4651, ADR-0049) — '
@@ -874,8 +874,8 @@ const AREA_REQUIRED_PERMISSIONS_RETIRED =
   + 'area never reaches the browser either. That enforces the items INSIDE an area; the '
   + 'area-level key is not revived. Still evaluated client-side ONLY, at every level: '
   + '`visible` (CEL) and `requiresObject` — so anything that must never reach the browser '
-  + 'goes in `requiredPermissions`, never in `visible`. Run `os migrate meta --from 16` to '
-  + 'rewrite existing sources automatically.';
+  + 'goes in `requiredPermissions`, never in `visible`. '
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
 /**
  * Navigation Area Schema
@@ -1014,8 +1014,8 @@ const CONTEXT_SELECTOR_RETIRED_KEY_GUIDANCE: Readonly<Record<string, string>> = 
     + 'kernel metadata to a developer who scoped to their own package. The renderer never '
     + 'offered an All row regardless of this flag, so `includeAll: false` hardened nothing '
     + 'and `includeAll: true` unlocked nothing. Delete the key. To widen what a selector '
-    + 'offers, widen `optionsSource.filter` instead. Run `os migrate meta --from 16` to '
-    + 'rewrite existing sources automatically.',
+    + 'offers, widen `optionsSource.filter` instead. '
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   showall:
     '`contextSelectors[].includeAll` (which `showall` aliased) was removed in '
     + '@objectstack/spec 17.0.0 (#4509) — selectors are mandatory-scope and never render an '
@@ -1024,7 +1024,7 @@ const CONTEXT_SELECTOR_RETIRED_KEY_GUIDANCE: Readonly<Record<string, string>> = 
     '`contextSelectors[].placement` was removed in @objectstack/spec 17.0.0 (#4509, '
     + 'ADR-0049) — no renderer ever read it. Selectors always render in the sidebar header '
     + "block, and `'topbar'` placed nothing in the topbar. Delete the key. Run "
-    + '`os migrate meta --from 16` to rewrite existing sources automatically.',
+    + '`os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   location:
     '`contextSelectors[].placement` (which `location` aliased) was removed in '
     + '@objectstack/spec 17.0.0 (#4509) — selectors always render in the sidebar header. '
@@ -1206,8 +1206,8 @@ const HOME_PAGE_ID_RETIRED =
   + 'app\'s landing page IS its first navigation item (by `order`), and the root landing '
   + 'follows `isDefault` routing. Delete the key; to change where an app opens, '
   + 'reorder `navigation` so the intended entry is first, and set `isDefault` on the app that '
-  + 'should own the root landing. Run `os migrate meta --from 16` to rewrite existing sources '
-  + 'automatically.';
+  + 'should own the root landing. '
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
 /**
  * The prescription for every author-shaped spelling of the ADR-0045 publish
@@ -1299,7 +1299,7 @@ export const AppSchema = lazySchema(() => strictObject(
     '`App.version` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — ' +
     'no consumer in framework or objectui). An app is versioned by its owning package: ' +
     'use `manifest.version`. Delete the key. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
 
   /** Description */
@@ -1441,7 +1441,7 @@ export const AppSchema = lazySchema(() => strictObject(
     'never read; the spec itself labelled it "config file convenience"). Objects belong ' +
     'to the stack (`defineStack({ objects })`); an app reaches them through its ' +
     'navigation items. Delete the key. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   apis: retiredKey(
     '`App.apis` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — ' +
@@ -1460,7 +1460,7 @@ export const AppSchema = lazySchema(() => strictObject(
     '`declarative-apis-endpoints-live` entry of the protocol upgrade guide first; it is a ' +
     'security review, not a rename. A route that genuinely needs handler CODE still ' +
     'belongs in a plugin manifest `contributes.routes` entry. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
 
   /**
@@ -1475,13 +1475,13 @@ export const AppSchema = lazySchema(() => strictObject(
     'ADR-0049 enforce-or-remove) — no public-app route ever read it, so it declared ' +
     'sharing that did not exist. Public access is granted per FORM VIEW ' +
     '(`FormView.sharing`, the public-data-collection surface). Delete the key. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   embed: retiredKey(
     '`App.embed` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit / ' +
     'ADR-0049) — no iframe route ever read it. Embedding is a per-form-view surface ' +
     '(`FormView.sharing`), not an app-level switch. Delete the key. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
 
   /**
@@ -1494,7 +1494,7 @@ export const AppSchema = lazySchema(() => strictObject(
     '`App.mobileNavigation` was removed in @objectstack/spec 17.0.0 (2026-06 liveness ' +
     'audit — fully unimplemented; no renderer, including packages/mobile, ever read ' +
     'it). Delete the key; the block returns if/when a real mobile navigation ships. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
 
   /**
@@ -1534,7 +1534,7 @@ export const AppSchema = lazySchema(() => strictObject(
     'renderer read app-level ARIA attributes). Declare `aria` on the page component ' +
     'that renders the DOM node instead (`page.components[].aria`; `page.aria` and the ' +
     'list view `aria` are live too). Delete the key. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
 
   /**

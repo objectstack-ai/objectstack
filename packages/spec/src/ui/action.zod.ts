@@ -502,7 +502,7 @@ const TARGET_REQUIRED_TYPES: ReadonlySet<string> = new Set(
  * The `execute` alias was **removed in protocol 17** (#3855). `target` is the
  * only handler slot, so no consumer has a second slot to disagree about. An
  * authored `execute` is rejected with the rename prescription rather than
- * silently stripped; `os migrate meta --from 16` rewrites it for you.
+ * silently stripped; `os migrate meta --from 16` lists the edit for you to apply.
  * 
  * @example Good action names
  * - 'on_close_deal'
@@ -536,7 +536,7 @@ const GLOBAL_NAV_RETIRED =
   + '`record_related`, `record_section`), or — for an action that deliberately has no UI home, '
   + 'such as an object-less one invoked over REST/MCP/AI — declare it headless with '
   + '`locations: []`, which keeps its capability gate, param contract and audit trail. '
-  + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.';
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
 /**
  * Action Location — where an action is allowed to surface in the UI.
@@ -980,7 +980,7 @@ const actionObject = () => strictObject({
   execute: retiredKey(
     '`execute` was removed in @objectstack/spec 17 (#3855) — use `target`. ' +
     'Rename the key; the value (a handler / flow / URL ref) is unchanged. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   
   /**
@@ -1200,14 +1200,14 @@ const actionObject = () => strictObject({
     "objectui's keyboard stack (useKeyboardShortcuts) is hand-registered and never consults " +
     'action metadata. Delete the key. For a real shortcut, register the key in the Console ' +
     'keyboard stack and have its handler invoke the action by name. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   bulkEnabled: retiredKey(
     '`action.bulkEnabled` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
     'the multi-select toolbar is driven by the LIST VIEW\'s `bulkActions` / `bulkActionDefs`, ' +
     'never by this flag, so setting it changed nothing. Delete the key and declare the action ' +
     "in the view's `bulkActions` instead. " +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
 
   /**
