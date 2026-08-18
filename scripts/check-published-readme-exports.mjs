@@ -751,13 +751,30 @@ function run() {
   const baseline = loadBaseline();
   const baselineById = new Map(baseline.map((e) => [e.id, e]));
   const observed = new Set(findings.map((f) => f.id));
-  const fresh = findings.filter((f) => f.fatal || !baselineById.has(f.id));
+  // A missing type entry is a statement about the CHECKOUT, not about the
+  // README, so it is separated out and gets its own remedy. Reported under the
+  // claims heading it read as "this README is wrong" while the actual fix was
+  // `pnpm build` — a gate whose failure sends the reader at the wrong file is
+  // one push away from being muted.
+  const unbuilt = findings.filter((f) => f.fatal);
+  const fresh = findings.filter((f) => !f.fatal && !baselineById.has(f.id));
   const stale = baseline.filter((e) => !observed.has(e.id));
 
   const memberChecks = findings.filter((f) => f.id.includes('|member|')).length;
   const header =
     `${docs.length} published document(s) across ${byName.size} workspace package(s); ` +
     `${importStatements} import statement(s), ${targets.size} workspace type entr(ies).`;
+
+  if (unbuilt.length > 0) {
+    console.error(
+      `✗ check:published-readme-exports — ${unbuilt.length} package(s) are not built, so this\n` +
+        '  run measured nothing there. That is reported rather than skipped: a green result\n' +
+        '  over an unread tree is indistinguishable from a clean one (#4690).\n',
+    );
+    for (const f of unbuilt) console.error(`    ${f.id.split('|')[1]} line ${f.line}: ${f.text}`);
+    console.error('');
+    return 1;
+  }
 
   if (fresh.length === 0 && stale.length === 0) {
     console.log(`✓ check:published-readme-exports — ${header}`);
