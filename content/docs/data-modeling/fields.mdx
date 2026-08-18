@@ -189,9 +189,13 @@ rejected with `400 VALIDATION_FAILED` and a `fields[]` entry whose `code` is
 `reference_not_found` (see the [error catalog](/docs/api/error-catalog)). The
 same check runs on bulk updates.
 
-Clearing a relationship is not a dangling reference: `null`, `""` and `[]` mean
-"no link" — exactly what `deleteBehavior: 'set_null'` writes when the parent
-goes away.
+Clearing a relationship is not a dangling reference: `null`, `""` and `[]` all mean
+"no link". Which of them `deleteBehavior: 'set_null'` writes when the referenced
+record goes away depends on the field: a single-value lookup is set to `null`, while
+a `multiple: true` lookup keeps its other members and loses only the deleted one —
+and a set emptied that way is written as `[]`, never `null` (the `multiple` doc block
+in `packages/spec/src/data/field.zod.ts`, rendered in the
+[Field reference](/docs/references/data/field)).
 
 <Callout type="info">
 `deleteBehavior` governs what happens to *this* record when the **referenced**
