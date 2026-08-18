@@ -481,9 +481,10 @@ describe('#9482 C9: every derived /admin/ route refuses a non-admin', () => {
       expect(member.code, `${route} member code`).toBe('PERMISSION_DENIED');
 
       // The allowed side on the SAME route and payload: the platform admin is
-      // not turned away by the gate. The handler may still answer a semantic
-      // error (an unknown OAuth client, an unregistered SSO provider) — what
-      // must not happen is the member's refusal.
+      // not turned away by the gate. The handler may still answer a SEMANTIC
+      // error once past it — measured: 200 for unlock-user, 404
+      // RESOURCE_NOT_FOUND for toggle-disabled's unknown client — and that is
+      // fine. What must not happen is the member's refusal.
       const admin = await fire(route, adminToken);
       expect(
         [401, 403].includes(admin.status),
