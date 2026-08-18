@@ -319,4 +319,27 @@ describe('[#8144] createAuthEventAuditSink writes a login row that names its act
     // on a systemic cause trains everyone to skim the channel.
     expect(logger.debug).toHaveBeenCalledTimes(1);
   });
+
+  it('[#9657] a sink with NO `error` still hears it — at warn, not in silence', async () => {
+    // `AuthEventAuditLogger.error` is OPTIONAL and the report used to be
+    // `logger?.error?.(…)`, an optional call that emits NOTHING when the method
+    // is absent. The sign-in still succeeds either way, which is exactly why
+    // the missing ledger row has to be somebody's problem out loud.
+    const broken: any = {
+      getSchema: () => null,
+      insert: async () => {
+        throw new Error('no such table: sys_audit_log');
+      },
+    };
+    const logger = { warn: vi.fn(), debug: vi.fn() };
+    const sink = createAuthEventAuditSink({ getEngine: () => broken, logger });
+
+    await expect(sink.recordAuthEvent({ action: 'login', userId: 'usr_1' })).resolves.toBeUndefined();
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    const [msg, meta] = logger.warn.mock.calls[0];
+    expect(String(msg)).toContain('INCOMPLETE');
+    expect(String(msg)).toContain('Fix:');
+    expect(meta).toMatchObject({ action: 'login' });
+  });
 });
