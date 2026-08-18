@@ -57,7 +57,7 @@
     "check:adr-links": "node scripts/check-adr-links.mjs --self-test && node scripts/check-adr-links.mjs",
     "check:adr-merge-approval": "node scripts/check-adr-merge-approval.mjs --self-test && node scripts/check-adr-merge-approval.mjs",
     "check:platform-checklist": "node scripts/checklist-select.mjs --self-test && node scripts/check-platform-checklist.mjs",
-    "check:org-identifier": "node scripts/check-org-identifier.mjs",
+    "check:org-identifier": "node scripts/check-org-identifier.mjs --self-test && node scripts/check-org-identifier.mjs",
     "check:authz-resolver": "node scripts/check-single-authz-resolver.mjs --self-test && node scripts/check-single-authz-resolver.mjs",
     "check:slot-lookup": "node scripts/check-slot-lookup-ratchet.mjs",
     "check:query-options-erasure": "node scripts/check-query-options-erasure-ratchet.mjs --self-test && node scripts/check-query-options-erasure-ratchet.mjs",
