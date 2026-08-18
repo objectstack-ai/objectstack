@@ -41,7 +41,7 @@
  * identified. They pin the repository's guarantee, not chokidar's behaviour.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -214,6 +214,75 @@ describe('FileSystemRepository — external writes survive a lost watcher event 
     expect(mine).toHaveLength(1);
     expect(mine[0]!.actor).toBe('tester');
     expect(mine[0]!.op).toBe('create');
+  }, CASE_TIMEOUT_MS);
+
+  it('reports an unreadable type directory instead of inventing an empty one, and says it once', async () => {
+    await start();
+    // A tracked item, so the delete pass has something it could wrongly retire.
+    await repo!.put(ref('kept'), { label: 'kept' }, { parentVersion: null, actor: 'tester' });
+    await sleep(200);
+
+    const errors: string[] = [];
+    const errSpy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      errors.push(args.map(String).join(' '));
+    });
+    // Injected at the seam rather than with `chmod 000`, which is a no-op for a
+    // process running as root — the shape this must survive is "the read could
+    // not run", not one particular way of arranging that.
+    const realReaddir = fs.readdir;
+    const readdirSpy = vi.spyOn(fs, 'readdir').mockImplementation(((p: unknown, opts?: unknown) => {
+      if (p === viewDir) {
+        const denied: NodeJS.ErrnoException = new Error(`EACCES: permission denied, scandir '${viewDir}'`);
+        denied.code = 'EACCES';
+        return Promise.reject(denied);
+      }
+      return (realReaddir as (a: unknown, b?: unknown) => Promise<unknown>)(p, opts);
+    }) as typeof fs.readdir);
+
+    try {
+      await waitFor(() => errors.length > 0, RECOVERY_WAIT_MS);
+      // Keep failing across several more sweeps: a standing fault must not
+      // reprint every 2s for the life of the process.
+      await sleep(QUIET_WINDOW_MS);
+    } finally {
+      readdirSpy.mockRestore();
+      errSpy.mockRestore();
+    }
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain(viewDir);
+    expect(errors[0]).toContain('EACCES');
+    // ⛔ And it must not have answered the unreadable listing with "empty":
+    // every item of that type would otherwise be retired as an external delete.
+    expect(events.filter((e) => e.op === 'delete')).toHaveLength(0);
+    expect(await repo!.get(ref('kept'))).not.toBeNull();
+  }, CASE_TIMEOUT_MS);
+
+  it('stays silent when the directory is genuinely gone (ENOENT), which is a truthful empty answer', async () => {
+    await start();
+
+    const errors: string[] = [];
+    const errSpy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      errors.push(args.map(String).join(' '));
+    });
+    const realReaddir = fs.readdir;
+    const readdirSpy = vi.spyOn(fs, 'readdir').mockImplementation(((p: unknown, opts?: unknown) => {
+      if (p === viewDir) {
+        const gone: NodeJS.ErrnoException = new Error(`ENOENT: no such file or directory, scandir '${viewDir}'`);
+        gone.code = 'ENOENT';
+        return Promise.reject(gone);
+      }
+      return (realReaddir as (a: unknown, b?: unknown) => Promise<unknown>)(p, opts);
+    }) as typeof fs.readdir);
+
+    try {
+      await sleep(QUIET_WINDOW_MS);
+    } finally {
+      readdirSpy.mockRestore();
+      errSpy.mockRestore();
+    }
+
+    expect(errors).toEqual([]);
   }, CASE_TIMEOUT_MS);
 
   it('retires the sweep on close(), so a closed repository schedules no further work', async () => {

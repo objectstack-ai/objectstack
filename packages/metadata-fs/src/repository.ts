@@ -95,6 +95,17 @@ const matchEvent = (evt: MetadataEvent, filter: WatchFilter): boolean => matchRe
  */
 const RESYNC_INTERVAL_MS = 2_000;
 
+/**
+ * The ONE errno that is a truthful "there is nothing here" for a directory
+ * read, as opposed to "the read could not run" (#8895 — discriminate or
+ * propagate). A path that does not exist holds no items, so answering with an
+ * empty listing states a fact. Every other code — EACCES, EIO, ENOTDIR, and
+ * above all EMFILE/ENFILE under fd exhaustion — means the answer was never
+ * obtained, and inventing an empty one there is the defect itself.
+ */
+const isEnoent = (err: unknown): boolean =>
+  (err as NodeJS.ErrnoException | null)?.code === 'ENOENT';
+
 export class FileSystemRepository implements MetadataRepository {
   private readonly layout: FsLayout;
   private readonly org: string;
@@ -115,6 +126,12 @@ export class FileSystemRepository implements MetadataRepository {
   private resyncTimer: ReturnType<typeof setTimeout> | null = null;
   /** False before the watcher is armed and from `close()` onwards. */
   private resyncEnabled = false;
+  /**
+   * Sweep read faults already reported, keyed `CODE @ path`, so a standing
+   * fault is announced once rather than every 2s (AGENTS.md: say it once, at
+   * the first degradation). An entry is cleared when that path reads again.
+   */
+  private readonly resyncFaults = new Set<string>();
 
   constructor(opts: FileSystemRepositoryOptions) {
     this.org = opts.org;
@@ -650,17 +667,91 @@ export class FileSystemRepository implements MetadataRepository {
    * Discovery is by content, never by stat: a stat pre-filter would reintroduce
    * a time key of exactly the kind this replaces.
    */
+  /**
+   * Announce a sweep read that could not run — the non-silence half of #8895's
+   * "discriminate or propagate".
+   *
+   * ## Why `error` and not `warn`
+   *
+   * AGENTS.md decides the level with one question: *after the degradation, does
+   * the system still look "normal" from the outside while something it claims
+   * is persisted has not actually landed?* Here it does. Nothing throws, the
+   * watcher stays armed, `getWatched()` stays populated, `start()` succeeded —
+   * and the repository's index quietly stops tracking what is on disk. That is
+   * the rule's second limb verbatim ("persisted state and runtime state
+   * disagree"), not the functional-degradation limb: no capability is visibly
+   * smaller, so nobody finds out by using the missing thing.
+   *
+   * The counter-argument — *this is only a backstop, the watcher is still the
+   * fast path* — is why the level is arguable, and it does not survive the
+   * failing errno. The sharp case is fd exhaustion: EMFILE/ENFILE break this
+   * `readdir` and chokidar's `fs.watchFile` polling **at the same time and for
+   * the same reason**, so the fast path is not an independent fallback under
+   * precisely the load that produces this fault. A backstop that is silently
+   * absent whenever it is most needed is a durability-shaped degradation.
+   *
+   * ⚠️ AGENTS.md also warns against over-applying `error`, and the discipline
+   * that answers it is the ledger, not a quieter level: an `error` owes the
+   * consequence and the fix, said **once** at the first degradation rather than
+   * once per failed read. A sweep runs every 2s forever, so an unlatched
+   * `console.error` here would be the mirror-image failure the same rule names.
+   *
+   * ⛔ It deliberately does NOT throw. This runs on a background timer; taking
+   * a process down on a transient EACCES would be worse than the bug. The bar
+   * met here is non-silence, not propagation.
+   *
+   * The channel is `console.error` because this class has no logger: nothing is
+   * injected through `FileSystemRepositoryOptions`, and widening that public
+   * surface to carry one is out of scope for this fix.
+   */
+  private reportResyncFault(target: string, err: unknown): void {
+    const code = (err as NodeJS.ErrnoException | null)?.code ?? 'UNKNOWN';
+    const key = `${code} @ ${target}`;
+    if (this.resyncFaults.has(key)) return;
+    this.resyncFaults.add(key);
+    console.error(
+      `[FileSystemRepository] metadata reconciliation sweep could not read ${target} (${code}). ` +
+        `CONSEQUENCE: external edits under this path are no longer reconciled, so this ` +
+        `repository's index and its watch() subscribers can drift from what is on disk while ` +
+        `everything keeps reporting healthy. The chokidar watcher is not an independent ` +
+        `fallback here — fd exhaustion degrades both. ` +
+        `FIX: restore read access to the path; the sweep recovers by itself on the first ` +
+        `successful read. Reported once per path and error code.`,
+    );
+  }
+
+  /** Re-arm reporting for a path that reads again, so a recurrence is heard. */
+  private clearResyncFault(target: string): void {
+    if (this.resyncFaults.size === 0) return;
+    const suffix = ` @ ${target}`;
+    for (const key of this.resyncFaults) {
+      if (key.endsWith(suffix)) this.resyncFaults.delete(key);
+    }
+  }
+
   private async resync(): Promise<void> {
     const root = this.layout.root;
     let entries: import('node:fs').Dirent[] = [];
     try {
       entries = await fs.readdir(root, { withFileTypes: true });
-    } catch {
-      // A root that has gone away is not a divergence we can report on; the
-      // next sweep sees whatever replaces it.
+      this.clearResyncFault(root);
+    } catch (err) {
+      // ENOENT is truthful: a root that does not exist holds nothing to
+      // reconcile, and the next sweep sees whatever replaces it. Any other
+      // errno means the read could not RUN, and staying silent about that
+      // would make this backstop absent for the life of the process exactly
+      // when the load-dependent loss it exists to catch is most likely —
+      // EMFILE/ENFILE degrade this read and chokidar's own polling together.
+      if (!isEnoent(err)) this.reportResyncFault(root, err);
       return;
     }
     const onDisk = new Set<string>();
+    /**
+     * Type directories whose listing could not be obtained. Their keys are
+     * missing from `onDisk` for a reason that is NOT "the files are gone", so
+     * the delete pass below must not read that absence as a removal.
+     */
+    const unreadableTypes = new Set<string>();
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       // Same dot-entry rule as `scanHeads` and `isIgnoredWatchPath`, so the
@@ -671,7 +762,15 @@ export class FileSystemRepository implements MetadataRepository {
       let files: string[] = [];
       try {
         files = await fs.readdir(dir);
-      } catch {
+        this.clearResyncFault(dir);
+      } catch (err) {
+        // The same discrimination at type granularity. An unreadable type
+        // directory silently stops reconciling EVERY item of that type, which
+        // is exactly the invented-emptiness shape #8895 rules on.
+        if (!isEnoent(err)) {
+          this.reportResyncFault(dir, err);
+          unreadableTypes.add(entry.name);
+        }
         continue;
       }
       for (const file of files) {
@@ -702,6 +801,8 @@ export class FileSystemRepository implements MetadataRepository {
       if (onDisk.has(key)) continue;
       const ref = parseRefKey(key);
       if (!ref) continue;
+      // Absent from `onDisk` because we could not look, not because it is gone.
+      if (unreadableTypes.has(ref.type)) continue;
       const file = itemPath(this.layout, ref.type, ref.name);
       await this.mutex.run(key, async () => {
         // Re-checked UNDER the lock. The enumeration above ran outside it, so
