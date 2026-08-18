@@ -3045,7 +3045,14 @@ export class AutomationEngine implements IAutomationService {
 
         // Check if flow is disabled
         if (this.flowEnabled.get(flowName) === false) {
-            return { success: false, error: `Flow '${flowName}' is disabled` };
+            // [#9415] NEVER DISPATCHED, and the producer says which kind — the
+            // remaining half of #9378's classification. `status` stays ABSENT
+            // here on purpose (see the `status: 'failed'` exit below): its
+            // absence is what proves the transport's 400 arm reads a verdict
+            // instead of guessing, so a later edit that stamps `'failed'` on
+            // this exit "for consistency" must fail a test. What the exit
+            // gained is a `code`, which is the classification's own channel.
+            return { success: false, code: 'FLOW_DISABLED', error: `Flow '${flowName}' is disabled` };
         }
 
         // #4792 — a real run is about to start, so if the vocabulary was never
@@ -3118,7 +3125,13 @@ export class AutomationEngine implements IAutomationService {
             // Find the start node
             const startNode = flow.nodes.find(n => n.type === 'start');
             if (!startNode) {
-                return { success: false, error: 'Flow has no start node' };
+                // [#9415] Inside the `try`, but still a NEVER-DISPATCHED exit:
+                // nothing has executed at this point — the run id and the run
+                // context exist, no node does. Registration accepts a flow with
+                // no `start` (`FlowSchema` requires no such member), so this is
+                // reachable from the trigger door and is not dead code. No
+                // `status`, for the reason the disabled exit above states.
+                return { success: false, code: 'FLOW_NO_START_NODE', error: 'Flow has no start node' };
             }
 
             // Trigger-condition gate. The start node's `condition` is the predicate
@@ -3302,6 +3315,41 @@ export class AutomationEngine implements IAutomationService {
                 success: false,
                 error: errorMessage,
                 durationMs,
+                // [#9378] RAN AND FAILED, said by the producer that knows —
+                // the same lifecycle verdict this exit just wrote to the run
+                // log two statements up, now also on the result.
+                //
+                // Load-bearing, not decoration: `execute()` has three OTHER
+                // `success: false` exits that never dispatched anything (flow
+                // not found, flow disabled, no start node), and a transport
+                // cannot tell them from this one without either a message
+                // regex or sniffing `summary` / `durationMs` — the
+                // tolerant-consumer shape PD #12 forbids, and the one #8684
+                // deliberately did not reproduce on the resume route. Those
+                // three exits carry NO `status`, this one carries `'failed'`,
+                // so "the run dispatched and was rejected" is a fact the route
+                // reads rather than infers.
+                //
+                // [#9415] Two of those three now also carry a `code`
+                // (`FLOW_DISABLED`, `FLOW_NO_START_NODE`) so the transport can
+                // answer them 409/422 instead of 200. That did NOT retire the
+                // rule above — it sharpened it. The `status` absence is still
+                // the discriminator this arm is read by, and it is the reason
+                // the never-dispatched exits must never acquire `status`: a
+                // tidy-up that stamped `'failed'` on all of them would put
+                // every refusal back on this 400 arm, silently.
+                //
+                // `status` and not a `code`, and that division SURVIVED the
+                // union widening: #9415 added `'FLOW_DISABLED'` /
+                // `'FLOW_NO_START_NODE'` for the two never-dispatched exits,
+                // and this exit still classifies with `status` alone. The two
+                // fields answer different questions — `code` says WHY a
+                // dispatch was refused, `status` says how a run that started
+                // ended — and a run that reached here has no refusal to name.
+                // `status?: 'completed' | 'paused' | 'failed'` is declared,
+                // documented as the run's lifecycle verdict, and already the
+                // value recorded in the log.
+                status: 'failed',
                 // A failed run's counts matter MORE, not less: they say how far
                 // it got before dying — how many rows it had already written.
                 summary: logged.summary,
@@ -6106,7 +6154,12 @@ export class AutomationEngine implements IAutomationService {
             if (result.success) return result;
             lastError = result.error ?? 'Unknown error';
         }
-        return { success: false, error: lastError, durationMs: Date.now() - startTime };
+        // [#9378] Same "ran and was rejected" class as `execute()`'s own failure
+        // exit — every attempt above dispatched the flow — so it carries the
+        // same lifecycle verdict, and a transport answers it the same way.
+        // Without it, a flow whose author chose `errorHandling.strategy:
+        // 'retry'` would be the ONE failure shape that still rode HTTP 200.
+        return { success: false, error: lastError, durationMs: Date.now() - startTime, status: 'failed' };
     }
 
     /**
@@ -6173,7 +6226,19 @@ export class AutomationEngine implements IAutomationService {
             return { success: false, error: `Flow '${flowName}' not found` };
         }
         if (this.flowEnabled.get(flowName) === false) {
-            return { success: false, error: `Flow '${flowName}' is disabled` };
+            // [#9415] Classified like `execute()`'s own disabled exit, for the
+            // same reason #9378 classified this method's failure exit: a
+            // selective classification is the one a later reader mistakes for
+            // a rule.
+            //
+            // ⚠️ Defensive, and unreachable through `execute()` today — the
+            // outer guard fires first, and `retryExecution` is only entered
+            // after it passed. That is exactly why no test pins it: a test
+            // driving a disabled flow with `strategy: 'retry'` returns from the
+            // OUTER guard and would stay green with this line unclassified.
+            // Reachability is what a future change would have to establish;
+            // the spelling is already right.
+            return { success: false, code: 'FLOW_DISABLED', error: `Flow '${flowName}' is disabled` };
         }
 
         const variables = this.seedDeclaredVariables(flow, context);
@@ -6193,7 +6258,9 @@ export class AutomationEngine implements IAutomationService {
         try {
             const startNode = flow.nodes.find(n => n.type === 'start');
             if (!startNode) {
-                return { success: false, error: 'Flow has no start node' };
+                // [#9415] Same classification as `execute()`'s start-node exit,
+                // for the reason the disabled exit above states.
+                return { success: false, code: 'FLOW_NO_START_NODE', error: 'Flow has no start node' };
             }
 
             await this.executeNode(startNode, flow, variables, runContext, steps);
@@ -6239,7 +6306,12 @@ export class AutomationEngine implements IAutomationService {
                 steps,
                 error: errorMessage,
             });
-            return { success: false, error: errorMessage, durationMs, summary: logged.summary };
+            // [#9378] The retry loop reads only `result.success` and this
+            // result never escapes `retryExecution` on its own, but it is the
+            // same ran-and-failed exit as the two above and is classified the
+            // same: a selective classification is the one a later reader
+            // mistakes for a rule.
+            return { success: false, error: errorMessage, durationMs, status: 'failed', summary: logged.summary };
         }
     }
 }

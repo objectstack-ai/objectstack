@@ -459,6 +459,129 @@ function flowDefinitionRefusal(err: any): unknown {
 }
 
 /**
+ * [#9378] The ONE mapper both trigger doors answer through — `POST
+ * /:name/trigger` and the legacy `POST /trigger/:name`, which
+ * `client.automation.trigger()` calls. Extracted rather than written twice:
+ * the two routes already shared one context builder so they could not drift
+ * about what a body means (#4127), and they must not drift about what a
+ * failed run means either.
+ *
+ * Until now both ended `return deps.success(result)` unconditionally, so a
+ * flow that RAN AND FAILED came back as
+ * `HTTP 200 {success:true,data:{success:false,error:"…"}}` — the double
+ * envelope #3962 ruled out for `/actions` and #8684 closed on the resume
+ * route. A caller that branches on the HTTP status alone read a failed run as
+ * a successful one, and this is the door every app dispatches flows through.
+ *
+ * Implements the maintainer ruling on #9378 (2026-08-17) — all four rows,
+ * completed by #9415:
+ *
+ * | engine exit                | reality            | answer                |
+ * |----------------------------|--------------------|-----------------------|
+ * | flow not found             | never dispatched   | `404`                 |
+ * | flow disabled              | never dispatched   | `409` `FLOW_DISABLED` |
+ * | flow has no start node     | never dispatched   | `422` `FLOW_NO_START_NODE` |
+ * | ran and failed (incl. the retry-strategy exits) | ran, rejected | `400` `FLOW_FAILED` |
+ *
+ * **404 is answered by the registry probe, not by reading the result.** It is
+ * the SAME `getFlow` probe `POST /:name/toggle` (#7535) and `GET /:name` use,
+ * so no two doors can disagree about which flows exist — and existence is a
+ * question the transport legitimately owns, the way every REST resource route
+ * owns its own 404. `getFlow` is optional on `IAutomationService`; an
+ * implementation that omits it cannot be asked, so the trigger proceeds as
+ * before rather than this inventing an answer.
+ *
+ * **400 is answered by the ENGINE's classification, never by sniffing.** The
+ * engine stamps `status: 'failed'` on exactly the exits that dispatched the
+ * flow and were rejected (#9378, engine `execute` / `retryExecution`); its
+ * never-dispatched exits carry no `status`. So this reads a producer verdict —
+ * it does not inspect `summary` / `durationMs` / the message text to guess the
+ * class, which is the tolerant-consumer shape PD #12 forbids and the one
+ * #8684 deliberately did not reproduce.
+ *
+ * ⚠️ `errorMessage` is the flow AUTHOR's own failure text and travels in
+ * `details`, the one place the console reads it from (objectui
+ * `flowResponse.ts`, PR #4899): the ADR-0112 envelope carries no `data`, so a
+ * producer that builds its message out of `result.error` alone drops the
+ * author's words silently. `summary` rides along for the same reason it was on
+ * the 200 body — it is how a caller finds WHICH node failed.
+ *
+ * **409 and 422 are answered the SAME way as 400 — by reading the producer's
+ * classification (#9415).** Both are never-dispatched exits, and telling them
+ * apart needed the producer to say which is which. When #9413 landed, the
+ * closed `AutomationResult.code` union had no honest member for either, so
+ * both kept today's 200 and the question went to the spec seat under the
+ * #9384 ruling (which keeps the union closed — a new member is a deliberate
+ * widening, not a call-site mint). #9415 is that widening: the engine's
+ * disabled-flow exit stamps `'FLOW_DISABLED'`, its start-node-less exit
+ * stamps `'FLOW_NO_START_NODE'`, and the two arms below read those.
+ *
+ * ⛔ The two workarounds this replaced were measured and REJECTED, and neither
+ * becomes tempting again just because the arms now exist: matching the
+ * engine's message text is a regex on prose (PD #12), and probing enable-state
+ * here would put a second copy of the engine's own execution policy in the
+ * transport, with a TOCTOU window in which a flow disabled between probe and
+ * dispatch is answered as a malformed definition. Nothing below inspects
+ * `summary`, `durationMs` or the message.
+ *
+ * Why these statuses and not one shared 4xx: a DISABLED flow is well-formed
+ * and well-defined — only its current *state* conflicts with running it, and
+ * flipping the switch makes the identical request succeed, which is 409's
+ * meaning. A flow with NO START NODE is understood, exists, and cannot be
+ * executed as stored: an authoring defect no retry fixes, which is 422's.
+ * Collapsing them would tell an operator to flip a switch that will not help.
+ *
+ * ⚠️ **Ordering: the never-dispatched arms come FIRST.** They are exclusive of
+ * the `status: 'failed'` arm today (a refused dispatch has no lifecycle
+ * verdict), so the order is not load-bearing for correctness — but it states
+ * the intended precedence, and it keeps a future producer that stamped both by
+ * mistake from being reported as a run that failed, which is the wrong of the
+ * two answers.
+ */
+async function respondToFlowTrigger(
+    deps: DomainHandlerDeps,
+    automationService: IAutomationService,
+    flowName: string,
+    body: any,
+    context: HttpProtocolContext,
+): Promise<HttpDispatcherResult> {
+    if (typeof automationService.getFlow === 'function') {
+        const existing = await automationService.getFlow(flowName);
+        if (!existing) {
+            return { handled: true, response: deps.error(`Flow '${flowName}' not found`, 404) };
+        }
+    }
+    const result = await automationService.execute(flowName, buildAutomationContext(body, context));
+    if (result?.success === false && result.code === 'FLOW_DISABLED') {
+        return {
+            handled: true,
+            response: deps.error(result.error ?? `Flow '${flowName}' is disabled`, 409, {
+                code: 'FLOW_DISABLED',
+            }),
+        };
+    }
+    if (result?.success === false && result.code === 'FLOW_NO_START_NODE') {
+        return {
+            handled: true,
+            response: deps.error(result.error ?? `Flow '${flowName}' has no start node`, 422, {
+                code: 'FLOW_NO_START_NODE',
+            }),
+        };
+    }
+    if (result?.success === false && result.status === 'failed') {
+        return {
+            handled: true,
+            response: deps.error(result.error ?? 'Flow run failed', 400, {
+                code: 'FLOW_FAILED',
+                ...(result.errorMessage !== undefined ? { errorMessage: result.errorMessage } : {}),
+                ...(result.summary !== undefined ? { summary: result.summary } : {}),
+            }),
+        };
+    }
+    return { handled: true, response: deps.success(result) };
+}
+
+/**
  * Handles Automation requests
  * path: sub-path after /automation/
  *
@@ -472,7 +595,10 @@ function flowDefinitionRefusal(err: any): unknown {
  *   POST   /                     → createFlow (registerFlow)
  *   PUT    /:name                → updateFlow
  *   DELETE /:name                → deleteFlow (unregisterFlow)
- *   POST   /:name/trigger        → execute (legacy: trigger/:name also supported)
+ *   POST   /:name/trigger        → execute (legacy: trigger/:name also supported;
+ *                                  unknown name → 404, disabled → 409 `FLOW_DISABLED`,
+ *                                  no start node → 422 `FLOW_NO_START_NODE`, a run that
+ *                                  ran and failed → 400 `FLOW_FAILED`; #9378 + #9415)
  *   POST   /:name/toggle         → toggleFlow (unknown name → 404, #7535)
  *   GET    /:name/runs           → listRuns (query: limit, cursor — validated, #7300;
  *                                  status — validated AND honoured, #7359)
@@ -558,7 +684,8 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
 
     // Legacy: POST /automation/trigger/:name — the shape
     // `client.automation.trigger()` calls. Same handling as
-    // `POST /:name/trigger` below: one context builder, one service method.
+    // `POST /:name/trigger` below: one context builder, one service method,
+    // and since #9378 one response mapper.
     //
     // [#4127] This branch used to probe `automationService.trigger(name, body,
     // { request })` first and "fall back" to `execute`. Nothing in the repo has
@@ -567,11 +694,14 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // on every deployment and the fallback WAS the route. Declaring `trigger?`
     // to make the probe honest would have blessed a second name for `execute`
     // (Prime Directive #12); the dead branch is gone instead.
+    //
+    // [#9378] Both doors answer through `respondToFlowTrigger` — see its
+    // docblock for the status table, complete since #9415 delivered the
+    // ruling's remaining two rows (409 / 422).
     if (parts[0] === 'trigger' && parts[1] && m === 'POST') {
         const triggerName = parts[1];
         if (typeof automationService.execute === 'function') {
-            const result = await automationService.execute(triggerName, buildAutomationContext(body, context));
-            return { handled: true, response: deps.success(result) };
+            return respondToFlowTrigger(deps, automationService, triggerName, body, context);
         }
     }
 
@@ -741,8 +871,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // legacy `POST /trigger/:name` above so the two routes cannot drift.
         if (parts[1] === 'trigger' && m === 'POST') {
             if (typeof automationService.execute === 'function') {
-                const result = await automationService.execute(name, buildAutomationContext(body, context));
-                return { handled: true, response: deps.success(result) };
+                return respondToFlowTrigger(deps, automationService, name, body, context);
             }
         }
 
@@ -822,8 +951,10 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // POST /:name/runs/:runId/resume → resume a paused run (screen-flow
         // runtime / ADR-0019). Body `{ inputs }` = a screen node's collected
         // values, applied as bare flow variables; `output`/`branchLabel` also
-        // forwarded for approval-style resumes. Returns the next paused
-        // `{ screen }` (multi-screen) or the completed result.
+        // forwarded for approval-style resumes. The outer envelope is a CLOSED
+        // set — exactly the four keys below — and an unknown top-level key is
+        // refused (#8796). Returns the next paused `{ screen }` (multi-screen)
+        // or the completed result.
         //
         // The signal is built key-by-key from the JSON body on purpose (#3801):
         // the engine gates a suspension whose node declares
@@ -862,6 +993,53 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         if (parts[1] === 'runs' && parts[2] && parts[3] === 'resume' && m === 'POST') {
             if (typeof automationService.resume === 'function') {
                 const b = (body && typeof body === 'object') ? body : {};
+                // [#8796] The outer envelope is a CLOSED SET (maintainer ruling
+                // 2026-08-15, Option A): an unknown top-level key is refused,
+                // located, naming the offending key(s) AND the accepted set —
+                // the closed-parameter-set policy (Route & surface ownership
+                // rule 5) applied to a request body, and the declared=enforced
+                // treatment #4477 gave the INNER bag, one level up. Until now
+                // the assembly below read the keys it knows and silently
+                // dropped the rest, so `{"nodeId":"ask","values":{…}}` — no
+                // key of which this route reads — was answered 200
+                // `success:true` with the submission treated as EMPTY: the run
+                // completed and the submitted value never reached the flow. A
+                // caller that guesses `values` instead of `inputs` now gets a
+                // correction at authoring time instead of silence.
+                //
+                // The refusal WRAPS #3801's field-by-field signal assembly, it
+                // never replaces it with a body spread — the service-authority
+                // marker stays unforgeable exactly as before.
+                //
+                // Deliberately BEFORE the `resume()` call: nothing reaches the
+                // engine until the body is legal (#3899, the same ordering the
+                // toggle arm above enforces), so this refusal composes AHEAD
+                // of every engine verdict — a body that is both malformed and
+                // unauthorized answers the envelope 400 and the suspension is
+                // never consulted, let alone consumed.
+                //
+                // Thrown as the duck-typed validation failure both dispatcher
+                // error exits map to 400 `VALIDATION_FAILED` + `fields[]`
+                // (#3918) — the same wire shape the toggle arm's closed set
+                // answers. NOT `FLOW_FAILED` (#8684, a few lines down): the
+                // console treats 400 `FLOW_FAILED` as terminal (the engine
+                // consumed the suspension and ran — objectui PR #4899), while
+                // this refusal leaves the suspension intact and the caller can
+                // retry with a corrected body. It sits with `INVALID_SIGNAL` /
+                // `INVALID_SCREEN_INPUT` on the retryable side.
+                const RESUME_BODY_KEYS = ['inputs', 'variables', 'output', 'branchLabel'];
+                const unknownKeys = Object.keys(b).filter((k) => !RESUME_BODY_KEYS.includes(k));
+                if (unknownKeys.length > 0) {
+                    const accepted = RESUME_BODY_KEYS.map((k) => `\`${k}\``).join(', ');
+                    throw validationFailure(
+                        `Unknown key${unknownKeys.length > 1 ? 's' : ''} ${unknownKeys.map((k) => `\`${k}\``).join(', ')} — the resume body accepts ${accepted}`,
+                        unknownKeys.map((k) => ({
+                            field: k,
+                            code: 'unknown_field',
+                            message: `not a resume body key — the resume body accepts ${accepted}`,
+                        })),
+                    );
+                }
                 const inputs = (b.inputs ?? b.variables);
                 const signal: any = {};
                 if (inputs && typeof inputs === 'object') signal.variables = inputs;

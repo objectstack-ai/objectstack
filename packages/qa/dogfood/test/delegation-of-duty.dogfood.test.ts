@@ -13,6 +13,8 @@
 //     L1 resolution-time filter, on the real persisted row, via the real
 //     `resolveAuthzContext`. "Access dies at valid_until" with no cleanup job.
 //
+// authz-row: grant-validity-window
+//
 // @proof: delegation-of-duty
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';

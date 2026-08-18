@@ -79,6 +79,7 @@ export type {
 // twice (maintainer ruling 2026-08-15: contract option 1, stored data shape 2).
 export {
     backfillSeedTenancy,
+    resolveSeedTenancySeam,
     resolveSeedTenancyExec,
     normalizeRows,
     buildSequencesPresenceSql,
@@ -93,6 +94,7 @@ export {
     ORGANIZATION_FIELD,
     ORGANIZATION_TABLE,
 } from './migrations/seed-tenancy-backfill.js';
+export type { SeedTenancySeam } from './migrations/seed-tenancy-backfill.js';
 export type {
     SeedTenancyExec,
     SeedTenancyLogger,

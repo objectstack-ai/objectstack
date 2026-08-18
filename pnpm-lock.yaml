@@ -1245,6 +1245,9 @@ importers:
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
+      mysql2:
+        specifier: ^3.23.1
+        version: 3.23.1(@types/node@26.1.2)
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.26)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)

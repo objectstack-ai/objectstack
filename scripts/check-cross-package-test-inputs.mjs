@@ -254,6 +254,17 @@ const CROSS_PACKAGE_TEST_INPUTS = {
       'examples/app-showcase/**',
       'packages/cli/src/commands/**',
       'packages/metadata/src/**',
+      // `realtime-protocol.mdx` is named in a comment rather than read, the
+      // same shape as `check-nul-bytes.mjs` and `sync-template-versions.mjs`
+      // and settled the same way: a mention forces a declaration, and
+      // declaring the file is cheaper than rewording prose to dodge the
+      // scanner. Here the coupling is real on top of being cheap — that page
+      // is what documents the PLANNED realtime transports (`/ws`, SSE
+      // `/api/v1/stream`), and the #2992 transport tripwires in
+      // authz-conformance.test.ts are only correct for as long as they cover
+      // those spellings. A third transport added to the page is exactly the
+      // change that reopens the #9084 blind spot, so it must re-run this test.
+      'content/docs/protocol/kernel/realtime-protocol.mdx',
     ],
   },
   '@objectstack/formula': {

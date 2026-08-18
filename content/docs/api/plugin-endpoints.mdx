@@ -46,7 +46,7 @@ Approve/reject were never workflow routes (ADR-0019): approval is a flow node, a
 
 | Method | Endpoint | Description |
 |:-------|:---------|:------------|
-| POST | `/automation/:name/trigger` | Trigger an automation flow by name (legacy alias: `/automation/trigger/:name`) |
+| POST | `/automation/:name/trigger` | Trigger an automation flow by name (legacy alias: `/automation/trigger/:name`). Failures answer real status codes, not a `200` wrapping an inner failure: **404** unknown flow, **409** `FLOW_DISABLED`, **422** `FLOW_NO_START_NODE`, **400** `FLOW_FAILED` for a run that ran and was rejected — see [Run a flow via API](/docs/automation/flows#run-a-flow-via-api) |
 
 The automation dispatcher also exposes flow CRUD (`GET`/`POST /automation`, `GET`/`PUT`/`DELETE /automation/:name`) and run observability/resume routes — see [Durable pause & resume](/docs/automation/flows#durable-pause--resume-adr-0019).
 

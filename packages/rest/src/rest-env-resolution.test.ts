@@ -220,13 +220,30 @@ describe('resolveRequestEnvironmentId (D11④ seam)', () => {
 // every pin below is written on the multi-tenant shape.
 // ---------------------------------------------------------------------------
 
+/**
+ * A per-request kernel double, answering BY SERVICE NAME.
+ *
+ * [#9292] It used to resolve every name to one value, which was enough while
+ * `mcp` was the only slot anything asked it for. `/discovery` now resolves the
+ * request's `protocol` off this same kernel (the shared `resolveProtocol` path
+ * every other handler in rest-server.ts already uses), so a double that hands
+ * the mcp stub back for `protocol` produces a document builder with no
+ * `getDiscovery`. A real kernel serves both slots; this one now does too. The
+ * #9120 assertions below are unchanged — only the double got faithful.
+ */
+function kernelServing(services: Record<string, any>) {
+  return { getServiceAsync: vi.fn(async (name: string) => services[name]) };
+}
 /** A kernel whose `mcp` slot holds a service of the shape `/mcp` needs. */
 function kernelWithMcp() {
-  return { getServiceAsync: vi.fn().mockResolvedValue({ handleHttpRequest: () => undefined }) };
+  return kernelServing({
+    mcp: { handleHttpRequest: () => undefined },
+    protocol: createMockProtocol(),
+  });
 }
 /** A kernel with no `mcp` service at all — `/mcp` would 501 here. */
 function kernelWithoutMcp() {
-  return { getServiceAsync: vi.fn().mockResolvedValue(undefined) };
+  return kernelServing({ protocol: createMockProtocol() });
 }
 
 describe('probeMcpServeable (D11④ seam, ninth consumer)', () => {

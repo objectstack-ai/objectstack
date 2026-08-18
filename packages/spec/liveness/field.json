@@ -265,8 +265,92 @@
     },
     "inlineColumns": {
       "status": "live",
-      "evidence": "objectui: packages/plugin-form/src/deriveMasterDetail.ts + app-shell/MetadataProvider.tsx",
-      "note": "LIVE via objectui renderer — the 2026-06 audit mis-classified as dead (renderer side not re-verified). Corrected after checking ../objectui."
+      "verifiedAt": "2026-08-17",
+      "evidenceScope": "cross-repo",
+      "evidence": "objectui: packages/app-shell/src/providers/MetadataProvider.tsx (attachInlineSubforms passes d.inlineColumns as the subform's columns) → plugin-form/MasterDetailForm.tsx (hydrateColumns) → fields/GridField.tsx (the name-keyed GridColumn renderer, objectui#3951)",
+      "note": "LIVE via objectui renderer. #9227 closed the element shape (strict, name-keyed InlineGridColumnSchema): the child keys below are exactly the GridColumn keys the widget has a live read for, measured against objectui main 2026-08-17. NOTE the .objectui-sha pin (665661ab) predates objectui#3951 — the PINNED console still reads the retired field spelling; the drilled evidence below cites objectui main, which is the contract this schema mirrors.",
+      "children": {
+        "name": {
+          "status": "live",
+          "note": "objectui GridField.tsx — the column's row key: every cell read/write is row[c.name]; hydrateColumns resolves the child field def by col.name (deriveMasterDetail.ts). #3951 aligned this from the retired `field` spelling."
+        },
+        "label": {
+          "status": "live",
+          "note": "objectui GridField.tsx header cells render c.label; hydrateColumns fills it from the child field's label when absent."
+        },
+        "type": {
+          "status": "live",
+          "note": "objectui GridField.tsx — selects the cell control (text/number/currency/date/datetime/time/select/lookup/file) and drives type-based min widths (minWidthFor/widthStyle); hydrateColumns derives it from the child field type when absent."
+        },
+        "width": {
+          "status": "live",
+          "note": "objectui GridField.tsx minWidthFor/widthStyle — a declared width pins the column; otherwise type-based role sizing."
+        },
+        "required": {
+          "status": "live",
+          "note": "objectui GridField.tsx — header asterisk and inline-invalid flag on empty cells; curation keeps required columns always visible (deriveMasterDetail curateColumns)."
+        },
+        "options": {
+          "status": "live",
+          "note": "objectui GridField.tsx select cells — SelectItem per {label,value}; display formatting resolves the stored value to its label."
+        },
+        "prefix": {
+          "status": "live",
+          "note": "objectui GridField.tsx currency cells — rendered symbol (c.prefix || '¥') in both display and edit."
+        },
+        "step": {
+          "status": "live",
+          "note": "objectui GridField.tsx numeric cells — input step (c.step ?? 'any')."
+        },
+        "reference": {
+          "status": "live",
+          "note": "objectui GridField.tsx lookup cells — passed to LookupField as the referenced object."
+        },
+        "displayField": {
+          "status": "live",
+          "note": "objectui GridField.tsx lookup cells — LookupField display_field."
+        },
+        "idField": {
+          "status": "live",
+          "note": "objectui GridField.tsx lookup cells — LookupField id_field."
+        },
+        "multiple": {
+          "status": "live",
+          "note": "objectui GridField.tsx — multi-record lookup cells and multi-file upload cells."
+        },
+        "accept": {
+          "status": "live",
+          "note": "objectui GridField.tsx file cells — joined into the file input's accept attribute."
+        },
+        "defaultHidden": {
+          "status": "live",
+          "note": "objectui GridField.tsx — column chooser visibility; deriveColumns sets it past the curation budget, and an authored value is honoured the same way."
+        },
+        "computed": {
+          "status": "live",
+          "note": "objectui GridField.tsx — read-only computed cells (recomputeRow filters c.computed && c.expr); computed columns are exempt from required."
+        },
+        "expr": {
+          "status": "live",
+          "note": "objectui GridField.tsx evalArith — the BARE arithmetic string the grid's own safe evaluator tokenizes (never a CEL envelope; the schema refuses the envelope form, #9227)."
+        },
+        "scale": {
+          "status": "live",
+          "note": "objectui GridField.tsx — rounding for computed results (c.scale ?? currency default 2)."
+        },
+        "autofill": {
+          "status": "live",
+          "note": "objectui GridField.tsx lookup pick — copies same-named fields from the picked record into sibling columns unless col.autofill === false."
+        },
+        "readonlyWhen": {
+          "status": "live",
+          "note": "objectui GridField.tsx — per-row CEL predicate via resolveFieldRuleState (record + parent scope); cell renders read-only when TRUE."
+        },
+        "requiredWhen": {
+          "status": "live",
+          "note": "objectui GridField.tsx — per-row CEL predicate via resolveFieldRuleState; cell flagged required when TRUE."
+        }
+      }
     },
     "inlineAmountField": {
       "status": "live",
@@ -289,8 +373,10 @@
     },
     "relatedListColumns": {
       "status": "live",
-      "evidence": "objectui: packages/app-shell/src/utils/deriveRelatedLists.ts + views/RecordDetailView.tsx",
-      "note": "LIVE via objectui renderer — the 2026-06 audit mis-classified as dead (renderer side not re-verified). Corrected after checking ../objectui."
+      "verifiedAt": "2026-08-17",
+      "evidenceScope": "cross-repo",
+      "evidence": "objectui: packages/app-shell/src/utils/deriveRelatedLists.ts (columns override on the derived descriptor) → views/RecordDetailView.tsx → plugin-detail/RelatedList.tsx (normalizeColumn hydrates STRING entries: header from the child field label, type-aware cell via makeCell)",
+      "note": "LIVE via objectui renderer. #9227 narrowed the elements to child FIELD-NAME STRINGS — the only authored form in-repo (three showcase objects) and the only form the renderer hydrates fully; the page-block sibling record:related_list.columns (ui/component.zod.ts) is the same strings-only shape. Measured 2026-08-17 against objectui main: object entries span two vocabularies (RelatedList resolves identity via columnIdentity, canonical `field`; the data-table accessor resolves `accessorKey || name` only), so a spec-canonical {field} object renders BLANK cells — refused at parse instead."
     },
     "relatedListFilter": {
       "status": "planned",

@@ -583,6 +583,83 @@ function fieldKeyGuidanceAsStrictOptions() {
   return { aliases, guidance };
 }
 
+/**
+ * What `z.array(z.any())` cost on the two explicit column lists below (#9227):
+ * every column object validated — right keys, wrong keys, misspelled keys,
+ * empty objects — so a mis-keyed column published clean and surfaced only in
+ * the browser, as a grid with the right row COUNT and every cell blank
+ * (objectui#3951 measured exactly this failure one seam over, in the
+ * renderer). A lenient producer schema is where AI-generated metadata errors
+ * hide; these shapes close it at publish time.
+ */
+const INLINE_GRID_COLUMN_HISTORY =
+  'Until #9227 closed this shape these parsed as `z.any()` — a mis-keyed column published '
+  + 'clean and rendered as blank cells, with nothing naming the wrong key.';
+
+/**
+ * One explicit column of the inline master-detail grid (`inlineColumns`).
+ *
+ * STRICT mirror of the objectui inline-grid renderer's `GridColumn`
+ * (`packages/fields/src/widgets/GridField.tsx`, hydration in
+ * `packages/plugin-form/src/deriveMasterDetail.ts`) — the objectui#3951
+ * `name`-keyed contract. Admits exactly the keys that renderer has a live
+ * read for (measured against objectui main, 2026-08-17); an unknown key is a
+ * named rejection at publish time, and the retired `field` spelling is
+ * refused with a prescription naming `name`.
+ *
+ * The minimal — and recommended — authored entry is identity-only
+ * (`{ name: 'quantity' }`): when a column declares no `type`, objectui's
+ * `hydrateColumns` fills `label`, `type`, `options`, the lookup target and
+ * conditional rules, and the computed expression from the child object's own
+ * field definitions, so the columns cannot drift from the fields they show.
+ * Declaring a `type` opts that column out of hydration entirely — supply the
+ * extras it needs (options / reference / …) yourself.
+ */
+export const InlineGridColumnSchema = lazySchema(() => strictObject({
+  surface: 'this inline grid column',
+  history: INLINE_GRID_COLUMN_HISTORY,
+  aliases: {
+    // The retired grid spelling: objectui#3951 aligned the widget to `name`
+    // (the FORM-layer identity key), with deliberately no tolerant alias in
+    // the renderer — the refusal here is the producer-side half of that.
+    field: 'name', fieldName: 'name', key: 'name',
+    title: 'label', header: 'label',
+    size: 'width',
+    // The field-level formula key; a grid column's computed cell reads the
+    // bare arithmetic `expr` (paired with `computed`), never a CEL envelope.
+    expression: 'expr',
+    hidden: 'defaultHidden',
+  },
+}, {
+  name: z.string().min(1).describe('Child field this column shows — the key the grid reads and writes on each row object (objectui GridColumn.name, #3951). The retired `field` spelling is refused.'),
+  label: z.string().optional().describe("Column header; defaults to the child field's label via hydration."),
+  type: z.enum(['text', 'number', 'currency', 'date', 'datetime', 'time', 'select', 'lookup', 'file']).optional().describe("Cell control, derived from the child field's type when omitted. Declaring it opts the column out of schema hydration — supply the extras (options / reference / …) yourself."),
+  width: z.number().positive().optional().describe('Fixed column width in px; omitted columns use type-based role sizing (text flexes, numeric/date/select stay fixed).'),
+  required: z.boolean().optional().describe('Cell is flagged inline-invalid while empty. Computed columns are never required.'),
+  options: z.array(strictObject({
+    surface: 'this inline grid column option',
+    history: INLINE_GRID_COLUMN_HISTORY,
+    aliases: { text: 'label', name: 'label', title: 'label', key: 'value', id: 'value' },
+  }, {
+    label: z.string().describe('Option label shown in the select cell.'),
+    value: z.string().min(1).describe("Stored option value; must match the child select field's option values."),
+  })).optional().describe("Select-cell options for `type: 'select'`; derived from the child field's options when the column declares no `type`."),
+  prefix: z.string().optional().describe("Currency symbol rendered inside a `currency` cell (default '¥')."),
+  step: z.number().positive().optional().describe('Input step for numeric cells.'),
+  reference: z.string().optional().describe("Referenced object for `type: 'lookup'` cells; derived from the child lookup field when the column declares no `type`."),
+  displayField: z.string().optional().describe('Label field shown for a picked lookup record.'),
+  idField: z.string().optional().describe('Id field stored for a picked lookup record.'),
+  multiple: z.boolean().optional().describe('Multi-value column: multi-record lookup, or multi-file upload cell.'),
+  accept: z.array(z.string()).optional().describe("Accepted MIME types / extensions for a `file` cell's picker (e.g. ['image/*', '.pdf']); omit to accept anything."),
+  defaultHidden: z.boolean().optional().describe("Collapsed into the grid's column chooser by default (not dropped); required columns are never default-hidden."),
+  computed: z.boolean().optional().describe('Read-only computed column, recomputed live from sibling cells via `expr` and written back into the row.'),
+  expr: z.string().min(1).optional().describe("Arithmetic expression for a computed column — a BARE string over `+ - * / %`, parentheses, numeric literals and field refs (`record.qty` or `qty`), evaluated by the grid's own safe evaluator. Deliberately NOT a CEL Expression envelope; `{ dialect, source }` is refused here."),
+  scale: z.number().int().nonnegative().optional().describe('Decimal places to round a computed numeric/currency result to.'),
+  autofill: z.boolean().optional().describe("For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable."),
+  readonlyWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — the cell is read-only when TRUE, evaluated per row against the row as `record` plus the header as `parent` (e.g. P`parent.status == 'paid'`)."),
+  requiredWhen: ExpressionInputSchema.optional().describe('Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`.'),
+}));
+
 export const FieldSchema = lazySchema(() => strictObject({
   surface: 'this field',
   history: FIELD_HISTORY,
@@ -831,8 +908,14 @@ export const FieldSchema = lazySchema(() => strictObject({
   inlineEdit: z.union([z.boolean(), z.enum(['grid', 'form'])]).optional().describe('Edit these child records inline within the parent\'s form (atomic master-detail). true = auto-pick grid/form by child shape; \'grid\' = editable line-item grid; \'form\' = list + per-row full form.'),
   /** Optional section title for the inline grid (defaults to the child object label). */
   inlineTitle: z.string().optional().describe('Title for the inline master-detail grid'),
-  /** Optional explicit grid columns for the inline editor (derived from the child object when omitted). */
-  inlineColumns: z.array(z.any()).optional().describe('Explicit columns for the inline grid (derived from the child object when omitted)'),
+  /**
+   * Optional explicit grid columns for the inline editor (derived from the
+   * child object when omitted). Strict `name`-keyed element schema
+   * ({@link InlineGridColumnSchema}, #9227) mirroring the objectui grid
+   * renderer's measured reads — an unknown or retired key (`field`) is a
+   * named rejection at publish time, never a blank cell at render time.
+   */
+  inlineColumns: z.array(InlineGridColumnSchema).optional().describe("Explicit columns for the inline grid (derived from the child object when omitted). Each entry is a strict, name-keyed column ({ name, label?, type?, … } — objectui GridColumn, #3951); identity-only entries ({ name }) hydrate everything else from the child object's fields. Unknown keys and the retired `field` spelling are refused at parse."),
   /** Optional numeric child field summed for the inline grid running total. */
   inlineAmountField: z.string().optional().describe('Numeric child field summed for the inline grid total'),
 
@@ -866,8 +949,25 @@ export const FieldSchema = lazySchema(() => strictObject({
   relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). false = suppress; true/absent = shown (stacked under the shared "Related" tab); \'primary\' = core relationship, promoted to its own tab. Prominence intent, not a layout switch (ADR-0085).'),
   /** Optional section title for the detail-page related list (defaults to the child object label). */
   relatedListTitle: z.string().optional().describe('Title for the detail-page related list'),
-  /** Optional explicit columns for the detail-page related list (derived from the child object when omitted). */
-  relatedListColumns: z.array(z.any()).optional().describe('Explicit columns for the detail-page related list (derived from the child object when omitted)'),
+  /**
+   * Optional explicit columns for the detail-page related list (derived from
+   * the child object when omitted). Child FIELD-NAME STRINGS only (#9227) —
+   * the read-side list derives labels, cell types and formatting from the
+   * child object's field definitions, so the columns cannot drift from them.
+   * Deliberately narrower than `inlineColumns`: the related list is not an
+   * editable grid, and per-column display overrides are not part of its
+   * measured renderer contract (objectui RelatedList hydrates string entries
+   * fully; the page-block sibling `record:related_list.columns` is the same
+   * strings-only shape). Column OBJECTS are refused with a prescription.
+   */
+  relatedListColumns: z.array(z.string({
+    error: (issue) => issue.code === 'invalid_type'
+      ? "Related-list columns are child FIELD-NAME strings (e.g. ['name', 'status', 'total']). "
+        + 'Column objects are not authorable here: the related list derives labels, cell types and '
+        + "formatting from the child object's field definitions, so declare display changes on the "
+        + 'child fields themselves.'
+      : undefined,
+  }).min(1)).optional().describe("Explicit columns for the detail-page related list, as child field names (e.g. ['name', 'status']); derived from the child object (highlightFields → field walk) when omitted. Strings only — labels, cell types and formatting always derive from the child object's field definitions; column objects are refused at parse."),
   /**
    * Declarative default FILTER for the detail-page related list (#8704). The
    * auto-derived related list for this relationship queries the child object
@@ -1407,6 +1507,10 @@ export type FieldParsed = z.infer<typeof FieldSchema>;
 export type SelectOption = z.input<typeof SelectOptionSchema>;
 /** Post-parse shape of {@link SelectOption} — defaults applied, transforms run (ADR-0122). */
 export type SelectOptionParsed = z.infer<typeof SelectOptionSchema>;
+/** One authored `inlineColumns` entry (#9227) — the strict, name-keyed inline grid column. */
+export type InlineGridColumn = z.input<typeof InlineGridColumnSchema>;
+/** Post-parse shape of {@link InlineGridColumn} — bare-string CEL predicates normalized to Expression envelopes (ADR-0122). */
+export type InlineGridColumnParsed = z.infer<typeof InlineGridColumnSchema>;
 export type LocationCoordinates = z.input<typeof LocationCoordinatesSchema>;
 export type Address = z.input<typeof AddressSchema>;
 export type CurrencyConfig = z.input<typeof CurrencyConfigSchema>;

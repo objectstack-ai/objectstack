@@ -2911,7 +2911,48 @@ export class RestServer {
         const isScoped = basePath.includes('/environments/:environmentId');
         const discoveryHandler = async (req: any, res: any) => {
                 try {
-                    const discovery = await this.protocol.getDiscovery();
+                    // [#9292] The document describes the environment the REQUEST
+                    // names, not the control plane this server was constructed
+                    // against. `this.protocol` is the host's; ~30 sibling
+                    // handlers in this file obtain theirs from
+                    // `resolveProtocol(environmentId, req)`, and `/discovery` —
+                    // the surface SDKs, codegen and AI clients read (AGENTS.md
+                    // "Route & surface ownership" #4) — was the one that did not.
+                    //
+                    // Measured on a two-kernel host before the fix: the scoped
+                    // route `/environments/<id>/discovery` served the HOST's
+                    // document to every environment, so two environments with
+                    // genuinely different kernels received byte-identical
+                    // `capabilities`, `services` and `locale`. Everything below
+                    // this line composes over `discovery`, so the whole document
+                    // followed the wrong kernel — not only the two capability
+                    // keys derived from `engine.transaction` and `searchAll`,
+                    // but every `services` slot, `locale` (from the kernel's own
+                    // i18n service) and the route keys this handler does not
+                    // itself overwrite (`analytics`, `automation`, `ai`, `i18n`,
+                    // `notifications`, `realtime`, `storage`) — an environment's
+                    // real surfaces missing, the host's advertised in their place.
+                    //
+                    // The unscoped route reaches the same resolution and keeps
+                    // its control-plane answer where one is correct: with no
+                    // environment in scope `resolveProtocol` falls through to
+                    // `this.protocol`, so a control-plane boot is unchanged
+                    // while a single-environment boot (step 3, the default
+                    // provider) and a hostname-routed host now answer for the
+                    // kernel that actually serves the request.
+                    //
+                    // The placeholder normalisation is `probeMcpServeable`'s,
+                    // for its reason (#9120): an unsubstituted route pattern is
+                    // the ABSENCE of an id, not an id, and the shared entry
+                    // point short-circuits on any truthy explicit value — so
+                    // `getOrCreate(':environmentId')` would go looking for a
+                    // kernel named after the pattern.
+                    const routeParam: string | undefined = req.params?.environmentId;
+                    const environmentId = isScoped && routeParam !== ':environmentId'
+                        ? routeParam
+                        : undefined;
+                    const protocol = await this.resolveProtocol(environmentId, req);
+                    const discovery = await protocol.getDiscovery();
 
                     // Override discovery information with actual server configuration
                     discovery.version = this.config.api.version;
@@ -4162,7 +4203,42 @@ export class RestServer {
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const p = await this.resolveProtocol(environmentId, req);
                         if (typeof (p as any).findReferencesToMeta !== 'function') {
-                            res.json({ references: [] });
+                            // [#9326 / ADR-0110 D3] A MISS and a FAULT are
+                            // different facts, and this branch is the second
+                            // one: the resolved protocol cannot compute the
+                            // reference graph AT ALL, so the question was never
+                            // asked. Answering `{ references: [] }` reported it
+                            // as the first — "nothing depends on this item" —
+                            // and the admin "Used by" panel renders that empty
+                            // case as "Nothing in the metadata graph points at
+                            // this item. Safe to delete.", shown to an operator
+                            // about to delete something.
+                            //
+                            // Refusing HERE rather than asserting at assembly is
+                            // deliberate. `findReferencesToMeta` is not a member
+                            // of `RestProtocol` (= `DataProtocol &
+                            // MetadataProtocol`) — it is an ADR-0076 D9
+                            // server-only extension, which is why it is reached
+                            // through a runtime cast at all. So a host that
+                            // implements the DECLARED contract exactly is a
+                            // CONFORMING deployment that lands here with no type
+                            // error, and a boot-time assertion would promote an
+                            // undeclared optional extension into a required one
+                            // — a `packages/spec` contract decision, not a
+                            // route one. What the route owes is that an
+                            // unanswerable question comes back unanswered.
+                            //
+                            // Envelope per #7035: the ADR-0112 NESTED
+                            // `{ error: { code, message } }` that the sibling
+                            // `/meta` 501 refusals converged on — never the
+                            // bare-string or sibling-`code` dialects, which make
+                            // `body.error.code` read `undefined`.
+                            res.status(501).json({
+                                error: {
+                                    code: 'NOT_IMPLEMENTED',
+                                    message: 'protocol.findReferencesToMeta() is not available in this kernel',
+                                },
+                            });
                             return;
                         }
                         const result = await (p as any).findReferencesToMeta({

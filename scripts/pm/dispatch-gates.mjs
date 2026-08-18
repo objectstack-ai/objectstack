@@ -110,6 +110,7 @@ import {
   isExtractConfigPath,
   isMetadataFormModulePath,
 } from '../i18n-bundle-surface.mjs';
+import { blank, maskComments, scanSource } from '../js-comment-mask.mjs';
 
 // Re-exported so this tool's self-test drives the SAME predicates the gate
 // runs, not copies of them. They used to be written twice — see the shared
@@ -459,167 +460,26 @@ export function resolveCheckToFiles(checkName, scriptsMap) {
 }
 
 /**
- * Identifier characters, for the regex-vs-division decision in `scanSource`.
- */
-const IDENT_CHAR = /[\w$]/;
-
-/**
- * The keywords after which a `/` opens a REGEX rather than dividing. Every
- * other case is decided by the preceding character: a `/` that follows a value
- * (identifier, number, `)`, `]`, or a closed literal) divides; anything else
- * opens a regex.
- */
-const REGEX_AFTER_KEYWORD = new Set([
-  'return', 'typeof', 'instanceof', 'in', 'of', 'case', 'delete', 'void',
-  'yield', 'await', 'new', 'do', 'else', 'throw',
-]);
-
-/**
- * One left-to-right pass over a JS source, flagging every character as COMMENT
- * content and/or LITERAL content (inside a string, template or regex). Both
- * come back as same-length byte arrays, so a caller can blank a span without
- * moving any other offset.
+ * The comment/literal scanner used to live here. It now lives in
+ * `scripts/js-comment-mask.mjs`, because five source-scanning GATES needed the
+ * same judgment and each had grown a private copy that got it wrong in one of
+ * two silent ways -- see that module's header for the two failure families and
+ * the shapes its self-test pins.
  *
- * ## Why a scan, and why it has to know about regex literals
- *
- * The two questions the callers below ask — "is this `//` a comment or the
- * middle of a URL?" and "is this `}` the end of a function or a character in a
- * fixture?" — are precisely the ones a regex over raw text cannot answer.
- * Measured on this tree, both traps are real: `release-github-releases.mjs`
- * carries `'https://github.com'` in its module body (a `//` a line-comment rule
- * would swallow the rest of the line for), and its own markdown regex
- * `/^(#{1,6})\s(.*)$|^(`{3,})/gm` contains a BACKTICK — a scanner that skipped
- * regex literals would open a template literal there and treat everything to
- * the next backtick, hundreds of lines later, as string content. This file's
- * hint regex below puts all three quote characters inside a regex literal for
- * the same reason. Regex literals also carry unbalanced `{`/`}` (`{1,6}`), so
- * the brace counting in `maskSelfTests` needs them flagged too.
- *
- * The literal flag covers a literal's CONTENT, not its delimiters, so a caller
- * blanking comments still sees every string intact. Template interiors are
- * treated as literal through `${…}` as well: an interpolation's braces are
- * balanced by construction, so ignoring them is right for depth counting, and
- * the hint scan reads the raw characters either way.
- *
- * A shape this scan gets wrong fails toward masking MORE than it should, which
- * costs recall (a real hint dropped) and cannot fabricate a lead — the
- * direction this whole file's "22 leads is the same as none" note asks for.
- */
-function scanSource(source) {
-  const n = source.length;
-  const comment = new Uint8Array(n);
-  const literal = new Uint8Array(n);
-  let i = 0;
-  let prev = ''; // last significant CODE character
-  let word = ''; // …and the identifier it is the tail of, if any
-
-  // A shebang is a comment to node; it is also the one line whose slashes are
-  // neither division nor a regex.
-  if (source.startsWith('#!')) {
-    while (i < n && source[i] !== '\n') comment[i++] = 1;
-  }
-
-  while (i < n) {
-    const c = source[i];
-    const next = source[i + 1];
-
-    if (c === '/' && next === '/') {
-      while (i < n && source[i] !== '\n') comment[i++] = 1;
-      continue;
-    }
-    if (c === '/' && next === '*') {
-      comment[i++] = 1;
-      comment[i++] = 1;
-      while (i < n && !(source[i] === '*' && source[i + 1] === '/')) comment[i++] = 1;
-      if (i < n) comment[i++] = 1;
-      if (i < n) comment[i++] = 1;
-      continue;
-    }
-    if (c === "'" || c === '"') {
-      i++; // the opening quote is code, so the hint scan can still pair it
-      while (i < n && source[i] !== c && source[i] !== '\n') {
-        literal[i] = 1;
-        if (source[i] === '\\' && i + 1 < n) literal[++i] = 1;
-        i++;
-      }
-      if (i < n && source[i] === c) i++;
-      prev = 'x'; // a value just ended
-      word = '';
-      continue;
-    }
-    if (c === '`') {
-      i++;
-      while (i < n && source[i] !== '`') {
-        literal[i] = 1;
-        if (source[i] === '\\' && i + 1 < n) literal[++i] = 1;
-        i++;
-      }
-      if (i < n) i++;
-      prev = 'x';
-      word = '';
-      continue;
-    }
-    if (c === '/' && !(IDENT_CHAR.test(prev) || prev === ')' || prev === ']')) {
-      i++; // regex literal: `/` after anything that is not a value
-      let inClass = false;
-      while (i < n && source[i] !== '\n') {
-        const ch = source[i];
-        if (ch === '\\' && i + 1 < n) {
-          literal[i] = 1;
-          literal[++i] = 1;
-          i++;
-          continue;
-        }
-        if (ch === '[') inClass = true;
-        else if (ch === ']') inClass = false;
-        else if (ch === '/' && !inClass) break;
-        literal[i] = 1;
-        i++;
-      }
-      if (i < n && source[i] === '/') i++;
-      prev = 'x';
-      word = '';
-      continue;
-    }
-    if (c === '/' && REGEX_AFTER_KEYWORD.has(word)) {
-      // `return /x/` — a value character precedes, but it is a keyword.
-      prev = '';
-      word = '';
-      continue; // re-read this `/` with prev cleared, as a regex
-    }
-    if (!/\s/.test(c)) {
-      prev = c;
-      word = IDENT_CHAR.test(c) ? word + c : '';
-    }
-    i++;
-  }
-  return { comment, literal };
-}
-
-/** Replace every flagged character with a space, keeping newlines and offsets. */
-function blank(source, flags) {
-  const out = source.split('');
-  for (let k = 0; k < out.length; k++) if (flags[k] && out[k] !== '\n') out[k] = ' ';
-  return out.join('');
-}
-
-/**
- * The source with its COMMENT spans blanked — line, block and shebang.
- *
- * ## Why comments must not contribute hints
+ * ## Why comments must not contribute hints (the reason it was written here)
  *
  * A gate's header discusses the tree at length, and the hint scan accepts
  * backticks, so every backticked path in a header used to be read as a path the
  * gate operates on. Measured, and self-inflicted: the first draft of
  * `scripts/pm/check-dispatch-gates.mjs` explained this very pollution with each
- * path in backticks, and that header alone produced ten hints — reproducing,
+ * path in backticks, and that header alone produced ten hints -- reproducing,
  * from the file documenting the problem, the exact false MATCHED leads it was
  * written to avoid. It ships today with its paths deliberately unquoted, a
- * workaround this function retires: naming a path is not reading it.
- */
-export function maskComments(source) {
-  return blank(source, scanSource(source).comment);
-}
+ * workaround `maskComments` retires: naming a path is not reading it.
+ *
+ * Re-exported because this tool's self-test drives the SAME masker the gates
+ * run, not a copy of it.
+export { maskComments };
 
 /**
  * A top-level self-test function DECLARATION. The anchor is structural, not a

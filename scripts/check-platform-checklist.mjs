@@ -39,6 +39,7 @@
 // Usage: node scripts/check-platform-checklist.mjs   (pnpm check:platform-checklist)
 
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
+import { maskComments } from './js-comment-mask.mjs';
 import { join, basename } from 'node:path';
 
 const ROOT = new URL('..', import.meta.url).pathname;
@@ -167,7 +168,12 @@ for (const file of files) {
 // exists to force. Extractor rot is loud, not fail-open: a missing file or
 // export is an error, never a silent skip.
 function extractEnumMembers(absFile, exportName) {
-  const src = readFileSync(absFile, 'utf8');
+  // Masked ONCE, up front, rather than per-segment: comment spans are blanked
+  // in place, so every offset below still indexes the real file, and the
+  // bracket walk can no longer be closed early by a `]` that lives in a
+  // comment. Masking a SLICE would be the same defect one level down -- a
+  // fragment starting mid-file has no literal context to scan from.
+  const src = maskComments(readFileSync(absFile, 'utf8'));
   const decl = src.match(new RegExp(`(?:export\\s+)?const\\s+${exportName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b[^=]*=`));
   if (!decl) return null;
   const start = src.indexOf('[', decl.index + decl[0].length);
@@ -178,9 +184,7 @@ function extractEnumMembers(absFile, exportName) {
     else if (src[j] === ']') {
       depth--;
       if (depth === 0) {
-        const seg = src.slice(start, j + 1)
-          .replace(/\/\/[^\n]*/g, '')
-          .replace(/\/\*[\s\S]*?\*\//g, '');
+        const seg = src.slice(start, j + 1);
         const seen = new Set();
         for (const m of seg.matchAll(/'([a-zA-Z0-9_\-]+)'/g)) seen.add(m[1]);
         return [...seen];

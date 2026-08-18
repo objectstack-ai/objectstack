@@ -106,6 +106,7 @@
 // that has one AND mentions `examples/` in its text, under `unresolved`.
 
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { maskComments } from './js-comment-mask.mjs';
 import { join, resolve, relative, dirname, sep, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
@@ -163,54 +164,20 @@ const TEST_DIR_RE = /(?:^|\/)(?:test|tests|__tests__)(?:\/|$)/;
 const rel = (abs) => relative(REPO_ROOT, abs).split(sep).join('/');
 
 /**
- * Strip line and block comments while preserving string and template contents.
+ * Comment masking, shared. See `scripts/js-comment-mask.mjs` for the scanner.
  *
  * A comment mentioning `examples/app-showcase` is NOT a coupling -- that is the
  * false-positive class a bare grep produces -- but the specifiers we DO want
  * are themselves string literals, so a blunt "drop everything quoted" pass
  * would erase the signal. Hence a real scanner rather than a regex.
+ *
+ * The private copy this replaces was string-aware but read a `/` as division,
+ * so a regex literal holding a quote character opened a phantom string that ran
+ * to the next matching quote -- to end of file for a backtick. Comments inside
+ * that span were never removed, so the gate read commented-out imports as live
+ * ones. Measured on this gate's own corpus, the two worst files were showcase
+ * tests carrying exactly that shape.
  */
-function stripComments(src) {
-  let out = '';
-  let i = 0;
-  const n = src.length;
-  while (i < n) {
-    const c = src[i];
-    const d = src[i + 1];
-    if (c === '/' && d === '/') {
-      while (i < n && src[i] !== '\n') i++;
-      continue;
-    }
-    if (c === '/' && d === '*') {
-      i += 2;
-      while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++;
-      i += 2;
-      continue;
-    }
-    if (c === '"' || c === "'" || c === '`') {
-      const quote = c;
-      out += c;
-      i++;
-      while (i < n) {
-        if (src[i] === '\\') {
-          out += src[i] + (src[i + 1] ?? '');
-          i += 2;
-          continue;
-        }
-        out += src[i];
-        if (src[i] === quote) {
-          i++;
-          break;
-        }
-        i++;
-      }
-      continue;
-    }
-    out += c;
-    i++;
-  }
-  return out;
-}
 
 /** Every string-literal specifier reachable as a live module reference. */
 function moduleSpecifiers(code) {
@@ -441,7 +408,7 @@ function collect() {
       continue;
     }
     if (!raw.includes('example')) continue;
-    const code = stripComments(raw);
+    const code = maskComments(raw);
     const refs = [...moduleSpecifiers(code), ...readPathLiterals(code)];
 
     const couplings = [];
@@ -705,7 +672,7 @@ function selfTest() {
   const fakeAbs = join(REPO_ROOT, 'packages/cli/test/x.test.ts');
 
   const detects = (src) => {
-    const code = stripComments(src);
+    const code = maskComments(src);
     const refs = [...moduleSpecifiers(code), ...readPathLiterals(code)];
     return refs.some(({ spec }) => couplingTarget(spec, fakeAbs, apps) !== null);
   };

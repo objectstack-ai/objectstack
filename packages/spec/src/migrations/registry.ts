@@ -4895,12 +4895,23 @@ const step18: MigrationStep = {
     'are retiredKey tombstones; the mechanical conversion strips them from old sources ' +
     '(pure lossless deletes) and leaves the bare node, inert as it always was. List ' +
     'surfaces own their filtering: a view\'s `userFilters` quick-filter bar / the list ' +
-    'toolbar\'s filter builder.',
+    'toolbar\'s filter builder. ' +
+    'It also closes the two explicit column lists on relationship fields (#9227): ' +
+    '`field.inlineColumns` entries are now the strict, name-keyed InlineGridColumnSchema ' +
+    '(mirroring the objectui grid renderer\'s measured reads — objectui#3951 aligned the ' +
+    'widget to `name` and retired the `field` spelling with no tolerant alias), and ' +
+    '`field.relatedListColumns` entries are child field-name strings (the only form the ' +
+    'related-list renderer hydrates fully). Both were z.array(z.any()) — a mis-keyed ' +
+    'column published clean and rendered as blank cells with the right row count. The ' +
+    'mechanical conversion respells inline `{ field }` entries as `{ name }` and folds ' +
+    'related-list column objects to their identity string; unknown keys are named ' +
+    'rejections at publish from this major.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
     'element-input-target-variable-removed',
     'element-filter-removed',
+    'field-column-lists-canonicalized',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by

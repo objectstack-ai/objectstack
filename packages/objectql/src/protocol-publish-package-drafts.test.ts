@@ -99,6 +99,10 @@ function makeProtocol(
   const promoteOk = (req: any) => ({
     singularType: req.type,
     orgId: null,
+    // [#9176/#9343] The real helper ALWAYS returns the gate's advisory half
+    // (empty = nothing raised); the batch door reads it per element now, so a
+    // double that omits the key is a drifted seam, not a minimal one.
+    advisories: [],
     result: { version: 'h', seq: 1, item: { body: { name: req.name } }, packageId: null },
   });
   return {
@@ -406,6 +410,8 @@ describe('protocol.publishPackageDrafts (ADR-0033 / ADR-0067 D2)', () => {
       .mockImplementation(async (req: any) => ({
         singularType: req.type,
         orgId: null,
+        // [#9176/#9343] The real helper always returns the advisory half.
+        advisories: [],
         result: { version: 'h', seq: 1, item: { body: { name: req.name } }, packageId: null },
       }));
     const sideEffects = vi.spyOn(protocol as any, 'runPublishSideEffects').mockResolvedValue({});

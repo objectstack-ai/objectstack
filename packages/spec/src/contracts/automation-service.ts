@@ -183,12 +183,19 @@ export interface AutomationResult {
      * caller must distinguish *why* it failed rather than just report it —
      * without it a refusal is indistinguishable from "no such run".
      *
-     *  - `'forbidden'` — {@link IAutomationService.resume} refused because the
-     *    run is parked on a node whose descriptor declares
+     * Two disjoint families share this field, and the distinction is
+     * load-bearing rather than editorial — see the trigger-time group at the
+     * bottom.
+     *
+     * **Resume refusals** — {@link IAutomationService.resume} declined to
+     * continue a parked run:
+     *
+     *  - `'PERMISSION_DENIED'` — {@link IAutomationService.resume} refused
+     *    because the run is parked on a node whose descriptor declares
      *    `resumeAuthority: 'service'` — or declares no `resumeAuthority` at all,
      *    which resolves the same way (#3801, #5561). A transport maps it to
      *    **403**.
-     *  - `'invalid_signal'` — the resume signal tried to write variables the
+     *  - `'INVALID_SIGNAL'` — the resume signal tried to write variables the
      *    flow engine reserves for itself (a `$…` name, or one carrying a `.$`
      *    segment: `$runId`, `<nodeId>.$mapItemDone`, …). A transport maps it to
      *    **400**.
@@ -217,10 +224,36 @@ export interface AutomationResult {
      *    first, so a HIDDEN field's `required` never fires — enforcing it would
      *    dead-end the run at a field the user was never shown (#3528).
      *
-     * All of these refuse before consuming the suspension: the run stays parked
-     * and the legitimate continuation still lands.
+     * All of the above refuse before consuming the suspension: the run stays
+     * parked and the legitimate continuation still lands.
+     *
+     * **Trigger-time refusals** — {@link IAutomationService.execute} declined
+     * to start a run at all. Both are classified by the engine **before
+     * dispatch**, so no node ever executed, nothing was written, and there is
+     * no run to inspect: they carry no `status`, which is exactly what
+     * separates them from a run that dispatched and was rejected
+     * (`status: 'failed'`, #9378). A transport reads the classification; it
+     * must never infer one from `summary` / `durationMs` / the message text.
+     *
+     *  - `'FLOW_DISABLED'` — the flow exists but is switched off
+     *    (`toggleFlow(name, false)`), so this dispatch was refused by policy.
+     *    A transport maps it to **409**: the request is well-formed and the
+     *    flow is well-defined; only the flow's current *state* conflicts with
+     *    running it, and enabling the flow makes the identical request
+     *    succeed.
+     *  - `'FLOW_NO_START_NODE'` — the flow's definition holds no `start` node,
+     *    so there is nothing to dispatch. A transport maps it to **422**: the
+     *    request was understood and the flow exists, but the stored definition
+     *    cannot be executed — an authoring defect the caller cannot fix by
+     *    retrying. Distinct from `'FLOW_DISABLED'` on purpose: one is a
+     *    reversible operational state, the other a malformed definition, and
+     *    collapsing them tells an operator to flip a switch that will not help.
+     *
+     * Both are the remaining two rows of the #9378 trigger-status ruling; the
+     * union stays closed (the #9384 ruling), so these members were added
+     * deliberately, from measured need, rather than minted at a call site.
      */
-    code?: 'PERMISSION_DENIED' | 'INVALID_SIGNAL' | 'RUN_NOT_FOUND' | 'STORE_UNAVAILABLE' | 'RESUME_IN_PROGRESS' | 'INVALID_SCREEN_INPUT';
+    code?: 'PERMISSION_DENIED' | 'INVALID_SIGNAL' | 'RUN_NOT_FOUND' | 'STORE_UNAVAILABLE' | 'RESUME_IN_PROGRESS' | 'INVALID_SCREEN_INPUT' | 'FLOW_DISABLED' | 'FLOW_NO_START_NODE';
     /**
      * Lifecycle status. `'paused'` means the run suspended at a node (e.g.
      * an Approval node awaiting a human decision, ADR-0019) and can be

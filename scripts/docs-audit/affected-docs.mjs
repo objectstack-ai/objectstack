@@ -808,7 +808,8 @@ function declarationChainAt(lines, idx) {
 }
 
 /**
- * The DOCUMENTABLE declarations a changed line belongs to — at most one name.
+ * The DOCUMENTABLE declarations a changed line belongs to — at most one, as
+ * `{ name, container }`.
  *
  * Most-specific-wins: a changed method body anchors on the METHOD, not on its class.
  * Emitting the container too would mean every edit anywhere in a 20k-line class flagged
@@ -816,6 +817,12 @@ function declarationChainAt(lines, idx) {
  * reintroduced one level down. The container is the FALLBACK, used when the inner name is
  * generic or absent (a changed entry inside `export const FIELD_TYPES = [...]` has no
  * declaration of its own, and `FIELD_TYPES` is the right anchor for it).
+ *
+ * `container` reports WHICH of those two the name came from, because the answer is a
+ * doc anchor either way but a ROUTE-BRIDGE symbol only one way (#9294 — see the
+ * `bridgeSymbols` block in §3b). It is read off the winning declaration rather than
+ * from the branch, so a container reached as `inner` (an interface nested in a
+ * namespace) is reported the same as one reached as the fallback.
  */
 function documentableDeclarationsAt(lines, idx) {
   const chain = declarationChainAt(lines, idx);
@@ -823,8 +830,8 @@ function documentableDeclarationsAt(lines, idx) {
   const outer = chain[chain.length - 1];
   const inner = chain.length > 1 ? chain[chain.length - 2] : null;
   const usable = (d) => d && !GENERIC_ANCHOR_NAMES.has(d.name) && !GENERIC_ANCHOR_NAMES.has(d.name.toLowerCase()) && d.name.length >= 3;
-  if (inner && outer.container && usable(inner)) return [inner.name];
-  if (usable(outer) && outer.kind !== 'member') return [outer.name];
+  if (inner && outer.container && usable(inner)) return [{ name: inner.name, container: !!inner.container }];
+  if (usable(outer) && outer.kind !== 'member') return [{ name: outer.name, container: !!outer.container }];
   return [];
 }
 
@@ -909,15 +916,27 @@ function literalAnchorsFromLines(lines, changed) {
   return { routes, literals };
 }
 
-/** Documentable declaration names touched on one side of one file's diff. */
+/**
+ * Documentable declaration names touched on one side of one file's diff.
+ *
+ * Two sets, and the second one is the point: `names` is every symbol anchor the side
+ * yields, `bridgeable` is the subset that named a LEAF declaration rather than a
+ * container. Positive, not subtractive — a name that reached the set through a leaf
+ * derivation anywhere stays bridgeable even if some other line derived it as a
+ * container. `bridgeable ⊆ names` always.
+ */
 function symbolAnchorsFromSource(text, changed) {
   const lines = text.split('\n');
   const names = new Set();
+  const bridgeable = new Set();
   for (const n of changed) {
     if (n - 1 < 0 || n - 1 >= lines.length) continue;
-    for (const name of documentableDeclarationsAt(lines, n - 1)) names.add(name);
+    for (const d of documentableDeclarationsAt(lines, n - 1)) {
+      names.add(d.name);
+      if (!d.container) bridgeable.add(d.name);
+    }
   }
-  return names;
+  return { names, bridgeable };
 }
 
 /**
@@ -1144,7 +1163,8 @@ function selfTest() {
     '    }',
     '}',
   ].join('\n');
-  const anchorsAt = (src, lineNo) => symbolAnchorsFromSource(src, [lineNo]);
+  const anchorsAt = (src, lineNo) => symbolAnchorsFromSource(src, [lineNo]).names;
+  const bridgeableAt = (src, lineNo) => symbolAnchorsFromSource(src, [lineNo]).bridgeable;
   const symbolCases = [
     // [1-based line, expected anchor set, label]
     [9, ['auditMetaItem'], 'a changed METHOD BODY anchors on the method, not on its 20k-line class'],
@@ -1302,6 +1322,87 @@ function selfTest() {
   const bridged = registrar.get('/:type/:name/audit');
   const bridgeRow = ledger.find((r) => bridged && r.route.endsWith('/:type/:name/audit'));
   check('bridge', 'a changed protocol method reaches the SDK method the docs name', 'auditMetaItem → getAudit', 'getAudit', bridgeRow?.client?.split('.').pop());
+
+  // ---- the route bridge admits LEAF symbols only (#9294) ---------------------
+  // MEASURED FAILURE (9e2e68206): a 27-line edit confined to `RestServer.probeMcpServeable`
+  // — 17 of those lines its own doc comment — listed `api/client-sdk.mdx` via
+  // `getBookTree (sdk)` / `meta.getBookTree (sdk)` and `releases/v14.mdx` via
+  // `/book/:name/tree (route)`. No changed line relates to book trees; the nearest
+  // `/book/:name/tree` literal sits ~1350 lines away.
+  //
+  // THE CHAIN, each link real and each one but the last correct: a doc-comment line has no
+  // declaration of its own and its indent walk climbs past every sibling member to the
+  // CLASS, so `RestServer` enters the anchor set (a correct row — three release pages name
+  // that class) → the route bridge accepts it as a bridge symbol → `parseRegistrarSource`
+  // scans handler windows for the BARE IDENTIFIER and two unrelated handlers call
+  // `RestServer.` statics → two route anchors → the ledger maps one to `meta.getBookTree`.
+  // Two routes is UNDER `MAX_ROUTES_PER_SYMBOL`, so the cross-cutting cap never saw it.
+  //
+  // ⚠️ PINNED IN BOTH DIRECTIONS. A test that only asserts the wrong rows vanish passes
+  // just as happily on an over-correction that also drops `RestServer (symbol)` — which
+  // would trade a precision bug for a coverage hole, strictly worse than the bug (this
+  // defect over-reports and misses nothing). So the class must stay a symbol anchor, the
+  // method must stay bridgeable, and the identifier scan must still SEE the qualifier —
+  // that last one is what stops this block going green because the fixture drifted into
+  // deriving no route at all.
+  const serverSource = [
+    'export class RestServer {',
+    '    /**',
+    '     * [#9120] Resolve the environment through the shared entry point.',
+    '     */',
+    '    private async probeMcpServeable(req: any): Promise<boolean | null> {',
+    '        return this.resolveRequestEnvironmentId(req);',
+    '    }',
+    '',
+    '    private registerBookRoutes() {',
+    '        this.routeManager.register({',
+    "            method: 'GET',",
+    '            path: `${metaPath}/book/:name/tree`,',
+    '            handler: async (req, res) => {',
+    '                return RestServer.anyPermissionSetAudience(books);',
+    '            },',
+    '        });',
+    '    }',
+    '}',
+  ].join('\n');
+  const bookRegistrar = parseRegistrarSource(serverSource);
+  const bookIds = bookRegistrar.get('/book/:name/tree');
+  check('parseRegistrarSource', 'the mechanism is real: a static-call QUALIFIER lands in the handler window', 'RestServer', true, !!bookIds?.has('RestServer'));
+  check('parseRegistrarSource', 'and so does the handler\'s own implementation symbol', 'anyPermissionSetAudience', true, !!bookIds?.has('anyPermissionSetAudience'));
+
+  const docCommentLine = 3;   // `* [#9120] Resolve the environment …` — inside the JSDoc
+  const methodBodyLine = 6;   // `return this.resolveRequestEnvironmentId(req);`
+  check('symbolAnchorsFromSource', 'a changed DOC COMMENT above a method still anchors on the enclosing class — the correct row that must survive', `line ${docCommentLine}`, true, anchorsAt(serverSource, docCommentLine).has('RestServer'));
+  check('symbolAnchorsFromSource.bridgeable', 'but the CLASS is not a route\'s implementation, so it never enters the bridge', `line ${docCommentLine}`, false, bridgeableAt(serverSource, docCommentLine).has('RestServer'));
+  check('symbolAnchorsFromSource.bridgeable', 'the METHOD is a leaf and stays bridgeable — the #9192 recall win is untouched', `line ${methodBodyLine}`, true, bridgeableAt(serverSource, methodBodyLine).has('probeMcpServeable'));
+  check('symbolAnchorsFromSource', 'and the method is still the anchor for its own body (most-specific-wins)', `line ${methodBodyLine}`, true, anchorsAt(serverSource, methodBodyLine).has('probeMcpServeable'));
+
+  // End to end over the fixture: the doc-comment edit selects NO route, and the method
+  // edit selects no route HERE either (it appears in no handler) — while `auditMetaItem`
+  // above still selects its own. Absence proved by the same selection step the bridge
+  // runs, not by asserting on a different quantity.
+  const tailsSelectedBy = (symbols, registrarMap) => {
+    const tails = [];
+    for (const [tail, ids] of registrarMap) if ([...symbols].some((sym) => ids.has(sym))) tails.push(tail);
+    return tails;
+  };
+  check('bridge', 'a doc-comment-only edit inside a class selects no route at all', 'tails', JSON.stringify([]), JSON.stringify(tailsSelectedBy(bridgeableAt(serverSource, docCommentLine), bookRegistrar)));
+  check('bridge', 'the pre-fix behaviour, held as the counterfactual: the raw anchor set DID select the book route', 'tails', JSON.stringify(['/book/:name/tree']), JSON.stringify(tailsSelectedBy(anchorsAt(serverSource, docCommentLine), bookRegistrar)));
+  check('bridge', 'a changed protocol METHOD still selects its own route', 'tails', JSON.stringify(['/:type/:name/audit']), JSON.stringify(tailsSelectedBy(bridgeableAt(protocolSource, 9), registrar)));
+
+  // The container/leaf split on the two fixtures the derivation is already pinned against,
+  // so the new flag is read off the same shapes the anchor cases use.
+  const bridgeableCases = [
+    [protocolSource, 1, 'ObjectStackProtocolImplementation', false, 'a changed CLASS LINE anchors, but a class is a scope, not a route implementation'],
+    [protocolSource, 9, 'auditMetaItem', true, 'a changed method body is a leaf'],
+    [protocolSource, 16, 'historyMetaItem', true, 'a method reached past an intermediate block is still a leaf'],
+    [schemaSource, 1, 'ObjectSchema', false, 'a `const` object that owns its keys is a container'],
+    [schemaSource, 2, 'controlled_by_parent', true, 'a schema KEY is a leaf — it names one property, not a scope'],
+    [schemaSource, 6, 'buildObject', true, 'a function is a leaf: it holds locals, it does not own surface'],
+  ];
+  for (const [src, line, name, want, label] of bridgeableCases) {
+    check('symbolAnchorsFromSource.bridgeable', label, `${name} @ line ${line}`, want, bridgeableAt(src, line).has(name));
+  }
 
   // ---- the CLI command anchor kind (#9230) ----------------------------------
   // The recall class: a CLI-surface change derives `MetaResync` / a lowercase `resync`,
@@ -1555,6 +1656,10 @@ for (const dir of pkgRoots) {
 // One pass per changed file, both sides of the diff: the HEAD side for what the change
 // now declares, the base side so a REMOVED export still anchors the pages naming it.
 const symbolAnchors = new Set();
+// The subset of `symbolAnchors` eligible to enter the route bridge — see §3b. Kept as
+// its own set rather than recomputed there, because the container/leaf distinction is
+// only knowable at DERIVATION time: by §3b a symbol is just a string.
+const bridgeableSymbols = new Set();
 const routeAnchors = new Set();
 const literalAnchors = new Set();
 const commandAnchors = new Map(); // canonical phrase → { id, bins }
@@ -1587,7 +1692,9 @@ for (const f of implementationChanges) {
   let ruleSpansHere = 0;
   for (const [text, changed] of [[after, newLines], [before, oldLines]]) {
     if (!text) continue;
-    for (const name of symbolAnchorsFromSource(text, changed)) { symbolAnchors.add(name); found++; }
+    const sym = symbolAnchorsFromSource(text, changed);
+    for (const name of sym.names) { symbolAnchors.add(name); found++; }
+    for (const name of sym.bridgeable) bridgeableSymbols.add(name);
     const { routes, literals } = literalAnchorsFromLines(text.split('\n'), changed);
     for (const r of routes) { routeAnchors.add(r); found++; }
     for (const l of literals) { literalAnchors.add(l); found++; }
@@ -1652,11 +1759,37 @@ function admitAnchor(kind, token, re) {
 const bridgeSymbols = [];
 for (const name of [...symbolAnchors].sort()) {
   if (!admitAnchor('symbol', name, symbolRe(name))) continue;
-  // A SCREAMING_SNAKE constant is a data table, not a route's implementation: it is
-  // referenced by handlers that merely consult it. Admitted as a doc anchor (it names a
-  // real surface — `ERROR_CODE_LEDGER` found 4 pages on 30b1c636a), but kept OUT of the
-  // route bridge, where it dragged `/approvals/requests/:id/remind` into a wire-code
-  // registration change.
+  // TWO KINDS OF SYMBOL ARE DOC ANCHORS BUT NOT BRIDGE SYMBOLS. The bridge's premise is
+  // "this name IS some route's implementation, so the handler that implements that route
+  // mentions it" — and `parseRegistrarSource` tests that premise by scanning a handler
+  // window for the BARE IDENTIFIER. Any name a handler mentions for some OTHER reason
+  // satisfies the scan without satisfying the premise, and mints a route (and, through
+  // the ledger, an sdk) anchor from a diff that never came near that route.
+  //
+  //  1. A SCREAMING_SNAKE constant is a data table, not a route's implementation: it is
+  //     referenced by handlers that merely consult it. `ERROR_CODE_LEDGER` names a real
+  //     surface (4 pages on 30b1c636a) and stays a doc anchor, but in the bridge it
+  //     dragged `/approvals/requests/:id/remind` into a wire-code registration change.
+  //  2. A CONTAINER name — a class, interface, type, enum, namespace, or a `const`
+  //     object that owns its keys — is the SCOPE a route's implementation lives in, not
+  //     the implementation. Handlers mention it as a static-call qualifier
+  //     (`RestServer.metaTypeSingular(…)`), a `new`, or a type annotation. Measured on
+  //     9e2e68206 (#9294): a 27-line edit confined to `probeMcpServeable` — 17 of those
+  //     lines its doc comment, which attributes to the enclosing class — put `RestServer`
+  //     in the anchor set, and two handlers calling `RestServer.` statics ~1350 lines away
+  //     bridged it to `/:type/:name/layers` and `/book/:name/tree`, and thence to
+  //     `meta.getBookTree` / `getBookTree` on `api/client-sdk.mdx`. Three wrong rows off
+  //     one qualifier. The cross-cutting cap could not catch it: two routes, cap three.
+  //
+  // ⭐ NEITHER is an exclusion from the anchor set. `RestServer (symbol)` is a CORRECT
+  // row — the edited method really is in that class — and it survives this untouched;
+  // only the bridge hop it was feeding is cut. The container's own members are unaffected:
+  // most-specific-wins already anchors a changed method body on the METHOD, and a method
+  // is a leaf, so `auditMetaItem` → `/:type/:name/audit` → `meta.getAudit` still bridges.
+  // The failure direction if a container ever did belong in the bridge is a RECALL miss on
+  // the `route`/`sdk` kinds only; the over-report this replaces was on `client-sdk.mdx`,
+  // the page the bridge exists to reach, which is where a wrong row costs the most.
+  if (!bridgeableSymbols.has(name)) continue;
   if (!/^[A-Z0-9_$]+$/.test(name)) bridgeSymbols.push(name);
 }
 for (const name of [...literalAnchors].sort()) admitAnchor('literal', name, symbolRe(name));

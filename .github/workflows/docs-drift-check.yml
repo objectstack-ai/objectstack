@@ -3,9 +3,13 @@ name: Docs Drift Check
 # When a PR changes packages/** code, flag the hand-written docs that NAME something the
 # change touched — a symbol, a wire route, or the SDK method a route ledger binds to it —
 # so they can be re-verified for implementation accuracy before the drift lands on main.
-# Advisory only: posts a PR comment, never fails the build. The actual LLM audit is run
-# on-demand / on a schedule via the `docs-accuracy-audit` workflow, scoped to exactly the
-# docs this check lists.
+# Advisory only: posts a PR comment, and its VERDICT never fails the build. Since #9373 a
+# transient GitHub API failure while DELIVERING that comment does not fail it either — but
+# it is never swallowed: the run then states, in its own job summary and a warning
+# annotation, that the advisory could not be delivered, so "could not tell" can never
+# render as "no drift". Scan and derivation errors DO still fail the job. The actual LLM
+# audit is run on-demand / on a schedule via the `docs-accuracy-audit` workflow, scoped to
+# exactly the docs this check lists.
 #
 # It used to list pages by PACKAGE DEPENDENCY ("which docs mention @objectstack/x"), and
 # #9192 measured that wrong in both directions on a real PR: 2 of 3 listed pages were
@@ -192,12 +196,164 @@ jobs:
               );
               body = body.join('\n');
             }
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number,
-            });
+            // ── Delivery, and ONLY delivery, tolerates platform weather (#9373) ────
+            //
+            // Everything above is the VERDICT. Everything below merely carries it to the
+            // PR conversation. Those are two different failures and must not share one
+            // outcome:
+            //
+            //   the scan ran wrong / the body could not be built  → red job (unchanged)
+            //   the computed advisory could not be POSTED         → green job, said aloud
+            //
+            // Measured: this job died four consecutive times on PR #9370 (17:17Z-18:24Z,
+            // 2026-08-17), every time with
+            //   HttpError: No server is currently available to service your request.
+            //   response: { url: '.../issues/9370/comments', status: 503 }
+            // github-script hands any throw from this script to `main().catch(handleError)`
+            // -> `core.setFailed('Unhandled error: ...')`, so an advisory-only check went
+            // red on GitHub's weather and cost four re-runs that no local change could fix.
+            // That URL is the endpoint of BOTH `listComments` (GET) and `createComment`
+            // (POST), so the recorded log cannot say which call was rejected — both are
+            // covered below.
+            //
+            // ⛔ Deliberately NOT `continue-on-error: true`, and NOT a bare catch:
+            //   - this step also parses `affected.json` and builds `body`, so blanket
+            //     tolerance would let a malformed scan result or an over-long (422) comment
+            //     read as a clean run — real breakage wearing a green tick;
+            //   - a swallowed failure leaves the run saying NOTHING, and then "could not
+            //     tell" renders exactly like "no drift". That is the same defect in the
+            //     opposite mask, and it is precisely what this file's #9192 posture — say
+            //     what the run could not see — exists to prevent.
+            // So: a narrow transient class, bounded retries, and, when they are spent, a
+            // loud statement in the run's own output of exactly what was lost.
+
+            // Transient = the request never received a considered answer.
+            //   5xx  the server declined to serve it. octokit also normalises
+            //        network-layer failures into a 500-shaped RequestError; the explicit
+            //        code set covers any that arrive unnormalised.
+            //   429  rate limited.
+            //   403 + a rate-limit signature — GitHub answers a SECONDARY rate limit with
+            //        403 as well as 429, so the signature, never the status alone, is what
+            //        separates it from a genuine permission denial.
+            // Everything else stays fatal on purpose: 401 / plain 403 (the `permissions:`
+            // block above is wrong), 404 (wrong target), 422 (the body this workflow built
+            // is not postable — e.g. past GitHub's 65536-character comment limit), and any
+            // non-HTTP error such as a TypeError in the code above. Those are this repo's
+            // own bugs and must keep failing the job.
+            const TRANSIENT_NETWORK_CODES = new Set([
+              'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND', 'EPIPE',
+              'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT',
+            ]);
+            const isTransient = (error) => {
+              if (error && TRANSIENT_NETWORK_CODES.has(error.code)) return true;
+              const status = error && typeof error.status === 'number' ? error.status : null;
+              if (status === null) return false;
+              if (status >= 500 || status === 429) return true;
+              if (status === 403) {
+                const remaining = error.response?.headers?.['x-ratelimit-remaining'];
+                return String(remaining) === '0'
+                  || /secondary rate limit|abuse detection/i.test(String(error.message || ''));
+              }
+              return false;
+            };
+
+            // Bounded, and deliberately short. The measured incident ran over an hour — no
+            // retry budget rides that out, and pretending otherwise only burns runner
+            // minutes before degrading anyway. The retries are for a BLIP; the visible
+            // degradation below is what handles an incident. The delays are a judgement,
+            // not a measurement.
+            const RETRY_DELAYS_MS = [3000, 9000];
+            const ATTEMPTS = RETRY_DELAYS_MS.length + 1;
+            const deliver = async (label, call) => {
+              for (let attempt = 0; ; attempt++) {
+                try {
+                  return await call();
+                } catch (error) {
+                  if (!isTransient(error) || attempt >= RETRY_DELAYS_MS.length) throw error;
+                  const wait = RETRY_DELAYS_MS[attempt];
+                  core.info(`${label}: transient ${error.status ?? error.code} — retrying in ${wait}ms (attempt ${attempt + 2}/${ATTEMPTS})`);
+                  await new Promise((resolve) => setTimeout(resolve, wait));
+                }
+              }
+            };
+
+            // Degrade VISIBLY — the house pattern (check-links.yml's "the link check did
+            // not run", cross-repo-issue-closer.yml's missing-token notice). A reader looks
+            // for this advisory's verdict on the PR; when it cannot be put there, the run
+            // page must say so in full: what failed, what the reader must NOT infer from
+            // whatever is on the PR, and the verdict itself — degraded but delivered,
+            // never lost.
+            const degrade = async (stage, error, staleNote) => {
+              const detail = typeof error.status === 'number' ? `HTTP ${error.status}` : (error.code || 'error');
+              // Octokit messages usually end in a full stop; ours supplies its own.
+              const reason = `${detail}: ${String(error.message || '').replace(/\s*\.\s*$/, '')}`;
+              const note = [
+                '## ⚠️ Docs Drift Check — advisory computed, but NOT posted to this PR',
+                '',
+                `The scan completed; this is a **delivery** failure only. \`${stage}\` was rejected on all`,
+                `${ATTEMPTS} attempts: \`${reason}\`.`,
+                '',
+                `- ${staleNote}`,
+                '- The verdict this run computed is reproduced below. It is **not** on the pull request.',
+                '- This job is **green on purpose**: its conclusion reflects the scan, not the',
+                '  deliverability of its courtesy comment (#9373). The check is advisory either way.',
+                '- Re-run this job to retry delivery once the API recovers.',
+                '',
+                '---',
+                '',
+                body,
+                '',
+              ].join('\n');
+              try {
+                await core.summary.addRaw(note).write();
+              } catch (summaryError) {
+                // The summary is the richer channel, the annotation the reliable one.
+                // Losing the richer one must not restore the silence this exists to prevent.
+                core.info(`Could not write the job summary: ${summaryError.message}`);
+              }
+              core.warning(
+                `The docs-drift advisory was computed but could not be posted to this PR: `
+                + `${stage} failed ${ATTEMPTS}x with ${reason}. ${staleNote} `
+                + `The verdict is in this run's job summary. Transient GitHub API failure (#9373) — `
+                + `the job stays green because the scan itself is unaffected.`,
+                { title: 'Docs drift advisory not delivered' },
+              );
+            };
+
+            let comments;
+            try {
+              ({ data: comments } = await deliver('issues.listComments', () => github.rest.issues.listComments({
+                owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number,
+              })));
+            } catch (error) {
+              if (!isTransient(error)) throw error;
+              // Without the listing there is no way to tell an update from a create.
+              // Posting blind would strand a SECOND advisory comment that the marker dedup
+              // then updates forever alongside the first, and every comment here is relayed
+              // into subscribed agent sessions (#9037). Saying so costs less than
+              // duplicating.
+              await degrade(
+                'issues.listComments',
+                error,
+                'This run could not even determine whether an advisory comment exists on this PR; if one is shown there, it is from an earlier push.',
+              );
+              return;
+            }
+
             const existing = comments.find(c => c.body && c.body.includes(marker));
-            if (existing) {
-              await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: existing.id, body });
-            } else {
-              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body });
+            try {
+              if (existing) {
+                await deliver('issues.updateComment', () => github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: existing.id, body }));
+              } else {
+                await deliver('issues.createComment', () => github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body }));
+              }
+            } catch (error) {
+              if (!isTransient(error)) throw error;
+              await degrade(
+                existing ? 'issues.updateComment' : 'issues.createComment',
+                error,
+                existing
+                  ? `The \`docs-drift-check\` comment on this PR still shows an EARLIER run's verdict — this run could not refresh it.`
+                  : 'No advisory comment was posted on this PR for this run.',
+              );
             }
