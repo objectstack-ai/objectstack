@@ -21,6 +21,20 @@ Server-connected create/edit/view form for one object. Config props come from th
 | `formType` | `'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'` | binding |  | Form presentation; drawer/modal render the form in a built-in overlay (use drawerSide/drawerWidth/modalSize). |
 | `fields` | `string[]` | binding |  | Limit/order the fields shown (defaults to the object form fields). |
 | `initialValues` | `Record<string, any>` | binding |  | Prefill values in create mode. |
+| `customFields` | `any[]` | binding |  | Field definitions merged over the set generated from object metadata. With inline definitions and no data source, this becomes the only field source. |
+| `readOnly` | `boolean` | binding |  | Render every field read-only, whatever `mode` says. |
+| `modalCloseButton` | `boolean` | binding |  | Show the modal presentation's close button (formType 'modal'; honoured by the modal form). |
+| `contentLayout` | `'simple' \| 'tabbed'` | binding |  | How the modal presentation lays out sections; 'tabbed' needs more than one section to differ from 'simple'. |
+| `confirmOnDiscard` | `boolean` | binding |  | Ask before discarding unsaved edits when a drawer/modal form is dismissed. Set false to close immediately. |
+| `submitText` | `string` | binding |  | Label of the submit button. |
+| `cancelText` | `string` | binding |  | Label of the cancel button. |
+| `nextText` | `string` | binding |  | Label of the next-step button (wizard). |
+| `prevText` | `string` | binding |  | Label of the previous-step button (wizard). |
+| `showSubmit` | `boolean` | binding |  | Show the submit button. |
+| `showCancel` | `boolean` | binding |  | Show the cancel button. |
+| `showReset` | `boolean` | binding |  | Show the reset button. |
+| `successMessage` | `string` | binding |  | Toast shown after a successful submit. Ignored when `submitBehavior` is set. |
+| `resetOnSuccess` | `boolean` | binding |  | Clear the form after a successful submit instead of keeping the saved values. |
 | `mode` | `'create' \| 'edit' \| 'view'` | controlled |  | Create a new record, or edit/view an existing one — drive from React state. |
 | `recordId` | `string \| number` | controlled |  | Which record to load (edit/view). The hook for master/detail. |
 | `onSuccess` | `(record) => void` | callback |  | Called after a successful save with the saved record (e.g. close a panel + reload). |

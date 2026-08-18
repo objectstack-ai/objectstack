@@ -199,13 +199,17 @@ export async function sweepStrandedOutbox(
       result.failed++;
       if (!rowErrorReported) {
         rowErrorReported = true;
-        logger?.error?.(
+        const message =
           `EmailServicePlugin: outbox sweep could not advance sys_email row '${rowId}' — that message stays `
           + 'at `queued`, undelivered, and nothing will look at it again until the next restart, while the '
           + 'server keeps reporting healthy. Fix: the cause below comes from the datasource or the queue, '
           + 'not from the message itself (a message that cannot be sent is recorded as `failed` on its own '
-          + `row); restore that dependency and restart to re-sweep. Cause: ${err?.message ?? err}`,
-        );
+          + `row); restore that dependency and restart to re-sweep. Cause: ${err?.message ?? err}`;
+        // `SweepLogger.error` is OPTIONAL, so `logger?.error?.(…)` printed
+        // NOTHING against a sink that has only `warn` — the stranded row would
+        // then be reported by nobody (#9657). Fall back to `warn`, not silence.
+        if (logger?.error) logger.error(message);
+        else logger?.warn?.(message);
       }
     }
   }

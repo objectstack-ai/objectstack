@@ -1068,7 +1068,7 @@ describe('audit writers — a lost audit row is reported at error (#5226)', () =
   interface LogLine { level: string; message: string; meta?: any }
 
   /** Engine whose `sys_audit_log` insert always fails, capturing every log line. */
-  function makeFailingEngine(failWith = 'no such table: sys_audit_log') {
+  function makeFailingEngine(failWith = 'no such table: sys_audit_log', omitError = false) {
     const hooks = new Map<string, Array<(ctx: any) => any>>();
     const logs: LogLine[] = [];
     const sudoApi = {
@@ -1095,7 +1095,12 @@ describe('audit writers — a lost audit row is reported at error (#5226)', () =
       },
       unregisterHooksByPackage() { /* no-op */ },
       logger: {
-        error(message: string, _err?: unknown, meta?: any) { logs.push({ level: 'error', message, meta }); },
+        // `omitError` reproduces the sink a host may legitimately inject: the
+        // kernel `Logger` requires `error`, but this reporter reaches its sink
+        // through `(engine as any).logger`, so nothing checks. #9657.
+        ...(omitError
+          ? {}
+          : { error(message: string, _err?: unknown, meta?: any) { logs.push({ level: 'error', message, meta }); } }),
         warn(message: string, meta?: any) { logs.push({ level: 'warn', message, meta }); },
         debug(message: string, meta?: any) { logs.push({ level: 'debug', message, meta }); },
         info() { /* unused */ },
@@ -1125,6 +1130,24 @@ describe('audit writers — a lost audit row is reported at error (#5226)', () =
     const errors = logs.filter((l) => l.level === 'error');
     expect(errors).toHaveLength(1);
     expect(errors[0].meta).toMatchObject({ object: 'crm_lead', action: 'create' });
+  });
+
+  it('still reports the lost row when the sink has NO `error` — at warn, never in silence (#9657)', async () => {
+    // The regression this pins: the report used to be spelled
+    // `logger?.error?.(…)`, an optional call that emits NOTHING against a sink
+    // without `error`. The compliance trail was then incomplete AND unreported.
+    // ⛔ Asserting only "did not throw" would pass on the silent version too,
+    // so this asserts the MESSAGE lands, and that it is the same one.
+    const { engine, fire, logs } = makeFailingEngine('no such table: sys_audit_log', true);
+    installAuditWriters(engine as any);
+
+    await fire('afterInsert', aWrite('l-1'));
+
+    const warns = logs.filter((l) => l.level === 'warn');
+    expect(warns).toHaveLength(1);
+    expect(warns[0].message).toMatch(/compliance trail is now INCOMPLETE/);
+    expect(warns[0].message).toMatch(/OS_TELEMETRY_DB=0/);
+    expect(warns[0].meta).toMatchObject({ object: 'crm_lead', action: 'create' });
   });
 
   it('names both the CONSEQUENCE and the FIX in the first line it prints', async () => {
