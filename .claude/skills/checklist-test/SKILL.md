@@ -182,17 +182,23 @@ expected-fail 探针 —— 永不在真实缺陷上把条款打成绿。
 **收口评论是机器可 grep 的** —— 一条一行,落在记录 issue 的收口评论里:
 
 ```text
-Extracted: #<card> · <item-id> · <clause>
-Parked-on: #<anchor> · <what>
-Superseded-by: #<run>
-Carried-forward: #<run> · <item-id> · <verdict>
+Extracted: #缺陷卡号 · area.item · 条款
+Parked-on: #锚卡号 · 缺口
+Superseded-by: #新记录号
+Carried-forward: #旧记录号 · area.item · 判定
 ```
 
 **抽取出的每张卡,正文带一行溯源**(靠 grep,不靠标签):
 
 ```text
-QA-source: #<run> · <item-id> · <clause>
+QA-source: #运行记录号 · area.item · 条款
 ```
+
+上面两处的定位字段一律是 §0 的**裸 id 形式 `area.item`**(如
+`platform-core.console-login`)—— 解析器、run 记录的逐条款表、抽取卡三处同一把定位
+符,才互相 grep 得到;⛔ 不写只有 item 段的短形。**写进 GitHub 正文/评论时⛔ 不要用尖
+括号占位符**:`<`+字母会被写入层当标签吃掉,一行溯源就此消失在库里 —— 占位用中文词或
+直接填实值。
 
 **Supersede 协议** —— 重跑覆盖了旧记录的地面时,旧记录关闭(`not_planned` + 一行
 `Superseded-by:` 指向新记录),但**先把新一轮没有重新判定的判定结转过去**:结转行
