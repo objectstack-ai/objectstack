@@ -86,6 +86,19 @@ export interface ObjectQLPluginOptions {
    */
   authoringChannel?: MetadataAuthoringChannel;
   /**
+   * [#9380] Does this boot arm the `kernel:ready` platform-table repair
+   * migrations (#5839 / #8629 / #8686)?
+   *
+   * Same lesson as `authoringChannel` right above: the gate used to be deduced
+   * from `environmentId === undefined`, which is a row-scoping key and not a
+   * topology signal — the standalone stack stamps `'proj_local'`, so the three
+   * migrations never armed on a self-hosted boot at all. Forwarded verbatim to
+   * `assembleMetadataProtocol`; see
+   * `AssembleMetadataProtocolOptions.runPlatformMigrations` for the two facts
+   * that make it false. Omitted ⇒ the historical deduction, unchanged.
+   */
+  runPlatformMigrations?: boolean;
+  /**
    * Override the kernel's default plugin-start timeout for this plugin.
    * Defaults to 120000 (120s). Schema sync to a remote SQL backend
    * (Neon/Postgres/Turso) is latency-bound — the SQL driver currently
@@ -191,6 +204,15 @@ export class ObjectQLPlugin implements Plugin {
    * resolves it to `'environment'`, the gated channel.
    */
   private authoringChannel?: MetadataAuthoringChannel;
+  /**
+   * [#9380] Declared arming of the `kernel:ready` platform-table repair
+   * migrations, forwarded to the ONE protocol assembly. `undefined` here is
+   * not "off" — it means "not declared", and the assembly resolves it to the
+   * historical `environmentId === undefined` deduction. The legacy positional
+   * `(ObjectQL, hostContext)` constructor returns before any option is read,
+   * so it lands here undefined and keeps that deduction too.
+   */
+  private runPlatformMigrations?: boolean;
   private skipSchemaSync = false;
   /** Serializes reload-time schema syncs so overlapping reloads can't race DDL. */
   private reloadSchemaSync: Promise<void> = Promise.resolve();
@@ -231,6 +253,7 @@ export class ObjectQLPlugin implements Plugin {
     this.hostContext = opts.hostContext ?? hostContext;
     this.environmentId = opts.environmentId;
     this.authoringChannel = opts.authoringChannel;
+    this.runPlatformMigrations = opts.runPlatformMigrations;
     if (typeof opts.startupTimeout === 'number' && opts.startupTimeout > 0) {
       this.startupTimeout = opts.startupTimeout;
     }
@@ -325,6 +348,11 @@ export class ObjectQLPlugin implements Plugin {
       // constructor path, which returns before any option is read.
       const protocolShim = assembleMetadataProtocol(ctx, this.ql, this.environmentId, {
         authoringChannel: this.authoringChannel,
+        // [#9380] Rides the same seam, for the same reason: an undeclared value
+        // resolves to the historical `environmentId === undefined` deduction
+        // inside the assembly, so this mount and the delegated
+        // MetadataProtocolPlugin cannot disagree about when the migrations arm.
+        runPlatformMigrations: this.runPlatformMigrations,
       });
       this.subscribeMetadataRebind(ctx, protocolShim);
     } else {

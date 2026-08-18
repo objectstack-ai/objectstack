@@ -214,6 +214,30 @@ export const StandaloneStackConfigSchema = z.object({
      * exists for.
      */
     sqliteAbsentFile: z.enum(['create', 'empty-in-memory']).optional(),
+    /**
+     * [#9380] Does this boot arm the `kernel:ready` platform-table repair
+     * migrations (#5839's `sys_view_definition` active-row index, #8629's
+     * `sys_setting` row-identity index, #8686's seed/API tenancy backfill)?
+     *
+     * Defaults to `true`, and that default is the fix: a standalone kernel
+     * OWNS its local platform tables, which is what the gate in
+     * `assembleMetadataProtocol` always meant to say. It used to deduce that
+     * from `environmentId === undefined`, and line ~515 below stamps
+     * `'proj_local'` on every boot — so the block never ran and #8686's
+     * "covers every existing deployment" half covered no self-hosted install
+     * at all.
+     *
+     * Set `false` for a boot that must not repair anything behind the
+     * operator's back. `bootSchemaStack` (the CLI's ONE one-shot boot funnel)
+     * passes `false` for every `os migrate *` / `os meta *` command: those are
+     * dry-run-by-default report commands, and a repair that fires under them
+     * destroys the very evidence they were run to collect
+     * (`packages/cli/src/commands/migrate/duplicates.integration.test.ts`
+     * pins byte-identical-after-run). The serving boots — `os dev`,
+     * `os serve`, `os start` — take the default and repair, which is the one
+     * boot an operator starts in order to RUN the install.
+     */
+    runPlatformMigrations: z.boolean().optional(),
 });
 
 export type StandaloneStackConfig = z.input<typeof StandaloneStackConfigSchema>;
@@ -695,7 +719,14 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
             // when unset so the plugin keeps its own cwd default.
             ...(cfg.projectRoot ? { rootDir: cfg.projectRoot } : {}),
         }),
-        new ObjectQLPlugin({ environmentId }),
+        // [#9380] `runPlatformMigrations` is declared here, not deduced from
+        // `environmentId`: this stack stamps `'proj_local'` above, and the
+        // assembly's old `environmentId === undefined` gate read that as "a
+        // per-project cloud kernel" and disarmed the three boot repairs on
+        // every self-hosted install. A standalone kernel owns its local
+        // platform tables — say so — and let a read-only one-shot boot turn
+        // it off explicitly.
+        new ObjectQLPlugin({ environmentId, runPlatformMigrations: cfg.runPlatformMigrations ?? true }),
     ];
     if (artifactBundle) {
         plugins.push(new AppPlugin(artifactBundle, undefined, { skipSeedData: cfg.skipSeedData ?? false }));

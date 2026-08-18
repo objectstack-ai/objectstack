@@ -23,7 +23,7 @@ export {
   omitInternalFieldsFromWriteResponse,
   collectInternalWriteResponseFields,
 } from './write-response-internal-fields.js';
-export { createMetadataProtocolPlugin, assembleMetadataProtocol } from './plugin.js';
+export { createMetadataProtocolPlugin, assembleMetadataProtocol, shouldRunPlatformMigrations } from './plugin.js';
 export type { MetadataProtocolPluginOptions, AssembleMetadataProtocolOptions } from './plugin.js';
 // [#6710] The declared authoring channel — the explicit expression of ADR-0005's
 // "package author's own bootstrap channel", replacing the `environmentId ===
