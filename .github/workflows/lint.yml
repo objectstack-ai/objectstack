@@ -1663,6 +1663,42 @@ jobs:
       # committed snapshot; intentional changes regenerate it via
       # `pnpm --filter @objectstack/spec gen:api-surface`. Runs after the build
       # step above (reads the built dist).
+      # Published-README export gate (#9532, from #9517). Six published service
+      # READMEs documented a `.configure()` entry point on classes that exist
+      # nowhere in the repo — `PluginAudit`, `ServiceAnalytics`,
+      # `ServiceAutomation`, `ServiceCache`, `ServiceI18n`, `ServiceJob`. A
+      # reader following any of them wrote code that could not compile, and
+      # because each README is in its package's `files` array with `private`
+      # unset, those are the pages npm renders. Six instances of one defect is a
+      # missing gate, not six mistakes: nothing read a published README against
+      # its package's exports, so drift was free in both directions.
+      #
+      # WHY THIS JOB AND NOT THE LINT JOB. It resolves each documented symbol
+      # through the `exports` map to the BUILT `.d.ts` — the surface a consumer
+      # actually installs, and the only one that can show a subpath the README
+      # imports but `exports` never declares. That makes it build-dependent, so
+      # it sits after the two build steps above with the other dist-reading
+      # gate (`check:api-surface`, right below). A missing type entry is a HARD
+      # ERROR naming the build command, never a skip — a build-dependent gate
+      # that silently reads nothing reports "not measured" as if it were
+      # "measured and clean" (#4690).
+      #
+      # It adds no required context: this is a step in an existing job, so no
+      # open PR waits on a check whose name no head has ever reported (#9325).
+      #
+      # Scope was set by measurement, not taste — the card warned a naive
+      # version "will drown in false positives on prose and pseudo-code", and a
+      # muted gate is worse than none because it still reads as coverage. Of the
+      # 145 lines across 50 published READMEs carrying both `import` and an
+      # `@objectstack/` specifier, the 3 outside code fences are ALL prose false
+      # positives; `diff` fences read their `+` side only; CHANGELOG.md is out
+      # of scope because a changelog documents the past. Runs its own
+      # --self-test first, which drives the whole pipeline offline in both
+      # directions — a text scanner over prose fails by quietly matching
+      # nothing, and only a positive control tells that apart from a clean tree.
+      - name: Published-README export gate
+        run: pnpm check:published-readme-exports
+
       - name: Check @objectstack/spec public API surface
         run: pnpm --filter @objectstack/spec run check:api-surface
 
