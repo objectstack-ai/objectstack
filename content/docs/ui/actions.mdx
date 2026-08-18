@@ -343,7 +343,7 @@ The endpoint dispatches on the **declared `type`**, exactly like the MCP
 | `type` | Over REST |
 |:---|:---|
 | `script` | Runs the registered handler / inline body. |
-| `flow` | Runs `target` on the automation engine, with your identity forwarded (a `runAs: 'user'` flow enforces RLS as you). Dispatches the same flow as `POST /api/v1/automation/:target/trigger`, without having to know the flow name. ⚠️ It does **not** answer the same way: any unsuccessful outcome comes back as **400** `FLOW_FAILED`, where the trigger route separates a run that failed (400) from one that was never dispatched (404 / 409 / 422) — see [#9446](https://github.com/objectstack-ai/objectstack/issues/9446). |
+| `flow` | Runs `target` on the automation engine, with your identity forwarded (a `runAs: 'user'` flow enforces RLS as you). Dispatches the same flow as `POST /api/v1/automation/:target/trigger`, without having to know the flow name — **and answers the same way**: a run that ran and was rejected is **400** `FLOW_FAILED`, while a dispatch that never happened is separated out (**404** unknown flow / **409** `FLOW_DISABLED` / **422** `FLOW_NO_START_NODE`). See [Run a flow via API](/docs/automation/flows#run-a-flow-via-api) for the full table — it is one table, read by both doors. |
 | `api` | **400** — it dispatches on `target`; call that endpoint directly. |
 | `url` / `modal` / `form` | **400** — client-side navigation; there is nothing for the server to run. |
 
