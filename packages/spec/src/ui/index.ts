@@ -76,3 +76,9 @@ export * from './sharing.zod';
 // validated dead slot is the more convincing lie (#4583). Absence and survival
 // are both pinned in `interaction-config-retirement.test.ts`.
 // ---------------------------------------------------------------------------
+
+// The closed expression-bindable text-key vocabulary (objectui#4795
+// Direction 1, spec half — #9599): the four keys a SchemaRenderer evaluation
+// memo may evaluate at a node's top level, plus the per-component carriage
+// map the objectui memo consumes instead of hard-coding a twin list.
+export * from './expression-bindable-text-keys.zod';

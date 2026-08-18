@@ -12,6 +12,7 @@
     "component",
     "dashboard",
     "dataset",
+    "expression-bindable-text-keys",
     "report",
     "---Interaction & Layout---",
     "responsive",
