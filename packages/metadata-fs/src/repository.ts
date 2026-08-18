@@ -615,59 +615,6 @@ export class FileSystemRepository implements MetadataRepository {
   }
 
   /**
-   * Content-keyed reconciliation sweep — the backstop that makes external-edit
-   * detection a guarantee rather than a single chance (#9339, #7282).
-   *
-   * ## Why the watcher alone cannot be the guarantee
-   *
-   * An external write to `<root>/<type>/<name>.json` reaches a subscriber only
-   * if chokidar notices it, and under `usePolling` it gets **exactly one**
-   * opportunity to do so: the write advances the type directory's mtime once,
-   * and chokidar re-reads a directory only when its stat *strictly advances*,
-   * so every later poll compares an unchanged stat and can never rediscover
-   * the file. Measured on #9339 with a fault-injection harness: with the one
-   * read suppressed, fifteen further poll ticks never find the new file, and a
-   * 20s deadline and a 200s deadline buy the same single attempt. That is the
-   * structural reason behind #7282's empirical finding that the event is
-   * "never delivered, not slow", and why widening the deadline (#7208) and
-   * lowering `interval` were both spent before they were tried.
-   *
-   * At least six independent one-shot gates sit on that single attempt,
-   * spanning three layers — the kernel timestamp (the directory mtime does not
-   * strictly advance), chokidar's readdir throttle and readdir snapshot, and
-   * chokidar's emit gates (`_throttle('add')`, a stale `_pendingWrites` entry,
-   * the `awaitWriteFinish` ENOENT early return). Each one produces a
-   * byte-identical observable: no event, ever, for that path.
-   *
-   * ## Why this shape, and not a narrower one
-   *
-   * ⚠️ The six are indistinguishable at the point of failure, so **any fix
-   * that has to name which gate fired is a fix for one member of a family** —
-   * which is exactly how #7282 was closed and exactly why it reopened. This
-   * sweep never asks. It compares what is on disk against `heads`, the index
-   * that already defines what this repository believes it holds, and publishes
-   * the divergence through the same `handleFsChange` the watcher feeds. It is
-   * therefore robust across all six *by construction*, and equally across a
-   * seventh nobody has found: the only property it relies on is that the bytes
-   * on disk stopped matching the index.
-   *
-   * `put()` is unaffected and keeps its direct registration (`trackWrittenPath`
-   * calls `watcher.add` and bypasses the whole chain, which is why the `put()`
-   * half of this family was already closed by #7336 and the external-write half
-   * was not).
-   *
-   * ## Cost, and why it is bounded
-   *
-   * One pass over `<root>/<type>/*.json` per sweep — the same walk `start()`
-   * already performs once — with no retry loop inside it and no work at all
-   * when nothing diverged. Sweeps are chained, so they cannot overlap; the
-   * timer is `unref`ed and dies with `close()`; and it is armed only alongside
-   * the watcher, so a `disableWatch` repository pays nothing.
-   *
-   * Discovery is by content, never by stat: a stat pre-filter would reintroduce
-   * a time key of exactly the kind this replaces.
-   */
-  /**
    * Announce a sweep read that could not run — the non-silence half of #8895's
    * "discriminate or propagate".
    *
@@ -729,6 +676,59 @@ export class FileSystemRepository implements MetadataRepository {
     }
   }
 
+  /**
+   * Content-keyed reconciliation sweep — the backstop that makes external-edit
+   * detection a guarantee rather than a single chance (#9339, #7282).
+   *
+   * ## Why the watcher alone cannot be the guarantee
+   *
+   * An external write to `<root>/<type>/<name>.json` reaches a subscriber only
+   * if chokidar notices it, and under `usePolling` it gets **exactly one**
+   * opportunity to do so: the write advances the type directory's mtime once,
+   * and chokidar re-reads a directory only when its stat *strictly advances*,
+   * so every later poll compares an unchanged stat and can never rediscover
+   * the file. Measured on #9339 with a fault-injection harness: with the one
+   * read suppressed, fifteen further poll ticks never find the new file, and a
+   * 20s deadline and a 200s deadline buy the same single attempt. That is the
+   * structural reason behind #7282's empirical finding that the event is
+   * "never delivered, not slow", and why widening the deadline (#7208) and
+   * lowering `interval` were both spent before they were tried.
+   *
+   * At least six independent one-shot gates sit on that single attempt,
+   * spanning three layers — the kernel timestamp (the directory mtime does not
+   * strictly advance), chokidar's readdir throttle and readdir snapshot, and
+   * chokidar's emit gates (`_throttle('add')`, a stale `_pendingWrites` entry,
+   * the `awaitWriteFinish` ENOENT early return). Each one produces a
+   * byte-identical observable: no event, ever, for that path.
+   *
+   * ## Why this shape, and not a narrower one
+   *
+   * ⚠️ The six are indistinguishable at the point of failure, so **any fix
+   * that has to name which gate fired is a fix for one member of a family** —
+   * which is exactly how #7282 was closed and exactly why it reopened. This
+   * sweep never asks. It compares what is on disk against `heads`, the index
+   * that already defines what this repository believes it holds, and publishes
+   * the divergence through the same `handleFsChange` the watcher feeds. It is
+   * therefore robust across all six *by construction*, and equally across a
+   * seventh nobody has found: the only property it relies on is that the bytes
+   * on disk stopped matching the index.
+   *
+   * `put()` is unaffected and keeps its direct registration (`trackWrittenPath`
+   * calls `watcher.add` and bypasses the whole chain, which is why the `put()`
+   * half of this family was already closed by #7336 and the external-write half
+   * was not).
+   *
+   * ## Cost, and why it is bounded
+   *
+   * One pass over `<root>/<type>/*.json` per sweep — the same walk `start()`
+   * already performs once — with no retry loop inside it and no work at all
+   * when nothing diverged. Sweeps are chained, so they cannot overlap; the
+   * timer is `unref`ed and dies with `close()`; and it is armed only alongside
+   * the watcher, so a `disableWatch` repository pays nothing.
+   *
+   * Discovery is by content, never by stat: a stat pre-filter would reintroduce
+   * a time key of exactly the kind this replaces.
+   */
   private async resync(): Promise<void> {
     const root = this.layout.root;
     let entries: import('node:fs').Dirent[] = [];
