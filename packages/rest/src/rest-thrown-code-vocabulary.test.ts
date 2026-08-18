@@ -168,6 +168,12 @@ describe('#9232 §1 — a thrown code outside the vocabulary rides `declaredCode
 
         it(`${arm.name}: presence means demotion — never a member, never a copy of \`code\``, () => {
             const { body } = arm.answer(UNREGISTERED);
+            // ⚠️ `toBeTypeOf` first, and it is not decoration: every assertion
+            // below is vacuously true of `undefined` (an absent field is not a
+            // union member and is not equal to `code`), so without it this case
+            // stayed GREEN under the reverse verification that reddened its
+            // sibling — a pin that cannot fail for the defect it names.
+            expect(body.declaredCode).toBeTypeOf('string');
             // `ApiErrorSchema.declaredCode`'s documented semantics, held at this
             // door too so a consumer reading `declaredCode` at all knows the
             // serving side's ledger did not recognise the spelling.
