@@ -38,9 +38,9 @@ my-app/
 
 # Implementation Rules
 
-1.  **Strict Typing:** Always explicit types.
+1.  **Strict Typing:** Always define metadata through its schema, never as a bare literal.
     *   BAD: `const MyObject = { ... }`
-    *   GOOD: `export const MyObject: Object = { ... }`
+    *   GOOD: `export const MyObject = ObjectSchema.create({ ... })`
 
 2.  **Naming Conventions:**
     *   **File Names:** `snake_case` or `domain.feature.ts` (e.g., `account.object.ts`).
@@ -49,14 +49,14 @@ my-app/
 
 3.  **Code Pattern (Object Definition):**
     ```typescript
-    import { Object } from '@objectstack/spec/data';
+    import { ObjectSchema } from '@objectstack/spec/data';
 
-    export const AccountObject: Object = {
+    export const AccountObject = ObjectSchema.create({
       name: 'account',
       label: 'Corporate Account',
       enable: {
-        audit: true,
-        workflow: true
+        trackHistory: true,
+        files: true
       },
       fields: {
         name: { type: 'text', label: 'Account Name', required: true },
@@ -66,7 +66,7 @@ my-app/
         },
         owner: { type: 'lookup', reference: 'user' }
       }
-    };
+    });
     ```
 
 4.  **Code Pattern (App Config):**
