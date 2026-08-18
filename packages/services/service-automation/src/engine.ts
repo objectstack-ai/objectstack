@@ -3239,6 +3239,28 @@ export class AutomationEngine implements IAutomationService {
                 success: true,
                 output,
                 durationMs,
+                // [#9414] The flow author's own completion text, on the exit
+                // every TRIGGERED run leaves through. `AutomationResult`
+                // declares this pair as a general terminal-result feature —
+                // "`successMessage` is set on terminal success, `errorMessage`
+                // on failure" — but `resumeInternal` was the only producer, so
+                // the author's words reached a caller only when the run
+                // happened to pause and be resumed. A flow dispatched straight
+                // through `POST /api/v1/automation/:name/trigger` (or the
+                // legacy `trigger/:name` the SDK calls) carried nothing. Same
+                // declaration, two behaviours decided by ROUTE rather than by
+                // authoring — the shape ADR-0049's enforce-or-remove exists to
+                // stop, and this is the restoration half of it, not a new key.
+                //
+                // ⚠️ TERMINAL exits only, which is the whole boundary. The
+                // paused return below carries neither (the run has not
+                // finished; `resumeInternal` stamps the message when it later
+                // ends). Neither do the SKIP exits above — `condition_not_met`
+                // and `reentrancy_loop_guard` return `success: true` for a run
+                // that executed no node, so stamping "Opportunity created!" on
+                // one would be a toast about work nobody did. They carry no
+                // `summary` for exactly the same reason.
+                successMessage: flow.successMessage,
                 // #4354 — hand the counts back synchronously so a caller
                 // (a `subflow` roll-up, a runtime test asserting the sweep wrote
                 // something) never has to re-read the run to learn what it did.
@@ -3309,7 +3331,7 @@ export class AutomationEngine implements IAutomationService {
 
             // Error handling strategy
             if (flow.errorHandling?.strategy === 'retry') {
-                return this.retryExecution(flowName, context, startTime, flow.errorHandling);
+                return this.retryExecution(flowName, context, startTime, flow.errorHandling, flow.errorMessage);
             }
             return {
                 success: false,
@@ -3350,6 +3372,16 @@ export class AutomationEngine implements IAutomationService {
                 // documented as the run's lifecycle verdict, and already the
                 // value recorded in the log.
                 status: 'failed',
+                // [#9414] The author's failure text, BESIDE the raw `error`
+                // rather than instead of it. The transport folds `error` into
+                // the ADR-0112 message and carries this one in
+                // `error.details.errorMessage` — the single place the console
+                // reads it from (objectui `flowResponse.ts`, PR #4899). The
+                // envelope has no `data`, so a producer that leaves this absent
+                // does not degrade to a plainer toast: the consumer falls back
+                // to the raw node error text, which is what every non-screen
+                // flow showed until now.
+                errorMessage: flow.errorMessage,
                 // A failed run's counts matter MORE, not less: they say how far
                 // it got before dying — how many rows it had already written.
                 summary: logged.summary,
@@ -6117,12 +6149,20 @@ export class AutomationEngine implements IAutomationService {
      * the parameter as the parsed shape is what keeps a second set of defaults
      * from growing back here: a knob the spec stops defaulting becomes a
      * compile error, not a silent engine-side guess.
+     *
+     * `flowErrorMessage` is the author's terminal failure text
+     * (`flow.errorMessage`), passed for the same reason `errorHandling` is
+     * passed rather than re-read: `execute()` already holds the parsed flow,
+     * and the exhausted exit below must report the definition THIS dispatch
+     * started under — not whatever a hot-reload re-registered under the same
+     * name while the loop slept between attempts (#9414).
      */
     private async retryExecution(
         flowName: string,
         context: AutomationContext | undefined,
         startTime: number,
         errorHandling: NonNullable<FlowParsed['errorHandling']>,
+        flowErrorMessage: string | undefined,
     ): Promise<AutomationResult> {
         // `maxRetries >= 1` is guaranteed under `strategy: 'retry'` — the schema
         // refuses the zero-attempt spelling of "retry" (#4247), so reaching this
@@ -6159,7 +6199,20 @@ export class AutomationEngine implements IAutomationService {
         // same lifecycle verdict, and a transport answers it the same way.
         // Without it, a flow whose author chose `errorHandling.strategy:
         // 'retry'` would be the ONE failure shape that still rode HTTP 200.
-        return { success: false, error: lastError, durationMs: Date.now() - startTime, status: 'failed' };
+        //
+        // [#9414] `errorMessage` for the same structural reason: this is a
+        // DIFFERENT terminal exit from `execute()`'s own failure return — a
+        // flow under `strategy: 'retry'` is handed off above and never reaches
+        // that one — so a repair that stopped at `execute()` would leave the
+        // author's message missing for precisely the runs most likely to need
+        // it, the ones that failed over and over.
+        return {
+            success: false,
+            error: lastError,
+            durationMs: Date.now() - startTime,
+            status: 'failed',
+            errorMessage: flowErrorMessage,
+        };
     }
 
     /**
@@ -6290,7 +6343,13 @@ export class AutomationEngine implements IAutomationService {
 
             // #4354 — a retried run reports its own attempt's counts, not the
             // failed one's: `retryExecution` returns THIS result on success.
-            return { success: true, output, durationMs, summary: logged.summary };
+            //
+            // [#9414] …and because `retryExecution` returns THIS result, this
+            // is the exit a run that succeeded on attempt 2+ leaves through.
+            // The author's completion text has to be produced here as well, or
+            // `successMessage` would be a function of which attempt happened to
+            // work — the same route-dependent shape the fix is removing.
+            return { success: true, output, durationMs, successMessage: flow.successMessage, summary: logged.summary };
         } catch (err: unknown) {
             const errorMessage = err instanceof Error ? err.message : String(err);
             const durationMs = Date.now() - startTime;
@@ -6311,7 +6370,19 @@ export class AutomationEngine implements IAutomationService {
             // same ran-and-failed exit as the two above and is classified the
             // same: a selective classification is the one a later reader
             // mistakes for a rule.
-            return { success: false, error: errorMessage, durationMs, status: 'failed', summary: logged.summary };
+            //
+            // [#9414] `errorMessage: flow.errorMessage` rides along on the same
+            // argument, and note the two names are NOT the same thing here:
+            // the local `errorMessage` is the raw thrown text, `flow.errorMessage`
+            // is what the author wrote for a human to read.
+            return {
+                success: false,
+                error: errorMessage,
+                durationMs,
+                status: 'failed',
+                errorMessage: flow.errorMessage,
+                summary: logged.summary,
+            };
         }
     }
 }
