@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// check-runtime-services-index (#9604) -- hold the runtime-services chapter's
-// two INDEX lists to the pages that actually exist.
+// check-runtime-services-index (#9604, #9630) -- hold the runtime-services
+// chapter's two INDEX lists to the pages that actually exist, and each page's
+// documented registry slot to a real `registerService` call.
 //
 //   node scripts/check-runtime-services-index.mjs
 //   node scripts/check-runtime-services-index.mjs --self-test   # verify the checker itself
@@ -17,6 +18,9 @@
 //   2. `runtime-services/index.mdx`  -> "This chapter documents ..." bullets
 //   3. `kernel/index.mdx`            -> the `services.*` table
 //
+// and each page additionally claims the registry slot it is resolved by (see
+// "The fourth claim" below).
+//
 // None of the three is generated, so each drifts from the tree one edit at a
 // time, and nothing reads them: `check:docs-audit-scope` derives WHICH pages the
 // docs-accuracy audit covers, never whether an index enumerates them. #9604
@@ -30,6 +34,40 @@
 // chapter has no SMS page. `content/docs/` is also the corpus humans and AIs
 // copy from, so a short list is read as a fact about the platform's surface.
 // Declared = enforced.
+//
+// ## The fourth claim: which key `ctx.getService()` actually takes (#9630)
+//
+// The three enumerations above are all about page EXISTENCE and ORDER. None of
+// them reads a line of `packages/`, so every one of them stayed green over a
+// page that documented an accessor the kernel cannot resolve -- and one did:
+//
+//   * `storage-service.mdx` spelled its whole surface `services.storage.*`;
+//   * the chapter's own binding note tells the reader that no literal
+//     `services.*` object is injected and that plugin code goes through
+//     `ctx.getService(...)`;
+//   * the registered slot is `file-storage` (`storage-service-plugin.ts:237`),
+//     and NOTHING registers `storage`.
+//
+// Following both instructions together produced `ctx.getService('storage')`,
+// which throws `[Kernel] Service 'storage' not found`. Seven of the eight pages
+// were fine only because their accessor and their slot happened to be the same
+// word, so the chapter had exactly one unannounced exception and no way to
+// notice a second one.
+//
+// So each page now declares `- **Registry slot:** \`<key>\``, and this gate holds
+// that declaration to a production `registerService`/`registerServiceFactory`
+// call under `packages/`. Note what is deliberately NOT required: the slot does
+// not have to equal the accessor. `file-storage` is canonical -- it is the
+// `CoreServiceName` member, `CORE_SERVICE_PROVIDER` maps it, and the CLI, email
+// plugin and HTTP dispatcher all resolve it -- so a docs defect must never be
+// "fixed" by renaming the slot or adding a `registerService('storage', ...)`
+// alias. The rule is only: say which key you mean, and be right.
+//
+// Test files are excluded from the sweep on purpose: a slot only a fixture
+// registers is not a platform surface a reader can resolve. The sweep is also
+// multiline-aware, because `plugin-audit` puts its key on the line after the
+// `(` -- a line-at-a-time grep reports a confident zero for it, and a wrongly
+// measured absence is precisely the failure this check exists to rule out.
 //
 // ## What "derived" means here
 //
@@ -65,8 +103,8 @@
 // natural follow-up; until then a green here means "the three enumerations agree
 // with the tree", which is exactly what the summary line says.
 
-import { readFileSync, readdirSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { readFileSync, readdirSync, statSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { join, dirname, relative, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
@@ -75,13 +113,29 @@ const repoRoot = () => join(HERE, '..');
 
 const CHAPTER_DIR = 'content/docs/kernel/runtime-services';
 const KERNEL_INDEX = 'content/docs/kernel/index.mdx';
+const PACKAGES_DIR = 'packages';
 const PAGE_SUFFIX = '-service.mdx';
 const META_SUFFIX = '-service';
+
+/** Directories that never hold a production registration. */
+const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.turbo', '.next', 'coverage']);
+/** A registration in one of these is a fixture, not a platform surface. */
+const IS_TEST_PATH = (rel) =>
+  /\.(test|spec|conformance|e2e)\./.test(rel) || /(^|\/)(test|tests|__tests__|__mocks__|mocks|fixtures)\//.test(rel);
+
+// MULTILINE-AWARE ON PURPOSE. `\s*` spans newlines, so a registration whose key
+// sits on the line after the `(` is still found -- `plugin-audit` really is
+// written that way (`audit-plugin.ts:117`), and a `^.*registerService\('x'` style
+// line-at-a-time grep reports a confident ZERO for it. An absence measured with
+// the wrong tool is the failure mode this whole check exists to rule out, so the
+// self-test pins the split-line form explicitly.
+const REGISTER_RE = /register(?:Service|ServiceFactory)\s*(?:<[^>]*>)?\s*\(\s*['"`]([^'"`]+)['"`]/g;
 
 // ---------------------------------------------------------------------------
 // Derivation
 
-/** Accessor names from the pages that exist, plus each page's declared title. */
+/** Accessor names from the pages that exist, plus each page's declared title
+ *  and its declared registry slot. */
 export function readPages(chapterDir) {
   return readdirSync(chapterDir)
     .filter((f) => f.endsWith(PAGE_SUFFIX))
@@ -90,8 +144,35 @@ export function readPages(chapterDir) {
       const name = file.slice(0, -PAGE_SUFFIX.length);
       const text = readFileSync(join(chapterDir, file), 'utf8');
       const m = /^title:\s*(.+?)\s*$/m.exec(text);
-      return { name, file, title: m ? m[1] : null };
+      const slot = /^-\s+\*\*Registry slot:\*\*\s+`([^`]+)`/m.exec(text);
+      return { name, file, title: m ? m[1] : null, slot: slot ? slot[1] : null };
     });
+}
+
+/** Every service key a PRODUCTION `registerService` / `registerServiceFactory`
+ *  call registers under `packages/`, mapped to its call sites. */
+export function readRegisteredSlots(root) {
+  const found = new Map();
+  const pkgRoot = join(root, PACKAGES_DIR);
+  if (!existsSync(pkgRoot)) return found;
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir)) {
+      if (SKIP_DIRS.has(entry)) continue;
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) { walk(full); continue; }
+      if (!/\.(ts|tsx|mts|js|mjs)$/.test(entry) || entry.endsWith('.d.ts')) continue;
+      const rel = relative(root, full).split(sep).join('/');
+      if (IS_TEST_PATH(rel)) continue;
+      const text = readFileSync(full, 'utf8');
+      for (const m of text.matchAll(REGISTER_RE)) {
+        const line = text.slice(0, m.index).split('\n').length;
+        if (!found.has(m[1])) found.set(m[1], []);
+        found.get(m[1]).push(`${rel}:${line}`);
+      }
+    }
+  };
+  walk(pkgRoot);
+  return found;
 }
 
 /** `pages` entries that name a service page, in nav order. */
@@ -118,7 +199,7 @@ export function readKernelTable(kernelText) {
 const missing = (expected, actual) => expected.filter((n) => !actual.includes(n));
 const extra = (expected, actual) => actual.filter((n) => !expected.includes(n));
 
-export function check({ pages, metaOrder, chapterList, kernelTable }) {
+export function check({ pages, metaOrder, chapterList, kernelTable, registeredSlots }) {
   const findings = [];
   const add = (where, msg) => findings.push({ where, msg });
 
@@ -159,11 +240,46 @@ export function check({ pages, metaOrder, chapterList, kernelTable }) {
     }
   }
 
+  // 5. Each page names the registry slot it is really resolved by, and that
+  //    slot is a key something actually registers (#9630). The four checks
+  //    above hold page EXISTENCE and ORDER to each other; none of them reads a
+  //    single line of `packages/`, so a page could document a slot nothing has
+  //    ever registered and stay green -- which is exactly what shipped:
+  //    `services.storage` was resolvable only as `file-storage`, the accessor
+  //    and the slot differed on that one page alone, and the page never said
+  //    so. A reader following the chapter's own binding note wrote
+  //    `ctx.getService('storage')` and got a throw.
+  //
+  //    The accessor is NOT required to equal the slot -- `file-storage` is
+  //    canonical (`CoreServiceName`, `CORE_SERVICE_PROVIDER`, three internal
+  //    consumers) and renaming it to satisfy a docs page would be backwards.
+  //    What is required is that the page SAYS which one it is, and that what it
+  //    says is true.
+  if (registeredSlots) {
+    for (const p of pages) {
+      if (!p.slot) {
+        add(`${CHAPTER_DIR}/${p.file}`, `no \`- **Registry slot:** \`<key>\`\` bullet -- state the key \`ctx.getService()\` resolves this surface by (it is \`${p.name}\` unless the page says otherwise)`);
+        continue;
+      }
+      if (!registeredSlots.has(p.slot)) {
+        const near = [...registeredSlots.keys()].filter((k) => k.includes(p.name) || p.name.includes(k));
+        add(
+          `${CHAPTER_DIR}/${p.file}`,
+          `declares registry slot \`${p.slot}\`, but no production registerService() call under ${PACKAGES_DIR}/ registers that key`
+            + (near.length ? ` -- did you mean ${near.map((k) => `\`${k}\``).join(' / ')}?` : ''),
+        );
+      }
+    }
+  }
+
   return findings;
 }
 
-export function summarise({ pages, chapterList, kernelTable }) {
-  return `${pages.length} chapter page(s) vs meta.json "pages", ${chapterList.length} chapter-list bullet(s) and ${kernelTable.length} kernel/index.mdx table row(s)`;
+export function summarise({ pages, chapterList, kernelTable, registeredSlots }) {
+  const slots = registeredSlots
+    ? `, and ${pages.filter((p) => p.slot).length} declared registry slot(s) vs ${registeredSlots.size} registered key(s)`
+    : '';
+  return `${pages.length} chapter page(s) vs meta.json "pages", ${chapterList.length} chapter-list bullet(s) and ${kernelTable.length} kernel/index.mdx table row(s)${slots}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -174,8 +290,9 @@ function run(root) {
   const metaOrder = readMetaOrder(chapterDir);
   const chapterList = readChapterList(readFileSync(join(chapterDir, 'index.mdx'), 'utf8'));
   const kernelTable = readKernelTable(readFileSync(join(root, KERNEL_INDEX), 'utf8'));
+  const registeredSlots = readRegisteredSlots(root);
   if (pages.length === 0) throw new Error(`no ${PAGE_SUFFIX} pages found under ${CHAPTER_DIR} -- refusing to report OK over an empty set`);
-  const input = { pages, metaOrder, chapterList, kernelTable };
+  const input = { pages, metaOrder, chapterList, kernelTable, registeredSlots };
   return { findings: check(input), summary: summarise(input) };
 }
 
@@ -191,10 +308,12 @@ function main() {
     for (const f of findings) console.error(`  • ${f.where}: ${f.msg}`);
     console.error('\n  The pages on disk are the source of truth. Add the missing entry (or delete the stale');
     console.error('  one) so all three enumerations agree; the chapter list follows meta.json "pages" order.');
-    console.error('  The "Source of Truth" canonical-source list is deliberately not checked -- see the header.');
+    console.error('  A "Registry slot" finding is different: the page must name the key ctx.getService() really');
+  console.error('  resolves it by. Fix the PAGE, never the slot -- the registered key is the contract (#9630).');
+  console.error('  The "Source of Truth" canonical-source list is deliberately not checked -- see the header.');
     process.exit(1);
   }
-  console.log(`✓ check-runtime-services-index: ${summary} -- all three enumerations agree (Source-of-Truth list not in scope).`);
+  console.log(`✓ check-runtime-services-index: ${summary} -- all enumerations agree and every declared slot is really registered (Source-of-Truth list not in scope).`);
 }
 
 // ---------------------------------------------------------------------------
@@ -212,9 +331,34 @@ function selfTest() {
     mkdirSync(join(dir, 'content/docs/kernel'), { recursive: true });
 
     const names = ['data', 'email', 'sms'];
-    const writeTree = ({ pages = names, meta = names, list = names, table = names, titleFor = (n) => `services.${n}`, hrefFor = (n) => `${n}-service` } = {}) => {
+    // A synthetic `packages/` tree so check 5 has a registry to compare against.
+    // `email` is registered on the SAME line; `sms` is registered with its key on
+    // the line AFTER the `(` -- the `plugin-audit` shape that defeats a
+    // line-at-a-time grep. Both must be found, or the "no such slot" finding
+    // below would be a false positive rather than a measurement.
+    const pkg = join(dir, PACKAGES_DIR, 'svc/src');
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(join(pkg, 'plugin.ts'), [
+      "ctx.registerService('data', engine);",
+      "ctx.registerService('email', mailer);",
+      'ctx.registerService(',
+      "  'sms',",
+      '  texter,',
+      ');',
+      "ctx.registerServiceFactory('file-storage', async () => adapter);",
+    ].join('\n'));
+    // Registered ONLY by a test file: must NOT count as a platform surface.
+    mkdirSync(join(dir, PACKAGES_DIR, 'svc/src/__tests__'), { recursive: true });
+    writeFileSync(join(dir, PACKAGES_DIR, 'svc/src/__tests__/fake.ts'), "ctx.registerService('testonly', {});");
+
+    const slotFor = (n) => n;
+    const writeTree = ({ pages = names, meta = names, list = names, table = names, titleFor = (n) => `services.${n}`, hrefFor = (n) => `${n}-service`, slot = slotFor } = {}) => {
       for (const f of readdirSync(chapter)) rmSync(join(chapter, f), { force: true });
-      for (const n of pages) writeFileSync(join(chapter, `${n}${PAGE_SUFFIX}`), `---\ntitle: ${titleFor(n)}\n---\n`);
+      for (const n of pages) {
+        const declared = slot(n);
+        const bullet = declared === null ? '' : `\n- **Registry slot:** \`${declared}\` — resolve with \`ctx.getService('${declared}')\`.\n`;
+        writeFileSync(join(chapter, `${n}${PAGE_SUFFIX}`), `---\ntitle: ${titleFor(n)}\n---\n${bullet}`);
+      }
       writeFileSync(join(chapter, 'meta.json'), JSON.stringify({ pages: ['index', ...meta.map((n) => `${n}${META_SUFFIX}`), 'examples'] }));
       writeFileSync(join(chapter, 'index.mdx'), `# x\n\n${list.map((n) => `- \`services.${n}\``).join('\n')}\n\n## Source of Truth\n\n- Security: \`packages/spec/src/contracts/security-service.ts\`\n`);
       writeFileSync(join(dir, KERNEL_INDEX), `# k\n\n${table.map((n) => `| [\`services.${n}\`](/docs/kernel/runtime-services/${hrefFor(n)}) | stable | d |`).join('\n')}\n`);
@@ -241,6 +385,38 @@ function selfTest() {
     assert(lying.some((f) => f.msg.includes('expected "services.sms"')), 'a page whose title contradicts its filename is caught');
     assert(lying.every((f) => f.where.endsWith(`sms${PAGE_SUFFIX}`)), 'the title premise short-circuits: no set comparison runs over a page that lies about its name');
 
+    // ── Check 5: declared registry slot vs the real registry (#9630) ────────
+    // The defect itself: a page documenting an accessor that resolves to nothing.
+    const ghost = findingsFor({ slot: (n) => (n === 'sms' ? 'storage' : n) });
+    assert(
+      ghost.some((f) => f.where.endsWith(`sms${PAGE_SUFFIX}`) && f.msg.includes('no production registerService() call')),
+      `a page declaring a slot nothing registers is caught -- got ${JSON.stringify(ghost)}`,
+    );
+    assert(ghost.some((f) => f.msg.includes('did you mean')), 'the finding suggests the near-miss key rather than only rejecting');
+
+    // An accessor that legitimately differs from its slot is ACCEPTED -- the rule
+    // is "say which key you mean and be right", never "the two must match".
+    assert(
+      findingsFor({ slot: (n) => (n === 'sms' ? 'file-storage' : n) }).length === 0,
+      'a page whose slot deliberately differs from its accessor is silent when that slot is really registered',
+    );
+
+    // The split-line registration is REACHED, not merely tolerated: `sms` is only
+    // registered in the multiline form, so a line-at-a-time scan would flag it.
+    assert(findingsFor().every((f) => !f.where.endsWith(`sms${PAGE_SUFFIX}`)), 'a registration whose key sits on the next line is found (the plugin-audit shape)');
+
+    // A test-only registration does not make a slot real.
+    assert(
+      findingsFor({ slot: (n) => (n === 'sms' ? 'testonly' : n) }).some((f) => f.msg.includes('no production registerService() call')),
+      'a slot registered only under a test path is not accepted as a platform surface',
+    );
+
+    // A page that declares no slot at all is caught -- silence is not a pass.
+    assert(
+      findingsFor({ slot: (n) => (n === 'sms' ? null : n) }).some((f) => f.where.endsWith(`sms${PAGE_SUFFIX}`) && f.msg.includes('Registry slot')),
+      'a page with no Registry slot bullet is caught',
+    );
+
     // ── Refuses to report OK over nothing ───────────────────────────────────
     let threw = false;
     try { findingsFor({ pages: [], meta: [], list: [], table: [] }); } catch { threw = true; }
@@ -254,7 +430,7 @@ function selfTest() {
     for (const f of failures) console.error(`  • ${f}`);
     process.exit(1);
   }
-  console.log(`✓ check-runtime-services-index --self-test: ${checked} assertions over a temp fixture (real run() path); every limb -- chapter list, kernel table, meta.json, order, href, title premise, empty tree -- observed FAILING and observed silent.`);
+  console.log(`✓ check-runtime-services-index --self-test: ${checked} assertions over a temp fixture (real run() path); every limb -- chapter list, kernel table, meta.json, order, href, title premise, registry slot (incl. the split-line registration), empty tree -- observed FAILING and observed silent.`);
 }
 
 if (process.argv.includes('--self-test')) selfTest();

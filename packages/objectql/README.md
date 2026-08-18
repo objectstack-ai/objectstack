@@ -60,10 +60,12 @@ for (const obj of objects) {
 ### Schema Registry
 
 ```typescript
-import { SchemaRegistry, computeFQN } from '@objectstack/objectql';
+import { computeFQN, type SchemaRegistry } from '@objectstack/objectql';
 
-// Register an object under a namespace
-SchemaRegistry.registerObject(taskDef, 'com.acme.todo', 'todo');
+// `registerObject` is an INSTANCE method — reach the engine's registry.
+// Signature: (schema, packageId, namespace?, ownership?, priority?)
+const registry: SchemaRegistry = engine.registry;
+registry.registerObject(taskDef, 'com.acme.todo', 'todo');
 
 // Resolve FQN
 computeFQN('todo', 'task'); // => 'todo__task'

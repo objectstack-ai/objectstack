@@ -11,7 +11,7 @@ There are **two upgrades** on this platform, and they run on separate clocks:
 | Versioned by | our release train (`17.0.0`) | your own catalog |
 | Whose cadence | ours | yours |
 | The upgrade action | move the image tag, restart | `os migrate meta --from 16`, then rebuild and ship |
-| Touches your metadata? | no | yes — it rewrites your source |
+| Touches your metadata? | no | yes — you edit your source, guided by the tool's change list |
 
 Most upgrade questions are really the question *which of these am I doing*. You
 can do either one alone. A platform move does not rewrite your app, and
@@ -88,7 +88,7 @@ as it reads them, emitting a deprecation notice per conversion. **That window is
 exactly one major wide.** Metadata authored against the previous major loads and
 runs; a shape retired one major further back is *rejected*, and the rejection
 carries the fix — the old spelling, the new spelling, and the command that
-rewrites your sources.
+lists every site to edit.
 
 The practical consequence:
 
@@ -131,25 +131,34 @@ Useful flags:
 | Flag | What it does |
 | :--- | :--- |
 | `--step` | Report each major's hop separately, so a failure bisects to the exact major |
-| `--out migrated.stack.json` | Write the migrated stack instead of only reporting it |
+| `--out migrated.stack.json` | Also write the migrated stack as a JSON snapshot — the only file the command writes |
 | `--to 16` | Stop at an intermediate major instead of this runtime's |
 | `--json` | Machine-readable output, for CI or an agent |
 
-It rewrites **your source** and reads no database. (Its sibling,
+It reads **your source** and no database. (Its sibling,
 `os migrate meta --stored`, does the opposite — it rewrites one deployment's
 stored metadata rows and reads no config. The two are mutually exclusive.)
 
 ### What it does not do — read the output
 
 <Callout type="warn">
-`os migrate meta` applies the **mechanical** rewrites and never guesses at the
-rest. Changes that cannot be converted losslessly are reported as structured
-to-dos for you to resolve — they are not applied, and a clean-looking run can
-still carry dozens of them. The command's output is the work list, not a receipt.
+**`os migrate meta` does not rewrite your source files.** It replays the chain
+over the loaded stack *in memory* and reports the diff; the only file it writes
+is `--out`, a JSON snapshot. Porting the listed edits into your own `.ts`
+sources is your work — use `--out` as the oracle you diff against, never as the
+file you ship.
+</Callout>
+
+<Callout type="warn">
+It also applies the **mechanical** changes only, and never guesses at the rest.
+Changes that cannot be converted losslessly are reported as structured to-dos
+for you to resolve — and a clean-looking run can still carry dozens of them. The
+command's output is the work list, not a receipt.
 </Callout>
 
 That split is the reason the per-major checklists below still matter: renames
-and retired keys the tool handles; decisions it cannot make for you stay yours.
+and retired keys the tool enumerates for you; decisions it cannot make for you
+stay yours.
 The run also ends by naming the per-deployment **data** migrations that remain
 (`os migrate files-to-references`, `os migrate value-shapes`, and friends) —
 scoped to the field classes your metadata actually declares. It reads no
@@ -159,8 +168,9 @@ has already done.
 ### The loop
 
 ```bash
-os migrate meta --from 15     # 1. rewrite sources; read the to-dos
-                              # 2. resolve them, and the checklist items below
+os migrate meta --from 15     # 1. read the mechanical change list and the to-dos
+                              # 2. apply the edits by hand; resolve the to-dos
+                              #    and the checklist items below
 os validate                   # 3. the gate — schema, CEL predicates, widget bindings
 os build                      # 4. compile to dist/objectstack.json
                               # 5. ship the artifact; restart

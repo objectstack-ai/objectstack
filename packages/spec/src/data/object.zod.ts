@@ -141,13 +141,13 @@ const CAPABILITIES_RETIRED_KEY_GUIDANCE: Record<string, string> = {
     'soft-delete that never ran). Delete the key. For recoverability use per-field ' +
     '`trackHistory` (audit trail) or a `lifecycle` policy; soft delete is parked at ' +
     '#3146 and, if built, returns as a live enforced flag (ADR-0049 prune-or-build). ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   mru:
     '`enable.mru` was removed from @objectstack/spec in the 16.x line (#2377/#3207, ' +
     'ADR-0049) — Most-Recently-Used tracking was never implemented; no reader ' +
     'existed, so the flag changed nothing. Delete the key. If MRU tracking is ' +
     'built it returns as a live enforced flag (ADR-0049 prune-or-build). ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
 };
 
 /**
@@ -439,7 +439,7 @@ export const IndexSchema = lazySchema(() => strictObject({
     'output. Delete the key. The index method is the driver/dialect\'s decision (Postgres ' +
     'defaults to B-tree; `gin`/`gist`/`fulltext` are dialect-specific and are chosen by a ' +
     'database-layer migration when a workload actually needs one). ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   partial: retiredKey(
     '`indexes[].partial` was removed in @objectstack/spec 17.0.0 (#5248, #4943, ADR-0049) — no ' +
@@ -449,7 +449,7 @@ export const IndexSchema = lazySchema(() => strictObject({
     'WHERE <predicate>` from a runtime migration (this is what `metadata-protocol`\'s ' +
     '`ensureOverlayIndex` already does for `sys_metadata`). Drift detection is unaffected — it ' +
     'reads partiality back from the database\'s own DDL, never from this key. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
 }));
 
@@ -1244,8 +1244,8 @@ const MANAGED_BY_SYSTEM_RETIRED =
   + '`userActions` block that existed only to re-open create/edit/delete is now redundant '
   + 'and can be deleted; keep it only to NARROW. CSV `import` is deliberately NOT in that '
   + 'default (#4671): it stays opt-in per object via `userActions: { import: true }`, which '
-  + 'is what a v16 `system` object already resolved to. Run `os migrate meta --from 16` to '
-  + 'rewrite existing sources automatically.';
+  + 'is what a v16 `system` object already resolved to. '
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
 /**
  * Known-confusable schema keys → precise authoring guidance.

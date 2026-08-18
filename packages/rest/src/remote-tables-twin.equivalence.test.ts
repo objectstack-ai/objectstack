@@ -93,6 +93,15 @@ const REMOTE: IntrospectedSchema = {
   },
 };
 
+/** The credential the admin spelling's authentication floor admits (#9391). */
+const SESSION = 'Bearer twin-session';
+const authService = {
+  api: {
+    getSession: async ({ headers }: { headers: Headers }) =>
+      headers?.get?.('authorization') === SESSION ? { user: { id: 'u_twin' } } : null,
+  },
+};
+
 /**
  * One server, one service, both registrars — the point of the fixture.
  *
@@ -112,6 +121,12 @@ function mountBoth() {
   const ctx = {
     getService: (name: string) => {
       if (name === 'external-datasource') return service;
+      // The admin spelling requires authentication (#9391) and resolves the
+      // caller through the platform's shared resolver, so the fixture wires an
+      // `auth` service that admits `SESSION` below. Without it this file would
+      // compare a 200 against a 401 and read the difference as a request-shape
+      // divergence — which is the one thing it exists NOT to confuse.
+      if (name === 'auth') return authService;
       throw new Error(`no service: ${name}`);
     },
   } as any;
@@ -133,7 +148,9 @@ interface Reading {
 
 /** Drive one spelling and read back the table set it answers with. */
 async function read(app: any, spelling: keyof typeof SPELLING, qs: string): Promise<Reading> {
-  const res = await app.fetch(new Request(`http://local${SPELLING[spelling](qs)}`));
+  const res = await app.fetch(
+    new Request(`http://local${SPELLING[spelling](qs)}`, { headers: { authorization: SESSION } }),
+  );
   const body = (await res.json()) as { success: boolean; data?: { tables?: Reading['tables'] } };
   return { status: res.status, tables: body.data?.tables ?? [] };
 }

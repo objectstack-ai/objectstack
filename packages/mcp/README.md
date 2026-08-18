@@ -37,10 +37,9 @@ import { MCPServerPlugin } from '@objectstack/mcp';
 
 const stack = defineStack({
   plugins: [
-    MCPServerPlugin.configure({
-      serverName: 'objectstack-server',
+    new MCPServerPlugin({
+      name: 'objectstack-server',
       version: '1.0.0',
-      autoRegisterTools: true,
     }),
   ],
 });
@@ -48,30 +47,34 @@ const stack = defineStack({
 
 ## Configuration
 
-```typescript
-interface MCPServerConfig {
-  /** Server name (shown to AI clients) */
-  serverName?: string;
+The constructor takes `MCPServerPluginOptions`:
 
-  /** Server version */
+```typescript
+interface MCPServerPluginOptions {
+  /** Override MCP server name. Defaults to 'objectstack'. */
+  name?: string;
+
+  /** Override MCP server version. Defaults to package version. */
   version?: string;
 
-  /** Auto-register tools from actions and flows */
-  autoRegisterTools?: boolean;
-
-  /** Auto-expose objects as resources */
-  autoExposeObjects?: boolean;
-
-  /** Enable streaming for large responses */
-  enableStreaming?: boolean;
-
-  /** Transport mechanism ('stdio' | 'http') */
+  /** Transport mode: 'stdio' (default). */
   transport?: 'stdio' | 'http';
 
-  /** HTTP port (if transport is 'http') */
-  port?: number;
+  /** Whether to auto-start the MCP server. Defaults to false. */
+  autoStart?: boolean;
+
+  /** Custom instructions for the MCP server. */
+  instructions?: string;
 }
 ```
+
+Tools and resources are **not** opted into per-option — the plugin bridges the
+AI tool registry, metadata service and data engine automatically when it
+starts. The HTTP surface needs no start at all: it is served per-request at
+`/api/v1/mcp` (default-on; `OS_MCP_SERVER_ENABLED=false` opts out).
+
+Environment overrides: `OS_MCP_SERVER_NAME`, `OS_MCP_SERVER_TRANSPORT`,
+`OS_MCP_SERVER_ENABLED`.
 
 ## MCP Tools
 
@@ -389,43 +392,57 @@ Configure in Cline settings:
 ### Stdio Transport (Default)
 
 ```typescript
-// server.ts
+// objectstack.config.ts
 import { defineStack } from '@objectstack/spec';
+import { defineDatasource } from '@objectstack/spec/data';
 import { MCPServerPlugin } from '@objectstack/mcp';
-import { DriverSql } from '@objectstack/driver-sql';
 
-const stack = defineStack({
-  driver: DriverSql.configure({
-    client: 'better-sqlite3',
-    connection: { filename: process.env.DATABASE_URL ?? './data/app.db' },
-  }),
+export default defineStack({
+  manifest: {
+    id: 'com.example.crm',
+    namespace: 'crm',
+    version: '0.1.0',
+    type: 'app',
+    name: 'My CRM',
+    engines: { protocol: '^17' },
+  },
+  // Optional: the CLI already anchors a persistent SQLite database at
+  // `<project>/.objectstack/data/standalone.db`. Declare a datasource only
+  // to point somewhere else.
+  datasources: [
+    defineDatasource({
+      name: 'primary',
+      label: 'Primary',
+      driver: 'sqlite',
+      config: { filename: '.objectstack/data/app.db' },
+    }),
+  ],
   plugins: [
-    MCPServerPlugin.configure({
-      serverName: 'my-crm',
+    new MCPServerPlugin({
+      name: 'my-crm',
       transport: 'stdio', // Claude Desktop, Cursor, Cline
+      autoStart: true,    // stdio is a long-lived transport, so start it
     }),
   ],
 });
-
-await stack.boot();
 ```
+
+Run it with the CLI (`os dev` / `os serve`) — `defineStack()` returns the
+metadata definition; the CLI boots the kernel from it.
 
 ### HTTP Transport
 
 ```typescript
-const stack = defineStack({
-  driver: DriverSql.configure({ /* ... */ }),
+export default defineStack({
+  manifest: { /* ... */ },
   plugins: [
-    MCPServerPlugin.configure({
-      serverName: 'my-crm',
+    new MCPServerPlugin({
+      name: 'my-crm',
       transport: 'http',
-      port: 3100,
     }),
   ],
 });
-
-await stack.boot();
-// MCP server running on http://localhost:3100
+// Served per-request by the running server at /api/v1/mcp
 ```
 
 ## Advanced Features
@@ -549,13 +566,13 @@ The MCP server exposes these capabilities:
 
 ## Debugging
 
-Enable debug logging:
+The plugin logs through the kernel logger — there is no `debug` option. The
+MCP surface is controlled by environment variables:
 
-```typescript
-MCPServerPlugin.configure({
-  serverName: 'my-crm',
-  debug: true, // Log all MCP messages
-});
+```bash
+OS_MCP_SERVER_ENABLED=true   # explicit true also auto-starts the stdio transport
+OS_MCP_SERVER_NAME=my-crm    # override the server name
+OS_MCP_SERVER_TRANSPORT=http # override the transport
 ```
 
 View MCP messages in client:
@@ -566,50 +583,33 @@ View MCP messages in client:
 ## Example: Complete CRM Server
 
 ```typescript
-import { defineStack, defineTool } from '@objectstack/spec';
+// objectstack.config.ts
+import { defineStack } from '@objectstack/spec';
 import { MCPServerPlugin } from '@objectstack/mcp';
 
-const stack = defineStack({
-  driver: /* ... */,
-  plugins: [
-    MCPServerPlugin.configure({
-      serverName: 'crm-assistant',
-      autoRegisterTools: true,
-    }),
-  ],
-});
+import * as objects from './src/objects/index.js';
+import { allActions } from './src/actions/index.js';
 
-await stack.boot();
-
-const mcp = stack.kernel.getService('mcp');
-
-// Register custom tools
-mcp.registerTool(defineTool({
-  name: 'forecast_revenue',
-  description: 'Forecast revenue based on pipeline',
-  async execute() {
-    // Implementation
+export default defineStack({
+  manifest: {
+    id: 'com.example.crm',
+    namespace: 'crm',
+    version: '0.1.0',
+    type: 'app',
+    name: 'CRM Assistant',
+    engines: { protocol: '^17' },
   },
-}));
-
-// Register custom resources
-mcp.registerResource({
-  uri: 'objectstack://dashboards/sales',
-  name: 'Sales Dashboard',
-  async read() {
-    // Implementation
-  },
-});
-
-// Register prompts
-mcp.registerPrompt({
-  name: 'weekly_report',
-  description: 'Generate weekly sales report',
-  async render() {
-    // Implementation
-  },
+  objects: Object.values(objects),
+  // Your actions become MCP tools — the plugin bridges them at start.
+  actions: allActions,
+  plugins: [new MCPServerPlugin({ name: 'crm-assistant' })],
 });
 ```
+
+There is no imperative "register a tool" call to make: the plugin derives the
+tool set from your metadata. The bridging helpers it uses —
+`registerObjectTools`, `registerActionTools` and `registerSkillPrompts` — are
+exported for hosts that drive an `MCPServerRuntime` directly.
 
 ## License
 

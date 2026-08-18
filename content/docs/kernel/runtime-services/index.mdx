@@ -12,6 +12,15 @@ repo's runtime, hook bodies reach scoped data operations through `ctx.api`,
 while plugin code resolves any registered service through `ctx.getService(...)` —
 a literal `services.*` object is not injected into hook contexts by the open
 framework today. Managed runtimes provide the `services.*` binding directly.
+
+**`services.*` is the accessor spelling, not necessarily the registry slot.** The name
+after `services.` is what this chapter documents each surface under; the string you pass
+to `ctx.getService(...)` is the slot the implementation is registered by. They are the
+same word for every service below **except storage**, whose slot is `file-storage`
+(there is no `storage` alias — see
+[`services.storage`](/docs/kernel/runtime-services/storage-service)). Each page states
+its own slot in a **Registry slot** bullet; `scripts/check-runtime-services-index.mjs`
+holds those to a real `registerService` call.
 </Callout>
 
 This chapter documents the runtime `services.*` APIs used in hook/action/flow/plugin code:

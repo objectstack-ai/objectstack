@@ -141,7 +141,7 @@
       "title": "Gated downloads: 401 anonymous, 403 parent-invisible, signed URL for the entitled — per gating class (attachments-scope / field-owned / public_read opt-out / ungated)",
       "since": "v15.1",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (uploader/owner)", "signed-up member who cannot read the parent record", "anonymous"],
@@ -155,8 +155,9 @@
           "why": "qa_vault (private + files) is the invisible parent both 403 clauses need, qa_shared is the entitled contrast, and the two personas are the non-admin principals the deny side must be checked as. Without the recipe both deny clauses are blocked(fixture) on stock seeds."
         },
         "knownGaps": [
+          "MARKER (QA run #9401 finding 5, carried here so runs stop re-deriving it): the CROSS-TENANT clauses of this area are structurally unprovable in the OSS workspace. `@objectstack/organizations` is cloud-private, so the dogfood matrix's cross-tenant block is gated behind `describe.skipIf(!organizationsAvailable)` and skips BY DESIGN here. That is blocked(dependency), never a pass and never a defect. A run that is supposed to ship the package sets OS_TEST_MULTI_ORG_ENABLED=1, which turns the skip into a hard failure instead of a silent one.",
           "CLOSED by the qa-scratch-authz recipe (#7670): stock showcase's only files-enabled object (showcase_project) is public_read_write, so no stock parent is invisible to any member. The 403 deny side is otherwise reachable only through the pinned dogfood fixture (att_secret, private owner-scoped: fixtures/attachments-fixture.ts). Run the recipe; fall back to the dogfood pin only if it cannot be provisioned, and record which one the verdict rests on.",
-          "no stock seed mints an acl='public_read' attachments file (the anonymous-embed opt-out) — author one via a system write on a qa_vault-attached file (the recipe gives you the parent; the acl flip is still a system write) or accept the unit-test coverage in storage-routes.test.ts for that variant"
+          "[API half CLOSED by #9483] no stock seed mints an acl='public_read' attachments file (the anonymous-embed opt-out) — author one via a system write on a qa_vault-attached file (the recipe gives you the parent; the acl flip is still a system write) or accept the unit-test coverage in storage-routes.test.ts for that variant. What changed: attachments-public-read-acl.dogfood.test.ts performs that system flip at runtime on its own private-parent fixture and asserts both sides plus the flip back, so clause 3 no longer waits on a stock seed. Landing one in the showcase seeds would additionally unblock the BROWSER half (clause 4), which a runtime-only file cannot reach."
         ]
       },
       "steps": [
@@ -205,7 +206,7 @@
         "a deny that surfaces in the panel as 'Download failed (403)' instead of the mapped copy means the error-envelope dialect broke (#3689 note in the panel) — file it against objectui, not storage"
       ],
       "traps": ["wrong-persona", "dispatcher-vs-hono-route", "stale-console-bundle"],
-      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts" },
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts (the CLOSED side — clauses 0, 1 and 2: anonymous 401 AUTH_REQUIRED on both download routes, 403 ATTACHMENT_DOWNLOAD_DENIED for an authenticated member who cannot read the parent, and the uploader/entitled 200 in the {success, data:{url}} envelope) + packages/qa/dogfood/test/attachments-public-read-acl.dogfood.test.ts (clause 3, the OPEN side, asserted on ONE attachments-scope file attached to a private parent: the anonymous capability URL is 401 BEFORE the flip, 302 AFTER acl='public_read' — and the redirect is FOLLOWED anonymously and the served bytes compared, because a 302 into a wall would satisfy a status-only assertion — the /url sibling likewise reopens in its declared envelope, and flipping the acl back to 'private' re-closes both routes, which is what shows the acl VALUE is the cause rather than state accrued by the earlier requests. A sibling file on the SAME parent with the same uploader and scope keeps its 401/403, so the opt-out is per FILE and not a global fail-open. The TTL is read back out of the minted capability URL to prove WHICH branch ran: public_read returns presignedTtl (measured >3000s) while an authorized gated grant returns downloadTtl (measured <=300s) — a distinction no status code exposes, so a widened gate admitting the anonymous caller through the AUTHORIZED path would still be caught. The field-owned gating class (ref_object/ref_id, ADR-0104 D3 wave 2) is covered on both sides too, including its distinct FILE_DOWNLOAD_DENIED deny code, which is the evidence that the field-owned arm — not the attachments arm — is the one that ran). STILL MANUAL: clause 4, the browser's friendly denial copy in objectui's RecordAttachmentsPanel, is a screenshot oracle over a console bundle this repo does not build. It has NO pin, must be hand-driven, and the clause-3 pin must NOT be read as covering it." },
       "source": [
         "docs/plans/release-15.1-test-plan.md §A12 / §C1 (#2755/#2970)",
         "packages/services/service-storage/src/storage-routes.ts (authorizeDownload: gating classes, verdict→status mapping, downloadTtl vs presignedTtl)",
@@ -214,7 +215,13 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item enumerating the download gating classes straight from authorizeDownload's source (attachments-scope / field-owned / public_read opt-out) with the exact deny codes and TTL contrast", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-11", "change": "opted into the new area-level qa-scratch-authz provisioning recipe (#7670): the standing 'no private files-enabled parent on stock showcase' gap that would force blocked(fixture) on both 403 clauses is now payable at runtime instead of being rediscovered every sweep. knownGaps records it as CLOSED-by-recipe with the dogfood pin as the named fallback, and asks the run to say which of the two its verdict rests on", "ref": "#7670" }
+        { "revision": 2, "date": "2026-08-11", "change": "opted into the new area-level qa-scratch-authz provisioning recipe (#7670): the standing 'no private files-enabled parent on stock showcase' gap that would force blocked(fixture) on both 403 clauses is now payable at runtime instead of being rediscovered every sweep. knownGaps records it as CLOSED-by-recipe with the dogfood pin as the named fallback, and asks the run to say which of the two its verdict rests on", "ref": "#7670" },
+        {
+          "revision": 3,
+          "date": "2026-08-18",
+          "change": "clause 3 (acl='public_read' reopens the anonymous capability URL) pinned — QA run #9401 scored this item partial with the OPEN side of the anonymous gate unpinned, which is the half a deny-only suite cannot see: a download-authz suite made only of refusals stays green on a surface that has started refusing everything. automated.ref now names the both-sides pin, records that the TTL branch is read out of the minted URL so the public_read early return is distinguishable from an authorized grant, and states that clause 4 (the panel's denial copy) stays manual with no pin. knownGaps marks the public_read seed gap CLOSED for the API half only, and carries the run's cross-tenant marker so it is not re-derived every wave.",
+          "ref": "#9483"
+        }
       ]
     },
     {
@@ -222,7 +229,7 @@
       "title": "sys_attachment reads inherit parent visibility: a restricted member sees neither rows nor counts for invisible parents",
       "since": "v15.1",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": ["member who can read the parent record", "member who cannot read the parent record"],
@@ -236,6 +243,7 @@
           "why": "the whole item turns on a parent one persona cannot read; qa_vault (private + files) is that parent, and persona B is the restricted member. On stock seeds there is no such pair."
         },
         "knownGaps": [
+          "MARKER (QA run #9401 finding 5, carried here so runs stop re-deriving it): the CROSS-TENANT clauses of this area are structurally unprovable in the OSS workspace. `@objectstack/organizations` is cloud-private, so the dogfood matrix's cross-tenant block is gated behind `describe.skipIf(!organizationsAvailable)` and skips BY DESIGN here. That is blocked(dependency), never a pass and never a defect. A run that is supposed to ship the package sets OS_TEST_MULTI_ORG_ENABLED=1, which turns the skip into a hard failure instead of a silent one.",
           "CLOSED by the qa-scratch-authz recipe (#7670): stock showcase's files-enabled parent (showcase_project) is public_read_write — every member sees every project, so the invisible-parent case is not demonstrable on stock seeds, and the pinned dogfood matrix proves it only on its own private fixture (att_secret). The recipe provisions the private files-enabled parent at runtime; landing one in the showcase seeds proper would retire this gap entirely, and remains the better long-term fix.",
           "the READ_SCAN_LIMIT fail-closed branch (clause 4) needs a broad read past the 2000-candidate cap — run #7635 reached it by bulking to 2100 join rows on the scratch parent. Budget for that write volume, or the clause degrades to 'the warning never appeared', which is indistinguishable from a silent leak."
         ]
@@ -279,7 +287,7 @@
         "rows filtered but `total` counting the raw table is equally a FAIL (the middleware-not-hook design note in attachment-access-hooks.ts exists because a find-hook leaves count() unfiltered)"
       ],
       "traps": ["wrong-persona"],
-      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts" },
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts (clauses 0 and 2: the restricted member's scoped list is empty for an invisible parent while the entitled one is not, and a by-id read of the hidden row is 403/404) + packages/qa/dogfood/test/attachments-parent-rls-count-parity.dogfood.test.ts (clause 1, the COUNT: the restricted member's list `total` excludes invisible-parent rows while the entitled caller's includes them on the same request, engine.count() under the member's OWN resolved authz context (resolveAuthzContext, not a hand-built principal) is filtered identically, a count NARROWED to the invisible parent answers 0 for the member and the true number for admin, and paging the member all the way through yields exactly the reported total — so rows-vs-count parity is asserted as one fact rather than two numbers that happen to agree. ⚠ THE TRAP, and why every assertion passes $top: protocol.findData only calls engine.count() when the request carries a PAGE LIMIT; without one it sets total = records.length, which is trivially self-consistent and stays green with count() fully unfiltered because the count path never runs. Each assertion therefore also requires total > records.length, proving the count call happened rather than assuming it) + packages/qa/dogfood/test/attachments-parent-rls-scan-cap.dogfood.test.ts (clause 3, the READ_SCAN_LIMIT half: with >2000 candidate join rows the broad read's pre-scan is truncated, and the pin asserts the '[storage] attachment read visibility ... 2000-row cap ... fail-closed' warning fires (the clause's own log oracle — silence plus leaked rows is the failure), that visible rows are DROPPED rather than the un-scanned remainder being admitted, that the invisible-parent row never appears, that every row returned has a genuinely resolvable visible parent, and that a row the broad read omitted is still returned by a SCOPED read that does not hit the cap — the contrast without which 'missing' would be equally explained by 'invisible anyway'. The seed puts visible rows at BOTH ENDS of the insertion order with the filler bulk between, because the pre-scan has no ORDER BY and the driver was measured NOT to return insertion order; the control asserts the window is full and some visible parent is outside it rather than trusting either). ALSO PINNED, as the reachable half of clause 3's fail-compute arm: a row whose parent RECORD no longer resolves (a dangling parent_id, what a hard-deleted parent leaves behind) is excluded from both rows and count. NOT REACHED, and not to be read as covered: (a) the unknown parent_OBJECT arm (`catch { visible = [] }`) has no reachable fixture from this lane — the #2727 enable.files gate refuses to create a sys_attachment row against a non-files object even under system context (measured: \"File attachments are not enabled for object 'att_ghost_object'\"), so such a row cannot be seeded; (b) the middleware-level outer catch ('filter failed, denying all') is not provokable through the API, since a where malformed enough to break the system pre-scan also fails the caller's own read and surfaces as a 4xx instead." },
       "source": [
         "docs/plans/release-15.1-test-plan.md §C3 (#2970)",
         "packages/services/service-storage/src/attachment-access-hooks.ts (installAttachmentReadVisibility: middleware over find/findOne/count/aggregate, deny-all sentinel, READ_SCAN_LIMIT fail-closed cap)",
@@ -287,7 +295,13 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item grounded in the read-visibility middleware source (count-parity rationale, fail-closed sentinel and scan cap) and the dogfood matrix clause (c)", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-11", "change": "opted into the area-level qa-scratch-authz provisioning recipe (#7670) — the invisible-parent pair this item is entirely about is now provisionable at runtime rather than blocked on stock seeds. Added the scan-cap volume note run #7635 paid for (2100 join rows to reach READ_SCAN_LIMIT), so clause 4 is not silently degraded to an unreached branch next run", "ref": "#7670" }
+        { "revision": 2, "date": "2026-08-11", "change": "opted into the area-level qa-scratch-authz provisioning recipe (#7670) — the invisible-parent pair this item is entirely about is now provisionable at runtime rather than blocked on stock seeds. Added the scan-cap volume note run #7635 paid for (2100 join rows to reach READ_SCAN_LIMIT), so clause 4 is not silently degraded to an unreached branch next run", "ref": "#7670" },
+        {
+          "revision": 3,
+          "date": "2026-08-18",
+          "change": "clauses 1 and 3 pinned — QA run #9401 scored this item partial with the COUNT and the fail-closed cap unpinned. A count leak is a real RLS leak: `total` comes from engine.count(), not the find path, which is exactly why the visibility rule is a data middleware over find/findOne/count/aggregate rather than a find hook, and a suite reading only `records` cannot tell the two apart. automated.ref now names the count-parity and scan-cap pins, records the $top trap that makes a count assertion vacuous without a page limit, and enumerates the two fail-closed arms that remain unreachable from this lane so neither is read as covered. Ablation-verified: dropping 'count' from READ_OPS turns 5 of the 7 count-parity tests red and leaves the row-only assertions green.",
+          "ref": "#9483"
+        }
       ]
     },
     {
@@ -295,7 +309,7 @@
       "title": "Attaching requires EDIT on the parent record; deleting requires uploader-or-parent-editor; unscoped multi-delete is refused outright",
       "since": "v15.1",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": ["member with EDIT on the parent", "member with READ but not EDIT on the parent", "member who uploaded the attachment", "member who is neither uploader nor parent editor"],
@@ -310,6 +324,8 @@
           "why": "persona A is provisioned read-but-NOT-edit precisely for the attach gate (the whole point of clause 0: read inherits parent READ, attach requires parent EDIT — two different gates), and qa_nofiles is the purpose-built FILES_DISABLED probe target for the last clause."
         },
         "knownGaps": [
+          "MARKER (QA run #9401 finding 5, carried here so runs stop re-deriving it): the CROSS-TENANT clauses of this area are structurally unprovable in the OSS workspace. `@objectstack/organizations` is cloud-private, so the dogfood matrix's cross-tenant block is gated behind `describe.skipIf(!organizationsAvailable)` and skips BY DESIGN here. That is blocked(dependency), never a pass and never a defect. A run that is supposed to ship the package sets OS_TEST_MULTI_ORG_ENABLED=1, which turns the skip into a hard failure instead of a silent one.",
+          "clause 3 ('unscoped multi-delete refused outright', #4757) is NOT satisfied by the shipped engine — see #9719 and automated.ref. Do not tick it from the unit test in attachment-access-hooks.test.ts: that suite calls the handler directly with an operation-level context the engine's per-row dispatch no longer produces, so it is green while the wired path does the opposite. The REST lane cannot express the shape at all (DeleteManyDataRequestSchema strips options.where and requires ids, #3897), so the reachable callers are server-side engine holders: flows, actions, scripts, MCP tools.",
           "the FILES_DISABLED clause currently probes showcase_account, which is files-disabled only incidentally — if the showcase ever enables files on it, the clause goes green for the wrong reason. The recipe's qa_nofiles exists to be probed instead; prefer it, and treat showcase_account as the fallback."
         ]
       },
@@ -358,7 +374,7 @@
         "a rejected write that still created the sys_attachment row (verify by re-listing) is a FAIL — the rejection must be authoritative, not cosmetic"
       ],
       "traps": ["wrong-persona"],
-      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts" },
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts (clauses 0, 1, 2 and 4: attach without parent EDIT is 403 ATTACHMENT_PARENT_ACCESS while the same member's LIST still succeeds, uploaded_by is server-stamped over a spoofed value, delete splits uploader-vs-outsider, and FILES_DISABLED) + packages/qa/dogfood/test/attachments-unscoped-delete-gate.dogfood.test.ts (the delete gate under an UNSCOPED multi-delete AST, both sides: a `{ multi: true }` delete with neither id nor where cannot slip past the per-row gate and removes NOTHING — not even the one row the caller WAS entitled to, so the refusal is authoritative rather than cosmetic and cannot land as a partial delete; `where: {}` behaves identically, since an empty predicate is still every row; a predicate that MATCHES NOTHING is allowed through, which is the live half of the #4757 reasoning that 'nothing matched' is not a refusal; and the same caller's SCOPED delete of their own row succeeds, without which every assertion here would be satisfied by a delete path that is simply broken. The member is granted the sys_attachment delete bit first and that grant is asserted, because otherwise RBAC refuses ahead of the attachment hook and the whole file would be green for a reason it is not about). ⛔ CLAUSE 3 IS NOT PINNED. Measured while writing the above: the #4757 'refused outright' rule does NOT fire through ObjectQL.delete. The engine's predicate path dispatches beforeDelete PER ROW (dispatchPerRowBeforeHooks builds `input: { id: rowId, options }`), so the handler always takes its by-id branch and never reaches the `where === undefined` check; a caller who is the uploader of every matched row deletes the whole table with a predicate-less delete (measured: 2 rows before, resolves, 0 rows after). attachment-access-hooks.test.ts pins the refusal by calling the handler directly with a whole-operation context the engine no longer produces on this path, so that unit green is not evidence about the wired behaviour. Tracked as a PRODUCT gap in #9719; clause 3 is deliberately left unpinned rather than pinned against current behaviour, because pinning today's outcome would turn the eventual fix red." },
       "source": [
         "docs/plans/release-15.1-test-plan.md §A12 (attach 需 parent EDIT)",
         "packages/services/service-storage/src/attachment-access-hooks.ts (beforeInsert canEdit gate + uploaded_by stamping; beforeDelete uploader-or-editor + #4757 unscoped refusal, MULTI_DELETE_AUTH_LIMIT fail-closed)",
@@ -366,7 +382,13 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item from the access-hook source: EDIT-not-read attach gate, server stamping, delete authorization matrix and the #4757 unscoped-delete refusal, each with its exact deny code", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-11", "change": "opted into the area-level qa-scratch-authz provisioning recipe (#7670): persona A is provisioned read-but-not-edit for the attach gate, and qa_nofiles is named as the purpose-built FILES_DISABLED probe target instead of showcase_account, which is files-disabled only incidentally and would go green for the wrong reason if the showcase ever enabled files on it. Clause 3's stale-@objectstack/core pin problem from run #7635 is deliberately NOT touched here — it is owned by #7668", "ref": "#7670" }
+        { "revision": 2, "date": "2026-08-11", "change": "opted into the area-level qa-scratch-authz provisioning recipe (#7670): persona A is provisioned read-but-not-edit for the attach gate, and qa_nofiles is named as the purpose-built FILES_DISABLED probe target instead of showcase_account, which is files-disabled only incidentally and would go green for the wrong reason if the showcase ever enabled files on it. Clause 3's stale-@objectstack/core pin problem from run #7635 is deliberately NOT touched here — it is owned by #7668", "ref": "#7670" },
+        {
+          "revision": 3,
+          "date": "2026-08-18",
+          "change": "the unscoped-multi-delete surface pinned on the halves that hold, and clause 3 recorded as NOT pinned with the measurement. QA run #9401 listed clause 3 as the gap; implementing it found the #4757 refusal is unreachable through ObjectQL.delete because beforeDelete is dispatched per row with input.id bound, so the guard's own branch never runs and an uploader-of-every-row wipes the table. Filed as #9719. The new pin asserts what does hold — an unscoped AST cannot bypass the per-row gate, deletes nothing (no partial delete), an empty where is treated as every row, a zero-match predicate is allowed through, and the same caller's scoped delete still succeeds — and the ref says plainly that clause 3 stays unpinned rather than being pinned against behaviour a fix will change.",
+          "ref": "#9483"
+        }
       ]
     },
     {

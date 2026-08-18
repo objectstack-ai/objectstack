@@ -376,8 +376,8 @@ server enforces `requiredWhen` on submit and ignores writes to fields whose
 `readonlyWhen` predicate is `TRUE`, so client-side affordances are not the
 only guard. Use `requiredWhen`. The deprecated `conditionalRequired` alias was removed in
 protocol 17 (#3855): authoring it is rejected with an error naming the
-replacement, not silently stripped, and `os migrate meta --from 16` rewrites
-existing sources automatically.
+replacement, not silently stripped, and `os migrate meta --from 16` lists the
+mechanical edits for existing sources.
 
 #### Who the lock applies to — and the derived-field write path
 

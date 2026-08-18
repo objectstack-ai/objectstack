@@ -2969,7 +2969,7 @@ describe('ListViewSchema — retired striped/bordered/virtualScroll (#7176 pass-
         ListViewSchema.parse({ type: 'grid', columns: ['name'], [key]: true });
       } catch (e) { message = String((e as Error).message); }
       expect(message).toMatch(/#7176/);
-      expect(message).toMatch(/Run `os migrate meta --from 16` to rewrite existing sources automatically\./);
+      expect(message).toMatch(/Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand\./);
     }
   });
   it('accepts the live grid siblings byte-identically (rowHeight/selection/pagination/resizable)', () => {
@@ -3038,7 +3038,7 @@ describe('ListViewSchema.exportOptions — object form + array lift + pdf retire
     expect(message).toMatch(/'pdf' was removed from `view\.exportOptions` formats/);
     expect(message).toMatch(/#1301/);
     expect(message).toMatch(/'csv', 'xlsx' and 'json'/);
-    expect(message).toMatch(/Run `os migrate meta --from 16` to rewrite existing sources automatically\./);
+    expect(message).toMatch(/Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand\./);
   });
 
   it("REJECTS 'pdf' in the object form's `formats` with the same prescription", () => {

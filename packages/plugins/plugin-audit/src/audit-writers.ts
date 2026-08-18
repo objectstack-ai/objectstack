@@ -1301,7 +1301,7 @@ export function installAuditWriters(
       userId ?? (typeof sess.actor === 'string' && sess.actor.trim() ? sess.actor.trim() : null);
     // [#8707, honouring #8287's ruling] The audited RECORD'S OWN organization
     // wins; the acting session's active organization is the fallback. ⛔ Do not
-    // flip this back to `sess.tenantId ?? recordOrgId`.
+    // flip this back to `sess.organizationId ?? recordOrgId`.
     //
     // An audit row describes a change to a RECORD, and it is read through
     // `sys_audit_log`'s own tenant wall. Stamped with the ACTOR's active
@@ -1324,9 +1324,10 @@ export function installAuditWriters(
     //      `resolveRecordOrganizationField`, which returns null for both);
     //   2. a row whose organization column is NULL/empty;
     // and the record's own organization answers on the two cases the fallback
-    // was written for — background jobs / sudo paths with no `tenantId`, and
-    // better-auth's `activeOrganizationId` cache miss right after sign-in —
-    // exactly as it did before, since those sessions carry no tenant either way.
+    // was written for — background jobs / sudo paths with no active
+    // organization, and better-auth's `activeOrganizationId` cache miss right
+    // after sign-in — exactly as it did before, since those sessions carry no
+    // organization either way.
     //
     // What this does NOT change: the overwhelming majority of writes, where the
     // actor's active organization IS the record's. Under the `isolated` posture
@@ -1343,7 +1344,24 @@ export function installAuditWriters(
       return typeof v === 'string' && v.length > 0 ? v : undefined;
     };
     const recordOrgId: string | undefined = readRecordOrg(ctx.result) ?? readRecordOrg(before);
-    const tenantId: string | undefined = recordOrgId ?? sess.tenantId;
+    //
+    // [#9516] The fallback arm reads `organizationId` — the ONLY name the
+    // engine emits. `ObjectQL.buildSession` builds the hook session as a fixed
+    // key-set literal with no spread, and the `session.tenantId` alias (#3280)
+    // was removed repo-wide in the v11 major (#3290). This arm spelled the
+    // removed name, so it resolved to `undefined` and the guard above could
+    // never fire: every case it names — no organization column, NULL column —
+    // stamped `organization_id: null` and went permanently invisible behind the
+    // RLS predicate, silently, because `sys_audit_log`'s fields are all
+    // `readonly: true` (so `validateRecord` skips them) and this whole path is
+    // wrapped in swallow-and-report.
+    //
+    // It survived a careful review of exactly these lines because #8707
+    // reordered the two arms without evaluating either one: reordering two
+    // expressions does not tell you whether they resolve. The pins in
+    // `audit-writers.test.ts` (#9516 block) are what check this comment against
+    // the mechanism it describes — keep them if you touch this line.
+    const tenantId: string | undefined = recordOrgId ?? sess.organizationId;
 
     let oldValue: Record<string, any> | null = null;
     let newValue: Record<string, any> | null = null;
@@ -1632,7 +1650,7 @@ export function installAuditWriters(
     const actorName = row.author_name ?? null;
     const bodyPreview = String(row.body ?? '').slice(0, 240);
     const sess: any = (ctx as any).session ?? {};
-    const tenantId: string | null = sess.tenantId ?? row.organization_id ?? null;
+    const tenantId: string | null = sess.organizationId ?? row.organization_id ?? null;
     const commentId = row.id != null ? String(row.id) : null;
 
     for (const uid of userIds) {

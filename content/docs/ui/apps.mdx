@@ -327,8 +327,8 @@ same holds for `requiresObject`.
   `areas[].order`, `areas[].visible` and `areas[].requiredPermissions` were
   removed in `@objectstack/spec` 17.0.0 (ADR-0049 enforce-or-remove) and are now
   **refused at parse time** rather than ignored, so one leftover key fails the
-  whole save. Run `os migrate meta --from 16` to rewrite existing sources
-  automatically.
+  whole save. Run `os migrate meta --from 16` to list the mechanical edits for existing
+  sources; apply them by hand.
 
   - `order` (#4667) — no renderer ever sorted areas, so declaration order
     already *was* display order and an author who set `order` saw nothing move.
@@ -503,8 +503,8 @@ offers, widen `optionsSource.filter`.
   `contextSelectors[].includeAll` and `contextSelectors[].placement` were removed
   in `@objectstack/spec` 17.0.0 (#4509, ADR-0049 enforce-or-remove) and are now
   **refused at parse time** rather than ignored, so one leftover key fails the
-  whole save. Run `os migrate meta --from 16` to rewrite existing sources
-  automatically.
+  whole save. Run `os migrate meta --from 16` to list the mechanical edits for existing
+  sources; apply them by hand.
 
   - `includeAll` — not merely unread, deliberately **disobeyed**, for the reason
     above: the renderer never offered an "All" row regardless of the flag, so

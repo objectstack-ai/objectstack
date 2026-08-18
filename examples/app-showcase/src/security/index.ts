@@ -51,9 +51,7 @@ export {
 } from './capabilities.js';
 
 export {
-  RedProjectSharingRule,
-  HighValueRedProjectRule,
   NewInquiryFieldOpsRule,
-  ContributorTaskSharingRule,
+  KeyAccountQualifiedContactRule,
   allSharingRules,
 } from './sharing-rules.js';

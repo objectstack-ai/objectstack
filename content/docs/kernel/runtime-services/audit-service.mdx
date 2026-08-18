@@ -7,6 +7,7 @@ description: Write ingress for audit events that are not CRUD — today, auth se
 
 - **Stability:** `experimental`
 - **Canonical source:** `packages/plugins/plugin-audit/src/auth-event-audit.ts`
+- **Registry slot:** `audit` — resolve with `ctx.getService('audit')`.
 
 `services.audit` is the kernel service slot that `@objectstack/plugin-audit` registers
 during `init()`. It is the **write ingress for audit events that are not CRUD** — today,

@@ -433,7 +433,8 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
       + 'is now always denied. Delete the key; publish public surfaces by declaration instead — a public '
       + "form view, a share link, or `book.audience: 'public'`. A stack that mounts no auth at all now "
       + 'fails at boot rather than silently serving object data to anonymous callers. '
-      + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+      + 'Run `os migrate meta --from 16` to list the mechanical edits for existing '
+      + 'sources; apply them by hand.',
     ),
     /** Enable environment-scoped routing for data/meta/AI APIs. */
     enableProjectScoping: z.boolean().optional(),

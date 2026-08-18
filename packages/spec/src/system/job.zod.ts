@@ -122,8 +122,8 @@ const JOB_ID_RETIRED =
   + 'override that did not exist. `name` IS the job\'s identity everywhere: the scheduling '
   + 'key, the `sys_job` row key, and the `JobExecution.jobId` stamp. Two jobs differing only '
   + 'in `id` were the same job. Delete the key; rename the job via `name` if you need a '
-  + 'different identity. Run `os migrate meta --from 16` to rewrite existing sources '
-  + 'automatically.';
+  + 'different identity. '
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
 export const JobSchema = lazySchema(() => strictObject({
   surface: 'this job',
