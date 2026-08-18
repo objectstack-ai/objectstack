@@ -870,9 +870,14 @@ jobs:
       # the machine-readable form of #5617's audit exclusions. It deliberately
       # does NOT judge job-level `if:`: four of the enrolled ci.yml jobs carry a
       # filter-driven `if:` by design (#4928), and a skipped job still publishes
-      # a context. ⚠️ It cannot verify the required SET itself — Settings →
-      # Rulesets is unreadable from every agent seat (403) — so it asserts the
-      # repo-side half only, and the script's header says so at length.
+      # a context. ⚠️ It does not read the required SET itself — but not because
+      # it cannot: the rulesets API answers 200 to an ordinary seat (it is the
+      # CLASSIC branches/main/protection endpoint that answers 403, and this repo
+      # does not use classic branch protection — #9642). The live diff is a
+      # separate report-only mode, `--verify-required-set`, deliberately kept OFF
+      # this required path: the settings half of a rename is maintainer-only and
+      # lands after the merge, so a blocking version would be red on the very PR
+      # carrying the repo half. This step stays network-free.
       # Reads two YAML files; sub-second.
       - name: Required-context name pin
         run: pnpm check:required-contexts
