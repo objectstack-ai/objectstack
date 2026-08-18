@@ -131,7 +131,7 @@ describe('#8928 — why it must run BEFORE the #8686 backfill', () => {
     ]);
 
     // The real repair, run exactly as a boot would run it.
-    const repair = await backfillSeedTenancy(exec);
+    const repair = await backfillSeedTenancy({ exec, client: 'better-sqlite3' });
     expect(repair.status).toBe('applied');
 
     const afterRepair = await report();

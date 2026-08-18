@@ -24,6 +24,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   normalizeRows,
+  resolveSeedTenancySeam,
+  buildOrganizationProbeSql,
   buildSplitProbeSql,
   buildCollisionProbeSql,
   buildStampSql,
@@ -76,6 +78,7 @@ describe('#8686 SQL builders', () => {
     // repair would decline seconds before the first duplicate is minted.
     expect(sql).toContain('LEFT JOIN');
     expect(sql).not.toMatch(/\bFROM\s+"_objectstack_sequences"\s+g\s+JOIN\b/);
+    expect(sql).toContain('"_objectstack_sequences" g LEFT JOIN');
     expect(sql).toContain(SEQUENCES_TABLE);
   });
 
@@ -86,13 +89,18 @@ describe('#8686 SQL builders', () => {
     // Without this the whole UPDATE is refused by the partitioned unique index on
     // any install that already minted duplicates, rolling back even the rows that
     // had no conflict.
-    expect(sql).toContain('"case_number" NOT IN (SELECT "case_number" FROM "crm_case"');
+    expect(sql).toContain('"case_number" NOT IN (SELECT');
+    expect(sql).toContain('FROM "crm_case"');
   });
 
   it('the stamp guards EVERY split field of a multi-autonumber object', () => {
     const sql = buildStampSql('crm_case', ['case_number', 'ticket_no']);
     expect(sql).toContain('"case_number" NOT IN');
     expect(sql).toContain('"ticket_no" NOT IN');
+    // One derived table per guard: MySQL rejects a repeated derived-table alias
+    // in one statement, and the guards are all in one statement.
+    expect(sql).toContain('AS "taken_0"');
+    expect(sql).toContain('AS "taken_1"');
   });
 
   it('the collision probe asks for values held on BOTH sides of the split', () => {
@@ -105,9 +113,11 @@ describe('#8686 SQL builders', () => {
   it('counter statements bind every value and name no literal tenant', () => {
     // The tenant id reaching these is an organization id read from the database.
     // It is bound, never interpolated.
-    expect(buildCounterMergeSql()).toContain('SET last_value = ?');
-    expect(buildCounterMergeSql()).toContain('WHERE object = ? AND field = ? AND tenant_id = ?');
-    expect(buildGlobalCounterDeleteSql()).toContain('WHERE object = ? AND field = ? AND tenant_id = ?');
+    expect(buildCounterMergeSql()).toContain('SET "last_value" = ?');
+    expect(buildCounterMergeSql()).toContain('WHERE "object" = ? AND "field" = ? AND "tenant_id" = ?');
+    expect(buildGlobalCounterDeleteSql()).toContain(
+      'WHERE "object" = ? AND "field" = ? AND "tenant_id" = ?',
+    );
     expect(buildCounterMergeSql()).not.toContain(GLOBAL_TENANT);
     expect(buildGlobalCounterDeleteSql()).not.toContain(GLOBAL_TENANT);
   });
@@ -146,5 +156,100 @@ describe('#8686 identifier gate', () => {
   it('accepts the platform’s own snake_case machine names', () => {
     expect(() => buildStampSql('crm_case', ['case_number'])).not.toThrow();
     expect(() => buildCollisionProbeSql('_odd_but_legal', 'f1')).not.toThrow();
+  });
+});
+
+describe('#9381 dialect-aware statement text', () => {
+  // MySQL does not run with `ANSI_QUOTES` — measured on a live MySQL 8.0.46,
+  // whose `sql_mode` is
+  // ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,
+  // ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION, and nothing in
+  // `driver-sql` sets one. `"x"` is therefore a STRING LITERAL there, and every
+  // statement this module builds was an `ER_PARSE_ERROR` before this fix.
+  //
+  // The live counterpart of this suite is
+  // `seed-tenancy-backfill.live-mysql.test.ts`, which RUNS the statements on a
+  // real server. This one pins the text so the seam is covered on every
+  // machine, with or without a MySQL.
+  const BACKTICK = String.fromCharCode(96);
+  const bt = (name: string) => `${BACKTICK}${name}${BACKTICK}`;
+
+  for (const client of ['mysql', 'mysql2']) {
+    describe(`client=${client}`, () => {
+      it('quotes every table and column with backticks, never with double quotes', () => {
+        const statements = [
+          buildSequencesPresenceSql(client),
+          buildSplitProbeSql(client),
+          buildOrganizationProbeSql(client),
+          buildCollisionProbeSql('crm_case', 'case_number', client),
+          buildStampSql('crm_case', ['case_number'], client),
+          buildCounterMergeSql(client),
+          buildGlobalCounterDeleteSql(client),
+        ];
+        for (const sql of statements) {
+          expect(sql).not.toContain('"');
+          expect(sql).toContain(BACKTICK);
+        }
+        expect(buildSequencesPresenceSql(client)).toContain(bt(SEQUENCES_TABLE));
+        expect(buildStampSql('crm_case', ['case_number'], client)).toContain(
+          `UPDATE ${bt('crm_case')} SET ${bt(ORGANIZATION_FIELD)} = ?`,
+        );
+      });
+
+      it('quotes `last_value` — a RESERVED word on MySQL 8.0 — wherever it is unqualified', () => {
+        // `LAST_VALUE()` is a window function there, so a bare `last_value` is a
+        // parse error even when the table name is spelled correctly. Measured.
+        const merge = buildCounterMergeSql(client);
+        expect(merge).toContain(`SET ${bt('last_value')} = ?`);
+        expect(merge).not.toMatch(/(?<![`\w])last_value(?![`\w])/);
+      });
+
+      it('routes the stamp guard through a derived table (MySQL rejects the self-reference)', () => {
+        // ER_UPDATE_TABLE_USED (1093): "You can't specify target table 'crm_case'
+        // for update in FROM clause". Not a quoting problem — the statement stays
+        // refused after the identifiers are spelled the MySQL way.
+        const sql = buildStampSql('crm_case', ['case_number'], client);
+        expect(sql).toContain(`AS ${bt('taken_0')})`);
+        expect(sql).not.toMatch(
+          new RegExp(`NOT IN \\(SELECT ${BACKTICK}case_number${BACKTICK} FROM`),
+        );
+      });
+    });
+  }
+
+  for (const client of ['pg', 'better-sqlite3', 'sqlite3', undefined]) {
+    it(`keeps the ANSI spelling for client=${String(client)}`, () => {
+      const statements = [
+        buildSequencesPresenceSql(client),
+        buildSplitProbeSql(client),
+        buildOrganizationProbeSql(client),
+        buildCollisionProbeSql('crm_case', 'case_number', client),
+        buildStampSql('crm_case', ['case_number'], client),
+        buildCounterMergeSql(client),
+        buildGlobalCounterDeleteSql(client),
+      ];
+      for (const sql of statements) {
+        expect(sql).not.toContain(BACKTICK);
+        expect(sql).toContain('"');
+      }
+    });
+  }
+
+  it('the seam carries the dialect, so a caller cannot drop it', () => {
+    // The structural half of the fix: `backfillSeedTenancy` takes the pair, and
+    // the resolver is what produces the pair. A driver that reports no client
+    // still resolves — ANSI is the right default for the two dialects that want
+    // it, and for a MySQL running with ANSI_QUOTES.
+    const driver = {
+      execute: async () => [],
+      config: { client: 'mysql2' },
+    };
+    const seam = resolveSeedTenancySeam({ driver });
+    expect(seam?.client).toBe('mysql2');
+    expect(typeof seam?.exec).toBe('function');
+
+    const clientless = resolveSeedTenancySeam({ driver: { execute: async () => [] } });
+    expect(clientless?.client).toBeUndefined();
+    expect(resolveSeedTenancySeam({})).toBeUndefined();
   });
 });

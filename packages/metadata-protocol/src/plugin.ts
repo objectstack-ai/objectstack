@@ -41,7 +41,7 @@ import {
 } from './migrations/sys-setting-identity-index.js';
 import {
     backfillSeedTenancy,
-    resolveSeedTenancyExec,
+    resolveSeedTenancySeam,
 } from './migrations/seed-tenancy-backfill.js';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import type { MetadataAuthoringChannel } from './protocol.js';
@@ -334,7 +334,7 @@ export function assembleMetadataProtocol(
                     // organization exists yet — and is handled at the first-admin
                     // handoff instead (see runtime's app-plugin).
                     try {
-                        await backfillSeedTenancy(resolveSeedTenancyExec(ql), ctx.logger);
+                        await backfillSeedTenancy(resolveSeedTenancySeam(ql), ctx.logger);
                     } catch (e: unknown) {
                         ctx.logger.warn(
                             '[metadata-protocol] seed/API tenancy backfill skipped (#8686)',
