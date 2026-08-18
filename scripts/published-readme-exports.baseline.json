@@ -40,30 +40,6 @@
       "why": "registerObject is an INSTANCE method (`engine.registry.registerObject(...)`); the README calls it on the class. The import resolves, so only the call-site half can see it."
     },
     {
-      "id": "@objectstack/service-analytics|packages/services/service-analytics/README.md|import|@objectstack/service-analytics|ServiceAnalytics",
-      "why": "#9532 instance 1 of 5. Real exports: `AnalyticsService`, `AnalyticsServicePlugin`. The README then calls `ServiceAnalytics.configure({...})`."
-    },
-    {
-      "id": "@objectstack/service-automation|packages/services/service-automation/README.md|import|@objectstack/service-automation|ServiceAutomation",
-      "why": "#9532 instance 2 of 5. Real export: `AutomationEngine`."
-    },
-    {
-      "id": "@objectstack/service-cache|packages/services/service-cache/README.md|import|@objectstack/service-cache|ServiceCache",
-      "why": "#9532 instance 3 of 5. Real export: `CacheServicePlugin`."
-    },
-    {
-      "id": "@objectstack/service-i18n|packages/services/service-i18n/README.md|import|@objectstack/service-i18n|ServiceI18n",
-      "why": "#9532 instance 4 of 5. Real export: `I18nServicePlugin`."
-    },
-    {
-      "id": "@objectstack/service-i18n|packages/services/service-i18n/README.md|import|@objectstack/client-react|useTranslation",
-      "why": "A CROSS-PACKAGE claim: no `useTranslation` exists anywhere in this repo. @objectstack/client-react ships `useObjectStackLocale`. Found inside a #9532 package but pointing at a sibling — the rewrite of this README owns it."
-    },
-    {
-      "id": "@objectstack/service-job|packages/services/service-job/README.md|import|@objectstack/service-job|ServiceJob",
-      "why": "#9532 instance 5 of 5. Real export: `JobServicePlugin`."
-    },
-    {
       "id": "@objectstack/spec|packages/spec/README.md|import|@objectstack/spec/ai|MCPServerConfigSchema",
       "why": "@objectstack/spec/ai exports `MCPServerRefSchema`; there is no `MCPServerConfigSchema`. This is the protocol package's own front page."
     },
