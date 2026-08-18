@@ -242,7 +242,7 @@ const MODULES = {
   'packages/rest/src/rest-server.ts': {
     dialectOnly:
       'the repo\'s hottest response file (208 write sites, edited several times a day) — a `responses` ratchet would go red for edits that are not envelope drift',
-    ratchet: '#7035 (option 1: convert onto the shared sendOk/sendError)',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
     stringError: 44,
     // 77 → 75 (#7981): registerSecurityEndpoints' two `handleError` arms moved
     // off the `{ code, error }` sibling-code literal onto the shared
@@ -306,7 +306,7 @@ const MODULES = {
     responses: 2,
     ok: 0,
     err: 0,
-    ratchet: '#7035 (option 1: convert onto the shared sendOk/sendError)',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
   },
 };
 
