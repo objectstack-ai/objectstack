@@ -58,25 +58,45 @@
  *
  * It went unnoticed because the enforcing half has never run: the RC exemption
  * above stands the guard down for the whole pre-release window. What made it
- * urgent is that the window ENDS. Measured on `origin/main` @ `d3e53f2d8`, with
- * `pre.json` still at `"mode": "pre"`:
+ * urgent is that the window ENDS. Measured on `origin/main` @ `d3e53f2d8`, under
+ * `@changesets/cli` v2, with `pre.json` still at `"mode": "pre"`:
  *
  *   total .changeset/*.md (excl README):  1552
  *   FILES declaring a major:               171
  *   total major package entries:           222
  *   pre.changesets recorded:              1279
  *
- * Those files are on disk because pre-mode `changeset version` does not delete
- * the changesets it consumes — it records them in `pre.json.changesets` so the
- * final release can re-apply them. Only the POST-EXIT `changeset version`
- * deletes them. So `changeset pre exit` rewrites the mode to `"exit"`
- * (@changesets/pre@2.0.2, `changesets-pre.cjs.js:117`), that commit lands on
- * main, and from that moment until the Version PR merges, the stock-scoped guard
- * would have failed EVERY unlabelled PR in the repo — each one listing 171 files
- * it never touched, with `allow-major` as the only route out. That label's own
- * error message says "a whole-stack major release is genuinely intended", which
- * is false for a PR fixing a typo, so the escape hatch would have meant
- * something different from what it says for the duration of the window.
+ * Those files were on disk because pre-mode `changeset version` under v2 did not
+ * delete the changesets it consumed — it recorded them in `pre.json.changesets`
+ * so the final release could re-apply them, and only the POST-EXIT
+ * `changeset version` deleted them. So `changeset pre exit` rewrote the mode to
+ * `"exit"`, that commit landed on main, and from that moment until the Version PR
+ * merged, the stock-scoped guard would have failed EVERY unlabelled PR in the
+ * repo — each one listing 171 files it never touched, with `allow-major` as the
+ * only route out. That label's own error message says "a whole-stack major
+ * release is genuinely intended", which is false for a PR fixing a typo, so the
+ * escape hatch would have meant something different from what it says for the
+ * duration of the window.
+ *
+ * ### What `@changesets/cli` v3 changes here, and what it does not
+ *
+ * v3 MOVES each consumed changeset into `.changeset/pre/NAME.md` at the cut that
+ * consumes it (changesets#2190) instead of leaving it in the root. Measured on a
+ * v3 cut of this repo's own stock — 209 pending changesets, 17.0.0 ->
+ * 17.1.0-rc.0, a full `pnpm run version` in a throwaway clone: afterwards the
+ * root holds only the UNCONSUMED residue, all 209 consumed files sit under
+ * `.changeset/pre/`, and `readChangesets` below — a root-only `readdirSync`
+ * filtered to `.md` — does not enumerate them (`pre` is a directory, not a
+ * `.md`). The 1552-file high-water mark and the single post-exit deletion event
+ * that made this urgent are both gone; the stock this guard could ever read is
+ * bounded now.
+ *
+ * NONE OF THAT RETIRES A LINE OF THE FIX BELOW, and this section is written to
+ * be unreadable as though it did. Stock size was the URGENCY; it was never the
+ * ARGUMENT. The argument is #6129's — "what this PR introduced" is a claim about
+ * one side of a fork and cannot be evaluated without the fork — and it is exactly
+ * as true at a stock of 2 as at 1552. What v3 does add is a new population of `R`
+ * rows on the ORDINARY path; see the diff-row table below.
  *
  * The fix is the sibling's, deliberately rather than coincidentally: judge only
  * what the diff INTRODUCES, starting at `merge-base(base, head)` and never at
@@ -120,15 +140,31 @@
  * `"@objectstack/spec": major` is reported for `@objectstack/cli` alone. The
  * report naming only what the PR introduced is the entire point of the card.
  *
- * `R` is where this file diverges from its two siblings by one letter:
- * `check-empty-changeset.mjs` and `check-adr-0087-registration.mjs` both use
- * `--diff-filter=AM`. Measured on git 2.43.0, renaming `.changeset/old.md` to
- * `.changeset/new.md` while flipping its bump to `major` reports as
- * `R075 .changeset/old.md .changeset/new.md` and is dropped entirely by `AM` —
- * a silent bypass. `AMR` plus reading the base side at the OLD path closes it
- * and costs nothing, because a pure rename compares equal and stays exempt. The
- * two siblings have the same hole in their own directions; filed separately
- * rather than fixed here, because their fixtures and messages are theirs.
+ * `R` is in the filter because of a bypass measured here first. On git 2.43.0,
+ * renaming `.changeset/old.md` to `.changeset/new.md` while flipping its bump to
+ * `major` reports as `R075 .changeset/old.md .changeset/new.md` and is dropped
+ * entirely by `--diff-filter=AM` — a silent bypass. `AMR` plus reading the base
+ * side at the OLD path closes it and costs nothing, because a pure rename
+ * compares equal and stays exempt.
+ *
+ * This paragraph used to say the two siblings `check-empty-changeset.mjs` and
+ * `check-adr-0087-registration.mjs` "both use `--diff-filter=AM`", i.e. that they
+ * still carried the hole. That stopped being true at #7045 and is corrected here
+ * rather than repeated: measured on the tree this line ships in, both siblings
+ * pass `AMR` today. A stale claim about a sibling's filter is worse than no
+ * claim — it is the kind a reader acts on.
+ *
+ * Under `@changesets/cli` v3 the `R` row also stops being a hand-crafted-bypass
+ * shape and becomes the ORDINARY one. A cut renames every consumed changeset into
+ * `.changeset/pre/`, and git's `.changeset/*.md` pathspec reaches into that
+ * directory (`*` crosses `/` in a pathspec). Measured on a real v3 cut commit of
+ * this repo: `git diff --name-status --diff-filter=AMR <cut>^ <cut> --
+ * '.changeset/*.md'` returns exactly 209 `R100` rows, every one under `pre/`. So
+ * any PR that merges main after a cut now carries a whole cut's worth of `R` rows
+ * through this gate. They are pure renames, so the base-side read at the OLD path
+ * compares equal and every one is exempt — but only because the filter says
+ * `AMR`. Dropping the `R` would no longer hide one crafted rename; it would hide
+ * a cut.
  *
  * ## The cost of the branch point, stated rather than slipped in
  *
@@ -1110,7 +1146,8 @@ function selfTest() {
     }
 
     // The rename rows. Measured on git 2.43.0: this reports as `R<score>` and is
-    // dropped entirely by the two siblings' `--diff-filter=AM`.
+    // dropped entirely by `--diff-filter=AM` (which is what this gate and both
+    // its siblings passed until #7045).
     {
       const long = '\n\nbody long enough for git to score this as a rename rather than an add plus a delete\n';
       const oldMinor = '---\n"@objectstack/spec": minor\n---' + long;

@@ -383,12 +383,25 @@ jobs:
           fi
           # Count changesets THIS PR adds (diff against the base commit), NOT
           # the whole .changeset directory. A global `find | wc -l` is unsound:
-          # in pre-release (RC) mode `changeset version` RETAINS every consumed
-          # .md file, so the directory is permanently non-empty and the gate can
-          # never go red. #3373 merged a real spec/api-surface fix with no
-          # changeset while this step happily reported "Found 104 changeset(s)".
-          # Diffing against the merge base ignores that residue and sees only
-          # what the PR itself introduced. It has to be the MERGE BASE and not
+          # it counts main's pending stock, which has nothing to do with what this
+          # PR wrote. #3373 merged a real spec/api-surface fix with no changeset
+          # while this step happily reported "Found 104 changeset(s)".
+          # Diffing against the merge base ignores that stock and sees only what
+          # the PR itself introduced.
+          #
+          # That argument used to be stated in terms of pre-mode RESIDUE — under
+          # @changesets/cli v2, `changeset version` in pre mode retained every
+          # consumed .md file, so `.changeset/` was permanently non-empty for the
+          # whole RC window. v3 moves consumed changesets into `.changeset/pre/`
+          # instead (changesets#2190), so the root directory is no longer
+          # permanently non-empty. The unsoundness is unchanged and so is this
+          # step: a stock count is the wrong question in EVERY repo phase, not just
+          # a polluted one. What the migration did have to be checked against is
+          # the counter itself, because a cut now MOVES 209 tracked changeset
+          # paths: measured on a real v3 cut commit, git reports them as `R100`
+          # renames, so `--diff-filter=A` credits this PR with 0 of them (still 0
+          # with `diff.renameLimit=1` forced; only `--no-renames` turns them into
+          # 209 `A` rows, and nothing here passes it). It has to be the MERGE BASE and not
           # the payload's frozen `base.sha` -- see the base-resolution step above
           # (#6129); with the frozen sha this count silently included every
           # changeset main gained while the PR was open.
@@ -827,12 +840,19 @@ jobs:
         # same #6129 reason one defect along (#7005). This script used to read
         # the whole `.changeset` directory with no branch point, so its verdict
         # was a function of what main carried rather than of what the author
-        # wrote. That was invisible while pre-mode held and would have become
-        # visible all at once at `changeset pre exit`: 171 consumed-but-undeleted
-        # major changesets sit on main until the post-exit `changeset version`
-        # removes them, so every unlabelled PR open in that window would have
-        # gone red listing files it never touched, with `allow-major` -- a label
-        # meaning "a whole-stack major is intended HERE" -- as its only way out.
+        # wrote. Under @changesets/cli v2 that was invisible while pre-mode held
+        # and would have become visible all at once at `changeset pre exit`: 171
+        # consumed-but-undeleted major changesets sat on main until the post-exit
+        # `changeset version` removed them, so every unlabelled PR open in that
+        # window would have gone red listing files it never touched, with
+        # `allow-major` -- a label meaning "a whole-stack major is intended HERE"
+        # -- as its only way out. v3 retires that particular detonation: each cut
+        # moves its consumed changesets into `.changeset/pre/`, which the gate's
+        # root-only reader does not enumerate, so the root stock stays bounded to
+        # the unconsumed residue. It retires no line of the fix. `--base` is
+        # correct because a verdict about what a PR INTRODUCED cannot be computed
+        # without the fork -- #6129's argument, which never depended on how big
+        # the stock was.
         if: >-
           steps.labels.outputs.skip != 'true'
           && steps.labels_settled.outputs.skip != 'true'

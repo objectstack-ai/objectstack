@@ -348,6 +348,32 @@ const ADR_0087 = 'docs/adr/0087-metadata-protocol-upgrade-contract.md';
 const isChangesetFile = (p) => p.startsWith('.changeset/') && p.endsWith('.md') && !p.endsWith('/README.md');
 
 /**
+ * `.changeset/pre/NAME.md` is a CONSUMED prerelease changeset, not pending stock.
+ *
+ * New in `@changesets/cli` v3 (changesets#2190): a pre-mode `changeset version`
+ * MOVES every changeset it consumes out of `.changeset/` and into
+ * `.changeset/pre/`, verbatim, instead of leaving it in place and recording it in
+ * `pre.json` the way v2 did. Measured on a v3 cut of this repo (209 pending
+ * changesets, 17.0.0 -> 17.1.0-rc.0): all 209 move, git scores every one `R100`,
+ * and `git ls-tree -r ... -- .changeset` at the cut lists all 209 under `pre/`.
+ *
+ * That `-r` is why this predicate exists. `changesetDirAt` below lists the
+ * directory RECURSIVELY, so from the first v3 cut onwards the entire consumed
+ * stock of the open RC window would flow into `--list` and `--audit-stock` — two
+ * surfaces whose whole subject is the PENDING stock ("this gate judges diffs, not
+ * stock"), and whose numbers a reader takes as the size of the backlog. Every one
+ * of those changesets was judged by the diff scan on the PR that introduced it;
+ * re-listing them daily for the length of a window is noise that grows.
+ *
+ * WHERE THIS DELIBERATELY DOES NOT APPLY: the enforcing scan. It reads the diff
+ * through `isChangesetFile`, NOT through this predicate, so a changeset ADDED
+ * under `.changeset/pre/` in a PR is still judged like any other. Filtering the
+ * audit surfaces is a readability fix; filtering the verdict would be a bypass,
+ * and `PRE2` in the self-test pins the difference.
+ */
+const isConsumedPrerelease = (p) => p.startsWith('.changeset/pre/');
+
+/**
  * Split a changeset into its frontmatter bump entries and its body.
  *
  * The entry regex is deliberately the SAME shape `check-changeset-no-major.mjs`,
@@ -1376,12 +1402,18 @@ export function mergeBase(base, head, cwd) {
 
 /**
  * Everything under `.changeset/` at a rev, split into "any entry at all" and
- * "actual changesets", or `null` when the tree itself cannot be listed.
+ * "actual PENDING changesets", or `null` when the tree itself cannot be listed.
  *
  * The split is what lets `assertInputs` tell an EMPTY STOCK (zero pending
  * changesets — the legitimate state of main right after a release cut, #8658)
  * apart from a MISSING DIRECTORY (not even the tracked README.md/config.json
  * found — unreadable input, still a #4690 refusal).
+ *
+ * `entries` stays UNFILTERED on purpose: it answers "is this directory readable
+ * at all", and a tree whose changesets have all moved into `.changeset/pre/` is a
+ * perfectly readable one. Narrowing it would turn the ordinary post-cut state of
+ * main into a #4690 refusal — the exact confusion #8658 removed. `changesets` is
+ * the narrowed half (see `isConsumedPrerelease`).
  *
  * @returns {{ entries: string[], changesets: string[] } | null}
  */
@@ -1389,11 +1421,17 @@ function changesetDirAt(rev, cwd) {
   let out;
   try { out = git(['ls-tree', '-r', '--name-only', rev, '--', '.changeset'], cwd); } catch { return null; }
   const entries = out.split('\n').map((s) => s.trim()).filter(Boolean);
-  return { entries, changesets: entries.filter(isChangesetFile) };
+  return { entries, changesets: entries.filter((p) => isChangesetFile(p) && !isConsumedPrerelease(p)) };
 }
 
-/** Every changeset path present at a rev. */
-function changesetsAt(rev, cwd) {
+/**
+ * Every PENDING changeset path at a rev — the consumed prerelease stock under
+ * `.changeset/pre/` excluded (`isConsumedPrerelease`).
+ *
+ * Exported for `--self-test` S6/S8: the two consumers below print counts, and a
+ * count is the one thing an exit code cannot tell apart from "nothing ran".
+ */
+export function changesetsAt(rev, cwd) {
   return changesetDirAt(rev, cwd)?.changesets ?? [];
 }
 
@@ -3473,6 +3511,63 @@ function selfTest() {
     // same bypass: the worklist silently omitted them.
     const TABLE_PRESCRIPTION = '**BREAKING** x\n\n## Migration\n\n| Wrote | Write instead |\n| --- | --- |\n| `new HttpServer(p)` | register the `HonoHttpServer` |\n';
     assert(cls(CS({ body: TABLE_PRESCRIPTION })) === 'residue', 'S7: THE #6497 SHAPE -- published break + arrowless rewrite TABLE -- is RESIDUE');
+  }
+
+  // ---- PRE1-PRE3: `.changeset/pre/` is CONSUMED stock, not pending stock -----
+  //
+  // `@changesets/cli` v3 MOVES every changeset it consumes into `.changeset/pre/`
+  // at the cut that consumes it, and `changesetDirAt` lists `.changeset`
+  // RECURSIVELY (`ls-tree -r`). Without `isConsumedPrerelease` the entire consumed
+  // stock of an open RC window flows into `--list` and `--audit-stock`, two
+  // surfaces whose subject is the PENDING backlog. Measured on a real v3 cut of
+  // this repo's stock: 209 consumed changesets, every one of them returned by
+  // `git ls-tree -r --name-only <cut> -- .changeset`.
+  //
+  // PRE2 is the half that must NOT hold, and it is why the filter lives in
+  // `changesetsAt` rather than in `isChangesetFile`: the enforcing scan reads the
+  // diff through `isChangesetFile`, so a changeset ADDED under `.changeset/pre/`
+  // by a PR is judged like any other. Filter the verdict instead of the audit and
+  // `.changeset/pre/` becomes the place to put a breaking change you do not want
+  // read.
+  {
+    const { dir } = mk({
+      files: {
+        '.changeset/pre/consumed-one.md': CS({ body: 'consumed at the last cut\n\n**BREAKING** something\n' }),
+        '.changeset/pre/consumed-two.md': CS({ body: 'consumed at the last cut\n\n**BREAKING** something else\n' }),
+      },
+    });
+    const stock = changesetsAt('HEAD', dir);
+    assert(
+      stock.length === 1 && stock[0] === '.changeset/stock-breaking.md',
+      `PRE1: the audit surfaces read PENDING stock only -- two consumed changesets under .changeset/pre/ must not appear -- got ${JSON.stringify(stock)}`,
+    );
+  }
+
+  red('PRE2 a breaking changeset ADDED under .changeset/pre/ is still judged', run(mk({
+    files: { '.changeset/pre/smuggled.md': SIX048 },
+    pkgs: { '@objectstack/runtime': { dir: 'packages/runtime', private: false }, '@objectstack/spec': { dir: 'packages/spec', private: false } },
+  })), [/smuggled/, /no `adr-0087:` disposition marker/]);
+
+  {
+    // PRE3: `entries` stays UNFILTERED. A tree whose changesets have all moved
+    // into `.changeset/pre/` is the ordinary state of main mid-window; narrowing
+    // the readability probe as well would turn it into a #4690 refusal and undo
+    // #8658 by a different route. Pending stock is legitimately zero there.
+    const { dir } = mk({
+      files: {
+        '.changeset/stock-breaking.md': null,
+        '.changeset/pre/consumed.md': CS({ body: 'consumed\n\n**BREAKING** something\n' }),
+      },
+    });
+    const probs = assertInputs({ cwd: dir, head: 'HEAD' });
+    assert(
+      probs.length === 0,
+      `PRE3: a tree holding ONLY consumed changesets under .changeset/pre/ is readable input, not a #4690 refusal -- got: ${probs.join('|')}`,
+    );
+    assert(
+      changesetsAt('HEAD', dir).length === 0,
+      `PRE3: ...and its PENDING stock is legitimately zero -- got ${JSON.stringify(changesetsAt('HEAD', dir))}`,
+    );
   }
 
   assert(breakingDeclaration(parseChangeset(CS({ body: 'feat(spec)!: x\n' }))).breaking, 'P6: a conventional-commit bang is a declaration');

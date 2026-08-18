@@ -303,11 +303,14 @@ rediscovered at 2am:
   by itself.
 
 **A stale #6208 after an rc cut is EXPECTED AND HARMLESS — do not "fix" it by hand.**
-Its changesets were consumed by the cut and are recorded in `.changeset/pre.json`; the
-PR is bookkeeping, it carries no publish capability by construction (`release.yml`
-passes the changesets action no `publish:` script), and it regenerates correctly at
-the next push to `main` or the next GA cut. Editing or force-refreshing it manually
-only risks putting a version commit somewhere the publish lane can reach.
+Its changesets were consumed by the cut and MOVED into `.changeset/pre/` — under
+`@changesets/cli` v3 that move is what "consumed" looks like on disk, and
+`.changeset/pre.json` carries `{"mode","tag"}` and nothing else, so it is not a
+record of what was consumed (it was, under v2). The PR is bookkeeping, it carries no
+publish capability by construction (`release.yml` passes the changesets action no
+`publish:` script), and it regenerates correctly at the next push to `main` or the
+next GA cut. Editing or force-refreshing it manually only risks putting a version
+commit somewhere the publish lane can reach.
 
 **The runtime image is not built here.** `release.yml`'s `release-integrity` lane runs
 on every push to `main` and requests the image once the version is on npm, so it

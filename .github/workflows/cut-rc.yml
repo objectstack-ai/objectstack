@@ -486,17 +486,39 @@ jobs:
       # cut: the pin bump and the version output are one atomic unit, and there is
       # never a main commit carrying a bumped pin but an unversioned tree.
       #
-      # WHAT MAY BE IN IT — re-measured on the 17.0.0 -> 18.0.0-rc.0 train (a full
-      # local `pnpm run version` in a throwaway clone over 199 pending changesets),
-      # not assumed. 160 paths:
-      #   77 modified package.json, 76 modified CHANGELOG.md,
-      #   .changeset/pre.json, the 3 major-boundary paths below, and the 3 doc
-      #   surfaces below. Zero deletions. `.changeset/pre.json` is UNTRACKED on the
-      #   first cut of a train (`changeset pre enter` just created it) and modified
-      #   on later ones; `git add -A` covers both. In PRE mode `changeset version`
-      #   does NOT delete the consumed changesets — it records them in pre.json and
-      #   they are removed at `changeset pre exit` — so a cut never races a lane PR
-      #   over a `.changeset/*.md` file it wants to keep.
+      # WHAT MAY BE IN IT — re-measured under @changesets/cli v3 on the
+      # 17.0.0 -> 17.1.0-rc.0 train (a full local `pnpm run version` in a throwaway
+      # clone over 209 pending changesets), not assumed. 365 staged paths:
+      #   76 modified package.json, 76 modified CHANGELOG.md, 209 changesets MOVED
+      #   into `.changeset/pre/`, `.changeset/pre.json`, and the 3 doc surfaces
+      #   below. `.changeset/pre.json` is UNTRACKED on the first cut of a train
+      #   (`changeset pre enter` just created it) and modified on later ones;
+      #   `git add -A` covers both.
+      #   The 3 major-boundary paths below did NOT appear on this train and are
+      #   allowed for the train that does move the major — as is the blank
+      #   template's own package.json, which is why the v2 measurement this block
+      #   used to carry counted 77 package.json against this one's 76: that train
+      #   was 17.0.0 -> 18.0.0-rc.0, so `sync-template-versions.mjs` had to rewrite
+      #   the template's `^17.0.0` pins. On a minor train it logs "already pins" and
+      #   writes nothing. The counts move with the SHAPE of the train; the
+      #   allowlist below is what does not have to.
+      #
+      #   THE CONSUMED CHANGESETS MOVE — new in v3 (changesets#2190), and the one
+      #   thing about a cut that this file's prose used to get wrong. v2 left every
+      #   consumed `.changeset/*.md` on disk and recorded it in `pre.json`; v3 moves
+      #   it to `.changeset/pre/NAME.md` VERBATIM (measured: a moved file diffs
+      #   identical to its original, and git reports all 209 as `R100` renames), and
+      #   `pre.json` is `{"mode","tag"}` only — `changeset version` never rewrites
+      #   it. So in the worktree a cut is 209 deletions plus a new untracked
+      #   `.changeset/pre/` directory, and the claim this block used to make — "a
+      #   cut never races a lane PR over a `.changeset/*.md` file it wants to keep"
+      #   — is FALSE under v3. The cut moves tracked changeset paths, so a lane PR
+      #   that edits or deletes one of them conflicts; the rebase guard further down
+      #   is what catches it, and it already names `.changeset` in its conflict
+      #   surface. What does NOT change is this allowlist: `^\.changeset/` covers
+      #   `.changeset/pre/…` and `git add -A -- … .changeset …` stages the deletions
+      #   and the new directory together (measured: all 365 staged paths accepted,
+      #   nothing tracked left unstaged).
       # Three more paths can appear at a major boundary and are allowed for that
       # reason, all written by `sync-protocol-version.mjs` /
       # `sync-template-versions.mjs`: packages/spec/src/kernel/protocol-version.ts
@@ -848,7 +870,7 @@ jobs:
             echo "### Two things that are expected, not defects"
             echo
             echo "1. **The standing \`chore: version packages (rc)\` PR (#6208) may look stale.**"
-            echo "   Its changesets were consumed by this cut and are recorded in \`.changeset/pre.json\`."
+            echo "   Its changesets were consumed by this cut and moved to \`.changeset/pre/\` (v3)."
             echo "   Whether it refreshes now depends on the push credential: pushes made with the"
             echo "   Actions \`GITHUB_TOKEN\` trigger no workflow runs (GitHub's recursion guard), so"
             echo "   \`version-pr\` does not fire until some later push to main; with a"
