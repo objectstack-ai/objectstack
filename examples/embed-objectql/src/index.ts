@@ -4,7 +4,7 @@
 //
 // This imports from `@objectstack/objectql/core` — the LEAN entry. It pulls the
 // data engine (query/CRUD/hooks/validation) only: NO kernel, NO ObjectQLPlugin,
-// and NOT `@objectstack/metadata-protocol` (the 268KB metadata-management layer).
+// and NOT `@objectstack/metadata-protocol` (the metadata-management layer).
 // Ideal for a thin, latency-sensitive host (e.g. a gateway) that wants the
 // engine and the *same* object definitions as the full platform, without the
 // platform itself.
