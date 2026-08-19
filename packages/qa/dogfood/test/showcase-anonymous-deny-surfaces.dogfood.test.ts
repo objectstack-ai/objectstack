@@ -107,7 +107,10 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
 /**
  * The REST seam's envelope — `@objectstack/rest` `enforceAuth` writing
  * `ANONYMOUS_DENY_BODY` verbatim. The machine code IS the top-level `error`
- * value; there is no wrapper around it and no `success` flag.
+ * value — and, since #9487, also the top-level `code` key (additive); there is
+ * no wrapper around it and no `success` flag. The predicate deliberately does
+ * not require `code`: family membership is judged on the discriminating keys,
+ * and the exact body is pinned strictly elsewhere in this file.
  */
 const isRestFlatDeny = (body: unknown): boolean =>
   isRecord(body)
@@ -369,11 +372,14 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     // Each family is read in ITS OWN declared shape — no `??` chain across the
     // two, because a tolerant reader here would hide the day one of them
     // changes. `@objectstack/rest` returns the flat `ANONYMOUS_DENY_BODY`
-    // (`{ error: <CODE>, message }`); the dispatcher returns its standard
+    // (`{ error: <CODE>, code: <CODE>, message }` — `code` added by #9487,
+    // additive, aligning the 401 family to the `{ error, code }` shape every
+    // other REST error family answers); the dispatcher returns its standard
     // wrapper (`{ success: false, error: { code, message, httpStatus } }`).
     for (const body of rest) {
       expect(body).toEqual({
         error: 'UNAUTHENTICATED',
+        code: 'UNAUTHENTICATED',
         message: 'Authentication is required to access this endpoint.',
       });
     }

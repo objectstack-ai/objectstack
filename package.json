@@ -54,6 +54,7 @@
     "check:pm-dispatch-gates": "node scripts/pm/check-dispatch-gates.mjs",
     "check:pm-half-states": "node scripts/pm/check-half-states.mjs --self-test",
     "check:pm-governed-merges": "node scripts/pm/check-governed-merges.mjs --self-test",
+    "check:pm-governed-prose": "node scripts/pm/check-governed-prose.mjs --self-test && node scripts/pm/check-governed-prose.mjs",
     "check:partof-closing-keyword": "node scripts/check-partof-closing-keyword.mjs --self-test",
     "check:single-claim-paths": "node scripts/check-single-claim-paths.mjs --self-test",
     "check:adr-anchors": "node scripts/check-adr-anchors.mjs --self-test && node scripts/check-adr-anchors.mjs",

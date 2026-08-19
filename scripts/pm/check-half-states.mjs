@@ -116,6 +116,22 @@
  *       review ACCEPT, so ready = reviewed by construction; a reviewed PR
  *       that left the merge queue (or never entered it) with nobody handling
  *       it would otherwise wait silently forever. Patrol input, not a gate.
+ *   H13 a card carrying `domain:*` with NO pm-state label, aged past one
+ *       sweep cycle — the half-annotated shape the protocol's own
+ *       single-label writes produce by design, which the triage sweep's
+ *       disjunct ③ ("有 domain:* 无 pm-state") exists to heal hourly. In that
+ *       shape the card is invisible to every seat's candidate query (routing
+ *       landed, the state machine never did), and it is ALSO invisible to
+ *       every label-scoped listing in this sweep — the shape is defined by
+ *       the absence of the labels the other listings key on — so H13 is the
+ *       one item that needs an UNSCOPED listing. Aged past a cycle it is a
+ *       defect of the HEALING LOOP, not inventory (maintainer, 2026-08-19,
+ *       verbatim: 「项目经理等分诊,但是没有切换 label,导致挂了很久。」「我
+ *       刚和他说了他才处理。」— the measured specimen, its body self-declaring
+ *       P0/data-integrity, sat ~26h until poked by hand). A louder line fires
+ *       when the card's own title/body self-declares P0/data-integrity: for
+ *       that class the emergency-triage channel (immediate triage subagent)
+ *       is the mandated move, never the hourly Routine.
  *
  * ## The close mechanism, measured (#8293)
  *
@@ -679,6 +695,96 @@ export function h12OrphanLanding(pr, nowMs = Date.now()) {
 }
 
 // ---------------------------------------------------------------------------
+// H13 — domain:* without any pm-state label, aged past one sweep cycle
+// (maintainer-reported incident, 2026-08-19).
+// ---------------------------------------------------------------------------
+
+/**
+ * The label vocabulary that counts as "a pm-state" for H13, mirroring the
+ * triage sweep's disjunct ③: any of these makes the card visible to a named
+ * reader (queue view, lane view, unlock scan, decision inbox, finding
+ * grading round, epic index, seat registry), so their absence — with routing
+ * already present — is the invisible half-annotated shape. `pm:blocking` is
+ * deliberately NOT here: it is a derived priority cache, not a state, and a
+ * card carrying only it is exactly as invisible to candidate queries.
+ */
+export const PM_STATE_LABELS = [
+  'pm:queue',
+  'pm:dispatched',
+  'pm:blocked',
+  'pm:on-hold',
+  'pm:epic',
+  'pm:seat',
+  'needs-user-decision',
+  'finding',
+];
+
+/**
+ * Labels whose NORMAL shape is domain-without-pm-state, excluded by the
+ * sweep's own protocol text (SKILL.md, Backlog sweep): flagging them would
+ * report the protocol's design as a defect.
+ */
+export const H13_EXEMPT_LABELS = ['tracking', 'status:parked', 'qa-run'];
+
+/**
+ * H13 threshold — "one sweep cycle": the triage Routine fires HOURLY and its
+ * disjunct ③ heals exactly this shape every round, so a card still in it
+ * after 2h has survived at least one full healing round it should not have —
+ * the alarm reads a failure of the healing loop, never routine intake
+ * latency (a just-landed domain label sits here only for the sweep's own
+ * ~2-minute settle window, two orders of magnitude under the threshold).
+ * Age reads `updated_at`: it needs no timeline fetch, and every healing
+ * write would bump it, so a stale `updated_at` in this shape means nothing
+ * touched the card at all. The measured specimen sat ~26h; at 2h it would
+ * have been flagged a day earlier.
+ */
+export const DOMAIN_HALF_STATE_STALE_HOURS = 2;
+
+/**
+ * Whether the card's own title/body self-declares P0 / data-integrity — the
+ * incident card carried its emergency-triage trigger in its body while the
+ * seat that saw it "waited for triage" in session memory. Read through
+ * `stripMarkdownCode` (H7 reading 4's careful-author protection carries
+ * over: a body QUOTING `P0` in backticks is not a self-declaration).
+ */
+export function h13SelfDeclaredP0(issue) {
+  const text = stripMarkdownCode(`${issue?.title ?? ''}\n${issue?.body ?? ''}`);
+  return /\bp0\b/i.test(text) || /data[\s-]?integrity/i.test(text);
+}
+
+/**
+ * H13 — null when clean, else the finding sentence (louder for a
+ * self-declared P0/data-integrity card, whose mandated route is the
+ * emergency-triage channel, not the next Routine fire). An unreadable
+ * `updated_at` flags rather than reads as fresh (#4690 direction, same as
+ * H10/H11/H12).
+ */
+export function h13DomainWithoutPmState(issue, nowMs = Date.now()) {
+  const labels = labelNames(issue);
+  if (!labels.some((l) => l.startsWith('domain:'))) return null;
+  if (labels.some((l) => PM_STATE_LABELS.includes(l))) return null;
+  if (labels.some((l) => H13_EXEMPT_LABELS.includes(l))) return null;
+  const updated = Date.parse(issue.updated_at ?? '');
+  const ageHours = Number.isFinite(updated) ? (nowMs - updated) / 3_600_000 : null;
+  if (ageHours !== null && ageHours <= DOMAIN_HALF_STATE_STALE_HOURS) return null;
+  const reading =
+    ageHours === null
+      ? 'an unreadable `updated_at` (which must not read as fresh)'
+      : `~${Math.round(ageHours)}h without activity (threshold ${DOMAIN_HALF_STATE_STALE_HOURS}h)`;
+  const base =
+    `\`domain:*\` with no pm-state label and ${reading} — routing landed, the state machine ` +
+    `never did, so the card is invisible to every seat's candidate query. A half-state older ` +
+    `than one sweep cycle is a defect of the healing loop (triage sweep disjunct ③), not ` +
+    `inventory: pair the domain label with its pm-state in one write, oldest first.`;
+  if (!h13SelfDeclaredP0(issue)) return base;
+  return (
+    `🚨 P0-SUSPECT: the card's own title/body self-declares P0/data-integrity, and for that ` +
+    `class the emergency-triage channel (immediate triage subagent) is the mandated move, ` +
+    `never the hourly Routine. ${base}`
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Transport prerequisite — the classifier (pure) and the probe that feeds it.
 //
 // Modelled on `scripts/cli-build-prerequisite.mjs`: the knowledge lives in pure
@@ -974,7 +1080,7 @@ function reportPrerequisiteNotMet(v, options = {}) {
   const nothing =
     swept === 0
       ? [
-          `  Nothing was swept: no issue was listed and no predicate (H1–H12) ran, so this`,
+          `  Nothing was swept: no issue was listed and no predicate (H1–H13) ran, so this`,
           `  result says NOTHING about whether the board carries half-states. It is not a`,
           `  clean board and it is not a dirty one — it is no reading at all.`,
         ]
@@ -1041,10 +1147,11 @@ async function sweep() {
   const seen = new Map();
   const seenPrs = new Map();
   const seenMerged = new Map();
+  const seenUnscoped = new Map();
   try {
-    await sweepInto(findings, seen, seenPrs, seenMerged);
+    await sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped);
   } catch (err) {
-    err.sweptSoFar = seen.size + seenPrs.size + seenMerged.size;
+    err.sweptSoFar = seen.size + seenPrs.size + seenMerged.size + seenUnscoped.size;
     throw err;
   }
 
@@ -1053,7 +1160,8 @@ async function sweep() {
     console.log(`  ${code} #${issue.number} ${msg}\n     ${issue.html_url}`);
   }
   console.log(
-    `check-half-states: swept ${seen.size} open pm-/p0-labeled issue(s), ${seenPrs.size} open PR(s) ` +
+    `check-half-states: swept ${seen.size} open pm-/p0-labeled issue(s), ${seenUnscoped.size} open ` +
+      `issue(s) in H13's unscoped pass, ${seenPrs.size} open PR(s) ` +
       `and ${seenMerged.size} recently-merged PR(s) in ${OWNER_REPO} — ${findings.length} half-state(s) found. ` +
       `Report-only: findings are patrol input, not a gate verdict.`,
   );
@@ -1089,7 +1197,26 @@ async function listRecentlyMergedPullRequests() {
   return out;
 }
 
-async function sweepInto(findings, seen, seenPrs, seenMerged) {
+/**
+ * The unscoped listing H13 needs: the domain-without-pm-state shape is
+ * DEFINED by the absence of every label the listings below key on, so no
+ * label page can ever return it — the very property that hides it from seat
+ * queries hides it from a label-scoped sweep too. Ten pages, the same cap as
+ * `listIssues`; an open backlog beyond the cap is invisible to H13 (stated
+ * boundary, same convention as H8's merged window — the finding clears when
+ * the paired write lands, not when the card ages out).
+ */
+async function listAllOpenIssues() {
+  const out = [];
+  for (let page = 1; page <= 10; page++) {
+    const batch = await rest(`/repos/${OWNER_REPO}/issues?state=open&per_page=100&page=${page}`);
+    out.push(...batch.filter((i) => !i.pull_request));
+    if (batch.length < 100) break;
+  }
+  return out;
+}
+
+async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped) {
   for (const label of ['pm:dispatched', 'pm:queue', 'pm:blocked', 'pm:seat', 'pm:on-hold', 'priority:p0']) {
     for (const issue of await listIssues(label)) seen.set(issue.number, issue);
   }
@@ -1152,6 +1279,17 @@ async function sweepInto(findings, seen, seenPrs, seenMerged) {
   for (const issue of seen.values()) {
     const stale = h8MergedPrStillDispatched(issue, mergedWindow);
     if (stale) findings.push([issue, 'H8', stale]);
+  }
+
+  // H13 — the one item whose population no label page can list (note at
+  // `listAllOpenIssues`). Kept out of `seen` so H1–H12 keep their exact
+  // inputs and the summary line stays honest about what each pass covered;
+  // the overlap with the label listings costs nothing (the predicate is
+  // label-gated and pure).
+  for (const issue of await listAllOpenIssues()) {
+    seenUnscoped.set(issue.number, issue);
+    const halfState = h13DomainWithoutPmState(issue);
+    if (halfState) findings.push([issue, 'H13', halfState]);
   }
 }
 
@@ -1473,6 +1611,42 @@ function selfTest() {
   // must be a real false, so an issue-shaped or partial row never flags.
   t('H12: missing draft field is out of scope', h12OrphanLanding({ auto_merge: null, updated_at: hoursAgo(50) }, NOW), null);
   t('H12: merged row is out of scope', h12OrphanLanding({ ...openPr({ updated: hoursAgo(50) }), merged_at: '2026-08-13T10:00:00Z' }, NOW), null);
+
+  // -- H13: domain:* without any pm-state label, aged (2026-08-19 incident) --
+  const domainCard = (labels, updatedAt, extra = {}) => ({
+    ...issue(labels),
+    updated_at: updatedAt,
+    ...extra,
+  });
+  t('H13: aged domain card with no pm-state -> finding', typeof h13DomainWithoutPmState(domainCard(['domain:engine-core', 'bug', 'regression'], hoursAgo(26)), NOW), 'string');
+  t('H13: …and the finding names the threshold', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26)), NOW).includes(`${DOMAIN_HALF_STATE_STALE_HOURS}h`), true);
+  t('H13: …and blames the healing loop, not inventory', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26)), NOW).includes('healing loop'), true);
+  t('H13: pm:queue pairs the domain label -> clean', h13DomainWithoutPmState(domainCard(['domain:engine-core', 'pm:queue'], hoursAgo(26)), NOW), null);
+  t('H13: needs-user-decision is a state (the inbox reads it) -> clean', h13DomainWithoutPmState(domainCard(['domain:spec', 'needs-user-decision'], hoursAgo(200)), NOW), null);
+  t('H13: finding is a state (the grading round reads it) -> clean', h13DomainWithoutPmState(domainCard(['domain:cli', 'finding'], hoursAgo(200)), NOW), null);
+  // `pm:blocking` is a derived priority cache, not a state — a card carrying
+  // only it is exactly as invisible to candidate queries, so it still flags.
+  t('H13: pm:blocking alone is NOT a state -> still a finding', typeof h13DomainWithoutPmState(domainCard(['domain:services', 'pm:blocking'], hoursAgo(26)), NOW), 'string');
+  t('H13: status:parked exemption (its normal shape IS this one)', h13DomainWithoutPmState(domainCard(['domain:services', 'status:parked'], hoursAgo(200)), NOW), null);
+  t('H13: tracking exemption', h13DomainWithoutPmState(domainCard(['domain:devx', 'tracking'], hoursAgo(200)), NOW), null);
+  t('H13: qa-run exemption', h13DomainWithoutPmState(domainCard(['domain:cli', 'qa-run'], hoursAgo(200)), NOW), null);
+  t('H13: no domain label is out of scope however bare', h13DomainWithoutPmState(domainCard(['bug'], hoursAgo(200)), NOW), null);
+  t('H13: fresh half-state is intake latency, not a finding', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(1)), NOW), null);
+  t('H13: exactly at the threshold -> clean (strictly beyond fires)', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(DOMAIN_HALF_STATE_STALE_HOURS)), NOW), null);
+  // #4690 in miniature, same as H10/H11/H12: unreadable must not read as fresh.
+  t('H13: unreadable updated_at -> finding, not fresh', typeof h13DomainWithoutPmState(domainCard(['domain:engine-core'], 'not-a-date'), NOW), 'string');
+  t('H13: absent updated_at -> finding, not fresh', typeof h13DomainWithoutPmState(domainCard(['domain:engine-core'], undefined), NOW), 'string');
+  // The louder line — the measured card carried its trigger in its own body.
+  const p0Body = { body: 'P0 checklist-item failure (data-integrity DELETE regression) — priority label is triage’s to set' };
+  t('H13: body self-declaring P0 -> louder line', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26), p0Body), NOW).includes('P0-SUSPECT'), true);
+  t('H13: …which prescribes the emergency-triage channel', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26), p0Body), NOW).includes('emergency-triage'), true);
+  t('H13: data-integrity phrasing alone fires the louder line', h13SelfDeclaredP0({ title: '', body: 'a data integrity regression in DELETE' }), true);
+  t('H13: the title is scanned too', h13SelfDeclaredP0({ title: 'p0 suspect: rows vanish', body: '' }), true);
+  // Strip reuse (H7 reading 4): quoting the token in backticks is not a
+  // self-declaration, and `P0` inside a word is not the token.
+  t('H13: P0 only inside backticks is not a self-declaration', h13SelfDeclaredP0({ title: '', body: 'the card quotes `P0` in passing' }), false);
+  t('H13: P0 inside a word does not fire', h13SelfDeclaredP0({ title: '', body: 'the HTTP0 protocol note' }), false);
+  t('H13: a quiet body stays on the base line', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26), { body: 'ordinary defect' }), NOW).includes('P0-SUSPECT'), false);
 
   // -- transport prerequisite (#7412) ---------------------------------------
   // The three container classes are REAL measurements, not invented fixtures;
