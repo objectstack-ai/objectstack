@@ -142,7 +142,7 @@ describe('#9653 the /admin/sso/* bridges run the ADR-0068 platform-admin gate be
   };
 
   let app: Hono;
-  let vendor: ReturnType<typeof betterAuth>;
+  let vendor: ReturnType<typeof makeSsoVendor>;
   let delegated: ReturnType<typeof vi.fn>;
 
   beforeAll(async () => {
@@ -212,7 +212,7 @@ describe('#9653 the /admin/sso/* bridges run the ADR-0068 platform-admin gate be
 });
 
 describe('#9653 the card’s assertion: on an SSO-ENABLED fixture a real plain member cannot register an SSO provider', () => {
-  let vendor: ReturnType<typeof betterAuth>;
+  let vendor: ReturnType<typeof makeSsoVendor>;
   let memberCookie: string;
 
   /** First `name=value` pair of every Set-Cookie the response carries. */
