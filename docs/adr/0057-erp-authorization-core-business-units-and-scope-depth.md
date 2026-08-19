@@ -515,6 +515,8 @@ One proof per surfacing decision, ratcheted with its PR:
 
 ### PS-2 implementation note (2026-06-22) — D10 realized via server-enforced `requiresService`
 
+> ⚠️ **The general rule lives in [ADR-0124](./0124-server-enforces-client-is-courtesy.md), not here.** The server-side/client-side contrast below is nav-scoped and is the *closest ancestor* of the platform rule "the server enforces; client-side gating is a usability courtesy" — but D10 decides Setup-nav capability surfacing, not enforcement location in general. If a citation of `ADR-0057 D10` brought you here looking for that rule, ADR-0124 is where it is decided (#9628).
+
 Implementing D10 refined the mechanism (no cross-repo relocation needed):
 
 - The Setup nav is filtered **server-side** (`rest-server` `filterAppForUser`), which
