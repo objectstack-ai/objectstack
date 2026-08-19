@@ -14,9 +14,12 @@
  * account app.)
  *
  * NOTE (transitional): `ACCOUNT_APP` is still imported from
- * `@objectstack/platform-objects/apps`, and this package is NOT yet wired into
- * the dev/serve plugin set — that boot-path switch lands separately so it can
- * be verified against a live `os dev` boot.
+ * `@objectstack/platform-objects/apps`. The package IS wired into the
+ * dev/serve plugin set — `packages/cli/src/commands/serve.ts` loads it via
+ * the ADR-0048 platform-app loop (`['@objectstack/account',
+ * 'createAccountAppPlugin']`) — and that boot path has been verified against
+ * a live `os dev` boot (transcript: objectstack-ai/objectos#94, comment
+ * 5329804967).
  */
 
 import { ACCOUNT_APP } from '@objectstack/platform-objects/apps';
