@@ -219,3 +219,87 @@ describe('mountRouteOnServer write-less fallback (#9936)', () => {
     });
 });
 
+// ---------------------------------------------------------------------------
+// Site 2 — sendResultBase's dispatch-result writer (#9961)
+// ---------------------------------------------------------------------------
+
+describe('dispatch-result writer write-less fallback (#9961)', () => {
+    const ROUTE_PATH = '/api/v1/ai/stream-pin2';
+    const WILDCARD = 'POST /api/v1/ai/*';
+
+    async function drive(withWriteEnd: boolean, events: () => AsyncIterable<unknown>) {
+        const fakeServer = makeFakeServer();
+        const handler = vi.fn(async () => ({ status: 200, stream: true, events: events() }));
+        const ctx = makeCtx(fakeServer, [{ method: 'POST', path: ROUTE_PATH, auth: false, handler }]);
+        const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
+        await plugin.start?.(ctx);
+
+        const wildcard = fakeServer.handlers[WILDCARD];
+        expect(wildcard).toBeTypeOf('function');
+        const { rec, res, settled } = recordingRes(withWriteEnd);
+        await wildcard({ path: ROUTE_PATH, headers: {}, body: {}, params: {}, query: {} }, res);
+        // The drain is detached by design (sendResultBase is synchronous by
+        // signature); the response arrives when the iterable settles.
+        await settled;
+        return rec;
+    }
+
+    it('drains the descriptor and buffers the SAME bytes a streaming transport receives — never the serialized descriptor', async () => {
+        const mk = () => {
+            const drained = { value: false };
+            const events = async function* () {
+                yield STRING_FRAME;
+                yield null; // the streamed branch skips null events; the buffer must too
+                yield OBJECT_FRAME;
+                drained.value = true;
+            };
+            return { events, drained };
+        };
+
+        const a = mk();
+        const streamed = await drive(true, a.events);
+        const b = mk();
+        const buffered = await drive(false, b.events);
+
+        expect(streamed.terminal).toBe('end');
+        expect(buffered.terminal).toBe('send');
+
+        // ⭐ Byte identity with the streamed leg (its leading res.write('')
+        // adapter nudge contributes zero bytes).
+        expect(buffered.sent).toBe(streamed.writes.join(''));
+        expect(decodeSseFrames(buffered.sent!)).toEqual(EXPECTED_FRAMES);
+
+        // The #9961 defect shape must not come back: the descriptor was
+        // json-serialized with `events` collapsed to {} and never drained.
+        expect(buffered.jsonBody).toBeUndefined();
+        expect(buffered.sent).not.toContain('"events"');
+        expect(a.drained.value).toBe(true);
+        expect(b.drained.value).toBe(true);
+
+        // Streaming headers relayed from the descriptor on both legs.
+        expect(streamed.headers['Content-Type']).toBe('text/event-stream');
+        expect(buffered.headers['Content-Type']).toBe('text/event-stream');
+        expect(buffered.status).toBe(200);
+    });
+
+    it('a mid-stream throw lands as the same event:error frame the streamed branch writes', async () => {
+        const boom = () => (async function* () {
+            yield STRING_FRAME;
+            throw new Error('adapter unplugged');
+        })();
+
+        const streamed = await drive(true, boom);
+        const buffered = await drive(false, boom);
+
+        // Streamed reference: frames then the error frame, then end().
+        const streamedBytes = streamed.writes.join('');
+        expect(streamed.terminal).toBe('end');
+        expect(streamedBytes).toContain('event: error');
+
+        // Buffered leg: byte-identical, delivered through send().
+        expect(buffered.terminal).toBe('send');
+        expect(buffered.sent).toBe(streamedBytes);
+        expect(buffered.sent).toContain('adapter unplugged');
+        expect(buffered.jsonBody).toBeUndefined();
+    });
+});

@@ -403,6 +403,51 @@ function sendResultBase(
                 })();
                 return;
             }
+            if (isStream) {
+                // [#9961] Buffered fallback for a transport whose `res` cannot
+                // stream — the same #3607 / ADR-0076 OQ#10 contract
+                // prescription the route-wrapper branch applies (see
+                // `mountRouteOnServer`): drain the descriptor's AsyncIterable
+                // and deliver the identical SSE bytes through `send()` under
+                // the streaming headers. Frame encoding, the `null` skip and
+                // the trailing `event: error` frame all mirror the streamed
+                // branch above so the buffered body is byte-identical to what
+                // a streaming transport would have received.
+                //
+                // This used to fall through to `res.json(result.result)`,
+                // which serialized the descriptor itself: `JSON.stringify`
+                // collapses the `events` AsyncIterable to `{}`, so the caller
+                // got HTTP 200 with the payload gone and the iterable was
+                // never drained — silent total event loss.
+                res.status(typeof r.status === 'number' ? r.status : 200);
+                applySecurityHeaders();
+                if (r.headers && typeof r.headers === 'object') {
+                    for (const [k, v] of Object.entries(r.headers)) {
+                        res.header(k, String(v));
+                    }
+                } else {
+                    res.header('Content-Type', r.contentType || 'text/event-stream');
+                    res.header('Cache-Control', 'no-cache');
+                    res.header('Connection', 'keep-alive');
+                }
+                // Drained in the same detached shape as the streaming path —
+                // this function is synchronous by signature, and the response
+                // is delivered when the iterable settles.
+                (async () => {
+                    let buffered = '';
+                    try {
+                        for await (const event of r.events as AsyncIterable<unknown>) {
+                            if (event == null) continue;
+                            buffered += typeof event === 'string' ? event : `data: ${JSON.stringify(event)}\n\n`;
+                        }
+                    } catch (streamErr) {
+                        buffered += `event: error\ndata: ${JSON.stringify({ message: streamErr instanceof Error ? streamErr.message : String(streamErr) })}\n\n`;
+                    } finally {
+                        try { res.send(buffered); } catch { /* connection already gone */ }
+                    }
+                })();
+                return;
+            }
             res.status(200);
             applySecurityHeaders();
             res.json(result.result);
