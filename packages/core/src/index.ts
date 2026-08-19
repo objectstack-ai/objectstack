@@ -88,6 +88,8 @@ export type {
     IHttpResponse,
     RouteHandler,
     Middleware,
+    HttpResponseObservation,
+    HttpResponseObserver,
     IDataEngine,
     IObjectQLEngine,
     EngineSchemaRegistryView,
@@ -95,3 +97,6 @@ export type {
     EngineTransactionInfo,
     IDataDriver,
 } from '@objectstack/spec/contracts';
+// The reserved route label for unrouted requests on the `afterResponse`
+// observation seam (#9835) — a VALUE, so it rides beside the type block above.
+export { UNMATCHED_ROUTE_PATTERN } from '@objectstack/spec/contracts';

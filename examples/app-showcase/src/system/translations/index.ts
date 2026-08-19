@@ -118,6 +118,35 @@ export const ShowcaseTranslationBundle = {
           notes: { label: 'Notes' },
         },
       },
+      // [#9308 fixture 2] The share-link object. Translated on BOTH sides at
+      // once, key for key: `check-i18n-coverage` is a two-sided ratchet, so an
+      // `en` entry landing without its zh-CN mirror is what WIDENS the gap
+      // rather than closing it. Every string the object declares is here —
+      // label, pluralLabel, description, all seven field labels and both
+      // `status` options — which is what returns the count to its baseline
+      // instead of merely stopping its growth.
+      showcase_client_brief: {
+        label: 'Client Brief',
+        pluralLabel: 'Client Briefs',
+        // Byte-for-byte the string the object DECLARES. A bundle entry
+        // overrides the schema label for its locale, so a "tidied" English
+        // description here would silently rewrite the product copy under the
+        // guise of translating it — the en side's job is to mirror, not edit.
+        description:
+          'A client-facing project brief published by opaque share link — the showcase\'s `publicSharing` demonstration (ADR-0047).',
+        fields: {
+          title: { label: 'Title' },
+          summary: { label: 'Client Summary' },
+          project: { label: 'Project' },
+          status: {
+            label: 'Status',
+            options: { draft: 'Draft', published: 'Published' },
+          },
+          internal_notes: { label: 'Internal Notes' },
+          deal_value: { label: 'Deal Value' },
+          owner_id: { label: 'Owner' },
+        },
+      },
       showcase_invoice: {
         label: 'Invoice',
         pluralLabel: 'Invoices',
@@ -452,6 +481,37 @@ export const ShowcaseTranslationBundle = {
           status: { label: '状态' },
           notes: { label: '备注' },
           who_is_this: { label: '这是谁' },
+        },
+      },
+      // [#9308 fixture 2] The zh-CN mirror of the `en` block above, key for
+      // key. Renderings follow the ones this bundle already established rather
+      // than being coined fresh: 标题 / 项目 / 状态 / 备注 / 负责人 are the words
+      // showcase_task and showcase_invoice already use for the same concepts,
+      // which is the whole point of the file — a list must not mix a translated
+      // 状态 with an English Owner next to it.
+      showcase_client_brief: {
+        label: '客户简报',
+        // Chinese does not inflect for number, so the plural is the same word —
+        // the same shape 客户 / 客户 and 联系人 / 联系人 already take here.
+        pluralLabel: '客户简报',
+        // A faithful rendering of the SAME sentence the en side carries,
+        // including the ADR reference — dropping half of it in translation is
+        // the locale degradation this bundle exists to prevent.
+        description:
+          '面向客户的项目简报，通过不透明的分享链接对外发布——本示例应用对 `publicSharing` 的演示（ADR-0047）。',
+        fields: {
+          title: { label: '标题' },
+          summary: { label: '客户摘要' },
+          project: { label: '项目' },
+          status: {
+            label: '状态',
+            // 已发布 follows the 已完成 pattern this bundle uses for a state
+            // that has been reached, rather than the bare verb 发布.
+            options: { draft: '草稿', published: '已发布' },
+          },
+          internal_notes: { label: '内部备注' },
+          deal_value: { label: '交易金额' },
+          owner_id: { label: '负责人' },
         },
       },
       showcase_invoice: {

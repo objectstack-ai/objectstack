@@ -112,6 +112,59 @@
  * file) but share no vocabulary, no baseline and no verdict: a seam red under
  * one is untouched by the other.
  *
+ * ## THE THIRD VERDICT (#9747, maintainer ruling of 2026-08-18)
+ *
+ * Both rules above end in one of two states: a finding, or `clean`. #9747
+ * measured nine instances in this repo where a gate printed the second while
+ * meaning something else entirely — "I saw nothing I understood" — and two of
+ * them (#8897, #9657) are this file's own. The ruling accepted a THIRD state:
+ *
+ *   > N constructs in the scan roots matched no rule in this gate's vocabulary
+ *   > — printed and counted, visible in round reports; NOT a failure, and NO
+ *   > new merge-blocking context.
+ *
+ * This file is one of the three pilot gates. What it now prints, on every run:
+ *
+ *   UNRECOGNISED [durability-degradation-log-level]: N of M discovered seam(s)
+ *   answer their catch through a call this checker could not read as a log
+ *
+ * The log-level rule can answer this honestly because its LOG-CALLEE
+ * vocabulary is a closed, structural thing — `resolveLogCallee` already
+ * returns `unreadable` for a call it cannot read, and #9657 is precisely the
+ * damage that fact does when it stays private. Before this, `unreadable` was
+ * collected only to choose a FINDING's verdict, so a seam that was correctly
+ * green and also carried something unreadable reported nothing at all.
+ *
+ * ## Why this is not `exit 2`, when the in-tree prior art is
+ *
+ * Four places already spell a third state and every one of them exits
+ * non-zero: `check-where-matcher-conformance` (missing baseline => `exit 2`,
+ * explicitly distinct from a finding's `exit 1`), `check-published-readme-
+ * exports` (hard refusal — "cannot tell debt from a new defect"),
+ * `check-governed-merges`' header ("non-zero exits classify the ENVIRONMENT,
+ * not the tree"), and #9700's drift guard. All four are the gate REFUSING TO
+ * RUN: the environment is broken and no verdict about the tree exists.
+ *
+ * This verdict is the opposite — the run completed and the count is an
+ * observation about it. `exit 2` would make it a failing CI job, which the
+ * ruling forbids in as many words. So the convention is matched where the
+ * convention is about SEMANTICS (a named third state, printed rather than
+ * inferred, distinct from both `clean` and a finding) and deliberately not
+ * where it is about the exit code. The line carries a stable, greppable
+ * prefix — `UNRECOGNISED [<gate>]:` — so a round report can pick it up
+ * without any new merge-blocking context existing anywhere.
+ *
+ * ## Why the READ-SEAM rule prints NOT APPLICABLE instead of a number
+ *
+ * Measured, not assumed — see the note at that rule's own verdict. Its
+ * vocabulary is callee NAMES, and "a storage read I do not know about" cannot
+ * be counted without the spelling heuristic the vocabulary note refuses. A
+ * census over its three scan roots returns 25 candidates of which the
+ * majority (`JSON.parse`, `Array.isArray`, `getService`) are correctly out of
+ * scope, so a count there would be noise on day one. Printing NOT APPLICABLE
+ * rather than nothing is deliberate: an absent row cannot be told apart from
+ * "nobody looked", which is this card's own subject.
+ *
  * ## Usage
  *
  *     node scripts/check-durability-degradation-log-level.mjs             # audit (both rules)
@@ -850,31 +903,240 @@ function calleeName(node) {
     return undefined;
 }
 
+/** The receiver names that make a `<recv>.<level>(…)` call a LOG. */
+const LOGGER_RECEIVERS = /^(logger|log|console)$/i;
+
+/** Every level name the two vocabularies above know. */
+const ALL_LEVELS = new Set([...LOUD_LEVELS, ...QUIET_LEVELS]);
+
+/**
+ * How far a callee is resolved through parentheses / fallbacks / `const`
+ * aliases before the resolver gives up and says so. The deepest real chain in
+ * the repo is 3 (`(a.error?.bind(a) ?? a.warn.bind(a))` behind a `const`), so
+ * this is that plus headroom; a chain longer than this is reported as
+ * UNREADABLE rather than as silence, which is the safe direction (see below).
+ */
+const MAX_CALLEE_RESOLUTION_DEPTH = 6;
+
+/** The receiver name of `<recv>.<level>`, for the vocabulary test. */
+function logReceiverName(expr) {
+    if (ts.isIdentifier(expr)) return expr.text;
+    if (ts.isPropertyAccessExpression(expr) && ts.isIdentifier(expr.name)) return expr.name.text;
+    return undefined;
+}
+
+/**
+ * Resolve a CALLEE expression to the log levels the call may reach.
+ *
+ * @returns `{ levels: string[], unreadable: boolean }` — `unreadable` means
+ *          "this looks like a report and I could not read it", which is a
+ *          DIFFERENT fact from "there is no log here" (see `loggerLevels`).
+ */
+function resolveLogCallee(expr, ctx, depth = 0) {
+    const res = { levels: [], unreadable: false };
+    if (!expr) return res;
+    if (depth > MAX_CALLEE_RESOLUTION_DEPTH) {
+        res.unreadable = true;
+        return res;
+    }
+    const merge = (r) => {
+        res.levels.push(...r.levels);
+        if (r.unreadable) res.unreadable = true;
+    };
+
+    // Transparent wrappers: `(…)`, `…!`, `… as T`.
+    if (
+        ts.isParenthesizedExpression(expr) ||
+        ts.isNonNullExpression(expr) ||
+        ts.isAsExpression(expr)
+    ) {
+        return resolveLogCallee(expr.expression, ctx, depth + 1);
+    }
+
+    // `a ?? b` / `a || b` — the fallback idiom. EVERY branch contributes: the
+    // call reaches whichever one is defined, and the existing
+    // `levels.filter(LOUD)` semantic then decides, exactly as it already does
+    // for a catch that contains both a `warn` and an `error`.
+    if (ts.isBinaryExpression(expr)) {
+        const op = expr.operatorToken.kind;
+        if (op !== ts.SyntaxKind.QuestionQuestionToken && op !== ts.SyntaxKind.BarBarToken) {
+            return res;
+        }
+        merge(resolveLogCallee(expr.left, ctx, depth + 1));
+        merge(resolveLogCallee(expr.right, ctx, depth + 1));
+        return res;
+    }
+
+    // `(cond ? a : b)(…)` — same reasoning as the fallback.
+    if (ts.isConditionalExpression(expr)) {
+        merge(resolveLogCallee(expr.whenTrue, ctx, depth + 1));
+        merge(resolveLogCallee(expr.whenFalse, ctx, depth + 1));
+        return res;
+    }
+
+    if (ts.isPropertyAccessExpression(expr) && ts.isIdentifier(expr.name)) {
+        const name = expr.name.text;
+        // `.call(recv, …)` / `.apply(recv, args)` / `.bind(recv)` are ADAPTERS,
+        // not levels: what is being called is whatever they are called ON.
+        // `driver-turso` uses `.call` because `(a ?? b)(…)` loses the receiver
+        // binding — it is the MORE correct spelling of the same idiom, so
+        // reading it as a log is not a loosening.
+        if (name === 'call' || name === 'apply' || name === 'bind') {
+            return resolveLogCallee(expr.expression, ctx, depth + 1);
+        }
+        if (!ALL_LEVELS.has(name)) return res;
+        const receiverName = logReceiverName(expr.expression);
+        // Receiver vocabulary UNCHANGED (#8897 owns that half). A level name on
+        // an unrecognised receiver is not reported as unreadable either: that
+        // narrowness is already filed, measured and deliberate, and turning it
+        // into a new verdict here would re-open it by the back door.
+        if (receiverName && LOGGER_RECEIVERS.test(receiverName)) res.levels.push(name);
+        return res;
+    }
+
+    // `logger['error'](…)` is the same call; `logger[key](…)` is a report this
+    // checker cannot read, and says so rather than counting it as silence.
+    if (ts.isElementAccessExpression(expr)) {
+        const receiverName = logReceiverName(expr.expression);
+        if (!receiverName || !LOGGER_RECEIVERS.test(receiverName)) return res;
+        const arg = expr.argumentExpression;
+        if (arg && ts.isStringLiteralLike(arg) && ALL_LEVELS.has(arg.text)) {
+            res.levels.push(arg.text);
+            return res;
+        }
+        res.unreadable = true;
+        return res;
+    }
+
+    if (ts.isIdentifier(expr)) {
+        // A same-file `const report = <log expression>` — the SAME "follow the
+        // indirection" discipline this file already applies to same-file helper
+        // FUNCTIONS, extended to a helper stored in a const. Without it,
+        // `const log = l.error?.bind(l) ?? l.warn.bind(l); log(…)` (6 calls in
+        // `catch` blocks across three trigger/service packages) reads as silence.
+        const alias = ctx.logAliases?.get(expr.text);
+        if (alias) {
+            res.levels.push(...alias.levels);
+            if (alias.unreadable) res.unreadable = true;
+            return res;
+        }
+        // A bare `warn(…)` naming a same-file function is handled one level up,
+        // by `collectLoggedLevels`' helper walk. One this file cannot see (an
+        // IMPORTED `warn`) is a report we cannot read — not a silent catch.
+        if (ALL_LEVELS.has(expr.text) && !ctx.functionBodies?.has(expr.text)) {
+            res.unreadable = true;
+        }
+        return res;
+    }
+
+    return res;
+}
+
 /**
  * `x.logger.warn(...)` / `logger.warn(...)` / `this.log.error(...)` /
- * `console.error(...)` → 'warn' | 'error' | …
+ * `console.error(...)` / `(logger.error ?? logger.warn)(…)` →
+ * `[{ level, conditional }]`.
  *
- * Matched on the SHAPE `<logger|log|console>.<level>(…)`, so a renamed local
- * (`const log = ctx.logger`) is still seen. `console` counts because
- * `console.error` is every bit as loud as `logger.error` — measuring the gate
- * against the repo turned up a real site (`metadata/src/loaders/
- * database-loader.ts` history-schema sync) that reports honestly via `console`,
- * and flagging it would have been a false positive.
+ * `console` counts because `console.error` is every bit as loud as
+ * `logger.error` — measuring the gate against the repo turned up a real site
+ * (`metadata/src/loaders/database-loader.ts` history-schema sync) that reports
+ * honestly via `console`, and flagging it would have been a false positive.
+ *
+ * ## Why the callee is RESOLVED rather than matched (#9657)
+ *
+ * The old matcher required the callee to be a plain property access, so it read
+ * exactly one spelling. A census of every log-emitting call under `packages/`
+ * found SIX shape families — 3,308 calls, 658 of them inside a `catch`
+ * (measured on the tree this landed in; re-run it before trusting the counts,
+ * the SHAPES are the durable part):
+ *
+ *   | callee shape                                            | calls | in a catch |
+ *   |---------------------------------------------------------|------:|-----------:|
+ *   | `logger.error(…)` and its `?.` variants                  |  3266 |        645 |
+ *   | `(logger.error ?? logger.warn)(…)`                        |     6 |          2 |
+ *   | `(logger.error ?? logger.warn).call(logger, …)`           |     1 |          0 |
+ *   | `((c.warn ?? c.error))?.(…)`                              |     1 |          0 |
+ *   | `l.error?.bind(l) ?? l.warn.bind(l)` stored in a `const`   |     8 |          6 |
+ *   | bare `warn(…)` / `info(…)` / `log(…)` (helper, same-file or imported) | 26 | 5 |
+ *
+ * Only the first was visible. The other five exist because `error` is OPTIONAL
+ * on the driver sinks (`SqlDriver.logger` declares `error?`, and hosts do inject
+ * `{ warn }`-only sinks), so every author invents their own way to spell "error
+ * if you have one, warn if you do not". Adding spellings one at a time is an
+ * instalment plan against a set that is still growing — the callee is therefore
+ * RESOLVED through the constructs that build these shapes.
+ *
+ * ## ⛔ `?.(` is CONDITIONAL, and a conditional log is NOT loud
+ *
+ * This is the half that matters more than the widening, and it is why the
+ * widening alone would have been actively harmful.
+ *
+ * `logger.error?.(msg)` — the ONE fallback spelling the old matcher accepted —
+ * prints NOTHING against a sink that has no `error`. So the cheapest way to
+ * clear a "this catch swallows the failure with no log at all" report was to
+ * adopt it: the gate goes green and the operator goes blind, which is the exact
+ * #4420 shape this whole rule exists to prevent (and the same argument
+ * `FAILURE_PROPAGATION_CALLEES`' header makes about bolting on a `logger.error`).
+ * A gate whose cheapest satisfaction is harmful has the wrong shape.
+ *
+ * So the OPTIONAL-CALL token is read as what it is: the author's own statement
+ * that this call may not print. An emission spelled `?.(` does not count toward
+ * `loud` — the fix is to give it the fallback it is missing, which is now a
+ * shape the checker can read:
+ *
+ *     ⛔ l.error?.(msg)                     // may print nothing
+ *     ✅ (l.error ?? l.warn)(msg)           // always prints; reaches `error`
+ *     ✅ (l.error ?? l.warn).call(l, msg)   // same, keeping the receiver
+ *     ✅ this.logDurabilityFailure(msg)     // a named same-file helper
+ *
+ * The cheapest satisfaction is now the correct code.
+ *
+ * ⛔ Optionality on the RECEIVER (`logger?.error(…)`) is deliberately NOT
+ * judged. It says "there may be no sink at all", and when there is no sink
+ * there is no better level to fall back to — there is nothing the author could
+ * do about it. It is `?.(`, on a sink that DOES exist and DOES have `warn`,
+ * that chooses silence over the alternative it is holding. Measured: judging
+ * receiver optionality too would have flagged 22 further in-`catch` calls with
+ * no remedy to offer any of them.
  */
-function loggerLevel(node) {
-    if (!ts.isCallExpression(node)) return undefined;
-    const expr = node.expression;
-    if (!ts.isPropertyAccessExpression(expr) || !ts.isIdentifier(expr.name)) return undefined;
-    const level = expr.name.text;
-    if (!LOUD_LEVELS.has(level) && !QUIET_LEVELS.has(level)) return undefined;
-    const receiver = expr.expression;
-    let receiverName;
-    if (ts.isIdentifier(receiver)) receiverName = receiver.text;
-    else if (ts.isPropertyAccessExpression(receiver) && ts.isIdentifier(receiver.name)) {
-        receiverName = receiver.name.text;
-    }
-    if (!receiverName) return undefined;
-    return /^(logger|log|console)$/i.test(receiverName) ? level : undefined;
+function loggerLevels(node, ctx) {
+    if (!ts.isCallExpression(node)) return { levels: [], unreadable: false };
+    const resolved = resolveLogCallee(node.expression, ctx);
+    const conditional = !!node.questionDotToken;
+    return {
+        levels: resolved.levels.map((level) => ({ level, conditional })),
+        // "Unreadable" is only reported when NOTHING resolved: a callee that
+        // reached a level is classified, not deferred.
+        unreadable: resolved.unreadable && resolved.levels.length === 0,
+    };
+}
+
+/**
+ * Same-file `const <name> = <expression that resolves to a log>` bindings.
+ *
+ * Two shapes in the repo, both in `catch` blocks that reason explicitly about
+ * the durability class:
+ *
+ *     const log = this.logger.error?.bind(this.logger) ?? this.logger.warn.bind(this.logger);
+ *     const report = this.logger?.error?.bind(this.logger) ?? this.logger?.warn?.bind(this.logger);
+ *
+ * Indexed in one pass and resolved with the same resolver, so a fallback stored
+ * in a const is read exactly like a fallback called inline. Only `const`/`let`
+ * declarations with an initializer are indexed, keyed by bare name — the same
+ * key model, with the same trade-off, as `indexFunctionBodies` above.
+ */
+function indexLogAliases(sf, functionBodies) {
+    const byName = new Map();
+    const ctx = { functionBodies, logAliases: byName };
+    walkAll(sf, (node) => {
+        if (!ts.isVariableDeclaration(node) || !ts.isIdentifier(node.name)) return;
+        const init = node.initializer;
+        if (!init || ts.isArrowFunction(init) || ts.isFunctionExpression(init)) return;
+        const resolved = resolveLogCallee(init, ctx);
+        if (resolved.levels.length === 0) return;
+        byName.set(node.name.text, resolved);
+    });
+    return byName;
 }
 
 /**
@@ -1120,29 +1382,50 @@ function indexFunctionBodies(sf) {
  * like the hand-copied driver-error predicates `@objectstack/metadata/errors`
  * exists to prevent.
  *
+ * @param ctx `{ functionBodies, logAliases, unreadable? }` — the same-file
+ *        indexes the resolver follows. When `unreadable` is an array, calls
+ *        that LOOK like a report and could not be read are appended to it; the
+ *        read-seam rule passes none and is therefore unaffected by that half.
  * @param lineOf Resolves a node to its 1-based line, for the report.
- * @returns `{ level, line, viaHelper? }[]` — `viaHelper` names the same-file
- *          function the log was found inside, when it was not inline.
+ * @returns `{ level, conditional, line, viaHelper? }[]` — `viaHelper` names the
+ *          same-file function the log was found inside, when it was not inline;
+ *          `conditional` marks an emission that may not print at all (see
+ *          `loggerLevels`).
  */
-function collectLoggedLevels(block, functionBodies, lineOf, seen = new Set(), depth = 0) {
+function collectLoggedLevels(block, ctx, lineOf, seen = new Set(), depth = 0) {
     const levels = [];
     walkSameTickInclusive(block, (child) => {
-        const level = loggerLevel(child);
-        if (level) {
-            levels.push({ level, line: lineOf(child) });
+        const found = loggerLevels(child, ctx);
+        if (found.levels.length > 0) {
+            for (const l of found.levels) levels.push({ ...l, line: lineOf(child) });
             return;
+        }
+        if (found.unreadable && ctx.unreadable) {
+            ctx.unreadable.push({ line: lineOf(child), text: sourceSnippet(child) });
         }
         if (depth >= 3) return;
         const name = calleeName(child);
         if (!name || seen.has(name)) return;
-        const body = functionBodies.get(name);
+        const body = ctx.functionBodies.get(name);
         if (!body) return;
         seen.add(name);
-        for (const l of collectLoggedLevels(body, functionBodies, lineOf, seen, depth + 1)) {
+        for (const l of collectLoggedLevels(body, ctx, lineOf, seen, depth + 1)) {
             levels.push({ ...l, viaHelper: name });
         }
     });
     return levels;
+}
+
+/** The first line of a node's source text, for a diagnostic that names it. */
+function sourceSnippet(node) {
+    let text;
+    try {
+        text = node.getText();
+    } catch {
+        return '<unavailable>';
+    }
+    const firstLine = text.split('\n')[0].trim();
+    return firstLine.length > 72 ? `${firstLine.slice(0, 72)}…` : firstLine;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1435,6 +1718,7 @@ function analyzeReadSeams(sf, relPath, findings, seams, options = {}) {
     const discriminators = options.discriminators ?? READ_FAILURE_DISCRIMINATORS;
     const lineOf = (node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
     const functionBodies = indexFunctionBodies(sf);
+    const logAliases = indexLogAliases(sf, functionBodies);
     const ctx = { functionBodies, discriminators, usedDiscriminators: new Set() };
 
     /** Does this catch RECOVER (rather than propagate on every path)? */
@@ -1497,7 +1781,14 @@ function analyzeReadSeams(sf, relPath, findings, seams, options = {}) {
         if (reads.length === 0) return;
 
         const catchBlock = node.catchClause.block;
-        const logs = collectLoggedLevels(catchBlock, functionBodies, lineOf);
+        // No `unreadable` sink: this rule asks "did the catch say anything at
+        // all?", and an unreadable call is not a verdict it has any use for.
+        // Its census and its findings are byte-identical before and after #9657.
+        const logs = collectLoggedLevels(
+            catchBlock,
+            { functionBodies, logAliases },
+            lineOf,
+        );
 
         // 2. On which paths does it invent an answer? TWO criteria over the
         //    same exits — an EMPTY/ZERO value, or the function's own input
@@ -1554,6 +1845,7 @@ function analyzeSourceFile(sf, relPath, findings, seams, options = {}) {
     const usedPropagationSites = options.usedPropagationSites;
     const lineOf = (node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
     const functionBodies = indexFunctionBodies(sf);
+    const logAliases = indexLogAliases(sf, functionBodies);
 
     const globalPropagation = [...FAILURE_PROPAGATION_CALLEES].map(([name, d]) => ({
         name,
@@ -1588,7 +1880,17 @@ function analyzeSourceFile(sf, relPath, findings, seams, options = {}) {
         walkSameTickInclusive(block, (child) => {
             if (ts.isThrowStatement(child)) rethrows = true;
         });
-        return { levels: collectLoggedLevels(block, functionBodies, lineOf), rethrows };
+        // `unreadable` collects the calls that LOOK like a report and could not
+        // be read. Kept separate from `levels` so that "I could not recognise
+        // this" can be REPORTED AS ITSELF instead of being folded into "this
+        // catch said nothing" — see the `unreadable-report` verdict below.
+        const unreadable = [];
+        const levels = collectLoggedLevels(
+            block,
+            { functionBodies, logAliases, unreadable },
+            lineOf,
+        );
+        return { levels, rethrows, unreadable };
     };
 
     /**
@@ -1701,7 +2003,7 @@ function analyzeSourceFile(sf, relPath, findings, seams, options = {}) {
         if (guarded.length === 0) return;
 
         // 2. How does the catch respond?
-        const { levels, rethrows } = collectResponse(node.catchClause.block);
+        const { levels, rethrows, unreadable } = collectResponse(node.catchClause.block);
         // Only an UNCONDITIONAL rethrow excuses the seam — see catchRecovers().
         const propagatesAlways = rethrows && !catchRecovers(node.catchClause.block);
 
@@ -1712,7 +2014,15 @@ function analyzeSourceFile(sf, relPath, findings, seams, options = {}) {
         );
         if (delivery?.site && usedPropagationSites) usedPropagationSites.add(delivery.site);
 
-        const loud = levels.filter((l) => LOUD_LEVELS.has(l.level));
+        // A CONDITIONAL emission (`logger.error?.(…)`) is not loud: on the
+        // branch where the method is absent it prints nothing at all, and the
+        // sink it is holding still has a `warn`. See `loggerLevels`' header for
+        // why that spelling had to stop satisfying this rule — it was the gate's
+        // own cheapest satisfaction, and it converts a loud degradation into a
+        // silent one. The correct repair is the fallback, which this checker now
+        // reads in every spelling the repo uses.
+        const loud = levels.filter((l) => LOUD_LEVELS.has(l.level) && !l.conditional);
+        const conditionalLoud = levels.filter((l) => LOUD_LEVELS.has(l.level) && l.conditional);
         const quiet = levels.filter((l) => QUIET_LEVELS.has(l.level));
 
         const seam = {
@@ -1725,7 +2035,11 @@ function analyzeSourceFile(sf, relPath, findings, seams, options = {}) {
             propagates: delivery ? `${delivery.name}()${delivery.site ? ' (site-declared)' : ''}` : undefined,
             propagatesWhy: delivery?.why,
             loud: loud.map((l) => `${l.level}@${l.line}${l.viaHelper ? ` via ${l.viaHelper}()` : ''}`),
+            conditional: conditionalLoud.map(
+                (l) => `${l.level}?.@${l.line}${l.viaHelper ? ` via ${l.viaHelper}()` : ''}`,
+            ),
             quiet: quiet.map((l) => `${l.level}@${l.line}${l.viaHelper ? ` via ${l.viaHelper}()` : ''}`),
+            unreadable: unreadable.map((u) => `${u.text}@${u.line}`),
         };
         seams.push(seam);
 
@@ -1734,7 +2048,19 @@ function analyzeSourceFile(sf, relPath, findings, seams, options = {}) {
         findings.push({
             ...seam,
             why: DURABILITY_CRITICAL_CALLEES.get(guarded[0].callee),
-            kind: quiet.length > 0 ? 'quiet-log' : 'silent-swallow',
+            // Verdict ORDER is the message the author reads, so the most
+            // actionable fact wins. A catch that reached for `error` and spelled
+            // it conditionally is one token from correct; one this checker could
+            // not read is not an accusation at all; only after both is "there is
+            // no log here" the truth.
+            kind:
+                conditionalLoud.length > 0
+                    ? 'conditional-log'
+                    : unreadable.length > 0
+                      ? 'unreadable-report'
+                      : quiet.length > 0
+                        ? 'quiet-log'
+                        : 'silent-swallow',
         });
     });
 }
@@ -1877,6 +2203,42 @@ function runReadSeamRule({ list = false } = {}) {
         console.log('');
     }
 
+    // ── The UNRECOGNISED verdict for THIS rule (#9747): stated, not invented ──
+    //
+    // The ruling asked for "N constructs in the scan roots matched no rule in
+    // this gate's vocabulary" as a third verdict. For the log-level rule above
+    // that is answerable and answered. For THIS rule it is not, and the honest
+    // act is to say so in the output rather than print a number.
+    //
+    // Measured, not asserted. This rule's vocabulary is DRIVER_READ_CALLEES
+    // (`find`/`findOne`/`count`, anchored to `IDataDriver`). A census over the
+    // three scan roots asking "which catches carry this rule's HARM shape —
+    // invent an unreported answer — while guarding a call the vocabulary does
+    // not name?" returns 25 sites, and the callee histogram is
+    // `Array.isArray` (5), `.raw` (3), a callback `fn` (3), `JSON.parse` (3),
+    // `getService` (2), `getDriver` (2), `toJSONSchema`, `stringify` … Most of
+    // them are not storage reads at all. Reporting those as "unrecognised"
+    // would put ~20 correct rows in the count on day one, which is the #8662
+    // failure the pilot must avoid: a correct out-of-scope verdict rendered as
+    // noise discredits the direction for every gate after it.
+    //
+    // Narrowing that 25 to the genuine storage reads requires exactly the
+    // name-heuristic ("a callee matching /find|query|fetch|getAll/") this
+    // rule's own vocabulary note refuses, and refuses for a measured reason.
+    // So: proposal 2 does not apply per-construct here. The line below is
+    // printed anyway, because a pilot gate that emitted NO row would leave a
+    // round report unable to tell "measured at zero" from "nobody looked" —
+    // this card's own subject.
+    console.log(
+        'UNRECOGNISED [durability-read-invention]: NOT APPLICABLE — this rule cannot enumerate what it ' +
+            'failed to recognise. Its vocabulary is callee NAMES anchored to IDataDriver ' +
+            `(${[...DRIVER_READ_CALLEES.keys()].join(', ')}), and the only way to count "a read I do not ` +
+            'know about" is the spelling heuristic the vocabulary note deliberately refuses. Measured ' +
+            'on this tree: 25 catches carry the harm shape while guarding a non-vocabulary call, and ' +
+            'the majority are JSON.parse / Array.isArray / getService — correctly out of scope. A count ' +
+            'here would be noise, so none is invented (#9747, H3).',
+    );
+
     const baseline = loadReadInventionBaseline();
     const allowed = new Map((baseline.entries ?? []).map((e) => [`${e.file}::${e.fn}`, e]));
     const violations = [];
@@ -1975,7 +2337,7 @@ function runReadSeamRule({ list = false } = {}) {
         ).length;
         const passThrough = seams.filter((s) => s.invents.some((i) => i.startsWith('pass-through'))).length;
         console.log(
-            `✓ read-seam invention (#5186 + #6451, ${READ_SEAM_SCAN_ROOTS.length} package roots): ${seams.length} read seam(s), none invents an unreported answer` +
+            `✓ read-seam invention (#5186 + #6451, ${READ_SEAM_SCAN_ROOTS.length} package roots, vocabulary ${[...DRIVER_READ_CALLEES.keys()].join('/')}): ${seams.length} read seam(s), none invents an unreported answer` +
                 (discriminated > 0 ? ` (${discriminated} answer on a type-discriminated benign branch)` : '') +
                 (passThrough > 0 ? ` (${passThrough} pass an input through, reported)` : '') +
                 (allowed.size > 0 ? ` (${allowed.size} baselined)` : '') +
@@ -1984,6 +2346,78 @@ function runReadSeamRule({ list = false } = {}) {
     }
 
     return failed ? 1 : 0;
+}
+
+/**
+ * The `found :` line — what the checker actually observed, in its own words.
+ *
+ * ⛔ `unreadable-report` is NOT an accusation of silence. It says the checker
+ * could not read the call, and names it, so the author can tell "you are quiet"
+ * from "I could not read you". Reporting the second as the first is the defect
+ * #9657 was filed for: a loud `(logger.error ?? logger.warn)(…)` was reported as
+ * `catch swallows the failure with no log at all`, and the cheapest way to
+ * silence THAT accusation is to make the code genuinely silent.
+ */
+function describeFinding(v) {
+    switch (v.kind) {
+        case 'conditional-log':
+            return (
+                `catch reaches \`error\` only CONDITIONALLY (${v.conditional.join(', ')}) — the \`?.(\` ` +
+                'says the sink may not have that method, and on that branch this catch prints nothing at all' +
+                (v.quiet.length > 0 ? `; the only unconditional log is ${v.quiet.join(', ')}` : '')
+            );
+        case 'unreadable-report':
+            return (
+                `catch calls something this checker could not read as a log (${v.unreadable.join(', ')}) — ` +
+                'this is NOT a finding that the catch is silent, it is the checker saying it cannot tell'
+            );
+        case 'quiet-log':
+            return `catch logs ${v.quiet.join(', ')} and does not rethrow`;
+        default:
+            return 'catch swallows the failure with no log at all';
+    }
+}
+
+/** The `fix :` block — the repair that is correct for THIS verdict. */
+function remedyFor(v) {
+    const propagationOption =
+        '    OR      : if this catch already HANDS THE FAILURE TO THE CALLER on every path (an error envelope, a per-item outcome report), do NOT bolt on a log — declare how it delivers, in FAILURE_PROPAGATION_CALLEES or FAILURE_PROPAGATION_SITES in this script (#5241). Adding a redundant `logger.error` to a path whose common case is a rejected request is the mirror-image failure AGENTS.md warns about.\n';
+
+    if (v.kind === 'conditional-log') {
+        return (
+            '    fix     : give the optional call the FALLBACK it is missing, so something always prints:\n' +
+            '                  (this.logger.error ?? this.logger.warn)(msg, meta)\n' +
+            '                  (this.logger.error ?? this.logger.warn).call(this.logger, msg)\n' +
+            '                  or a named same-file helper: `if (l.error) l.error(msg, meta); else l.warn(msg, meta);`\n' +
+            '              (`SqlDriver.logDurabilityFailure` is the worked example, #9665.) This checker\n' +
+            '              reads all three, and follows a same-file helper transitively.\n' +
+            '    ⛔ NOT   : deleting the `?.` — that throws on a sink without the method. And do NOT\n' +
+            '              settle for `logger.warn(…)`: the reach for `error` was right, only its\n' +
+            '              fallback was missing.\n' +
+            propagationOption
+        );
+    }
+    if (v.kind === 'unreadable-report') {
+        return (
+            '    fix     : NOTHING may be wrong with this code — read it first. If it does report loudly,\n' +
+            '              spell the report in a shape this checker reads: `logger.error(…)`, a fallback\n' +
+            '              `(logger.error ?? logger.warn)(…)`, or a NAMED same-file helper (followed\n' +
+            '              transitively). If the reporter is imported from another module, a same-file\n' +
+            '              wrapper around it is the smallest change that makes the seam auditable.\n' +
+            '    ⛔ NOT   : `logger.error?.(…)` — it satisfies nothing here, and prints nothing at all\n' +
+            '              against a sink that has no `error`.\n' +
+            '              If the code is genuinely silent, the fix below is the real one.\n' +
+            '    then    : log at `error` naming the CONSEQUENCE and the FIX (see packages/services/service-automation/src/plugin.ts start(), #4460), or rethrow.\n' +
+            propagationOption
+        );
+    }
+    return (
+        '    fix     : log at `error` naming the CONSEQUENCE and the FIX (see packages/services/service-automation/src/plugin.ts start(), #4460), or rethrow.\n' +
+        '    ⛔ NOT   : `logger.error?.(…)` — an optional call prints nothing against a sink that has no\n' +
+        '              `error`, so it buys green by making the degradation genuinely silent. Spell the\n' +
+        '              fallback instead: `(logger.error ?? logger.warn)(msg, meta)`.\n' +
+        propagationOption
+    );
 }
 
 function run({ list = false } = {}) {
@@ -2013,9 +2447,13 @@ function run({ list = false } = {}) {
                   ? `recovers on one branch, loud (${s.loud.join(', ')})`
                   : s.loud.length > 0
                   ? `loud (${s.loud.join(', ')})`
-                  : s.quiet.length > 0
-                    ? `QUIET (${s.quiet.join(', ')})`
-                    : 'SILENT';
+                  : s.conditional.length > 0
+                    ? `CONDITIONAL (${s.conditional.join(', ')})`
+                    : s.quiet.length > 0
+                      ? `QUIET (${s.quiet.join(', ')})`
+                      : s.unreadable.length > 0
+                        ? `UNREADABLE (${s.unreadable.join(', ')})`
+                        : 'SILENT';
             console.log(`  ${s.file}:${s.catchLine}  guards ${s.callee}()@${s.calleeLine}  → ${verdict}`);
             // A propagating seam is EXCUSED, so the census must show the reason
             // it was excused — otherwise reviewing the vocabulary means reading
@@ -2023,6 +2461,37 @@ function run({ list = false } = {}) {
             if (s.propagates && s.propagatesWhy) console.log(`      why: ${s.propagatesWhy}`);
         }
         console.log('');
+    }
+
+    // ── The UNRECOGNISED verdict (#9747) ─────────────────────────────────────
+    //
+    // Printed on EVERY run, before the failure branches: a count that appeared
+    // only on a clean run would be invisible exactly when a reader is looking
+    // hardest. It is a verdict, never a finding — nothing here changes the
+    // exit code. See "THE THIRD VERDICT" in the header for why this is not
+    // spelled `exit 2` even though the in-tree prior art is.
+    const unreadableSeams = seams.filter((s) => s.unreadable.length > 0);
+    const verdictRestsOnIt = unreadableSeams.filter(
+        (s) =>
+            !s.rethrows &&
+            !s.propagates &&
+            s.loud.length === 0 &&
+            s.quiet.length === 0 &&
+            s.conditional.length === 0,
+    );
+    console.log(
+        `UNRECOGNISED [durability-degradation-log-level]: ${unreadableSeams.length} of ${seams.length} ` +
+            'discovered seam(s) answer their catch through a call this checker could not read as a log ' +
+            `(${verdictRestsOnIt.length} where nothing else in the catch could be read either, so the ` +
+            'verdict rests entirely on a construct outside this vocabulary). Not a failure and not a ' +
+            'clean bill: it is the count of what the recognizer did not understand (#9747, ruling of ' +
+            '2026-08-18).',
+    );
+    for (const s of unreadableSeams) {
+        console.log(
+            `  unrecognised  ${s.file}:${s.catchLine}  guards ${s.callee}()  ` +
+                `could not read: ${s.unreadable.join(', ')}`,
+        );
     }
 
     const baseline = loadBaseline();
@@ -2054,13 +2523,15 @@ function run({ list = false } = {}) {
             console.error(`  ${v.file}:${v.catchLine}`);
             console.error(`    guards  : ${v.callee}() at line ${v.calleeLine}`);
             console.error(`    consequence: ${v.why}`);
-            console.error(
-                `    found   : ${v.kind === 'quiet-log' ? `catch logs ${v.quiet.join(', ')} and does not rethrow` : 'catch swallows the failure with no log at all'}`,
-            );
-            console.error(
-                `    fix     : log at \`error\` naming the CONSEQUENCE and the FIX (see packages/services/service-automation/src/plugin.ts start(), #4460), or rethrow.\n` +
-                `    OR      : if this catch already HANDS THE FAILURE TO THE CALLER on every path (an error envelope, a per-item outcome report), do NOT bolt on a log — declare how it delivers, in FAILURE_PROPAGATION_CALLEES or FAILURE_PROPAGATION_SITES in this script (#5241). Adding a redundant \`logger.error\` to a path whose common case is a rejected request is the mirror-image failure AGENTS.md warns about.\n`,
-            );
+            console.error(`    found   : ${describeFinding(v)}`);
+            // The FIX line is per-verdict on purpose. One generic remedy is what
+            // made this gate harmful: told "no log at all", the cheapest repair
+            // an author reaches for is `logger.error?.(…)`, which the old
+            // matcher accepted and which prints NOTHING against a sink with no
+            // `error` (#9657). A gate must never be cheapest to satisfy by
+            // going quieter, so each verdict names the repair that is correct
+            // FOR IT.
+            console.error(remedyFor(v));
         }
     }
 
@@ -2565,6 +3036,283 @@ function selfTest() {
             sites: [['t.ts::migrateStoredMetadata', { callees: [['record', 'effect']] }]],
             expectViolation: true,
         },
+        // ── #9657: CALLEE SHAPES ─────────────────────────────────────────
+        //
+        // Every fixture below is a shape the repo actually writes (see the
+        // census in `loggerLevels`' header), and every one of them read as
+        // `catch swallows the failure with no log at all` before this. They pin
+        // the VERDICT, not just "did it flag": a wrong verdict that still fails
+        // is precisely the defect — it is what pushed an author toward
+        // `logger.error?.(…)`, which is silence.
+        {
+            name: 'passes: (logger.error ?? logger.warn)(…) — the parenthesized fallback',
+            code: `
+                class P { async f(driver: any, obj: any) {
+                    try { await driver.syncSchema('t', obj); }
+                    catch (e) { (this.logger.error ?? this.logger.warn)('CONSEQUENCE + FIX', { e }); }
+                } }`,
+            expectViolation: false,
+            expectSeams: 1,
+        },
+        {
+            name: 'passes: (logger.error ?? logger.warn).call(logger, …) — driver-turso spelling',
+            code: `
+                class P { async f(driver: any, obj: any) {
+                    try { await driver.syncSchema('t', obj); }
+                    catch (e) { (this.logger.error ?? this.logger.warn).call(this.logger, 'CONSEQUENCE + FIX'); }
+                } }`,
+            expectViolation: false,
+            expectSeams: 1,
+        },
+        {
+            name: 'passes: (logger.error || logger.warn)(…) — the || spelling of the same idiom',
+            code: `
+                class P { async f(driver: any, obj: any) {
+                    try { await driver.syncSchema('t', obj); }
+                    catch (e) { (this.logger.error || this.logger.warn)('CONSEQUENCE + FIX'); }
+                } }`,
+            expectViolation: false,
+            expectSeams: 1,
+        },
+        {
+            name: 'passes: (cond ? logger.error : logger.warn)(…) — ternary callee',
+            code: `
+                class P { async f(driver: any, obj: any, hard: boolean) {
+                    try { await driver.syncSchema('t', obj); }
+                    catch (e) { (hard ? this.logger.error : this.logger.warn)('CONSEQUENCE + FIX'); }
+                } }`,
+            expectViolation: false,
+            expectSeams: 1,
+        },
+        {
+            name: "passes: logger['error'](…) — a level named by a string literal",
+            code: `
+                class P { async f(driver: any, obj: any) {
+                    try { await driver.syncSchema('t', obj); }
+                    catch (e) { this.logger['error']('CONSEQUENCE + FIX', { e }); }
+                } }`,
+            expectViolation: false,
+            expectSeams: 1,
+        },
+        {
+            name: 'passes: a fallback stored in a same-file const and called through it',
+            code: `
+                class P { async f(driver: any, obj: any) {
+                    try { await driver.syncSchema('t', obj); }
+                    catch (e) {
+                        const report = this.logger.error?.bind(this.logger) ?? this.logger.warn.bind(this.logger);
+                        report('CONSEQUENCE + FIX');
+                    }
+                } }`,
+            expectViolation: false,
+            expectSeams: 1,
+        },
+        {
+            name: 'passes: the #9665 named-helper shape (guarded error, warn fallback)',
+            code: `
+                class P {
+                    logDurabilityFailure(msg: string, meta?: any) {
+                        if (this.logger.error) this.logger.error(msg, meta);
+                        else this.logger.warn(msg, meta);
+                    }
+                    async f(driver: any, obj: any) {
+                        try { await driver.syncSchema('t', obj); }
+                        catch (e) { this.logDurabilityFailure('CONSEQUENCE + FIX', { e }); }
+                    }
+                }`,
+            expectViolation: false,
+            expectSeams: 1,
+        },
+        {
+            name: 'passes: logger?.error(…) — optionality on the RECEIVER is not judged',
+            code: `
+                class P { async f(driver: any, obj: any) {
+                    try { await driver.syncSchema('t', obj); }
+                    catch (e) { this.logger?.error('CONSEQUENCE + FIX', { e }); }
+                } }`,
+            expectViolation: false,
+            expectSeams: 1,
+        },
+        {
+            // ⛔ THE one that must be red. It is the spelling the old matcher
+            // accepted, and against a sink with no `error` it prints nothing —
+            // so accepting it made the gate's cheapest satisfaction harmful.
+            name: 'flags: logger.error?.(…) alone — an optional call may print nothing',
+            code: `
+                class P { async f(driver: any, obj: any) {
+                    try { await driver.syncSchema('t', obj); }
+                    catch (e) { this.logger.error?.('CONSEQUENCE + FIX', { e }); }
+                } }`,
+            expectViolation: true,
+            expectSeams: 1,
+            expectCount: 1,
+            expectKinds: ['conditional-log'],
+        },
+        {
+            name: 'flags: (logger.error ?? logger.warn)?.(…) — the fallback itself called optionally',
+            code: `
+                class P { async f(driver: any, obj: any) {
+                    try { await driver.syncSchema('t', obj); }
+                    catch (e) { (this.logger.error ?? this.logger.warn)?.('CONSEQUENCE + FIX'); }
+                } }`,
+            expectViolation: true,
+            expectSeams: 1,
+            expectCount: 1,
+            expectKinds: ['conditional-log'],
+        },
+        {
+            name: 'flags: a conditional error next to an unconditional debug is still conditional',
+            code: `
+                class P { async f(driver: any, obj: any) {
+                    try { await driver.syncSchema('t', obj); }
+                    catch (e) {
+                        this.logger.debug('detail', { e });
+                        this.logger.error?.('CONSEQUENCE + FIX', { e });
+                    }
+                } }`,
+            expectViolation: true,
+            expectSeams: 1,
+            expectCount: 1,
+            expectKinds: ['conditional-log'],
+        },
+        {
+            // The fallback machinery must not become a way to be quiet: every
+            // branch of `(warn ?? info)` is quiet, so the verdict is quiet-log.
+            name: 'flags: (logger.warn ?? logger.info)(…) — a fallback between two QUIET levels',
+            code: `
+                class P { async f(driver: any, obj: any) {
+                    try { await driver.syncSchema('t', obj); }
+                    catch (e) { (this.logger.warn ?? this.logger.info)('degraded'); }
+                } }`,
+            expectViolation: true,
+            expectSeams: 1,
+            expectCount: 1,
+            expectKinds: ['quiet-log'],
+        },
+        {
+            // ⭐ The verdict this file did not have. `reportFailure` is imported
+            // from another module, so the checker cannot read it — and saying
+            // "this catch swallows the failure with no log at all" about a
+            // catch that reports loudly is what taught authors to reach for the
+            // silent spelling. It is still a violation (the checker cannot
+            // prove the seam is loud), but it accuses the right thing.
+            name: 'flags: an unreadable report is `unreadable-report`, NOT `silent-swallow`',
+            code: `
+                import { warn } from './log';
+                class P { async f(driver: any, obj: any) {
+                    try { await driver.syncSchema('t', obj); }
+                    catch (e) { warn('something happened', { e }); }
+                } }`,
+            expectViolation: true,
+            expectSeams: 1,
+            expectCount: 1,
+            expectKinds: ['unreadable-report'],
+        },
+        {
+            name: 'flags: logger[level](…) with a computed level is unreadable, not silent',
+            code: `
+                class P { async f(driver: any, obj: any, level: string) {
+                    try { await driver.syncSchema('t', obj); }
+                    catch (e) { this.logger[level]('something happened', { e }); }
+                } }`,
+            expectViolation: true,
+            expectSeams: 1,
+            expectCount: 1,
+            expectKinds: ['unreadable-report'],
+        },
+        {
+            // A bare `warn(…)` that IS a same-file function is followed by the
+            // helper walk, so it must NOT be reported as unreadable — the two
+            // mechanisms have to agree or every same-file reporter becomes a
+            // false `unreadable-report`.
+            name: 'passes: a bare warn(…) naming a same-file helper that logs error',
+            code: `
+                function warn(msg: string) { console.error(msg); }
+                class P { async f(driver: any, obj: any) {
+                    try { await driver.syncSchema('t', obj); }
+                    catch (e) { warn('CONSEQUENCE + FIX'); }
+                } }`,
+            expectViolation: false,
+            expectSeams: 1,
+        },
+        {
+            // A genuinely empty catch must still read as SILENT: the new
+            // verdicts must not swallow the original one.
+            name: 'flags: a truly empty catch is still `silent-swallow`',
+            code: `
+                class P { async f(driver: any, obj: any) {
+                    try { await driver.syncSchema('t', obj); } catch { /* ignore */ }
+                } }`,
+            expectViolation: true,
+            expectSeams: 1,
+            expectCount: 1,
+            expectKinds: ['silent-swallow'],
+        },
+        // ── The UNRECOGNISED census (#9747) ──────────────────────────────
+        {
+            // ⭐ The limb the card exists for. This seam is correctly GREEN —
+            // `logger.error` is right there and readable — and it ALSO contains
+            // a call the resolver cannot read. Before #9747 that fact reached
+            // no output at all: `unreadable` was collected only to pick a
+            // finding's verdict, so a seam that never became a finding threw it
+            // away, and `clean` was printed where the honest answer is "clean,
+            // and there is one call in here I did not understand".
+            name: 'census: an UNREADABLE call inside an otherwise LOUD catch is counted, and stays green',
+            code: `
+                class P { async f(driver: any, obj: any, level: string) {
+                    try { await driver.syncSchema('t', obj); }
+                    catch (e) { this.logger.error('CONSEQUENCE + FIX', { e }); this.logger[level]('x'); }
+                } }`,
+            expectViolation: false,
+            expectSeams: 1,
+            expectUnrecognised: 1,
+        },
+        {
+            // The other direction on the same axis: a catch whose ONLY answer is
+            // unreadable is BOTH a finding (`unreadable-report`, #9657) and a
+            // census row. Two independent verdicts about one seam; wiring either
+            // to the other would lose one of them.
+            name: 'census: a catch whose only answer is unreadable is BOTH a finding and a census row',
+            code: `
+                class P { async f(driver: any, obj: any, level: string) {
+                    try { await driver.syncSchema('t', obj); }
+                    catch (e) { this.logger[level]('something happened', { e }); }
+                } }`,
+            expectViolation: true,
+            expectSeams: 1,
+            expectCount: 1,
+            expectKinds: ['unreadable-report'],
+            expectUnrecognised: 1,
+        },
+        {
+            // ⛔ SILENT is not UNRECOGNISED. An empty catch is fully understood —
+            // the checker read it and it said nothing. Counting it here would
+            // conflate the two states this card exists to separate, in the
+            // direction that turns the count into noise.
+            name: 'census: a truly SILENT catch is NOT counted as unrecognised',
+            code: `
+                class P { async f(driver: any, obj: any) {
+                    try { await driver.syncSchema('t', obj); } catch { /* ignore */ }
+                } }`,
+            expectViolation: true,
+            expectSeams: 1,
+            expectCount: 1,
+            expectKinds: ['silent-swallow'],
+            expectUnrecognised: 0,
+        },
+        {
+            // And the clean direction. Without this limb a census that counted
+            // every discovered seam would satisfy every limb above.
+            name: 'census: an ordinary loud catch contributes nothing to the census',
+            code: `
+                class P { async f(driver: any, obj: any) {
+                    try { await driver.syncSchema('t', obj); }
+                    catch (e) { this.logger.error('CONSEQUENCE + FIX', { e }); }
+                } }`,
+            expectViolation: false,
+            expectSeams: 1,
+            expectUnrecognised: 0,
+        },
         {
             // A propagating catch is still a SEAM — it is reported by `--list`
             // and it must not vanish from the census. #4754's whole precision
@@ -2607,15 +3355,38 @@ function selfTest() {
         const sitesMismatch =
             c.expectSitesUsed !== undefined &&
             JSON.stringify(usedList) !== JSON.stringify([...c.expectSitesUsed].sort());
-        if (got !== c.expectViolation || countMismatch || seamMismatch || sitesMismatch) {
+        // `expectKinds` pins WHICH verdict, not just that there was one. #9657
+        // is the reason: the old rule reported a loud fallback as
+        // `silent-swallow`, and a boolean `expectViolation` cannot tell a right
+        // verdict from a wrong one — the wrong one is what made the gate's
+        // cheapest satisfaction harmful.
+        const kinds = findings.map((f) => f.kind).sort();
+        const kindsMismatch =
+            c.expectKinds !== undefined &&
+            JSON.stringify(kinds) !== JSON.stringify([...c.expectKinds].sort());
+        // `expectUnrecognised` pins the #9747 census — how many discovered seams
+        // carry a call the log resolver could not read at all. It is deliberately
+        // independent of `expectViolation`: the whole point of the third verdict
+        // is that a seam can be correctly GREEN and still contain something this
+        // checker did not understand, and before #9747 that combination printed
+        // nothing anywhere.
+        const unrecognised = seams.filter((x) => x.unreadable.length > 0).length;
+        const unrecognisedMismatch =
+            c.expectUnrecognised !== undefined && unrecognised !== c.expectUnrecognised;
+        if (got !== c.expectViolation || countMismatch || seamMismatch || sitesMismatch || kindsMismatch
+            || unrecognisedMismatch) {
             failures++;
             console.error(
                 `  ✗ ${c.name}: expected violation=${c.expectViolation}` +
                     (c.expectCount !== undefined ? ` count=${c.expectCount}` : '') +
                     (c.expectSeams !== undefined ? ` seams=${c.expectSeams}` : '') +
                     (c.expectSitesUsed !== undefined ? ` sitesUsed=${JSON.stringify(c.expectSitesUsed)}` : '') +
+                    (c.expectKinds !== undefined ? ` kinds=${JSON.stringify(c.expectKinds)}` : '') +
+                    (c.expectUnrecognised !== undefined ? ` unrecognised=${c.expectUnrecognised}` : '') +
                     `, got violation=${got} count=${findings.length} seams=${seams.length}` +
-                    (c.expectSitesUsed !== undefined ? ` sitesUsed=${JSON.stringify(usedList)}` : ''),
+                    (c.expectUnrecognised !== undefined ? ` unrecognised=${unrecognised}` : '') +
+                    (c.expectSitesUsed !== undefined ? ` sitesUsed=${JSON.stringify(usedList)}` : '') +
+                    (c.expectKinds !== undefined ? ` kinds=${JSON.stringify(kinds)}` : ''),
             );
         } else {
             console.log(`  ✓ ${c.name}`);

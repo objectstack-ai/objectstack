@@ -915,7 +915,7 @@ describe('Interactive Elements — element:filter (retired, #9220)', () => {
   // sentence (the D2 conversion `element-filter-removed` strips it).
   it('rejects the retired `targetVariable` with its prescription', () => {
     expect(() => ElementFilterPropsSchema.parse({ targetVariable: 'active_filter' }))
-      .toThrow(/`element:filter` property `targetVariable`.*removed.*Run `os migrate meta --from 17` to rewrite existing sources automatically/s);
+      .toThrow(/`element:filter` property `targetVariable`.*removed.*Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand/s);
   });
 
   // The migrated shape — `element-filter-removed` strips all six keys and

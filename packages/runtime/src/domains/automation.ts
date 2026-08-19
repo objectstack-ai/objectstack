@@ -27,6 +27,7 @@ import {
     classifyFlowRefusal,
     flowIsUnknown,
     flowNotFoundMessage,
+    isPausedRun,
     FLOW_NOT_FOUND_STATUS,
 } from '../flow-dispatch-status.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
@@ -489,6 +490,14 @@ function flowDefinitionRefusal(err: any): unknown {
  * | flow disabled              | never dispatched   | `409` `FLOW_DISABLED` |
  * | flow has no start node     | never dispatched   | `422` `FLOW_NO_START_NODE` |
  * | ran and failed (incl. the retry-strategy exits) | ran, rejected | `400` `FLOW_FAILED` |
+ * | ran and PAUSED (whichever attempt) | ran, suspended | `200` + `runId` / `screen` |
+ *
+ * [#9510] The last row is NON-TERMINAL and is answered by its own arm at the
+ * bottom of this function. The durable pause is not a refusal, and since the
+ * suspend arm was restored to the engine's retry path it arrives from two
+ * producers — `execute()`'s catch and `retryExecution` — which this door must
+ * NOT be able to tell apart. See that arm for why it is written separately from
+ * the terminal success it happens to answer identically.
  *
  * [#9446] **The table itself now lives in `../flow-dispatch-status.js`** — one
  * definition, read by this door and by `/actions` (`action-execution.ts`) —
@@ -586,6 +595,34 @@ async function respondToFlowTrigger(
             response: deps.error(refusal.message, refusal.status, { code: refusal.code, ...runDetails }),
         };
     }
+    // [#9510] THE THIRD STATE, answered deliberately. A run that dispatched and
+    // then SUSPENDED at a pausing node (ADR-0019) is neither refused nor
+    // finished: its continuation is persisted, and the `200` here carries the
+    // `runId` — and the `screen`, for a screen flow — that the caller continues
+    // it with at `POST /:name/runs/:runId/resume`, the door just below.
+    //
+    // The answer is unchanged from what this door has always given a paused
+    // run, and that IS the requirement rather than an accident of ordering: it
+    // must be the SAME answer a pause on the first attempt gets, because a
+    // pause on a retry attempt is the same user-visible situation reached by a
+    // different route. Two answers for one situation would replace #9510's LOST
+    // pause with an inconsistent one. Pinned as an equality between the two
+    // routes — engine-side in `service-automation`'s
+    // `retry-attempt-pause.test.ts`, and on the wire through a real engine in
+    // `@objectstack/verify`'s `automation-trigger-paused-run.test.ts`.
+    //
+    // ⛔ Its own arm even though it returns what the terminal exit below
+    // returns. The two are different STATEMENTS about the run — "still running,
+    // here is how to continue it" versus "it finished" — and collapsing them
+    // recreates exactly the fall-through this card is about: a non-terminal
+    // result that no reader on the path ever names is one edit away from being
+    // classified as a terminal one.
+    if (isPausedRun(result)) {
+        return { handled: true, response: deps.success(result) };
+    }
+    // Terminal success: the run reached an `end` node, and `deps.success` serves
+    // the engine result as the response data (`output`, `successMessage`,
+    // `summary`).
     return { handled: true, response: deps.success(result) };
 }
 
@@ -606,7 +643,9 @@ async function respondToFlowTrigger(
  *   POST   /:name/trigger        → execute (legacy: trigger/:name also supported;
  *                                  unknown name → 404, disabled → 409 `FLOW_DISABLED`,
  *                                  no start node → 422 `FLOW_NO_START_NODE`, a run that
- *                                  ran and failed → 400 `FLOW_FAILED`; #9378 + #9415)
+ *                                  ran and failed → 400 `FLOW_FAILED`; #9378 + #9415;
+ *                                  a run that PAUSED → 200 with `runId` / `screen`,
+ *                                  on whichever attempt it paused — #9510)
  *   POST   /:name/toggle         → toggleFlow (unknown name → 404, #7535)
  *   GET    /:name/runs           → listRuns (query: limit, cursor — validated, #7300;
  *                                  status — validated AND honoured, #7359)
@@ -961,8 +1000,10 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // values, applied as bare flow variables; `output`/`branchLabel` also
         // forwarded for approval-style resumes. The outer envelope is a CLOSED
         // set — exactly the four keys below — and an unknown top-level key is
-        // refused (#8796). Returns the next paused `{ screen }` (multi-screen)
-        // or the completed result.
+        // refused (#8796); since #9416 so is an accepted key carrying a value
+        // of the wrong TYPE, and a body that is not a JSON object at all.
+        // Returns the next paused `{ screen }` (multi-screen) or the completed
+        // result.
         //
         // The signal is built key-by-key from the JSON body on purpose (#3801):
         // the engine gates a suspension whose node declares
@@ -1000,7 +1041,36 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // `inputs` had just closed; every transport now inherits one rule.
         if (parts[1] === 'runs' && parts[2] && parts[3] === 'resume' && m === 'POST') {
             if (typeof automationService.resume === 'function') {
-                const b = (body && typeof body === 'object') ? body : {};
+                // [#9416] The BODY ITSELF must be a JSON object before its
+                // keys mean anything. This read used to normalise anything
+                // else to `{}` — a JSON string/number/boolean body, and an
+                // EMPTY array (a non-empty one was caught by the key check
+                // below, because its indices read as unknown keys) — so those
+                // reached the engine as an empty signal and answered 200
+                // `success:true` with the submission treated as EMPTY: the
+                // #8796 failure shape, reached without misspelling anything.
+                // `undefined` / `null` stay the legal bodyless resume (an
+                // empty submission is legal — a screen whose declared fields
+                // are all optional), which is why the normalisation survives
+                // for exactly those two.
+                const rawBody = body ?? {};
+                const RESUME_BODY_KEYS = ['inputs', 'variables', 'output', 'branchLabel'];
+                const accepted = RESUME_BODY_KEYS.map((k) => `\`${k}\``).join(', ');
+                /**
+                 * How the offending value is NAMED back to the caller. Local to
+                 * this arm on purpose: it exists to make one refusal message
+                 * readable, not to become a shared formatter for a vocabulary
+                 * nobody has ruled on.
+                 */
+                const jsonTypeOf = (v: unknown): string =>
+                    v === null ? 'null' : Array.isArray(v) ? 'an array' : `a ${typeof v}`;
+                if (typeof rawBody !== 'object' || Array.isArray(rawBody)) {
+                    throw validationFailure(
+                        `Invalid resume body — expected an object with ${accepted}, received ${jsonTypeOf(rawBody)}`,
+                        [{ field: '(body)', code: 'invalid_type', message: `expected an object with ${accepted}` }],
+                    );
+                }
+                const b = rawBody as Record<string, unknown>;
                 // [#8796] The outer envelope is a CLOSED SET (maintainer ruling
                 // 2026-08-15, Option A): an unknown top-level key is refused,
                 // located, naming the offending key(s) AND the accepted set —
@@ -1035,10 +1105,8 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // this refusal leaves the suspension intact and the caller can
                 // retry with a corrected body. It sits with `INVALID_SIGNAL` /
                 // `INVALID_SCREEN_INPUT` on the retryable side.
-                const RESUME_BODY_KEYS = ['inputs', 'variables', 'output', 'branchLabel'];
                 const unknownKeys = Object.keys(b).filter((k) => !RESUME_BODY_KEYS.includes(k));
                 if (unknownKeys.length > 0) {
-                    const accepted = RESUME_BODY_KEYS.map((k) => `\`${k}\``).join(', ');
                     throw validationFailure(
                         `Unknown key${unknownKeys.length > 1 ? 's' : ''} ${unknownKeys.map((k) => `\`${k}\``).join(', ')} — the resume body accepts ${accepted}`,
                         unknownKeys.map((k) => ({
@@ -1048,11 +1116,73 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                         })),
                     );
                 }
+                // [#9416] VALUE SHAPES — the same silent-drop family as #8796,
+                // one axis over: a key that IS accepted, carrying a value the
+                // engine contract excludes. The assembly below used to
+                // type-guard each key and skip what failed the guard, so
+                // `{"inputs":"a string"}` / `{"output":42}` /
+                // `{"branchLabel":7}` passed the closed KEY set, lost their
+                // value, and answered 200 `success:true` on an EMPTY
+                // submission — the caller told its screen input landed when
+                // nothing did. Ruled Option A (maintainer, on this card): 400,
+                // located, naming the key and the expected type, inheriting
+                // #8796's ruling together with its reason plus #3899's toggle
+                // arm (a truthy non-boolean `enabled` is refused there, never
+                // coerced or dropped).
+                //
+                // ⛔ NOT Option B (forward the raw value, let the engine
+                // judge): `ResumeSignal` types `variables`/`output` as
+                // `Record<string, unknown>` and `branchLabel` as `string`, so
+                // forwarding hands a service a shape its own contract excludes
+                // — an array included, which the old `typeof === 'object'`
+                // guard passed through.
+                //
+                // A key whose value is `undefined` counts as ABSENT rather than
+                // mis-shaped, deliberately: `JSON.stringify` drops such a key,
+                // so no HTTP caller can produce one, and the in-process
+                // spelling `{ inputs: maybeUndefined }` means "no inputs". An
+                // explicit `null` IS refused — JSON can express it, and it is
+                // the value that used to be dropped most quietly of all.
+                //
+                // Ordering: after the unknown-key refusal, so a body that is
+                // both misspelled and mis-shaped still reports the misspelling
+                // #8796 pinned; before `resume()`, so nothing reaches the
+                // engine until the body is legal and the suspension stays
+                // intact for a corrected retry.
+                const valueFailures: Array<{ field: string; code: 'invalid_type'; message: string }> = [];
+                for (const key of ['inputs', 'variables', 'output']) {
+                    const v = b[key];
+                    if (v === undefined) continue;
+                    if (v === null || typeof v !== 'object' || Array.isArray(v)) {
+                        valueFailures.push({
+                            field: key,
+                            code: 'invalid_type',
+                            message: `expected an object (a map of names to values), received ${jsonTypeOf(v)}`,
+                        });
+                    }
+                }
+                if (b.branchLabel !== undefined && typeof b.branchLabel !== 'string') {
+                    valueFailures.push({
+                        field: 'branchLabel',
+                        code: 'invalid_type',
+                        message: `expected a string (the out-edge label to follow), received ${jsonTypeOf(b.branchLabel)}`,
+                    });
+                }
+                if (valueFailures.length > 0) {
+                    throw validationFailure(
+                        `Invalid resume body — ${valueFailures.map((f) => `\`${f.field}\` ${f.message}`).join('; ')}`,
+                        valueFailures,
+                    );
+                }
+                // #3801's field-by-field assembly, unchanged in substance: the
+                // body is never spread, so the symbol-keyed service-authority
+                // marker stays unforgeable. Every surviving value is now known
+                // to match the contract, so presence is the only test left.
                 const inputs = (b.inputs ?? b.variables);
                 const signal: any = {};
-                if (inputs && typeof inputs === 'object') signal.variables = inputs;
-                if (b.output && typeof b.output === 'object') signal.output = b.output;
-                if (typeof b.branchLabel === 'string') signal.branchLabel = b.branchLabel;
+                if (inputs !== undefined) signal.variables = inputs;
+                if (b.output !== undefined) signal.output = b.output;
+                if (b.branchLabel !== undefined) signal.branchLabel = b.branchLabel;
                 const result = await automationService.resume(parts[2], signal);
                 if (result?.success === false && result.code === 'PERMISSION_DENIED') {
                     return { handled: true, response: deps.error(result.error ?? 'Resume forbidden', 403) };

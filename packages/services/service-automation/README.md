@@ -175,7 +175,7 @@ array of `{ field, operator, value }` triples; operator objects such as
 through `filter`. Unknown keys are rejected at `registerFlow()`.
 
 For every other node's `config`, and for loops, parallel blocks, subflows, waits
-and error handling, see the maintained reference — **[Flows](/content/docs/automation/flows.mdx)**.
+and error handling, see the maintained reference — **[Flows](https://docs.objectstack.ai/docs/automation/flows)**.
 This README deliberately does not keep a second copy of that per-node reference.
 
 ## Expressions
@@ -456,5 +456,7 @@ Apache-2.0. See [LICENSING.md](../../../LICENSING.md).
 ## See Also
 
 - [@objectstack/spec/automation](../../spec/src/automation/)
-- [Flow Builder Guide](/content/docs/automation/)
-- [Trigger Reference](/content/docs/references/automation/)
+- [Automation](https://docs.objectstack.ai/docs/automation) — the automation docs section: hooks, flows,
+  workflows, approvals, webhooks, connectors
+- [Automation Protocol](https://docs.objectstack.ai/docs/references/automation) — the complete schema
+  reference for the automation protocol

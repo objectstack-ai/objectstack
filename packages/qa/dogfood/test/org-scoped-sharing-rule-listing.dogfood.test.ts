@@ -44,12 +44,18 @@ import { bootStack, type VerifyStack } from '@objectstack/verify';
 const RULES = '/sharing/rules';
 const SYS = { isSystem: true } as const;
 
-/** The four rules `examples/app-showcase` declares, all seeded org-less. */
+/**
+ * The rules `examples/app-showcase` declares, all seeded org-less.
+ *
+ * [#9237] Two of the former four were retired rather than re-homed: they sat
+ * on `showcase_project` / `showcase_task`, whose `public_read_write` OWD
+ * leaves sharing nothing to widen, so their boot backfill was refused
+ * (`SHARING_NOT_ENABLED`) on every boot. What this file measures — an org-bound
+ * admin's READ over org-less rows — is unchanged by their number.
+ */
 const SEEDED_RULE_NAMES = [
-  'share_red_projects_with_execs',
-  'share_high_value_red_projects_with_managers',
   'share_new_inquiries_with_field_ops',
-  'share_open_tasks_with_manager',
+  'share_key_account_qualified_contacts_with_managers',
 ];
 
 interface RuleRow {

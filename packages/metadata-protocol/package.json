@@ -42,8 +42,8 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^26.1.2",
-    "mysql2": "^3.23.1",
+    "@types/node": "^26.2.0",
+    "mysql2": "^3.23.3",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"

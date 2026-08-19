@@ -96,6 +96,17 @@ const CROSS_PACKAGE_TEST_INPUTS = {
       'content/docs/references/**',
       // scripts/dist-freshness.test.ts stages a fixture around the root scripts dir
       'scripts/**',
+      // `serve.ts` is named in a comment rather than read, the same shape as
+      // `check-nul-bytes.mjs` / `sync-template-versions.mjs` / the realtime
+      // protocol page below, and settled the same way: the literal collector
+      // takes quoted paths without parsing, so a mention forces a declaration,
+      // and declaring the file is cheaper than rewording prose to dodge the
+      // scanner. scripts/publish-smoke-port-collision.test.ts cites it for the
+      // measurement that justifies its whole existence — `serve.ts` auto-shifts
+      // off a busy port whenever `flags.dev` is set, which is the only reason
+      // publish-smoke.sh cannot trust the port it asked for. One file, not the
+      // commands tree: the test reads publish-smoke.sh and nothing else.
+      'packages/cli/src/commands/serve.ts',
       // scripts/liveness/evidence.test.ts resolves the evidence paths the
       // liveness ledgers cite, so those files' existence is a spec input.
       'packages/runtime/src/**',
@@ -255,8 +266,8 @@ const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/cli/src/commands/**',
       'packages/metadata/src/**',
       // `realtime-protocol.mdx` is named in a comment rather than read, the
-      // same shape as `check-nul-bytes.mjs` and `sync-template-versions.mjs`
-      // and settled the same way: a mention forces a declaration, and
+      // same shape as `check-nul-bytes.mjs` on the @objectstack/cli entry
+      // above and settled the same way: a mention forces a declaration, and
       // declaring the file is cheaper than rewording prose to dodge the
       // scanner. Here the coupling is real on top of being cheap — that page
       // is what documents the PLANNED realtime transports (`/ws`, SSE
@@ -288,16 +299,56 @@ const CROSS_PACKAGE_TEST_INPUTS = {
     // src/template-consistency.test.ts reads doc frontmatter by repo-relative
     // path to decide which templates are internal.
     //
-    // `sync-template-versions.mjs` is named in a comment rather than read, the
-    // same shape as `check-nul-bytes.mjs` above and settled the same way: a
-    // mention forces a declaration, and declaring the file is cheaper than
-    // rewording prose to dodge the scanner. Here the coupling is real on top of
-    // being cheap — that script STAMPS the three per-template version surfaces
-    // (`package.json` @objectstack/* ranges, `objectstack.config.ts`
-    // `engines.protocol`, `objectstack.manifest.json` `specVersion`) that the
-    // ratchets in that test assert, so a change to the stamper is exactly the
-    // change those ratchets exist to catch (#9264).
-    globs: ['content/**', 'scripts/sync-template-versions.mjs'],
+    // `sync-template-versions.mjs` is a real cross-package READ. Since #9648,
+    // src/template-version-stamps.test.ts loads the script by URL to assert its
+    // declaration surface (`stampedPaths()`, `findTemplateDirs()`, the
+    // `TEXT_STAMPS` table) and runs it with `execFileSync` over a two-template
+    // fixture (#9554). It was a mention before that test existed, which is what
+    // the rationale here used to say.
+    //
+    // The glob does not rest on that one test, so deleting it would not make
+    // this declaration wrong — only smaller. The script STAMPS the three
+    // per-template version surfaces (`package.json` @objectstack/* ranges,
+    // `objectstack.config.ts` `engines.protocol`, `objectstack.manifest.json`
+    // `specVersion`) that template-consistency.test.ts ratchets, so a change to
+    // the stamper is exactly the change those ratchets exist to catch (#9264).
+    //
+    // What FORCES the glob, though, is neither read. Both tests spell the path
+    // as `join(repoRoot, 'scripts', 'sync-template-versions.mjs')`, and the
+    // literal collector below only sees a whole repo-relative path inside ONE
+    // quoted string — so what it actually picks up is the quoted mention in
+    // each test's header comment. Measured: dropping the glob fails this gate
+    // naming the file; dropping the glob AND unquoting both mentions passes.
+    // So do not reword those mentions into unquoted prose on the theory that
+    // the read has the radius covered — it does not, until the collector
+    // learns this spelling (#9763).
+    //
+    // `.github/workflows/scaffold-e2e.yml` is READ, not merely mentioned:
+    // src/scaffold-e2e-boot-probe.test.ts extracts the three boot-and-probe
+    // `run:` scripts out of that file and EXECUTES them, so the workflow is
+    // literally the code under test. It is the workflow that gates this package
+    // (its `paths:` filter is `packages/create-objectstack/**`), which is why
+    // the test lives here rather than beside a shell script in spec (#9779).
+    //
+    // The last three are NAMED in that test's header rather than read, the same
+    // shape as `check-nul-bytes.mjs` and `sync-template-versions.mjs` above and
+    // settled the same way: the literal collector takes quoted paths without
+    // parsing, so a mention forces a declaration, and declaring three
+    // rarely-touched files is cheaper than rewording prose to dodge a scanner.
+    // `serve.ts` earns it on the merits too — its `flags.dev || NODE_ENV ===
+    // 'development'` port-shift gate is the single fact that decides which fix
+    // those workflow blocks need, so a change to that branch is exactly the
+    // change the test's premise would need re-measuring against. The two sibling
+    // scripts are cited for the contrast that keeps the fixes from being copied
+    // between them.
+    globs: [
+      'content/**',
+      'scripts/sync-template-versions.mjs',
+      '.github/workflows/scaffold-e2e.yml',
+      'packages/cli/src/commands/serve.ts',
+      'scripts/gen-sdui-manifest.sh',
+      'scripts/publish-smoke.sh',
+    ],
   },
 };
 

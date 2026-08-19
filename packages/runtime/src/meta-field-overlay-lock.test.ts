@@ -117,11 +117,14 @@ const PACKAGED_OBJECT = {
     label: 'Task',
     // [#8310] The runtime object door requires an authored OWD — without it
     // the 422 lint door answers first and the NOT_OVERRIDABLE control below
-    // would be refused for the wrong reason.
+    // would be refused for the wrong reason. [#4716] Same discipline for the
+    // five gating object rules that crossed that door: the select declares
+    // `options` so `validateFunctionalCompleteness` stays silent and the 403
+    // keeps being the sentence under test.
     sharingModel: 'private',
     fields: {
         title: { type: 'text', label: 'Title', required: true },
-        status: { type: 'select', label: 'Status' },
+        status: { type: 'select', label: 'Status', options: [{ label: 'Open', value: 'open' }] },
     },
     _packageId: 'com.example.showcase',
 };

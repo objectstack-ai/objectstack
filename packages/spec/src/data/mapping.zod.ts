@@ -43,15 +43,15 @@ const RETIRED_EXTRACT_QUERY =
   + 'exporter ever read a mapping artifact, so "Query to run for export only" promised an '
   + 'export path that does not exist. Delete the key. Exports run through the ordinary '
   + 'query API (`POST /api/v1/data/:object/query`); if a mapping-driven export is ever '
-  + 'designed, this is where it plugs back in. Run `os migrate meta --from 16` to rewrite '
-  + 'existing sources automatically.';
+  + 'designed, this is where it plugs back in. '
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
 const RETIRED_ERROR_POLICY =
   '`mapping.errorPolicy` was removed in @objectstack/spec 17.0.0 (#4509, ADR-0049) — no '
   + 'import code ever read it, so `skip` / `abort` / `retry` selected between three '
   + 'behaviours that were all the same behaviour. Delete the key. Error handling on the '
   + 'import path belongs to the import REQUEST\'s own options, not to the stored mapping. '
-  + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.';
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
 const RETIRED_BATCH_SIZE =
   '`mapping.batchSize` was removed in @objectstack/spec 17.0.0 (#4509, ADR-0049) — no '
@@ -60,8 +60,8 @@ const RETIRED_BATCH_SIZE =
   + '`bulkActionDef.batchSize`, `connector.batchSize`, `sync.batchSize`, `offline.batchSize`, '
   + 'the seed loader\'s and the NoSQL driver cursor\'s are all LIVE and enforced — but each is '
   + 'a DIFFERENT key on a different type sizing its own path, and none of them sizes a '
-  + 'mapping import. Run `os migrate meta --from 16` to rewrite existing sources '
-  + 'automatically.';
+  + 'mapping import. '
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
 const MAPPING_RETIRED_KEY_GUIDANCE: Readonly<Record<string, string>> = {
   extractQuery: RETIRED_EXTRACT_QUERY,

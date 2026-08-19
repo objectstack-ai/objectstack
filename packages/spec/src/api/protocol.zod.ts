@@ -213,10 +213,38 @@ export const GetMetaTypesResponseSchema = lazySchema(() => z.object({
 /**
  * Get Metadata Items Request
  * Get all items of a specific metadata type
+ *
+ * **`environmentId` is deliberately NOT a member here — or on any meta-read
+ * request schema** (maintainer ruling 2026-08-18, #9741). It is the
+ * TRANSPORT-level multi-kernel routing key: the REST layer resolves the target
+ * kernel from it *before* the protocol call, and the implementation's own
+ * parameter types (`@objectstack/metadata-protocol`) never read it off the
+ * request. Its absence from these schemas is a recorded contract decision —
+ * "not part of the request" — not an undeclared-surface omission. Callers that
+ * must carry it alongside a request do so in a typed transport envelope at
+ * their own layer (see `TransportScopedMetaRequest` in `@objectstack/rest`),
+ * never by widening these shapes.
  */
 export const GetMetaItemsRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name (e.g., "object", "plugin")'),
   packageId: z.string().optional().describe('Optional package ID to filter items by'),
+  organizationId: z.string().optional().describe(
+    'Organization (tenant) scope for the read. Selects the org partition in the '
+    + 'ADR-0005 overlay read order — org overlay wins over env-wide overlay wins '
+    + 'over packaged artifact — so it decides which tenant\'s customization rows '
+    + 'are merged into the list. Absent = environment-wide read: only env-level '
+    + 'overlays apply and no org partition is consulted.',
+  ),
+  previewDrafts: z.boolean().optional().describe(
+    'Draft-visibility switch (ADR-0033 draft-overlay preview): when true, '
+    + 'pending `state=\'draft\'` rows are overlaid on the active list — draft '
+    + 'wins on name collision, draft-only items appear, and each overlaid item '
+    + 'is tagged `_draft: true` so UIs can badge the preview. Absent/false = '
+    + 'published world only. Declaration ≠ authorization: this member only '
+    + 'switches which rows are read, and ADR-0106 masking is unaffected — '
+    + 'callers without draft-preview authorization are refused upstream '
+    + '(admin-gated), not by this schema.',
+  ),
 }));
 
 /**
@@ -235,6 +263,32 @@ export const GetMetaItemRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
   name: z.string().describe('Item name (snake_case identifier)'),
   packageId: z.string().optional().describe('Optional package ID to filter items by'),
+  organizationId: z.string().optional().describe(
+    'Organization (tenant) scope for the read. Selects the org partition in the '
+    + 'ADR-0005 overlay read order — org overlay wins over env-wide overlay wins '
+    + 'over packaged artifact — so it decides which tenant\'s customization row '
+    + 'is served as the item. Absent = environment-wide read: only env-level '
+    + 'overlays apply and no org partition is consulted.',
+  ),
+  state: z.enum(['active', 'draft']).optional().describe(
+    'Draft-visibility switch — which lifecycle row to read (strict mode): '
+    + '`\'draft\'` opens the pending draft buffer (Studio\'s editor read) and '
+    + 'fails when no draft exists; absent or `\'active\'` reads the live '
+    + 'published row. Distinct from `previewDrafts`, which FALLS BACK to the '
+    + 'active row when no draft exists. Declaration ≠ authorization: this '
+    + 'member only selects which stored row is read — ADR-0106 masking is '
+    + 'unaffected, and draft access is gated upstream, not by this schema.',
+  ),
+  previewDrafts: z.boolean().optional().describe(
+    'Draft-visibility switch (ADR-0033 draft-overlay preview, non-strict): '
+    + 'when true and `state` is not `\'draft\'`, a pending draft row is '
+    + 'preferred if one exists, else the read falls back to the active row — '
+    + 'the render path degrades to the published value instead of erroring. A '
+    + 'served draft is tagged `_draft: true` so UIs can badge it. Declaration '
+    + '≠ authorization: this member only switches which row is read, and '
+    + 'ADR-0106 masking is unaffected — draft preview is admin-gated '
+    + 'upstream, not by this schema.',
+  ),
 }));
 
 /**
@@ -347,6 +401,30 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
   name: z.string().describe('Item name'),
   item: z.unknown().describe('Metadata item definition'),
   ...MetadataProtectionEnvelopeFields,
+}));
+
+/**
+ * Get Metadata Item — LAYERED Request
+ *
+ * Request shape for `GET /api/v1/meta/:type/:name/layers` (the
+ * `getMetaItemLayered` protocol method). Mirrors the implementation's
+ * parameter type in `@objectstack/metadata-protocol` member for member — a
+ * declared-surface catch-up, not a new capability: the verb and every member
+ * here already ship and are enforced.
+ */
+export const GetMetaItemLayeredRequestSchema = lazySchema(() => z.object({
+  type: z.string().describe('Metadata type name'),
+  name: z.string().describe('Item name'),
+  packageId: z.string().optional().describe(
+    'Optional package ID — scopes the `code` layer so a same-name collision '
+    + 'resolves to the requested package\'s artifact (ADR-0048).',
+  ),
+  organizationId: z.string().optional().describe(
+    'Organization (tenant) scope for the read. Selects the org partition in the '
+    + 'ADR-0005 overlay read order, so it decides which tenant\'s customization '
+    + 'row is reported as the `overlay` layer (and merged into `effective`). '
+    + 'Absent = environment-wide read: `overlay` reports the env-level row only.',
+  ),
 }));
 
 /**
@@ -920,6 +998,13 @@ export const GetMetaItemCachedRequestSchema = lazySchema(() => z.object({
     'Resolved response locale. Folded into the ETag so a language switch '
     + 'never returns a stale-locale 304 — metadata is translated *after* the '
     + 'cache validator check (issue #1319).',
+  ),
+  organizationId: z.string().optional().describe(
+    'Organization (tenant) scope for the read. Selects the org partition in the '
+    + 'ADR-0005 overlay read order — org overlay wins over env-wide overlay wins '
+    + 'over packaged artifact — exactly as on the uncached read (#9454). Also '
+    + 'folded into the ETag, so a scope switch never returns a stale 304 from '
+    + 'another scope\'s cached representation. Absent = environment-wide read.',
   ),
 }));
 
@@ -2035,6 +2120,7 @@ export type GetMetaItemsRequest = z.input<typeof GetMetaItemsRequestSchema>;
 export type GetMetaItemsResponse = z.input<typeof GetMetaItemsResponseSchema>;
 export type GetMetaItemRequest = z.input<typeof GetMetaItemRequestSchema>;
 export type GetMetaItemResponse = z.input<typeof GetMetaItemResponseSchema>;
+export type GetMetaItemLayeredRequest = z.input<typeof GetMetaItemLayeredRequestSchema>;
 export type GetMetaItemLayeredResponse = z.input<typeof GetMetaItemLayeredResponseSchema>;
 /**
  * One #4463 runtime authoring-gate finding. The SINGLE declaration of the shape;
@@ -2291,6 +2377,17 @@ export interface MetadataProtocol {
    */
   deleteMetaItem?(request: DeleteMetaItemRequest): Promise<DeleteMetaItemResponse>;
   getMetaItemCached?(request: GetMetaItemCachedRequest): Promise<GetMetaItemCachedResponse>;
+  /**
+   * Three-layer diagnostic read (`GET /api/v1/meta/:type/:name/layers`) —
+   * packaged baseline, tenant overlay row and merged result side by side; see
+   * {@link GetMetaItemLayeredResponseSchema} for the shape and its #5882
+   * route-separation rationale. A declared-surface catch-up, not a new
+   * capability: `metadata-protocol` has shipped this verb since the layered
+   * route landed. Declared optional like its `getMetaItemCached` /
+   * `deleteMetaItem` siblings — additive to a shipped contract, with the
+   * implementation predating the declaration.
+   */
+  getMetaItemLayered?(request: GetMetaItemLayeredRequest): Promise<GetMetaItemLayeredResponse>;
   getUiView?(request: GetUiViewRequest): Promise<GetUiViewResponse>;
 }
 

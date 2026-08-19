@@ -98,7 +98,8 @@ export const FieldMappingSchema = lazySchema(() => z.object({
     + "import mapping's: `mapping.fieldMapping[].transform` (a string enum — "
     + '`none`/`constant`/`map`/`split`/`join`/`lookup` — with its settings in `params`), '
     + 'applied by the REST import path, which rejects `javascript` with a 400 rather than '
-    + 'pretending to run it. Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    + 'pretending to run it. '
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
 
   /**

@@ -59,6 +59,12 @@ import {
   GetFieldLabelsResponseSchema,
 } from './protocol.zod';
 import type { ListNotificationsRequest } from './protocol.zod';
+import { expectTypeOf } from 'vitest';
+import type {
+  MetadataProtocol,
+  GetMetaItemLayeredRequest,
+  GetMetaItemLayeredResponse,
+} from './protocol.zod';
 
 describe('ObjectStack Protocol', () => {
 
@@ -1284,5 +1290,212 @@ describe('PublishPackageDraftsResponseSchema published[].advisories (#9343 — #
         published: [el({ advisories: advisory })],
       }).success,
     ).toBe(false);
+  });
+});
+
+// Deliberately its own import line, matching the file's later blocks: this
+// group pins one change (#9726) and reads as one unit.
+import {
+  GetMetaItemsRequestSchema,
+  GetMetaItemRequestSchema,
+  GetMetaItemCachedRequestSchema,
+  GetMetaItemLayeredRequestSchema,
+} from './protocol.zod';
+
+describe('meta-read request schemas declare organizationId (#9726 — declared = enforced)', () => {
+  // The implementation (`@objectstack/metadata-protocol`) accepts and HONOURS
+  // `organizationId` on all four read verbs: it selects the org partition in
+  // the ADR-0005 overlay read order, i.e. it decides which tenant's row is
+  // served. These pins hold the DECLARED surface to that enforced shape.
+  //
+  // Why the accept-pin asserts the parsed VALUE, not just `success`: these are
+  // non-strict objects, so before #9726 a request carrying `organizationId`
+  // still parsed green — the member was silently STRIPPED. Presence in the
+  // parse OUTPUT is the observable that actually changed.
+  const cases = [
+    ['GetMetaItemsRequestSchema', GetMetaItemsRequestSchema, { type: 'object' }],
+    ['GetMetaItemRequestSchema', GetMetaItemRequestSchema, { type: 'view', name: 'account_list' }],
+    ['GetMetaItemCachedRequestSchema', GetMetaItemCachedRequestSchema, { type: 'view', name: 'account_list' }],
+    ['GetMetaItemLayeredRequestSchema', GetMetaItemLayeredRequestSchema, { type: 'view', name: 'account_list' }],
+  ] as const;
+
+  it.each(cases)('%s accepts organizationId and PRESERVES it through parse', (_n, schema, base) => {
+    const result = schema.safeParse({ ...base, organizationId: 'org_alpha' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect((result.data as { organizationId?: string }).organizationId).toBe('org_alpha');
+    }
+  });
+
+  it.each(cases)('%s keeps organizationId OPTIONAL — an env-wide (org-less) read stays valid', (_n, schema, base) => {
+    const result = schema.safeParse(base);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect('organizationId' in (result.data as object)).toBe(false);
+    }
+  });
+
+  it.each(cases)('%s rejects a non-string organizationId — the scope key is a value, not a bag', (_n, schema, base) => {
+    expect(schema.safeParse({ ...base, organizationId: 42 }).success).toBe(false);
+    expect(schema.safeParse({ ...base, organizationId: { id: 'org_alpha' } }).success).toBe(false);
+  });
+
+  it('GetMetaItemLayeredRequestSchema mirrors the implementation inline type member for member', () => {
+    // `{ type, name, packageId?, organizationId? }` — the exact parameter type
+    // of `getMetaItemLayered` in metadata-protocol. packageId scopes the code
+    // layer (ADR-0048); nothing else is declared because nothing else is
+    // enforced.
+    const full = GetMetaItemLayeredRequestSchema.safeParse({
+      type: 'view',
+      name: 'account_list',
+      packageId: 'pkg_crm',
+      organizationId: 'org_alpha',
+    });
+    expect(full.success).toBe(true);
+    expect(GetMetaItemLayeredRequestSchema.safeParse({ type: 'view' }).success).toBe(false);
+    expect(GetMetaItemLayeredRequestSchema.safeParse({ name: 'account_list' }).success).toBe(false);
+  });
+});
+
+describe('meta-read request schemas declare the draft-visibility switches (#9741 — declared = enforced)', () => {
+  // Maintainer ruling 2026-08-18 (#9741): declare `previewDrafts` / `state`
+  // exactly where the implementation enforces them, and record `environmentId`
+  // as transport-level — OUT of the request shape by decision. The
+  // implementation's inline parameter types are the measure:
+  //   getMetaItems:  { …, previewDrafts?: boolean }            — no `state`
+  //   getMetaItem:   { …, state?: 'active'|'draft', previewDrafts?: boolean }
+  //   getMetaItemCached / getMetaItemLayered: NEITHER member
+  // As in the #9726 block above, accept-pins assert the parsed VALUE: these are
+  // non-strict objects, so `success` alone is exactly the silent-strip state
+  // this card closes.
+  const previewCases = [
+    ['GetMetaItemsRequestSchema', GetMetaItemsRequestSchema, { type: 'object' }],
+    ['GetMetaItemRequestSchema', GetMetaItemRequestSchema, { type: 'view', name: 'account_list' }],
+  ] as const;
+
+  it.each(previewCases)('%s accepts previewDrafts and PRESERVES it through parse', (_n, schema, base) => {
+    const result = schema.safeParse({ ...base, previewDrafts: true });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect((result.data as { previewDrafts?: boolean }).previewDrafts).toBe(true);
+    }
+  });
+
+  it.each(previewCases)('%s keeps previewDrafts OPTIONAL — a published-world read stays valid', (_n, schema, base) => {
+    const result = schema.safeParse(base);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect('previewDrafts' in (result.data as object)).toBe(false);
+    }
+  });
+
+  it.each(previewCases)('%s rejects a non-boolean previewDrafts — a switch, not a bag', (_n, schema, base) => {
+    expect(schema.safeParse({ ...base, previewDrafts: 'true' }).success).toBe(false);
+    expect(schema.safeParse({ ...base, previewDrafts: 1 }).success).toBe(false);
+  });
+
+  it('GetMetaItemRequestSchema accepts state and PRESERVES it through parse', () => {
+    for (const state of ['active', 'draft'] as const) {
+      const result = GetMetaItemRequestSchema.safeParse({ type: 'view', name: 'account_list', state });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect((result.data as { state?: string }).state).toBe(state);
+      }
+    }
+  });
+
+  it('GetMetaItemRequestSchema keeps state OPTIONAL and refuses values outside the vocabulary', () => {
+    const absent = GetMetaItemRequestSchema.safeParse({ type: 'view', name: 'account_list' });
+    expect(absent.success).toBe(true);
+    if (absent.success) {
+      expect('state' in (absent.data as object)).toBe(false);
+    }
+    // The lifecycle vocabulary is CLOSED: `archived` is not a read state.
+    expect(GetMetaItemRequestSchema.safeParse({ type: 'view', name: 'account_list', state: 'archived' }).success).toBe(false);
+    expect(GetMetaItemRequestSchema.safeParse({ type: 'view', name: 'account_list', state: true }).success).toBe(false);
+  });
+
+  it('getMetaItems declares NO state — the list verb has no strict-draft mode (mirror of the inline type)', () => {
+    // Non-strict schema: an undeclared key parses green but is STRIPPED.
+    // Stripping is the observable that the member is NOT declared.
+    const result = GetMetaItemsRequestSchema.safeParse({ type: 'object', state: 'draft' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect('state' in (result.data as object)).toBe(false);
+    }
+  });
+
+  it('cached and layered reads declare NEITHER switch — declared only where enforced', () => {
+    const cases = [
+      [GetMetaItemCachedRequestSchema, { type: 'view', name: 'account_list' }],
+      [GetMetaItemLayeredRequestSchema, { type: 'view', name: 'account_list' }],
+    ] as const;
+    for (const [schema, base] of cases) {
+      const result = schema.safeParse({ ...base, previewDrafts: true, state: 'draft' });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect('previewDrafts' in (result.data as object)).toBe(false);
+        expect('state' in (result.data as object)).toBe(false);
+      }
+    }
+  });
+});
+
+describe('environmentId stays OUT of the meta-read request shape — by decision, not omission (#9741)', () => {
+  // Maintainer ruling 2026-08-18 (#9741): `environmentId` is the
+  // TRANSPORT-level multi-kernel routing key. The REST layer resolves the
+  // target kernel from it BEFORE the protocol call, the implementation's
+  // parameter types never read it off the request, and these schemas record
+  // the same exclusion. This pin is the regression guard for that decision:
+  // if someone declares the member, the parse below stops stripping it and
+  // this test names the ruling they are overturning.
+  const cases = [
+    ['GetMetaItemsRequestSchema', GetMetaItemsRequestSchema, { type: 'object' }],
+    ['GetMetaItemRequestSchema', GetMetaItemRequestSchema, { type: 'view', name: 'account_list' }],
+    ['GetMetaItemCachedRequestSchema', GetMetaItemCachedRequestSchema, { type: 'view', name: 'account_list' }],
+    ['GetMetaItemLayeredRequestSchema', GetMetaItemLayeredRequestSchema, { type: 'view', name: 'account_list' }],
+  ] as const;
+
+  it.each(cases)('%s does not declare environmentId — a carried value is stripped by parse', (_n, schema, base) => {
+    const result = schema.safeParse({ ...base, environmentId: 'env_alpha' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect('environmentId' in (result.data as object)).toBe(false);
+    }
+  });
+
+  it.each(cases)('%s has no environmentId in its declared shape', (_n, schema) => {
+    // Shape-level twin of the strip-pin above: `.shape` enumerates exactly the
+    // DECLARED members, so this fails even if stripping semantics ever change.
+    const shape = (schema as unknown as { shape: Record<string, unknown> }).shape;
+    expect(Object.keys(shape)).not.toContain('environmentId');
+  });
+});
+
+describe('MetadataProtocol declares getMetaItemLayered (#9740)', () => {
+  // Type-level pins (compiled by the spec test typecheck, the
+  // translation-typegen.test.ts pattern). The member is an interface
+  // declaration with no runtime shadow, so its presence and shape are only
+  // observable to tsc — these pins are what turns red if the member is
+  // dropped again or drifts off the layered schemas.
+
+  it('declares the member optional, against the layered request/response schemas', () => {
+    // Optional like its `getMetaItemCached` / `deleteMetaItem` siblings:
+    // additive to a shipped contract, implementation predating declaration.
+    expectTypeOf<MetadataProtocol['getMetaItemLayered']>().toEqualTypeOf<
+      ((request: GetMetaItemLayeredRequest) => Promise<GetMetaItemLayeredResponse>) | undefined
+    >();
+  });
+
+  it("keeps the layered lockSource vocabulary closed — no 'overlay' arm", () => {
+    // The drift this card closed: the implementation's inline annotation
+    // carried an 'overlay' arm no producer on the layered read path can emit
+    // (the only `lockSource: 'overlay'` producer is `getEffectiveLock`, a
+    // write/delete-door helper). The declared wire enum stays
+    // artifact | package | env-forced; widening it without a producer is the
+    // declared-but-unenforced direction Prime Directive #10 forbids.
+    expectTypeOf<GetMetaItemLayeredResponse['lockSource']>().toEqualTypeOf<
+      'artifact' | 'package' | 'env-forced' | undefined
+    >();
   });
 });

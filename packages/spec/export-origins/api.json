@@ -414,6 +414,8 @@
     "GetMetaItemCachedResponse": "src/api/protocol.zod.ts#GetMetaItemCachedResponse (type)",
     "GetMetaItemCachedResponseParsed": "src/api/protocol.zod.ts#GetMetaItemCachedResponseParsed (type)",
     "GetMetaItemCachedResponseSchema": "src/api/protocol.zod.ts#GetMetaItemCachedResponseSchema (const)",
+    "GetMetaItemLayeredRequest": "src/api/protocol.zod.ts#GetMetaItemLayeredRequest (type)",
+    "GetMetaItemLayeredRequestSchema": "src/api/protocol.zod.ts#GetMetaItemLayeredRequestSchema (const)",
     "GetMetaItemLayeredResponse": "src/api/protocol.zod.ts#GetMetaItemLayeredResponse (type)",
     "GetMetaItemLayeredResponseSchema": "src/api/protocol.zod.ts#GetMetaItemLayeredResponseSchema (const)",
     "GetMetaItemRequest": "src/api/protocol.zod.ts#GetMetaItemRequest (type)",

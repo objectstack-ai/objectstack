@@ -1,17 +1,16 @@
 # @objectstack/mcp
 
-MCP Runtime Server Plugin for ObjectStack — exposes AI tools, data resources, and agent prompts via the Model Context Protocol.
+MCP Runtime Server Plugin for ObjectStack — exposes your app's data objects, business actions, and authored skills over the Model Context Protocol (stdio + Streamable HTTP).
 
 ## Features
 
-- **Model Context Protocol (MCP)**: Expose ObjectStack resources to AI models via MCP
-- **AI Tools**: Auto-generate MCP tools from ObjectStack actions and flows
-- **Data Resources**: Expose objects, records, and metadata as MCP resources
-- **Agent Prompts**: Register prompt templates for AI agents
-- **Type-Safe**: Full Zod schema validation for tool inputs/outputs
-- **Auto-Discovery**: MCP clients automatically discover available tools and resources
-- **Streaming Support**: Stream large datasets and real-time updates
-- **Security**: Built-in permission checks for tool execution
+- **Model Context Protocol (MCP)**: expose an ObjectStack app to any MCP client
+- **Object tools**: list / describe / query / aggregate / read / create / update / delete, generated from your metadata
+- **Action tools**: invoke the business actions an author opted into the AI surface
+- **Resources**: object schemas, records and metadata types as MCP resources
+- **Prompts**: authored skills and registered agents project as MCP prompts
+- **Two transports**: a long-lived stdio server, and a per-request Streamable HTTP endpoint at `/api/v1/mcp`
+- **Security**: every call runs under a real principal — permissions, row-level and field-level security apply, and OAuth scopes narrow the tool families
 
 ## What is MCP?
 
@@ -37,10 +36,9 @@ import { MCPServerPlugin } from '@objectstack/mcp';
 
 const stack = defineStack({
   plugins: [
-    MCPServerPlugin.configure({
-      serverName: 'objectstack-server',
+    new MCPServerPlugin({
+      name: 'objectstack-server',
       version: '1.0.0',
-      autoRegisterTools: true,
     }),
   ],
 });
@@ -48,72 +46,90 @@ const stack = defineStack({
 
 ## Configuration
 
-```typescript
-interface MCPServerConfig {
-  /** Server name (shown to AI clients) */
-  serverName?: string;
+The constructor takes `MCPServerPluginOptions`:
 
-  /** Server version */
+```typescript
+interface MCPServerPluginOptions {
+  /** Override MCP server name. Defaults to 'objectstack'. */
+  name?: string;
+
+  /** Override MCP server version. Defaults to package version. */
   version?: string;
 
-  /** Auto-register tools from actions and flows */
-  autoRegisterTools?: boolean;
-
-  /** Auto-expose objects as resources */
-  autoExposeObjects?: boolean;
-
-  /** Enable streaming for large responses */
-  enableStreaming?: boolean;
-
-  /** Transport mechanism ('stdio' | 'http') */
+  /** Transport mode: 'stdio' (default). */
   transport?: 'stdio' | 'http';
 
-  /** HTTP port (if transport is 'http') */
-  port?: number;
+  /** Whether to auto-start the MCP server. Defaults to false. */
+  autoStart?: boolean;
+
+  /** Custom instructions for the MCP server. */
+  instructions?: string;
 }
 ```
 
-## MCP Tools
+Tools and resources are **not** opted into per-option — the plugin bridges the
+AI tool registry, metadata service and data engine automatically when it
+starts. The HTTP surface needs no start at all: it is served per-request at
+`/api/v1/mcp` (default-on; `OS_MCP_SERVER_ENABLED=false` opts out).
 
-### Auto-Generated Tools
+### Environment variables
 
-ObjectStack automatically exposes these operations as MCP tools:
+| Variable | Effect |
+|---|---|
+| `OS_MCP_SERVER_ENABLED` | HTTP surface, **default-on**. `false` disables it. |
+| `OS_MCP_SERVER_NAME` | Override the server name. |
+| `OS_MCP_SERVER_TRANSPORT` | Override the transport (`stdio` \| `http`). |
+| `OS_MCP_STDIO_ENABLED` | Auto-start the **long-lived stdio** transport (equivalent to the `autoStart` option). |
+| `OS_MCP_STDIO_API_KEY` | The identity the stdio server runs as. **Required** whenever stdio auto-starts. |
+
+The stdio transport has its own switch on purpose: starting it claims the
+process's stdin/stdout. Setting `OS_MCP_SERVER_ENABLED=true` also starts stdio,
+but that path is **deprecated** and logs a warning — use `OS_MCP_STDIO_ENABLED`
+or the `autoStart` option.
+
+`OS_MCP_STDIO_API_KEY` is not optional and has no fallback: a stdio server with
+no resolvable principal **refuses to start** rather than serving data unscoped
+(ADR-0101). Mint a key in Setup → Connect an Agent, or `POST /api/v1/keys`.
+
+The legacy `MCP_SERVER_*` spellings are still honoured with a deprecation
+warning.
+
+## The tool surface
+
+There are two independent families, and which one you get depends on how the
+server is assembled.
+
+### Object and action tools
+
+Registered from a **data bridge** the host supplies — the surface both
+transports serve. Every call runs as the caller (permissions, RLS and FLS
+apply):
 
 ```typescript
-// CRUD operations (auto-registered)
-'objectstack_find'         // Query records
-'objectstack_findOne'      // Get single record
-'objectstack_create'       // Create record
-'objectstack_update'       // Update record
-'objectstack_delete'       // Delete record
-
-// Metadata operations
-'objectstack_describeObject'   // Get object schema
-'objectstack_listObjects'      // List all objects
-'objectstack_listFields'       // List object fields
-```
-
-### Native Tools (Streamable HTTP)
-
-Over the network-reachable Streamable HTTP transport, the server self-registers
-a native tool set bound to the **caller's principal** (the API key acts as the
-user, with full row-level security + permission enforcement). No
-`@objectstack/service-ai` and no cloud studio are required — these are part of
-the open framework.
-
-```typescript
-// Object data (RLS-enforced as the caller)
-'list_objects'      // List objects (system sys_* objects hidden by default)
-'describe_object'   // Object schema: fields + features
-'validate_expression' // Check a CEL expression against a schema before authoring it
-'query_records'     // Filter / sort / paginate
-'get_record'        // Fetch one by id
-'create_record' / 'update_record' / 'delete_record'
+// Object data
+'list_objects'         // List objects (system sys_* objects hidden by default)
+'describe_object'      // Object schema: fields + features
+'validate_expression'  // Check a CEL expression against a schema before authoring it
+'query_records'        // Filter / sort / paginate
+'aggregate_records'    // count/sum/avg/min/max/count_distinct, optionally grouped
+'get_record'           // Fetch one by id
+'create_record'        // Create
+'update_record'        // Update by id
+'delete_record'        // Delete by id (destructive)
 
 // Business actions — operate the app, not just its rows
-'list_actions'      // Invokable business actions the caller may run
-'run_action'        // Invoke an action by name with { recordId, params }
+'list_actions'         // Invokable business actions the caller may run
+'run_action'           // Invoke an action by name with { recordId, params }
 ```
+
+`aggregate_records` is registered only when the bridge implements `aggregate`;
+a bridge without that seam serves the rest and advertises nothing it cannot do.
+
+OAuth scopes narrow the families at consent time: `data:read` covers
+list/describe/query/aggregate/get, `data:write` covers create/update/delete, and
+`actions:execute` covers `list_actions` / `run_action`. A tool outside the grant
+is **not registered at all**, so the SDK rejects it as an unknown tool — the
+grant doubles as dispatch-time enforcement.
 
 `list_actions` enumerates each object's headless-invokable actions (script /
 flow), filtered to what the author exposed and the caller may run: only actions
@@ -133,151 +149,113 @@ task", "convert this lead".
 > behalf of anyone allowed through the gate. Flow actions honour the flow's
 > `runAs` declaration (ADR-0049) with the caller's identity forwarded.
 
-### Custom Tools
+### AI-registry tools
 
-Register custom tools that AI models can call:
+If the deployment also runs an AI service that exposes a function-calling
+`ToolRegistry`, the plugin bridges every tool in it onto the long-lived server
+under the same name, description and JSON Schema. This family is empty on an app
+that registers no AI tools, and its absence is reported honestly: no tools
+registered means the `tools` capability is not advertised.
+
+## Resources
+
+Registered by the resource bridge, from your metadata:
+
+```
+objectstack://objects                                    # List all data objects
+objectstack://objects/{objectName}                       # Object schema
+objectstack://objects/{objectName}/records/{recordId}     # One record
+objectstack://metadata/types                             # List all metadata types
+```
+
+The record resource is registered only when the host supplies a record reader;
+without one, the schema and listing resources are served alone.
+
+## Prompts
+
+Two prompt families are bridged — there is no per-item prompt registration call:
+
+1. **`agent_prompt`** — one dynamic prompt that loads a registered agent's
+   system prompt by name, with optional UI context (`objectName`, `recordId`,
+   `viewName`).
+2. **One prompt per authored skill** that carries `instructions` (#3905). Write
+   a `*.skill.ts`, and its instructions become a prompt any connected MCP client
+   can list and fetch.
+
+The skill **list** is a snapshot taken when the bridge runs; each prompt's
+**body** is re-read from metadata at `prompts/get` time, so an edited skill
+serves fresh text without a restart.
+
+## Extending the server from a host
+
+⚠️ There is **no** imperative `registerTool()` / `registerResource()` /
+`registerPrompt()` call on the `'mcp'` service. Tools, resources and prompts are
+derived from metadata, and a host that drives the runtime itself contributes
+them through the bridge methods and the exported helpers below.
+
+`MCPServerRuntime`'s public surface, as published in `dist/index.d.ts`:
+
+| Member | What it does |
+|---|---|
+| `new MCPServerRuntime(config?)` | `MCPServerRuntimeConfig`: `name`, `version`, `instructions`, `transport`, `logger`. |
+| `server` | The underlying `McpServer` (getter), for advanced use. |
+| `isStarted` | Whether a transport is currently connected (getter). |
+| `bridgeTools(toolRegistry)` | Bridge an AI service's function-calling `ToolRegistry`. |
+| `bridgeDataTools(bridge, toolOptions?)` | Register the object-CRUD tools, plus the action pair when the bridge carries that seam. Returns the tool names registered. |
+| `bridgeResources(metadataService, getRecord?)` | Register the `objectstack://` resources. |
+| `bridgePrompts(metadataService, mergedRead?)` | Register the agent and skill prompts. |
+| `start()` / `stop()` | Attach / detach the configured long-lived transport. |
+| `renderSkill(options?)` | Render the portable Agent Skill (`SKILL.md`) for this environment. |
+| `handleHttpRequest(request, opts?)` | Serve one Streamable HTTP request (Web-standard `Request`/`Response`). |
+
+Ordering matters: **bridge everything before `start()`**. Registering a tool,
+resource or prompt is also what declares its capability, and the MCP SDK refuses
+to register capabilities once a transport is attached.
+
+The three helpers the bridges use are exported so a host can drive an
+`McpServer` directly:
 
 ```typescript
-import { defineTool } from '@objectstack/spec';
+import {
+  MCPServerRuntime,
+  registerObjectTools,
+  registerActionTools,
+  registerSkillPrompts,
+} from '@objectstack/mcp';
+import type { McpDataBridge, McpActionBridge, McpSkillBridge } from '@objectstack/mcp';
 
-const calculateRevenueTool = defineTool({
-  name: 'calculate_revenue',
-  description: 'Calculate total revenue for an account',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      accountId: { type: 'string', description: 'Account ID' },
-      startDate: { type: 'string', description: 'Start date (ISO 8601)' },
-      endDate: { type: 'string', description: 'End date (ISO 8601)' },
-    },
-    required: ['accountId'],
-  },
-  async execute({ accountId, startDate, endDate }) {
-    const opportunities = await kernel.getDriver().find({
-      object: 'opportunity',
-      filters: [
-        { field: 'account_id', operator: 'eq', value: accountId },
-        { field: 'stage', operator: 'eq', value: 'closed_won' },
-        { field: 'close_date', operator: 'gte', value: startDate },
-        { field: 'close_date', operator: 'lte', value: endDate },
-      ],
-    });
+// Your host supplies these, bound to the caller's principal.
+declare const data: McpDataBridge & McpActionBridge;
+declare const skills: McpSkillBridge;
 
-    const total = opportunities.reduce((sum, opp) => sum + opp.amount, 0);
-
-    return {
-      accountId,
-      totalRevenue: total,
-      opportunityCount: opportunities.length,
-    };
-  },
+const runtime = new MCPServerRuntime({
+  name: 'my-host',
+  version: '1.0.0',
+  transport: 'stdio',
 });
 
-// Register with MCP server
-kernel.getService('mcp').registerTool(calculateRevenueTool);
+// Either: one call for the whole data surface, returning the names registered.
+const registered: string[] = runtime.bridgeDataTools(data, { maxQueryLimit: 200 });
+
+// Or: drive the helpers against the underlying McpServer yourself.
+registerObjectTools(runtime.server, data, { allowSystemObjects: false });
+registerActionTools(runtime.server, data, { grantedScopes: ['actions:execute'] });
+registerSkillPrompts(runtime.server, skills);
+
+await runtime.start();
 ```
 
-## MCP Resources
+`RegisterObjectToolsOptions` carries `allowSystemObjects`, `maxQueryLimit` and
+`grantedScopes`; `RegisterActionToolsOptions` carries `allowSystemObjects` and
+`grantedScopes`. `McpDataBridge` is the data seam (`listObjects`,
+`describeObject`, `query`, `get`, `create`, `update`, `remove`, and the optional
+`aggregate` / `listObjectsDiagnosed`); `McpActionBridge` adds `listActions` and
+`runAction`; `McpSkillBridge` is a single `listSkills`.
 
-### Auto-Exposed Objects
-
-All ObjectStack objects are automatically exposed as MCP resources:
-
-```
-objectstack://objects/opportunity           # Opportunity object schema
-objectstack://objects/opportunity/records   # All opportunity records
-objectstack://objects/opportunity/123       # Specific opportunity record
-```
-
-### Custom Resources
-
-Expose custom resources to AI models:
-
-```typescript
-kernel.getService('mcp').registerResource({
-  uri: 'objectstack://reports/sales-pipeline',
-  name: 'Sales Pipeline Report',
-  description: 'Current sales pipeline with stages and amounts',
-  mimeType: 'application/json',
-  async read() {
-    const opportunities = await kernel.getDriver().find({
-      object: 'opportunity',
-      filters: [
-        { field: 'stage', operator: 'neq', value: 'closed_won' },
-        { field: 'stage', operator: 'neq', value: 'closed_lost' },
-      ],
-    });
-
-    const pipeline = opportunities.reduce((acc, opp) => {
-      acc[opp.stage] = (acc[opp.stage] || 0) + opp.amount;
-      return acc;
-    }, {});
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(pipeline, null, 2),
-        },
-      ],
-    };
-  },
-});
-```
-
-## MCP Prompts
-
-Register prompt templates that AI models can use:
-
-```typescript
-kernel.getService('mcp').registerPrompt({
-  name: 'analyze_account',
-  description: 'Analyze an account and its opportunities',
-  arguments: [
-    {
-      name: 'accountId',
-      description: 'Account ID to analyze',
-      required: true,
-    },
-  ],
-  async render({ accountId }) {
-    const account = await kernel.getDriver().findOne({
-      object: 'account',
-      filters: [{ field: 'id', operator: 'eq', value: accountId }],
-    });
-
-    const opportunities = await kernel.getDriver().find({
-      object: 'opportunity',
-      filters: [{ field: 'account_id', operator: 'eq', value: accountId }],
-    });
-
-    return {
-      messages: [
-        {
-          role: 'user',
-          content: {
-            type: 'text',
-            text: `Analyze this account and provide insights:
-
-Account: ${account.name}
-Industry: ${account.industry}
-Total Opportunities: ${opportunities.length}
-Total Value: $${opportunities.reduce((sum, o) => sum + o.amount, 0)}
-
-Opportunities:
-${opportunities.map(o => `- ${o.name} (${o.stage}): $${o.amount}`).join('\n')}
-
-Please provide:
-1. Key insights about this account
-2. Risk assessment
-3. Recommendations for next steps`,
-          },
-        },
-      ],
-    };
-  },
-});
-```
+Also exported for hosts that render the skill surface themselves:
+`renderSkillMarkdown`, `listSkillPrompts`, `projectSkillPrompt`,
+`skillPromptResult`, `OBJECTSTACK_SKILL_NAME`, `OBJECTSTACK_SKILL_DESCRIPTION`,
+and the Setup page metadata `CONNECT_AGENT_PAGE` / `CONNECT_AGENT_UI_BUNDLE`.
 
 ## Using with AI Clients
 
@@ -338,7 +316,9 @@ are also accepted.)
 
 ### Claude Desktop (local stdio server)
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`. The
+stdio transport needs both of its switches — the enable flag and the identity it
+runs as:
 
 ```json
 {
@@ -347,7 +327,9 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
       "command": "node",
       "args": ["/path/to/your/objectstack/server.js"],
       "env": {
-        "DATABASE_URL": "your-database-url"
+        "DATABASE_URL": "your-database-url",
+        "OS_MCP_STDIO_ENABLED": "true",
+        "OS_MCP_STDIO_API_KEY": "osk_..."
       }
     }
   }
@@ -356,14 +338,18 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ### Cursor IDE
 
-Add to `.cursor/mcp.json`:
+Add to `.cursor/mcp.json` (same two environment variables apply):
 
 ```json
 {
   "mcpServers": {
     "objectstack": {
       "command": "node",
-      "args": ["./server.js"]
+      "args": ["./server.js"],
+      "env": {
+        "OS_MCP_STDIO_ENABLED": "true",
+        "OS_MCP_STDIO_API_KEY": "osk_..."
+      }
     }
   }
 }
@@ -378,7 +364,11 @@ Configure in Cline settings:
   "cline.mcpServers": {
     "objectstack": {
       "command": "node",
-      "args": ["./server.js"]
+      "args": ["./server.js"],
+      "env": {
+        "OS_MCP_STDIO_ENABLED": "true",
+        "OS_MCP_STDIO_API_KEY": "osk_..."
+      }
     }
   }
 }
@@ -386,176 +376,106 @@ Configure in Cline settings:
 
 ## Server Implementation
 
-### Stdio Transport (Default)
+### Stdio Transport
 
 ```typescript
-// server.ts
+// objectstack.config.ts
 import { defineStack } from '@objectstack/spec';
+import { defineDatasource } from '@objectstack/spec/data';
 import { MCPServerPlugin } from '@objectstack/mcp';
-import { DriverSql } from '@objectstack/driver-sql';
 
-const stack = defineStack({
-  driver: DriverSql.configure({
-    client: 'better-sqlite3',
-    connection: { filename: process.env.DATABASE_URL ?? './data/app.db' },
-  }),
+export default defineStack({
+  manifest: {
+    id: 'com.example.crm',
+    namespace: 'crm',
+    version: '0.1.0',
+    type: 'app',
+    name: 'My CRM',
+    engines: { protocol: '^17' },
+  },
+  // Optional: the CLI already anchors a persistent SQLite database at
+  // `<project>/.objectstack/data/standalone.db`. Declare a datasource only
+  // to point somewhere else.
+  datasources: [
+    defineDatasource({
+      name: 'primary',
+      label: 'Primary',
+      driver: 'sqlite',
+      config: { filename: '.objectstack/data/app.db' },
+    }),
+  ],
   plugins: [
-    MCPServerPlugin.configure({
-      serverName: 'my-crm',
+    new MCPServerPlugin({
+      name: 'my-crm',
       transport: 'stdio', // Claude Desktop, Cursor, Cline
+      autoStart: true,    // stdio is a long-lived transport, so start it
     }),
   ],
 });
-
-await stack.boot();
 ```
 
-### HTTP Transport
+Run it with the CLI (`os dev` / `os serve`) — `defineStack()` returns the
+metadata definition; the CLI boots the kernel from it. With `autoStart: true`
+you must also set `OS_MCP_STDIO_API_KEY`, or boot fails closed.
+
+### HTTP Transport (default)
 
 ```typescript
-const stack = defineStack({
-  driver: DriverSql.configure({ /* ... */ }),
+export default defineStack({
+  manifest: { /* ... */ },
   plugins: [
-    MCPServerPlugin.configure({
-      serverName: 'my-crm',
+    new MCPServerPlugin({
+      name: 'my-crm',
       transport: 'http',
-      port: 3100,
     }),
   ],
 });
-
-await stack.boot();
-// MCP server running on http://localhost:3100
+// Served per-request by the running server at /api/v1/mcp
 ```
 
-## Advanced Features
+## Server capabilities
 
-### Streaming Resources
+The server does **not** hand-declare a capability set. Capabilities are derived
+from what was actually registered, because the SDK's registration call installs
+the handler and declares the capability together — so there is no way to
+advertise a primitive this server cannot serve (ADR-0076 D12).
 
-```typescript
-kernel.getService('mcp').registerResource({
-  uri: 'objectstack://exports/opportunities-csv',
-  name: 'Opportunities Export (CSV)',
-  mimeType: 'text/csv',
-  async *stream() {
-    // Stream header
-    yield 'Name,Stage,Amount,Close Date\n';
+In practice: `tools` appears once a tool is registered, `resources` once a
+resource is, `prompts` once the skill/agent bridge runs. `logging` is the one
+hand-declared entry, and it is honest — declaring it is itself what wires the
+`logging/setLevel` handler.
 
-    // Stream records in batches
-    let offset = 0;
-    const batchSize = 100;
+There is no `subscribe`, no `listChanged` and no streaming capability. An app
+with no bridged tools advertises no `tools` capability, which is the honest
+report rather than an empty promise.
 
-    while (true) {
-      const batch = await kernel.getDriver().find({
-        object: 'opportunity',
-        limit: batchSize,
-        offset,
-      });
+## Best practices
 
-      if (batch.length === 0) break;
-
-      for (const opp of batch) {
-        yield `${opp.name},${opp.stage},${opp.amount},${opp.close_date}\n`;
-      }
-
-      offset += batchSize;
-    }
-  },
-});
-```
-
-### Tool Permissions
-
-```typescript
-kernel.getService('mcp').registerTool({
-  name: 'delete_opportunity',
-  description: 'Delete an opportunity',
-  permissions: ['opportunity:delete'], // Require permission
-  inputSchema: {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-    },
-    required: ['id'],
-  },
-  async execute({ id }, context) {
-    // context includes userId, permissions, etc.
-    if (!context.hasPermission('opportunity:delete')) {
-      throw new Error('Permission denied');
-    }
-
-    await kernel.getDriver().delete({
-      object: 'opportunity',
-      filters: [{ field: 'id', operator: 'eq', value: id }],
-    });
-
-    return { success: true, deleted: id };
-  },
-});
-```
-
-### Dynamic Tool Registration
-
-```typescript
-// Register tools from flow definitions
-const flows = await kernel.getMetadata('flow');
-
-for (const flow of flows) {
-  kernel.getService('mcp').registerTool({
-    name: `flow_${flow.name}`,
-    description: flow.description,
-    inputSchema: generateSchemaFromFlow(flow),
-    async execute(inputs) {
-      return await kernel.executeFlow(flow.name, inputs);
-    },
-  });
-}
-```
-
-## Server Capabilities
-
-The MCP server exposes these capabilities:
-
-```json
-{
-  "capabilities": {
-    "tools": {
-      "listChanged": true
-    },
-    "resources": {
-      "subscribe": true,
-      "listChanged": true
-    },
-    "prompts": {
-      "listChanged": true
-    },
-    "logging": {},
-    "experimental": {
-      "streaming": true
-    }
-  }
-}
-```
-
-## Best Practices
-
-1. **Tool Design**: Keep tools focused and well-documented
-2. **Resource Naming**: Use clear, hierarchical URI schemes
-3. **Prompt Templates**: Make prompts flexible with arguments
-4. **Error Handling**: Always return helpful error messages
-5. **Permissions**: Check permissions before tool execution
-6. **Performance**: Use streaming for large datasets
-7. **Versioning**: Version your server and tools
+1. **Model the app, not the transport** — tools come from your objects and
+   actions, so the lever that shapes the AI surface is your metadata.
+2. **Opt actions in deliberately** — `ai: { exposed: true }` is a security
+   decision; an invoked action body runs as trusted app code.
+3. **Scope the grant** — hand `grantedScopes` the narrowest set the client
+   needs; an ungranted tool is never registered.
+4. **Cap the reads** — `maxQueryLimit` bounds what one `query_records` call can
+   pull.
+5. **Prefer `aggregate_records` over paging** — a question about totals should
+   not walk every row.
+6. **Bridge before `start()`** — capabilities cannot be declared once a
+   transport is attached.
 
 ## Debugging
 
-Enable debug logging:
+The plugin logs through the kernel logger — there is no `debug` option. The
+MCP surface is controlled by the environment variables listed under
+[Configuration](#environment-variables):
 
-```typescript
-MCPServerPlugin.configure({
-  serverName: 'my-crm',
-  debug: true, // Log all MCP messages
-});
+```bash
+OS_MCP_SERVER_ENABLED=false     # opt the HTTP surface out (it is on by default)
+OS_MCP_SERVER_NAME=my-crm       # override the server name
+OS_MCP_SERVER_TRANSPORT=http    # override the transport
+OS_MCP_STDIO_ENABLED=true       # auto-start the long-lived stdio transport
+OS_MCP_STDIO_API_KEY=osk_...    # required identity for that transport
 ```
 
 View MCP messages in client:
@@ -566,50 +486,33 @@ View MCP messages in client:
 ## Example: Complete CRM Server
 
 ```typescript
-import { defineStack, defineTool } from '@objectstack/spec';
+// objectstack.config.ts
+import { defineStack } from '@objectstack/spec';
 import { MCPServerPlugin } from '@objectstack/mcp';
 
-const stack = defineStack({
-  driver: /* ... */,
-  plugins: [
-    MCPServerPlugin.configure({
-      serverName: 'crm-assistant',
-      autoRegisterTools: true,
-    }),
-  ],
-});
+import * as objects from './src/objects/index.js';
+import { allActions } from './src/actions/index.js';
 
-await stack.boot();
-
-const mcp = stack.kernel.getService('mcp');
-
-// Register custom tools
-mcp.registerTool(defineTool({
-  name: 'forecast_revenue',
-  description: 'Forecast revenue based on pipeline',
-  async execute() {
-    // Implementation
+export default defineStack({
+  manifest: {
+    id: 'com.example.crm',
+    namespace: 'crm',
+    version: '0.1.0',
+    type: 'app',
+    name: 'CRM Assistant',
+    engines: { protocol: '^17' },
   },
-}));
-
-// Register custom resources
-mcp.registerResource({
-  uri: 'objectstack://dashboards/sales',
-  name: 'Sales Dashboard',
-  async read() {
-    // Implementation
-  },
-});
-
-// Register prompts
-mcp.registerPrompt({
-  name: 'weekly_report',
-  description: 'Generate weekly sales report',
-  async render() {
-    // Implementation
-  },
+  objects: Object.values(objects),
+  // Your actions become MCP tools — the plugin bridges them at start.
+  actions: allActions,
+  plugins: [new MCPServerPlugin({ name: 'crm-assistant' })],
 });
 ```
+
+There is no imperative "register a tool" call to make: the plugin derives the
+tool set from your metadata. The bridging helpers it uses —
+`registerObjectTools`, `registerActionTools` and `registerSkillPrompts` — are
+exported for hosts that drive an `MCPServerRuntime` directly.
 
 ## License
 
@@ -619,4 +522,4 @@ Apache-2.0. See [LICENSING.md](../../LICENSING.md).
 
 - [Model Context Protocol Specification](https://modelcontextprotocol.io/)
 - [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk)
-- [@objectstack/spec/ai](../../spec/src/ai/)
+- [@objectstack/spec AI metadata](../spec/src/ai/)

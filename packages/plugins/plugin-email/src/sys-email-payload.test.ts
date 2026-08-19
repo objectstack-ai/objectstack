@@ -218,7 +218,7 @@ describe('a column that lies is rejected, never partially delivered', () => {
   it('rejects a storageKey-only attachment, naming the capability it would need', () => {
     expect(decodeAtt(JSON.stringify([
       { filename: 'a.txt', size: 2, hash: sha('hi'), contentForm: 'buffer', storageKey: 'blob/abc' },
-    ]))).toThrow(/no file-storage capability to fetch it from/);
+    ]))).toThrow(/no storage capability to fetch it from/);
   });
 
   it('rejects truncated content (size disagrees)', () => {

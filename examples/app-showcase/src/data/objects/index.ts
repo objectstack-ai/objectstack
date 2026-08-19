@@ -13,6 +13,7 @@ export { CascadingSelect } from './cascading-select.object.js';
 export { Preference } from './preference.object.js';
 export { PrivateNote } from './private-note.object.js';
 export { Announcement } from './announcement.object.js';
+export { ClientBrief } from './client-brief.object.js';
 export { Inquiry } from './inquiry.object.js';
 export { Contact } from './contact.object.js';
 export { SemanticZoo, SemanticZooLegacy } from './semantic-zoo.object.js';

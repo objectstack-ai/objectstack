@@ -38,8 +38,30 @@ in the qualified schemas (`TenantSecurityPolicySchema`, `PermissionSetSchema`).
 
 ### Rule #3: API Gateway Contract
 The HTTP/Gateway layer must perform strict request/response validation using `api/contract.zod.ts` and `api/endpoint.zod.ts`.
-- Incoming requests -> Validate `RequestEnvelope`
-- Outgoing responses -> Wrap in `ResponseEnvelope`
+- **Incoming requests** -> validate the body against the schema the operation
+  declares. There is no single request envelope, by design: `StandardApiContracts`
+  maps each standard operation to its `input` — `create` to `CreateRequestSchema`,
+  `update` to `UpdateRequestSchema`, `get` and `delete` to `IdRequestSchema`, the
+  `bulk*` family to `BulkRequestSchema`, `list` to `QuerySchema` (that one from
+  `@objectstack/spec/data`). The route's own shape — method, path, mappings — is
+  `ApiEndpointSchema` in `api/endpoint.zod.ts`.
+- **Outgoing responses** -> emit the one declared envelope. `BaseResponseSchema`
+  is its skeleton (`success`, `error`, `meta`); each response type adds its own
+  `data` on top of it — `SingleRecordResponseSchema`, `ListRecordResponseSchema`,
+  `BulkResponseSchema`, `DeleteResponseSchema` — and `StandardApiContracts` names
+  the `output` for the operation you served.
+```typescript
+import {
+  StandardApiContracts,
+  BaseResponseSchema,
+  envelopeViolations,
+} from '@objectstack/spec/api';
+```
+`BaseResponseSchema.safeParse` alone does NOT prove a body is envelope-conformant:
+it is a plain object schema, so it strips unknown keys, and it accepts
+`{ success: true }` carrying no payload at all. Gate what you emit with
+`envelopeViolations(body)` — it returns every way the body departs from the
+declared envelope, and an empty array means conformant.
 
 ### Rule #4: Event Driven Architecture
 System state changes (User created, Schema changed) MUST emit events defined in `EventSchema`.

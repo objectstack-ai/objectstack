@@ -389,7 +389,7 @@ one. `sys_metadata` overlay rows are not in any config file, so there is no
 | Protocol schema (Zod) | ✓ | ✓ | — | ✓ |
 | CEL / predicate validation (ADR-0032) | ✓ | ✓ | ✓ | ✓ᶠ |
 | List-view navigation modes (ADR-0053) | ✓ | ✓ | ✓ | — |
-| Zod-valid but functionally inert declarations — a `summary` with no operations (ADR-0078), a managed object advertising an API method its affordances refuse (#7521) | ✓ | ✓ | ✓ | — |
+| Zod-valid but functionally inert declarations — a `summary` with no operations (ADR-0078), a managed object advertising an API method its affordances refuse (#7521) | ✓ | ✓ | ✓ | ✓ᵒ |
 | View container shape | ✓ | ✓ | ✓ | — |
 | Widget-binding integrity (ADR-0021) | ✓ | ✓ | ✓ | ✓ᵈ |
 | Dashboard action/route references (ADR-0049) | ✓ | ✓ | ✓ | — |
@@ -408,9 +408,10 @@ one. `sys_metadata` overlay rows are not in any config file, so there is no
 | Security posture (ADR-0090 — e.g. every custom object declares `sharingModel`) | ✓ | ✓ | ✓ | ✓ˢᵖᵉᵇᵒ |
 | Security vocabulary freeze (ADR-0090 D3 — the reserved word, replaced by `permission_set` / `position` / `business_unit`) | ✓ | ✓ | ✓ | — |
 | Organization-axis red lines (ADR-0105 D6) | ✓ | ✓ | ✓ | — |
-| Declared enforcement that cannot run — sharing-rule conditions (#4698), row-level-security predicates (#4983), a validation rule's regex / JSON Schema (#4762) and its `format` names (#5178) | ✓ | ✓ | ✓ | — |
+| Declared enforcement that cannot run, **declared on the object being written** — a validation rule's regex / JSON Schema (#4762) and its `format` names (#5178) | ✓ | ✓ | ✓ | ✓ᵒ |
+| Declared enforcement that cannot run, **declared on another collection** — sharing-rule conditions (#4698), row-level-security predicates (#4983) | ✓ | ✓ | ✓ | — |
 | Platform-schedule `create_record` organization (#6285) | — | — | — | ✓ᶠ |
-| Autonumber `{field}` interpolation | ✓ | ✓ | ✓ | — |
+| Autonumber `{field}` interpolation | ✓ | ✓ | ✓ | ✓ᵒ |
 | View references — form targets, view-key collisions (#2554) | ✓ | ✓ | ✓ | — |
 | Flow authoring anti-patterns (#1874) | ✓ | ✓ | ✓ | ✓ᶠ |
 | Flow trigger readiness — a flow that looks armed and never launches (#5762) | ✓ | ✓ | ✓ | ✓ᶠ |
@@ -432,8 +433,10 @@ grown a type at a time (#4463 shipped P1 as `flow` and four rule families, #7220
 moved the whole `views[]` visibility-predicate family across in one edit, #7529
 put widget-binding integrity on `dashboard`, #8307 → #8310 walked the ADR-0090
 security-posture block across `seed`, then `permission` and `book`, then
-`object`), so read the rule rather than assuming a save of some other type
-reaches storage unjudged.
+`object`, and #4716 crossed the five remaining **gating** object rules —
+functional completeness, managed API methods, autonumber formats, and both
+validation-rule enforceability checks — onto `object`), so read the rule rather
+than assuming a save of some other type reaches storage unjudged.
 
 That last move is also why the vocabulary freeze is a row of its own. It was
 split out of the security-posture rule on the day the rest of that block
@@ -441,17 +444,40 @@ crossed, because it judges collections the per-write snapshot does not carry:
 one rule id has to sit on ONE side of the wall, so it stayed behind whole rather
 than crossing for some of the collections it judges and not others.
 
-The `—` cells above are `—` for more than one reason, and only the first two are
-about the rule being unable to run there: some rules read a stack-wide
+**Declared enforcement that cannot run** is two rows for the mirror-image
+reason, and #4716 is where it split. That heading covers four rule ids, and
+the split is drawn by **which collection carries the declaration each one
+reads** — not by what the rules have in common, which is everything.
+`validateRuleCompilability` (#4762) and `validateRuleSchemaFormats` (#5178)
+read `validationRules[]` on the object being written, so an `object` write
+already carries every declaration they judge and they crossed with the rest of
+#4716. `validateSharingRuleEnforceability` (#4698) reads `sharingRules[]` and
+`validateRlsPredicateEnforceability` (#4983) reads `permissions[]`, so neither
+is answered by an `object` write at all — and each is held by something
+different: the door does not accept `sharing_rule` as a type yet, whereas
+`permissions` has been in the snapshot since #8309 and only the declaration is
+missing. The freeze kept one id whole by staying behind; here four ids stopped
+agreeing, and one row cannot say two things. **When the next crossing lands on
+a shared row, check the rule ids before the cell: if they disagree, split the
+row by the collection each id reads, and neither `✓` nor `—` has to lie.**
+
+The `—` cells above are `—` for more than one reason, and only the first two
+are about the rule being unable to run there: some rules read a stack-wide
 collection a one-item write does not carry (pages, dashboards, navigation,
-positions, apps — the snapshot has carried `permissions` and `books` since #8309
-and `datasets` since #7529, so those three are no longer in this class); some parse
-authored source through `typescript`, which the kernel boot path must never
-load; some are snapshot-safe and simply have not been rolled out to a type yet
-(a sharing rule or an RLS predicate crosses on a `runtimeTypes` edit, not on new
-wiring); and the capability-reference rule would *graduate* from advisory to
-gating at that door, since the live registry decides what the CLI has to hedge —
-a severity change on a published rule id, which is its own PR rather than a
+positions, apps — the snapshot has carried `permissions` and `books` since
+#8309 and `datasets` since #7529, so those three are no longer in this class);
+some parse authored source through `typescript`, which the kernel boot path
+must never load; some are snapshot-safe and simply have not been rolled out to
+a type yet (a sharing rule or an RLS predicate crosses on a `runtimeTypes`
+edit, not on new wiring); some judge an object declaration at **advisory**
+tier, where what holds them back is advisory VOLUME rather than anything they
+are unable to do — #4716 crossed the gating object rules and left these six
+measured at ~8 findings per object write on unswept metadata, which Studio's
+designer has rendered on every field edit since #4717, so crossing one is a UX
+decision with its own card and explicitly *not* a bare `runtimeTypes` edit;
+and the capability-reference rule would *graduate* from advisory to gating at
+that door, since the live registry decides what the CLI has to hedge — a
+severity change on a published rule id, which is its own PR rather than a
 wiring change.
 
 The visibility family crossed **together**, and that is the point rather than an

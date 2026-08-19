@@ -5,7 +5,10 @@ import type {
   RouteHandler,
   Middleware,
   IHttpServer,
+  HttpResponseObservation,
+  HttpResponseObserver,
 } from './http-server';
+import { UNMATCHED_ROUTE_PATTERN } from './http-server';
 
 describe('HTTP Server Contract', () => {
   describe('IHttpRequest interface', () => {
@@ -307,6 +310,150 @@ describe('HTTP Server Contract', () => {
 
         server.setFallbackHandler!(second);
         expect(current).toBe(second);
+      });
+    });
+
+    describe('optional afterResponse (#9835)', () => {
+      /** A server with only the REQUIRED members. */
+      const baseServer = (): IHttpServer => ({
+        get: () => {},
+        post: () => {},
+        put: () => {},
+        delete: () => {},
+        patch: () => {},
+        use: () => {},
+        listen: async () => {},
+      });
+
+      it('is optional — an adapter without it still satisfies the contract', () => {
+        const server = baseServer();
+
+        expect(typeof server.afterResponse).toBe('undefined');
+        // The documented consequence: this transport reports NO HTTP metrics.
+        // Zero on `http_requests_total` there means "not instrumented",
+        // never "no traffic" — a consumer must ask, exactly like this:
+        expect(typeof server.afterResponse === 'function').toBe(false);
+      });
+
+      it('is feature-detected with typeof === "function" when provided (runtime-real, not type-only)', () => {
+        const server: IHttpServer = {
+          ...baseServer(),
+          afterResponse: (_observer) => {},
+        };
+
+        expect(typeof server.afterResponse).toBe('function');
+      });
+
+      it('a delegating wrapper that forwards only required members ERASES detection (#5122 shape)', () => {
+        const underlying: IHttpServer = {
+          ...baseServer(),
+          afterResponse: (_observer) => {},
+        };
+        // The failure mode the contract warns wrappers against: forward the
+        // required members, drop the optional ones.
+        const erasingWrapper: IHttpServer = {
+          get: underlying.get,
+          post: underlying.post,
+          put: underlying.put,
+          delete: underlying.delete,
+          patch: underlying.patch,
+          use: underlying.use,
+          listen: underlying.listen,
+        };
+        // The underlying adapter implements the hook; the wrapper makes the
+        // contract's own detection idiom read "not instrumented".
+        expect(typeof underlying.afterResponse === 'function').toBe(true);
+        expect(typeof erasingWrapper.afterResponse === 'function').toBe(false);
+        // The compliant wrapper forwards conditionally — present iff wrapped.
+        const forwardingWrapper: IHttpServer = {
+          ...erasingWrapper,
+          ...(typeof underlying.afterResponse === 'function'
+            ? { afterResponse: underlying.afterResponse.bind(underlying) }
+            : {}),
+        };
+        expect(typeof forwardingWrapper.afterResponse === 'function').toBe(true);
+      });
+
+      it('registration APPENDS — several observers coexist, unlike setFallbackHandler', () => {
+        const observers: HttpResponseObserver[] = [];
+        const server: IHttpServer = {
+          ...baseServer(),
+          afterResponse: (observer) => { observers.push(observer); },
+        };
+
+        const metricsObserver: HttpResponseObserver = () => {};
+        const accessLogObserver: HttpResponseObserver = () => {};
+        server.afterResponse!(metricsObserver);
+        server.afterResponse!(accessLogObserver);
+
+        // Both registered, registration order kept — nothing replaced.
+        expect(observers).toEqual([metricsObserver, accessLogObserver]);
+      });
+
+      it('carries the observation shape: method, routePattern (the PATTERN), status, elapsedMs', () => {
+        const seen: HttpResponseObservation[] = [];
+        const observer: HttpResponseObserver = (observation) => { seen.push(observation); };
+
+        // What a compliant adapter reports for GET /api/v1/data/rec_42
+        // answered by the registered route `/api/v1/data/:id`: the PATTERN,
+        // never the concrete path — the hard requirement the contract states
+        // so no adapter re-decides cardinality.
+        observer({
+          method: 'GET',
+          routePattern: '/api/v1/data/:id',
+          status: 200,
+          elapsedMs: 3,
+        });
+
+        expect(seen).toHaveLength(1);
+        expect(seen[0].routePattern).toBe('/api/v1/data/:id');
+        expect(seen[0].routePattern).not.toContain('rec_42');
+        expect(seen[0].status).toBe(200);
+        expect(typeof seen[0].elapsedMs).toBe('number');
+      });
+
+      it('reports a request no route matched with the reserved UNMATCHED_ROUTE_PATTERN', () => {
+        // Reserved in the CONTRACT, not per adapter, so every transport
+        // reports the same spelling and unrouted traffic is one series.
+        expect(UNMATCHED_ROUTE_PATTERN).toBe('unmatched');
+
+        const seen: HttpResponseObservation[] = [];
+        const observer: HttpResponseObserver = (observation) => { seen.push(observation); };
+        observer({
+          method: 'GET',
+          routePattern: UNMATCHED_ROUTE_PATTERN,
+          status: 404,
+          elapsedMs: 1,
+        });
+        expect(seen[0].routePattern).toBe('unmatched');
+      });
+
+      it('a throwing observer must not affect the response or sibling observers — the delivery contract, modelled', () => {
+        const observers: HttpResponseObserver[] = [];
+        const server: IHttpServer = {
+          ...baseServer(),
+          afterResponse: (observer) => { observers.push(observer); },
+        };
+
+        const delivered: string[] = [];
+        server.afterResponse!(() => { throw new Error('broken metrics backend'); });
+        server.afterResponse!(() => { delivered.push('access-log'); });
+
+        // How a compliant adapter delivers: each observer isolated, failures
+        // swallowed — a metrics backend must never break a response.
+        const deliver = (observation: HttpResponseObservation) => {
+          for (const observer of observers) {
+            try {
+              observer(observation);
+            } catch {
+              /* observer failures never propagate */
+            }
+          }
+        };
+        expect(() =>
+          deliver({ method: 'GET', routePattern: '/x', status: 200, elapsedMs: 0 }),
+        ).not.toThrow();
+        expect(delivered).toEqual(['access-log']);
       });
     });
 

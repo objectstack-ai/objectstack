@@ -1213,7 +1213,7 @@ export const FieldSchema = lazySchema(() => strictObject({
   conditionalRequired: retiredKey(
     '`conditionalRequired` was removed in @objectstack/spec 17 (#3855) — use `requiredWhen`. ' +
     'Rename the key; the value (a CEL predicate) is unchanged. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
 
   /**

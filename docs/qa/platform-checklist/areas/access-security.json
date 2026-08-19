@@ -621,7 +621,7 @@
       "title": "Field-level security: editable:false strips/denies writes API-side and renders read-only in the UI; masked-read half needs an authored readable:false grant",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -632,10 +632,12 @@
         "app": "showcase",
         "requires": [
           "showcase_contributor.fields FLS on showcase_project budget figures (permission-sets.ts — keys are <object>.<field> qualified; bare keys silently enforce nothing, the compile-time lint security-fls-unqualified-key guards that)",
-          "a seeded showcase_project row with a non-null budget"
+          "a seeded showcase_project row with a non-null budget",
+          "showcase_client_liaison — the STOCK readable:false grant since #9308 fixture 4 (permission-sets.ts): showcase_project { allowRead: true } plus fields { 'showcase_project.budget' | '.spent' | '.budget_remaining': { readable: false, editable: false } }, bound to the client_liaison position. Grant it to a FRESH member and to nobody who also holds showcase_contributor: field permissions merge most-permissive across the sets a caller holds, so contributor's readable:true would legitimately un-mask all three"
         ],
         "knownGaps": [
-          "[API half CLOSED by #9481; the seed gap itself stays open] stock showcase authors NO readable:false FLS grant, so the read-MASKING half (field absent/nulled on GET, plugin-security/src/field-masker.ts) has no stock fixture; to run it, author a scratch permission set carrying readable:false on a showcase_project field and grant it to a fresh member — if the run cannot author one through a supported surface, record that half blocked(fixture) rather than ticking on the write half alone. What changed: showcase-fls-read-mask-strip.dogfood.test.ts does exactly that at runtime, so the SERVER half no longer waits on the seed. The UI half still does — a console render cannot be driven off a permission set that exists only inside a test's stack — and #9308 fixture 4 is the card that would land the stock grant.",
+          "[CLOSED — API half by #9481, the seed gap itself by #9308 fixture 4; the gap text stays because it carries the reason] stock showcase authored NO readable:false FLS grant, so the read-MASKING half (plugin-security/src/field-masker.ts) had no stock fixture and a run had to author a scratch permission set at runtime — which the SERVER half could do (showcase-fls-read-mask-strip.dogfood.test.ts does exactly that) but the UI half could not, because a console render cannot be driven off a permission set that exists only inside a test's stack. showcase_client_liaison is now that grant on stock seeds, so clause 5 is runnable end to end: grant the set to a fresh member, sign in as them, and compare their API body and their console render against the admin's. packages/qa/dogfood/test/showcase-client-liaison-fixtures.dogfood.test.ts pins the server half of the stock grant (by id, in lists, through an explicit $select) with the admin as the entitled contrast.",
+          "all three budget figures are withheld together, not just `budget` — `budget_remaining` is a formula over `budget - spent`, so masking one of the three leaks it back through arithmetic. A run that ticks clause 5 having observed only `budget` absent has not checked the mask that matters.",
           "MASKED and STRIPPED are two different mechanisms with two different wire shapes, and this item's clause 4 (\"absent or nulled\") predates the measurement. Measured answer: a permission-set readable:false DELETES the key (strip); the #8993 `maskingRule` path REPLACES the value and leaves the key present (mask). A test that only checks \"I did not get the real value\" passes for both and pins neither, so the pin asserts key-absence. The masked half has no fixture at all — do not tick it off the strip pin."
         ]
       },
@@ -709,6 +711,12 @@
           "date": "2026-08-18",
           "change": "READ half pinned (QA run #9401 scored this item partial on a write-only pin). automated.ref now names the read pin and states what it does NOT reach: the UI render, and the #8993 maskingRule path, which has no fixture in this repo. knownGaps records the measured mask-vs-strip distinction — readable:false DELETES the key, it does not null it — so the next runner does not tick the masked half off the strip pin",
           "ref": "#9481"
+        },
+        {
+          "revision": 3,
+          "date": "2026-08-18",
+          "change": "the SEED gap is closed too: showcase_client_liaison is a stock permission set carrying readable:false on all three showcase_project budget figures, so clause 5's UI half is reachable for the first time — a real member, a real console render, no test-local stack. knownGaps rewritten as closed-by-fixture rather than deleted, with the merge caveat (do not also grant showcase_contributor) and the reason all three figures move together. The #8993 maskingRule gap is UNTOUCHED and still has no fixture anywhere in this repo",
+          "ref": "#9308"
         }
       ]
     },
@@ -1005,7 +1013,7 @@
       "title": "Per-record manual shares grant, scope, and revoke access on a private-OWD record; rule evaluate reconciles the audience",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1019,7 +1027,8 @@
         "requires": [
           "showcase_private_note (sharingModel: private — member_default grants create/read/edit, so a non-owner sees nothing without a share)",
           "three fresh sign-ups (A/B/C) whose sys_user ids are resolved via a system-context read",
-          "the seeded criteria sharing rule share_red_projects_with_execs on showcase_project + at least one red-health showcase_project (examples/app-showcase/src/security/sharing-rules.ts) for the evaluate clause"
+          "the seeded criteria sharing rule share_key_account_qualified_contacts_with_managers on showcase_contact (OWD private) + at least one qualified contact at company Northwind — seeded as Nora West (examples/app-showcase/src/security/sharing-rules.ts) — for the evaluate clause",
+          "a holder of the manager position, so the rule's recipient expansion is non-empty: without one the reconcile answers grantsCreated 0 and materializes nothing, which is a fixture gap, not a defect"
         ]
       },
       "steps": [
@@ -1033,7 +1042,7 @@
         "as B (a non-manager on A's note): POST /api/v1/data/showcase_private_note/<A id>/shares granting themselves — must be refused (creating a share is not a reader's power, ADR-0111 D5)",
         "as A: DELETE /api/v1/data/showcase_private_note/<A id>/shares/<shareId> → 204; then as B: GET the note by id again — refused once more",
         "revoke-scope probe: attempt DELETE of the same shareId through a DIFFERENT record's path (/data/showcase_private_note/<some other id>/shares/<shareId>) — must be refused (the URL's object/id is the revoke scope, ADR-0111 D4)",
-        "as admin: POST /api/v1/sharing/rules/share_red_projects_with_execs/evaluate — capture the reconcile result; read sys_record_share for the matched red project"
+        "as admin: assign the manager position to one persona (Setup -> Access Control), then POST /api/v1/sharing/rules/share_key_account_qualified_contacts_with_managers/evaluate — capture the reconcile result; read sys_record_share for the matched contact"
       ],
       "acceptance": [
         {
@@ -1073,9 +1082,9 @@
           "evidence": "the mis-scoped DELETE trace + survival read"
         },
         {
-          "clause": "rule evaluate reconciles the audience: POST /sharing/rules/share_red_projects_with_execs/evaluate returns {ruleId, matchedRecords>=1, grantsCreated/grantsUpdated} and a sys_record_share row exists for the matched red project with source 'rule' and source_id = the rule's ROW ID (sys_sharing_rule.id, e.g. srule_…), NOT the rule name",
+          "clause": "rule evaluate reconciles the audience: POST /sharing/rules/share_key_account_qualified_contacts_with_managers/evaluate returns {ruleId, matchedRecords>=1, grantsCreated/grantsUpdated} and a sys_record_share row exists for the matched contact with source 'rule' and source_id = the rule's ROW ID (sys_sharing_rule.id, e.g. srule_…), NOT the rule name",
           "oracle": "api",
-          "verify": "the SharingRuleEvaluationResult body (packages/plugins/plugin-sharing/src/sharing-rule-service.ts evaluateRule) + the materialized rule-sourced share row: assert share.source_id === the sys_sharing_rule row's id, not 'share_red_projects_with_execs'. The row id is the stable FK the reconcile path relies on — purgeRuleGrants(ruleId) deletes on where {source:'rule', source_id: ruleId} with ruleId = rule.id (sharing-rule-service.ts), and sys-sharing-rule.object.ts documents 'source_id={rule.id}' — so a run asserting the NAME here would be asserting a value the implementation never writes",
+          "verify": "the SharingRuleEvaluationResult body (packages/plugins/plugin-sharing/src/sharing-rule-service.ts evaluateRule) + the materialized rule-sourced share row: assert share.source_id === the sys_sharing_rule row's id, not 'share_key_account_qualified_contacts_with_managers'. The row id is the stable FK the reconcile path relies on — purgeRuleGrants(ruleId) deletes on where {source:'rule', source_id: ruleId} with ruleId = rule.id (sharing-rule-service.ts), and sys-sharing-rule.object.ts documents 'source_id={rule.id}' — so a run asserting the NAME here would be asserting a value the implementation never writes",
           "evidence": "evaluate response + the sys_record_share read (both the row's source_id and the sys_sharing_rule id it must equal)"
         }
       ],
@@ -1091,7 +1100,7 @@
         "packages/rest/src/rest-server.ts (registerRecordShareEndpoints ~L7246-7331; registerSharingRuleEndpoints evaluate ~L7477-7493)",
         "packages/plugins/plugin-sharing/src/objects/sys-record-share.object.ts (recipient_type/recipient_id/access_level/source fields)",
         "packages/plugins/plugin-sharing/src/sharing-rule-service.ts (evaluateRule → SharingRuleEvaluationResult)",
-        "examples/app-showcase/src/security/sharing-rules.ts (share_red_projects_with_execs seeded criteria rule)",
+        "examples/app-showcase/src/security/sharing-rules.ts (share_key_account_qualified_contacts_with_managers seeded criteria rule)",
         "ADR-0111 D1/D4/D5"
       ],
       "history": [
@@ -1106,6 +1115,12 @@
           "date": "2026-08-11",
           "change": "clause 6 text corrected against the implementation (run #7637): a rule-materialized share carries source_id = the sys_sharing_rule ROW ID, not the rule name — the stable FK purgeRuleGrants reconciles on. Semantic intent was already right; the asserted value was not",
           "ref": "#7687"
+        },
+        {
+          "revision": 3,
+          "date": "2026-08-18",
+          "change": "the evaluate clause was UNRUNNABLE as written and had been since it was authored: it drove share_red_projects_with_execs, a rule on showcase_project, whose public_read_write OWD leaves sharing nothing to widen — so evaluate\u0027s reconcile hit assertNotInertGrant and the call was refused (SHARING_NOT_ENABLED, ADR-0111 D7) rather than returning a reconcile result. That rule is retired; the clause now drives share_key_account_qualified_contacts_with_managers on showcase_contact (OWD private), and a step assigns the manager position so the recipient expansion is non-empty",
+          "ref": "#9237"
         }
       ]
     },
@@ -1406,7 +1421,7 @@
       "title": "Share-link capability tokens: anon resolve renders the record minus redactFields, password/audience gates hold, revoke/expire refuse without leaking",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1417,16 +1432,14 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "an object declaring publicSharing { enabled:true, allowedAudiences, allowedPermissions, redactFields } with at least one visible record — REQUIRED to mint any link"
+          "an object declaring publicSharing { enabled:true, allowedAudiences, allowedPermissions, redactFields } with at least one visible record — REQUIRED to mint any link",
+          "showcase_client_brief is that object since #9308 fixture 2: publicSharing { enabled:true, allowedAudiences ['link_only','signed_in','email'], allowedPermissions ['view'], maxExpiryDays 30, redactFields ['internal_notes','deal_value'], eligibility \"record.status == 'published'\" }. The minter persona is a member holding showcase_client_liaison (bound to the client_liaison position); the seed carries a PUBLISHED brief ('Northwind — Website Relaunch brief', mint-eligible) and a DRAFT one ('Fabrikam — Compliance Audit brief', which the eligibility predicate refuses 422 RECORD_NOT_ELIGIBLE)"
         ],
         "knownGaps": [
-          "NO stock showcase object sets publicSharing.enabled (verified across examples/app-showcase/src) — createLink answers 422 SHARING_NOT_ENABLED for every showcase object, so the resolve/redact/password/revoke clauses are BLOCKED until a publicSharing-enabled fixture object (e.g. qa_public_note with redactFields) is added; only the SHARING_NOT_ENABLED clause is runnable on stock today",
-          "the GET /share-links/:token/messages half is ai_conversations-only (Cloud/EE service-ai in the `cloud` repo) — split out as a separate knownGap; do not exercise messages against open-framework showcase"
+          "[CLOSED by #9308 fixture 2 — the gap text stays because it carries the reason] NO stock showcase object set publicSharing.enabled (verified across examples/app-showcase/src), so createLink answered 422 SHARING_NOT_ENABLED for every showcase object and only the SHARING_NOT_ENABLED clause was runnable; the resolve/redact/password/revoke clauses were BLOCKED. showcase_client_brief now opts in (see requires). NOTE the negative control did NOT move: every OTHER showcase object still declines the opt-in, so clause 1's 422 is still runnable — probe it against showcase_private_note, not against the new object",
+          "the GET /share-links/:token/messages half is ai_conversations-only (Cloud/EE service-ai in the `cloud` repo) — split out as a separate knownGap; do not exercise messages against open-framework showcase",
+          "audience `public` is deliberately NOT in the fixture object's allowedAudiences (nothing in the showcase wants an un-tokened, indexable surface), so a `public`-audience mint is refused PERMISSION/AUDIENCE-not-allowed rather than being a resolve variant. Record that as the declared policy, not as a defect"
         ]
-      },
-      "blocked": {
-        "by": "fixture",
-        "ref": "no showcase object sets publicSharing.enabled — needs a publicSharing-enabled fixture object (PENDING-GAPS.md §C share-link-capability-tokens)"
       },
       "steps": [
         "STOCK-RUNNABLE probe: as a member, POST /api/v1/share-links {\"object\": \"showcase_private_note\", \"recordId\": \"<a visible note id>\"} — capture the 422 SHARING_NOT_ENABLED that proves the block (no showcase object opts in)",
@@ -1506,6 +1519,12 @@
           "date": "2026-08-08",
           "change": "new — share-link capability tokens (ADR-0047): resolve-minus-redactFields, password/audience gates, fail-closed revoke/expire/record-gone, caller-scoped list; blocked(fixture) because no showcase object opts into publicSharing, messages half split as a Cloud/EE knownGap",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-18",
+          "change": "UNBLOCKED. showcase_client_brief is the stock publicSharing fixture and the seed carries both an eligible and an ineligible record, so mint / resolve / redaction are runnable on stock and the declared eligibility predicate is falsifiable too. `blocked` removed; the fixture is named in requires; the knownGap is rewritten as closed-by-fixture rather than deleted, with the warning that clause 1's negative control must stay pointed at an object that did NOT opt in. packages/qa/dogfood/test/showcase-client-liaison-fixtures.dogfood.test.ts pins the mint, the eligibility refusal and the redaction",
+          "ref": "#9308"
         }
       ]
     },

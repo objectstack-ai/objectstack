@@ -190,6 +190,65 @@ export const OpsPermissionSet = definePermissionSet({
   systemPermissions: ['setup.access', 'showcase.export_data'],
 });
 
+// ── FLS: withholding a field's READ (ADR-0090 D10) ─────────────────────────
+/**
+ * Client Liaison — the app's `readable: false` demonstration (#9308 fixture 4).
+ *
+ * `showcase_contributor` above governs the SAME three budget figures on the
+ * SAME object with `readable: true, editable: false`: it exercises the WRITE
+ * half of field-level security — the value is visible, the edit is refused. The
+ * READ half had no fixture at all. Nothing in the stock app authored a
+ * `readable: false` grant, so `plugin-security`'s field masker
+ * (`field-masker.ts`) — the code that STRIPS a withheld key out of every record
+ * before it leaves the server — was reachable only from a permission set
+ * invented inside a test, which a console render can never be driven off.
+ *
+ * The two sets side by side are the whole point: same object, same three
+ * fields, two personas, two verdicts.
+ *
+ * ## What `readable: false` actually does, and why the persona must be clean
+ *
+ * Field permissions merge MOST-PERMISSIVE across the sets a caller holds
+ * (`permission-evaluator.ts` → `getFieldPermissions`): a field enters the map
+ * as `{ readable: false }` the moment ANY held set names it, and only a held
+ * set saying `readable: true` can turn it back on. So the mask is observable on
+ * a member holding this set and the `everyone` baseline — which names no fields
+ * at all — and is correctly NOT observable on someone who also holds
+ * `showcase_contributor`. That is the merge behaving as declared, not a defect:
+ * grant one persona, not both.
+ *
+ * The masked verdict is a STRIP, not a blur — the key is absent from the
+ * record, not nulled and not replaced. (The partial-masking path — a value
+ * replaced by `138****5678` — is `maskingRule` on the FIELD, a different
+ * mechanism this app does not yet declare anywhere.)
+ *
+ * `showcase_client_brief` is granted alongside because that is what the persona
+ * is FOR: they write the client-facing brief and publish it by share link. It
+ * also makes the two halves of the fixture legible together — the fields a
+ * client may not see through a link (`redactFields` on the object) and the
+ * fields this persona may not see at all (below).
+ */
+export const ClientLiaisonPermissionSet = definePermissionSet({
+  name: 'showcase_client_liaison',
+  label: 'Showcase Client Liaison',
+  objects: {
+    showcase_project: { allowRead: true },
+    showcase_client_brief: { allowRead: true, allowCreate: true, allowEdit: true },
+  },
+  // Keys are `<object>.<field>` qualified — a bare key enforces NOTHING and is
+  // rejected at compile time by `security-fls-unqualified-key`.
+  //
+  // All three, not just `budget`: `budget_remaining` is a formula over
+  // `budget - spent`, so withholding `budget` alone would leak it back through
+  // arithmetic. A mask with a documented hole is worse than no mask, because it
+  // teaches the hole.
+  fields: {
+    'showcase_project.budget': { readable: false, editable: false },
+    'showcase_project.spent': { readable: false, editable: false },
+    'showcase_project.budget_remaining': { readable: false, editable: false },
+  },
+});
+
 // ── The `everyone` baseline suggestion (ADR-0090 D5) ───────────────────────
 /**
  * `isDefault: true` is a SUGGESTION: "bind this set to the built-in
@@ -289,4 +348,5 @@ export const allPermissionSets = [
   MemberDefaultPermissionSet,
   GuestPortalPermissionSet,
   FieldOpsDelegatePermissionSet,
+  ClientLiaisonPermissionSet,
 ];

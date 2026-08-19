@@ -24,7 +24,16 @@ export const CoreServiceName = z.enum([
   'auth',           // Authentication & Identity
   
   // Infrastructure
-  'file-storage',   // Storage Driver (Local/S3)
+  'storage',        // Storage Driver (Local/S3) — canonical slot name
+  // DEPRECATED alias of `storage` (maintainer ruling 2026-08-18, issue #9683:
+  // 「9683 file-storage 可以叫 storage」). The compound spelling had no
+  // recorded reason; the slot is now the bare noun like every sibling.
+  // Kept as an accepted member within v17 — it is a published enum member,
+  // and existing `getService(...)` callers of the old spelling must not
+  // silently break inside a major. `service-storage` registers the SAME
+  // instance under both names. Retirement goes through the standard
+  // retirement flow at the next major.
+  'file-storage',
   'search',         // Search Engine (Elastic/Meili)
   'cache',          // Cache Driver (Redis/Memory)
   'queue',          // Job Queue (BullMQ/Redis)
@@ -87,6 +96,9 @@ export const CORE_SERVICE_PROVIDER: Readonly<Record<string, string | null>> = {
   'queue':        '@objectstack/service-queue',
   'job':          '@objectstack/service-job',
   'realtime':     '@objectstack/service-realtime',
+  // Canonical slot and its deprecated v17 alias (see the enum note) — one
+  // provider, registered under both names.
+  'storage':      '@objectstack/service-storage',
   'file-storage': '@objectstack/service-storage',
   'i18n':         '@objectstack/service-i18n',
   // The `notification` slot is filled by the messaging service — the one entry
@@ -231,6 +243,9 @@ export const ServiceRequirementDef = {
   i18n: 'core',
 
   // Optional: Add-on capabilities
+  storage: 'optional',
+  // Deprecated v17 alias of `storage` (see the enum note). Both slots are
+  // filled by the same registration, so neither ever reports missing alone.
   'file-storage': 'optional',
   search: 'optional',
   automation: 'optional',

@@ -53,25 +53,50 @@ export default defineConfig({
         replacement: path.resolve(__dirname, '../platform-objects/src/index.ts'),
       },
       { find: '@objectstack/rest', replacement: path.resolve(__dirname, '../rest/src/index.ts') },
-      { find: '@objectstack/spec/ai', replacement: path.resolve(__dirname, '../spec/src/ai/index.ts') },
-      { find: '@objectstack/spec/api', replacement: path.resolve(__dirname, '../spec/src/api/index.ts') },
-      // `AppPlugin` reads a bundle function's declared effect off this
-      // namespace (#4396).
-      { find: '@objectstack/spec/automation', replacement: path.resolve(__dirname, '../spec/src/automation/index.ts') },
-      { find: '@objectstack/spec/contracts', replacement: path.resolve(__dirname, '../spec/src/contracts/index.ts') },
-      { find: '@objectstack/spec/data', replacement: path.resolve(__dirname, '../spec/src/data/index.ts') },
-      // Reached via `@objectstack/platform-objects` (sys-user.object.ts), which
-      // notifications.hono.integration.test.ts pulls in for the real
-      // `sys_notification` declaration.
-      { find: '@objectstack/spec/identity', replacement: path.resolve(__dirname, '../spec/src/identity/index.ts') },
-      { find: '@objectstack/spec/kernel', replacement: path.resolve(__dirname, '../spec/src/kernel/index.ts') },
-      { find: '@objectstack/spec/shared', replacement: path.resolve(__dirname, '../spec/src/shared/index.ts') },
-      { find: '@objectstack/spec/system', replacement: path.resolve(__dirname, '../spec/src/system/index.ts') },
-      { find: '@objectstack/spec/ui', replacement: path.resolve(__dirname, '../spec/src/ui/index.ts') },
-      // [ADR-0105 D1] Reached transitively via `@objectstack/types` (tenancy posture).
-      { find: '@objectstack/spec/security', replacement: path.resolve(__dirname, '../spec/src/security/index.ts') },
-      { find: '@objectstack/spec/qa', replacement: path.resolve(__dirname, '../spec/src/qa/index.ts') },
-      { find: '@objectstack/spec', replacement: path.resolve(__dirname, '../spec/src/index.ts') },
+      // #9457: ONE anchored rule for every `@objectstack/spec` namespace, in
+      // place of the hand-maintained list of the twelve subpaths tests happened
+      // to reach on the day it was written. That list had gone stale in three
+      // places — `cloud`, `integration` and `studio` are published subpath
+      // exports with no entry — and a bare string `find` matches by PREFIX with
+      // a FILE replacement, so `@objectstack/spec/cloud` resolved to the
+      // garbage path `…/spec/src/index.ts/cloud` and died with `ENOTDIR` inside
+      // whichever module happened to import it. Measured before this change:
+      // `MetadataPlugin._parseAndRegisterArtifact` (`await
+      // import('@objectstack/spec/cloud')`) took every artifact-loading test in
+      // this package down with an error naming the metadata plugin rather than
+      // this table — the diagnostic distance is the real defect, the missing
+      // subpath is only its trigger.
+      //
+      // `@objectstack/spec`'s export map is UNIFORM: every published namespace
+      // is `src/<ns>/index.ts`, and it has no FILE-shaped subpath of the kind
+      // `@objectstack/platform-objects/plugin` is (which is exactly why the
+      // rule above it needs a hand-written entry and this one does not). So one
+      // rule covers all fifteen and cannot go stale as tests reach new
+      // namespaces — the same shape `packages/qa/downstream-contract` (PR
+      // #8129), `service-knowledge`, `service-settings` and `plugin-audit`
+      // already carry.
+      //
+      // What the enumeration recorded, kept because the reasons outlive it:
+      // `automation` carries the declared effect `AppPlugin` reads off a bundle
+      // function (#4396); `identity` is reached through
+      // `@objectstack/platform-objects` (`sys-user.object.ts`) by
+      // notifications.hono.integration.test.ts; `security` is reached
+      // transitively via `@objectstack/types` ([ADR-0105 D1] tenancy posture).
+      // None of the three is a reason to keep listing namespaces by hand.
+      //
+      // `src/spec-subpath-alias-coverage.pin.test.ts` pins the RULE rather than
+      // any one subpath: it derives the population from spec's published
+      // `exports` map, so a subpath this rule stops covering fails there.
+      {
+        find: /^@objectstack\/spec\/([a-z-]+)$/,
+        replacement: path.join(path.resolve(__dirname, '..'), 'spec/src/$1/index.ts'),
+      },
+      { find: /^@objectstack\/spec$/, replacement: path.resolve(__dirname, '../spec/src/index.ts') },
+      // Subpath BEFORE the bare package, same prefix-match reason: `./node` is a
+      // published subpath served by a FILE (`types/src/node.ts` — the node-only slice
+      // the root export deliberately excludes), so the bare entry would resolve it to
+      // `…/types/src/index.ts/node`. Same published-subpath rule pins it.
+      { find: /^@objectstack\/types\/node$/, replacement: path.resolve(__dirname, '../types/src/node.ts') },
       { find: '@objectstack/types', replacement: path.resolve(__dirname, '../types/src/index.ts') },
       // Dev-only: app-plugin.jobs.test.ts drives the REAL CronJobAdapter, so
       // the #4567 regression (croner rejecting the expression envelope) is

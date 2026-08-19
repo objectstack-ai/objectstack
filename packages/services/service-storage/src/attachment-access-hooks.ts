@@ -31,7 +31,10 @@ import type {
  *    multi-delete requires EVERY matched row to pass, and one carrying
  *    NEITHER an id NOR a `where` is refused outright (#4757) — the engine
  *    would hand `deleteMany` an AST over the whole table, and a gate that
- *    resolved no rows for it would be authorizing exactly that.
+ *    resolved no rows for it would be authorizing exactly that. The refusal
+ *    reaches this handler through the `dispatchUnscopedMultiDelete`
+ *    whole-operation dispatch its registration declares (#9719) — the
+ *    per-row dispatch alone can never deliver the shape it refuses.
  *
  * System-context operations (engine self-writes, seeds, lifecycle sweeps)
  * bypass both gates, as do context-less programmatic calls on bare kernels
@@ -131,7 +134,17 @@ function callerContext(ctx: any): ExecutionContext {
     return withoutOperationPrivateKeys(exec as Record<string, unknown>);
   }
   const s = ctx?.session ?? {};
-  return { userId: s.userId, tenantId: s.tenantId, positions: s.positions };
+  // [#9691] `s.organizationId`, NOT `s.tenantId`. The hook session's org key is
+  // `organizationId` (engine `buildSession`; `HookContextSchema` STRIPS a
+  // `tenantId` key outright, pinned in `packages/spec/src/data/hook.test.ts`),
+  // so the removed alias read here answered `undefined` on every call and this
+  // fallback handed `ISharingService.canEdit` an envelope with no org at all.
+  // The target field keeps its `tenantId` spelling: that is `ExecutionContext`'s
+  // driver-layer name for the same value, a separate axis #3290 deliberately
+  // left alone. The comment kit's `callerContext` already read the blessed name
+  // (`s.tenantId ?? s.organizationId`), so this is the #7145 parity that kit's
+  // card asked for, completed.
+  return { userId: s.userId, tenantId: s.organizationId, positions: s.positions };
 }
 
 export function installAttachmentAccessHooks(
@@ -214,6 +227,14 @@ export function installAttachmentAccessHooks(
           // "Nothing to authorize" and "nothing was ever queried" are not the
           // same verdict; reading the second as the first is fail-open.
           // (Mirrors #4630's `resolveTargetRows` for sys_comment.)
+          //
+          // [#9719] Reached through the wired engine ONLY via the
+          // `dispatchUnscopedMultiDelete` whole-operation dispatch declared on
+          // this registration (see the registration options below): the
+          // per-row contract (#5038/#5574) binds `input.id` on every predicate
+          // dispatch — which routes into the by-id branch above — and a
+          // zero-match predicate dispatches nothing at all, so without that
+          // declaration this refusal cannot fire, whatever this file says.
           forbid(
             'ATTACHMENT_DELETE_DENIED',
             'Refusing an unscoped multi-delete of attachments — scope the delete to the rows you mean (an id or a where predicate)',
@@ -273,7 +294,13 @@ export function installAttachmentAccessHooks(
         }
       }
     },
-    { object: 'sys_attachment', packageId: PACKAGE_ID },
+    // [#9719] `dispatchUnscopedMultiDelete` is what makes the #4757 branch
+    // above REACHABLE through the wired engine: the predicate path dispatches
+    // per row with `input.id` bound (so the by-id branch shadows the check),
+    // and a zero-match predicate dispatches nothing at all — the engine's
+    // opt-in whole-operation dispatch is the one call that arrives with no id
+    // and the caller's raw `options`, before any row is resolved.
+    { object: 'sys_attachment', packageId: PACKAGE_ID, dispatchUnscopedMultiDelete: true },
   );
 }
 

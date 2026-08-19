@@ -1382,6 +1382,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/rest-server-meta-read-org-scope.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/rest-server-meta-read-org-scope.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/runtime/src/action-execution-calldata-not-found.test.ts",
       "verb": "delete",
       "pinned": 2

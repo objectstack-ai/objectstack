@@ -74,8 +74,8 @@ references);② 创建后手动 fire 一轮烟测,判据取**GitHub 上的产出
 | **assignee 已设** | 已认领/在飞 —— 不是你的就永不碰 |
 | `pm:dispatched` | 已派发(派发评论记轮次);与摘 `pm:queue` **同一次标签写入**成对落地 |
 | `needs-user-decision` | 决定**待做** —— 永不派发、除已裁代裁通道外永不代答;维护者的收件箱 |
-| `pm:on-hold` | 决定**已做**且答案是「不是现在」—— 不派发也不催;**仅当正文带机器可读行 `Restart-when: closed <owner/repo>#N`(由 `Blocked-by:` 的同一遍解锁扫描点火、同一正文单通道)或 `Restart-when: <一行可执行判据>` 时才合法**;hold 评论带日期、理由、出处(维护者裁或座位定级,⛔ 不设第二个标签区分) |
-| `pm:blocked` + 正文行 `Blocked-by: #N` | 等上游 —— 选择期跳过,#N 关闭时由解锁扫描放回 |
+| `pm:on-hold` | 决定**已做**且答案是「不是现在」—— 不派发也不催;**仅当正文带机器可读行 `Restart-when: closed <owner/repo>#N`(由 `Blocked-by:` 的同一遍解锁扫描点火、同一正文单通道)或 `Restart-when: <一行可执行判据>` 时才合法**;hold 评论带日期、理由、出处(维护者裁或座位定级,⛔ 不设第二个标签区分);**放行双查(两查皆机械、零判断)**:① 只对**最近一次** `pm:on-hold`/`pm:blocked` 转换评论所载条件放行,⛔ 永不对线程里更早的 blocker —— 已放行过的条件是花掉的,再点火就把过期前提立成现行;② 该转换评论之后卡上有**更新的 merged PR** ⇒ 拒绝放行 —— 那是条件写下后卡已前进的信号(引用的事实可以为真而不再是现行条件) |
+| `pm:blocked` + 正文行 `Blocked-by: #N` | 等上游 —— 选择期跳过,#N 关闭时由解锁扫描放回。**工已完、PR 被外部门禁缺陷卡住的卡同用本态,⛔ 不设新标签**:`Blocked-by:` 指向门禁缺陷卡,正文另加机器可读行 `Unlock-action: re-check PR #M` —— 解锁扫描读到它就把解锁动作从「回队重派」换成「重查该 PR 的落地」(回队前提检查见到已完工的 open PR 即按落地工作处理,⛔ 永不给完工卡重派 dev);停放的 PR 正文必须点名门禁卡,让链路从任一端可读、不依赖会被整篇改写的座位贴 |
 | `pm:blocking` | 有 open 下游依赖者(分诊 sweep 自 `Blocked-by:` 索引推导的缓存,⛔ 不手工挂);进选择优先级全序 |
 | `finding` | 观察类记录,恒 = **待首次定级**(定级即离标:晋级换 `pm:queue` / 关闭 / hold 换 `pm:on-hold`;裸标签数即健康读数)—— 不占队列不进收件箱 |
 | `target:<major>` | 发版阻塞 —— 每个 backlog 恰好一个生产者,见「发版板」 |
@@ -97,11 +97,11 @@ references);② 创建后手动 fire 一轮烟测,判据取**GitHub 上的产出
   件**(维护者 2026-08-11 接受):hold 评论写触发文件清单,座位贴设「派发前必查」段,派发卡文件面与清单相交时点名该单、顺手活列为申报过的增项。
 - **`Blocked-by:` 行是机器可 grep 的反向索引**,一遍读喂三个职责:上游关单时放回被解锁的、按解
   锁扇出排序选择、**在合并后的 ref 上重验每张回队卡的文件面**(⛔ 只做第一件)。**一个标签存在
-  ,当且仅当有具名读者**;2026-08-11 的「⛔ 不落存储标签」已被维护者 2026-08-13 意见取代(原话
-  :「被依赖的卡片是不是应该通过label标注提高优先级」):`pm:blocking` = 分诊 sweep 自该索引推导写
+  ,当且仅当有具名读者**;2026-08-11 的「⛔ 不落存储标签」已被维护者 2026-08-13 意见取代(原
+  话见 runbook 全序节):`pm:blocking` = 分诊 sweep 自该索引推导写
   入/摘除的**缓存**,⛔ 不手工挂 —— 变的是缓存位置,推导本性与具名读者不变量未变(读者:选择优先级全序、列表页扫描)。
 - **状态变更不过夜**:标签挂了评论没跟上、assignee 设了没认领评论、结论只在 chat ——都是半状态
-  ,结束会话(含限流悬挂)前补齐成对或回滚半边(report-only 巡查见机械守卫索引)。**代执行他人指令
+  ,结束会话(含限流悬挂)前补齐成对或回滚半边(report-only 巡查见机械守卫索引)。**等待他座位也是状态,写在卡上才存在**(等谁、自何时,⛔ 不留在会话记忆);P0 嫌疑的等待 ⇒ 紧急直接分诊通道是义务不是选项(维护者 2026-08-19)。**代执行他人指令
   的关闭/作废,评论带出处三件(谁的指令、原话、在哪说的)** —— 无出处的关闭与误操作在证据上不可区
   分,会被兄弟席当误扫重开;同理适用于摘标签、回收认领等不可反推理由的动作。
 - **写后回读按风险定向;标签写恒为硬步骤 read-modify-write + 回读**(维护者 2026-08-18 裁定):① 先取现集 → ② 只增删目标标签 → ③ 写合并集 → ④ 写后回读核验 —— 整组 PUT 写的是本席快照,并发席落在你读与写之间的标签被静默剥掉,受害者常是你没打算碰的那枚;**承载闸门语义的标签**(如 `needs:contract-review`)挂与清两向同此四步,闸门被剥不是红灯是放行,「被剥」与「从未挂过」在证据上不可区分,回读是唯一察觉手段;
@@ -112,8 +112,8 @@ references);② 创建后手动 fire 一轮烟测,判据取**GitHub 上的产出
 ## 平台读数纪律
 
 统一原则:**判据取命令的输出,不取 API 字段的字面值、不取本地工作树现状、不取「看起来相邻」的
-日志。** GitHub API / 工具行为的实测事实表(队列成员资格与 auto-merge、API 配额、读数陷阱、截
-断双读取、容器重启三态)在`references/platform-readings.md`,做对应操作的那一刻查阅。常驻原则:
+日志。** GitHub API / 工具行为的实测事实表在 `references/platform-readings.md`(条目清单即其文内
+标题),做对应操作的那一刻查阅。常驻原则:
 
 - **核验 main 用 `origin/main`**(先 fetch,再 `git grep <pat> origin/main -- <paths>` /
   `git show origin/main:<path>`),⛔ 不用共享检出的工作树 —— 它的 HEAD由别的 agent 摆布。
@@ -135,17 +135,15 @@ references);② 创建后手动 fire 一轮烟测,判据取**GitHub 上的产出
   证据的零实现停手是好产出,不当返工计)。**裁决明令的动作实施中测出对向事实** ⇒ 照裁决字面执
   行、被打断行为的 pin 反转为拒绝 pin(不是删除)、⛔ 同 PR 不做任何 promote/回退、冲突立
   成 `needs-user-decision` 卡、该 PR 不挂 auto-merge 留异议窗口。
-- **spec 改动的 fixture triage 必须跑消费包测试**(A 包的改动可让 B 包的 fixture 反着断言
-  ,spec 范围内任何 sweep 都看不见)—— 动契约面的派发令点名消费包测试清单,报告要有各消费包真实读数。
 
 ## 多仓协调(五条规则)
 
 产品横跨三仓,依赖方向固定:`objectstack`(后端;`packages/spec` 是唯一契约)→ `objectui`(前端,构
 建产物经 `pnpm objectui:refresh` 回流)与 `cloud`。第四仓 `objectos`(纯文档与站点,不入上述依赖链):
-分诊照扫,执行折入 `domain:devx`(已辖 `content/docs/**` + `apps/docs`),⛔ 现在不铸 `repo:objectos`
-座位;规则 4 预登记的拆分触发任一命中(单轮逼近 fire 周期 / objectos 队列持续断粮)⇒ 升格完整座位,
-是记录在案的转换(维护者 2026-08-18:「就按 B,带你补的两条,落地吧」)。该仓无 changeset 流、无
-`packages/`、无合并队列(落地 = 人工合并),CI 形状与三仓不同 —— 派发预期照实设,⛔ 不要求不存在的机制。
+分诊照扫(分诊座位保持四仓唯一),执行已自 `domain:devx` 折入迁出、归 `repo:objectos` 执行座位 ——
+座位已存在,维护者 2026-08-18 亲自提前行使规则 4 预登记的升格(「objectos 是新开的项目经理,是不是
+少了座位帖。」),同其它 `repo:*` 座位一套执行座位纪律(⛔ 不产 `domain:*`/type/定级)。该仓无
+changeset 流、无 `packages/`;合并队列 + required `build` + `merge_group` 自 2026-08-18 起已上线 —— 派发预期照实设,⛔ 不要求不存在的机制。
 
 1. **Issue 住在修复落地的仓,分诊时按判据严格执行**(维护者 2026-08-10 裁决;2026-08-16 重申收紧)。判
    据:正文抽掉 objectstack 还成立 ⇒ file-at-destination,分诊当场转仓 —— console/UI 缺陷即转 objectui
@@ -173,8 +171,13 @@ references);② 创建后手动 fire 一轮烟测,判据取**GitHub 上的产出
 5. **一块板,不设第二跟踪器(one board, no second tracker)。** pm 标签就是状态机;org Project 只是维护者的聚合视图,权威层坚持 issue 正文 + REST。
 
 **跨座位转移**:工作跨座位线,PM 永不跨(唯一豁免:简单阻塞项直接接手,见「候选与批次」)—— 落到
-对方队列(目标仓立单带 `pm:queue` +出处行),依赖走 `Blocked-by:`;后续杂事由消费侧座位立;凡触
-`packages/spec` 一律转`domain:spec` 座位(唯一所有者),不论谁需要它。
+对方队列(目标仓立单带 `pm:queue` + 出处行 + 一行可执行判据),依赖走 `Blocked-by:`;后续杂事由消
+费侧座位立;凡触 `packages/spec` 一律转 `domain:spec` 座位(唯一所有者),不论谁需要它。**任何跨座
+位请求都是工作,同判**(要一次读数、要对方开卡的义务、要访问/授权):一律立卡进目标车道队列,⛔ 座
+位贴敲门或裁决评论永不作唯一载体(评论是加速器不是记录 —— 散文对候选查询、sweep、老化告警全不可
+见);等待方**同一笔**把自卡翻 `pm:blocked` + `Blocked-by:` 指向请求卡(队列标签对卡住的卡说「可派
+发」就是撒谎;落进词表的等待自动享有既有解锁扫描与老化机械,⛔ 不设新标签新 sweep);目标仓不可达
+时按缝卡规则落 objectstack 带 `repo:*` + 具名读者(顺带解掉请求方无目标仓写权限的失败)。
 
 ## 域车道(Domain lanes,同仓多 PM 并发)
 
@@ -185,28 +188,16 @@ references);② 创建后手动 fire 一轮烟测,判据取**GitHub 上的产出
 
 | 标签 | 包家族 |
 |:--|:--|
-| `domain:engine-core` | `packages/objectql`、`packages/core`、`packages/formula`(CEL / `matches-filter` / RLS 谓词求值)、`plugin-pinyin-search`(落点在编译/查询核心) |
-| `domain:metadata` | `packages/metadata*`(加载、注册、持久化、缓存、目录)、`packages/platform-objects` |
-| `domain:drivers` | `packages/drivers/driver-*`(维护者 2026-08-05 对 `driver-memory` / `driver-mongodb` 族有投入冻结指令;`formula` / `driver-sql` 不受影响) |
-| `domain:services` | `packages/services/*`、`packages/connectors/*`、`packages/triggers/*`、`plugin-approvals`、`plugin-webhooks`、`plugin-email`、`plugin-reports`、`embedder-openai`、`knowledge-*` |
-| `domain:identity` | `plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit` |
+| `domain:engine` | `packages/objectql`、`packages/core`、`packages/formula`(CEL / `matches-filter` / RLS 谓词求值)、`plugin-pinyin-search`(落点在编译/查询核心);`packages/metadata*`(加载、注册、持久化、缓存、目录)、`packages/platform-objects`;`packages/drivers/driver-*`(维护者 2026-08-05 对 `driver-memory` / `driver-mongodb` 族有投入冻结指令;`formula` / `driver-sql` 不受影响)—— 车道合并(维护者 2026-08-19:「engine-core + metadata + drivers -> engine, identity + services → services 怎么样?」),原 `domain:engine-core` / `domain:metadata` / `domain:drivers` 三标签**退役**(只退出流通;GitHub 标签对象保留 —— 删标签会剥光已关卡、毁掉存档,止住流通的是本表) |
+| `domain:services` | `packages/services/*`、`packages/connectors/*`、`packages/triggers/*`、`plugin-approvals`、`plugin-webhooks`、`plugin-email`、`plugin-reports`、`embedder-openai`、`knowledge-*`;`plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit`(2026-08-19 并入,原 `domain:identity` 标签**退役**,同上只退流通不删对象) |
 | `domain:devx` | `packages/lint`、`packages/sdui-parser`、`content/docs/**`、`apps/docs`、`scripts/`(门禁类;与 `domain:skills` 的分界按门禁的 SUBJECT:治理 agent 指令面/governed 面的归 skills,治理代码/文档质量的归本域)—— 与 `domain:spec` 相交的三面按「是否围着 spec 契约转」切分 |
 | `domain:skills` | 两个技能根:`.claude/skills/**`(含本文件)+ `skills/**`(维护者 2026-08-11 裁定单设座位,与维护者走专题讨论;skills 更新 ADR-class,见 Guardrails);指令架构文件:根 `AGENTS.md` + 根 `CLAUDE.md`(所有面向 agent 的宪法文本);governed 面(统一定义见 ACCEPT 路径分叉)的治理执行文件:`.github/CODEOWNERS`(治理路由半边)+ SUBJECT 是 governed 面本身的门禁/审计(现为 `scripts/pm/check-governed-merges.mjs`,一句话见守卫索引;未来同类同判)—— 维护者 2026-08-18 裁决:「skills 相关的应该都归你管,为什么派给了 devx」 |
-| `domain:spec` | `packages/spec` 整包唯一契约,语义/文本/机器三面同席:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及围着 spec 契约转的工具链(门禁/生成器/lint 规则/报错散文/references 管线)—— 一般开发工具面留 `devx`(维护者 2026-08-09 裁决);席内分派判据见下文「spec 席内分派参考」 |
+| `domain:spec` | `packages/spec` 整包唯一契约,语义/文本/机器三面同席:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及围着 spec 契约转的工具链(门禁/生成器/lint 规则/报错散文/references 管线)—— 一般开发工具面留 `devx`(维护者 2026-08-09 裁决);席内分派判据见 `references/lanes/spec.md` |
 | `domain:cli` | `packages/cli`、`runtime`、`verify`、`qa`、`types`、`packages/rest`、`packages/mcp`、`packages/observability`、`packages/client*`、`cloud-connection`、`create-objectstack`、`packages/adapters/*`、`plugin-hono-server`、`plugin-dev` |
 | (无固定归属,按落点分诊) | `packages/apps/*`、`packages/console`(dist 由脚本生成 ⛔ 手改;UI 缺陷走 `repo:objectui`,pin/刷新脚本归 `scripts/` 行)、`examples/*`(归它演练的子系统) |
 
 表未覆盖的包在首次分诊时归类并**走 PR 更新本表**;**新增或退役一个 `domain:*` 必须同批改本表**(在流
 通而不在表 = 无主车道)。座位在编情况以 `label:pm:seat` 索引为准,每个 `domain:*` 与 `repo:*` 恰一张座位贴。
-
-**spec 席内分派参考**(维护者 2026-08-16 裁定合并车道:原 `domain:spec-surface` / `domain:spec-tooling` 标签已退役,
-三面同归 `domain:spec` 一席,锚定规则双射恢复;以下判据降为席内分派与定价依据):语义/文本按
-「合法元数据集合变没变」分 —— 改动前能过校验的输入,改动后逐字节同判 ⇒ 文本面(changeset 恒 patch,
-默认 sweep-first),否则语义面;**任何改变接受/拒绝行为的卡,不论多小,按语义面处理**。机器面改
-「围着契约转的机器」,与文本面无交集,⛔ 不碰 `packages/spec/src/**/*.zod.ts` 与 strictness 台账。
-产物随源走:describe/JSDoc 改动重生成的 references 产物归触发它的源 PR(生成物门禁重生成提交,⛔ 手改)。
-`metadata` 自 `engine-core` 的二次切分按包边界(无例外);改元数据**格式/接受面**的照旧归 `domain:spec`,
-`/meta` 路由本体在 `packages/rest` 归 `domain:cli`;拿不准 FLAG 回分诊。
 
 **单一生产者。** `domain:*` 只由分诊座位产出;打标签 ≠ 认领;**未打标签的 issue 任何人不得认领
 ** —— 那意味着分诊还没走到,不是「可以自己判一下」。
@@ -222,17 +213,20 @@ references);② 创建后手动 fire 一轮烟测,判据取**GitHub 上的产出
 ## 座位贴协议(一座位一贴,单写手)
 
 多写手共编一个 body 机制上防不住互吞(维护者 2026-08-06 拍板):**贴 = 座位**(标签 `pm:seat`),
-正文固定六段现值、**只由在任座位 PM 编辑**、正文为权威,标题与 assignee 是派生视图、三者同笔更
-新;接管/移交 = 改正文 + 审计评论(**评论只作审计不承载状态**),接管压缩是标准步骤。**写侧刷新
-点 = 轮次边界**(派发、收班、暂停/交接前),中途状态由卡上 claim/ACCEPT 评论承载(本就是 state
-of record)。**读侧闭环(维护者 2026-08-12 批准):接管与巡检只读贴正文 + 晚于正文最后编辑的评
-论** —— 更早的已被吸收,是存档不是现状。**热文件串行队是正文具名段**(区域写不清就只能整文件串
-行)。无心跳,活性惰性判定;竞态三招 —— 动手前重 fetch 正文、审计评论时间戳先到先得、写后回读。**换班报告默
+正文固定**四段**现值(当前 PM / 继承台账 / 热文件串行队 / 说明)、**只由在任座位 PM 编辑**、正文为
+权威,标题与 assignee 是派生视图、三者同笔更新;接管/移交 = 改正文 + 审计评论(**评论只作审计不承
+载状态**),接管压缩是标准步骤。**范围与常设承诺是岗位说明不是状态,版本化在
+`references/lanes/<lane>.md`**(维护者 2026-08-19 裁定:「所以我认为每一种项目经理的岗位说明应该进
+skills,类似分诊」)—— 贴内指针指向其车道文件,升级走技能 PR,⛔ 手抄接力(逐任手抄正是本条要退役
+的失效模式;存量贴的四段收缩细则在 seat-post-protocol)。**写侧刷新点 = 轮次边界**,读侧只读贴
+正文 + 晚于正文最后编辑的评论(维护者 2026-08-12 批准;更早的已被吸收,是存档不是现状),中途状态
+由卡上 claim/ACCEPT 评论承载。**热文件串行队是正文具名段**(区域写不清就只能整文件串行)。无心跳,
+活性惰性判定;竞态三招 —— 动手前重 fetch 正文、审计评论时间戳先到先得、写后回读。**换班报告默
 认零建议**(维护者 2026-08-12 裁定,原话:「还有各车道下班时会提交 skills 建议有必要吗?就是那些
 搞得后来skills越来越乱。」):强制建议清单已退役,离任报告只收三类 —— 原则错/缺(→ skills 席专题)
 、可机械化项(→ 门禁/脚本卡,⛔ 不是散文)、平台事实变化(→ references 事实表改一行)—— 以
 `finding` 入 skills 车道由该席分诊,三类之外默认关 not planned;「经验教训」散文不再入技能文本
-(防错归门禁,判断归档位)。六段模板、状态词表、接管/退场收尾清单等细则见
+(防错归门禁,判断归档位)。四段模板、状态词表、接管/退场收尾清单等细则见
 `references/seat-post-protocol.md`;epic 委托不入座位贴体系;`packages/spec` 恒归 spec 座位。
 
 ## Epic 子树车道
@@ -258,7 +252,7 @@ of record)。**读侧闭环(维护者 2026-08-12 批准):接管与巡检只读�
 仓没有车道标签,这形状是它们队列卡的常态);③ 有 `domain:*` 无 pm-state。②③ 只取 `updated_at`
 早于 ~2 分钟的卡且不是可选项 —— 半标注卡是协议自己按设计生产的(一次标签写入即把老卡打成半标
 注),只带路由或状态机其一的卡对两个视图同时不可见。排除:`tracking`、`status:parked`(其正常形
-状恰是「带域标签无 pm-state」)、全部 `pm:seat` 贴、`qa-run` 记录(协议载体非工作);存量大时每轮限量、优先最新。**紧急卡直接分诊**
+状恰是「带域标签无 pm-state」)、全部 `pm:seat` 贴、`qa-run` 记录(协议载体非工作);存量大时每轮限量 —— 新入卡①优先最新,半状态治愈积压②③**最老优先、P0 嫌疑先行**,⛔ 优先最新不适用(细则见 runbook)。**紧急卡直接分诊**
 (维护者 2026-08-13):维护者点名或 p0 嫌疑 ⇒ 立即起 `claude-fable-5` 分诊子代理,不等 Routine 班
 次;授权面 = 分诊本身(定级/路由/标签/既有评论格式),⛔ 不写码不认领;产出落卡,与 Routine 分诊同格式同效力(细则见 `references/dispatch-runbook.md`)。
 **跨仓 pin 链的窗口级兜底也在本 sweep**(联动单第一产者仍是接受座位;⛔ 只立单不执行 bump):
@@ -271,6 +265,8 @@ objectui pin 落后且其队列已空 ⇒ 在本仓立/刷新 console bump 单;�
 **必带四棱卡面块**(见「升级与决策」),⛔ 不留待有人接手再补;**`finding`** —— 观察类(死代码、未演
 练漂移、抛光;真实但今天没有用户撞上),待首次定级;**先修复(repair first)** —— 正文被 sanitizer 截断的卡不
 可派发,评论修复指令后跳过;停摆指令判据必须比其它分类更硬(双读取),事后证伪同处公开作废。
+**决策箱勤务(常设)**:落卡入箱时校验/补全标准四棱卡面块;存量卡低频子轮回填;摘要 issue 按轮刷新
+—— 块形状、批量决裁通道与脚本化出口见「升级与决策」。
 
 **原生 issue 类型 Bug/Feature/Task 是分诊的固定产出**(维护者 2026-08-12 裁定「同意」):分诊
 座位是 `type` 字段的唯一权威生产者(立单者可预填,分诊校正 —— 与 `domain:*` 同一纪律);判据即
@@ -338,7 +334,15 @@ issue,逐个读当前 open/closed/assignee,引用读到的现状 ⛔ 不引用�
 张卡还开着吗」;过时动作断言 dev 动手即自纠,过时卡引用不变红)。花几分钟,不查则赔一次 agent 运行。
 
 **批次独立性。** 一批内任两单不得可能碰同一个包/registry/barrel/spec schema;拿不准就串行。**同
-文件单跨轮硬串行;延后不是搁置**(被延后那一刻就把已知的坑记到该 issue 上)。**维护者明示豁免同
+文件单跨轮硬串行;延后不是搁置**(被延后那一刻就把已知的坑记到该 issue 上)。**家族派发(family dispatch)是本条的范围澄清,不是豁免**:独立性防的是两个 agent 相撞同一区域,
+一个 dev **有意**覆盖 N 张同区域已裁卡是平凡满足不变量,可折叠为一次派发(折叠认领约定见「认
+领」节)。准入五门全过才可折:① 同缺陷形态同修法(⛔ 不是同关键词/同子系统);② 同包/区域(一
+worktree、一 changeset、一队列位);③ **每张成员都已裁/已定级,⛔ 决策箱内一张不许**(承重门:防
+借折叠把未裁卡洗进已裁 PR);④ 每成员独立可核(每成员一个具名判据,批次不能静默少交);⑤ 派发令
+点名**排除清单** —— 长得像家族而不是的成员及理由(承重门:盲扫「同类」正是要防的错编辑)。
+**fold-or-serial 是必答题**(维护者 2026-08-19 原话:「你自己定的工作方式你也会忘。」):凡 ≥2 张
+排队卡共享热文件,串行队条目和/或链首认领必须以五门为判据显式答折叠还是串行 —— 不答而默认串行是
+漏答不是安全选项(零余量棘轮文件上的串行还翻倍付账搜刮与人工合并次数)。**维护者明示豁免同
 文件串行时,替代纪律四条**(豁免的是排队,不是防撞):① 文件面申报到**区域**级(函数/段落);② 开
 PR 前合一次 main;③ 兄弟卡落地后再合一次;④ 冲突交合并队列仲裁,⛔ PM 不手动排序;豁免不外溢。**
 阻塞解除后给延后单重新定价**:派发前一单时带必答项「你的改动让 #X 变简单/变难/变得不必要还是无
@@ -380,7 +384,7 @@ PR 前合一次 main;③ 兄弟卡落地后再合一次;④ 冲突交合并队�
 不相交挡不住**读耦合**:本卡 pin 断言兄弟卡在改的行为 ⇒ 各自全绿、先合者令后者 CI 无因变红;派
 发令点名跨车道兄弟时**应**注明本卡 pin 是否断言其面,是则在用例内预登记翻转触发词(兄弟行为落地
 即变红:删除或反转,⛔ 不修绿)。文件面对跨域例外单**必填**、普通单建议(定向在飞检查与 epic 领
-地判断的唯一输入);分支名必须带 issue 号。**限流不拆原子对**:发不出评论就撤 assign 或不开始;配额尽则整对排队,永不留半个。
+地判断的唯一输入);分支名必须带 issue 号。**家族派发(见批次独立性)的折叠认领约定**:共享分支按链首卡命名,**每张成员卡各留认领评论并点名该分支**(成员卡无自有分支是设计不是半状态);一 PR 正文多行 `Fixes #<n>` 每成员一行、逐卡 commit(= 每成员的独立可核件);完整串行约束检查落链首认领,成员认领指向之。**限流不拆原子对**:发不出评论就撤 assign 或不开始;配额尽则整对排队,永不留半个。
 3. **竞态复读**:自己的认领评论上墙后重读全线程 —— assignment 幂等,两个 agent 都会「成功」,**
    认领评论时间戳是唯一仲裁**;更早的评论带不同 session ID/分支 ⇒ 你输了,回「already claimed
    — yielding」另选。**让行是交接不是退场**:连同让行评论交出已诊断的一切与 PM 侧已取的板面读
@@ -400,7 +404,7 @@ dev 侧推分支要早 —— 远程分支是在飞工作最硬的证据。**死
 拿不准就升一档 —— 错派低档的返工贵过省下的额度);上限 `fable`(最重协议/流程/编排卡,按卡取用非新
 默认)。**⛔ 强制条款两条**:① 凡改 `.claude/skills/pm-dispatch/**` 的卡一律
 `model: "claude-fable-5"`;② 凡**改变契约接受/拒绝行为或扩大公开面**的卡(`domain:spec` 语义面;
-判据即分诊代裁的机械边界测试与 spec 席内分派判据,⛔ 不另抄第二份)一律 `claude-fable-5`(维护者
+判据即分诊代裁的机械边界测试与 spec 席内分派判据 —— `references/lanes/spec.md`,⛔ 不另抄第二份)一律 `claude-fable-5`(维护者
 2026-08-12 裁定,原话:「同意,就按语义面收窄,立卡并通知 spec 席」)—— 契约错毒化一切下游,全仓最贵(条款②闸门见「入队与落地」)。两条唯一降档出口:**额度耗尽豁免**(维护者 2026-08-13
 原话:「fable 如果用完了,可以用 opus」):仅当 fable 实测不可用(限流/墙杀中途,重派同样可降)
 才落 `opus`,⛔ 不再往下,档位与理由记入认领评论「Container & model」行。明确不变(合并后按席内
@@ -437,11 +441,10 @@ dev 侧推分支要早 —— 远程分支是在飞工作最硬的证据。**死
 作、浏览器/dogfood 验证、逐卡判断的 build 重 M 卡(论证见 `references/dispatch-runbook.md`)。**归档义
 务只落在云卡**;OOM 死的单独重派;判定连同档位写进认领评论。
 
-**云卡四课**(细则见 `references/dispatch-runbook.md`;一次性云卡用 `create_session`,⛔ 不用
-create_trigger+fire —— 维护者 2026-08-07 拍板,trigger 流只留给定时/重复型):① 授权面随
-source 不随环境;② 派发词必带**自驱条款**;③ 交付通道 = dev 自开 draft PR + 终报以 issue 评论
-交付;④ **云卡 draft PR 一存在立即 `subscribe_pr_activity` —— 硬步骤**。云会话 `SendMessage`
-not-reachable 是设计非故障(维护者 2026-08-11 裁定)⛔ 不复测;**接手中断的 dev**:先试 SendMessage 复活,不可用才走接手协议(四条增量见 runbook,⛔ 不重跑原派发词)。
+**云卡四课(① 授权面随 source 不随环境;② 派发词必带自驱条款;③ 交付通道 = 自开 draft PR + 终报
+issue 评论;④ draft PR 一存在立即 `subscribe_pr_activity` 硬步骤)全文见 runbook**;一次性云卡用
+`create_session`,⛔ 不用 create_trigger+fire(维护者 2026-08-07 拍板,trigger 流只留给定时/重复型)。
+云会话 `SendMessage` not-reachable 是设计非故障(维护者 2026-08-11 裁定)⛔ 不复测;**接手中断的 dev**:先试 SendMessage 复活,不可用才走接手协议(四条增量见 runbook,⛔ 不重跑原派发词)。
 
 ### 收集
 
@@ -466,7 +469,7 @@ not-reachable 是设计非故障(维护者 2026-08-11 裁定)⛔ 不复测;**接
 - **停摆永不自愈**:携带任务中途状态的完成通知本身就是停摆信号,立刻 SendMessage 附前台执行姿
   态句,⛔ 不等任何静默阈值(阈值是给「没有回答」的);复位走梯度,每次比上一次更具体,第三次停摆
   判 unreliable 按接手协议重派。这里是消费侧兜底,⛔ 不能写成「派发词写全了就可以不探」。
-- **通知重放先算身份再读内容**:去重三元组 `(issue, 分支, PR head sha)`,与已验收那份相同 ⇒ 记
+- **通知重放先算身份再读内容**:与已验收那份同身份(三元组定义见 runbook)⇒ 记
   「重放」即结束,⛔ 不重新验收不重复 ACCEPT;⛔ 到达不读作「还活着」,不到达也不读作「已死」。
 - **直接验收兜底(报告丢失 ≠ 验收停摆)**:(a) draft PR 在且 CI 全绿 + (b) 探活确认已死或 ≥2h 无
   推送 + (c) 报告未达 ⇒ 直接按 PR 验收(复核判据不减,细则见 runbook);先探活后翻 ready;舰队级
@@ -477,20 +480,13 @@ not-reachable 是设计非故障(维护者 2026-08-11 裁定)⛔ 不复测;**接
 你是记录在案的复核人(reviewer of record)—— **对 GitHub 核验,不对报告的自述核验**;逐项判据展开
 在 `references/review-checklist.md`,每份报告对着它过。骨架:
 
-- **PR 形态与范围**:draft、目标 `main`、首行 **`Fixes #<n>` 仅当合并应当关卡** ——半实施必
-  须 `Part of #<n>`,否则合并静默关掉决策箱里的卡(收件箱过滤只看 open);翻 ready 前亲核首行。
-  **`Fixes` 卡随关单自动离开在飞视图,`Part of` 卡合并后仍开着**:MERGED 的同一动作里摘
-  `pm:dispatched` 换回 `pm:queue`(或按剩余物定级)+ 评论写明已交付/还剩/归谁。changed files 范围
-  检查(⛔ 不看报告自述);tests/docs-only 按仓库分流:本仓库 `skip-changeset` 标签是真实机制;
-  objectui 无此标签,空 frontmatter changeset 即声明,⛔ 永不铸标签;测试证据要真实命令与输出。
+- **PR 形态与范围**:draft、目标 `main`、`Fixes`/`Part of` 首行判据(翻 ready 前亲核)、`Part of`
+  卡 MERGED 时点收口、changed files 范围与 changeset/`skip-changeset` 分流、测试证据 —— 判据全文见 checklist 与 landing-operations B。
 - **报告在草稿 PR 时点到达,CI 收敛读数只属于复核侧**(维护者 2026-08-10 裁定):gate
   `in_progress` 是诚实读数;放行前亲核判据、收敛期补丁轮与「本单等 CI」例外见 checklist。
-- **绿色输出 ≠ 该绿证明了被测风险**:拒收用例查 `code`+`status` 断言;「N 个包全绿」问方向与时
-  序;裁决实施 PR 查全仓 pin 翻转 + 拒收断言仍在;收益穿过必经边界后还在吗(必要时端到端验一次)。
-- **证伪是好运行**:`premise_still_valid: false` 是再分诊输入不是失败;dev 纠正 PM要当众认;验
-  收判据被测量推翻 = 好运行,但过程要写在 PR 正文并附实测信噪比。
-- **删除与二进制**:死代码删除在 `origin/main` 亲核引用面再 ACCEPT;`+0/-0` 先疑NUL。sweep 类
-  交付的范围外产出在 ACCEPT 评论成组列出。
+- **绿色输出 ≠ 该绿证明了被测风险**(拒收断言、全绿方向与时序、pin 翻转、边界后收益 —— 判据在 checklist)。
+- **证伪是好运行**:`premise_still_valid: false` 是再分诊输入;dev 纠正 PM 当众认;判据被测量推翻照 ACCEPT,证据要件在 checklist。
+- **删除与二进制**:死代码删除亲核引用面;`+0/-0` 先疑 NUL;sweep 范围外产出成组列出(判据在 checklist)。
 
 **判决**:**ACCEPT** 短格式(issue 英文评论):核对清单结论 + 抽查读数 + 偏差,链接 PR —— 论证指
 向 PR 本身,⛔ 不复述其叙事 → 驱动落地;**REWORK**(逐项反馈,同认领重派;补丁轮优先 SendMessage
@@ -500,8 +496,8 @@ not-reachable 是设计非故障(维护者 2026-08-11 裁定)⛔ 不复测;**接
 取一次 PR 的路径面(`get_files`,⛔ 不看报告自述)。governed 面统一定义(维护者 2026-08-18
 「同意」):`docs/adr/**` + `.claude/**`(全量,含 agents/hooks/settings)+ `skills/**` +
 `AGENTS.md` + `CLAUDE.md`;agent 指令文件按此跨仓同判 —— objectui、cloud、objectos 一并在内(维护者
-2026-08-18:「任何对 agents.md 等文件的修改…包括 objectui cloud仓库」→「同意」;objectos 执行虽折
-入 devx,其指令面 PR 照样 draft/人工合并)。路径面**一条命中** ⇒ ACCEPT 换终局三件套:① 复核结论照常写在
+2026-08-18:「任何对 agents.md 等文件的修改…包括 objectui cloud仓库」→「同意」;objectos 指令面
+PR 照样 draft/人工合并)。路径面**一条命中** ⇒ ACCEPT 换终局三件套:① 复核结论照常写在
 issue 上(不能合 ≠ 不复核;技能面 PR 的复核席须跑在契约复审档位,档位单源见条款②闸门);
 ② PR 留给维护者,**看得见地悬着** —— **人工合并即审核记录,本条座位纪律是唯一的 merge 前防线**
 (per-PR 事前门已退役,没有机器会替你挡):⛔ 永不翻 ready、永不入队、永不挂 auto-merge;③ 轮次报
@@ -519,26 +515,19 @@ issue 上(不能合 ≠ 不复核;技能面 PR 的复核席须跑在契约复审
 - **`needs:contract-review` 复审链**:复审资格双条件,同时满足 —— ① 跑在契约复审档位;② 非该卡派发席(犯规席在结构上无资格补救自己的犯规)。归属:常设 = 分诊席(Routine 模型由维护者在 Routines UI
   钉在契约复审档位),分诊轮新增子轮清该标签 —— 只审契约增量 diff、结论一行写在卡上、清标签后卡方可入队;每小时一轮即天然攒批;过渡期(分诊 Routine 未建成前)由 skills 席代行。**降档保险丝**:
   子轮开场自检当前模型,非契约复审档位 ⇒ 该子轮整体跳过、标签原样留置 —— 卡在队列外等待是安全态;契约复审 ⛔ 不适用额度耗尽豁免降档(豁免的对象是派发;复审的存在意义就是补偿一次低于地板的派发)。**载体不迁移**(维护者 2026-08-18,原话:「中期把闸门迁到 PR review 的 Request Changes 上 我觉得没必要」):闸门载体保持本标签,⛔ 不迁 PR review / Request Changes、不为迁移留门;挂与清皆按标签纪律的 read-modify-write 硬步骤写。
-- **碰生成物的 PR,入队前先同步 + 整体重生成** —— os-regen 驱动会零冲突标记地**静默丢掉一侧改
-  动**,只有重生成才暴露;四步序已机械化(`bash scripts/pm/os-regen-merge.sh`,**先 commit
-  merge 再重生成**);两个陷阱、断言措辞、清单读法与锚点禁令细则见 landing-operations A。
-- **跟到 MERGED 为止;入队后的看护同归车道 PM 的落地窗口。** 车道 PM 管验收、首次入队(flip 定点
-  与判据见 landing-operations B)、确认 MERGED(两个读数);落地窗口给关键 PR
-  挂`subscribe_pr_activity`(⛔ 不订阅 dev 交报告前的 PR —— 双驾驶员互踩;**MERGED/关闭即退订 +
-  云卡 `archive_session`**,⛔ 合并前不归档,不留孤儿订阅);落地后再核一次落地判据仍是车道 PM 的
-  活(队列合并同样走 os-regen 驱动)。**落地记账**:座位贴落地清单即账本,逐轮即时记;确需全仓
-  核对时首选 `head:claude/` 精确过滤。
+- **碰生成物的 PR,入队前先同步 + 整体重生成**(os-regen 驱动零冲突标记地**静默丢掉一侧改动**):
+  四步序已机械化 `bash scripts/pm/os-regen-merge.sh`;陷阱、断言措辞与锚点禁令见 landing-operations A。
+- **跟到 MERGED 为止;入队后的看护同归车道 PM 的落地窗口**:验收、首次入队 flip 定点、MERGED 两读
+  数、关键 PR 订阅与退订/归档、落地后再核落地判据 —— 操作细则全在 landing-operations B。**落地记
+  账**:座位贴落地清单即账本,逐轮即时记;确需全仓核对时首选 `head:claude/` 精确过滤。
 - **红/踢出处置在同一落地窗口内做**:机器输入是 merge-queue triage workflow 落在被踢 PR 上的分诊
   评论(失败签名与计数,细节以该 workflow 头为权威);判据唯一来源是签名台账,优先于现场判断 ——
   台账留在其锚点 issue 上作查表数据,**只有人工能升级**(疑似新 flaky 只留提请,⛔ 不自行加表;纯
   计数不追记,只有改变修法作用域时才记)。四分支:已知 flaky ⇒ 原样重投;**已修签名再现 ⇒ ⛔ 不重
   投**,判新问题重新诊断;基上缺已合修复 ⇒ merge main 推新提交(重跑无效);新签名 ⇒ ⛔ 不重投,
   在 PR 与其 `Fixes` 卡各留完整签名与初判;每次处置留审计评论(重投写签名与台账依据)。
-- **依赖前棒才能转绿的 PR:draft 停放 + 签名级预期红清单** + 解除条件(「几条测试会红」不够用
-  );CI-failure 事件与清单比对,新签名才是真问题;依赖合入后同步 → 红清零→ 转 ready → 入队。**
-  多个已实现 PR 全碰生成物 ⇒ 串行接力,一次只放行一个**:每一棒都是一整圈(每棒重走);相邻两棒交
-  接的是**语义不是文本**(意图叠加,⛔ 禁止机械取一边 —— 各自绿、合起来错);散文互锁的分工
-  由 PM 在**两侧**接力指令里写明谁动谁不动(两种漏法在 CI 上都是绿的)。
+- **依赖前棒才能转绿的 PR:draft 停放 + 签名级预期红清单 + 解除条件**;**多个已实现 PR 全碰生成物
+  ⇒ 串行接力一次只放行一个,每棒一整圈、交接语义不是文本** —— 两式全文见 landing-operations C/D。
 
 ### 轮次报告与节奏
 
@@ -569,9 +558,8 @@ issue 上(不能合 ≠ 不复核;技能面 PR 的复核席须跑在契约复审
 出处:维护者 2026-08-11 提问(「首先项目经理能不能查到相关的数据,其次是到达时间窗口工作就会停,
 是否应该设置一个1小时的定时以监测时间窗口已经解锁」)。检测读数、盲区与恢复 playbook 细则见 `references/platform-readings.md`;常驻原则:
 
-- **检测**:`ccusage blocks` 给窗口边界与燃烧率,但只有单容器视野、估成本不估套餐余量(没有任何
-  面向 agent 的接口暴露账号级剩余额度);**权威的墙信号是失败本身**——撞墙报文里的重置时刻在那
-  一刻可得、事前查不到,把它记下来。
+- **检测**:`ccusage blocks` 只有单容器视野、估成本不估套餐余量(账号级剩余额度无接口可查);
+  **权威的墙信号是失败本身**——撞墙报文里的重置时刻在那一刻可得、事前查不到,把它记下来(工具读数与盲区在事实表)。
 - **跨墙定时器**:拿到重置时刻 ⇒ 一发定点(reset + 缓冲)优先;没有 ⇒ 挂每小时 cron Routine,⛔
   **不用 send_later 链** —— send_later 是 run-once、fire 后自禁用,投进死窗口那一发是否被重试未实
   测且文档未承诺,一次性链条可能断在它存在的意义上;第一枪成功的 fire 跑恢复后**删除 cron**(幸存 cron 是孤儿定时器)。fired 文本照定时器写法纪律。
@@ -604,26 +592,38 @@ grep <branch>`),复升级时逐条**跑**一遍,零命中/变形的就地改写�
 `[Decision] <一句话>` 卡。③ **答复/代裁到手,裁决记录是一个原子动作,四件同笔**(维护者 2026-08-13)
 :鲜度门(录前重读晚于正文最后编辑的评论,有修正的先调和正文)/ 状态转换同笔(决策标签或 finding 定
 级换结果态,永不留挂)/ `Blocked-by:` 活性现验(合并一半也算解除,耗尽行同笔删)/ 条件已判即判(输入已知的就地判掉);案例与机械两旗见 `references/dispatch-runbook.md`。
-**每个方案必须沿三条固定评估轴分析,这是决策分析的核心原则,不是可选项:**
+**每个方案必须沿四条固定评估轴分析,这是决策分析的核心原则,不是可选项:**
 
 - **实际业务需求** — 它服务的是**真实存在的业务场景**,还是投机性能力面?判据要求**实测**(谁在
-  写这个键、谁在读、示例应用与真实部署的用法),「读起来像有用」不作数。**创业阶段聚焦原则**(
-  维护者 2026-08-04 指示:「我们是一个创业项目,应该先专注于核心能力」):能力扩张默认从紧,无拉
-  动的声明面按 implementation-first 处置,已发布零消费的能力不因沉没成本获得豁免。这条轴会改
-  变结论,不是陪衬。
+  写这个键、谁在读、示例应用与真实部署的用法),「读起来像有用」不作数。这条轴会改变结论,不是陪衬。
 - **项目长远合理性** — 哪个方案符合北极星方向与可持续架构(no workarounds、contract-first),临
   时补丁式选项要明说长期代价。
 - **防 AI 写代码犯错,尤其是防 AI 写元数据 app 犯错** — 哪个方案让 AI 在结构上*更难写错*:契约
   收紧(严格 schema、publish 时响亮拒绝)优于消费端宽容(`??` 回退、静默容错)—— 宽容恰是 AI 批
   量犯错被掩盖的温床;声明即强制,绝不让 AI 声明一个运行时不兑现的能力。
+- **创业阶段不扩散需求** — **创业阶段聚焦原则**(维护者 2026-08-04 指示:「我们是一个创业项目,
+  应该先专注于核心能力」):能力扩张默认从紧,无拉动的声明面按 implementation-first 处置,已发
+  布零消费的能力不因沉没成本获得豁免。
 
-推荐意见必须基于这三条轴给出理由;三轴冲突时如实呈现权衡,交维护者拍板。**四棱卡面块是落卡与升
-级的必备件**(维护者 2026-08-11 接受),每张 `needs-user-decision` 卡带四行,每棱一行,⛔ 不留待
-维护者到场再补:① platform long-term coherence(缩小还是扩大特例/契约增生);② measured business
-pull(今天谁撞上;零拉动默认 defer/ remove);③ AI-agent error-resistance(闭合枚举优于自由结构、
-响亮拒绝优于静默容忍);④ startup scope discipline(remove 优于 declare-and-maintain,每个已声明
-的键都是永久义务)。四棱是三条评估轴的卡面序列化,同一个框架不是第二套;它也是分诊代裁置信门的
-输入(见分诊职责)。交互会话可另发 `AskUserQuestion`,带标签的 issue 恒为持久记录。
+推荐意见必须基于这四条轴给出理由;四轴冲突时如实呈现权衡,交维护者拍板。**标准四棱卡面块是落卡与
+升级的必备件**(四棱维护者 2026-08-11 接受;标准块/摘要视图/批量决裁通道 2026-08-18 裁定「同意」——
+块标准化把提取从 LLM 理解题降级成 grep),每张 `needs-user-decision` 卡落卡即带、⛔ 不留待维护者到
+场再补。固定形状:首行**机器可寻固定标记** `<!-- os-decision-facets -->`(转义拼写写入,写后回读核
+验存活;提取按字面文本 grep,不依赖注释形状 —— sanitizer 纪律见平台读数);四棱各一行 —— ① platform
+long-term coherence(缩小还是扩大特例/契约增生);② measured business pull(今天谁撞上;零拉动默认
+defer/remove);③ AI-agent error-resistance(闭合枚举优于自由结构、响亮拒绝优于静默容忍);④ startup
+scope discipline(remove 优于 declare-and-maintain,每个已声明的键都是永久义务);一行推荐 + 字母选
+项(A/B/…);**一行强制置信缺口(「本分析看不见什么」)** —— 案例(2026-08-15):两张四棱同向、低风
+险、全绿、已复核的 PR 仍因分析看不见的方向性前提被整体作废 —— 推荐是输入,永不是放行,人工地板不变。
+四棱是四条评估轴的卡面序列化,一一对应,同一个框架不是第二套;也是分诊代裁置信门的输入(见分诊职责)。交互会
+话可另发 `AskUserQuestion`,带标签的 issue 恒为持久记录。
+
+**摘要视图与批量决裁**(同一 2026-08-18 裁定;实施既有批量裁决 2026-08-15 原话「还是等我批量决裁
+吧。」):恒设一张钉住的摘要 issue,分诊 Routine 以通用查询 + 标记提取刷其**正文**(编辑历史即存档)
+,逐卡**逐字粘贴**标准块,⛔ 零转述;权威恒在卡上 —— 摘要是生成视图,永不是第二跟踪器(one-board 规
+则)。维护者可在摘要下一条评论批量裁多张(逐卡「编号 + 选项字母」对);分诊席把每条裁决转录回其卡,
+走既有裁决记录原子四件,引批量评论为出处。**脚本化升级触发(记录在案的出口,不是重设计)**:收件箱
+持续 >20 张 open,或刷新节奏到达每日(内联命令开始跨 fire 漂移)⇒ 把提取冻结进 `scripts/pm/` rollup 脚本。
 
 ## 护栏(Guardrails,有约束力)
 
@@ -678,5 +678,5 @@ pull(今天谁撞上;零拉动默认 defer/ remove);③ AI-agent error-resistanc
 | `scripts/pm/dispatch-gates.mjs` | 文件面 → 该跑的门禁族(派发令取数) |
 | `scripts/pm/os-regen-merge.sh` | 碰生成物 PR 的 merge 四步序(防静默吞并与锚点倒退) |
 | `scripts/pm/ensure-pm-labels.sh` | pm 标签词表的幂等创建 |
-| `check:skill-frame-sync` / `-freshness` | 三轴决策框架四份拷贝的同构与新鲜度 |
+| `check:skill-frame-sync` / `-freshness` | 四维决策框架四份拷贝的同构与新鲜度 |
 | `guard-main-checkout` / `guard-shared-stash` hooks | worktree-first 与 stash 禁令的机械面 |

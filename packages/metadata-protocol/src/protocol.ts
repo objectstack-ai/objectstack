@@ -73,6 +73,7 @@ import {
     evaluateLockForDelete,
     resolveLockState,
     type MetadataLock,
+    type MetadataLockSource,
     type MetadataProvenance,
 } from '@objectstack/spec/kernel';
 import { validateObjectNamespacePrefix, deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
@@ -2948,7 +2949,10 @@ const SERVICE_CONFIG: Record<string, {
     // removed — GraphQL is not in the product plan", #2462 follow-on). A
     // route nobody serves, for a slot that does not exist, in the table SDKs
     // and AI clients read.
-    'file-storage': { route: '/api/v1/storage' },
+    // Canonical slot since #9683 (was `file-storage`; that spelling stays a
+    // deprecated v17 registry alias, mirrored verbatim into the services map
+    // after the loop below — never a SERVICE_CONFIG row of its own).
+    storage:      { route: '/api/v1/storage' },
     search:       { route: '/api/v1/search' },
 };
 
@@ -4235,7 +4239,7 @@ export class ObjectStackProtocolImplementation implements
         // registers the service (service-storage's own `/api/v1/storage`
         // routes, plugin-search, plugin-graphql, …) rather than to a dispatcher
         // domain, so `handlerReady` there says nothing about whether THAT route
-        // is mounted, and suppressing it would be a guess. `file-storage` stays
+        // is mounted, and suppressing it would be a guess. `storage` stays
         // listed as the one entry with no dispatcher domain behind it — #4087
         // retired the `/storage` bridge — because for that slot `handlerReady`
         // is not a proxy for anything, it is the fact itself: an occupant that
@@ -4243,7 +4247,7 @@ export class ObjectStackProtocolImplementation implements
         // its behalf. When service-storage is installed it registers a real
         // (unmarked) service and mounts the routes, so the entry never fires.
         const DISPATCHER_GATED_SERVICES = new Set([
-            'analytics', 'automation', 'notification', 'ai', 'i18n', 'file-storage',
+            'analytics', 'automation', 'notification', 'ai', 'i18n', 'storage',
         ]);
         const unserveable = (serviceName: string) =>
             DISPATCHER_GATED_SERVICES.has(serviceName)
@@ -4286,6 +4290,16 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
+        // [#9683] `file-storage` is the deprecated v17 alias of the `storage`
+        // slot, and it is a key existing consumers really read off this
+        // document (objectui's console endpoint catalog is keyed by it). The
+        // registry resolves both names to the same instance, so discovery
+        // mirrors the canonical row VERBATIM under the alias key until the
+        // alias retires at the next major — dropping the key would be the
+        // silent inside-a-major break the ruling forbids. Deliberately a
+        // byte-equal copy, not a second opinion: one slot, two spellings.
+        services['file-storage'] = { ...services['storage'] };
+
         // Build routes from services — a flat convenience map for client routing
         const serviceToRouteKey: Record<string, keyof ApiRoutes> = {
             analytics: 'analytics',
@@ -4296,7 +4310,7 @@ export class ObjectStackProtocolImplementation implements
             notification: 'notifications',
             ai: 'ai',
             i18n: 'i18n',
-            'file-storage': 'storage',
+            storage: 'storage',
             // [#6633] The package-management surface. `package` is NOT a
             // CoreServiceName slot, so it must not enter SERVICE_CONFIG — a
             // non-slot row there is the shape of the retired `graphql` defect,
@@ -4414,7 +4428,7 @@ export class ObjectStackProtocolImplementation implements
             export: registeredServices.has('automation') || registeredServices.has('queue'),
             // [#5672] Serveability-gated, was presence-only. Two reasons, and
             // the second is the binding one:
-            //   1. `declared === enforced` — a self-declared stub file-storage
+            //   1. `declared === enforced` — a self-declared stub storage service
             //      mounts no HTTP surface, so this builder already withholds
             //      `routes.storage` from it; advertising chunked upload anyway
             //      promised an upload endpoint that cannot exist.
@@ -4423,7 +4437,7 @@ export class ObjectStackProtocolImplementation implements
             //      would make the two producers give the SAME host opposite
             //      answers for the SAME key — a new dialect inside the
             //      vocabulary this issue exists to unify.
-            chunkedUpload: capabilityServed('file-storage'),
+            chunkedUpload: capabilityServed('storage'),
             // Atomic cross-object batch (#3298 / #1604 / ADR-0034 item 4): the
             // REST /batch endpoint runs its ops inside `engine.transaction()`,
             // which only opens a real (all-or-nothing) transaction when the
@@ -4449,10 +4463,10 @@ export class ObjectStackProtocolImplementation implements
             // answer here, not a stand-in for one — and it matches the runtime
             // dispatcher's answer for the same reason, in the same words.
             websockets: false,
-            // Storage: the `file-storage` slot, gated on serveability rather
+            // Storage: the `storage` slot (#9683), gated on serveability rather
             // than presence — a self-declared stub mounts nothing, and this
             // builder already withholds `routes.storage` from it.
-            files: capabilityServed('file-storage'),
+            files: capabilityServed('storage'),
             analytics: capabilityServed('analytics'),
             ai: capabilityServed('ai'),
             // Slot is `notification` (singular, CoreServiceName); the capability
@@ -6081,7 +6095,14 @@ export class ObjectStackProtocolImplementation implements
         // ── ADR-0010 protection envelope ──
         lock: MetadataLock;
         lockReason?: string;
-        lockSource?: 'artifact' | 'package' | 'env-forced' | 'overlay';
+        // `MetadataLockSource` (artifact | package | env-forced) — the only
+        // producer feeding this field on this path is `resolveLockState`,
+        // whose return is typed `MetadataLockSource | undefined`. The
+        // `'overlay'` arm this annotation used to carry was dead: the one
+        // `lockSource: 'overlay'` producer in this file belongs to
+        // `getEffectiveLock`, a write/delete-door helper that never feeds
+        // this response (#9740).
+        lockSource?: MetadataLockSource;
         lockDocsUrl?: string;
         provenance?: MetadataProvenance;
         packageId?: string;
@@ -6334,6 +6355,21 @@ export class ObjectStackProtocolImplementation implements
      * prior to ADR-0010) the call returns `{ events: [] }` instead of
      * raising, keeping the Studio tab harmless.
      *
+     * [#9638] `{ events: [] }` means "the audit trail was read and this item
+     * has no entries" and NOTHING else. Exactly two causes answer it without a
+     * read: the unprovisioned table above, and a host engine that exposes no
+     * `find` (the `typeof` probe before the read). Every other failure — a
+     * connection drop, a permission denial, a timeout, a malformed row, a query
+     * bug — RAISES, because the rows may well exist and simply were not seen,
+     * and a compliance reader must never be handed "nobody touched this item"
+     * on those terms (ADR-0110 D3). The unqualified `catch` that used to report
+     * all of them as an empty trail is what this closes.
+     *
+     * @throws {@link metadataStoreUnavailableError} — a 503 carrying the driver
+     *         error as `cause`, for every read failure that is not an
+     *         unprovisioned table. The `/audit` route's existing
+     *         `handleRouteError` turns it into an honest 5xx.
+     *
      * `organizationId` SCOPES the read and is enforced in the query below:
      * rows for that organization plus env-wide (`organization_id IS NULL`)
      * rows, and nothing else. Omitted (or `null`) reads the env-wide rows
@@ -6437,6 +6473,35 @@ export class ObjectStackProtocolImplementation implements
         // organization reads exactly the env-wide rows an org-less write
         // produces. Fail-closed, and symmetric with the write path.
         const organizationId = request.organizationId ?? null;
+        // [#9638] The FIRST of the two benign causes the catch below used to
+        // name, asked as a PRECONDITION rather than as an error shape.
+        //
+        // `MetadataHostEngine` carries `[key: string]: any`, so a metadata-only
+        // store or a partial test double with no `find` satisfies the type and
+        // reaches here. That is a real, documented deployment shape and it must
+        // keep answering `{ events: [] }`.
+        //
+        // ⚠️ Asked HERE, before the `try`, because it cannot be asked soundly
+        // INSIDE the catch. Measured: a missing method raises
+        // `TypeError: this.engine.find is not a function`, which
+        // `isMissingTableError` correctly reports as NOT benign — but the only
+        // signal separating it from a genuine `TypeError` raised *inside* a
+        // real driver's `find` (a malformed row, a null deref — actual faults)
+        // is the V8 message text. Sniffing that text would re-open exactly the
+        // fail-open this card closes, one error class narrower. A `typeof`
+        // probe is a fact about the engine, not a guess about an error, so it
+        // cannot misclassify a fault as a capability gap.
+        //
+        // Same shape as the sibling limb one layer up: the `/audit` route's own
+        // capability probe (`typeof p.auditMetaItem !== 'function'`, #9426)
+        // likewise decides BEFORE the call rather than classifying its failure.
+        if (typeof (this.engine as { find?: unknown }).find !== 'function') {
+            console.warn(
+                `[Protocol] auditMetaItem: host engine exposes no \`find\`; `
+                + `reporting no audit entries for ${request.type}/${request.name}`,
+            );
+            return { events: [] };
+        }
         try {
             // Org-scoped lookup: include rows for the specific org AND
             // env-wide (organization_id IS NULL) rows so the editor
@@ -6496,8 +6561,31 @@ export class ObjectStackProtocolImplementation implements
             }));
             return { events };
         } catch (err: any) {
-            // Table not provisioned (legacy env) or driver doesn't
-            // expose `find` — return empty rather than 500ing the tab.
+            // [#9638] Benign (the table has not been provisioned in this legacy
+            // env) falls through to the empty answer; everything else is a read
+            // that DID NOT HAPPEN and leaves as a 503. Byte-for-byte the shape
+            // the sibling {@link listCommits} carries (#5980), and the same
+            // {@link isMissingTableError} predicate `DatabaseLoader` (#5108) and
+            // `SysMetadataRepository` (#4867) ask — a driver quirk is taught to
+            // the platform once rather than re-spelled per seam.
+            //
+            // This `catch` used to be UNQUALIFIED. A connection drop, a
+            // permission denial, a malformed row, a query bug or a timeout was
+            // reported to the caller as the well-formed statement "this item has
+            // no audit entries" — ADR-0110 D3 broken (a miss and a fault are
+            // different facts) on the COMPLIANCE surface. `auditMetaItem` is the
+            // read behind `GET /api/v1/meta/:type/:name/audit`, which exists so
+            // Studio's 审计日志 tab can show who tried what and whether a lock
+            // blocked it; an empty answer there reads as *nobody touched this
+            // item*. Worse than the static capability gap #9426 fixed one layer
+            // up, because a transient read failure makes the same item report a
+            // full trail one minute and a clean one the next. The `console.warn`
+            // below is on the SERVER; it was never an answer to the reader.
+            //
+            // The second cause the old comment named — a host engine with no
+            // `find` — is decided by the precondition probe above the `try`, so
+            // it never reaches here and this arm has exactly ONE benign cause.
+            this.rethrowUnlessMetadataStoreUnprovisioned(err);
             console.warn(
                 `[Protocol] auditMetaItem read failed for ${request.type}/${request.name}: ${err?.message ?? err}`,
             );
@@ -9244,7 +9332,18 @@ export class ObjectStackProtocolImplementation implements
     // Metadata Caching
     // ==========================================
 
-    async getMetaItemCached(request: { type: string, name: string, cacheRequest?: MetadataCacheRequest, locale?: string }): Promise<MetadataCacheResponse> {
+    /**
+     * [#9454] `organizationId` — the sole meta read verb that could not express
+     * an org, which is why the CACHED door (`view` and every org-overridable
+     * type that is not `dashboard`) served nothing back after a runtime `PUT`.
+     * Its siblings `getMetaItem` / `getMetaItems` / `getMetaItemLayered` have
+     * carried the member all along; this one hard-coded a two-key delegation
+     * and dropped whatever the caller knew. Threaded into `getMetaItem` below,
+     * so the ADR-0005 read order (`sys_metadata` org row → env-wide row →
+     * registry → MetadataService) is honoured at the same scope the caller
+     * named — the whole reason this method delegates rather than re-reading.
+     */
+    async getMetaItemCached(request: { type: string, name: string, cacheRequest?: MetadataCacheRequest, locale?: string, organizationId?: string }): Promise<MetadataCacheResponse> {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. The ETag
         // and the cache entry are keyed by type, so two spellings would cache
         // the same item twice and invalidate only one of them.
@@ -9253,7 +9352,18 @@ export class ObjectStackProtocolImplementation implements
             // Delegate to getMetaItem so the customization-overlay read order
             // (sys_metadata → registry → MetadataService) is honoured here too
             // (ADR-0005). Without this, cached reads silently bypass overlays.
-            const result = await this.getMetaItem({ type: request.type, name: request.name });
+            const result = await this.getMetaItem({
+                type: request.type,
+                name: request.name,
+                // [#9454] Spread, not an unconditional member: `getMetaItem`
+                // branches on `organizationId !== undefined`, so passing an
+                // explicit `undefined` is not the same statement as passing
+                // nothing. Mirrors the conditional-spread idiom the REST read
+                // doors use to reach here.
+                ...(request.organizationId !== undefined
+                    ? { organizationId: request.organizationId }
+                    : {}),
+            });
             const item = (result as any)?.item;
 
             if (!item) {
@@ -9284,8 +9394,36 @@ export class ObjectStackProtocolImplementation implements
             // carrying a stale-locale body — labels/headers stuck in the old
             // language until a hard refresh (issue #1319). Folding the resolved
             // locale into the hash gives each locale a distinct validator.
+            //
+            // [#9454] The ETag MUST also state the ORGANIZATION scope, and the
+            // mechanism differs from `locale` above in a way worth stating
+            // rather than glossing. `locale` is INVISIBLE to the hash (the body
+            // is translated AFTER this runs), so folding it in was the only way
+            // it could vary the validator at all. `organizationId` is VISIBLE —
+            // the org-resolved document is the very thing hashed — so two orgs
+            // whose overlays differ already get different validators, and no
+            // leak is claimed here: `Cache-Control` is `private, no-cache` and
+            // there is no server-side cache ENTRY keyed by type+name.
+            //
+            // It is folded in anyway because that makes the scope a DECLARED
+            // property of the validator instead of an emergent property of the
+            // body. Two orgs whose documents are byte-identical today share a
+            // validator by coincidence, not by statement; and any future path
+            // that resolves an org row but falls back to the env-wide body
+            // would answer a 304 pinning the caller to a wrong-scope document
+            // with nothing in the validator to show it. Prepended, and ONLY
+            // when present, so an org-less caller's validator stays byte-for-
+            // byte the one it is issued today.
             const content = JSON.stringify(item);
-            const hash = simpleHash(request.locale ? `${request.locale}\u0000${content}` : content);
+            const scope = [
+                request.organizationId ? `org:${request.organizationId}` : undefined,
+                request.locale || undefined,
+            ].filter((part): part is string => part !== undefined);
+            const hash = simpleHash(
+                scope.length > 0
+                    ? `${scope.join('\u0000')}\u0000${content}`
+                    : content,
+            );
             const etag = { value: hash, weak: false };
 
             // Check If-None-Match header

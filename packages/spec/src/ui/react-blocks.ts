@@ -199,6 +199,33 @@ export const REACT_BLOCKS: ReactBlockDef[] = [
       { name: 'recordId', type: 'string | number', kind: 'controlled', description: 'Which record to load (edit/view). The hook for master/detail.' },
       { name: 'fields', type: 'string[]', kind: 'binding', description: 'Limit/order the fields shown (defaults to the object form fields).' },
       { name: 'initialValues', type: 'Record<string, any>', kind: 'binding', description: 'Prefill values in create mode.' },
+      // #9392 — catch-up with the registry inputs objectui#4648/#4901 published
+      // for keys ObjectFormRenderer already read (descriptions adapted from the
+      // `object-form` registration in objectui `plugin-form/src/index.tsx`, the
+      // one registration both parity channels enumerate). Published from the
+      // OVERLAY, not FormViewSchema `dataProps`, for the same reason as
+      // `<ObjectChart drillDown>` above: FormViewSchema is also what a
+      // declarative form VIEW parses, and only the react/registry tier
+      // measurably reads these. Three registry inputs are deliberately NOT
+      // declared (baselined in react-declaration-parity.baseline.json):
+      // `initialData` (alias spelling of `initialValues` — aliases are not
+      // promoted into spec), `mobile` (internal override, not an authoring
+      // surface), `navigateOnSuccess` (parked pending the action-success-
+      // navigation family ruling — see the baseline note on #9392).
+      { name: 'customFields', type: 'any[]', kind: 'binding', description: 'Field definitions merged over the set generated from object metadata. With inline definitions and no data source, this becomes the only field source.' },
+      { name: 'readOnly', type: 'boolean', kind: 'binding', description: 'Render every field read-only, whatever `mode` says.' },
+      { name: 'modalCloseButton', type: 'boolean', kind: 'binding', description: "Show the modal presentation's close button (formType 'modal'; honoured by the modal form)." },
+      { name: 'contentLayout', type: "'simple' | 'tabbed'", kind: 'binding', description: "How the modal presentation lays out sections; 'tabbed' needs more than one section to differ from 'simple'." },
+      { name: 'confirmOnDiscard', type: 'boolean', kind: 'binding', description: 'Ask before discarding unsaved edits when a drawer/modal form is dismissed. Set false to close immediately.' },
+      { name: 'submitText', type: 'string', kind: 'binding', description: 'Label of the submit button.' },
+      { name: 'cancelText', type: 'string', kind: 'binding', description: 'Label of the cancel button.' },
+      { name: 'nextText', type: 'string', kind: 'binding', description: 'Label of the next-step button (wizard).' },
+      { name: 'prevText', type: 'string', kind: 'binding', description: 'Label of the previous-step button (wizard).' },
+      { name: 'showSubmit', type: 'boolean', kind: 'binding', description: 'Show the submit button.' },
+      { name: 'showCancel', type: 'boolean', kind: 'binding', description: 'Show the cancel button.' },
+      { name: 'showReset', type: 'boolean', kind: 'binding', description: 'Show the reset button.' },
+      { name: 'successMessage', type: 'string', kind: 'binding', description: 'Toast shown after a successful submit. Ignored when `submitBehavior` is set.' },
+      { name: 'resetOnSuccess', type: 'boolean', kind: 'binding', description: 'Clear the form after a successful submit instead of keeping the saved values.' },
       { name: 'onSuccess', type: '(record) => void', kind: 'callback', description: 'Called after a successful save with the saved record (e.g. close a panel + reload).' },
       { name: 'onError', type: '(error: Error) => void', kind: 'callback', description: 'Called when the save fails.' },
       { name: 'onCancel', type: '() => void', kind: 'callback', description: 'Called when the user cancels.' },

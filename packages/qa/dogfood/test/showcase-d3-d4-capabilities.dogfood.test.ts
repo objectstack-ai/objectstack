@@ -4,6 +4,16 @@
 //   • ADR-0058 D3 / #1887 — a COMPOUND sharing `condition` (`&&`) compiles to a
 //     compound criteria_json and enforces (the AND matters; before #1887 it was
 //     silently skipped).
+//
+//     [#9237] The compound rule moved from `showcase_project` to
+//     `showcase_contact`, and the D3 proof got its missing half with it. On
+//     `showcase_project` (OWD `public_read_write`) sharing has nothing to
+//     widen, so every grant the rule reconciled was REFUSED
+//     (`SHARING_NOT_ENABLED`, ADR-0111 D7) — this file could assert the
+//     criteria compiled and matched, and never that anything was ENFORCED,
+//     while its own header claimed both. `showcase_contact` is OWD `private`,
+//     so the grant lands and the enforcement half is now measured rather than
+//     implied.
 //   • ADR-0058 D4 — an RLS `check` clause validates the write POST-IMAGE: a
 //     contributor cannot reassign an invoice they own to a different owner.
 //
@@ -16,6 +26,8 @@ import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plug
 import { PermissionSetSchema } from '@objectstack/spec/security';
 
 const MEMBER = 'd34-member@verify.test';
+/** The showcase's compound (ADR-0058 D3) sharing rule — re-homed by #9237. */
+const RULE = 'share_key_account_qualified_contacts_with_managers';
 const SYS = { context: { isSystem: true } } as const;
 
 // Member set: invoice CRUD + an OWNER read/pre-image policy AND the D4 CHECK
@@ -25,7 +37,7 @@ const memberSet = PermissionSetSchema.parse({
   name: 'showcase_d34_member',
   label: 'D3/D4 Member',
   objects: {
-    showcase_project: { allowRead: true },
+    showcase_contact: { allowRead: true },
     showcase_invoice: { allowRead: true, allowCreate: true, allowEdit: true },
   },
   rowLevelSecurity: [
@@ -55,10 +67,12 @@ describe('showcase: D3 compound sharing (#1887) + D4 RLS check', () => {
     const idOf = (r: any) => r?.id ?? r?.record?.id ?? r;
     const acct = idOf(await ql.insert('showcase_account', { name: 'D34 Co', status: 'prospect' }, SYS));
 
-    // Three projects: only the at-risk (red) AND high-budget (>100k) one matches.
-    await ql.insert('showcase_project', { id: 'pj_red_hi', name: 'Red-Hi', account: acct, status: 'planned', health: 'red', budget: 250000 }, SYS);
-    await ql.insert('showcase_project', { id: 'pj_red_lo', name: 'Red-Lo', account: acct, status: 'planned', health: 'red', budget: 40000 }, SYS);
-    await ql.insert('showcase_project', { id: 'pj_grn_hi', name: 'Grn-Hi', account: acct, status: 'planned', health: 'green', budget: 250000 }, SYS);
+    // Three contacts: only the `qualified` AND key-account ('Northwind') one
+    // matches. The other two each satisfy exactly ONE clause, so the AND is
+    // measured in both directions rather than one.
+    await ql.insert('showcase_contact', { id: 'ct_q_key', name: 'Q-Key', email: 'q.key@d34.example', company: 'Northwind', stage: 'qualified' }, SYS);
+    await ql.insert('showcase_contact', { id: 'ct_q_other', name: 'Q-Other', email: 'q.other@d34.example', company: 'Contoso', stage: 'qualified' }, SYS);
+    await ql.insert('showcase_contact', { id: 'ct_new_key', name: 'New-Key', email: 'new.key@d34.example', company: 'Northwind', stage: 'new' }, SYS);
 
     // An invoice owned by the member (system insert sidesteps authoring rules).
     invId = idOf(await ql.insert('showcase_invoice', { name: 'INV-D34', account: acct, owner: MEMBER, status: 'draft' }, SYS));
@@ -68,26 +82,54 @@ describe('showcase: D3 compound sharing (#1887) + D4 RLS check', () => {
 
   // ── ADR-0058 D3 / #1887 ────────────────────────────────────────────────────
   it('compound sharing condition is SEEDED as a compound criteria_json (not skipped)', async () => {
-    const rule = await ql.findOne('sys_sharing_rule', { where: { name: 'share_high_value_red_projects_with_managers' }, context: SYS.context });
+    const rule = await ql.findOne('sys_sharing_rule', { where: { name: RULE }, context: SYS.context });
     expect(rule, 'compound rule was seeded').toBeTruthy();
     expect(JSON.parse(rule.criteria_json)).toEqual({
-      $and: [{ health: 'red' }, { budget: { $gt: 100000 } }],
+      $and: [{ stage: 'qualified' }, { company: 'Northwind' }],
     });
   });
 
-  it('the compound criteria_json matches ONLY the project satisfying BOTH clauses', async () => {
-    const rule = await ql.findOne('sys_sharing_rule', { where: { name: 'share_high_value_red_projects_with_managers' }, context: SYS.context });
+  it('the compound criteria_json matches ONLY the contact satisfying BOTH clauses', async () => {
+    const rule = await ql.findOne('sys_sharing_rule', { where: { name: RULE }, context: SYS.context });
     const criteria = JSON.parse(rule.criteria_json);
-    // Apply the SEEDED compound criteria to our three projects: only red-AND-high passes.
-    const hit = await ql.find('showcase_project', {
-      where: { $and: [criteria, { id: { $in: ['pj_red_hi', 'pj_red_lo', 'pj_grn_hi'] } }] },
+    // Apply the SEEDED compound criteria to our three contacts: only qualified-AND-key passes.
+    const hit = await ql.find('showcase_contact', {
+      where: { $and: [criteria, { id: { $in: ['ct_q_key', 'ct_q_other', 'ct_new_key'] } }] },
       fields: ['id'], context: SYS.context,
     });
-    expect((hit ?? []).map((r: any) => r.id).sort()).toEqual(['pj_red_hi']);
+    expect((hit ?? []).map((r: any) => r.id).sort()).toEqual(['ct_q_key']);
     // The rule also evaluates end-to-end (matched count includes seed data).
     const rules: any = stack.kernel.getService('sharingRules');
-    const res = await rules.evaluateRule('share_high_value_red_projects_with_managers', SYS.context);
-    expect(res.matchedRecords, 'rule is evaluable + at least Red-Hi matches').toBeGreaterThanOrEqual(1);
+    const res = await rules.evaluateRule(RULE, SYS.context);
+    expect(res.matchedRecords, 'rule is evaluable + at least Q-Key matches').toBeGreaterThanOrEqual(1);
+  });
+
+  it('[#9237] the grant the rule reconciles is one the gates CONSULT — not refused as inert', async () => {
+    // The half this proof could never carry on `showcase_project`. The verdict
+    // is caller-independent (ADR-0111 D7) and computed from the OWD alone, so
+    // it is asserted directly rather than inferred from a reconcile count that
+    // an empty recipient expansion would leave silently at zero — which is
+    // exactly how the sibling rule on `showcase_project` produced no boot WARN
+    // while being just as dead.
+    const sharing: any = await stack.kernel.getServiceAsync('sharing');
+    const granted = await sharing.grant(
+      { object: 'showcase_contact', recordId: 'ct_q_key', recipientType: 'user', recipientId: 'u_d34_probe', accessLevel: 'read' },
+      { isSystem: true },
+    );
+    expect(granted, 'a share row on a private-OWD object is accepted').toBeTruthy();
+
+    // The contrast that names the retired rules' defect, on the object they
+    // used to sit on: same call, same caller, refused for the OWD alone. The
+    // record id deliberately names no row — the D7 verdict is computed from
+    // the OBJECT before any record is read, which is precisely why it is
+    // caller- and record-independent. Both the code and the object are
+    // asserted, so a refusal arriving for some other reason cannot pass.
+    await expect(
+      sharing.grant(
+        { object: 'showcase_project', recordId: 'pj_absent', recipientType: 'user', recipientId: 'u_d34_probe', accessLevel: 'read' },
+        { isSystem: true },
+      ),
+    ).rejects.toThrow(/SHARING_NOT_ENABLED: 'showcase_project' is not under record-sharing enforcement/);
   });
 
   // ── ADR-0058 D4 ────────────────────────────────────────────────────────────

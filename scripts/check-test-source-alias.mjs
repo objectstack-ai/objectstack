@@ -136,6 +136,43 @@
 // same configs are already read fail-closed by step 3 for every specifier the
 // consumer writes itself.
 //
+// ── The latent half: PUBLISHED subpaths, judged without waiting (#9674) ─────
+//
+// Rule 5 above waits for a specifier to be REACHED — by this package's own
+// files or, since #8351, by an aliased dependency's source. That is the right
+// domain for a verdict about what a suite resolves TODAY, and it is why the
+// gate stayed green over eleven mangled (config, subpath) pairs: seven configs
+// alias bare `@objectstack/core` with no `/logger` entry, four alias bare
+// `@objectstack/types` with no `/node` entry, and no test graph had reached
+// either specifier yet. Nothing was wrong with rule 5; the pairs were simply
+// outside the question it asks.
+//
+// So there is a second, reachability-INDEPENDENT rule, and its population comes
+// from the DEPENDENCY rather than from any import: every subpath a workspace
+// package PUBLISHES in its own `exports` map is resolved through every config's
+// alias table, and a resolution that passes through a file extension fails.
+// A table is then judged on what it would do, not on what a test has happened
+// to ask it for — which is the difference between a gate and a coincidence.
+//
+// Two boundaries, stated so they are not rediscovered as bugs:
+//
+//   - It checks only the THROUGH-A-FILE shape, never "does this land on an
+//     existing file". `asPath` reads a replacement as a FRAGMENT (see its
+//     notes), so the template spelling `path.join(path.resolve(__dirname,
+//     '../..'), 'spec/src/$1/index.ts')` cannot be turned into an absolute path
+//     here at all; requiring existence would report every config using it. The
+//     through-a-file shape needs no filesystem and no base directory — it is a
+//     property of the string the alias produces.
+//   - It therefore cannot see a namespace-capture rule misrouting a FILE-shaped
+//     subpath (`@objectstack/core/logger` → `src/logger/index.ts`): that result
+//     still reads as source. It is the reason the fix for `core` and `types` is
+//     an enumerated subpath entry rather than one capture rule, and the reason
+//     their bare entries stay PREFIX matches: a published subpath this table
+//     does not list resolves through a file, which this rule reads statically
+//     and run time reports loudly. Anchoring the bare entry instead would send
+//     it silently to `dist/` — the vacuous-green direction this whole file
+//     exists to refuse.
+//
 // ── The registry, and why it is shaped like this ────────────────────────────
 //
 // `KNOWN_UNALIASED_TEST_IMPORTS` is the measured state of the repo on the day
@@ -448,6 +485,23 @@ function listWorkspacePackages(root) {
 function resolvesToArtifact(json) {
   const targets = JSON.stringify([json.main ?? '', json.module ?? '', json.types ?? '', json.exports ?? '']);
   return /(^|[^a-z])dist\//.test(targets);
+}
+
+/**
+ * The subpath specifiers a package PUBLISHES, read from its own `exports` map —
+ * the population of the reachability-independent rule (see the header).
+ *
+ * `./package.json` is dropped (a manifest is not a module), and so is any
+ * pattern key: `./*` names a set no static reader can enumerate, and inventing
+ * a member of it would be exactly the fabricated path `remediationHint` refuses
+ * to print. A package with no `exports` map publishes no subpath at all.
+ */
+function publishedSubpaths(json, name) {
+  const map = json.exports;
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return [];
+  return Object.keys(map)
+    .filter((key) => key.startsWith('./') && key !== './package.json' && !key.includes('*'))
+    .map((key) => name + key.slice(1));
 }
 
 function walkFiles(dir, acc = []) {
@@ -1096,7 +1150,8 @@ function sourceTargetFor(spec, packageDirs, consumerDir) {
 // ── the scan ────────────────────────────────────────────────────────────────
 
 /**
- * @returns {{ packages: Array, artifactPackages: Set<string>, totalPackages: number }}
+ * @returns {{ packages: Array, artifactPackages: Set<string>, totalPackages: number,
+ *            configTraps: Array, publishedCount: number }}
  */
 function scan(root) {
   // Per-scan, not per-process: `--self-test` rewrites fixture files BETWEEN
@@ -1107,8 +1162,13 @@ function scan(root) {
   const names = new Set(workspace.map((p) => p.name));
   const artifactPackages = new Set(workspace.filter((p) => resolvesToArtifact(p.json)).map((p) => p.name));
   const packageDirs = new Map(workspace.map((p) => [p.name, p.dir]));
+  // Every subpath this workspace publishes, from the manifests rather than from
+  // any import — the population the reachability-independent rule is judged on.
+  const published = workspace.flatMap((p) => publishedSubpaths(p.json, p.name));
 
   const packages = [];
+  /** Per-config latent traps: a published subpath this table would mangle. */
+  const configTraps = [];
   for (const pkg of workspace) {
     // The config is read BEFORE the walk now: the alias list is what decides
     // where the walk is allowed to leave the package, so it cannot be read
@@ -1123,6 +1183,21 @@ function scan(root) {
         if (!(error instanceof UnreadableConfig)) throw error;
         unreadable = error.message;
       }
+    }
+
+    // The reachability-INDEPENDENT rule, run here rather than after the walk
+    // because it does not need one: the population is the dependency's export
+    // map. Deliberately ahead of the `!reachable` bail-out too — a config in a
+    // package with no test files still resolves specifiers for whoever aliases
+    // INTO it, and a table nobody exercises is where this trap survives longest.
+    if (entries.length > 0) {
+      const traps = [];
+      for (const spec of published) {
+        const resolved = resolveThroughAliases(spec, entries);
+        if (!resolved || !THROUGH_A_FILE.test(resolved.result)) continue;
+        traps.push({ spec, result: resolved.result, suggest: sourceTargetFor(spec, packageDirs, pkg.dir) });
+      }
+      if (traps.length > 0) configTraps.push({ rel: pkg.rel, configPath: relative(root, configPath), traps });
     }
 
     const crossInto =
@@ -1185,7 +1260,7 @@ function scan(root) {
     });
   }
 
-  return { packages, artifactPackages, totalPackages: workspace.length };
+  return { packages, artifactPackages, totalPackages: workspace.length, configTraps, publishedCount: published.length };
 }
 
 // ── the gate ────────────────────────────────────────────────────────────────
@@ -1281,7 +1356,7 @@ function remediationHint(pkg, deps) {
 
 function check(root, registry) {
   const failures = [];
-  const { packages, artifactPackages, totalPackages } = scan(root);
+  const { packages, artifactPackages, totalPackages, configTraps, publishedCount } = scan(root);
 
   // Census guard. Every reading below is a scan result, and a scan that has
   // quietly stopped matching reports a spotless repo — the #4868 family. Zero
@@ -1290,6 +1365,10 @@ function check(root, registry) {
   if (artifactPackages.size === 0)
     failures.push('scanner found NO package resolving to `dist/` — entry-point detection is broken, not the repo');
   if (packages.length === 0) failures.push('scanner found NO package with test files — test discovery is broken, not the repo');
+  if (publishedCount === 0)
+    failures.push(
+      'scanner found NO package publishing a subpath export — the `exports` read is broken, not the repo',
+    );
 
   const measured = new Map(packages.filter((p) => p.unaliased.length > 0).map((p) => [p.name, p.unaliased]));
 
@@ -1310,6 +1389,32 @@ function check(root, registry) {
             : '') +
           '    The object alias form matches by PREFIX. Anchor the pattern with the array form\n' +
           `    (\`{ find: /^${escapeForRegexLiteral(trap.spec)}$/, replacement: … }\`) or list the subpath entry BEFORE the bare one.`,
+      );
+    }
+  }
+
+  // The latent half. Deduped against rule 5 on purpose: when a test really does
+  // reach the specifier, rule 5's finding is the stronger one — it carries HOW
+  // the specifier arrives (this package's own file, or an aliased dependency's
+  // source) — and two failures for one edit is how a gate teaches people to skim.
+  const reportedByReach = new Set(packages.flatMap((p) => p.throughAFile.map((t) => `${p.rel} :: ${t.spec}`)));
+  for (const entry of configTraps) {
+    for (const trap of entry.traps) {
+      if (reportedByReach.has(`${entry.rel} :: ${trap.spec}`)) continue;
+      failures.push(
+        `${entry.rel}: alias table would resolve the PUBLISHED subpath \`${trap.spec}\` to \`${trap.result}\` — ` +
+          'a path THROUGH a file (ENOTDIR at run time).\n' +
+          '    Latent, not currently failing: no test reaches that specifier from this package yet, which is\n' +
+          '    the only reason the reachability rule above is silent about it. The failure lands on whoever\n' +
+          '    first writes the import — inside a module one package away from this table, naming a path\n' +
+          '    nobody wrote.\n' +
+          `    \`${trap.spec}\` is read from \`${barePackageOf(trap.spec)}\`'s own \`exports\` map, so a subpath this\n` +
+          '    table does not list cannot go unnoticed. List it BEFORE the bare entry (array form):\n' +
+          `      { find: /^${escapeForRegexLiteral(trap.spec)}$/, ` +
+          `replacement: path.resolve(__dirname, '${trap.suggest ?? UNMEASURED_TARGET}') },\n` +
+          '    ⛔ Do NOT anchor the bare entry instead. Anchoring stops the mangling by stopping the MATCH:\n' +
+          '    the subpath then resolves through `exports` to `dist/`, silently, and a stale artifact decides\n' +
+          "    the verdict — the failure this file's header opens with.",
       );
     }
   }
@@ -1363,7 +1468,7 @@ function check(root, registry) {
     );
   }
 
-  return { failures, packages, measured };
+  return { failures, packages, measured, publishedCount };
 }
 
 // ── reporting ───────────────────────────────────────────────────────────────
@@ -1650,6 +1755,75 @@ function buildFixtureTree() {
       '} } };\n',
   });
 
+  // ── (16-19) THE LATENT HALF (#9674) ───────────────────────────────────────
+  //
+  // The reachability-independent rule. `@fx/publisher` PUBLISHES `./leaf` in its
+  // export map and serves it from a FILE, so a bare prefix entry for the package
+  // mangles it — whether or not anything imports it. On the real repo that shape
+  // sat green over eleven (config, subpath) pairs: rule 5 asks what a suite
+  // resolves today, and none of those specifiers had been reached yet.
+  fixture(root, 'packages/publisher', {
+    'package.json': JSON.stringify(
+      {
+        name: '@fx/publisher',
+        main: 'dist/index.js',
+        exports: { '.': { import: './dist/index.js' }, './leaf': { import: './dist/leaf.js' } },
+      },
+      null,
+      2,
+    ),
+    'src/index.ts': 'export const published = 1;\n',
+    'src/leaf.ts': 'export const leaf = 1;\n',
+  });
+
+  // (16) violating, and INVISIBLE to rule 5: no file here — and nothing this
+  // config aliases — writes `@fx/publisher/leaf`. The table is judged on what it
+  // would do with the specifier, not on whether anyone has asked yet.
+  fixture(root, 'packages/latent-prefix-trap', {
+    'package.json': ARTIFACT_MANIFEST('@fx/latent-prefix-trap'),
+    'src/thing.test.ts': "import { published } from '@fx/publisher';\nexport default published;\n",
+    'vitest.config.ts':
+      "import path from 'path';\nexport default { resolve: { alias: [\n" +
+      "  { find: '@fx/publisher', replacement: path.resolve(__dirname, '../publisher/src/index.ts') },\n" +
+      '] } };\n',
+  });
+
+  // (17) the negative control that keeps (16) honest: the published subpath
+  // listed ahead of the bare entry, which is the whole remediation.
+  fixture(root, 'packages/latent-prefix-fixed', {
+    'package.json': ARTIFACT_MANIFEST('@fx/latent-prefix-fixed'),
+    'src/thing.test.ts': "import { published } from '@fx/publisher';\nexport default published;\n",
+    'vitest.config.ts':
+      "import path from 'path';\nexport default { resolve: { alias: [\n" +
+      "  { find: /^@fx\\/publisher\\/leaf$/, replacement: path.resolve(__dirname, '../publisher/src/leaf.ts') },\n" +
+      "  { find: '@fx/publisher', replacement: path.resolve(__dirname, '../publisher/src/index.ts') },\n" +
+      '] } };\n',
+  });
+
+  // (18) …and when a test DOES reach the specifier, it is reported ONCE. Rule 5's
+  // finding is the stronger of the two — it carries how the specifier arrives —
+  // so the latent rule must stand down rather than restate it.
+  fixture(root, 'packages/latent-prefix-reached', {
+    'package.json': ARTIFACT_MANIFEST('@fx/latent-prefix-reached'),
+    'src/thing.test.ts': "import { leaf } from '@fx/publisher/leaf';\nexport default leaf;\n",
+    'vitest.config.ts':
+      "import path from 'path';\nexport default { resolve: { alias: [\n" +
+      "  { find: '@fx/publisher', replacement: path.resolve(__dirname, '../publisher/src/index.ts') },\n" +
+      '] } };\n',
+  });
+
+  // (19) a config in a package with NO test files. It resolves nothing itself,
+  // but it is a table like any other, and one nobody exercises is where this
+  // trap survives longest — the scan bails out on `!reachable` AFTER this rule.
+  fixture(root, 'packages/latent-no-tests', {
+    'package.json': ARTIFACT_MANIFEST('@fx/latent-no-tests'),
+    'src/index.ts': "export const untested = 1;\n",
+    'vitest.config.ts':
+      "import path from 'path';\nexport default { resolve: { alias: [\n" +
+      "  { find: '@fx/publisher', replacement: path.resolve(__dirname, '../publisher/src/index.ts') },\n" +
+      '] } };\n',
+  });
+
   return root;
 }
 
@@ -1862,12 +2036,68 @@ function selfTest() {
       'a specifier appearing only inside a JSDoc example was read as a real import',
     );
 
+    // ── the latent half (#9674) ───────────────────────────────────────────
+    // Judged without a reader: the population is the dependency's export map.
+    expect(
+      cross.failures.some((f) => f.includes('packages/latent-prefix-trap') && f.includes('@fx/publisher/leaf')),
+      'a published subpath the bare prefix entry would mangle went unreported because no test reaches it',
+    );
+    expect(
+      cross.failures.some((f) => f.includes('packages/latent-prefix-trap') && f.includes('Latent, not currently failing')),
+      'the latent finding did not say it is latent — read as a live failure, it sends the reader hunting a red suite',
+    );
+    // The remediation must be the one that keeps the trap detectable, not the
+    // one that hides it: anchoring the bare entry sends the subpath to `dist/`.
+    expect(
+      cross.failures.some((f) => f.includes('packages/latent-prefix-trap') && f.includes('Do NOT anchor the bare entry')),
+      'the latent finding did not warn off anchoring the bare entry, the fix that silences it by silencing the match',
+    );
+    expect(
+      cross.failures.some(
+        (f) => f.includes('packages/latent-prefix-trap') && f.includes("find: /^@fx\\/publisher\\/leaf$/"),
+      ),
+      'the latent finding printed no anchored subpath entry to add',
+    );
+    expect(
+      !has(cross.failures, 'packages/latent-prefix-fixed'),
+      'a table listing the published subpath ahead of the bare entry was reported anyway',
+    );
+    // A config in a package with no tests is still a table.
+    expect(
+      cross.failures.some((f) => f.includes('packages/latent-no-tests') && f.includes('@fx/publisher/leaf')),
+      'a config in a package with no test files was skipped — the bail-out ran before the rule',
+    );
+    // Deduped: one edit, one failure.
+    expect(
+      cross.failures.filter((f) => f.includes('packages/latent-prefix-reached') && f.includes('@fx/publisher/leaf'))
+        .length === 1,
+      'a subpath a test really reaches was reported twice — by the reachability rule and by the latent one',
+    );
+    expect(
+      cross.failures.some(
+        (f) => f.includes('packages/latent-prefix-reached') && f.includes('ENOTDIR at run time') && !f.includes('Latent'),
+      ),
+      'a reached subpath lost rule 5\'s finding — the dedupe dropped the stronger of the two',
+    );
+
+    // The population the green line prints has to BE a number. `check()` returning
+    // it under a different name still passes every failure assertion above and
+    // reports `undefined published subpath(s)` — a census nobody can read.
+    expect(
+      typeof cross.publishedCount === 'number' && cross.publishedCount > 0,
+      'the published-subpath population is not returned as a positive number — the green line\'s census is unreadable',
+    );
+
     // Census guard: an empty tree is a broken scanner, never a clean repo.
     const empty = join(tmpdir(), `os-test-source-alias-empty-${process.pid}`);
     rmSync(empty, { recursive: true, force: true });
     mkdirSync(empty, { recursive: true });
     const emptyResult = check(empty, {});
     expect(has(emptyResult.failures, 'the scan is broken'), 'an empty tree did not trip the census guard');
+    expect(
+      has(emptyResult.failures, 'publishing a subpath export'),
+      'an empty tree did not trip the published-subpath census guard — a population that silently went to zero',
+    );
     rmSync(empty, { recursive: true, force: true });
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1889,7 +2119,7 @@ if (argv.includes('--self-test')) {
 } else if (argv.includes('--list')) {
   printList(REPO_ROOT);
 } else {
-  const { failures, packages, measured } = check(REPO_ROOT, KNOWN_UNALIASED_TEST_IMPORTS);
+  const { failures, packages, measured, publishedCount } = check(REPO_ROOT, KNOWN_UNALIASED_TEST_IMPORTS);
   if (failures.length > 0) {
     console.error('check-test-source-alias FAILED\n');
     for (const failure of failures) console.error(`  ✗ ${failure}\n`);
@@ -1901,6 +2131,7 @@ if (argv.includes('--self-test')) {
   }
   console.log(
     `check-test-source-alias OK — ${packages.length} packages with tests scanned; ` +
-      `${measured.size} registered as still resolving a workspace dep through \`dist/\`.`,
+      `${measured.size} registered as still resolving a workspace dep through \`dist/\`; ` +
+      `${publishedCount} published subpath(s) resolved through every alias table.`,
   );
 }

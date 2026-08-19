@@ -245,9 +245,16 @@ export class MetadataPlugin implements Plugin {
     private lastParsedMetadata?: Record<string, unknown[]>;
 
     constructor(options: MetadataPluginOptions = {}) {
+        // Documented default: `watch: false` (see {@link MetadataPluginOptions.watch}).
+        // Normalized here rather than spelled `{ watch: false, ...options }` because a
+        // spread preserves an explicitly-passed `watch: undefined` verbatim, and not
+        // every read of this flag routes through the nullish fallback below — the
+        // `start()`-time FileSystemRepository `disableWatch` keys on `=== false`. Coercing
+        // once here makes the omitted key and an explicit `undefined` resolve identically
+        // at EVERY downstream read.
         this.options = {
-            watch: true,
-            ...options
+            ...options,
+            watch: options.watch ?? false
         };
 
         const rootDir = this.options.rootDir || process.cwd();
@@ -260,7 +267,7 @@ export class MetadataPlugin implements Plugin {
         // not as a side effect of any priming pass.
         const bootstrapMode = this.options.config?.bootstrap ?? 'eager';
         const effectiveWatch =
-            bootstrapMode === 'artifact-only' ? false : (this.options.watch ?? true);
+            bootstrapMode === 'artifact-only' ? false : (this.options.watch ?? false);
 
         this.manager = new NodeMetadataManager({
             rootDir,

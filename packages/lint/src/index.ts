@@ -658,8 +658,11 @@ export type {
 } from './authoring-rules.js';
 
 // The runtime publish gate over that registry. Also published as the
-// `@objectstack/lint/runtime` subpath — the entry the kernel boot path imports,
-// so a consumer there never names the graph that reaches the source parsers.
+// `@objectstack/lint/runtime` subpath — the entry the kernel boot path imports.
+// That subpath narrows the EXPORT surface to these five names, not the module
+// graph: measured, it reaches 70 of this entry's 72 modules and 93.8% of its
+// bundled bytes, and it does name the modules that reach the source parsers.
+// `runtime.ts`'s header carries the measurement and what the narrowing buys.
 export {
   buildRuntimeWriteSnapshots,
   runRuntimeAuthoringRules,

@@ -60,6 +60,7 @@
     "ui/ElementRecordPickerProps",
     "ui/ElementTextInputProps",
     "ui/ElementTextProps",
+    "ui/ExpressionBindableTextKey",
     "ui/FormButtonConfig",
     "ui/FormField",
     "ui/FormFieldPublicPicker",

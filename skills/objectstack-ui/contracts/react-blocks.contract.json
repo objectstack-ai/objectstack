@@ -39,6 +39,104 @@
           "description": "Prefill values in create mode."
         },
         {
+          "name": "customFields",
+          "type": "any[]",
+          "kind": "binding",
+          "required": false,
+          "description": "Field definitions merged over the set generated from object metadata. With inline definitions and no data source, this becomes the only field source."
+        },
+        {
+          "name": "readOnly",
+          "type": "boolean",
+          "kind": "binding",
+          "required": false,
+          "description": "Render every field read-only, whatever `mode` says."
+        },
+        {
+          "name": "modalCloseButton",
+          "type": "boolean",
+          "kind": "binding",
+          "required": false,
+          "description": "Show the modal presentation's close button (formType 'modal'; honoured by the modal form)."
+        },
+        {
+          "name": "contentLayout",
+          "type": "'simple' | 'tabbed'",
+          "kind": "binding",
+          "required": false,
+          "description": "How the modal presentation lays out sections; 'tabbed' needs more than one section to differ from 'simple'."
+        },
+        {
+          "name": "confirmOnDiscard",
+          "type": "boolean",
+          "kind": "binding",
+          "required": false,
+          "description": "Ask before discarding unsaved edits when a drawer/modal form is dismissed. Set false to close immediately."
+        },
+        {
+          "name": "submitText",
+          "type": "string",
+          "kind": "binding",
+          "required": false,
+          "description": "Label of the submit button."
+        },
+        {
+          "name": "cancelText",
+          "type": "string",
+          "kind": "binding",
+          "required": false,
+          "description": "Label of the cancel button."
+        },
+        {
+          "name": "nextText",
+          "type": "string",
+          "kind": "binding",
+          "required": false,
+          "description": "Label of the next-step button (wizard)."
+        },
+        {
+          "name": "prevText",
+          "type": "string",
+          "kind": "binding",
+          "required": false,
+          "description": "Label of the previous-step button (wizard)."
+        },
+        {
+          "name": "showSubmit",
+          "type": "boolean",
+          "kind": "binding",
+          "required": false,
+          "description": "Show the submit button."
+        },
+        {
+          "name": "showCancel",
+          "type": "boolean",
+          "kind": "binding",
+          "required": false,
+          "description": "Show the cancel button."
+        },
+        {
+          "name": "showReset",
+          "type": "boolean",
+          "kind": "binding",
+          "required": false,
+          "description": "Show the reset button."
+        },
+        {
+          "name": "successMessage",
+          "type": "string",
+          "kind": "binding",
+          "required": false,
+          "description": "Toast shown after a successful submit. Ignored when `submitBehavior` is set."
+        },
+        {
+          "name": "resetOnSuccess",
+          "type": "boolean",
+          "kind": "binding",
+          "required": false,
+          "description": "Clear the form after a successful submit instead of keeping the saved values."
+        },
+        {
           "name": "mode",
           "type": "'create' | 'edit' | 'view'",
           "kind": "controlled",

@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
+import { ObjectQL } from '@objectstack/objectql';
 import { installAttachmentAccessHooks, type AttachmentSharingLike } from './attachment-access-hooks.js';
 import type { AttachmentLifecycleEngine } from './attachment-lifecycle.js';
 
@@ -199,73 +200,237 @@ describe('attachment access — beforeDelete (uploader or parent editor)', () =>
     await expect(beforeDelete(deleteCtx({ id: 'missing' }, { userId: 'x' }))).resolves.toBeUndefined();
   });
 
-  // #4757 — no id AND no `where` is not "nothing matched", it is "nothing was
-  // ever queried": the engine seeds `{ object }` as the delete AST and hands
-  // it to `driver.deleteMany`, which empties the table. The gate must refuse
-  // rather than fall through the empty-`rows` short-circuit.
-  describe('unscoped multi-delete (no id, no where) — #4757', () => {
-    const unscopedShapes: Array<[string, any]> = [
-      ['options.multi with no where', { options: { multi: true } }],
-      ['no id and no options at all', {}],
-      ['an explicitly null where', { options: { multi: true, where: null } }],
-      ['an explicitly undefined where', { options: { multi: true, where: undefined } }],
-    ];
+  // The #4757 unscoped-multi-delete block that used to sit here called the
+  // handler DIRECTLY with a whole-operation context of this file's own
+  // construction — a shape the engine's per-row dispatch (#5038/#5574) never
+  // produced, so the block stayed green for a behaviour the wired engine did
+  // the opposite of (#9719's measurement: an uploader-owned table was wiped by
+  // `{ multi: true }` while these cases passed). It is re-pointed at the REAL
+  // engine below — see "#4757 through the wired engine".
+});
 
-    for (const [label, input] of unscopedShapes) {
-      it(`refuses ${label} (403 ATTACHMENT_DELETE_DENIED)`, async () => {
-        const { beforeDelete } = install({ attachments: [row], sharing: { canEdit: async () => true } });
-        await expect(beforeDelete(deleteCtx(input, { userId: 'uploader' }))).rejects.toMatchObject({
-          code: 'ATTACHMENT_DELETE_DENIED',
-          status: 403,
-        });
-      });
+// ─────────────────────────────────────────────────────────────────────────
+// #4757 through the WIRED engine (#9719)
+//
+// A real `ObjectQL` + in-memory driver + this module's installer — the exact
+// path `ql.delete('sys_attachment', …)` takes in production. The unscoped
+// refusal reaches the handler through the `dispatchUnscopedMultiDelete`
+// whole-operation dispatch its registration declares; the per-row gate keeps
+// firing per matched row; the scoped paths keep resolving. Every refusal here
+// asserts the rows SURVIVED, because the defect this replaces was precisely a
+// green suite over a wiped table.
+//
+// NOTE `@objectstack/objectql` is deliberately un-aliased in this package's
+// vitest config (see `KNOWN_UNALIASED_TEST_IMPORTS`): these pins run against
+// objectql's BUILT dist, so a stale build tests yesterday's engine — rebuild
+// `@objectstack/objectql` before trusting a verdict from this block.
+// ─────────────────────────────────────────────────────────────────────────
+
+const ATT_FIELDS = {
+  id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+  file_id: { name: 'file_id', label: 'File', type: 'text' as const },
+  parent_object: { name: 'parent_object', label: 'Parent Object', type: 'text' as const },
+  parent_id: { name: 'parent_id', label: 'Parent Id', type: 'text' as const },
+  uploaded_by: { name: 'uploaded_by', label: 'Uploaded By', type: 'text' as const },
+};
+const sysAttachmentObject = { name: 'sys_attachment', label: 'Attachment', fields: ATT_FIELDS };
+const attSecretObject = {
+  name: 'att_secret',
+  label: 'Secret',
+  fields: {
+    id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+    name: { name: 'name', label: 'Name', type: 'text' as const },
+  },
+};
+
+/** In-memory driver whose WHERE matcher REFUSES combinators/operator values by
+ * throwing — the conforming shape `check-where-matcher-conformance.mjs` asks
+ * of a double (silently wrong answers are the defect class, not incompleteness). */
+function makeWiredDriver() {
+  const stores = new Map<string, Map<string, Record<string, unknown>>>();
+  const storeFor = (o: string) => {
+    let s = stores.get(o);
+    if (!s) { s = new Map(); stores.set(o, s); }
+    return s;
+  };
+  const matches = (row: Record<string, unknown>, where: unknown): boolean => {
+    if (!where || typeof where !== 'object') return true;
+    for (const [k, v] of Object.entries(where)) {
+      if (k.startsWith('$')) throw new Error(`wired stub driver: unsupported combinator ${k}`);
+      if (v !== null && typeof v === 'object') throw new Error(`wired stub driver: unsupported operator value on ${k}`);
+      if ((row[k] ?? null) !== (v ?? null)) return false;
     }
+    return true;
+  };
+  const d: any = {
+    name: 'memory', version: '0.0.0', supports: {}, stores,
+    async connect() {}, async disconnect() {}, async checkHealth() { return true; },
+    async execute() { return null; }, async syncSchema() {},
+    async find(o: string, ast: any) {
+      return Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where));
+    },
+    async findOne(o: string, ast: any) {
+      for (const r of storeFor(o).values()) if (matches(r, ast?.where)) return r;
+      return null;
+    },
+    async create(o: string, data: Record<string, unknown>) {
+      const id = String(data.id);
+      const row = { ...data, id };
+      storeFor(o).set(id, row);
+      return row;
+    },
+    async update() { return null; },
+    async delete(o: string, id: string) { return storeFor(o).delete(String(id)); },
+    async count(o: string, ast: any) {
+      return Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where)).length;
+    },
+    async deleteMany(o: string, ast: any) {
+      const doomed = Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where));
+      for (const r of doomed) storeFor(o).delete(String(r.id));
+      return doomed.length;
+    },
+    async updateMany() { return 0; },
+  };
+  return d;
+}
 
-    it('refuses even the uploader of every matched row — the AST is unscoped, not row-scoped', async () => {
-      // The uploader shortcut is per RESOLVED row; with nothing resolved there
-      // is no row whose ownership could license emptying the table.
-      const canEdit = vi.fn(async () => true);
-      const { beforeDelete } = install({
-        attachments: [{ ...row, uploaded_by: 'uploader' }],
-        sharing: { canEdit },
-      });
-      await expect(
-        beforeDelete(deleteCtx({ options: { multi: true } }, { userId: 'uploader' })),
-      ).rejects.toMatchObject({ code: 'ATTACHMENT_DELETE_DENIED' });
-      expect(canEdit).not.toHaveBeenCalled();
-    });
+async function bootWired(opts: {
+  attachments?: Array<Record<string, unknown>>;
+  sharing?: AttachmentSharingLike | null;
+} = {}) {
+  const ql = new ObjectQL();
+  const driver = makeWiredDriver();
+  ql.registerDriver(driver, true);
+  await ql.init();
+  ql.registry.registerObject(sysAttachmentObject as any, 'app:test');
+  ql.registry.registerObject(attSecretObject as any, 'app:test');
+  // `engine as any` mirrors the production wiring in storage-service-plugin.ts.
+  installAttachmentAccessHooks(ql as any, () => opts.sharing ?? null, silentLogger());
+  if (!driver.stores.get('sys_attachment')) driver.stores.set('sys_attachment', new Map());
+  for (const row of opts.attachments ?? []) {
+    driver.stores.get('sys_attachment')!.set(String(row.id), { ...row });
+  }
+  const remaining = () => driver.stores.get('sys_attachment')?.size ?? 0;
+  return { ql, driver, remaining };
+}
 
-    it('still bypasses for system context and context-less calls', async () => {
-      const { beforeDelete } = install({ attachments: [row], sharing: { canEdit: async () => false } });
-      await expect(
-        beforeDelete(deleteCtx({ options: { multi: true } }, { isSystem: true, userId: 'x' })),
-      ).resolves.toBeUndefined();
-      await expect(beforeDelete(deleteCtx({ options: { multi: true } }, {}))).resolves.toBeUndefined();
-    });
+const wiredRow = (id: string, uploadedBy: string, parentId = 'r1') => ({
+  id, file_id: `f_${id}`, parent_object: 'att_secret', parent_id: parentId, uploaded_by: uploadedBy,
+});
 
-    // The scoped paths must be untouched by the fix: an id-bound delete and a
-    // `where`-bound one still authorize row-by-row and still ALLOW when they
-    // pass. `where: {}` matches every row but is a real query — every matched
-    // row is authorized, so it stays on the authorize path, not the refuse one.
-    it('leaves the legitimate scoped paths alone', async () => {
-      const { beforeDelete } = install({ attachments: [row], sharing: { canEdit: async () => true } });
-      await expect(beforeDelete(deleteCtx({ id: 'a1' }, { userId: 'stranger' }))).resolves.toBeUndefined();
-      await expect(
-        beforeDelete(
-          deleteCtx({ options: { where: { parent_object: 'att_secret' }, multi: true } }, { userId: 'stranger' }),
-        ),
-      ).resolves.toBeUndefined();
-      await expect(
-        beforeDelete(deleteCtx({ options: { where: {}, multi: true } }, { userId: 'stranger' })),
-      ).resolves.toBeUndefined();
-    });
+const UNSCOPED_REFUSAL = expect.objectContaining({
+  code: 'ATTACHMENT_DELETE_DENIED',
+  status: 403,
+  // The first sentence IS the declared contract (#4757's quoted refusal).
+  message: expect.stringContaining('Refusing an unscoped multi-delete of attachments'),
+});
 
-    it('an empty `where` still authorizes every matched row (one failing row denies)', async () => {
-      const { beforeDelete } = install({ attachments: [row], sharing: { canEdit: async () => false } });
-      await expect(
-        beforeDelete(deleteCtx({ options: { where: {}, multi: true } }, { userId: 'stranger' })),
-      ).rejects.toMatchObject({ code: 'ATTACHMENT_DELETE_DENIED' });
+describe('unscoped multi-delete (no id, no where) — #4757 through the wired engine (#9719)', () => {
+  it('refuses `{ multi: true }` even when the caller is the uploader of EVERY matched row — and the rows survive', async () => {
+    // #9719's measured gap verbatim: before the fix this call RESOLVED and
+    // wiped both rows; the per-row uploader shortcut licensed each row and no
+    // dispatch ever carried the unscoped shape.
+    const { ql, remaining } = await bootWired({
+      attachments: [wiredRow('a1', 'uploader'), wiredRow('a2', 'uploader', 'r2')],
     });
+    await expect(
+      ql.delete('sys_attachment', { multi: true, context: { userId: 'uploader' } } as any),
+    ).rejects.toEqual(UNSCOPED_REFUSAL);
+    expect(remaining()).toBe(2);
+  });
+
+  it('refuses an explicitly null `where` the same way', async () => {
+    const { ql, remaining } = await bootWired({ attachments: [wiredRow('a1', 'uploader')] });
+    await expect(
+      ql.delete('sys_attachment', { multi: true, where: null, context: { userId: 'uploader' } } as any),
+    ).rejects.toEqual(UNSCOPED_REFUSAL);
+    expect(remaining()).toBe(1);
+  });
+
+  it('refuses on an EMPTY table — "nothing was ever queried" is not "nothing to authorize"', async () => {
+    // The zero-match limb (#9719): the per-row dispatch is gated on matched
+    // rows, so a handler-only fix can never fire here — a caller probing
+    // against an empty table would see success and ship the unscoped delete.
+    const { ql } = await bootWired({ attachments: [] });
+    await expect(
+      ql.delete('sys_attachment', { multi: true, context: { userId: 'uploader' } } as any),
+    ).rejects.toEqual(UNSCOPED_REFUSAL);
+  });
+
+  it('positive control: an empty table is not refused per se — a scoped `where: {}` delete of it resolves', async () => {
+    // Proves the empty-table refusal above measures the SHAPE, not the
+    // emptiness: the same table, queried for real, deletes zero rows quietly.
+    const { ql } = await bootWired({ attachments: [] });
+    await expect(
+      ql.delete('sys_attachment', { multi: true, where: {}, context: { userId: 'uploader' } } as any),
+    ).resolves.toBeDefined();
+  });
+
+  it('the per-row gate is a DIFFERENT refusal and still fires through the wire', async () => {
+    // #9719's other measured row: a scoped delete matching a row the caller is
+    // not entitled to still answers with the PER-ROW message, not #4757's.
+    const { ql, remaining } = await bootWired({
+      attachments: [wiredRow('a1', 'member'), wiredRow('a2', 'someone-else', 'r2')],
+      sharing: { canEdit: async () => false },
+    });
+    await expect(
+      ql.delete('sys_attachment', {
+        multi: true,
+        where: { parent_object: 'att_secret' },
+        context: { userId: 'member' },
+      } as any),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        code: 'ATTACHMENT_DELETE_DENIED',
+        status: 403,
+        message: expect.stringContaining('Cannot delete attachment'),
+      }),
+    );
+    expect(remaining()).toBe(2);
+  });
+
+  it('scoped controls still pass: by id, by a real `where`, and by the match-all `where: {}`', async () => {
+    // Over-firing here would break every legitimate attachment delete.
+    const byId = await bootWired({ attachments: [wiredRow('a1', 'uploader')] });
+    await expect(
+      byId.ql.delete('sys_attachment', { where: { id: 'a1' }, context: { userId: 'uploader' } } as any),
+    ).resolves.toBeDefined();
+    expect(byId.remaining()).toBe(0);
+
+    const byWhere = await bootWired({
+      attachments: [wiredRow('a1', 'uploader'), wiredRow('a2', 'uploader', 'r2')],
+    });
+    await expect(
+      byWhere.ql.delete('sys_attachment', {
+        multi: true,
+        where: { uploaded_by: 'uploader' },
+        context: { userId: 'uploader' },
+      } as any),
+    ).resolves.toBeDefined();
+    expect(byWhere.remaining()).toBe(0);
+
+    // `where: {}` is a REAL match-all query (the declared semantics): every
+    // matched row is authorized per row, and an entitled caller may empty the
+    // table with it — the refusal is about an ABSENT predicate only.
+    const matchAll = await bootWired({ attachments: [wiredRow('a1', 'uploader')] });
+    await expect(
+      matchAll.ql.delete('sys_attachment', { multi: true, where: {}, context: { userId: 'uploader' } } as any),
+    ).resolves.toBeDefined();
+    expect(matchAll.remaining()).toBe(0);
+  });
+
+  it('still bypasses for system context and for context-less programmatic calls', async () => {
+    const system = await bootWired({ attachments: [wiredRow('a1', 'someone')] });
+    await expect(
+      system.ql.delete('sys_attachment', { multi: true, context: { isSystem: true } } as any),
+    ).resolves.toBeDefined();
+    expect(system.remaining()).toBe(0);
+
+    const bare = await bootWired({ attachments: [wiredRow('a1', 'someone')] });
+    await expect(
+      bare.ql.delete('sys_attachment', { multi: true } as any),
+    ).resolves.toBeDefined();
+    expect(bare.remaining()).toBe(0);
   });
 });
 
@@ -546,17 +711,45 @@ describe('#7145 — caller envelope forwarded to the sharing gate', () => {
     expect((canEdit.mock.calls[0]![2] as any).__writeScope).toBeUndefined();
   });
 
-  // ── The session fallback is unchanged ─────────────────────────────────
-  it('still falls back to the session snapshot when no execution context rides along', async () => {
+  // ── The session fallback, and the org name it reads (#9691) ───────────
+  //
+  // ⚠️ This case used to hand the hook a session spelling `tenantId: 'org_1'`
+  // and assert the same key came back out. That is a session the engine cannot
+  // produce: `HookContextSchema` STRIPS a `tenantId` key (#3290, pinned in
+  // `packages/spec/src/data/hook.test.ts`) and `buildSession` only ever emits
+  // `organizationId`. So the fixture pinned the removed-alias arm itself — it
+  // passed for exactly as long as `callerContext` read the dead name, and could
+  // only have started failing if the code became right, which is what happened.
+  // Replaced rather than respelled: the fixture below is the envelope a real
+  // transport builds.
+  it('falls back to the session snapshot and reads the caller org under the BLESSED name (#9691)', async () => {
     const canEdit = vi.fn(async (_o: string, _r: string, _c: any) => true);
     const { beforeDelete } = install({ attachments: [attRow], sharing: { canEdit } });
     await beforeDelete({
       object: 'sys_attachment',
       event: 'beforeDelete',
       input: { id: 'a1' },
-      session: { userId: 'u1', tenantId: 'org_1', positions: ['p1'] },
+      // Exactly what `ObjectQLEngine.buildSession` emits.
+      session: { userId: 'u1', organizationId: 'org_1', positions: ['p1'] },
       api: apiFor([]),
     });
+    // `tenantId` on the way OUT is `ExecutionContext`'s driver-layer name for
+    // the same value — the separate axis #3290 deliberately left alone.
     expect(canEdit.mock.calls[0]![2]).toEqual({ userId: 'u1', tenantId: 'org_1', positions: ['p1'] });
+  });
+
+  it('does not resurrect the removed `session.tenantId` alias if one ever reaches a hook (#9691)', async () => {
+    const canEdit = vi.fn(async (_o: string, _r: string, _c: any) => true);
+    const { beforeDelete } = install({ attachments: [attRow], sharing: { canEdit } });
+    await beforeDelete({
+      object: 'sys_attachment',
+      event: 'beforeDelete',
+      input: { id: 'a1' },
+      // A key the schema strips. Reaching for it is how this seam handed the
+      // sharing service an envelope with no org at all for several majors.
+      session: { userId: 'u1', tenantId: 'stale_org', positions: ['p1'] } as any,
+      api: apiFor([]),
+    });
+    expect((canEdit.mock.calls[0]![2] as any).tenantId).toBeUndefined();
   });
 });

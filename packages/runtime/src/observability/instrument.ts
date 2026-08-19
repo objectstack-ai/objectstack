@@ -29,6 +29,21 @@ export interface InstrumentOptions {
      * called, so any monotonic source works.
      */
     now?: () => number;
+    /**
+     * Whether this wrapper emits the `http_requests_total` counter for the
+     * wrapped route. Default `true` — the legacy behavior for transports
+     * that offer no better seam.
+     *
+     * Pass `false` when the transport under the route implements the
+     * `IHttpServer.afterResponse` observation seam (#9835): there the
+     * TRANSPORT owns the counter for every inbound request — this wrapper's
+     * copy would land on the same series under the same labels and count the
+     * dispatcher's routes twice (the measured, per-surface distortion of
+     * #9833). Only the counter is gated: request-id echo, the duration
+     * histogram, the error counter and the error reporter are not emitted by
+     * the transport seam and always stay on.
+     */
+    emitHttpRequestsTotal?: boolean;
 }
 
 /**
@@ -38,8 +53,9 @@ export interface InstrumentOptions {
  *   1. Resolve a request id from incoming `X-Request-Id` (or mint one).
  *   2. Set the request id on `req.requestId` and response header.
  *   3. Time the handler.
- *   4. Emit `http_requests_total{method,route,status}` counter and
- *      `http_request_duration_ms{method,route}` histogram.
+ *   4. Emit `http_requests_total{method,route,status}` counter (unless the
+ *      transport owns it — see {@link InstrumentOptions.emitHttpRequestsTotal})
+ *      and the `http_request_duration_ms{method,route}` histogram.
  *   5. On thrown errors, emit `http_request_errors_total` and call
  *      `errorReporter.captureException` for 5xx.
  *   6. When the handler catches its own error and calls
@@ -60,6 +76,7 @@ export function instrumentRouteHandler(
     const generateRequestId = opts.generateRequestId;
     const requestIdHeader = opts.requestIdHeader ?? 'X-Request-Id';
     const now = opts.now ?? Date.now;
+    const emitHttpRequestsTotal = opts.emitHttpRequestsTotal ?? true;
 
     return async (req: any, res: any) => {
         const requestId = resolveRequestId(req?.headers, generateRequestId);
@@ -103,11 +120,16 @@ export function instrumentRouteHandler(
             throw err;
         } finally {
             const elapsed = now() - startedAt;
-            metrics.counter(RUNTIME_METRICS.httpRequestsTotal, {
-                method,
-                route,
-                status: String(status),
-            });
+            // Gated (#9833/#9835): on a transport implementing the
+            // `afterResponse` seam the counter is the transport's — see
+            // `InstrumentOptions.emitHttpRequestsTotal`.
+            if (emitHttpRequestsTotal) {
+                metrics.counter(RUNTIME_METRICS.httpRequestsTotal, {
+                    method,
+                    route,
+                    status: String(status),
+                });
+            }
             metrics.histogram(
                 RUNTIME_METRICS.httpRequestDurationMs,
                 elapsed,

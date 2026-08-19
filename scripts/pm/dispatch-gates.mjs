@@ -500,6 +500,7 @@ export function resolveCheckToFiles(checkName, scriptsMap) {
  *
  * Re-exported because this tool's self-test drives the SAME masker the gates
  * run, not a copy of it.
+ */
 export { maskComments };
 
 /**
@@ -2182,6 +2183,24 @@ function selfTest() {
   t('a quote inside a regex literal does not open a string', commentHints.includes('packages/client/src'));
   t('masking preserves every offset', maskComments(commented).length === commented.length);
 
+  // ...and the re-export of that masker is CODE, not comment text (#9640). The
+  // statement sits at the end of the longest docblock in this file, and a
+  // missing `*/` swallows it into prose that still parses: the module then has
+  // no `maskComments` export while its header says it has one, and nothing goes
+  // red — every gate stayed green over it until someone parsed for it. Asked of
+  // this file's own source with this file's own masker, which is what the
+  // docblock claims. Column 0 only, and a match the scan flags as literal is
+  // rejected, so no fixture spelling in this self-test can stand in for the
+  // statement.
+  const ownSource = readFileSync(new URL(import.meta.url), 'utf8');
+  const ownScan = scanSource(ownSource);
+  t(
+    'the maskComments re-export is code, not comment text',
+    [...ownSource.matchAll(/^export \{ maskComments \};$/gm)].some(
+      (m) => !ownScan.comment[m.index] && !ownScan.literal[m.index],
+    ),
+  );
+
   // The self-test boundary. The fixture puts a column-0 `}` inside a template
   // literal on purpose: that is the shape this tree really has (a check script
   // whose self-test embeds TS sources as fixtures), and a boundary that stopped
@@ -2305,6 +2324,23 @@ function selfTest() {
   const anchorHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-doc-anchors.mjs'), 'utf8'));
   t('the doc-anchors gate reaches the content page population it declares', anchorHints.some((h) => hintCovers(h, 'content/docs/deployment/cli.mdx')));
   t('and does not thereby claim a path outside that population', !anchorHints.some((h) => hintCovers(h, 'packages/spec/src/index.ts')));
+
+  // The second gate of that class (#9700): a whole-tree ESLint ratchet whose
+  // only literals were its own baseline artifact and the ref it diffs against,
+  // so it scored `silent` for every card in the tree while being REQUIRED in
+  // lint.yml — twice at the cost of a p0's CI round (#9391, PR #9695). It now
+  // declares the subtree it lints. Read from the real gate, not a fixture: what
+  // is being pinned is that the tree still HAS the declaration.
+  const slotHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-slot-lookup-ratchet.mjs'), 'utf8'));
+  t('the slot-lookup ratchet reaches the package source population it declares', slotHints.some((h) => hintCovers(h, 'packages/services/service-datasource/src/admin-routes.ts')));
+  // The negative half is the load-bearing one for a declaration this broad: a
+  // gate named on EVERY card is the louder version of naming none. `packages/**`
+  // must reach nothing outside `packages/`, and these three roots are where a
+  // widened extractor would have leaked it (measured in hintCovers' docblock:
+  // the rejected alternative takes one card from 7 matched families to 34).
+  t('and claims nothing under apps/', !slotHints.some((h) => hintCovers(h, 'apps/console/src/main.tsx')));
+  t('nor under examples/', !slotHints.some((h) => hintCovers(h, 'examples/crm/objects/account.object.ts')));
+  t('nor a content page', !slotHints.some((h) => hintCovers(h, 'content/docs/deployment/cli.mdx')));
 
   // ── A trailing sentence period is not part of the path (#8534, half two) ──
   //

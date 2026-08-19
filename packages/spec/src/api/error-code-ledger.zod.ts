@@ -260,6 +260,13 @@ export const ERROR_CODE_LEDGER = {
     // synonym of `CONFLICT` in the detector's sense and not one in meaning
     // either — it names WHICH state conflicts, which is what an operator acts
     // on. Never carries `status`: nothing dispatched (#9378 row 3).
+    // [#9446] Second EMITTER of the code: `POST /api/v1/actions/:object/:action`
+    // answers the same 409 through `dispatchFlowAction`
+    // (`packages/runtime/src/action-execution.ts`), reading the same
+    // engine `AutomationResult.code` via the shared `classifyFlowRefusal`
+    // table (`flow-dispatch-status.ts`) and serving the throw through
+    // `errorFromThrown` — the two doors now state the same refusal the same
+    // way. Provenance, not identity (see above).
     'FLOW_DISABLED',
     // [#8846] a flow that RAN and rejected — a deliberate business rejection,
     // served as a 400 (#3962) with the semantic code kept on the wire so
@@ -274,6 +281,13 @@ export const ERROR_CODE_LEDGER = {
     // FLOW_DISABLED — one is reversible operational state, the other an
     // authoring defect — and from FLOW_FAILED, which means the flow ran
     // (#9378 row 4).
+    // [#9446] Second EMITTER of the code: `POST /api/v1/actions/:object/:action`
+    // answers the same 422 through `dispatchFlowAction`
+    // (`packages/runtime/src/action-execution.ts`), reading the same
+    // engine classification via the shared `classifyFlowRefusal` table
+    // (`flow-dispatch-status.ts`) and serving the throw through
+    // `errorFromThrown` — the two doors now state the same refusal the same
+    // way. Provenance, not identity (see above).
     'FLOW_NO_START_NODE',
     'INVALID_OR_EXPIRED',         // share-link token
     'NEEDS_PASSWORD',             // share link requires a password

@@ -54,13 +54,13 @@
   `failed to fetch issue field values: API rate limit already exceeded`。
 - **git 先行**:本地检出 / `git log` / `ls-remote` 不花配额,断粮期分支存在性检查
   照常可用,PR 文件读取同走 git(REST PR files 端点实测可瞬态 404);开轮先读配额
-  (免装 gh CLI:`curl -H "Authorization: Bearer $GH_TOKEN"
-  https://api.github.com/rate_limit`),graphql remaining < 1000 ⇒ 本轮降级为 git
-  先行 + 只做必要写。打满时:待执行写**排成有序清单挂进巡逻词**(不靠记忆),恢复
-  窗口按序连清;重试对齐整点(REST core 整点重置)优于指数退避,⛔ 绝不忙轮询;
+  (免装 gh CLI:`curl` 带 Bearer `$GH_TOKEN` 打 `/rate_limit`),graphql
+  remaining < 1000 ⇒ 本轮降级为 git 先行 + 只做必要写。打满时:待执行写**排成有序
+  清单挂进巡逻词**(不靠记忆),恢复窗口按序连清;重试对齐整点(REST core 整点重置)优于指数退避,⛔ 绝不忙轮询;
   search 与 core 独立计,一侧打满另一侧可作退路;REST core 共享身份下同样会打满;文档载明、未实测:条件请求答 `304` 不计 core 池(仅当直连 REST 获准才相关)。
 - **公开仓降级读法:WebFetch github.com 网页零 API 配额**(带 label 过滤的 issue
   列表、issue 全文含评论、PR 页含 checks,实测撑得起整轮盘点);边界:~15 分钟缓存、列表行不含 assignee、内容是渲染层。
+- **查重先 `search_issues`**(2026-08-18 23:3xZ 实测:单次调用按 issue body 内文本命中且 `total_count` 精确 ——「search API 对本会话不可用/回错误对象」的继承说法实测为**假**;继承说法不是读数,复述必须带实测日期):body 文本匹配是 repo-scoped `list` 做不到的(全量抓取再 grep 才等价),`list` + 对照组降为回退。
 - **会话中途轮换凭据把 GitHub MCP 服务器杀到不可恢复**:此后一切 `mcp__github__*`
   回 `Streamable HTTP error: invalid session`(含几分钟前还好的工具),只有新会话
   重绑 —— 轮换前提醒维护者:在飞席位丢的是整条 GitHub 通道;配额池按身份计,换身份即清零燃烧,共享身份结构不变。
@@ -75,8 +75,8 @@
   `issue_read`(它才返回 `assignees`),⛔ 不把清单当候选集直接认领。
 - **MCP `issue_read` 的 body 实体转义是纯读侧伪影**(撇号/引号/尖括号成数字实体;
   comments 原样),存储体是明文,**先解码实体再写回**往返实测安全(无双重转义)——
-  腐蚀 body 的恰是把转义读数原样回写;可逆的只有读侧,写侧剥除(HTML 注释、短
-  `<…>` 片段 —— 细则见「读数陷阱」截断行)是**真实存储损耗**,⛔ 两类不并成一条「API 会改 body」,写后回读因此必做;实体归属(MCP 还是 GitHub API)与 `&amp;` 类未实测。
+  腐蚀 body 的恰是把转义读数原样回写;可逆的只有读侧,写侧剥除(HTML 注释、tag
+  形状片段 —— 细则见「读数陷阱」写侧行)是**真实存储损耗**,⛔ 两类不并成一条「API 会改 body」,写后回读因此必做;实体归属(MCP 还是 GitHub API)与 `&amp;` 类未实测。
 - **`Blocked-by:` 行归 BODY(单通道反向索引)**:追加按上条「解码后写回」执行;历
   史上寄放在评论里的行按同程序**增量**回填(⛔ 不搞批量突击 —— 限流压力);解锁扫
   描只 grep body,⛔ 不加常设评论读;旧「连评论一起扫(`in:comments`)」提示作废,扫描走直读(`list_issues` + `issue_read` 读 body)。
@@ -97,14 +97,15 @@
 - **同一 head 上轻量兄弟 workflow `success` + 重量级载体 `cancelled` 是普通取代的
   预期签名,不是选择性失败**(cancel-in-progress 窗口只罩得住跑得慢的载体):先
   比对 run `head_sha` 与 PR 当前 head(取代必有新 head),不开「为何只取消它」调查。
-- **CI 红了先取完整日志归档再下结论**:「completeness check 绿」只断言没有 worker
-  静默死 ≠ 测试通过;并发输出的「相邻」≠「因果」(先查 `turbo.json` 依赖边),⛔ 不
-  只看 tail;公开发出的诊断被推翻时,更正发在同样公开的位置,据它开的 PR 撤回 draft、解绑 `Fixes`。
+- **CI 红了先取完整日志归档再下结论 —— 断言文本只在归档里,直读工具拿不到**
+  (2026-08-18 实测):`get_check_run` 对本仓 CI job 回空 `output.text`,`get_job_logs` 无论 `tail_lines` 只回占满日志尾部的 post-step service-container teardown ⇒ 两者都答不了「到底挂在哪」;失败 step 名免下载即得(`actions_get method=get_workflow_job`),真实断言文本走 run 日志归档:`actions_get method=get_workflow_run_logs_url` → 下载解压,分步文件在 `{Job name}/{step number}_{step name}.txt`。
+  「completeness check 绿」只断言没有 worker 静默死 ≠ 测试通过;并发输出的「相邻」≠「因果」(先查 `turbo.json` 依赖边),⛔ 不只看 tail;
+  公开发出的诊断被推翻时,更正发在同样公开的位置,据它开的 PR 撤回 draft、解绑 `Fixes`。
 - **判「正文被截断」必须双读取**:`.body` 原文 + `Accept:
-  application/vnd.github.full+json` 的 `.body_html`,两者同一处断掉才算 issue 端截
-  断,单一读法的尾部缺失先算读取端截断(工具输出上限、分页、切片)。写侧另一半:
-  sanitizer 会在**写入时就地删除**短 `<…>` 片段(HTML 注释标记、`<n>` 类占位符、泛
-  型),反引号与围栏**不提供保护** —— 要保留字面尖括号一律写 HTML 实体 `&lt;` / `&gt;`,要存活的注释类标记改写成可见 markdown;含这类片段的正文,写后回读逐个确认仍在(失效完全静默)。
+  application/vnd.github.full+json` 的 `.body_html`,两者同一处断掉才算 issue 端截断。读侧实测有确定性触发:正文含字面 script 开标记形状的 token(less-than 紧跟 script 字样;doctype 开标记、object 标签形状同触发)时,API/MCP 读回在该 token 处静默截断而网页全文完好 —— 存储体无损,⛔ 不「修复」只在 API 读短的卡:先 WebFetch 渲染页核对全文,重写会毁掉本来正确的正文。
+- **落库删字节,网页同显、围栏不防护**:「less-than + 感叹号 + 左方括号」序列(markup-declaration 开标记,恰是负向后行断言接字符类的形状)里的感叹号在存储层被删,幸存文本仍像代码但意义已变;裸「less-than + 感叹号」存活;作者规则并入下一条。
+- 写侧另一半:sanitizer 在**写入时按 tag 形状删,不按尖括号**(2026-08-18 issue body 实测):行内反引号里的 tag 形状 token(读作未知 HTML 标签者 —— 注释标记、`<n>` 类占位符、泛型)整个被删;孤立 less-than / greater-than 在行内代码**存活**;**围栏块整体存活**(含带尖括号的正则,上一条的删感叹号是唯一例外);写返回 200,损耗只在回读可见。
+  作者规则一条管三坑:必须字面携带 tag/script/markup-declaration 形状的文本进围栏并把危险字符用词拼出,或改花括号占位符(`{n}`)/整句用词描述;要字面尖括号写实体 `&lt;` / `&gt;`;含尖括号的任何写后回读逐个确认(失效完全静默;评论名义上是不受影响通道,2026-08-18/19 实测 4 次评论写入 1 次标记缺席、未归因 —— 回读不豁免评论)。
 - **并行 spec PR 同动 pin 计数断言**(被踢不是事故,按 os-regen 序再解一轮):解冲
   突两侧收据都保留、按合并顺序堆叠,新计数**从合并后源码重数**(操作数是文件本身不
   是历史),⛔ 不从两侧收据做算术;双方占同一编号是常态(各取当时 max+1),重编号后进侧。
@@ -129,6 +130,5 @@
 ## 断粮检测与跨墙恢复细则(5 小时用量墙)
 
 原则、定时器选型(⛔ 不用 send_later 链)与恢复 playbook 在主文件;事实补遗:
-`npx ccusage blocks` 容器内可用(读本地会话记录),报当前 5 小时窗口边界/剩余时间
-与燃烧率(预警);第三盲区:窗口起点是本地推断的近似值;撞墙时 API 调用失败、宿主
-报「limit reached, resets at HH:MM」(重置时刻主文件已述:那一刻可得、记下来)。
+`npx ccusage blocks` 容器内可用(读本地会话记录),报当前 5 小时窗口边界/剩余与燃
+烧率;盲区:窗口起点是本地推断的近似值;撞墙时 API 调用失败、宿主报「limit reached, resets at HH:MM」——那一刻可得、记下来。

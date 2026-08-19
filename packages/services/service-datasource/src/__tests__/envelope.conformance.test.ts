@@ -39,15 +39,35 @@ import { BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import { registerDatasourceAdminRoutes } from '../admin-routes.js';
 
+/**
+ * The family requires authentication (#9391), so every request below carries a
+ * session and the mock context resolves an `auth` service that admits it. The
+ * subject here is the ENVELOPE of the success and refusal bodies; an
+ * unauthenticated fixture would replace all of them with the guard's 401 and
+ * this file would stop covering what it exists to cover. The 401's own
+ * envelope is asserted by `admin-routes-auth-guard.test.ts`.
+ */
+const SESSION = 'Bearer test-session';
+const authService = {
+  api: {
+    getSession: async ({ headers }: { headers: Headers }) =>
+      headers?.get?.('authorization') === SESSION ? { user: { id: 'u_test' } } : null,
+  },
+};
+
 const req = (path: string, init?: RequestInit) =>
   new Request(`http://local${path}`, {
     ...init,
-    headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
+    headers: {
+      'content-type': 'application/json',
+      authorization: SESSION,
+      ...(init?.headers ?? {}),
+    },
   });
 
 function mount(svc: unknown) {
   const server = new HonoHttpServer(0);
-  const ctx = { getService: vi.fn().mockReturnValue(svc) } as any;
+  const ctx = { getService: vi.fn((name: string) => (name === 'auth' ? authService : svc)) } as any;
   registerDatasourceAdminRoutes(server, ctx, '/api/v1');
   return server.getRawApp();
 }

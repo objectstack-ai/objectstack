@@ -1,8 +1,25 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { PluginContext } from '@objectstack/core';
+// The authentication floor: the platform's ONE anonymous-deny decision plus the
+// ONE identity resolution every other HTTP seam reads. Both are imported rather
+// than restated — see `requireAuthenticated` below for why a local check would
+// be the wrong shape even if it were written correctly.
+import {
+  resolveAuthzContext,
+  shouldDenyAnonymous,
+  ANONYMOUS_DENY_STATUS,
+  ANONYMOUS_DENY_CODE,
+  ANONYMOUS_DENY_MESSAGE,
+} from '@objectstack/core';
 import type { ErrorCode } from '@objectstack/spec/api';
-import type { IHttpServer } from '@objectstack/spec/contracts';
+// The slots this module resolves, by their declared contracts. Erasing a
+// lookup to `any` is banned (#4127/#4176/#4202/#4251) and the ban is right
+// here: `IAuthService` is what declares BOTH shapes of the session accessor
+// (`api` and the lazy `getApi()`), so the two-step read below is a checked
+// expression rather than a pair of guesses — the exact gap the rule's own
+// message reports that erasure hiding, on the exact member this guard reads.
+import type { IAuthService, IDataEngine, IHttpServer } from '@objectstack/spec/contracts';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 import { sendOk, sendError } from '@objectstack/types';
 import { DRIVER_CATALOG } from './driver-catalog.js';
@@ -65,6 +82,21 @@ const SERVICE_ERROR_CODE: Record<ServiceName, ErrorCode> = {
  *
  * `GET /datasources/drivers` is static metadata and needs neither service.
  *
+ * ## Every route above requires authentication (#9391)
+ *
+ * All eleven — reads, writes and the static catalog alike — answer `401`
+ * `UNAUTHENTICATED` to a caller with no resolvable identity, before any service
+ * is resolved and before any handler body runs. See `requireAuthenticated`
+ * inside the registrar for how that decision is reached and why it has to be
+ * made here rather than inherited from a seam.
+ *
+ * The catalog route is included on purpose. It needs no service and reveals no
+ * deployment data, but the family's own route ledger dispositions it
+ * `server-only` — as it does every row here; the ledger's `public` disposition
+ * exists and is used by nothing in this file — and a family whose floor has one
+ * hole is a family whose floor has to be read route by route. Uniform is the
+ * property worth having.
+ *
  * Request bodies carry the connection draft inline with an optional cleartext
  * `secret` field; the route splits `secret` out so it never reaches the draft
  * the service persists.
@@ -110,12 +142,171 @@ const SERVICE_ERROR_CODE: Record<ServiceName, ErrorCode> = {
  * per-service 503. That puts the whole burden of naming the service on one
  * string — see `resolve` below for how it is kept honest (#4225).
  */
+/**
+ * Normalize the adapter's request headers to a Web `Headers`.
+ *
+ * `IHttpServer` hands handlers a plain `Record<string, string>` (the hono
+ * adapter builds it from `c.req.header()`), while the session resolver behind
+ * `resolveAuthzContext` is better-auth's, which reads a Web `Headers`. A
+ * request whose headers are already a `Headers` is passed through untouched —
+ * an adapter is free to hand over either.
+ *
+ * Returns `undefined` for a request carrying no readable headers at all. That
+ * is a DENIAL, not a pass: the caller below treats it as "no identity could be
+ * read", which is what an anonymous request is.
+ */
+function toWebHeaders(raw: unknown): Headers | undefined {
+  if (raw && typeof (raw as Headers).get === 'function') return raw as Headers;
+  if (raw && typeof raw === 'object') {
+    const headers = new Headers();
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (v == null) continue;
+      if (Array.isArray(v)) for (const one of v) headers.append(k, String(one));
+      else headers.set(k, String(v));
+    }
+    return headers;
+  }
+  return undefined;
+}
+
+/**
+ * A `getSession(headers)` bound to the kernel's `auth` service, or `undefined`
+ * when this deployment registers none.
+ *
+ * `undefined` does NOT open the routes. It removes one of the two credential
+ * paths `resolveAuthzContext` consults (the better-auth session), leaving the
+ * API-key path; a caller presenting neither resolves anonymous and is refused
+ * below. A kernel with no auth service simply has no session to present.
+ */
+function buildGetSession(ctx: PluginContext): ((headers: Headers) => Promise<unknown>) | undefined {
+  let authService: IAuthService | undefined;
+  try {
+    authService = ctx.getService<IAuthService>('auth');
+  } catch {
+    return undefined;
+  }
+  if (!authService) return undefined;
+  // Narrowed once, outside the closure, so the closure body needs no re-check.
+  const service = authService;
+  return async (headers: Headers) => {
+    // Both accessors are declared on the contract, and reading only the first
+    // is a known way to get a silent anonymous: the shipped `plugin-auth`
+    // registers an `AuthManager`, which has no `api` member at all, so `api`
+    // alone yields `undefined` on every current deployment and the caller
+    // reads that as "no session". `getApi()` is the accessor to prefer;
+    // `api` is its legacy twin, kept because a provider may still mount it.
+    const api = service.api ?? (await service.getApi?.());
+    return api?.getSession?.({ headers });
+  };
+}
+
 export function registerDatasourceAdminRoutes(
   server: IHttpServer,
   ctx: PluginContext,
   basePath = '/api/v1',
 ): void {
   const root = `${basePath}/datasources`;
+
+  /**
+   * The authentication floor for this whole family (#9391). Answers `401
+   * UNAUTHENTICATED` and returns `true` when the caller must be refused, so
+   * every handler opens with `if (await requireAuthenticated(req, res)) return;`.
+   *
+   * ## Why this module needs its own line at all
+   *
+   * These routes are mounted straight onto `IHttpServer` from a plugin `init()`
+   * — the third mount style this family's route ledger describes — so they pass
+   * through neither of the seams that produce the platform's 401s: the REST
+   * server's `enforceAuth` (which guards `/data`, `/meta`, `/batch`,
+   * `/security/explain`) runs inside `RestServer`'s own handlers, and the
+   * dispatcher domains' anonymous floor runs inside the dispatcher. Neither is
+   * reachable from here, and neither is a middleware anything could be routed
+   * through. The sibling direct-mount registrar in `@objectstack/rest`
+   * (`package-routes.ts`) reached the same conclusion and took the same shape
+   * for the same reason.
+   *
+   * ## What is imported rather than restated, and why that matters
+   *
+   * Two things, and they are the whole point of the fix:
+   *
+   *  - the DECISION — `shouldDenyAnonymous` (`@objectstack/core`), the one
+   *    function every HTTP seam shares, so this family can never drift on who
+   *    counts as anonymous. `isSystem` is never settable from the wire, and a
+   *    CORS `OPTIONS` preflight passes, both by that function's construction.
+   *    No `path` is passed: the control-plane allowlist exists for `/auth`,
+   *    `/health`, `/ready` and `/discovery`, and nothing here is one of those.
+   *  - the IDENTITY — `resolveAuthzContext` (`@objectstack/core`), the same
+   *    resolution `RestServer` and the runtime dispatcher perform. Reading only
+   *    a better-auth session here would have been cheaper and WRONG in the
+   *    direction that matters: it would refuse a caller presenting a valid
+   *    `sys_api_key`, which is a credential this platform admits everywhere
+   *    else. Admitting every credential kind the platform admits is what makes
+   *    this a floor rather than a second, narrower policy.
+   *
+   * ## Fail-closed, and where the check sits
+   *
+   * Anything that throws or resolves to no identity is a refusal — an
+   * unresolvable request is anonymous, and there is no fallback that opens the
+   * routes. The check also runs BEFORE `resolve()`: an anonymous caller must
+   * not learn from a `503` which services this deployment has wired, and a
+   * refusal that landed after dispatch would already have performed the write
+   * it was refusing.
+   *
+   * ## The envelope
+   *
+   * `sendError`, not the flat `ANONYMOUS_DENY_BODY` the `/data` + `/meta`
+   * `enforceAuth` seam writes. Both are live and sanctioned (ADR-0112's
+   * 2026-07-30 amendment records the flat and wrapped envelopes as the two);
+   * every other body in this module goes through the shared `sendOk`/`sendError`
+   * and `check:route-envelope` pins it at zero hand-written bodies, so the
+   * wrapper is this surface's, while the status, code and message are the
+   * shared ones. Same reasoning, same shape, as `package-routes.ts`.
+   *
+   * Authentication and nothing more: whether these routes should FURTHER
+   * require a platform-configuration capability is a separate, separately-ruled
+   * question (#9593) and is deliberately absent here.
+   */
+  const requireAuthenticated = async (req: any, res: any): Promise<boolean> => {
+    let userId: string | undefined;
+    try {
+      const headers = toWebHeaders(req?.headers);
+      if (headers) {
+        // Both lookups happen PER REQUEST, for the same reason `resolve()`
+        // below does it: this registrar runs inside a plugin `init()`, and a
+        // service resolved there is a boot-instant snapshot of a registry that
+        // is still filling. Binding the session resolver at registration time
+        // would answer "no auth service" on precisely the deployments that
+        // have one but register it later — every session-authenticated caller
+        // refused, with nothing in the registry to show for it.
+        const getSession = buildGetSession(ctx);
+        // `IDataEngine` for both spellings: the resolver reads exactly `find`
+        // off this, which is the data plane's own surface, and the same pair
+        // is spelled this way where other services resolve the engine. The
+        // two names are one registration — `packages/objectql` registers one
+        // object under both, two lines apart.
+        let ql: IDataEngine | undefined;
+        try {
+          ql = ctx.getService<IDataEngine>('objectql') ?? ctx.getService<IDataEngine>('data');
+        } catch {
+          ql = undefined;
+        }
+        const authz = await resolveAuthzContext({ ql, headers, getSession });
+        userId = authz.userId;
+      }
+    } catch {
+      // Fail closed: an identity that could not be resolved is not an identity.
+      userId = undefined;
+    }
+    // `isSystem` is deliberately not read off anything the wire can reach —
+    // `ResolvedAuthzContext` has no such field, and inbound HTTP never carries
+    // one, so the only way past this line is a resolved caller.
+    if (shouldDenyAnonymous({ userId, method: req?.method })) {
+      sendError(res, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE);
+      return true;
+    }
+    return false;
+  };
+
 
   /**
    * Resolve the service a route dispatches to — or answer
@@ -194,7 +385,8 @@ export function registerDatasourceAdminRoutes(
   // until #4264 — the one route in this module without one, so a backing-store
   // failure surfaced as the adapter's non-envelope 500 instead of the 400 its
   // eight siblings answer.
-  server.get(root, async (_req: any, res: any) => {
+  server.get(root, async (req: any, res: any) => {
+    if (await requireAuthenticated(req, res)) return;
     const svc = resolve(res, 'datasource-admin', 'listDatasources');
     if (!svc) return;
     try {
@@ -208,7 +400,8 @@ export function registerDatasourceAdminRoutes(
   // Catalog of connection drivers + their JSON-Schema config (drives the
   // Studio connection form). Static metadata — no service dependency, so it
   // is always available even before any datasource-admin service is wired.
-  server.get(`${root}/drivers`, async (_req: any, res: any) => {
+  server.get(`${root}/drivers`, async (req: any, res: any) => {
+    if (await requireAuthenticated(req, res)) return;
     sendOk(res, { drivers: DRIVER_CATALOG });
   });
 
@@ -234,6 +427,7 @@ export function registerDatasourceAdminRoutes(
   // question #7606 owns globally; honouring it is correct under either answer,
   // so this route does not pre-empt it.
   server.get(`${root}/:name/remote-tables`, async (req: any, res: any) => {
+    if (await requireAuthenticated(req, res)) return;
     const svc = resolve(res, 'external-datasource', 'listRemoteTables');
     if (!svc) return;
     try {
@@ -256,6 +450,7 @@ export function registerDatasourceAdminRoutes(
   // after the static `/drivers` route so that literal segment is never captured
   // as a name.
   server.get(`${root}/:name`, async (req: any, res: any) => {
+    if (await requireAuthenticated(req, res)) return;
     const svc = resolve(res, 'datasource-admin', 'getDatasource');
     if (!svc) return;
     try {
@@ -268,6 +463,7 @@ export function registerDatasourceAdminRoutes(
   });
 
   server.post(`${root}/:name/test`, async (req: any, res: any) => {
+    if (await requireAuthenticated(req, res)) return;
     const svc = resolve(res, 'external-datasource', 'testConnection');
     if (!svc) return;
     try {
@@ -291,6 +487,7 @@ export function registerDatasourceAdminRoutes(
   // plainly. Genuine refusals — an unknown name, a throwing store — still take
   // the `badRequest` arm below.
   server.post(`${root}/:name/migrate-credential`, async (req: any, res: any) => {
+    if (await requireAuthenticated(req, res)) return;
     const svc = resolve(res, 'datasource-admin', 'migrateCredential');
     if (!svc) return;
     try {
@@ -302,6 +499,7 @@ export function registerDatasourceAdminRoutes(
   });
 
   server.post(`${root}/:name/object-draft`, async (req: any, res: any) => {
+    if (await requireAuthenticated(req, res)) return;
     const svc = resolve(res, 'external-datasource', 'generateObjectDraft');
     if (!svc) return;
     const { table, ...opts } = (req.body as Record<string, unknown>) ?? {};
@@ -317,6 +515,7 @@ export function registerDatasourceAdminRoutes(
   // Probe a connection without persisting anything. Registered before the
   // `:name` routes so the literal `test` segment is never captured as a name.
   server.post(`${root}/test`, async (req: any, res: any) => {
+    if (await requireAuthenticated(req, res)) return;
     const svc = resolve(res, 'datasource-admin', 'testConnection');
     if (!svc) return;
     const { draft, secret } = splitSecret(req.body);
@@ -330,6 +529,7 @@ export function registerDatasourceAdminRoutes(
 
   // Create a runtime datasource.
   server.post(root, async (req: any, res: any) => {
+    if (await requireAuthenticated(req, res)) return;
     const svc = resolve(res, 'datasource-admin', 'createDatasource');
     if (!svc) return;
     const { draft, secret } = splitSecret(req.body);
@@ -343,6 +543,7 @@ export function registerDatasourceAdminRoutes(
 
   // Patch a runtime datasource.
   server.patch(`${root}/:name`, async (req: any, res: any) => {
+    if (await requireAuthenticated(req, res)) return;
     const svc = resolve(res, 'datasource-admin', 'updateDatasource');
     if (!svc) return;
     const { draft, secret } = splitSecret(req.body);
@@ -356,6 +557,7 @@ export function registerDatasourceAdminRoutes(
 
   // Remove a runtime datasource.
   server.delete(`${root}/:name`, async (req: any, res: any) => {
+    if (await requireAuthenticated(req, res)) return;
     const svc = resolve(res, 'datasource-admin', 'removeDatasource');
     if (!svc) return;
     try {
