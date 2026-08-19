@@ -55,6 +55,7 @@ import {
   type AuthoringRule,
   type AuthoringRuleContext,
 } from './authoring-rules.js';
+import { isSystemObject } from './validate-security-posture.js';
 
 type AnyRec = Record<string, unknown>;
 
@@ -166,6 +167,102 @@ export interface RuntimeStackContext {
 }
 
 /**
+ * Which package a write belongs to, and what that package is allowed to reach.
+ *
+ * [#9612] The maintainer's ruling, verbatim, is the product decision this type
+ * exists for:
+ *
+ * > 大客户(420 个对象),就不应该出现在一个软件包中啊,这就是划分软件包的价值。
+ * > 客户开发开发,校验是否也应该基于软件包
+ * > 当然这里面要考虑系统对象
+ *
+ * A tenant that has grown to 420 objects is not ONE package — it is many — and
+ * judging one package's write against all 420 is validating against the wrong
+ * unit, not merely validating slowly. A package's declared `dependencies`
+ * bound what it MAY reference, so `package + declared deps + platform/system`
+ * is a closure the platform computes EXACTLY rather than estimates. That is
+ * what separates this from "narrow to whatever the rule can be proven to
+ * reach", which was considered and refused: a per-rule proof is a second
+ * opinion that drifts the moment a rule changes.
+ *
+ * ⛔ Absent — or carrying a package whose dependency declaration cannot be
+ * read — narrows NOTHING. The whole collection is handed over, exactly as
+ * before. The fallback direction is deliberate and is the opposite of a size
+ * threshold: an unknown provenance buys MORE validation input, never less, so
+ * the gate never stops judging (the #9798 / #9261 / ADR-0110 D3 fail-open
+ * shape this card was explicitly forbidden from re-creating).
+ */
+export interface RuntimePackageScope {
+  /** The package the written item belongs to. */
+  packageId: string;
+  /**
+   * Every OTHER package this one may reference — the transitive closure of the
+   * written package's declared `dependencies`. Resolved by the host, which is
+   * the side that holds the package registry; this module only reads the set.
+   */
+  dependencies: readonly string[];
+}
+
+/**
+ * `objects` reduced to the written item's package closure (#9612).
+ *
+ * An object survives when ANY of these holds — the four limbs are the closure
+ * the ruling names, and each one is load-bearing:
+ *
+ *  1. it is a **platform / system object** ({@link isSystemObject}, imported
+ *     rather than re-decided). ⛔ Unconditional: a package legitimately
+ *     references `sys_*` objects it never declares a dependency on, and a
+ *     closure that dropped them would manufacture "unresolved reference"
+ *     findings that describe nothing — the false-positive class PR #7886
+ *     already paid for on the `permissions` collection;
+ *  2. it carries **no package provenance** — a tenant-authored overlay row.
+ *     Nothing declares what such a row may reference, so nothing bounds it and
+ *     it is kept. Conservative by construction;
+ *  3. it belongs to the **written package** itself;
+ *  4. it belongs to one of that package's **declared dependencies**.
+ *
+ * Pure, allocation-light, and total: a non-object member is kept rather than
+ * inspected, because deciding it is not this function's job.
+ */
+export function narrowObjectsToPackageClosure(
+  objects: readonly unknown[],
+  scope: RuntimePackageScope | undefined,
+): readonly unknown[] {
+  if (!scope || typeof scope.packageId !== 'string' || scope.packageId === '') return objects;
+  const reachable = new Set<string>([scope.packageId, ...scope.dependencies]);
+  return objects.filter((entry) => {
+    if (!entry || typeof entry !== 'object') return true;
+    const owner = (entry as AnyRec)[PACKAGE_PROVENANCE_KEY];
+    // Limb 2 — no provenance, or the registry's rehydration sentinel, which
+    // marks an overlay row rather than a real package (`registry.ts`'s
+    // `isArtifactBacked` reads it the same way).
+    if (typeof owner !== 'string' || owner === '' || owner === OVERLAY_PROVENANCE_SENTINEL) return true;
+    // Limbs 3 and 4.
+    if (reachable.has(owner)) return true;
+    // Limb 1 — checked last only because it is the rarest, never because it is
+    // the weakest: it is the one limb with no escape.
+    return isSystemObject(entry as AnyRec);
+  });
+}
+
+/**
+ * The provenance key the registry stamps an item's owning package onto.
+ * `registry.ts` writes it (`_packageId = this.getObjectOwner(fqn)?.packageId`)
+ * and `listItems` tags with it, which is why the closure can be read off the
+ * collection the host already hands over instead of needing a second lookup.
+ */
+const PACKAGE_PROVENANCE_KEY = '_packageId';
+
+/**
+ * The value `_packageId` carries for a row rehydrated from `sys_metadata`
+ * rather than delivered by a package. Not a package id — `registry.ts` tests
+ * for exactly this string before treating an item as artifact-backed — so the
+ * closure reads it as "unpackaged" (limb 2) rather than as a package nobody
+ * declared a dependency on.
+ */
+const OVERLAY_PROVENANCE_SENTINEL = 'sys_metadata';
+
+/**
  * The context collections the snapshot carries, in stack-key order. Derived
  * facts: every entry is a key of {@link RuntimeStackContext} AND a stack key
  * some runtime-wired rule reads (`runtime-gate.test.ts` pins membership).
@@ -255,6 +352,12 @@ export function buildRuntimeWriteSnapshots(args: {
   item: unknown;
   /** Live resolution context from the host runtime. */
   context?: RuntimeStackContext;
+  /**
+   * [#9612] The written item's package and what it may reach. Omitted — or
+   * carrying a package whose dependencies the host could not read — hands the
+   * rules the WHOLE `objects` collection, exactly as before.
+   */
+  packageScope?: RuntimePackageScope;
 }): { baseline: AnyRec; candidate: AnyRec } | null {
   const stackKey = stackKeyForType(args.type);
   if (!stackKey) return null;
@@ -265,7 +368,23 @@ export function buildRuntimeWriteSnapshots(args: {
 
   const baseline: AnyRec = {};
   for (const key of CONTEXT_STACK_KEYS) {
-    const collection = (args.context?.[key] ?? []) as readonly AnyRec[];
+    // [#9612] `objects` — and only `objects` — is reduced to the written
+    // item's package closure. The other three collections are already bounded
+    // by what a tenant authors (permission sets, books, datasets), and the
+    // measured bill is entirely in what the rules walk over `objects`.
+    //
+    // ⭐ Narrowing here rather than at either call site is what makes this ONE
+    // change covering BOTH doors: every gated write type is built through this
+    // function, so a flow publish and an object publish are narrowed by the
+    // same rule and cannot drift into two policies.
+    //
+    // ⛔ Applied to BOTH passes, necessarily. The gate's verdict is
+    // candidate MINUS baseline, so narrowing one side and not the other would
+    // not be a smaller input — it would be a different question.
+    const raw = (args.context?.[key] ?? []) as readonly AnyRec[];
+    const collection = key === 'objects'
+      ? (narrowObjectsToPackageClosure(raw, args.packageScope) as readonly AnyRec[])
+      : raw;
     baseline[key] = key === stackKey
       ? collection.filter((o) => !itemName || o?.name !== itemName)
       : collection;
@@ -323,6 +442,12 @@ export function runRuntimeAuthoringRules(args: {
   item: unknown;
   /** Live resolution context from the host runtime. */
   context?: RuntimeStackContext;
+  /**
+   * [#9612] The written item's package closure. Omit to judge against the
+   * whole collection — the pre-#9612 behaviour, and the behaviour every caller
+   * that cannot state a package keeps.
+   */
+  packageScope?: RuntimePackageScope;
   /** ADR-0080 SDUI manifest, when the host has one. */
   sduiManifest?: unknown;
 }): RuntimeGateResult {
@@ -340,6 +465,7 @@ export function runRuntimeAuthoringRules(args: {
     type: args.type,
     item: args.item,
     ...(args.context !== undefined ? { context: args.context } : {}),
+    ...(args.packageScope !== undefined ? { packageScope: args.packageScope } : {}),
   });
   if (!snapshots) return empty;
 

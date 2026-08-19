@@ -407,6 +407,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.package-closure-gate.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.package-closure-gate.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.package-publish-audit-rows.test.ts",
       "verb": "delete",
       "pinned": 1
