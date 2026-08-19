@@ -1568,6 +1568,19 @@ function backtickedSpans(line) {
  * follows, up to `H17_LIST_SCAN_LIMIT` items. A blank line AFTER the list has
  * started ends it, so the scan cannot rejoin the prose on the far side.
  *
+ * ## The under-report this leaves, found while reverse-verifying
+ *
+ * A path on a WRAPPED continuation line — the author hard-wrapped the clause
+ * and the path landed on the next source line, which is neither the anchor nor
+ * a list item — is not harvested. All seven measured clauses put the path on
+ * the anchor line or in a list item, because GitHub comment bodies are written
+ * as long unwrapped source lines, so the shape is currently hypothetical. It
+ * is recorded rather than fixed: widening the scan to "any following line"
+ * would re-admit the prose this bounds away, and the error direction here is
+ * the one this whole item keeps — a missing row costs a seat the intersection
+ * it would have got anyway before #10034, while a wrong row sends it to
+ * intersect against a file nobody nominated.
+ *
  * @param {string} text an issue body or a single comment body
  * @returns {string[]} raw candidate tokens, in document order, not deduped
  */
@@ -3664,12 +3677,24 @@ function selfTest() {
 
   // Fenced blocks are citations, not triggers — #8656's evidence block lists
   // real `packages/spec/**` paths that nominate nothing.
+  //
+  // ⚠️ The fixture QUOTES ANOTHER CARD'S CLAUSE inside the fence, and that
+  // detail is load-bearing. Written first with only #8656's verbatim
+  // `path:line` citations, this case passed with fence-stripping ENTIRELY
+  // REMOVED: the `:234` suffix makes that token fail the tracked-file check on
+  // its own, so the test was measuring the ORACLE while vouching for a fence
+  // parser it never exercised. A bare path in a fence does not exercise it
+  // either — nothing unbackticked is ever harvested from prose. The shape that
+  // actually needs the strip is the one these threads are full of: a comment
+  // quoting a PRIOR comment wholesale, anchor term and backticks included.
+  // Without the strip, the quoting card inherits a trigger file it never
+  // nominated, and the index sends a seat to intersect on the wrong card.
   const fenced =
-    '**Restart condition**: as below.\n\n' +
+    '**Restart condition**: unchanged. For reference, #8656 reads:\n\n' +
     '```\n' +
-    'packages/spec/src/contracts/data-driver.ts:234   // `Field.time` value is physically stored\n' +
+    '3. **opportunistic:** any PR already editing the `Field` builder object in `packages/spec/src/data/field.zod.ts` — a cheap declared rider.\n' +
     '```\n';
-  t('H17: paths quoted inside a fenced block are not harvested', files(fenced), '');
+  t('H17: a clause quoted inside a fenced block is not harvested', files(fenced), '');
   t(
     'H17: …but stripMarkdownCode({inline:false}) still keeps inline spans',
     stripMarkdownCode('a `packages/rest/src/rest-server.ts` b', { inline: false }).includes('rest-server'),
