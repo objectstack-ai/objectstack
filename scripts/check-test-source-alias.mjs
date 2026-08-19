@@ -1468,7 +1468,7 @@ function check(root, registry) {
     );
   }
 
-  return { failures, packages, measured };
+  return { failures, packages, measured, publishedCount };
 }
 
 // ── reporting ───────────────────────────────────────────────────────────────
@@ -2080,6 +2080,14 @@ function selfTest() {
       'a reached subpath lost rule 5\'s finding — the dedupe dropped the stronger of the two',
     );
 
+    // The population the green line prints has to BE a number. `check()` returning
+    // it under a different name still passes every failure assertion above and
+    // reports `undefined published subpath(s)` — a census nobody can read.
+    expect(
+      typeof cross.publishedCount === 'number' && cross.publishedCount > 0,
+      'the published-subpath population is not returned as a positive number — the green line\'s census is unreadable',
+    );
+
     // Census guard: an empty tree is a broken scanner, never a clean repo.
     const empty = join(tmpdir(), `os-test-source-alias-empty-${process.pid}`);
     rmSync(empty, { recursive: true, force: true });
@@ -2111,7 +2119,7 @@ if (argv.includes('--self-test')) {
 } else if (argv.includes('--list')) {
   printList(REPO_ROOT);
 } else {
-  const { failures, packages, measured } = check(REPO_ROOT, KNOWN_UNALIASED_TEST_IMPORTS);
+  const { failures, packages, measured, publishedCount } = check(REPO_ROOT, KNOWN_UNALIASED_TEST_IMPORTS);
   if (failures.length > 0) {
     console.error('check-test-source-alias FAILED\n');
     for (const failure of failures) console.error(`  ✗ ${failure}\n`);
@@ -2123,6 +2131,7 @@ if (argv.includes('--self-test')) {
   }
   console.log(
     `check-test-source-alias OK — ${packages.length} packages with tests scanned; ` +
-      `${measured.size} registered as still resolving a workspace dep through \`dist/\`.`,
+      `${measured.size} registered as still resolving a workspace dep through \`dist/\`; ` +
+      `${publishedCount} published subpath(s) resolved through every alias table.`,
   );
 }
