@@ -1010,6 +1010,27 @@ function expectedInputs(globs) {
 }
 
 /**
+ * `turbo ls --output=json` emits `packages.count` beside `packages.items`, and
+ * keeps the two equal -- measured on turbo 2.10.10, all of the bare, `--filter`
+ * and `--affected` forms agree. So `count` is TURBO's field, not this script's
+ * invention, and a document we have appended to is a valid `turbo ls` payload
+ * only while the count moves with the array.
+ *
+ * Nothing reads `count` today, which is exactly what makes it cheap to keep
+ * true and expensive to leave stale: the consumer is partition-test-shards.mjs,
+ * whose stated posture is to assert this payload's shape LOUDLY so an
+ * experimental-command upgrade becomes a red step naming the cause rather than
+ * a silently empty shard. A hand-mutated document that contradicts itself about
+ * its own size is the input to that assertion. The reader now checks the
+ * agreement (`readPackageItems()` there), so this is a checked invariant across
+ * the two scripts rather than a convention someone has to remember.
+ */
+function reconcilePackageCount(packages) {
+  packages.count = packages.items.length;
+  return packages;
+}
+
+/**
  * Layer A. Adds any declaring package whose globs the diff touches to the
  * package list ci.yml is about to shard, so the scan runs on the PR that
  * actually changed its inputs.
@@ -1045,6 +1066,11 @@ function unionInto(listPath, changedPath) {
     items.push({ name, path: join(REPO_ROOT, dir) });
     added.push(`${name}  (declared glob matched ${hit})`);
   }
+  // The push above changed the list's size, so the size the document DECLARES
+  // has to move with it -- see reconcilePackageCount(). Unconditional rather
+  // than `if (added.length)`: the invariant is a property of the document we
+  // write, not of whether this particular run had anything to add.
+  reconcilePackageCount(parsed.packages);
   writeFileSync(listPath, JSON.stringify(parsed));
   if (added.length) {
     console.log('Cross-package scans pulled into this run because the diff touched their declared inputs:');
@@ -1370,6 +1396,16 @@ function selfTest() {
   ok('but it DOES cover that directory as a listing', coversDirectory('packages/lint/src', ['packages/lint/src/**']));
   ok('a single-file glob does not cover the directory it sits in', !coversDirectory('scripts', ['scripts/check-nul-bytes.mjs']));
   ok('a directory that does not exist is covered by nothing', !coversDirectory('scripts/no-such-dir-9763', ['**']));
+
+  // `--union-into`'s output document. `packages.count` is turbo's field and the
+  // append changes the size it describes, so the two are one operation -- these
+  // pin the half of the cross-script invariant this side owns (the reader's
+  // half is partition-test-shards.mjs `--self-test`).
+  const counted = (packages) => reconcilePackageCount(packages).count;
+  ok('count follows an appended item', counted({ count: 0, items: [{ name: 'a', path: 'p' }, { name: 'b', path: 'q' }] }) === 2);
+  ok('a correct count is left correct', counted({ count: 1, items: [{ name: 'a', path: 'p' }] }) === 1);
+  ok('count follows an empty list down', counted({ count: 7, items: [] }) === 0);
+  ok('the reconciliation never invents items', reconcilePackageCount({ count: 0, items: [] }).items.length === 0);
 
   const failed = cases.filter((c) => !c.cond);
   for (const c of cases) console.log(`${c.cond ? 'ok  ' : 'FAIL'} ${c.label}`);
