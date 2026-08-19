@@ -51,6 +51,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { resolveAuthzContext } from '@objectstack/core';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import {
   ExternalDatasourceService,
@@ -130,7 +131,40 @@ function mountBoth() {
       throw new Error(`no service: ${name}`);
     },
   } as any;
-  registerExternalDatasourceRoutes(server, ctx, '/api/v1');
+  /**
+   * [#9686] Stands in for `RestServer.resolvePackageRouteExecutionContext`,
+   * which is what `direct-mount-composition.ts` hands the federation registrar
+   * in production. It resolves through `resolveAuthzContext` — the platform's
+   * shared resolution, and the same one the admin spelling reaches through
+   * `ctx` — so the two spellings under comparison read ONE identity function.
+   * A fixture that hand-rolled a second notion of "authenticated" here could
+   * make the twins agree by construction, which is the one thing this file
+   * must not do.
+   */
+  const resolveExecutionContext = async (req: any) => {
+    const raw: any = req?.headers;
+    let headers: Headers;
+    if (raw && typeof raw.get === 'function') {
+      headers = raw as Headers;
+    } else {
+      headers = new Headers();
+      for (const [k, v] of Object.entries((raw ?? {}) as Record<string, unknown>)) {
+        if (v != null) headers.set(k, String(v));
+      }
+    }
+    const authz = await resolveAuthzContext({
+      // No data engine here, stated rather than omitted: `ql` is a required
+      // member, and it is what the api-key admission path reads. This fixture
+      // wires only a session, so that path resolves nothing and the session
+      // path is the one under comparison.
+      ql: undefined,
+      headers,
+      getSession: async (h: any) => authService.api.getSession({ headers: h }),
+    });
+    return authz.userId ? { userId: authz.userId } : undefined;
+  };
+
+  registerExternalDatasourceRoutes(server, ctx, '/api/v1', { resolveExecutionContext });
   registerDatasourceAdminRoutes(server, ctx, '/api/v1');
   return server.getRawApp();
 }
@@ -144,23 +178,35 @@ const SPELLING = {
 interface Reading {
   status: number;
   tables: Array<{ schema?: string; name: string }>;
+  /** [#9686] The machine-readable refusal code, when the answer is a refusal. */
+  code?: string;
 }
 
 /** Drive one spelling and read back the table set it answers with. */
-async function read(app: any, spelling: keyof typeof SPELLING, qs: string): Promise<Reading> {
-  const res = await app.fetch(
-    new Request(`http://local${SPELLING[spelling](qs)}`, { headers: { authorization: SESSION } }),
-  );
-  const body = (await res.json()) as { success: boolean; data?: { tables?: Reading['tables'] } };
-  return { status: res.status, tables: body.data?.tables ?? [] };
+async function read(
+  app: any,
+  spelling: keyof typeof SPELLING,
+  qs: string,
+  headers: Record<string, string> = { authorization: SESSION },
+): Promise<Reading> {
+  const res = await app.fetch(new Request(`http://local${SPELLING[spelling](qs)}`, { headers }));
+  const body = (await res.json()) as {
+    success: boolean;
+    data?: { tables?: Reading['tables'] };
+    error?: { code?: string };
+  };
+  return { status: res.status, tables: body.data?.tables ?? [], code: body.error?.code };
 }
 
 /** Both spellings, same query — the comparison every case makes. */
-async function readBoth(qs: string): Promise<{ federation: Reading; admin: Reading }> {
+async function readBoth(
+  qs: string,
+  headers?: Record<string, string>,
+): Promise<{ federation: Reading; admin: Reading }> {
   const app = mountBoth();
   return {
-    federation: await read(app, 'federation', qs),
-    admin: await read(app, 'admin', qs),
+    federation: await read(app, 'federation', qs, headers),
+    admin: await read(app, 'admin', qs, headers),
   };
 }
 
@@ -230,6 +276,56 @@ describe('listRemoteTables twins agree on the request shape (#7955)', () => {
       'public.customers',
       'public.orders',
     ]);
+    expect(qualified(admin)).toEqual(qualified(federation));
+  });
+});
+
+/**
+ * [#9686] The same equivalence, on the REFUSAL axis.
+ *
+ * #4249 gave the two spellings one failure contract and #7955 one request
+ * shape; what neither covered is who is allowed to ASK. That axis was silently
+ * false on `main` between the two guards landing: the admin spelling answered
+ * 401 to an anonymous caller while the federation spelling served it — one
+ * operation, two admission policies, and no case in this file could see it
+ * because every case above presents a credential.
+ *
+ * The cases below drive both spellings with NO credential and compare the two
+ * answers, exactly as the request-shape cases compare table sets. A guard added
+ * to one spelling and not the other now fails here, whichever side it is added
+ * to — which is the property the equivalence is for.
+ */
+describe('listRemoteTables twins agree on WHO may ask (#9686)', () => {
+  it('an anonymous caller is refused identically on both spellings', async () => {
+    const { federation, admin } = await readBoth('', {});
+
+    expect(federation.status).toBe(401);
+    expect(federation.code).toBe('UNAUTHENTICATED');
+    // Not "both non-200": a 503 from an unwired service would satisfy that on
+    // either side and say nothing about admission.
+    expect(admin.status).toBe(federation.status);
+    expect(admin.code).toBe(federation.code);
+    // …and neither leaked the listing it refused to serve.
+    expect(federation.tables).toEqual([]);
+    expect(admin.tables).toEqual([]);
+  });
+
+  it('a credential the deployment does not admit is refused identically on both spellings', async () => {
+    const { federation, admin } = await readBoth('', { authorization: 'Bearer not-the-session' });
+
+    expect(federation.status).toBe(401);
+    expect(federation.code).toBe('UNAUTHENTICATED');
+    expect(admin.status).toBe(federation.status);
+    expect(admin.code).toBe(federation.code);
+  });
+
+  it('the credential that clears one spelling clears the other — same identity, same answer', async () => {
+    // The other direction, and the one that makes the refusal cases mean
+    // something: the two spellings do not agree merely by refusing everyone.
+    const { federation, admin } = await readBoth('?schema=public');
+
+    expect(federation.status).toBe(200);
+    expect(admin.status).toBe(200);
     expect(qualified(admin)).toEqual(qualified(federation));
   });
 });

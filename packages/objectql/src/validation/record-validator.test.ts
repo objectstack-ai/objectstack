@@ -548,6 +548,109 @@ describe('validateRecord — ADR-0113 required write contract on update', () => 
 });
 
 /**
+ * #9476 — the enforcement half of the #9447 maintainer ruling (2026-08-18):
+ * `required` on a multi-value field means NON-EMPTY array. The empty set is
+ * representable — it reads back as `[]`, never `null` — so `required` judges
+ * emptiness: an explicit `[]` is an empty value exactly as `null` / `''` are.
+ *
+ * Scope is the spec's own multi-value predicate (`isMultiValueField`,
+ * ADR-0104 D1): inherently-multi option types, plus multi-capable types
+ * flagged `multiple: true`. Structured-JSON types stay OUT — `[]` there is a
+ * legitimate document, not an emptied set (pinned below).
+ *
+ * Envelope: `ValidationError` (`code: 'VALIDATION_FAILED'`) carrying a
+ * `fields[]` entry with `code: 'required'` — the class the REST layer maps
+ * to HTTP 400 (packages/rest `error-response.ts`), exactly as every other
+ * required refusal already travels.
+ */
+describe('validateRecord — required judges array emptiness on multi-value fields (#9476)', () => {
+  const schema: any = {
+    fields: {
+      members: { type: 'lookup', reference: 'sys_user', multiple: true, required: true },
+    },
+  };
+
+  it('INSERT: `[]` on a required `multiple: true` lookup is rejected — full envelope pin', () => {
+    let err: any;
+    try {
+      validateRecord(schema, { members: [] }, 'insert');
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.code).toBe('VALIDATION_FAILED'); // → HTTP 400 via rest error-response mapping
+    expect(err.fields).toHaveLength(1);
+    expect(err.fields[0]).toMatchObject({ field: 'members', code: 'required' });
+    expect(err.fields[0].message).toMatch(/is required/);
+  });
+
+  it('UPDATE: supplying `[]` for a required multi-value field is an explicit clear — rejected', () => {
+    let err: any;
+    try {
+      validateRecord(schema, { members: [] }, 'update');
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.code).toBe('VALIDATION_FAILED');
+    expect(err.fields).toHaveLength(1);
+    expect(err.fields[0]).toMatchObject({ field: 'members', code: 'required' });
+    // The clear-out case keeps its DISTINCT sentence (`required_cleared`).
+    expect(err.fields[0].message).toMatch(/required and cannot be cleared/);
+  });
+
+  it('control: a populated array still lands on insert AND update — the check must not over-fire', () => {
+    expect(() => validateRecord(schema, { members: ['u1'] }, 'insert')).not.toThrow();
+    expect(() => validateRecord(schema, { members: ['u1', 'u2'] }, 'update')).not.toThrow();
+  });
+
+  it('control: `null` keeps its two existing reasons — `required` on insert, `required_cleared` on update', () => {
+    let ins: any;
+    let upd: any;
+    try {
+      validateRecord(schema, { members: null }, 'insert');
+    } catch (e) {
+      ins = e;
+    }
+    try {
+      validateRecord(schema, { members: null }, 'update');
+    } catch (e) {
+      upd = e;
+    }
+    expect(ins).toBeInstanceOf(ValidationError);
+    expect(ins.fields[0]).toMatchObject({ field: 'members', code: 'required' });
+    expect(ins.fields[0].message).toMatch(/is required/);
+    expect(ins.fields[0].message).not.toMatch(/cannot be cleared/);
+    expect(upd).toBeInstanceOf(ValidationError);
+    expect(upd.fields[0]).toMatchObject({ field: 'members', code: 'required' });
+    expect(upd.fields[0].message).toMatch(/required and cannot be cleared/);
+  });
+
+  it('an inherently-multi option type (`multiselect`) is judged the same way', () => {
+    const s: any = { fields: { labels: { type: 'multiselect', required: true, options: ['a', 'b'] } } };
+    expect(() => validateRecord(s, { labels: [] }, 'insert')).toThrow(/is required/);
+    expect(() => validateRecord(s, { labels: ['a'] }, 'insert')).not.toThrow();
+  });
+
+  it('control: `[]` on a NON-required multi-value field still passes — emptiness is only judged under `required`', () => {
+    const s: any = { fields: { accounts: { type: 'lookup', reference: 'acct', multiple: true } } };
+    expect(() => validateRecord(s, { accounts: [] }, 'insert')).not.toThrow();
+    expect(() => validateRecord(s, { accounts: [] }, 'update')).not.toThrow();
+  });
+
+  it('control: an UPDATE that omits the required multi-value field never 400s — legacy rows rest', () => {
+    const s: any = { fields: { members: schema.fields.members, notes: { type: 'textarea' } } };
+    expect(() => validateRecord(s, { notes: 'touched only this' }, 'update')).not.toThrow();
+  });
+
+  it('control: structured JSON stays out — `[]` on a required `json` field is a document, not an emptied set', () => {
+    const s: any = { fields: { payload: { type: 'json', required: true } } };
+    expect(() => validateRecord(s, { payload: [] }, 'insert')).not.toThrow();
+    expect(() => validateRecord(s, { payload: [] }, 'update')).not.toThrow();
+  });
+});
+
+/**
  * #3957 — a rejected write must name the field the way the USER knows it, in
  * the language they read, and must hand a client the constraint as data.
  *

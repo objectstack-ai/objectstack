@@ -8,7 +8,9 @@
  * `@objectstack/plugin-email`; integrations (nodemailer, third-party
  * SDKs) plug in as an `IEmailTransport`.
  *
- * Aligned with CoreServiceName 'email' in core-services.zod.ts.
+ * Registered as runtime service slot 'email' by `@objectstack/plugin-email`
+ * (`ctx.registerService('email', ...)`). Not a `CoreServiceName` member
+ * itself — email delivery is subsumed under the 'notification' core service.
  *
  * Follows Dependency Inversion Principle - plugins depend on this
  * interface, not on concrete email service implementations.

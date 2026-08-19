@@ -414,6 +414,8 @@
     "GetMetaItemCachedResponse (type)",
     "GetMetaItemCachedResponseParsed (type)",
     "GetMetaItemCachedResponseSchema (const)",
+    "GetMetaItemLayeredRequest (type)",
+    "GetMetaItemLayeredRequestSchema (const)",
     "GetMetaItemLayeredResponse (type)",
     "GetMetaItemLayeredResponseSchema (const)",
     "GetMetaItemRequest (type)",

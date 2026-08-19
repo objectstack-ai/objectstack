@@ -270,6 +270,26 @@ describe('failures are loud, counted, and never stop the batch', () => {
     expect(perRow[0]).toMatch(/engine exploded/);
   });
 
+  it('[#9657] reports a stranded row to a sink with NO `error` — at warn, not in silence', async () => {
+    // `SweepLogger.error` is declared OPTIONAL, and the per-row report used to
+    // be `logger?.error?.(…)`: against a `{ info, warn }` sink it emitted
+    // NOTHING, so the message that stays `queued` forever was reported by
+    // nobody while the server kept looking healthy.
+    const engine = fakeEngine([{ id: 'row-bad', created_at: ago(min(30)) }]);
+    const service = fakeService({
+      deliver: () => { throw new Error('engine exploded'); },
+    });
+    const logger = { info: vi.fn(), warn: vi.fn() };
+
+    const res = await sweepStrandedOutbox({ engine, service, logger, now: () => NOW });
+
+    expect(res).toMatchObject({ scanned: 1, failed: 1 });
+    const warned = lines(logger.warn).filter((l) => l.includes('could not advance sys_email row'));
+    expect(warned).toHaveLength(1);
+    expect(warned[0]).toMatch(/row-bad/);
+    expect(warned[0]).toMatch(/engine exploded/);   // the cause survives the fallback
+  });
+
   it('propagates a failure of the query itself — the sweep did not happen', async () => {
     const engine = { find: vi.fn(async () => { throw new Error('no such table: sys_email'); }) };
     await expect(sweepStrandedOutbox({ engine, service: fakeService(), now: () => NOW }))

@@ -73,6 +73,7 @@ import {
     evaluateLockForDelete,
     resolveLockState,
     type MetadataLock,
+    type MetadataLockSource,
     type MetadataProvenance,
 } from '@objectstack/spec/kernel';
 import { validateObjectNamespacePrefix, deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
@@ -6081,7 +6082,14 @@ export class ObjectStackProtocolImplementation implements
         // ── ADR-0010 protection envelope ──
         lock: MetadataLock;
         lockReason?: string;
-        lockSource?: 'artifact' | 'package' | 'env-forced' | 'overlay';
+        // `MetadataLockSource` (artifact | package | env-forced) — the only
+        // producer feeding this field on this path is `resolveLockState`,
+        // whose return is typed `MetadataLockSource | undefined`. The
+        // `'overlay'` arm this annotation used to carry was dead: the one
+        // `lockSource: 'overlay'` producer in this file belongs to
+        // `getEffectiveLock`, a write/delete-door helper that never feeds
+        // this response (#9740).
+        lockSource?: MetadataLockSource;
         lockDocsUrl?: string;
         provenance?: MetadataProvenance;
         packageId?: string;

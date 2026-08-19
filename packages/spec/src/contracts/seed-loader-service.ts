@@ -24,7 +24,12 @@ import type { Seed } from '../data/seed.zod.js';
  * - **ServiceNow**: Sys ID and display value mapping during import
  * - **Airtable**: Linked record resolution via display names
  *
- * Aligned with CoreServiceName 'seed-loader' and SeedLoaderProtocol in data/seed-loader.zod.ts.
+ * Not a `CoreServiceName` member and not a registered runtime service slot
+ * (no `SeedLoaderProtocol` export exists in data/seed-loader.zod.ts either —
+ * the request/result shapes there are `SeedLoaderRequestSchema` /
+ * `SeedLoaderResultSchema`). `metadata-protocol`'s `SeedLoaderService`
+ * implements this contract directly, constructed rather than registered
+ * via `ctx.registerService`.
  */
 export interface ISeedLoaderService {
   /**

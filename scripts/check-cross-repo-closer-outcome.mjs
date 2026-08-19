@@ -19,6 +19,12 @@
 // this repo maintains for the occasion it exists for has, in that window,
 // never once had a target to close.
 //
+// Re-measured for #9643 later the same day over the 1176 most recently UPDATED
+// merged PRs (a different window of the same size, 14 qualified same-repo
+// references in it): still **zero** foreign. Two independent windows agree,
+// which is why the coverage in this file matters more than the behaviour it
+// pins -- reading is the only thing that has ever found a defect here.
+//
 // Two consequences, and this file answers both:
 //
 //   1. The defects in it are found by reading, one card at a time -- #9575 for
@@ -54,6 +60,17 @@
 // which of `core.setFailed` / `core.warning` / a job summary fires, and which
 // API calls were made. Those are the properties both cards are about.
 //
+// Also asserted, since #9643: that every API the script calls is one this
+// harness MODELS. That is not pedantry -- it is the failure this file walked
+// into. Adding `listComments` to the shipped script moved real behaviour and
+// all 52 assertions stayed green, because the unstubbed method threw a
+// `TypeError` INSIDE the script's own `try` and was absorbed by the very
+// degradation branch the new code had just added. A harness whose stubs lag
+// the script does not under-report; it reports a pass about a path the script
+// no longer takes. So the guard records the access out-of-band and `judge`
+// fails the scenario on the record, whatever that scenario's own assertions
+// say.
+//
 // NOT asserted: the step's `retries:` / `retry-exempt-status-codes:` inputs.
 // They are consumed by the ACTION, not by the script, so no stub of `github`
 // can exercise them; their acceptance on the pinned action version is evidenced
@@ -69,11 +86,19 @@
 // one and green forever, including the day someone deletes the thing it
 // guards. `--self-test` mutates the extracted source -- drop the `setFailed`,
 // stop collecting failed keys, `break` out of the loop instead of isolating,
-// disable the same-repo skip, narrow the keyword set, disable the
-// already-closed skip -- and requires the battery to go RED for each, naming
-// the scenario it expects. Each mutation also asserts its own anchor was
-// PRESENT before substituting: a mutation that silently matched nothing would
-// leave the battery green and read exactly like a passing self-test.
+// disable the same-repo skip, narrow the keyword set, collapse the
+// already-closed branch, strip the backlink marker, drop the triage guard,
+// post blind when the comment listing is refused, stop recording which half
+// was lost -- and requires the battery to go RED for each, naming the scenario
+// it expects. Each mutation also asserts its own anchor was PRESENT before
+// substituting: a mutation that silently matched nothing would leave the
+// battery green and read exactly like a passing self-test.
+//
+// One scenario (L11) is driven TWICE, the second run's world built out of the
+// first run's calls. Re-run idempotency is a property of the PAIR, and a
+// fixture that hand-writes the marker proves each half while leaving the two
+// runs free to disagree about its spelling -- which is the only way the
+// property can actually break.
 
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -145,55 +170,101 @@ function httpError(status, message) {
   return Object.assign(new Error(message), { status });
 }
 
+/** The `github.rest.issues.*` methods this harness models. See the `guard` in `makeDoubles`. */
+const MODELLED_ISSUE_METHODS = new Set(['get', 'createComment', 'update', 'listComments']);
+
 /**
  * `github` / `context` / `core` doubles plus a call log.
  *
- * `issues` maps `owner/repo#number` to `{ state }` or to a `{ throwOn }`
- * instruction, so a scenario can refuse one specific target and leave the rest
- * reachable -- which is the whole point of the isolation the loop must keep.
+ * `issues` maps `owner/repo#number` to a fixture: `{ state, stateReason,
+ * comments }` describes the issue, and `{ getError, listError, commentError,
+ * updateError }` refuses one specific call on it -- so a scenario can break one
+ * target and leave the rest reachable, which is the whole point of the
+ * isolation the loop must keep.
  */
 function makeDoubles({ body, token, issues = {}, prCommentError = null, summaryError = null }) {
-  const calls = { get: [], comment: [], update: [], prComment: [] };
+  const calls = { get: [], list: [], comment: [], update: [], prComment: [] };
   const log = { info: [], warning: [], failed: [], summary: [] };
+  const unstubbedCalls = [];
   let summaryBuffer = [];
 
   const target = (o, r, n) => issues[`${o}/${r}#${n}`] ?? {};
 
-  const github = {
-    rest: {
-      issues: {
-        async get({ owner, repo, issue_number: n }) {
-          calls.get.push(`${owner}/${repo}#${n}`);
-          const t = target(owner, repo, n);
-          if (t.getError) throw t.getError;
-          return { data: { state: t.state ?? 'open' } };
-        },
-        async createComment({ owner, repo, issue_number: n, body: text }) {
-          const key = `${owner}/${repo}#${n}`;
-          const isThisPr = owner === THIS_REPO.owner && repo === THIS_REPO.repo;
-          if (isThisPr && prCommentError) {
-            calls.prComment.push({ key, attempted: true, delivered: false });
-            throw prCommentError;
-          }
-          if (isThisPr) {
-            calls.prComment.push({ key, attempted: true, delivered: true, body: text });
-            return { data: {} };
-          }
-          const t = target(owner, repo, n);
-          if (t.commentError) throw t.commentError;
-          calls.comment.push({ key, body: text });
-          return { data: {} };
-        },
-        async update({ owner, repo, issue_number: n, state, state_reason: reason }) {
-          const key = `${owner}/${repo}#${n}`;
-          const t = target(owner, repo, n);
-          if (t.updateError) throw t.updateError;
-          calls.update.push({ key, state, reason });
-          return { data: {} };
-        },
-      },
+  const issuesApi = {
+    async get({ owner, repo, issue_number: n }) {
+      calls.get.push(`${owner}/${repo}#${n}`);
+      const t = target(owner, repo, n);
+      if (t.getError) throw t.getError;
+      // `state_reason` is nullable on a real closed issue -- objectui#4478
+      // answers `null` from this very endpoint -- so the default models that
+      // rather than inventing a value the API does not promise.
+      return { data: { state: t.state ?? 'open', state_reason: t.stateReason ?? null } };
+    },
+    async listComments({ owner, repo, issue_number: n }) {
+      const key = `${owner}/${repo}#${n}`;
+      calls.list.push(key);
+      const t = target(owner, repo, n);
+      if (t.listError) throw t.listError;
+      return { data: (t.comments ?? []).map((text) => ({ body: text })) };
+    },
+    async createComment({ owner, repo, issue_number: n, body: text }) {
+      const key = `${owner}/${repo}#${n}`;
+      const isThisPr = owner === THIS_REPO.owner && repo === THIS_REPO.repo;
+      if (isThisPr && prCommentError) {
+        calls.prComment.push({ key, attempted: true, delivered: false });
+        throw prCommentError;
+      }
+      if (isThisPr) {
+        calls.prComment.push({ key, attempted: true, delivered: true, body: text });
+        return { data: {} };
+      }
+      const t = target(owner, repo, n);
+      if (t.commentError) throw t.commentError;
+      calls.comment.push({ key, body: text });
+      return { data: {} };
+    },
+    async update({ owner, repo, issue_number: n, state, state_reason: reason }) {
+      const key = `${owner}/${repo}#${n}`;
+      const t = target(owner, repo, n);
+      if (t.updateError) throw t.updateError;
+      calls.update.push({ key, state, reason });
+      return { data: {} };
     },
   };
+
+  // An unmodelled API call must be LOUD, and a throw alone is not loud enough
+  // here: every call in the loop sits inside the script's own `try`, so a
+  // `TypeError` from an unstubbed method is caught by the script and absorbed
+  // into whichever degradation that `catch` implements -- leaving the battery
+  // green over a behaviour it never exercised. Measured, on the #9643 change
+  // itself: adding `listComments` to the shipped script moved real behaviour
+  // and all 52 assertions stayed green, because the missing stub landed in the
+  // script's own "could not read the comments" branch. So the access is
+  // RECORDED as well as thrown, and `judge` fails the scenario on the record.
+  //
+  // The guard is applied at every level of `github`, not just to the issues
+  // methods: `github.paginate`, `github.request` and `github.graphql` are all
+  // reachable from a github-script body and all three would otherwise be
+  // `undefined`, i.e. the identical silent-absorption bug one level up.
+  const guard = (impl, path, allowed) =>
+    new Proxy(impl, {
+      get(t, prop, receiver) {
+        if (typeof prop === 'string' && !allowed.has(prop)) {
+          unstubbedCalls.push(`${path}.${prop}`);
+          throw new Error(
+            `${SELF}: the shipped script now uses \`${path}.${prop}\`, which this harness does not ` +
+              'stub. Model it here rather than letting a scenario absorb it.',
+          );
+        }
+        return Reflect.get(t, prop, receiver);
+      },
+    });
+
+  const github = guard(
+    { rest: guard({ issues: guard(issuesApi, 'github.rest.issues', MODELLED_ISSUE_METHODS) }, 'github.rest', new Set(['issues'])) },
+    'github',
+    new Set(['rest']),
+  );
 
   const summary = {
     addRaw(text) {
@@ -226,15 +297,22 @@ function makeDoubles({ body, token, issues = {}, prCommentError = null, summaryE
     },
   };
 
-  return { github, context, core, calls, log, token };
+  return { github, context, core, calls, log, token, unstubbedCalls };
 }
 
-/** Anything github-script hands the script that this harness does not model. */
-function unstubbed(name) {
+/**
+ * Anything github-script hands the script that this harness does not model.
+ *
+ * Records into the same sink as the `github` guard before throwing, for the
+ * same reason: a throw raised inside the script's own `try` is caught by the
+ * script, and a scenario then reports a pass about a degradation path.
+ */
+function unstubbed(name, sink) {
   return new Proxy(
     {},
     {
-      get() {
+      get(_t, prop) {
+        sink.push(typeof prop === 'string' ? `${name}.${prop}` : name);
         throw new Error(
           `${SELF}: the shipped script now uses \`${name}\`, which this harness does not stub. ` +
             'Model it here rather than deleting the assertion that found it.',
@@ -254,10 +332,10 @@ async function runScript(source, scenario) {
     github: doubles.github,
     context: doubles.context,
     core: doubles.core,
-    exec: unstubbed('exec'),
-    glob: unstubbed('glob'),
-    io: unstubbed('io'),
-    fetch: unstubbed('fetch'),
+    exec: unstubbed('exec', doubles.unstubbedCalls),
+    glob: unstubbed('glob', doubles.unstubbedCalls),
+    io: unstubbed('io', doubles.unstubbedCalls),
+    fetch: unstubbed('fetch', doubles.unstubbedCalls),
     require: createRequire(import.meta.url),
     __original_require__: createRequire(import.meta.url),
   };
@@ -303,6 +381,23 @@ const MIXED_BODY = [
 ].join('\n');
 
 const FOREIGN = ['objectstack-ai/objectui#456', 'my-org/some.repo#22', 'third/party#7'];
+
+/** The target the already-closed scenarios (L2, L6-L9) work on. */
+const CLOSED_TARGET = 'objectstack-ai/objectui#456';
+const PR_URL = 'https://github.com/objectstack-ai/objectstack/pull/1234';
+
+/**
+ * The backlink marker the shipped script is expected to write, spelled out.
+ *
+ * It is pinned as a LITERAL rather than recomputed from the script, because
+ * that is what makes the pair of assertions mean something: L1 asserts the
+ * script writes this exact string on the close path, and L6 seeds this exact
+ * string as an existing comment to prove the re-run path recognises it. Change
+ * the marker's shape in the workflow and L1 goes red -- which is the honest
+ * failure, because the two runs of a re-run must agree on one spelling and a
+ * harness that derived it from the script could never catch them disagreeing.
+ */
+const MARKER = '<!-- cross-repo-issue-closer:objectstack-ai/objectstack#1234 -->';
 
 /**
  * Each scenario names the exit path it walks and asserts the OUTCOME of it.
@@ -387,25 +482,138 @@ export const SCENARIOS = [
         'L1 closes as `completed`, not as `not_planned`',
       ),
       t(
-        r.calls.comment.every((c) => c.body.includes('https://github.com/objectstack-ai/objectstack/pull/1234')),
+        r.calls.comment.every((c) => c.body.includes(PR_URL)),
         'L1 comment carries the PR link -- the backlink is half the point of the workflow',
+      ),
+      t(
+        r.calls.comment.every((c) => c.body.includes(MARKER)),
+        'L1 comment carries the per-PR marker, so a LATER run can tell this backlink is already there (#9643)',
       ),
       t(r.log.warning.length === 0, 'L1 warns about nothing'),
     ],
   },
   {
     id: 'L2',
-    name: 'a target that is already closed is skipped, not re-commented (re-run safety)',
+    name: 'already closed by a human -- the backlink still lands, the close does not (#9643)',
     scenario: () => ({
       body: MIXED_BODY,
       token: 'pat',
-      issues: { 'objectstack-ai/objectui#456': { state: 'closed' } },
+      // Closed, `completed`, and carrying no backlink from this PR: the
+      // ordinary sequence the file's header is about -- the fix shipped,
+      // somebody tidied the tracker, then the merge happened.
+      issues: { [CLOSED_TARGET]: { state: 'closed', stateReason: 'completed', comments: [] } },
+    }),
+    check: (r, t) => {
+      const posted = r.calls.comment.find((c) => c.key === CLOSED_TARGET);
+      return [
+        t(r.log.failed.length === 0, `L2 stays green, got setFailed: ${r.log.failed[0]}`),
+        t(r.calls.list.includes(CLOSED_TARGET), 'L2 reads the comments before posting -- the re-run guard'),
+        t(Boolean(posted), 'L2 LEAVES THE BACKLINK on the already-closed issue -- the defect this card is about'),
+        t((posted?.body ?? '').includes(PR_URL), 'L2 backlink names the PR that fixed it'),
+        t((posted?.body ?? '').includes(MARKER), 'L2 backlink carries the marker, so a re-run recognises it'),
+        t(
+          !r.calls.update.some((u) => u.key === CLOSED_TARGET),
+          'L2 does NOT re-close it -- the close is the half that really was redundant',
+        ),
+        t(r.calls.update.length === 2, `L2 still closes the other two, got ${r.calls.update.length}`),
+        t(r.log.warning.length === 0, 'L2 warns about nothing -- leaving a backlink is the normal outcome, not a degradation'),
+      ];
+    },
+  },
+  {
+    id: 'L6',
+    name: 'already closed AND already linked (a re-run) -- nothing is posted twice (#9643)',
+    scenario: () => ({
+      body: MIXED_BODY,
+      token: 'pat',
+      issues: {
+        [CLOSED_TARGET]: {
+          state: 'closed',
+          stateReason: 'completed',
+          // What an earlier run of THIS job left behind. The marker is the only
+          // thing that separates this case from L2: `closed_by` is a login and
+          // every seat in this org shares one identity.
+          comments: ['已由 objectstack-ai/objectstack 的 ' + PR_URL + ' 修复并合并。\n\n' + MARKER],
+        },
+      },
     }),
     check: (r, t) => [
-      t(r.log.failed.length === 0, 'L2 stays green'),
-      t(!r.calls.comment.some((c) => c.key === 'objectstack-ai/objectui#456'), 'L2 does not re-comment on a closed issue'),
-      t(!r.calls.update.some((u) => u.key === 'objectstack-ai/objectui#456'), 'L2 does not re-close a closed issue'),
-      t(r.calls.update.length === 2, `L2 still closes the other two, got ${r.calls.update.length}`),
+      t(r.log.failed.length === 0, 'L6 stays green'),
+      t(r.calls.list.includes(CLOSED_TARGET), 'L6 reads the comments'),
+      t(
+        !r.calls.comment.some((c) => c.key === CLOSED_TARGET),
+        'L6 posts NO second backlink -- re-running this job must be idempotent (#9643 H2)',
+      ),
+      t(!r.calls.update.some((u) => u.key === CLOSED_TARGET), 'L6 does not re-close it either'),
+      t(r.calls.update.length === 2, `L6 still closes the other two, got ${r.calls.update.length}`),
+    ],
+  },
+  {
+    id: 'L7',
+    name: 'already closed as not_planned -- no backlink, because it would contradict the triage (#9643)',
+    scenario: () => ({
+      body: MIXED_BODY,
+      token: 'pat',
+      issues: { [CLOSED_TARGET]: { state: 'closed', stateReason: 'not_planned', comments: [] } },
+    }),
+    check: (r, t) => [
+      t(r.log.failed.length === 0, 'L7 stays green -- a disagreement between two humans is not a job failure'),
+      t(
+        !r.calls.comment.some((c) => c.key === CLOSED_TARGET),
+        'L7 posts NO backlink -- a comment saying this PR fixed a not_planned issue would be actively wrong',
+      ),
+      t(!r.calls.update.some((u) => u.key === CLOSED_TARGET), 'L7 does not reopen or re-close it'),
+      t(
+        !r.calls.list.includes(CLOSED_TARGET),
+        'L7 does not even list the comments -- the triage reason settles it before idempotency matters',
+      ),
+      t(
+        r.log.warning.some((w) => w.message.includes(CLOSED_TARGET) && /not_planned/.test(w.message)),
+        'L7 ANNOUNCES the contradiction rather than skipping silently -- only a human can settle it',
+      ),
+      t(r.calls.update.length === 2, `L7 still closes the other two, got ${r.calls.update.length}`),
+    ],
+  },
+  {
+    id: 'L8',
+    name: 'already closed but the comment listing is refused -- skip AT MOST ONCE, and say so (#9643)',
+    scenario: () => ({
+      body: MIXED_BODY,
+      token: 'pat',
+      issues: { [CLOSED_TARGET]: { state: 'closed', stateReason: 'completed', listError: FIXED } },
+    }),
+    check: (r, t) => [
+      t(r.log.failed.length === 0, `L8 stays green, got setFailed: ${r.log.failed[0]}`),
+      t(
+        !r.calls.comment.some((c) => c.key === CLOSED_TARGET),
+        'L8 does NOT post blind -- the marker is stable, so a blind post strands a permanent duplicate '
+          + "on another repo's closed issue (merge-queue-triage.yml chooses the opposite, from a per-RUN marker)",
+      ),
+      t(
+        r.log.warning.some((w) => w.message.includes(CLOSED_TARGET) && /HTTP 503/.test(w.message)),
+        'L8 names the target AND the refusal -- a skip with a stated reason, not a silent one',
+      ),
+      t(r.calls.update.length === 2, `L8 still closes the other two -- one bad listing isolates, got ${r.calls.update.length}`),
+    ],
+  },
+  {
+    id: 'L9',
+    name: 'already closed with a NULL state_reason -- read as completed, so the backlink lands (#9643)',
+    scenario: () => ({
+      body: MIXED_BODY,
+      token: 'pat',
+      // Measured, not invented: objectstack-ai/objectui#4478 is closed and
+      // answers `state_reason: null` from `issues.get`. A fix that keys on the
+      // reason has to say what null means, and this pins the answer.
+      issues: { [CLOSED_TARGET]: { state: 'closed', stateReason: null, comments: [] } },
+    }),
+    check: (r, t) => [
+      t(r.log.failed.length === 0, 'L9 stays green'),
+      t(
+        r.calls.comment.some((c) => c.key === CLOSED_TARGET),
+        'L9 treats a null reason as "no objection recorded" and leaves the backlink',
+      ),
+      t(!r.calls.update.some((u) => u.key === CLOSED_TARGET), 'L9 still does not re-close it'),
     ],
   },
   {
@@ -467,6 +675,61 @@ export const SCENARIOS = [
       ),
     ],
   },
+  {
+    id: 'L10',
+    name: 'the BACKLINK is refused on an already-closed target -- red, and the verdict says which half was lost',
+    scenario: () => ({
+      body: MIXED_BODY,
+      token: 'pat',
+      issues: {
+        [CLOSED_TARGET]: { state: 'closed', stateReason: 'completed', comments: [], commentError: DENIED },
+      },
+    }),
+    check: (r, t) => [
+      t(r.log.failed.length === 1, `L10 fails the job -- half the deliverable was lost; got ${r.log.failed.length}`),
+      t((r.log.failed[0] ?? '').includes(CLOSED_TARGET), 'L10 setFailed names the target'),
+      t(r.calls.update.length === 2, `L10 still closes the other two, got ${r.calls.update.length}`),
+      t(
+        /backlink/.test(r.log.summary[0] ?? ''),
+        'L10 summary says the BACKLINK was lost, not the close -- reporting "still open" about a closed '
+          + 'issue sends the reader to do the one thing that is already done',
+      ),
+      t(
+        !/close and backlink/.test(r.log.summary[0] ?? ''),
+        'L10 does not claim the close was lost too -- the issue was already closed before this run',
+      ),
+      t(r.threw === null, 'L10 does not let the refusal escape the script'),
+    ],
+  },
+  {
+    id: 'L11',
+    name: 'the ROUND TRIP: re-running the job after a clean close posts no second backlink (#9643 H2)',
+    scenario: () => ({ body: MIXED_BODY, token: 'pat' }),
+    // Run 2 sees exactly the world run 1 left behind: every target closed, each
+    // carrying the very comment run 1 posted. Nothing is hand-written -- the
+    // marker travels from run 1's OUTPUT into run 2's INPUT, so this is the one
+    // assertion that fails if the two runs ever disagree on its spelling.
+    rerun: (first) => ({
+      body: MIXED_BODY,
+      token: 'pat',
+      issues: Object.fromEntries(
+        first.calls.comment.map((c) => [c.key, { state: 'closed', stateReason: 'completed', comments: [c.body] }]),
+      ),
+    }),
+    check: (r, t, first) => [
+      t(first.calls.comment.length === 3, `L11 run 1 comments on all three, got ${first.calls.comment.length}`),
+      t(first.calls.update.length === 3, `L11 run 1 closes all three, got ${first.calls.update.length}`),
+      t(r.calls.list.length === 3, `L11 run 2 checks all three for an existing backlink, got ${r.calls.list.length}`),
+      t(
+        r.calls.comment.length === 0,
+        `L11 run 2 posts NOTHING -- \`pull_request_target: [closed]\` can be replayed by a re-run, and this `
+          + `workflow's own job summary tells people to do exactly that; got ${r.calls.comment.length} duplicate(s)`,
+      ),
+      t(r.calls.update.length === 0, `L11 run 2 re-closes nothing, got ${r.calls.update.length}`),
+      t(r.log.failed.length === 0, `L11 run 2 stays green, got setFailed: ${r.log.failed[0]}`),
+      t(r.log.warning.length === 0, 'L11 run 2 warns about nothing -- an idempotent re-run is a normal outcome'),
+    ],
+  },
 ];
 
 // ── The battery ─────────────────────────────────────────────────────────────
@@ -497,13 +760,35 @@ export async function judge(source) {
       return cond ? null : { id: s.id, message };
     };
     let result;
+    let first = null;
     try {
       result = await runScript(source, s.scenario());
+      // A scenario with `rerun` is driven TWICE, the second run's world built
+      // from the first run's output. That is the only way to prove the two runs
+      // agree on one marker spelling -- a fixture that hand-writes the marker
+      // proves each half separately and the round trip not at all.
+      if (typeof s.rerun === 'function') {
+        first = result;
+        result = await runScript(source, s.rerun(first));
+      }
     } catch (err) {
       failures.push({ id: s.id, message: `the harness itself threw -- ${err.message}` });
       continue;
     }
-    for (const f of s.check(result, t)) if (f) failures.push(f);
+    // Checked for EVERY scenario, ahead of its own assertions: an API the
+    // harness does not model is swallowed by the script's own `catch` and
+    // reported as a degradation, so no scenario assertion can be trusted to
+    // notice it. See the guard in `makeDoubles`.
+    for (const name of new Set([...(first?.unstubbedCalls ?? []), ...result.unstubbedCalls])) {
+      checked++;
+      failures.push({
+        id: s.id,
+        message: `the shipped script called \`${name}()\`, which this harness does not model -- `
+          + "the script's own catch absorbed it, so this scenario verified a degradation path rather "
+          + 'than the behaviour it names. Model the call in `makeDoubles`.',
+      });
+    }
+    for (const f of s.check(result, t, first)) if (f) failures.push(f);
   }
 
   return { failures, checked };
@@ -572,15 +857,15 @@ const MUTATIONS = [
   {
     id: 'M2',
     what: 'the loop stops collecting the keys it could not close',
-    from: 'failures.push({ key, reason });',
+    from: 'failures.push({ key, reason, lost });',
     to: '',
     expect: ['L3', 'L4', 'L5'],
   },
   {
     id: 'M3',
     what: 'the loop stops isolating and breaks out on the first refusal',
-    from: 'failures.push({ key, reason });',
-    to: 'failures.push({ key, reason }); break;',
+    from: 'failures.push({ key, reason, lost });',
+    to: 'failures.push({ key, reason, lost }); break;',
     expect: ['L3'],
   },
   {
@@ -599,10 +884,43 @@ const MUTATIONS = [
   },
   {
     id: 'M6',
-    what: 'the already-closed skip is removed, so a re-run re-comments',
+    what: 'the already-closed branch is removed, so a closed issue is commented on AND re-closed',
     from: "if (issue.state === 'closed') {",
     to: 'if (false) {',
-    expect: ['L2'],
+    // L2/L9 lose the "does not re-close it" half; L6 re-comments on a target
+    // that already carries the backlink; L7 posts a "fixed by" comment on a
+    // not_planned issue; L8 posts blind. Every already-closed scenario.
+    expect: ['L2', 'L6', 'L7', 'L8', 'L9'],
+  },
+  {
+    id: 'M8',
+    what: 'the backlink loses its per-PR marker, so a re-run cannot tell its own comment is already there',
+    from: '---\\n_Generated by [Claude Code](https://claude.ai/code)_\\n\\n${backlinkMarker}',
+    to: '---\\n_Generated by [Claude Code](https://claude.ai/code)_',
+    // L1 and L2 catch it on the comments the script POSTS; L11 catches the
+    // consequence, by feeding run 1's output into run 2 and finding a duplicate.
+    expect: ['L1', 'L2', 'L11'],
+  },
+  {
+    id: 'M9',
+    what: 'the triage guard is dropped, so a not_planned issue gets a comment claiming this PR fixed it',
+    from: "if (issue.state_reason === 'not_planned' || issue.state_reason === 'duplicate') {",
+    to: 'if (false) {',
+    expect: ['L7'],
+  },
+  {
+    id: 'M10',
+    what: 'an unreadable comment listing degrades to posting BLIND instead of skipping (a stranded duplicate)',
+    from: '{ title: \'Cross-repo backlink skipped, not confirmed\' },\n        );\n        continue;',
+    to: "{ title: 'Cross-repo backlink skipped, not confirmed' },\n        );",
+    expect: ['L8'],
+  },
+  {
+    id: 'M11',
+    what: 'the loop stops recording WHICH half it lost, so the verdict cannot tell a lost close from a lost backlink',
+    from: 'failures.push({ key, reason, lost });',
+    to: 'failures.push({ key, reason });',
+    expect: ['L10'],
   },
   {
     id: 'M7',
