@@ -151,7 +151,7 @@ send an atomic batch or fall back to client-side sequencing, instead of probing 
 
 ### `GET /.well-known/objectstack`
 
-Served by the runtime dispatcher (`@objectstack/runtime`), not `@objectstack/rest` — its body is wrapped as `{ "data": { ... } }` and includes fields (`name`, `environment`, `features`, `locale`) that the `@objectstack/rest`-served `/api/v1` response above does not. The client SDK's `connect()` tries `/api/v1/discovery` first and falls back to this endpoint, unwrapping either `body.data` or the bare `body`.
+Served by the runtime dispatcher (`@objectstack/runtime`), not `@objectstack/rest` — its body is wrapped in the response envelope as `{ "success": true, "data": { ... } }` and includes fields (`name`, `environment`, `features`, `locale`) that the `@objectstack/rest`-served `/api/v1` response above does not. The client SDK's `connect()` tries `/api/v1/discovery` first and falls back to this endpoint, unwrapping either `body.data` or the bare `body`.
 
 <Callout type="info">
 **Service Status Values**: `available` (fully operational), `registered` (route declared but handler unverified — may return 501), `degraded` (partial functionality), `unavailable` (not installed), `stub` (placeholder that throws errors)

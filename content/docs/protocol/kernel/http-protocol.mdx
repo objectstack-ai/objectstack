@@ -107,9 +107,9 @@ descriptor, each derived from what is actually registered — never hardcoded. S
 ### `GET /.well-known/objectstack`
 
 Served by the runtime dispatcher (`@objectstack/runtime`), not `@objectstack/rest` — its
-body is wrapped as `{ "data": { ... } }` and includes fields (`name`, `environment`,
-`features`, `locale`) that the `@objectstack/rest`-served `/api/v1` response above does
-not. This path is unconditionally dispatcher-owned: no other plugin registers it, so it
+body is wrapped in the response envelope as `{ "success": true, "data": { ... } }` and
+includes fields (`name`, `environment`, `features`, `locale`) that the
+`@objectstack/rest`-served `/api/v1` response above does not. This path is unconditionally dispatcher-owned: no other plugin registers it, so it
 answers with this shape whether or not REST is mounted. The client SDK's `connect()` tries
 `/api/v1/discovery` first and falls back to this endpoint, unwrapping either `body.data` or
 the bare `body`.
@@ -123,6 +123,7 @@ Host: api.acme.com
 **Response:**
 ```json
 {
+  "success": true,
   "data": {
     "name": "ObjectOS",
     "version": "1.0.0",
@@ -225,8 +226,8 @@ dispatcher owns `/api/v1/discovery` as the fallback registrant, so that path and
 `/api/v1` is registered by `@objectstack/rest` alone and is not served at all). As soon as
 `@objectstack/rest` is mounted it takes `/api/v1/discovery` under the single-owner rule
 (ADR-0076 D11) and the two paths answer different *documents* — same schema, different
-producers, so the envelope (`{ "data": … }` here, bare there) and the values differ even
-though the key set no longer does.
+producers, so the envelope (`{ "success": true, "data": … }` here, bare there) and the
+values differ even though the key set no longer does.
 </Callout>
 
 **Why discovery matters:**

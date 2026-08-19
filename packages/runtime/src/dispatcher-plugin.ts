@@ -772,7 +772,14 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 // enabled" against a live server (cloud#152). The body is computed
                 // fresh per request; the only staleness is the HTTP cache layer.
                 res.header('Cache-Control', 'no-store');
-                res.json({ data: await dispatcher.getDiscoveryInfo(prefix) });
+                // Enveloped (`{ success: true, data }`) under the #9436 maintainer
+                // ruling (2026-08-18, option A), inherited by #9813 — machine-read
+                // discovery bodies are the envelope's core constituency and the
+                // migration is one additive key. Deliberately NOT #9389's pre-auth
+                // exemption: that is a closed list of SPA-read surfaces, and this
+                // body is read by SDKs (`connect()`'s fallback probe), codegen and
+                // AI clients. Every measured reader tolerates the added key.
+                res.json({ success: true, data: await dispatcher.getDiscoveryInfo(prefix) });
             });
 
             // ── Discovery (versioned API path) ──────────────────────────
@@ -796,9 +803,10 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                         }
                     }
                     // See the .well-known handler above: discovery must not be cached
-                    // (mutable runtime config; cloud#152 stale `routes.mcp`).
+                    // (mutable runtime config; cloud#152 stale `routes.mcp`), and the
+                    // body is enveloped under the same #9436 ruling (via #9813).
                     res.header('Cache-Control', 'no-store');
-                    res.json({ data: await dispatcher.getDiscoveryInfo(prefix) });
+                    res.json({ success: true, data: await dispatcher.getDiscoveryInfo(prefix) });
                 });
             } else {
                 ctx.logger.info(`[Dispatcher] ${prefix}/discovery ceded to com.objectstack.rest.api (single owner)`);
