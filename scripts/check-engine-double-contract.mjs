@@ -203,17 +203,21 @@
 //
 // Method, stated so this can be redone rather than trusted: membership is
 // proxied by `assertEngine…Dispatch(` call sites in test files under the scan
-// roots, calibrated against this gate's own ledger at HEAD -- 0 false negatives
-// on the file sets, and 309 of 310 (file, verb) rows agreeing on the exact
-// count. Anyone re-running it must first prove their clone actually covers the
-// window; a shallow one silently answers for its own depth, which is the whole
-// reason this paragraph had to be rewritten.
+// roots, calibrated on 2026-08-19 against this gate's own ledger as it then
+// stood -- 0 false negatives on the file sets, and every (file, verb) row but
+// ONE agreeing on the exact count. That calibration is a dated measurement, not
+// a standing property; anyone re-running it must first prove their clone covers
+// the window; a shallow one silently answers for its own depth, which is the
+// whole reason this paragraph had to be rewritten.
 //
 // So the additions the ratchet does redden on are already in conversation with
 // this gate (they are new fakes that had to write `assert…Dispatch` because
-// PINNED demanded it). 310 entries today against the 135 the DEBT ledger
-// already carries: same file format, same order of magnitude, same
-// reconciliation shape.
+// PINNED demanded it). Set against the DEBT ledger this gate already carries,
+// the pinned ledger is the same file format, the same order of magnitude and
+// the same reconciliation shape -- so it is the maintenance cost already being
+// paid for the other ledger, not a new one. Both sizes are printed by a run and
+// countable in the artifacts; they are deliberately not copied into this prose,
+// because `--write` moves one of them and nothing here would notice.
 //
 // ## How a LEGITIMATE decrease is expressed (the anti-nuisance half)
 //
@@ -1476,10 +1480,12 @@ function readBaseline() {
  * The RETAINED ledger (#9680) — the enumerated pinned population.
  *
  * Deliberately a SEPARATE artifact from `engine-double-contract.baseline.json`
- * rather than more rows in it. The baseline is 135 hand-written MEASURED
+ * rather than more rows in it. The baseline is a set of hand-written MEASURED
  * justifications whose readability this file's header calls the gate's whole
- * value ("shrink-only, hand reviewed"); folding 308 generated rows in would
- * bury the reasons under the census and blur which rows a human must agree to.
+ * value ("shrink-only, hand reviewed"); folding the generated rows in would
+ * bury the reasons under a census that ALREADY OUTNUMBERS them -- and, by the
+ * opposite polarities below, can only outnumber them further -- blurring which
+ * rows a human must agree to.
  * These two ledgers also answer to opposite polarities — the baseline records
  * debt and may only SHRINK, this one records coverage and may only GROW — so a
  * reader who conflates them reads every ratchet in this file backwards.
@@ -1497,10 +1503,11 @@ function readPinnedLedger() {
  * diff.
  *
  * Counted per FILE and not merely as membership, because a file may hold more
- * than one pinned double for a verb — measured on this branch: 319 pinned
- * doubles across 308 (file, verb) pairs, so 11 pairs carry more than one. A
- * membership-only ledger would let a file that pins two deletes drop to one in
- * silence, which is this card's defect at a finer grain.
+ * than one pinned double for a verb — the rows reading `"pinned"` above 1 in
+ * `engine-double-contract.pinned.json` are the live list, and the ledger is
+ * where to read how many there are rather than here. A membership-only ledger
+ * would let a file that pins two deletes drop to one in silence, which is this
+ * card's defect at a finer grain.
  */
 function censusPinned(slices) {
   const rows = [];
@@ -1537,7 +1544,8 @@ const pairKey = (file, verb) => JSON.stringify([file, verb]);
  * remedy attached to the wrong story.
  *
  * Counted rather than a membership Set, because a file may pin several doubles
- * for one verb (measured: 10 of 308 rows do). Membership alone cannot separate
+ * for one verb (the ledger rows reading `"pinned"` above 1 are the live list,
+ * as above). Membership alone cannot separate
  * "the file pinned two deletes and now pins one because a MEMBER WAS DELETED"
  * from "...because a member stopped calling the predicate", and those two want
  * opposite remedies: restore the member vs re-pin it.
@@ -1578,8 +1586,9 @@ const REGEN = 'node scripts/check-engine-double-contract.mjs --write';
 function retainedErrors(census, ledger, ledgerExists, declared, onDisk) {
   const errors = [];
 
-  // Bootstrap. Without this a missing artifact reports 308 separate "not in the
-  // ledger" errors, which reads as a catastrophe and buries the one-line fix.
+  // Bootstrap. Without this a missing artifact reports one "not in the ledger"
+  // error per census row -- hundreds of them, and growing, since this ledger is
+  // grow-only -- which reads as a catastrophe and buries the one-line fix.
   if (!ledgerExists) {
     return [
       `RETAINED: ${relative(ROOT, PINNED_LEDGER_PATH)} is missing. That file IS the pinned `
@@ -2915,7 +2924,8 @@ class Svc {
     grewMore.length === 1 && anyOf(grewMore, 'Coverage grew'));
 
   // ── Bootstrap: a missing ledger is ONE error, not one per row. The failure
-  // this guards is a fresh checkout reporting 308 problems for one missing file.
+  // this guards is a fresh checkout reporting one problem per census row for a
+  // single missing file.
   const missing = retainedErrors(
     [{ file: 'a.test.ts', verb: 'delete', pinned: 1 }, { file: 'b.test.ts', verb: 'update', pinned: 1 }],
     { entries: [] }, false, dcount([]), onDisk);
