@@ -42,6 +42,64 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
 const BASELINE_PATH = 'scripts/slot-lookup-baseline.json';
 
+/**
+ * The POPULATION this gate re-measures, as the repo-relative subtree it really
+ * reads. Everything below is derived from it, so what the gate declares and
+ * what the gate scans cannot become two different facts.
+ *
+ * ## Why a gate declaring its own population is load-bearing (#9700, #9626)
+ *
+ * `scripts/pm/dispatch-gates.mjs` builds every dispatch's gate list by scanning
+ * each gate's own source for the path literals it operates on. Before this
+ * declaration, the only literals in this file were its OUTPUT
+ * (`scripts/slot-lookup-baseline.json`) and the ref the monotonicity check
+ * diffs against (`origin/main`) — neither of which is a file this gate reads.
+ * So the derivation scored this gate `silent` for every card in the tree: not
+ * "irrelevant", but "its sources name paths, none of which cover yours", which
+ * the residue summary calls its weakest claim and explicitly not a clearance.
+ *
+ * That cost real CI rounds on cards that could not have known to run it: #9391
+ * (a `priority:p0` auth guard that added five `getService` lookups typed `any`)
+ * and again PR #9695. Both went red in `Lint & Repo Gates` on a gate that
+ * appeared in NEITHER half of their dispatch's derivation.
+ *
+ * ## Why the subtree, and why it is the constant the target derives from
+ *
+ * The hint language `dispatch-gates` compares in is repo-relative paths with
+ * globs collapsed, so an extension glob carries no information there:
+ * `packages/**` + `/*.{ts,tsx,mts,cts}` is what ESLint needs, but that spelling
+ * is not even extractable as a hint (brace expansion is outside the scanner's
+ * accepted path charset) and collapses to something that matches no file. The
+ * declaration is therefore the SUBTREE, and the ESLint target is one
+ * concatenation away from it rather than a second literal — the same shape
+ * #9639 used for `check:doc-anchors` (`CONTENT_GLOB`, with its root derived),
+ * and for the same reason: a declaration that can drift from the scan is worse
+ * than none, because it replaces a silent gate with a lying one.
+ *
+ * ## The cost of declaring it, decided rather than assumed
+ *
+ * `packages/**` is broad: this gate is now named for every card whose surface
+ * is under `packages/`, and a card that edits a package README or manifest gets
+ * a lead it does not need. That trade is the one `CHANGE_KIND_GATES` already
+ * decided for the three structurally identical whole-tree ratchets in
+ * `dispatch-gates.mjs`, and it is decided the same way here — by what the gate
+ * costs to run needlessly. Measured on this tree: 46s, no build required, and a
+ * failure names the offending file and line. A seat that runs it needlessly
+ * loses seconds; a seat that is never prompted loses a CI round.
+ *
+ * Two things a seat prompted by this declaration needs to know, and neither is
+ * visible from a green `pnpm lint`:
+ *   • `pnpm lint` passing proves NOTHING for a file in the baseline — it is
+ *     grandfathered by `ignores`, so ESLint says nothing about new erasures
+ *     added to it. This ratchet is the only thing that sees them.
+ *   • the repair is to TYPE the lookup against its slot's contract. Never
+ *     `--update` the baseline upward; entries only ever go down.
+ */
+const POPULATION_GLOB = 'packages/**';
+
+/** What ESLint is asked to lint: every TS dialect inside the declared population. */
+const LINT_TARGET = `${POPULATION_GLOB}/*.{ts,tsx,mts,cts}`;
+
 const update = process.argv.includes('--update');
 const baseline = JSON.parse(readFileSync(resolve(repoRoot, BASELINE_PATH), 'utf8'));
 const baselinedFiles = new Set(Object.keys(baseline));
@@ -71,6 +129,28 @@ if (!eslintConfig.some(carriesRule)) {
   process.exit(2);
 }
 
+// The declaration above states what this gate READS, and a dispatch pastes it
+// into a prompt as a lead. It is only true while it agrees with the scope the
+// RULE is configured for — the config block's own `files`. Copies in two files
+// drift silently, so the agreement is asserted rather than assumed: if the rule
+// is ever rescoped (another extension, another root, a second block), this
+// refuses to run instead of measuring a population that no longer matches
+// either what `pnpm lint` enforces or what `dispatch-gates` was told.
+const ruleScopes = eslintConfig.filter(carriesRule).flatMap((entry) => entry.files ?? []);
+if (ruleScopes.length !== 1 || ruleScopes[0] !== LINT_TARGET) {
+  console.error(
+    'check-slot-lookup-ratchet: the declared population no longer matches the\n' +
+    'scope the rule is configured for.\n' +
+    `  declared here: ${LINT_TARGET}\n` +
+    `  rule is scoped to: ${ruleScopes.join(', ') || '(nothing)'}\n` +
+    'Update POPULATION_GLOB/LINT_TARGET in this file to match eslint.config.mjs.\n' +
+    'This declaration is read by scripts/pm/dispatch-gates.mjs to decide which\n' +
+    'cards are told to run this gate, so a stale one is a wrong lead, not a\n' +
+    'cosmetic mismatch — refusing rather than measuring the wrong set.',
+  );
+  process.exit(2);
+}
+
 const eslint = new ESLint({
   cwd: repoRoot,
   overrideConfigFile: true,
@@ -80,7 +160,7 @@ const eslint = new ESLint({
   allowInlineConfig: false,
 });
 
-const results = await eslint.lintFiles(['packages/**/*.{ts,tsx,mts,cts}']);
+const results = await eslint.lintFiles([LINT_TARGET]);
 
 const current = {};
 for (const result of results) {

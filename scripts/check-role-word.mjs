@@ -126,6 +126,98 @@ function newUseMessage(file, count) {
   );
 }
 
+// ── What a PASSING run tells the reader (#9910) ────────────────────────
+//
+// The green line used to be, in full:
+//
+//   check-role-word: OK (43 baselined file(s), no new occurrences).
+//
+// Every number in it came from the LEDGER. `current` holds only the files that
+// still carry the word, and a green run is precisely the run where its key set
+// equals the baseline's — so the population actually READ (`files`, walked over
+// ROOTS) never reached the output at all.
+//
+// That was safe only while the ledger was non-empty, and safe by ACCIDENT: a
+// scan that reads nothing drops every baselined file out of `current`, and the
+// ratchet-DOWN branch below then reports one "clean/gone" problem per baselined
+// file. Measured on this tree — ROOTS pointed at two non-existent directories,
+// ledger untouched — `43 problem(s)`, exit 1. That protection is a side effect
+// of still owing debt, and it evaporates at the exact moment this ratchet
+// succeeds at its purpose: with the ledger empty, `current = {}` and
+// `baseline = {}` raise nothing in either direction, and the same ablation
+// printed
+//
+//   check-role-word: OK (0 baselined file(s), no new occurrences).   EXIT=0
+//
+// — a gate that read zero files, over an empty ledger, reporting success. So
+// the green body states the INPUT VOLUME, which no clean tree can make vacuous:
+// a zero in `0 .md/.mdx file(s) read` is an alarm a reader can act on, whereas
+// a zero in `0 baselined file(s)` says nothing at all.
+//
+// PER ROOT, not just a total. `walk()` runs behind `existsSync(root)`, so a
+// root that is renamed or moved away is skipped in SILENCE, and a bare total
+// hides that behind whatever the other root still contributes. Every configured
+// root is therefore named on every green run — including one that contributed
+// nothing, because a root omitted from the line is the same silence in a new
+// place.
+//
+// Verdicts, populations and exit codes are untouched. This is the success text
+// and nothing else: the gate refuses exactly what it refused before.
+
+/**
+ * The input volume, as one clause, shared by BOTH success paths so they cannot
+ * drift apart. Derived from EXTENSIONS rather than spelling the suffixes again,
+ * so widening the scan cannot leave the sentence describing the old one.
+ *
+ * @param {{root: string, files: number}[]} scanned per-ROOT counts, in ROOTS order
+ * @returns {string}
+ */
+function scanClause(scanned) {
+  const total = scanned.reduce((n, r) => n + r.files, 0);
+  const kinds = [...EXTENSIONS].sort().join('/');
+  const perRoot = scanned.map((r) => `${r.root} ${r.files}`).join(', ');
+  return `${total} ${kinds} file(s) read across ${scanned.length} root(s) — ${perRoot}`;
+}
+
+/**
+ * The GREEN body, named and pure so the self-test can assert on the sentence an
+ * author actually reads — the counts are interpolated, so reading this file's
+ * SOURCE is not evidence about the rendered text.
+ *
+ * @param {{root: string, files: number}[]} scanned per-ROOT counts, in ROOTS order
+ * @param {Record<string, number>} ledger files still carrying the word (== the
+ *   baseline on any run that reaches this line)
+ * @returns {string}
+ */
+function successSummary(scanned, ledger) {
+  const fileCount = Object.keys(ledger).length;
+  const occurrences = Object.values(ledger).reduce((n, c) => n + c, 0);
+  return (
+    'check-role-word: OK, no new occurrences of the reserved word.\n'
+    + `  Scanned: ${scanClause(scanned)}.\n`
+    + `  Ledger: ${fileCount} baselined file(s) still carrying it `
+    + `(${occurrences} occurrence(s)) in ${BASELINE_PATH}.`
+  );
+}
+
+/**
+ * The `--update` confirmation. It carries the scan clause for the same reason,
+ * and with more at stake: `--update` REWRITES the baseline from the current
+ * tree, so running it over a dead scan does not merely print a misleading
+ * number — it writes `{}` over the ledger, and its old line (`role-word
+ * baseline updated: 0 file(s).`) read exactly like a debt fully paid.
+ *
+ * @param {{root: string, files: number}[]} scanned per-ROOT counts, in ROOTS order
+ * @param {Record<string, number>} ledger the freshly written baseline
+ * @returns {string}
+ */
+function updateSummary(scanned, ledger) {
+  return (
+    `role-word baseline updated: ${Object.keys(ledger).length} file(s) baselined `
+    + `from ${scanClause(scanned)}.`
+  );
+}
+
 function selfTest() {
   const failures = [];
   const expect = (label, cond) => {
@@ -173,6 +265,50 @@ function selfTest() {
     + '(marking the improvement path maintainer-only would teach the opposite of the rule)',
     !RATCHET_EXPANSION_OFFER.test(ratchetDown) && ratchetRemedyCarriesAuthority(ratchetDown));
 
+  // ── The green body reports what was READ (#9910) ──────────────────────
+  //
+  // Interpolated counts again, so the source proves nothing about the rendered
+  // sentence — driven here instead, in the states that used to be identical.
+  const SCANNED = [{ root: 'content/docs', files: 179 }, { root: 'skills', files: 36 }];
+  const DEAD_SCAN = [{ root: 'content/docs', files: 0 }, { root: 'skills', files: 0 }];
+  const PAID_OFF = {};
+
+  const greenPaid = successSummary(SCANNED, PAID_OFF);
+  const greenDead = successSummary(DEAD_SCAN, PAID_OFF);
+
+  // (1) THE property this card exists for, pinned as a property and not as
+  // text: once the debt is paid — the state this ratchet is BUILT to reach — a
+  // tree that was read and one that was not must not render the same success.
+  // A pin on the new sentence's wording would rot at the first rephrasing, and
+  // worse, a rephrasing that went back to printing only ledger numbers would
+  // keep such a pin green.
+  expect('#9910 — the GREEN body renders DIFFERENTLY for a scanned tree and an unscanned one '
+    + 'with the ledger EMPTY (the state in which every ledger-derived number is 0 either way)',
+    greenPaid !== greenDead);
+
+  // (2) The alarm has to be legible, not merely different: (1) alone passes on
+  // any two strings that differ at all.
+  expect('#9910 — an unscanned tree prints a ZERO input volume a reader can act on',
+    /\b0 [^\n]*file\(s\) read\b/.test(greenDead));
+  expect('#9910 — a scanned tree prints its real input volume, not a ledger-derived count',
+    /\b215 [^\n]*file\(s\) read\b/.test(greenPaid));
+
+  // (3) `walk()` sits behind `existsSync(root)`, so a root that moved away is
+  // skipped in silence. A line that named only the roots which contributed
+  // would put that silence straight back, one root at a time.
+  const oneRootGone = successSummary(
+    [{ root: 'content/docs', files: 179 }, { root: 'skills', files: 0 }], PAID_OFF);
+  expect('#9910 — a root that contributed NOTHING is still named, with its zero (existsSync '
+    + 'skips a missing root silently, so dropping it from the line hides the same failure)',
+    /\bskills 0\b/.test(oneRootGone) && oneRootGone !== greenPaid);
+
+  // (4) The same ambiguity on the privileged path, where it is destructive
+  // rather than merely misleading: `--update` rewrites the baseline from the
+  // tree it just read.
+  expect('#9910 — the --update confirmation states its input volume too, so re-baselining '
+    + 'over a dead scan cannot read like a debt fully paid',
+    updateSummary(DEAD_SCAN, PAID_OFF) !== updateSummary(SCANNED, PAID_OFF));
+
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\ncheck-role-word --self-test: ${failures.length} failure(s).\n`);
@@ -180,7 +316,9 @@ function selfTest() {
   }
   console.log(
     'OK  self-test: the NEW-use remedy marks baseline expansion as maintainer-only, the predicate '
-    + 'rejects an unmarked offer, and the ratchet-DOWN remedy stays the author\'s own.',
+    + 'rejects an unmarked offer, the ratchet-DOWN remedy stays the author\'s own, and both '
+    + 'success texts report what was READ \u2014 so a scanned tree and an unscanned one cannot print '
+    + 'the same result once the ledger is empty.',
   );
   process.exit(0);
 }
@@ -188,7 +326,14 @@ function selfTest() {
 if (process.argv.includes('--self-test')) selfTest();
 
 const files = [];
-for (const root of ROOTS) if (existsSync(root)) walk(root, files);
+/* The input volume, per root, recorded as the scan runs — the same pass, not a
+ * second one. `files` is built exactly as before; only the tally is new. */
+const scanned = [];
+for (const root of ROOTS) {
+  const before = files.length;
+  if (existsSync(root)) walk(root, files);
+  scanned.push({ root, files: files.length - before });
+}
 
 const current = {};
 for (const f of files.sort()) {
@@ -202,7 +347,7 @@ for (const f of files.sort()) {
 
 if (update) {
   writeFileSync(BASELINE_PATH, JSON.stringify(current, null, 2) + '\n');
-  console.log(`role-word baseline updated: ${Object.keys(current).length} file(s).`);
+  console.log(updateSummary(scanned, current));
   process.exit(0);
 }
 
@@ -233,4 +378,4 @@ if (errors.length) {
   for (const e of errors) console.error('  • ' + e);
   process.exit(1);
 }
-console.log(`check-role-word: OK (${Object.keys(current).length} baselined file(s), no new occurrences).`);
+console.log(successSummary(scanned, current));

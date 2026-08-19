@@ -34,6 +34,7 @@
         "$TURBO_ROOT$/packages/lint/src/**",
         "$TURBO_ROOT$/content/docs/references/**",
         "$TURBO_ROOT$/scripts/**",
+        "$TURBO_ROOT$/packages/cli/src/commands/serve.ts",
         "$TURBO_ROOT$/packages/runtime/src/**",
         "$TURBO_ROOT$/packages/objectql/src/validation/**",
         "$TURBO_ROOT$/packages/metadata-protocol/src/**",
@@ -192,7 +193,11 @@
         "!coverage/**",
         "!.turbo/**",
         "$TURBO_ROOT$/content/**",
-        "$TURBO_ROOT$/scripts/sync-template-versions.mjs"
+        "$TURBO_ROOT$/scripts/sync-template-versions.mjs",
+        "$TURBO_ROOT$/.github/workflows/scaffold-e2e.yml",
+        "$TURBO_ROOT$/packages/cli/src/commands/serve.ts",
+        "$TURBO_ROOT$/scripts/gen-sdui-manifest.sh",
+        "$TURBO_ROOT$/scripts/publish-smoke.sh"
       ]
     },
     "test:e2e": {

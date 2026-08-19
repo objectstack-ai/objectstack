@@ -681,6 +681,45 @@ const PLUGIN_ROUTE_MODULES = {
   },
 };
 
+const EXPRESS_RESPONSE_RECEIVERS = new Set(['res']);
+
+/**
+ * Surface 4 (#9813): modules that write express-style `res.json(…)` responses
+ * on an `IHttpServer` — the dialect none of the other three surfaces can see.
+ * `dispatcher-plugin.ts` served the exact `{ data }` discovery shape #9436 was
+ * ruled on for a day with no counter anywhere, because it writes through `res`
+ * rather than a Hono context and returns nothing to a central sender.
+ *
+ * ⚠ ENUMERATED, not discovered. The other populations refuse an undeclared
+ * response-writing module; this one audits only the files named here, because
+ * a discovery walk for this dialect first needs a read/write discriminator —
+ * fetch's `Response.json()` is a zero-argument READ on the same receiver name
+ * (`const res = await fetch(…); await res.json()`), and 20 non-test files
+ * under packages/ carry the `res.json(` spelling today, most of them fetch
+ * readers. Growing the walk is #9937; adding a NEW express-style route module
+ * to this table is part of adding the module.
+ *
+ * Entries carry the same counters, `ratchet`/`exempt`/`note` grammar and
+ * audit (`auditPluginRouteModule`) as PLUGIN_ROUTE_MODULES — one grammar, two
+ * receiver dialects.
+ */
+const IHTTP_ROUTE_MODULES = {
+  // Ten bodies. The two discovery bodies (`/.well-known/objectstack`,
+  // unconditional, and the REST-less `${prefix}/discovery` fallback) were
+  // enveloped by #9813 under the #9436 maintainer ruling (2026-08-18, option
+  // A, inherited with its reason intact: machine-read discovery bodies are
+  // the envelope's core constituency and the migration is one additive key —
+  // deliberately NOT #9389's pre-auth exemption, whose closed SPA-read list
+  // these sites are not on). The two `{ success: false, error: buildApiError(…) }`
+  // exits are conformant, and five relayed bodies (`result.body`,
+  // `ANONYMOUS_DENY_BODY`, …) are deliberately invisible, as everywhere.
+  'packages/runtime/src/dispatcher-plugin.ts': {
+    unenveloped: 1,
+    ratchet: '#9936 (envelope or rule on the SSE-fallback `{ events }` body)',
+    note: 'the streaming branch\'s JSON fallback — a transport whose `res` cannot stream gets the collected events as a bare `{ events }`, no `success` flag and the payload beside the envelope rather than under `data`. A different consumer population from the discovery bodies (callers that asked for an SSE stream), so #9813\'s inherited ruling does not reach it; #9936 carries the fork',
+  },
+};
+
 /**
  * Count the ways one plugin-route module's hand-built Hono bodies depart from
  * the declared envelope.
@@ -688,10 +727,17 @@ const PLUGIN_ROUTE_MODULES = {
  * Only `<ctx>.json(<objectLiteral>, …)` is judged — see the header on why
  * relayed bodies are deliberately invisible here.
  *
+ * `receivers` names the identifiers that count as a response receiver. The
+ * default is the Hono pair; passing `EXPRESS_RESPONSE_RECEIVERS` reads the
+ * express-style `res.json(…)` dialect instead (#9813) — same body grammar,
+ * different receiver, so the counters and their meanings are shared.
+ *
  * @param {string} source TypeScript source text.
+ * @param {string} fileName reported in sites.
+ * @param {Set<string>} receivers identifiers judged as response receivers.
  * @returns {{bodies: number, unenveloped: number, errorWithoutMessage: number, errorCodeNotString: number, strayKeys: number, stringError: number, siblingCode: number, sites: Record<string, string[]>}}
  */
-export function scanHonoRouteSource(source, fileName = 'plugin.ts') {
+export function scanHonoRouteSource(source, fileName = 'plugin.ts', receivers = HONO_CONTEXT_RECEIVERS) {
   const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
   const found = {
     bodies: 0,
@@ -711,7 +757,7 @@ export function scanHonoRouteSource(source, fileName = 'plugin.ts') {
       ts.isPropertyAccessExpression(node.expression) &&
       node.expression.name.text === 'json' &&
       ts.isIdentifier(node.expression.expression) &&
-      HONO_CONTEXT_RECEIVERS.has(node.expression.expression.text)
+      receivers.has(node.expression.expression.text)
     ) {
       found.bodies += 1;
       const arg = node.arguments[0];
@@ -1397,6 +1443,31 @@ function audit() {
     }
   }
 
+  // ── The IHttpServer express-style modules (#9813) — enumerated, see table ──
+  const ihttpScans = {};
+  for (const [file, declared] of Object.entries(IHTTP_ROUTE_MODULES)) {
+    let source;
+    try {
+      source = readFileSync(join(ROOT, file), 'utf8');
+    } catch {
+      problems.push(
+        `${file}\n    declared in IHTTP_ROUTE_MODULES but not found — moved or deleted?\n` +
+        `    Update the table.`,
+      );
+      continue;
+    }
+    const got = scanHonoRouteSource(source, file, EXPRESS_RESPONSE_RECEIVERS);
+    if (got.bodies === 0) {
+      problems.push(
+        `${file}\n    declared in IHTTP_ROUTE_MODULES but no longer writes an express-style\n` +
+        `    response (\`res.json(…)\`) — moved, deleted, or converted? Update the table.`,
+      );
+      continue;
+    }
+    ihttpScans[file] = got;
+    problems.push(...auditPluginRouteModule(file, declared, got));
+  }
+
   if (problems.length) {
     console.error('✗ Route-envelope conformance (#3843)\n');
     for (const p of problems) console.error('  ' + p + '\n');
@@ -1466,6 +1537,24 @@ function audit() {
   // enumeration, and printing it without its number would report the ruling as
   // the file-level waiver it deliberately is not.
   for (const [file, m] of pExempt) {
+    console.log(`  – exempt, closed at ${pCounts(m)}: ${file} — ${m.exempt}`);
+  }
+
+  const iEntries = Object.entries(IHTTP_ROUTE_MODULES);
+  const iRatcheted = iEntries.filter(([, m]) => m.ratchet);
+  const iExempt = iEntries.filter(([, m]) => m.exempt);
+  const iBodies = Object.values(ihttpScans).reduce((n, s) => n + s.bodies, 0);
+  console.log(
+    `✓ IHttpServer express-style modules — ${iEntries.length} module(s) audited ` +
+    `(ENUMERATED, not discovered — the walk is #9937), ` +
+    `${iBodies} hand-built body/bodies (count reported, NOT pinned): ` +
+    `${iEntries.length - iRatcheted.length - iExempt.length} conformant, ` +
+    `${iRatcheted.length} ratcheted, ${iExempt.length} exempt`,
+  );
+  for (const [file, m] of iRatcheted) {
+    console.log(`  ⚠ ratchet ${m.ratchet}: ${file} (${pCounts(m)}; ticks down only) — ${m.note}`);
+  }
+  for (const [file, m] of iExempt) {
     console.log(`  – exempt, closed at ${pCounts(m)}: ${file} — ${m.exempt}`);
   }
 }
@@ -1711,6 +1800,34 @@ function selfTest() {
   // scans must not both claim the same write site.
   p = scanHonoRouteSource(`res.status(404).json({ error: 'nope' });`);
   assert(p.bodies === 0, `a res.json write must not enter surface 3 → ${JSON.stringify(p)}`);
+
+  // ── Surface 4 (#9813): the same grammar under express receivers ───────────
+  //
+  // The receiver set is the load-bearing difference: identical source reads as
+  // zero bodies under the default (Hono) receivers and as a bare body under
+  // EXPRESS_RESPONSE_RECEIVERS — which is exactly how dispatcher-plugin.ts's
+  // discovery bodies sat invisible beside a green surface 3.
+  const expressBare = `res.json({ data: await dispatcher.getDiscoveryInfo(prefix) });`;
+  p = scanHonoRouteSource(expressBare, 'x.ts', EXPRESS_RESPONSE_RECEIVERS);
+  assert(
+    p.bodies === 1 && p.unenveloped === 1,
+    `a bare express body must count under express receivers → ${JSON.stringify(p)}`,
+  );
+  assert(
+    scanHonoRouteSource(expressBare, 'x.ts').bodies === 0,
+    'the same express body must stay invisible to the default (Hono) receivers',
+  );
+  p = scanHonoRouteSource(`res.json({ success: true, data: await x() });`, 'x.ts', EXPRESS_RESPONSE_RECEIVERS);
+  assert(
+    p.bodies === 1 && p.unenveloped === 0,
+    `the enveloped flip must read conformant under express receivers → ${JSON.stringify(p)}`,
+  );
+  // Relayed bodies are counted but never judged, in this dialect like the others.
+  p = scanHonoRouteSource(`res.json(result.body); res.json(ANONYMOUS_DENY_BODY);`, 'x.ts', EXPRESS_RESPONSE_RECEIVERS);
+  assert(
+    p.bodies === 2 && p.unenveloped === 0,
+    `relayed express bodies must count as bodies, never as counters → ${JSON.stringify(p)}`,
+  );
 
   // ── The #9389 ruling: an exemption is a CLOSED list ───────────────────────
   //

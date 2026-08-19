@@ -134,6 +134,28 @@ export type RestProtocol = DataProtocol & MetadataProtocol;
  * is now checked against the spec contract — an undeclared member is a compile
  * error at the call site, not a cast-and-hope. Never add protocol members
  * here; a key that belongs to the request belongs in the spec schema.
+ *
+ * [#9805] The same typing now covers the NON-door `getMetaItems` helper call
+ * sites in this file (the object, book, doc, view and dataset listings). Two
+ * spellings those sites carry deliberately SURVIVE the tightening, because
+ * retiring either would change behaviour rather than typing:
+ *
+ *   - The OPTIONAL CALL (`getMetaItems?.(…)`) and the
+ *     `typeof … === 'function'` guards. `getMetaItems` is a REQUIRED
+ *     `MetadataProtocol` member, so these are not feature detection in the
+ *     type sense — but a host may occupy the protocol slot with an object
+ *     that does not implement the whole surface, which is the measured reason
+ *     they exist (`metaTypeIsLive` documents the same deliberate spelling for
+ *     `getMetaTypes`). Retiring one turns a tolerated absence into a
+ *     `TypeError`.
+ *   - The RESULT handling. `getMetaItems` is declared to return
+ *     `{ type, items }`, while these sites also tolerate the bare-array shape
+ *     older hosts and stubs return (see `metaItemsArray`), so the response
+ *     stays runtime-shaped on purpose.
+ *
+ * The REQUEST is what is fully typeable today, and the request is what is
+ * typed — which is the whole point: an undeclared key in one of these
+ * literals is now a compile error instead of a cast-and-hope.
  */
 type TransportScopedMetaRequest<R> = R & { environmentId?: string };
 import {
@@ -1329,10 +1351,11 @@ export class RestServer {
      */
     private async loadObjectItems(p: RestProtocol, environmentId: string | undefined): Promise<any[]> {
         try {
-            const r: any = await (p as any).getMetaItems?.({
+            const objectsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
                 type: 'object',
                 ...(environmentId ? { environmentId } : {}),
-            });
+            };
+            const r: any = await p.getMetaItems?.(objectsRequest);
             return Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : [];
         } catch (err) {
             // [#3545] The API-exposure gate fails OPEN when object metadata can't
@@ -1711,11 +1734,12 @@ export class RestServer {
     }
 
     /** Fetch every book of the environment, shaped for the audience resolver. */
-    private async fetchAudienceBooks(p: any, environmentId: string | undefined): Promise<any[]> {
-        const raw = await p.getMetaItems({
+    private async fetchAudienceBooks(p: RestProtocol, environmentId: string | undefined): Promise<any[]> {
+        const booksRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
             type: 'book',
             ...(environmentId ? { environmentId } : {}),
-        } as any).catch(() => []);
+        };
+        const raw = await p.getMetaItems(booksRequest).catch(() => []);
         return RestServer.metaItemsArray(raw).map((b: any) =>
             b && typeof b === 'object' ? { ...b, packageId: b._packageId } : b,
         );
@@ -4554,11 +4578,12 @@ export class RestServer {
                         const norm = (raw: any): any[] =>
                             Array.isArray(raw) ? raw : (raw && Array.isArray(raw.items) ? raw.items : []);
 
-                        const books = norm(await prot.getMetaItems({
+                        const booksRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
                             type: 'book',
                             ...(packageId ? { packageId } : {}),
                             ...(environmentId ? { environmentId } : {}),
-                        } as any));
+                        };
+                        const books = norm(await prot.getMetaItems(booksRequest));
                         let book = books.find((b: any) => b && b.name === req.params.name);
                         if (!book) {
                             // Unknown name → the implicit per-package book (§6.4).
@@ -4583,11 +4608,12 @@ export class RestServer {
                             return;
                         }
 
-                        const docs = norm(await prot.getMetaItems({
+                        const docsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
                             type: 'doc',
                             ...(packageId ? { packageId } : {}),
                             ...(environmentId ? { environmentId } : {}),
-                        } as any))
+                        };
+                        const docs = norm(await prot.getMetaItems(docsRequest))
                             .map((d: any) => (d && typeof d === 'object' ? resolveDocLocale(d, locale) : d))
                             .map((d: any) => ({
                                 name: d.name,
@@ -5135,10 +5161,12 @@ export class RestServer {
                                     if (caller.authenticated && !RestServer.anyPermissionSetAudience(books)) {
                                         allowed = true; // no gated book anywhere → org suffices
                                     } else {
-                                        const corpus = RestServer.metaItemsArray(await p.getMetaItems({
+                                        const docCorpusRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
                                             type: 'doc',
                                             ...(environmentId ? { environmentId } : {}),
-                                        } as any).catch(() => []))
+                                        };
+                                        const corpus = RestServer.metaItemsArray(
+                                            await p.getMetaItems(docCorpusRequest).catch(() => []))
                                             .filter((d: any) => d && typeof d === 'object')
                                             .map((d: any) => ({
                                                 name: d.name,
@@ -8028,10 +8056,11 @@ export class RestServer {
         ): Promise<{ view: any; form: any; object: string } | null> => {
             const p = await this.resolveProtocol(environmentId, req);
             if (typeof (p as any).getMetaItems !== 'function') return null;
-            const result: any = await (p as any).getMetaItems({
+            const viewsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
                 type: 'view',
                 ...(environmentId ? { environmentId } : {}),
-            });
+            };
+            const result: any = await p.getMetaItems(viewsRequest);
             const items: any[] = Array.isArray(result?.items)
                 ? result.items
                 : Array.isArray(result)
@@ -8092,10 +8121,11 @@ export class RestServer {
                     try {
                         const p = await this.resolveProtocol(environmentId, req);
                         if (typeof (p as any).getMetaItems === 'function') {
-                            const r: any = await (p as any).getMetaItems({
+                            const objectsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
                                 type: 'object',
                                 ...(environmentId ? { environmentId } : {}),
-                            });
+                            };
+                            const r: any = await p.getMetaItems(objectsRequest);
                             const items: any[] = Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : [];
                             const obj = items.find((o: any) => o?.name === match.object);
                             if (obj && obj.fields && typeof obj.fields === 'object') {
@@ -8408,10 +8438,11 @@ export class RestServer {
                     let referenceTo: string | undefined = picker.object;
                     if (!referenceTo && typeof (p as any).getMetaItems === 'function') {
                         try {
-                            const r: any = await (p as any).getMetaItems({
+                            const objectsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
                                 type: 'object',
                                 ...(environmentId ? { environmentId } : {}),
-                            });
+                            };
+                            const r: any = await p.getMetaItems(objectsRequest);
                             const items: any[] = Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : [];
                             const obj = items.find((o: any) => o?.name === match.object);
                             const def = obj?.fields?.[fieldName];
@@ -8611,7 +8642,8 @@ export class RestServer {
                     let dataset = body.dataset;
                     if (!dataset && body.datasetName) {
                         const p = await this.resolveProtocol(environmentId, req);
-                        const items = await (p as any).getMetaItems?.({ type: 'dataset', previewDrafts }).catch(() => null);
+                        const datasetRequest: GetMetaItemsRequest = { type: 'dataset', previewDrafts };
+                        const items: any = await p.getMetaItems?.(datasetRequest).catch(() => null);
                         const list = Array.isArray(items?.items) ? items.items : (Array.isArray(items) ? items : []);
                         dataset = list.find((d: any) => d?.name === body.datasetName);
                         if (!dataset) {

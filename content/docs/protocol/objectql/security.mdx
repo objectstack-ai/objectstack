@@ -372,30 +372,47 @@ object: account
 accessLevel: read           # read | edit
 condition: 'record.account_type == "Enterprise"'
 sharedWith:
-  type: position            # user | group | position | unit_and_subordinates | guest
+  type: position            # user | team | position | unit_and_subordinates | business_unit
   value: sales_rep
 ```
 
 `unit_and_subordinates` expands a **business-unit subtree**: the unit named by `value` plus every descendant unit's members (ADR-0057 D5 / ADR-0090 D3 — the former position-tree walk was re-homed onto the `sys_business_unit` tree).
 
-### Owner-Based Sharing
+### Owner-Based Sharing — removed in v17
 
-Share records owned by one group with another (`OwnerSharingRuleSchema`):
+Owner-based rules (`type: 'owner'`, `ownedBy`) were removed from the authoring
+surface in v17 (#1878), together with the `group` / `guest` recipients. They
+depended on live membership the static seeder cannot track, so they validated
+but never materialized a share. Use a criteria rule or a scope-depth grant
+instead; none of these shapes parses anymore, so a stale definition fails
+loudly at authoring time instead of silently doing nothing (ADR-0078).
+
+> **"Skipped" and "rejected" are different instructions to an author.** Before
+> v17 these rules were *declared but skipped at seed time*: you could write one,
+> it parsed, and the seeder ignored it. They are not skipped now — they **do not
+> parse**. `SharingRuleSchema` rejects the block above with three issues:
+> `type: 'owner'` fails the `criteria` literal, the required `condition` is
+> reported missing, and `ownedBy` comes back as an unrecognized key carrying its
+> own guidance message. There is also no `OwnerSharingRuleSchema` to point at —
+> `packages/spec/src/security/sharing.zod.ts` exports `CriteriaSharingRuleSchema`,
+> and `SharingRuleSchema` *is* that schema.
+
+The retired `share_west_region` rule — "West-region accounts reach the regional
+managers" — is expressed by predicating the field instead of the owner:
 
 ```yaml
+# share_west_region.sharing.yml
 name: share_west_region
-type: owner
-object: account
+type: criteria
+object: account             # sharingModel: private, declared above
 accessLevel: edit
-ownedBy:
-  type: position
-  value: west_region_reps
+condition: 'record.region == "west"'
 sharedWith:
   type: position
   value: west_region_managers
 ```
 
-> **Enforcement status.** Criteria rules with `user` / `position` / `unit_and_subordinates` recipients compile and enforce (the CEL condition lowers to a runtime filter that materializes `sys_record_share` grants, ADR-0058 D3). Owner-type rules and `group`/`guest` recipients are `[experimental — not enforced]`: the seed bootstrap skips them (logged) rather than seeding a permissive match-all (ADR-0049).
+> **Enforcement status.** Every authorable rule and recipient type is enforced. Criteria rules with `user` / `team` / `position` / `unit_and_subordinates` / `business_unit` recipients compile and enforce (the CEL condition lowers to a runtime filter that materializes `sys_record_share` grants, ADR-0058 D3). Owner-type rules and the `group` / `guest` recipients are **not** `[experimental — not enforced]` and are no longer skipped at seed time — v17 removed them from the schema, so they do not parse at all (see above). What is still skipped-and-logged is a `condition` the compiler cannot lower (functions, cross-object traversal): it is never seeded as a permissive match-all (ADR-0049).
 
 > `accessLevel` is one of `read` or `edit`. Sharing widens **which rows** a principal reaches, never **which verbs** they may use — an `edit` share opens *update*, not *delete*: delete comes from ownership, the ADR-0057 DEPTH scopes, or the `modifyAllRecords` bypass, enforced by the sharing layer's own `canDelete` gate (distinct from the `canEdit` update gate) on top of the object-level CRUD gate (ADR-0111 D3). A third level `full` ("Full Access — transfer/share/delete") was authorable through protocol 16 but never granted any of those verbs: both enforcement sites matched `edit`/`full` alike, so it was equivalent to `edit` while telling admins otherwise, and it was removed (#3865, ADR-0078). Stacks still authoring it are rewritten to `edit` at load by the `sharing-rule-access-level-full-to-edit` conversion.
 

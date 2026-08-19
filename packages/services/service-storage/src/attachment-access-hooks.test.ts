@@ -711,17 +711,45 @@ describe('#7145 — caller envelope forwarded to the sharing gate', () => {
     expect((canEdit.mock.calls[0]![2] as any).__writeScope).toBeUndefined();
   });
 
-  // ── The session fallback is unchanged ─────────────────────────────────
-  it('still falls back to the session snapshot when no execution context rides along', async () => {
+  // ── The session fallback, and the org name it reads (#9691) ───────────
+  //
+  // ⚠️ This case used to hand the hook a session spelling `tenantId: 'org_1'`
+  // and assert the same key came back out. That is a session the engine cannot
+  // produce: `HookContextSchema` STRIPS a `tenantId` key (#3290, pinned in
+  // `packages/spec/src/data/hook.test.ts`) and `buildSession` only ever emits
+  // `organizationId`. So the fixture pinned the removed-alias arm itself — it
+  // passed for exactly as long as `callerContext` read the dead name, and could
+  // only have started failing if the code became right, which is what happened.
+  // Replaced rather than respelled: the fixture below is the envelope a real
+  // transport builds.
+  it('falls back to the session snapshot and reads the caller org under the BLESSED name (#9691)', async () => {
     const canEdit = vi.fn(async (_o: string, _r: string, _c: any) => true);
     const { beforeDelete } = install({ attachments: [attRow], sharing: { canEdit } });
     await beforeDelete({
       object: 'sys_attachment',
       event: 'beforeDelete',
       input: { id: 'a1' },
-      session: { userId: 'u1', tenantId: 'org_1', positions: ['p1'] },
+      // Exactly what `ObjectQLEngine.buildSession` emits.
+      session: { userId: 'u1', organizationId: 'org_1', positions: ['p1'] },
       api: apiFor([]),
     });
+    // `tenantId` on the way OUT is `ExecutionContext`'s driver-layer name for
+    // the same value — the separate axis #3290 deliberately left alone.
     expect(canEdit.mock.calls[0]![2]).toEqual({ userId: 'u1', tenantId: 'org_1', positions: ['p1'] });
+  });
+
+  it('does not resurrect the removed `session.tenantId` alias if one ever reaches a hook (#9691)', async () => {
+    const canEdit = vi.fn(async (_o: string, _r: string, _c: any) => true);
+    const { beforeDelete } = install({ attachments: [attRow], sharing: { canEdit } });
+    await beforeDelete({
+      object: 'sys_attachment',
+      event: 'beforeDelete',
+      input: { id: 'a1' },
+      // A key the schema strips. Reaching for it is how this seam handed the
+      // sharing service an envelope with no org at all for several majors.
+      session: { userId: 'u1', tenantId: 'stale_org', positions: ['p1'] } as any,
+      api: apiFor([]),
+    });
+    expect((canEdit.mock.calls[0]![2] as any).tenantId).toBeUndefined();
   });
 });

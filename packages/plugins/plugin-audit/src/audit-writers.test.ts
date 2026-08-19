@@ -1657,8 +1657,13 @@ describe('audit writers — the writer reads the session key the engine emits (#
     // A session in the REMOVED dialect. The engine cannot produce one, so the
     // only way this shape reaches the writer is a caller that is itself broken
     // — and honouring it here would hide that. This pin goes red the day
-    // `sess.tenantId` is reintroduced as a fallback arm; `pnpm check:org-identifier`
-    // cannot see that reintroduction when the receiver is spelled `sess`.
+    // `sess.tenantId` is reintroduced as a fallback arm. It used to be the ONLY
+    // thing that would: `pnpm check:org-identifier` was anchored on the literal
+    // receiver name `session` and scored zero on `sess`. Since #9691 that gate
+    // resolves the receiver's PROVENANCE instead — a local filled from a
+    // `.session` expression is a session whatever it is called — so the
+    // reintroduction is caught in both places now. Keep this pin anyway: the
+    // gate cannot see a wrong VALUE, only a removed-alias read.
     await fire('afterInsert', {
       object: 'crm_lead',
       input: { id: 'lead-1' },

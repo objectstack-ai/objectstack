@@ -77,6 +77,15 @@
  *     baseline artifact scores silent for every card in the tree. All three
  *     buckets are now accounted for in the closing summary, and `--residue`
  *     names the two unmatched ones runnably — see residueLines;
+ *   - an UNREACHABLE check is one whose whole declared population matches
+ *     nothing in the tree — every path literal its own source names is a path
+ *     this repo does not have. It is not a fourth bucket and it is not about
+ *     your paths: it is a standing fact about the REPO, swept from the tracked
+ *     files, and it cuts across the three verdicts the way the
+ *     unfiltered-workflow count does. A family in that state scores the same
+ *     quiet green for every card whether it still works or not, which is #4690
+ *     one level up. Counted in the summary on every run and named, with the
+ *     reason it could not reach, under `--residue` — see unreachableFamilies;
  *   - a CONVENTION-TRIGGERED check is one the path derivation can never reach,
  *     because it counts a population it computes for itself and so names no
  *     path literal to match. Those are derived from the change's KIND instead
@@ -112,10 +121,14 @@
  * this tool cannot narrow is a fact the reader is owed, not one to keep quiet.
  *
  * The output is print-only and exits 0 on a completed derivation; a run that
- * cannot read the workflows or package.json exits non-zero (#4690: unreadable
- * input must never look like an empty answer). The no-path mode inherits that
- * rule for its own input: a change set it cannot compute, and a change set that
- * comes back empty, both exit non-zero rather than derive over nothing.
+ * cannot read the workflows, package.json, or the tracked-file corpus the
+ * reachability sweep needs exits non-zero (#4690: unreadable input must never
+ * look like an empty answer). The no-path mode inherits that rule for its own
+ * input: a change set it cannot compute, and a change set that comes back
+ * empty, both exit non-zero rather than derive over nothing. The sweep
+ * inherits it twice — over an empty corpus, and over an answer in which EVERY
+ * declaring family reached nothing, which is a broken recognizer wearing a
+ * finding's clothes.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -776,8 +789,20 @@ export function runnableInvocation({ check, filter, direct }) {
  * the answer is to spell the hint as the two paths it means, not to widen this
  * comparison back into a string prefix.
  */
+/**
+ * A hint with its globs collapsed and its trailing separators dropped — the
+ * form `hintCovers` compares against, extracted so the reachability sweep can
+ * describe a dead hint in the SAME terms the comparison judged it by. The
+ * transformation is carried verbatim from where it was written inline; a
+ * second, separately-maintained copy of it is exactly the drift this file
+ * refuses everywhere else.
+ */
+export function collapseHint(hint) {
+  return hint.replace(/\*\*?/g, '').replace(/\/+$/, '').replace(/\/$/, '');
+}
+
 export function hintCovers(hint, inputPath) {
-  const plain = hint.replace(/\*\*?/g, '').replace(/\/+$/, '').replace(/\/$/, '');
+  const plain = collapseHint(hint);
   if (plain.length < 2) return false;
   // `hint`, not `plain`: glob collapse destroys the separator this refusal is
   // deciding on, and a declared subtree is not a bare word. See the docblock.
@@ -984,6 +1009,232 @@ export function classifyEntry(entry, paths) {
   }
   if (hits.length) return { verdict: 'matched', hits };
   return { verdict: (entry.hints ?? []).length === 0 ? 'undetermined' : 'silent', hits };
+}
+
+// ---------------------------------------------------------------------------
+// The reachability sweep — a declared population that matches NOTHING (#9883)
+// ---------------------------------------------------------------------------
+
+/**
+ * Every file git tracks, repo-relative — the corpus a declared population is
+ * measured against.
+ *
+ * ## Why it refuses an empty read instead of returning an empty list
+ *
+ * An empty corpus makes EVERY declared population unreachable, and that
+ * prints as "the whole farm reads nothing" — a wrong answer that reads as a
+ * catastrophic finding. The same empty list also arrives from a checkout that
+ * is not a git work tree at all. This file already follows #4690's rule for
+ * its other inputs ("an unreadable input must never look like an empty
+ * answer"), so a failed or empty listing is an error here too, and the sweep
+ * is never attempted over nothing.
+ *
+ * The null-separated form is deliberate: without it git quotes any path with a
+ * non-ASCII byte in it, so a corpus containing one would carry escaped names
+ * that no hint can match — a fabricated unreachable, invented by the reader of
+ * the corpus rather than declared by any gate.
+ */
+export function trackedFiles({ cwd = ROOT } = {}) {
+  const r = runGit(['ls-files', '-z'], cwd);
+  if (r.status !== 0) {
+    throw new Error(
+      `could not list the tracked files to sweep — git exited ${r.status}${r.stderr ? `: ${r.stderr}` : ''}. ` +
+        'The tier half needs no tree: pass --tier for the claim-time answer.',
+    );
+  }
+  const files = r.stdout.split('\0').filter(Boolean);
+  if (files.length === 0) {
+    throw new Error(
+      'the tracked-file listing came back EMPTY, so every declared population would sweep as unreachable — ' +
+        'zero is a broken scan, not a clean repo (#4690). Refusing to derive a reachability verdict over nothing.',
+    );
+  }
+  return files;
+}
+
+/**
+ * Every path prefix the tree still has — each tracked file, plus every
+ * directory above it. Used only to say HOW FAR a dead hint still got, never to
+ * decide the verdict; the verdict is `hintCovers` and nothing else.
+ */
+export function trackedPrefixes(files) {
+  const prefixes = new Set();
+  for (const f of files) {
+    prefixes.add(f);
+    for (let i = f.indexOf('/'); i !== -1; i = f.indexOf('/', i + 1)) prefixes.add(f.slice(0, i));
+  }
+  return prefixes;
+}
+
+/**
+ * The longest leading run of a hint's segments that the tree still has, or ''
+ * when even its first segment names nothing.
+ *
+ * This is the "why" half of the verdict, and it is the one distinction the
+ * tree can actually answer (#9883 H2). It separates three populations that
+ * would otherwise print identically as "matched nothing":
+ *
+ *   ''                  the literal was never a repo path — a MIME type, a
+ *                       remote ref, a package or repo specifier that survived
+ *                       the extractor. Nothing moved; it was never live;
+ *   a shorter prefix    the tree HAS the parent and stops there — the layout
+ *                       moved under a gate that still names the old spelling.
+ *                       This is the class that is usually a real miss;
+ *   the WHOLE hint      the population is right there and the covering rule
+ *                       still refuses the literal — a single-segment name
+ *                       carries no separator, so `hintCovers` rejects it as
+ *                       too generic. Nothing is wrong with the gate or the
+ *                       tree; the derivation simply cannot express this one.
+ *
+ * That third case is why the prefix is computed at all rather than reporting a
+ * bare "no match": measured on this tree it is one of the six, and a reader
+ * triaging it from the bare verdict would go looking for a directory that is
+ * sitting in front of them.
+ *
+ * It deliberately does NOT claim to know whether an empty population is
+ * intended. See the sweep's own docblock for why that distinction is not
+ * expressible from the tree.
+ */
+export function deepestTrackedPrefix(hint, prefixes) {
+  const segments = collapseHint(hint).split('/');
+  let deepest = '';
+  for (let i = 1; i <= segments.length; i++) {
+    const candidate = segments.slice(0, i).join('/');
+    if (!prefixes.has(candidate)) break;
+    deepest = candidate;
+  }
+  return deepest;
+}
+
+/**
+ * Does this hint reach ANY tracked file?
+ *
+ * The predicate is `hintCovers` — the same one `coveringKey` matches cards
+ * with, applied to the tree instead of to a card's paths. A second, faster
+ * implementation is available (a hint reaches the tree exactly when its
+ * collapsed form is in `trackedPrefixes`) and is deliberately NOT used: it
+ * would answer this question through a copy of a rule that lives somewhere
+ * else, and a copy that drifts is the whole defect this file exists to refuse.
+ * The sweep costs one pass per hint over a corpus this repo reads in full for
+ * several other gates already.
+ */
+export function hintReachesTree(hint, files) {
+  return files.some((f) => hintCovers(hint, f));
+}
+
+/**
+ * The third verdict: the families whose DECLARED POPULATION matches nothing in
+ * the tree.
+ *
+ * ## What the verdict is, and why it is not a fourth bucket
+ *
+ * `matched` / `undetermined` / `silent` all answer a question about the CARD:
+ * is this family relevant to these paths? `unreachable` answers a question
+ * about the TREE: does this family's declared population exist at all? The two
+ * are independent — an unreachable family can be matched (a card's surface is
+ * a hypothesis about files that may not exist yet), undetermined it can never
+ * be (that bucket is precisely the families that declare NO population). So it
+ * cuts across the partition the way the unfiltered-workflow count already
+ * does, and it is kept out of the accounting throw for the same reason:
+ * folding it in would double-count and turn a correct run into an error.
+ *
+ * Keeping it out is also what makes the addition safe for the fleet. Every
+ * seat derives its gate family from this tool; a verdict that re-classified
+ * even one family would move the list every dispatch pastes. This one adds a
+ * count and a listing, and moves no existing verdict.
+ *
+ * ## Why a family, and why ALL of its hints
+ *
+ * A single dead hint is ordinary and means almost nothing: gates name
+ * baseline artifacts, sibling tools and example paths, and one literal in a
+ * script that reads ten is not a population. What is reportable is a family
+ * whose ENTIRE declared population is dead — every path literal its own
+ * source names is a path this repo does not have — because that family scores
+ * the same quiet `silent` green for every card in the tree whether it works or
+ * not. That is #4690 one level up: zero is a broken scan, not a clean repo.
+ *
+ * Families with no hints at all are NOT unreachable. They declare no
+ * population, which is the honest `undetermined` verdict and a different fact.
+ *
+ * ## What it cannot tell you (#9883 H2, answered rather than papered over)
+ *
+ * A population that is empty TODAY BY DESIGN — a gate whose corpus the repo
+ * happens not to have yet — is indistinguishable, from the tree alone, from a
+ * hint spelled for a layout that moved. Intent is not in the tree, and no
+ * signal in this repo carries it, so this sweep does not pretend to read it.
+ * What it does instead is hand the reader the evidence to triage in one look:
+ * every dead hint is printed with the deepest prefix the tree still has, which
+ * separates "never was a path" from "the tree moved under it" mechanically.
+ * If dormancy ever needs to be DECLARED rather than inferred, the shape is the
+ * marker convention this file already reads for a workflow with no families —
+ * built when a real instance asks for it, not before.
+ *
+ * ## Why an all-unreachable answer is refused
+ *
+ * If the recognizer breaks — hint extraction, the corpus, `hintCovers` — every
+ * declaring family sweeps as unreachable, and the result reads as a repo-wide
+ * catastrophe rather than as the broken measurement it is. A tree whose gates
+ * are green cannot have zero live populations, so that answer is refused
+ * outright and names the recognizer as the suspect. It is a threshold-free
+ * guard: only the degenerate all-or-nothing shape is refused, never a count
+ * that is merely larger than someone expected.
+ */
+export function unreachableFamilies(entries, files) {
+  if (!Array.isArray(files) || files.length === 0) {
+    throw new Error(
+      'the reachability sweep was handed an empty corpus — zero tracked files is a broken scan, not a clean repo (#4690).',
+    );
+  }
+  const prefixes = trackedPrefixes(files);
+  const reach = new Map();
+  const reaches = (hint) => {
+    if (!reach.has(hint)) reach.set(hint, hintReachesTree(hint, files));
+    return reach.get(hint);
+  };
+
+  let declaring = 0;
+  const unreachable = [];
+  for (const [check, entry] of entries) {
+    const hints = [...new Set(entry.hints ?? [])];
+    if (hints.length === 0) continue; // declares no population — that is `undetermined`
+    declaring++;
+    if (hints.some(reaches)) continue;
+    unreachable.push({
+      check,
+      entry,
+      dead: hints.map((hint) => ({ hint, deepest: deepestTrackedPrefix(hint, prefixes) })),
+    });
+  }
+
+  if (declaring > 0 && unreachable.length === declaring) {
+    throw new Error(
+      `every one of the ${declaring} famil(ies) that declare a population reached nothing in a corpus of ${files.length} tracked file(s). ` +
+        'That is this sweep failing, not the farm — suspect the recognizer (hint extraction, the corpus, or the covering rule) ' +
+        'before reading it as a defect count.',
+    );
+  }
+  return unreachable;
+}
+
+/**
+ * One family's dead population, rendered for the reader: the hint as the gate
+ * spells it, and WHY it reached nothing — the three cases
+ * `deepestTrackedPrefix` distinguishes, each named in words rather than left
+ * for the reader to infer from a prefix. Capped like the neighbouring residue
+ * listing: the reason is a triage lead, not an inventory.
+ */
+export function unreachableReason(dead, cap = 3) {
+  const shown = dead
+    .slice(0, cap)
+    .map(({ hint, deepest }) => {
+      if (!deepest) return `'${hint}' — no tracked path under its first segment; never was a repo path`;
+      if (deepest === collapseHint(hint)) {
+        return `'${hint}' — the tree HAS it; the covering rule refuses the literal as too generic (no path separator)`;
+      }
+      return `'${hint}' — the tree stops at ${deepest}; the layout moved under it`;
+    })
+    .join(' · ');
+  return dead.length > cap ? `${shown} · …` : shown;
 }
 
 // ---------------------------------------------------------------------------
@@ -1468,8 +1719,23 @@ export function changeKindLines(paths, resolveInvocation, kinds = CHANGE_KIND_GA
  * It is printed for the same reason `silent` is: the reader is being told what
  * this derivation's silence does and does not mean, and on this tree the number
  * is most of the farm. An absence nobody can size is one nobody can weigh.
+ *
+ * ## Why the unreachable count is printed, and why the SWEPT total is beside it
+ *
+ * `unreachable` is the third verdict (#9883): families whose whole declared
+ * population matches nothing in the tree. Like `unfiltered` it cuts across the
+ * partition — it is a fact about the TREE, not about the card's paths — so it
+ * is outside the accounting throw for the same double-counting reason.
+ *
+ * `swept` is the size of the corpus that produced it, and it is required
+ * rather than optional because a bare "0 unreachable" is the exact ambiguity
+ * the verdict exists to remove one level down: it reads identically as "the
+ * repo is healthy" and as "the sweep matched nothing at all" (#4690). Printed
+ * with the corpus it swept, zero is readable. `trackedFiles` refuses an empty
+ * corpus before it gets here; this validation is the second half of the same
+ * refusal, for a caller that computed the count some other way.
  */
-export function residueLines({ discovered, matched, undetermined, silent, unfiltered }, kinds = CHANGE_KIND_GATES) {
+export function residueLines({ discovered, matched, undetermined, silent, unfiltered, unreachable, swept }, kinds = CHANGE_KIND_GATES) {
   const placed = matched + undetermined + silent;
   if (placed !== discovered) {
     throw new Error(
@@ -1483,6 +1749,18 @@ export function residueLines({ discovered, matched, undetermined, silent, unfilt
         '(it must be counted from the workflows, never omitted — a missing count would print as a missing line)',
     );
   }
+  if (!Number.isInteger(unreachable) || unreachable < 0 || unreachable > discovered) {
+    throw new Error(
+      `unreachable-population count is not derivable: got ${String(unreachable)} of ${discovered} discovered ` +
+        '(it must be swept from the tree, never omitted — a missing count would print as a missing line)',
+    );
+  }
+  if (!Number.isInteger(swept) || swept <= 0) {
+    throw new Error(
+      `the swept corpus size is not derivable: got ${String(swept)} tracked file(s) ` +
+        '(a reachability count without the corpus it swept cannot be read: zero unreachable and a zero-file sweep print alike — #4690)',
+    );
+  }
   const unplaced = undetermined + silent;
   return [
     `Residue — all ${discovered} discovered famil(ies) placed, derived at runtime:`,
@@ -1494,6 +1772,10 @@ export function residueLines({ discovered, matched, undetermined, silent, unfilt
       ' with no path separator is refused as too generic, so the gate reads your file while naming nothing that can match it.',
     `  ${unfiltered} of the ${discovered} sit only in workflows that declare no pull_request path filter — CI schedules those on` +
       ' EVERY pull request, so no path derivation can narrow them and their verdict above is about relevance, never schedule.',
+    `  ${unreachable} of the ${discovered} declare a population that reaches NOTHING in the tree, swept over ${swept} tracked file(s) —` +
+      ' their own sources name paths and this repo has none of them, so they score the same quiet green for every card in the tree' +
+      ' whether they still work or not. A standing repo fact, not a verdict about your paths; --residue names them, each with the' +
+      ' deepest prefix the tree still has for it.',
     `  Convention-triggered gates cut ACROSS all three and are printed above when a kind hits (${kinds.map((k) => k.kind).join('; ')}).`,
     `  This script names no gate from memory. To list the ${unplaced} famil(ies) the path derivation did not place, runnably:` +
       ' node scripts/pm/dispatch-gates.mjs --residue <paths>',
@@ -1791,6 +2073,13 @@ function derive(paths, { showResidue = false } = {}) {
     }
   }
 
+  // The reachability sweep runs BEFORE a line is printed, so its refusals
+  // (#4690: an empty corpus, or an all-unreachable answer) come out as a
+  // failed derivation rather than as a footnote under an answer that already
+  // looks complete. It reads the tree only; it moves no verdict above.
+  const swept = trackedFiles();
+  const unreachable = unreachableFamilies([...byCheck], swept);
+
   const matched = new Map();
   const undetermined = [];
   const silent = [];
@@ -1841,6 +2130,16 @@ function derive(paths, { showResidue = false } = {}) {
     };
     listing('Undetermined (source names no path at all — NOT known irrelevant)', undetermined, false);
     listing('Silent (source names paths, none of which cover yours — the weakest verdict)', silent, true);
+    // Printed with the other two because it is residue of the same kind — a
+    // family the reader is owed a word about — but its heading says plainly
+    // that this one is not about the card, and every entry carries the reason
+    // it could not reach rather than only the fact that it did not.
+    console.log(
+      `\nUnreachable (declared population matches NOTHING in the tree — about the REPO, not your paths): ${unreachable.length} famil(ies), swept over ${swept.length} tracked file(s).`,
+    );
+    for (const { entry, dead } of [...unreachable].sort((a, b) => a.check.localeCompare(b.check))) {
+      console.log(`  - ${runnableInvocation(entry)}   [${[...entry.workflows].join(', ')}]   dead: ${unreachableReason(dead)}`);
+    }
   }
 
   console.log('');
@@ -1850,6 +2149,8 @@ function derive(paths, { showResidue = false } = {}) {
     undetermined: undetermined.length,
     silent: silent.length,
     unfiltered: [...byCheck.values()].filter((e) => e.triggers.length === 0).length,
+    unreachable: unreachable.length,
+    swept: swept.length,
   })) {
     console.log(line);
   }
@@ -2324,6 +2625,23 @@ function selfTest() {
   const anchorHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-doc-anchors.mjs'), 'utf8'));
   t('the doc-anchors gate reaches the content page population it declares', anchorHints.some((h) => hintCovers(h, 'content/docs/deployment/cli.mdx')));
   t('and does not thereby claim a path outside that population', !anchorHints.some((h) => hintCovers(h, 'packages/spec/src/index.ts')));
+
+  // The second gate of that class (#9700): a whole-tree ESLint ratchet whose
+  // only literals were its own baseline artifact and the ref it diffs against,
+  // so it scored `silent` for every card in the tree while being REQUIRED in
+  // lint.yml — twice at the cost of a p0's CI round (#9391, PR #9695). It now
+  // declares the subtree it lints. Read from the real gate, not a fixture: what
+  // is being pinned is that the tree still HAS the declaration.
+  const slotHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-slot-lookup-ratchet.mjs'), 'utf8'));
+  t('the slot-lookup ratchet reaches the package source population it declares', slotHints.some((h) => hintCovers(h, 'packages/services/service-datasource/src/admin-routes.ts')));
+  // The negative half is the load-bearing one for a declaration this broad: a
+  // gate named on EVERY card is the louder version of naming none. `packages/**`
+  // must reach nothing outside `packages/`, and these three roots are where a
+  // widened extractor would have leaked it (measured in hintCovers' docblock:
+  // the rejected alternative takes one card from 7 matched families to 34).
+  t('and claims nothing under apps/', !slotHints.some((h) => hintCovers(h, 'apps/console/src/main.tsx')));
+  t('nor under examples/', !slotHints.some((h) => hintCovers(h, 'examples/crm/objects/account.object.ts')));
+  t('nor a content page', !slotHints.some((h) => hintCovers(h, 'content/docs/deployment/cli.mdx')));
 
   // ── A trailing sentence period is not part of the path (#8534, half two) ──
   //
@@ -2923,13 +3241,84 @@ function selfTest() {
   const liveGaps = checkFamilyCoverageGaps(liveWorkflowEntries);
   t(`every real paths-filtered workflow discovers a check family or declares why not (gaps: ${liveGaps.join(', ') || 'none'})`, liveGaps.length === 0);
 
+  // ── The reachability sweep — the third verdict (#9883) ────────────────────
+  //
+  // The verdict answers a question about the TREE, so both halves are pinned:
+  // the judgment over a fixture corpus, and the corpus reader against the real
+  // one. A fixture-only test passes just as happily when the reader is asking
+  // git the wrong question — which is the defect the verdict exists to expose,
+  // one level up.
+  const treeFixture = [
+    'AGENTS.md',
+    'packages/spec/package.json',
+    'packages/spec/src/index.ts',
+    'examples/app-showcase/src/ui/view.ts',
+  ];
+  const fam = (hints, extra = {}) => ({ hints, files: [], workflows: new Set(['lint.yml']), ...extra });
+  const sweepEntries = [
+    // one dead literal and one live one: a family is only unreachable when its
+    // WHOLE declared population is dead.
+    ['check:reaches', fam(['application/json', 'packages/spec/src'])],
+    ['check:moved', fam(['packages/spec/src/legacy/**'])],
+    ['check:never-was', fam(['application/json'])],
+    ['check:too-generic', fam(['examples'])],
+    ['check:declares-nothing', fam([], { files: ['scripts/check-declares-nothing.mjs'] })],
+  ];
+  const sweep = unreachableFamilies(sweepEntries, treeFixture);
+  const sweptNames = sweep.map((u) => u.check);
+  const reasonOf = (name) => unreachableReason(sweep.find((u) => u.check === name)?.dead ?? []);
+  t('a family whose whole declared population is absent from the tree is unreachable', sweptNames.includes('check:never-was'));
+  t('one live hint clears a family, however many dead ones it also names', !sweptNames.includes('check:reaches'));
+  t(
+    'a family that declares NO population is NOT unreachable — that is the undetermined verdict, a different fact',
+    !sweptNames.includes('check:declares-nothing'),
+  );
+  t('the sweep names WHY: a literal no tracked path begins with was never a repo path', /never was a repo path/.test(reasonOf('check:never-was')));
+  t('the sweep names WHY: the tree stops at a shorter prefix, so the layout moved under it', /stops at packages\/spec\/src/.test(reasonOf('check:moved')));
+  // The third cause is the one a bare "matched nothing" would send a reader
+  // hunting a directory that is sitting in front of them: the population is
+  // right there and hintCovers refuses the literal as too generic. It is also
+  // the pin that the sweep judges with hintCovers itself rather than with a
+  // faster second rule that would answer this case differently.
+  t('the sweep names WHY: the tree HAS the population and the covering rule refuses the literal', /the tree HAS it/.test(reasonOf('check:too-generic')));
+  t('...and that case really is a population the tree has', trackedPrefixes(treeFixture).has('examples'));
+  t('the reason list is capped rather than printed as an inventory', /…$/.test(unreachableReason([1, 2, 3, 4].map((n) => ({ hint: `no/such/path-${n}`, deepest: '' })))));
+  // The verdict is CROSS-CUTTING, never a fourth bucket: an unreachable family
+  // classifies exactly as it did before, including MATCHED for a card whose
+  // surface is a file that does not exist yet.
+  const unreachableFam = fam(['packages/spec/src/legacy/**']);
+  t('an unreachable family is still silent for an unrelated card — the sweep moves no verdict', classifyEntry(unreachableFam, ['packages/rest/src/server.ts']).verdict === 'silent');
+  t('and still MATCHED for a card surface that does not exist yet', classifyEntry(unreachableFam, ['packages/spec/src/legacy/new.ts']).verdict === 'matched');
+  // #4690 one level up: the sweep must not report a broken scan as a clean
+  // repo. Three refusals, at the corpus, at the answer, and at the summary.
+  let emptyCorpus = false;
+  try {
+    unreachableFamilies(sweepEntries, []);
+  } catch {
+    emptyCorpus = true;
+  }
+  t('a sweep over an EMPTY corpus is refused, never answered as "nothing unreachable"', emptyCorpus);
+  let allDead = false;
+  try {
+    unreachableFamilies([['check:never-was', fam(['application/json'])]], treeFixture);
+  } catch {
+    allDead = true;
+  }
+  t('an all-unreachable answer is refused as a broken recognizer, not printed as a defect count', allDead);
+  // The corpus reader, against the real tree — a wrong git invocation is
+  // invisible to every fixture above.
+  const liveCorpus = trackedFiles();
+  t('the corpus reader really reads this tree', liveCorpus.length > 1000 && liveCorpus.includes('AGENTS.md'));
+  t('and reads it null-separated, so a non-ASCII path is not quoted into a name nothing can match', !liveCorpus.some((f) => f.startsWith('"')));
+  t('the collapse the reason speaks in is the one hintCovers judges by', collapseHint('packages/spec/**') === 'packages/spec' && hintCovers('packages/spec/**', 'packages/spec/src/index.ts'));
+
   // ── The residue accounting (#8632) ────────────────────────────────────────
   //
   // Two properties, both of which the deleted prose lacked: it accounts for
   // every discovered family, and it names no gate. The second is the one that
   // rots — a hand-written list of gate names in this paragraph is exactly what
   // was wrong with it — so it is asserted directly rather than by inspection.
-  const residue = residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80 });
+  const residue = residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000 });
   t('the residue summary states the discovered total', residue.some((l) => l.includes('98')));
   t('the residue summary states each bucket', residue.some((l) => l.includes('35 undetermined')) && residue.some((l) => l.includes('55 silent')));
   t('the residue summary points at the flag that lists the unplaced families', residue.some((l) => l.includes('--residue') && l.includes('90')));
@@ -2945,7 +3334,7 @@ function selfTest() {
   // which is the failure class this whole card is about.
   let refused = false;
   try {
-    residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 54, unfiltered: 80 });
+    residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 54, unfiltered: 80, unreachable: 5, swept: 6000 });
   } catch {
     refused = true;
   }
@@ -2955,11 +3344,40 @@ function selfTest() {
   // a derivation rather than as the absent measurement it is.
   let refusedUnfiltered = false;
   try {
-    residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 55 });
+    residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unreachable: 5, swept: 6000 });
   } catch {
     refusedUnfiltered = true;
   }
   t('an omitted unfiltered-workflow count is REFUSED, never printed as undefined', refusedUnfiltered);
+  // The third verdict is held to the same standard, and its corpus size with
+  // it: "0 unreachable" and "the sweep matched nothing at all" print alike
+  // unless the number of files swept is beside the count (#4690).
+  t('the residue summary sizes the unreachable families', residue.some((l) => l.includes('5 of the 98') && l.includes('reaches NOTHING')));
+  t('and states the corpus it swept, so a zero can be told from a broken scan', residue.some((l) => l.includes('6000 tracked file(s)')));
+  const refusedFor = (args) => {
+    try {
+      residueLines(args);
+      return false;
+    } catch {
+      return true;
+    }
+  };
+  t(
+    'an omitted unreachable count is REFUSED, never printed as undefined',
+    refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, swept: 6000 }),
+  );
+  t(
+    'an unreachable count with NO corpus size is REFUSED — the number is unreadable without it',
+    refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5 }),
+  );
+  t(
+    'a sweep that swept zero files is REFUSED at the summary too, not printed as a clean repo',
+    refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 0, swept: 0 }),
+  );
+  t(
+    'zero unreachable over a real corpus is a legitimate answer, not a refusal',
+    !refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 0, swept: 6000 }),
+  );
 
   // ── The model-tier derivation (#8640) ─────────────────────────────────────
   //

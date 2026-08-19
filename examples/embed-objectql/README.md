@@ -15,7 +15,7 @@ import { ObjectQL } from '@objectstack/objectql/core';
 
 `@objectstack/objectql/core` exposes the engine, registry, hooks, and validation
 only. It does **not** pull in `ObjectQLPlugin`, the kernel factory, or
-`@objectstack/metadata-protocol` (the 268KB metadata-management layer), so none
+`@objectstack/metadata-protocol` (the metadata-management layer), so none
 of that lands in your bundle. (The batteries-included `@objectstack/objectql`
 entry still re-exports everything for full hosts.)
 

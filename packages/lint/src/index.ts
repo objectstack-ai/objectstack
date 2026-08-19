@@ -628,7 +628,7 @@ export {
   UNIQUE_UNSCOPED_DECLARED_INDEX,
   UNIQUE_LEGACY_ORGANIZATION_COMPOSITE,
 } from './data-model-rules.js';
-export type { LintIssue, Severity } from './data-model-rules.js';
+export type { LintIssue, LocatedLintIssue, Severity } from './data-model-rules.js';
 
 // ─── The registry itself (#4409, relocated #4463) ────────────────────
 //

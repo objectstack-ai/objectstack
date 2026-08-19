@@ -148,13 +148,72 @@ jobs:
           npm run validate
           npm run build
 
+      # Two questions this step must answer about its own server, and used to
+      # answer neither (#9779). Both belong here rather than in the CLI: `os
+      # start` is already correct — the shell around it was not.
+      #
+      # 1. IS ANYTHING ALREADY SERVING 8080, BEFORE WE BOOT ANYTHING?
+      #    `os start` is a PRODUCTION boot. packages/cli/src/commands/serve.ts
+      #    gates its port auto-shift on `flags.dev || NODE_ENV === 'development'`
+      #    and `start` spawns `serve` with neither (start.ts forces
+      #    NODE_ENV=production when the caller has not set it). Measured on this
+      #    checkout, a neighbouring server holding the requested port:
+      #
+      #        $ os start --port 38200        # neighbour already on 38200
+      #          ✗ Port 38200 is already in use.
+      #          ObjectStack does not auto-select a different port in production
+      #        $ echo $?
+      #        1
+      #        $ os start --port 38500        # nothing on 38500
+      #          ✓ Server is ready → http://localhost:38500/     (stays up, 200s)
+      #
+      #    So this step's server NEVER drifts to another port — it binds 8080 or
+      #    it dies. That is exactly what makes the WAIT LOOP the whole defect,
+      #    and it is why neither sibling fix filed alongside this one transfers:
+      #    there is no shifted port to read back (#9647) and no `--strictPort` to
+      #    ask for (#9578), because the CLI already behaves as if it had one.
+      #    The neighbour simply keeps answering 8080. Measured with the previous
+      #    block verbatim: the loop took its 200 on iteration 1 after 0s, then
+      #    asserted /api/v1/ready against the NEIGHBOUR's app, and `kill
+      #    "$SERVER_PID"` succeeded against our own `os start` — still booting,
+      #    not yet dead. Exit 0, on an app this job never started.
+      #
+      #    A liveness check ALONE does not catch that: through the window that
+      #    decides the run, our process is genuinely alive. The one question that
+      #    separates the two worlds is whether something was already answering
+      #    the exact URL the loop accepts as proof — so that is asked first.
+      #
+      # 2. IS OUR OWN SERVER STILL ALIVE?
+      #    `os start` exits 1 on a busy port, an unreadable artifact, or any boot
+      #    failure. Unasked, the loop burns its full 60s and then reports only
+      #    "never became healthy" — the slowest, vaguest form of a fact the
+      #    process table had at second 2.
+      #
+      # The PORTS STAY FIXED, on purpose. Every `runs-on:` in this repo is
+      # `ubuntu-latest` — one fresh VM per job — so no two CI jobs of this
+      # workflow, or of any other, can share 8080. Per-run ports would trade a
+      # readable literal for machinery that buys nothing on the runner this
+      # actually runs on. The two guards are for the shared-namespace replay:
+      # a self-hosted runner, or a developer running this block by hand in an
+      # agent dispatch container. Deliberately still open at that grade: a
+      # neighbour arriving AFTER the pre-flight and before our own bind. Closing
+      # it needs an affirmative "our server bound" signal — the runtime state
+      # file serve.ts publishes under OS_HOME — which is what to reach for if
+      # this workflow ever moves onto a runner it shares.
       - name: Boot from the artifact and probe health
         run: |
           cd "$RUNNER_TEMP/e2e-app"
+          if curl -fsS http://localhost:8080/api/v1/health > /dev/null 2>&1; then
+            echo "::error::something is already serving http://localhost:8080/api/v1/health before this step booted anything — every probe below would assert against it, not against the app this job scaffolded"
+            exit 1
+          fi
           npx os start --artifact ./dist/objectstack.json --port 8080 > server.log 2>&1 &
           SERVER_PID=$!
           ok=""
           for i in $(seq 1 30); do
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              echo "::error::the server this step started exited before becoming healthy"; cat server.log; exit 1
+            fi
             if curl -fsS http://localhost:8080/api/v1/health > /dev/null 2>&1; then ok=1; break; fi
             sleep 2
           done
@@ -368,12 +427,31 @@ jobs:
         run: |
           cd "$RUNNER_TEMP/e2e-app"
           docker build --pull=false -t e2e-app .
+          # The fixed container NAME and the fixed HOST PORT below both stay,
+          # and they are a different animal from the in-process port shift the
+          # two `os start` blocks guard against (#9779). Docker declines both
+          # collisions at `docker run` time and never relocates: a duplicate
+          # `--name e2e` is refused by name, and a taken `-p 18080:8080` fails
+          # to bind rather than publishing somewhere else. Under this step's
+          # `bash -e` either aborts the step before the loop is reached. So a
+          # `docker run` that SUCCEEDED is proof that 18080 is ours — this leg
+          # has no wrong-answer mode for a per-run port to remove. (Read from
+          # docker's published behaviour, not measured: the dispatch container
+          # this was written in ships the docker CLI with no daemon behind it.)
+          #
+          # What it did share with the other two is the missing question. The
+          # loop asked only whether 18080 answered, so a container that started
+          # and then died at second 3 cost the full 60s and reported "never
+          # became healthy" instead of "it is not running, here is why".
           docker run -d --name e2e -p 18080:8080 \
             -e OS_SECRET_KEY="$(openssl rand -hex 32)" \
             -e OS_AUTH_SECRET="$(openssl rand -hex 32)" \
             e2e-app
           ok=""
           for i in $(seq 1 30); do
+            if [ "$(docker inspect -f '{{.State.Running}}' e2e 2>/dev/null)" != "true" ]; then
+              echo "::error::the container this step started is no longer running"; docker logs e2e; exit 1
+            fi
             if curl -fsS http://localhost:18080/api/v1/health > /dev/null 2>&1; then ok=1; break; fi
             sleep 2
           done
@@ -417,14 +495,26 @@ jobs:
           fi
           npm run build
 
+      # Same two guards, same reasoning, as `Boot from the artifact and probe
+      # health` in scaffold-local — see the measurement written out there. Kept
+      # as a copy rather than factored into a composite action: these two blocks
+      # boot DIFFERENT artifacts (repo dist vs. the published scaffolder) and the
+      # thing under test is the block a reader of this file can see whole.
       - name: Boot and probe health (blank only)
         if: matrix.template == 'blank'
         run: |
           cd "$RUNNER_TEMP/canary-app"
+          if curl -fsS http://localhost:8080/api/v1/health > /dev/null 2>&1; then
+            echo "::error::something is already serving http://localhost:8080/api/v1/health before this step booted anything — every probe below would assert against it, not against the app this job scaffolded"
+            exit 1
+          fi
           npx os start --artifact ./dist/objectstack.json --port 8080 > server.log 2>&1 &
           SERVER_PID=$!
           ok=""
           for i in $(seq 1 30); do
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              echo "::error::the server this step started exited before becoming healthy"; cat server.log; exit 1
+            fi
             if curl -fsS http://localhost:8080/api/v1/health > /dev/null 2>&1; then ok=1; break; fi
             sleep 2
           done

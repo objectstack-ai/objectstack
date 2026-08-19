@@ -14,6 +14,8 @@ export {
     NoopMetricsRegistry,
     InMemoryMetricsRegistry,
     RUNTIME_METRICS,
+    armHttpRequestCounter,
+    type ArmHttpRequestCounterResult,
     type MetricsRegistry,
     type MetricSample,
 } from '@objectstack/observability';

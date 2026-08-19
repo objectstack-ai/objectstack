@@ -314,4 +314,64 @@ export const SysWebhook = ObjectSchema.create({
     { fields: ['object_name'] },
     { fields: ['active', 'object_name'] },
   ],
+
+  /**
+   * [#9756] The data-API exposure of this object, declared EXPLICITLY.
+   *
+   * ## Why the block exists
+   *
+   * Three cards observed that `sys_webhook` declared no `enable` block at all
+   * and each named narrowing its read surface as the next step — #7799 (the
+   * signing secret), #7986 (the custom headers) and #8025 option 2 (the URL) —
+   * and each assumed a later one would write the line. None did. The condition
+   * held not because anyone judged the full default API correct here, but
+   * because the omission was never anybody's deliverable. That is the standard
+   * #8025 set and #9756 quotes back: *an omission is not a decision unless
+   * someone wrote it down.* This block is that decision, written down.
+   *
+   * ## The census the set is derived from (#9756, measured before writing)
+   *
+   * | consumer | reaches this object through | needs |
+   * |:---|:---|:---|
+   * | Setup/Studio console — `nav_webhooks` (`webhook-outbox-plugin.ts`), the four list views above, `userActions` create/edit/delete | REST `/api/v1/data/sys_webhook` — the gated data API | `get` `list` `create` `update` `delete` |
+   * | Operator predicate write — "deactivate every webhook on an object" (#4639, for which `AutoEnqueuer.handleSelfHealEvent` carries a `data.records.*` branch built expressly for this gesture) | REST `updateMany` / `deleteMany`, both gated on the `bulk` primitive | `bulk` |
+   * | `AutoEnqueuer` cache refresh, `bootstrapDeclaredWebhooks`, `stampWebhookProvenance`, `redeliver-guard`, `migrateLegacyWebhookSecrets`, the `headers_secret` write gate | `engine.find/findOne/insert/update` and lifecycle hooks — ObjectQL directly, which never consults `enable.apiMethods` | ungated: unaffected by anything declared here |
+   *
+   * ⇒ every primitive is required by a real, measured consumer, so the set is
+   * all six. No consumer outside the admin/operator surface was found.
+   *
+   * ## ⛔ This narrows NOTHING — do not read it as if it did
+   *
+   * `resolveEffectiveApiMethods` (`@objectstack/spec/data`) seeds the
+   * `unrestricted` branch with the very same `API_PRIMITIVES` set, so the six
+   * primitives resolve to the operation closure the *absent* block already
+   * produced. The serialized effective set (`/me/permissions`, the 405
+   * `allowed` array) is byte-identical, and no route or `callData` action
+   * reaches an operation whose answer differs. Only `mode` changes,
+   * `unrestricted` → `restricted`.
+   *
+   * So the presence of this block is NOT evidence that the reachable cleartext
+   * on this object was reduced. It was not, and `apiMethods` is the wrong
+   * instrument for it: `url` (#8025 — won't-fix on masking, because the URL is
+   * the routing key an operator must be able to see, search, sort and edit) and
+   * a legacy row's un-migrated `definition_json.headers` (#7986 —
+   * `readLegacyHeaders` in `auto-enqueuer.ts` still reads them and warns) are
+   * both served by `get`/`list`, which is exactly what the console requires.
+   * Any set that removes them removes the admin surface with them. A survey
+   * that greps this file for `enable:` and stops is measuring the wrong thing;
+   * #9756's report carries the census that says so.
+   *
+   * Contrast the sibling `sys_http_delivery` (`['get','list']`,
+   * `service-messaging`), whose narrowing is real: that table is engine-owned —
+   * written only by `SqlHttpOutbox` through context-less raw-engine writes,
+   * never authored — so closing its write surface costs nothing. `sys_webhook`
+   * is a first-class admin authoring surface. That is the whole difference, and
+   * it is why the sibling's shape could not simply be copied here.
+   *
+   * Pinned — the census, the no-narrowing equality, and the registration-time
+   * survival of every write verb — in `sys-webhook-api-exposure.test.ts`.
+   */
+  enable: {
+    apiMethods: ['get', 'list', 'create', 'update', 'delete', 'bulk'],
+  },
 });

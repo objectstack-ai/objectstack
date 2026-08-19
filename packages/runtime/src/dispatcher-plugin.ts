@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
+import { Plugin, PluginContext, IHttpServer, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
 import { looksLikeInternalErrorLeak, declaresServerFault, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, demotedDeclaredCode } from '@objectstack/types';
 import { DispatcherErrorCode } from '@objectstack/spec/api';
 import type { IAuthService, IMetadataService } from '@objectstack/spec/contracts';
@@ -24,6 +24,7 @@ import {
     NoopMetricsRegistry,
     NoopErrorReporter,
     instrumentRouteHandler,
+    armHttpRequestCounter,
     type MetricsRegistry,
     type ErrorReporter,
 } from './observability/index.js';
@@ -210,14 +211,17 @@ function mountRouteOnServer(
             // opt-out is retired, so only a route declaring `auth: false` opens
             // itself, and it does so by declaration.
             if (route.auth !== false && !user) {
-                res.status(401);
+                res.status(ANONYMOUS_DENY_STATUS);
                 if (securityHeaders) {
                     for (const [k, v] of Object.entries(securityHeaders)) res.header(k, v);
                 }
-                res.json({
-                    error: 'UNAUTHENTICATED',
-                    message: 'Authentication is required to access this endpoint.',
-                });
+                // [#9823] The shared flat deny body from @objectstack/core —
+                // this used to be an inline `{ error, message }` copy, which is
+                // exactly why #9487's additive `code` key never reached it.
+                // Writing the constant keeps this seam from drifting again;
+                // the wrapper question (flat vs nested, ADR-0112 D5) is not
+                // settled here.
+                res.json(ANONYMOUS_DENY_BODY);
                 return;
             }
 
@@ -697,6 +701,38 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
              * through unchanged.
              */
             const rawServer = server;
+            // ── `http_requests_total` on the transport seam (#9835) ────
+            // A transport implementing `IHttpServer.afterResponse` OWNS the
+            // request counter for every inbound request on it (the 2026-08-18
+            // ruling on #9650 put the counter at the transport; the contract
+            // JSDoc records the ownership rule). Two consequences here, both
+            // feature-detected runtime-real per the contract:
+            //
+            //  1. When the host wired a registry to THIS plugin, offer it to
+            //     the transport seam. `armHttpRequestCounter` latches
+            //     per-server, first caller wins — a transport plugin that
+            //     already armed its own registry in Phase 1 keeps ownership
+            //     and this call is a no-op, so one registry handed to both
+            //     layers (the ordinary wiring) can never double-count. A host
+            //     that wired ONLY the dispatcher — the wiring the docs
+            //     demonstrate — now gets every inbound surface counted, not
+            //     just the dispatcher's own routes.
+            //  2. The per-route wrapper below stops emitting its copy of the
+            //     counter (`emitHttpRequestsTotal: false`): the seam already
+            //     counts these routes, and the duplicate would land on the
+            //     same series under the same labels — the measured #9833
+            //     distortion, counting ONLY the dispatcher's routes twice.
+            //
+            // On a transport WITHOUT the seam both revert to the legacy
+            // behavior: the wrapper counts the dispatcher's own routes, and
+            // (documented expectation, #9650 ruling) every other surface on
+            // that transport reports no HTTP metrics — zero there is "not
+            // instrumented", never "no traffic".
+            const transportCountsRequests =
+                typeof (rawServer as IHttpServer).afterResponse === 'function';
+            if (transportCountsRequests && config.observability?.metrics) {
+                armHttpRequestCounter(rawServer as IHttpServer, config.observability.metrics);
+            }
             server = new Proxy(rawServer, {
                 get(target, prop, receiver) {
                     if (prop === 'get' || prop === 'post' || prop === 'delete') {
@@ -712,6 +748,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                                     errorReporter,
                                     generateRequestId,
                                     requestIdHeader,
+                                    emitHttpRequestsTotal: !transportCountsRequests,
                                 }),
                             );
                         };
@@ -735,7 +772,14 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 // enabled" against a live server (cloud#152). The body is computed
                 // fresh per request; the only staleness is the HTTP cache layer.
                 res.header('Cache-Control', 'no-store');
-                res.json({ data: await dispatcher.getDiscoveryInfo(prefix) });
+                // Enveloped (`{ success: true, data }`) under the #9436 maintainer
+                // ruling (2026-08-18, option A), inherited by #9813 — machine-read
+                // discovery bodies are the envelope's core constituency and the
+                // migration is one additive key. Deliberately NOT #9389's pre-auth
+                // exemption: that is a closed list of SPA-read surfaces, and this
+                // body is read by SDKs (`connect()`'s fallback probe), codegen and
+                // AI clients. Every measured reader tolerates the added key.
+                res.json({ success: true, data: await dispatcher.getDiscoveryInfo(prefix) });
             });
 
             // ── Discovery (versioned API path) ──────────────────────────
@@ -759,9 +803,10 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                         }
                     }
                     // See the .well-known handler above: discovery must not be cached
-                    // (mutable runtime config; cloud#152 stale `routes.mcp`).
+                    // (mutable runtime config; cloud#152 stale `routes.mcp`), and the
+                    // body is enveloped under the same #9436 ruling (via #9813).
                     res.header('Cache-Control', 'no-store');
-                    res.json({ data: await dispatcher.getDiscoveryInfo(prefix) });
+                    res.json({ success: true, data: await dispatcher.getDiscoveryInfo(prefix) });
                 });
             } else {
                 ctx.logger.info(`[Dispatcher] ${prefix}/discovery ceded to com.objectstack.rest.api (single owner)`);

@@ -55,10 +55,23 @@ That's it — every route the dispatcher mounts now:
 
 1. Sends conservative security headers.
 2. Echoes `X-Request-Id` (honored from caller, or freshly minted).
-3. Emits `http_requests_total{method,route,status}` and
-   `http_request_duration_ms` metrics.
+3. Emits the `http_request_duration_ms` histogram.
 4. Reports 5xx exceptions to Sentry (or your reporter) with the
    request id attached.
+
+The `http_requests_total{method,route,status}` counter is emitted at the
+**transport** (the `IHttpServer.afterResponse` observation seam), so it covers
+*every* inbound request on the server — auth, the REST data API and other
+raw-app mounts included, not only the dispatcher's own routes. The dispatcher
+offers its `metrics` registry to that seam automatically, and exactly one
+counter is armed per server, so the wiring above is complete on its own and
+wiring the transport plugin too never double-counts. The `route` label is the
+registered pattern (`/api/v1/data/:id`), never the concrete path.
+
+**A transport that does not implement the seam reports no HTTP metrics**: zero
+on `http_requests_total` there means "not instrumented", never "no traffic".
+The shipped Hono adapter implements it; verify a custom adapter with
+`typeof server.afterResponse === 'function'` before trusting its numbers.
 
 Rate limiting is the one piece you wire at the adapter layer (Fastify
 preHandler, Hono middleware, etc.) because that's where you have

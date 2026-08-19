@@ -1228,6 +1228,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "客户端 ID",
         help: "公开的 OAuth 客户端标识"
       },
+      client_discovery_id: {
+        label: "Client Discovery ID",
+        help: "Opaque identifier the provider uses to look this client up on the discovery path, kept apart from the public `client_id`"
+      },
       client_secret: {
         label: "客户端密钥",
         help: "OAuth 客户端密钥（静态存储时会哈希/加密）"
@@ -1271,6 +1275,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       scopes: {
         label: "允许的范围",
         help: "客户端可申请的 scopes 的 JSON 序列化列表"
+      },
+      client_credentials_scopes: {
+        label: "Client-Credentials Scopes",
+        help: "JSON-serialized list of scopes the client may request on the client_credentials grant, where there is no user to consent — kept apart from `scopes`, which governs user-delegated grants"
       },
       subject_type: {
         label: "主体类型",

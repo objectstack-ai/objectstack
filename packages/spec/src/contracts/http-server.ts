@@ -138,6 +138,51 @@ export type Middleware = (
 ) => void | Promise<void>;
 
 /**
+ * The reserved route label for a request that matched NO registered route —
+ * the one non-pattern value {@link HttpResponseObservation.routePattern} may
+ * carry. Reserved here (not per adapter) so every transport reports the same
+ * spelling and dashboards can rely on one series for unrouted traffic.
+ */
+export const UNMATCHED_ROUTE_PATTERN = 'unmatched';
+
+/**
+ * What a transport reports about ONE answered request, after the response
+ * exists — the payload handed to every {@link HttpResponseObserver}. See the
+ * CONTRACT on {@link IHttpServer.afterResponse} for the semantics of each
+ * field; the hard requirement worth restating at the type itself:
+ * `routePattern` is the registered route PATTERN (`/api/v1/data/:id`), never
+ * the concrete request path.
+ */
+export interface HttpResponseObservation {
+    /** HTTP method of the request, uppercase (`GET`, `POST`, …). */
+    method: string;
+    /**
+     * The registered route pattern that answered (`/api/v1/data/:id`,
+     * `/api/v1/auth/*`) — NEVER the concrete path (`/api/v1/data/rec_42`),
+     * which would mint one metric series per record id. A request no
+     * registered route matched carries {@link UNMATCHED_ROUTE_PATTERN}.
+     */
+    routePattern: string;
+    /** Numeric HTTP status of the response as sent (`200`, `429`, `500`, …). */
+    status: number;
+    /**
+     * Wall-clock milliseconds from the transport first seeing the request to
+     * the response existing. Precision is adapter-defined — consumers must
+     * not assume sub-millisecond fidelity.
+     */
+    elapsedMs: number;
+}
+
+/**
+ * A response observer — registered via {@link IHttpServer.afterResponse},
+ * invoked by the transport once per answered request. Observation only: it
+ * has no channel back into the response, and a throwing observer must never
+ * affect the response or sibling observers (implementations swallow observer
+ * failures).
+ */
+export type HttpResponseObserver = (observation: HttpResponseObservation) => void;
+
+/**
  * IHttpServer - HTTP Server capability interface
  *
  * Defines the contract for HTTP server implementations.
@@ -354,4 +399,85 @@ export interface IHttpServer {
      * @param handler - The handler to invoke for otherwise-unmatched requests
      */
     setFallbackHandler?(handler: RouteHandler): void;
+
+    /**
+     * Register a RESPONSE OBSERVER: a callback the transport invokes once per
+     * inbound request, AFTER the response exists.
+     *
+     * ## Why this member exists (#9835; ruled 2026-08-18 on #9650)
+     *
+     * The {@link use} middleware chain deliberately runs BEFORE dispatch: the
+     * adapter runs the whole chain and only then continues into routing, so a
+     * middleware there sees method, path, query and headers and has NO
+     * response — it cannot carry the `status` label the operator guidance
+     * (5xx rate) is keyed on (measured in `packages/runtime/src/
+     * http-metrics-inbound-coverage.hono.integration.test.ts`). This member
+     * is the observation point that contract cannot express: it runs after
+     * the response exists, status known, elapsed time measurable — which is
+     * what makes HTTP metrics transport-agnostic instead of Hono-only.
+     *
+     * ## Observation contract
+     *
+     *  - Each registered observer is invoked EXACTLY ONCE per request the
+     *    transport answers, after the response status is known. A connection
+     *    that dies before any response is written may go unobserved.
+     *  - **`routePattern` MUST be the registered route PATTERN that answered
+     *    (`/api/v1/data/:id`, `/api/v1/auth/*`) — NEVER the concrete request
+     *    path.** A hard requirement, stated here precisely so no adapter
+     *    re-decides cardinality: labelling by concrete path mints one metric
+     *    series per record id and silently breaks the alerting the counter
+     *    exists for. A request no registered route matched is reported with
+     *    the reserved {@link UNMATCHED_ROUTE_PATTERN}.
+     *  - **Reach**: implementations MUST deliver an observation for every
+     *    inbound request the transport serves — including routes mounted on
+     *    the framework-native handle behind {@link getRawApp} and requests a
+     *    {@link use} middleware short-circuits (a rate limiter's 429). A
+     *    transport built-in that answers before the observation point (e.g. a
+     *    CORS preflight) may fall outside it; each adapter documents its own
+     *    boundary.
+     *  - Registration APPENDS — several observers may coexist (metrics,
+     *    access log), invoked in registration order; there is no unregister
+     *    (an observer lives as long as the server). Unlike
+     *    {@link setFallbackHandler}, registering again never replaces.
+     *  - An observer that throws MUST NOT affect the response or sibling
+     *    observers — implementations swallow observer failures (the same
+     *    discipline a metrics backend is held to).
+     *
+     * ## Optionality is visible — and MUST stay runtime-real
+     *
+     * Optional and feature-detected with
+     * `typeof server.afterResponse === 'function'`, like {@link getRawApp}.
+     * Detection must be runtime-real, not type-only: a wrapper or Proxy over
+     * an `IHttpServer` that forwards only required members erases this one
+     * and makes detection read false against an adapter that implements it —
+     * the optional-member-erasure shape #5122 records. A wrapper MUST forward
+     * it conditionally: present iff the wrapped server provides it.
+     *
+     * ## Who owns `http_requests_total` emission (de-duplication; #9833)
+     *
+     * The 2026-08-18 ruling on #9650 puts the counter at the TRANSPORT: it is
+     * emitted by exactly ONE counter-emitting observer per server, registered
+     * through this hook by the transport's own composition layer (its hosting
+     * plugin) when a metrics backend is wired. A downstream consumer that
+     * holds both this server and a metrics registry (the runtime dispatcher's
+     * `instrumentRouteHandler` wrapper) MUST NOT add a second per-request
+     * counter while this member is implemented: it feature-detects the hook
+     * and suppresses its own counter — keeping its non-duplicated signals
+     * (request-id echo, duration histogram, error counter/reporter). A
+     * request must never be double-counted between the transport seam and a
+     * consumer-side wrapper.
+     *
+     * ## A transport that does not implement this seam reports NO HTTP metrics
+     *
+     * Stated plainly, per the ruling, rather than letting absence read as
+     * coverage: on such a transport `http_requests_total` never increments —
+     * **zero means "not instrumented", never "no traffic"**. A consumer that
+     * needs the distinction must ASK (feature-detect this member) and surface
+     * the answer; it must never infer "no traffic" from an empty counter it
+     * never confirmed was armed.
+     *
+     * @param observer - Invoked once per answered request with the
+     *   {@link HttpResponseObservation}
+     */
+    afterResponse?(observer: HttpResponseObserver): void;
 }

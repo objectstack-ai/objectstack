@@ -4,12 +4,13 @@
 // registry, hooks, validation, in-memory aggregation, utilities — WITHOUT the
 // kernel plugin (`ObjectQLPlugin`), the kernel factory, or any metadata
 // management (`@objectstack/metadata-protocol`). Embedders that want only the
-// engine (e.g. a thin gateway) import from `@objectstack/objectql/core` so the
-// 268KB metadata protocol is never pulled into their dependency graph.
+// engine (e.g. a thin gateway) import from `@objectstack/objectql/core` so
+// `@objectstack/metadata-protocol` is never pulled into their dependency graph.
 //
 // A boundary ratchet (ADR-0076 D2) keeps this entry free of protocol/plugin
 // imports; do not add `./plugin`, `./kernel-factory`, or `@objectstack/metadata-protocol`
-// re-exports here.
+// re-exports here. That ratchet — not a byte figure — is what backs the sentence
+// above; see core-boundary.ratchet.test.ts for why no size is quoted (#9803).
 
 // Registry
 export {

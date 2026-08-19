@@ -729,7 +729,7 @@ const TEST_DEBT = {
       + '(#5278 option A).',
   },
   '@objectstack/plugin-auth': {
-    errors: 111,
+    errors: 110,
     note: 'TS2493 x42 (tuple index out of range), TS18048 x24, TS2740 x19, TS2322 x11, TS2532 x9, '
       + 'TS2339 x8, TS2741 x8. Lowered 131 -> 111 at b16dcb45 (#7888); the intermediate 108 in this PR\'s '
       + 'first commit was measured at b5e09b21 and was already stale when the merge queue built it -- the '

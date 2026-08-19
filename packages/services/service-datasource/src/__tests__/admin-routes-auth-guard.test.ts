@@ -1,49 +1,61 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The authentication pin for the datasource-admin HTTP family.
+ * The authorization pin for the datasource-admin HTTP family.
  *
- * ## Why both halves, and why on ONE boot
+ * ## Why all three postures, and why on ONE boot
  *
  * This family mounts straight onto `IHttpServer` from a plugin `init()`, which
- * is outside every seam that produces the platform's 401s — the REST server's
- * `enforceAuth` and the dispatcher domains' anonymous floor both sit on routes
- * this registrar never passes through. A guard added here is therefore the only
- * thing standing between an anonymous caller and datasource lifecycle
- * management, and a test that only asserts the refusal cannot tell "guarded"
- * apart from "broken": an unconditional 401 would pass it perfectly while
- * taking the Setup → Datasources console offline for everyone.
+ * is outside every seam that produces the platform's 401s and 403s — the REST
+ * server's `enforceAuth` and the dispatcher domains' anonymous floor both sit
+ * on routes this registrar never passes through. A guard added here is
+ * therefore the only thing standing between an unentitled caller and datasource
+ * lifecycle management, and a test that only asserts the refusals cannot tell
+ * "guarded" apart from "broken": an unconditional 401 (or 403) would pass a
+ * refusal-only suite perfectly while taking the Setup → Datasources console
+ * offline for everyone.
  *
- * So every route below is asserted TWICE against the SAME mounted app —
- * `family` is built once at module scope, so the anonymous refusal and the
- * entitled success are answers from one boot of one registrar, not from two
- * differently-wired fixtures that could disagree for reasons other than the
- * caller's identity.
+ * So every route below is asserted THREE times against the SAME mounted app —
+ * `family` is built once at module scope, so all three answers come from one
+ * boot of one registrar, not from differently-wired fixtures that could
+ * disagree for reasons other than the caller's identity and grants:
  *
- * The two halves are separate `it`s rather than one, deliberately: that is what
- * makes the red/green split countable when the guard is reverted — the
- * anonymous half must go red and the entitled half must stay green, and a
- * single combined case would hide the second fact behind the first failure.
+ *  1. **anonymous** → `401 UNAUTHENTICATED` (#9391's floor, unchanged);
+ *  2. **authenticated but unentitled** → `403 PERMISSION_DENIED` (#9593);
+ *  3. **entitled** → the route's own success status.
  *
- * ## What "entitled" means here, and what it does not
+ * The three are separate `it`s rather than one, deliberately: that is what
+ * makes the red/green split countable when either half of the guard is
+ * reverted — removing the capability check turns posture 2 red and leaves 1 and
+ * 3 green, which is a different signature from removing the whole guard — and a
+ * single combined case would hide every later fact behind the first failure.
  *
- * Exactly one thing: the caller is AUTHENTICATED. This family's guard is an
- * authentication floor, and nothing in this file asserts a capability — whether
- * these routes should further require something like `manage_platform_settings`
- * is a separate, separately-ruled question (#9593) and deliberately has no
- * scaffolding here.
+ * ## What "entitled" means here, and how it is granted
  *
- * Identity is resolved by the registrar through the platform's shared
- * `resolveAuthzContext`, so the fake `auth` service below is the real seam a
- * session arrives through, not a test-only bypass.
+ * Two things now: the caller is AUTHENTICATED **and** holds
+ * `manage_platform_settings` — the capability the sibling Setup-admin families
+ * gate on and the one this plugin's own Setup nav entry already declares
+ * (`DATASOURCE_ADMIN_CAPABILITY` in the registrar carries the measurement).
+ *
+ * The grant is delivered the way a deployment delivers it — a
+ * `sys_user_permission_set` row binding the user to a `sys_permission_set`
+ * whose `system_permissions` names the capability, read by the platform's
+ * shared `resolveAuthzContext` off the `objectql` engine — and it is delivered
+ * from `entitled-caller.fixture.ts`, which carries that chain once for the
+ * three suites in this package that need an entitled caller, and the reasoning
+ * behind each of its choices (including why the set is deliberately not
+ * `admin_full_access`).
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
-import { registerDatasourceAdminRoutes } from '../admin-routes.js';
-
-/** The credential the fake `auth` service below admits. */
-const ENTITLED = 'Bearer entitled-session';
+import { registerDatasourceAdminRoutes, DATASOURCE_ADMIN_CAPABILITY } from '../admin-routes.js';
+import {
+  ENTITLED_CREDENTIAL as ENTITLED,
+  UNENTITLED_CREDENTIAL as UNENTITLED,
+  createSessionAuthService,
+  createGrantsEngine,
+} from './entitled-caller.fixture.js';
 
 /** Every service method the family dispatches to, as spies. */
 function createServiceDouble() {
@@ -64,23 +76,19 @@ function createServiceDouble() {
 }
 
 /**
- * Mount the family once, with a fake `auth` service that admits exactly one
- * credential. `objectql` resolves to `undefined` — the shared resolver reads it
- * only to aggregate permissions, and this pin asserts authentication, so an
- * absent engine must not change who is admitted.
+ * Mount the family once, with the shared `auth` service double — it admits two
+ * distinct credentials, one whose user holds the capability and one whose user
+ * holds nothing — and the shared grants engine as `objectql`, so the capability
+ * half of the guard resolves through the platform's own aggregation.
  */
 function mountFamily() {
   const service = createServiceDouble();
-  const auth = {
-    api: {
-      getSession: async ({ headers }: { headers: Headers }) =>
-        headers?.get?.('authorization') === ENTITLED ? { user: { id: 'u_entitled' } } : null,
-    },
-  };
+  const auth = createSessionAuthService();
+  const engine = createGrantsEngine();
   const ctx = {
     getService: vi.fn((name: string) => {
       if (name === 'auth') return auth;
-      if (name === 'objectql' || name === 'data') return undefined;
+      if (name === 'objectql' || name === 'data') return engine;
       return service;
     }),
     logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -168,9 +176,28 @@ describe('datasource-admin family — the anonymous caller is refused (read AND 
   }
 });
 
+describe('datasource-admin family — the authenticated caller WITHOUT the capability is refused', () => {
+  for (const c of ALL_CASES) {
+    it(`${c.name} answers 403 PERMISSION_DENIED without \`${DATASOURCE_ADMIN_CAPABILITY}\``, async () => {
+      const { status, body } = await drive(c, UNENTITLED);
+      // Status AND the machine-readable code (ADR-0112 envelope). "Not 200"
+      // would be satisfied by the 401 the anonymous half already covers and by
+      // the 503 an unwired service gives — neither of which is this refusal,
+      // and one of which would mean the credential was not read at all.
+      expect(status).toBe(403);
+      expect(body?.error?.code).toBe('PERMISSION_DENIED');
+      // The message names the grant to ask for, and nothing else.
+      expect(body?.error?.message).toContain(DATASOURCE_ADMIN_CAPABILITY);
+      // Refused BEFORE dispatch, for the reason the anonymous half gives: a
+      // DELETE refused after the service ran has already removed the row.
+      if (c.dispatches) expect(family.service[c.dispatches]).not.toHaveBeenCalled();
+    });
+  }
+});
+
 describe('datasource-admin family — the entitled caller still succeeds', () => {
   for (const c of ALL_CASES) {
-    it(`${c.name} answers ${c.okStatus} for an authenticated caller`, async () => {
+    it(`${c.name} answers ${c.okStatus} for a caller holding \`${DATASOURCE_ADMIN_CAPABILITY}\``, async () => {
       const { status } = await drive(c, ENTITLED);
       expect(status).toBe(c.okStatus);
       if (c.dispatches) expect(family.service[c.dispatches]).toHaveBeenCalled();

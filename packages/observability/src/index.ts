@@ -16,6 +16,13 @@ export { OBSERVABILITY_METRICS_SERVICE, OBSERVABILITY_ERRORS_SERVICE } from './s
 // Semantic conventions
 export { SEMCONV, RUNTIME_METRICS } from './semconv.js';
 
+// Transport-agnostic HTTP request counter, armed at most once per server via
+// the `IHttpServer.afterResponse` observation seam (#9835)
+export {
+    armHttpRequestCounter,
+    type ArmHttpRequestCounterResult,
+} from './http-transport-metrics.js';
+
 // Metric exporters
 export {
     NoopMetricsRegistry,

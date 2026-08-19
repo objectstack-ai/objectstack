@@ -1228,6 +1228,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "ID de cliente",
         help: "Identificador público del cliente OAuth."
       },
+      client_discovery_id: {
+        label: "Client Discovery ID",
+        help: "Opaque identifier the provider uses to look this client up on the discovery path, kept apart from the public `client_id`"
+      },
       client_secret: {
         label: "Secreto de cliente",
         help: "Secreto del cliente OAuth (con hash/cifrado en reposo)."
@@ -1271,6 +1275,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       scopes: {
         label: "Ámbitos permitidos",
         help: "Lista serializada en JSON de ámbitos que el cliente puede solicitar."
+      },
+      client_credentials_scopes: {
+        label: "Client-Credentials Scopes",
+        help: "JSON-serialized list of scopes the client may request on the client_credentials grant, where there is no user to consent — kept apart from `scopes`, which governs user-delegated grants"
       },
       subject_type: {
         label: "Tipo de sujeto",

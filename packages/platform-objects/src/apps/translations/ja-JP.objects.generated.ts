@@ -1228,6 +1228,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "クライアント ID",
         help: "公開 OAuth クライアント識別子"
       },
+      client_discovery_id: {
+        label: "Client Discovery ID",
+        help: "Opaque identifier the provider uses to look this client up on the discovery path, kept apart from the public `client_id`"
+      },
       client_secret: {
         label: "クライアントシークレット",
         help: "OAuth クライアントシークレット（保存時にハッシュ/暗号化済み）"
@@ -1271,6 +1275,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       scopes: {
         label: "許可スコープ",
         help: "クライアントがリクエスト可能なスコープの JSON シリアライズリスト"
+      },
+      client_credentials_scopes: {
+        label: "Client-Credentials Scopes",
+        help: "JSON-serialized list of scopes the client may request on the client_credentials grant, where there is no user to consent — kept apart from `scopes`, which governs user-delegated grants"
       },
       subject_type: {
         label: "サブジェクトタイプ",

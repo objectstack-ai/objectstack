@@ -113,9 +113,7 @@ without the secret itself reaching the ledger.
 **`ip_address` / `user_agent` are populated on auth events only.** Neither the
 record-level writer nor the record-view writer stamps them: a `create` / `update` /
 `delete` / `read` row records who and what, not from where. Do not read a null client
-fingerprint on such a row as "the request had none". ⚠️ The shipped `record_views` list
-view carries an `ip_address` column, and on a `read` row that column is **always empty**
-for this reason.
+fingerprint on such a row as "the request had none".
 
 **`old_value` / `new_value` are null on every `read` row**, deliberately and not as an
 omission — see [Record-view auditing](#record-view-auditing--the-read-action).

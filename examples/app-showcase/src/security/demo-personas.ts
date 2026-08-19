@@ -40,7 +40,7 @@
  * distinct people, a submitter who is not an approver, an out-of-office
  * delegation decided under the delegate's own identity — was stuck on it, and
  * each rediscovered the same non-obvious cause: a password hash is not enough.
- * better-auth 1.7 keys accounts on `(issuer, providerAccountId)`, so a
+ * better-auth 1.7 keys accounts on `(issuer, accountId)`, so a
  * credential row whose `issuer` is not the local credential issuer is INVISIBLE
  * to sign-in, which then fails `INVALID_EMAIL_OR_PASSWORD` behind a misleading
  * "User not found" — pointing at the row, which is fine, instead of at the

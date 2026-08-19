@@ -46,14 +46,39 @@ const ROOT = new URL('../..', import.meta.url).pathname;
 /** The script under test — also this gate's one watch hint. */
 const MAPPER = 'scripts/docs-audit/affected-docs.mjs';
 
-const result = spawnSync(process.execPath, [join(ROOT, MAPPER), '--self-test'], { stdio: 'inherit' });
+/**
+ * Two runs, because they answer two different questions and only one of them needs the
+ * repo (#9572).
+ *
+ *   --self-test        the classifiers and derivations, pinned against fixtures
+ *   --bridge-coverage  the `sdk` bridge's DISCOVERED POPULATION on the real tree
+ *
+ * The second is here because a discovery scan that comes back structurally empty — no
+ * route ledger found, no registrar tail produced, a ledger file the row recognizer can
+ * no longer parse — reports `0 of 0 unreachable`, which is arithmetically true and reads
+ * exactly like a healthy bridge. That is the false-green shape #9747 catalogues, and the
+ * fixtures above cannot catch it: they supply their own population, so they stay green
+ * on a tree where the real walk selects nothing.
+ *
+ * ⛔ What it does NOT do is fail on the coverage ratio itself. Today's tree reaches 45 of
+ * 221 client-bound ledger rows; turning that shortfall into a red would be widening the
+ * recognizer by CI pressure, which #9747 declines explicitly ("Not a new required
+ * context"). The ratio is REPORTED — in the mapper's JSON, in the drift comment, and in
+ * `--bridge-coverage`'s own output. Only the broken-scan verdicts exit non-zero, and
+ * they cannot fire on a tree where the scan works at all.
+ */
+const MODES = ['--self-test', '--bridge-coverage'];
 
-if (result.error) {
-  console.error(`✗ check-affected-docs: could not run ${MAPPER} — ${result.error.message}`);
-  process.exit(2);
+for (const mode of MODES) {
+  const result = spawnSync(process.execPath, [join(ROOT, MAPPER), mode], { stdio: 'inherit' });
+  if (result.error) {
+    console.error(`✗ check-affected-docs: could not run ${MAPPER} ${mode} — ${result.error.message}`);
+    process.exit(2);
+  }
+  if (result.signal) {
+    console.error(`✗ check-affected-docs: ${MAPPER} ${mode} was killed by ${result.signal}.`);
+    process.exit(2);
+  }
+  if (result.status !== 0) process.exit(result.status ?? 2);
 }
-if (result.signal) {
-  console.error(`✗ check-affected-docs: ${MAPPER} --self-test was killed by ${result.signal}.`);
-  process.exit(2);
-}
-process.exit(result.status ?? 2);
+process.exit(0);

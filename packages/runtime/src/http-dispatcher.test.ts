@@ -462,8 +462,10 @@ describe('HttpDispatcher', () => {
         // of `packages/app-shell/src/utils/flowResponse.ts`, PR #4899): the
         // ADR-0112 envelope has no `data`, so a producer that builds its message
         // out of `result.error` alone drops the author's words while every status
-        // assertion stays green. The live `/actions` producer
-        // (`action-execution.ts`) does exactly that; this route does not.
+        // assertion stays green. The live `/actions` producer used to do exactly
+        // that; since #9585 it ships both fields through its typed refusal
+        // carrier (`action-execution.ts`), pinned door-against-door in
+        // `actions-flow-dispatch-status.test.ts`.
         it('should carry the flow-authored errorMessage and the run summary in the 400 details', async () => {
             mockAutomationService.resume.mockResolvedValue({
                 success: false,

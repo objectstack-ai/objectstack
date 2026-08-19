@@ -8,6 +8,31 @@
  *   node scripts/pm/check-half-states.mjs               # sweep the live repo
  *   node scripts/pm/check-half-states.mjs --probe       # can live mode run HERE? (no sweep)
  *   node scripts/pm/check-half-states.mjs --self-test   # verify the predicates offline
+ *   node scripts/pm/check-half-states.mjs --format=markdown [--provenance='…']
+ *                                                       # the same sweep, rendered for an issue body
+ *
+ * ## The standing caller (#9844)
+ *
+ * For most of this file's life its consumer was "a PM seat's patrol round" —
+ * which is to say, nobody's calendar. A shift covering two lanes declared a
+ * queue empty from memory while eight malformed claims (H2) and an unenumerated
+ * backlog sat on the board; not one predicate here had fired, because nothing
+ * standing ever called them. An alarm added to a script nobody runs is still
+ * silence, and the transport note below explains why "some seat should run it"
+ * kept not happening: the live sweep cannot run inside a PM session container
+ * at all.
+ *
+ * So the caller is now `.github/workflows/half-state-patrol.yml` — a scheduled
+ * workflow, on a runner where the transport prerequisite is met, landing the
+ * result by rewriting ONE pinned anchor issue in place (edit history is the
+ * archive; never a comment per run). `--format=markdown` exists for exactly
+ * that consumer, and `--provenance` lets the caller stamp its own run identity
+ * into a body this script otherwise renders repo-agnostically.
+ *
+ * What did NOT change, and must not: this stays report-only. The workflow never
+ * fails a build over findings and never writes a label. The one thing it DOES
+ * treat as a failure is its own non-delivery — a patrol that cannot land its
+ * report is the disease, not a finding.
  *
  * ## Why report-only, and why the exit code is ALWAYS 0 on a completed sweep
  *
@@ -116,6 +141,49 @@
  *       review ACCEPT, so ready = reviewed by construction; a reviewed PR
  *       that left the merge queue (or never entered it) with nobody handling
  *       it would otherwise wait silently forever. Patrol input, not a gate.
+ *   H13 a card carrying `domain:*` with NO pm-state label, aged past one
+ *       sweep cycle — the half-annotated shape the protocol's own
+ *       single-label writes produce by design, which the triage sweep's
+ *       disjunct ③ ("有 domain:* 无 pm-state") exists to heal hourly. In that
+ *       shape the card is invisible to every seat's candidate query (routing
+ *       landed, the state machine never did), and it is ALSO invisible to
+ *       every label-scoped listing in this sweep — the shape is defined by
+ *       the absence of the labels the other listings key on — so H13 is the
+ *       one item that needs an UNSCOPED listing. Aged past a cycle it is a
+ *       defect of the HEALING LOOP, not inventory (maintainer, 2026-08-19,
+ *       verbatim: 「项目经理等分诊,但是没有切换 label,导致挂了很久。」「我
+ *       刚和他说了他才处理。」— the measured specimen, its body self-declaring
+ *       P0/data-integrity, sat ~26h until poked by hand). A louder line fires
+ *       when the card's own title/body self-declares P0/data-integrity: for
+ *       that class the emergency-triage channel (immediate triage subagent)
+ *       is the mandated move, never the hourly Routine.
+ *   H14 `pm:blocking` cache incoherence, in BOTH directions, read off the
+ *       `Blocked-by:` reverse index this sweep already has the bodies for.
+ *       `pm:blocking` is not a state a seat sets: the state model makes it a
+ *       CACHE the triage sweep derives from that index (「分诊 sweep 自
+ *       `Blocked-by:` 索引推导的缓存,⛔ 不手工挂」), and the lane selection
+ *       order ranks it second only to `priority:p0`. A cache with a ranking
+ *       consumer and no coherence check drifts in two different ways, and
+ *       each lies differently: a card carrying the label that NOTHING targets
+ *       is boosted past fresher work on the authority of a dependency that
+ *       does not exist (worse than an absent label — it lies with authority),
+ *       while a card that IS targeted and does NOT carry it is a real
+ *       unblocker the selection order cannot see. Report-only, and pointedly
+ *       so: the producer is the triage sweep's derivation pass, so the remedy
+ *       is always a derivation that runs, never a label written from here.
+ *       Both directions were non-empty at the reading this item landed on
+ *       (2026-08-19, 234 open cards, 17 `Blocked-by:` body lines): ONE stale
+ *       card and FIVE missing ones, with not a single coherent pairing on the
+ *       board — the cache had no reader checking it and had drifted to 0%
+ *       agreement with the index it is derived from.
+ *   H15 the oldest UNCLAIMED `pm:blocking` card and its age — one row, no
+ *       threshold, selection-order compliance made visible (maintainer,
+ *       2026-08-19: 「然后车道项目经理应该优先处理 blocking」). Where H14 asks
+ *       whether the cache is TRUE, H15 asks whether anyone acted on it: a
+ *       lane that keeps taking fresher picks past an unclaimed blocking card
+ *       now says so on the anchor, by name. Deliberately not an alarm and
+ *       deliberately unconditional — see the rationale on the predicate for
+ *       why this one carries no threshold constant.
  *
  * ## The close mechanism, measured (#8293)
  *
@@ -205,7 +273,7 @@
  *      sweep cannot start.
  *
  * The paragraph this replaces claimed "unauthenticated works at 60 req/h". That
- * is not a fact about this script's environment. Three container classes have
+ * is not a fact about this script's environment. Four container classes have
  * been measured and no two agree:
  *
  *   PM seat session (#7412 as filed) — proxy denies the host (curl 403 with and
@@ -222,19 +290,88 @@
  *       behind the same NAT. Meanwhile `curl` answered 200 BOTH ways, because it
  *       honours HTTPS_PROXY and the proxy substitutes a real credential — the
  *       misleading pre-flight point 1 warns about, measured.
+ *   Proxy-mediated cloud session (#9946, measured 2026-08-19) — the same
+ *       container class as above, but with node routed THROUGH the agent proxy
+ *       (`NODE_OPTIONS=--use-env-proxy`, which is what a seat is told to use for
+ *       live GitHub reads from node). The proxy substitutes a real credential
+ *       for the placeholder, so ACCOUNT-scoped endpoints answer as GitHub and
+ *       the identity is genuine — while every REPO-scoped endpoint is refused by
+ *       the proxy itself. Live mode cannot run, and the reading that used to say
+ *       it could is the reason this probe now has a second stage.
  *
- * That last class also produced the trap worth naming: `/rate_limit` is EXEMPT
+ * That fourth class is the one that broke the probe, and its mechanism is worth
+ * stating exactly, because the obvious hypothesis is WRONG and was measured to
+ * be wrong. `/rate_limit` there is not the proxy fabricating a quota: it carries
+ * `server: github.com`, a real `x-github-request-id`, and a 15000-limit core
+ * quota, and `GET /user` on the same transport returns the real login. GitHub
+ * really did answer, and the credential really does authenticate. What the proxy
+ * intercepts is the OTHER side — the repo-scoped reads:
+ *
+ *   GET /rate_limit                          -> 200, remaining 14979, server: github.com
+ *   GET /user                                -> 200, the real login
+ *   GET /repos/objectstack-ai/objectstack    -> 403, NO x-ratelimit-* headers,
+ *                                               NO server: github.com, and a body
+ *                                               from the proxy vendor, not GitHub
+ *
+ * So no amount of care applied to `/rate_limit` can classify this container: the
+ * account-scoped observation is genuinely healthy, and is identical to the
+ * Routine runner's. Only a REPO-scoped read separates them, which is why the
+ * probe now takes one — and why `GET /user` would not have done: it is
+ * account-scoped and answers 200 here. The discriminator is not "a real
+ * endpoint", it is "the KIND of endpoint the sweep actually needs".
+ *
+ * Two things this fourth class deliberately does NOT do, both because the file
+ * has already recorded the decision against them:
+ *   - it does not pattern-match the proxy's refusal body. That body is a vendor
+ *     string that can change under us, and this classifier stays narrow about
+ *     what it will name (the `looksLikeStaleWorkspaceDist` posture below).
+ *   - it does not read the 14-character `prox…` token shape as disqualifying.
+ *     Token shape enriches wording and never gates a request — an unknown future
+ *     prefix must still be SENT so GitHub gets to be the judge — and in this very
+ *     class that placeholder IS swapped for a working credential, so the shape
+ *     would have mispredicted the outcome in both directions.
+ * What it matches instead is a pure structural contradiction, with no vendor
+ * string and no shape test in it: the quota endpoint reports thousands of core
+ * requests available, and a core request just got refused.
+ *
+ * The third class also produced the trap worth naming: `/rate_limit` is EXEMPT
  * from the limit it reports. With the quota spent it still answers 200 (carrying
  * `x-ratelimit-remaining: 0`) while every other endpoint answers 403 — so a
  * probe that reads only the status code cheerfully green-lights a sweep that
  * cannot make one request. The first draft of the probe below did exactly that.
  * `probeIsUsable` is that lesson, and the self-test pins it.
  *
- * So the script PROBES (`GET /rate_limit`, which costs no core quota) before it
- * sweeps. A failed probe prints a classified PREREQUISITE NOT MET report naming
+ * So the script PROBES before it sweeps, in two stages, and the staging is the
+ * whole cost story:
+ *
+ *   1. `GET /rate_limit` — costs no core quota, and is what separates the first
+ *      three classes from each other (unreachable / bad credential / exhausted).
+ *      Any verdict OTHER than `reachable` stops here, exactly as before.
+ *   2. `GET /repos/{OWNER_REPO}` — fired ONLY when stage 1 came back
+ *      `reachable`, i.e. only on the path that used to return a green. Costs
+ *      one core request, accepted deliberately (#9946): a probe whose answer
+ *      does not predict what the sweep can do is worth less than the request it
+ *      saves, and the sweep it green-lights spends a request per label page
+ *      anyway.
+ *
+ * Consequence worth being explicit about: the three FAILING classes cost exactly
+ * what they cost before (one request, no core quota), and the healthy path costs
+ * one core request more than it did. Nothing on a failing path got slower or
+ * more expensive.
+ *
+ * A failed probe prints a classified PREREQUISITE NOT MET report naming
  * which of the two requirements is unmet and the one command that satisfies it —
  * never a sweep result. `--probe` runs that check alone, which is what a seat
  * should use to answer "can live mode run in THIS container?".
+ *
+ * The repo-scoped stage is an OPTIONAL observation on the pure classifier, not a
+ * required one: `classifyTransportProbe` handed no `repo` reading classifies the
+ * account-scoped evidence alone, exactly as it always did. That keeps the other
+ * importer of this classifier (`scripts/pm/ci-failure.mjs`, which reads the
+ * Actions API and gathers its own account-scoped observations) behaving
+ * identically. The guarantee that THIS script never green-lights on stage 1
+ * alone therefore lives in `probeTransport` / `needsRepoProbe`, which is where
+ * the gathering policy belongs — and it is pinned in the self-test.
  *
  * Deliberately NOT decided here: whether these scripts should grow an MCP-backed
  * transport or a required-real-token doctrine. That depends on where
@@ -307,7 +444,15 @@ export function h5SeatStickerDesync(issue) {
   const status = m[2].trim();
   const assignees = (issue.assignees ?? []).map((a) => a.login);
   if (status.startsWith('🟢')) {
-    const holder = status.replace('🟢', '').trim();
+    // The login is only the FIRST whitespace-delimited token after the emoji.
+    // Everything past it — the `(session_…)` parenthetical every active seat
+    // title carries by protocol, and any `·`-separated suffix (in-flight
+    // counts, queue depth, a body-edit timestamp) — is display, not identity,
+    // and must never be compared against the assignee list (#9926: this used
+    // to take the WHOLE remainder as the holder, so a consistent seat post
+    // like `🟢 os-warren (session_…)` mismatched `[os-warren]` on every
+    // sweep).
+    const holder = status.replace('🟢', '').trim().split(/\s+/u)[0] ?? '';
     if (holder === 'Routine') return null; // Routine seats keep assignee empty by design
     if (!assignees.includes(holder)) {
       return `title says 🟢 ${holder} but assignees are [${assignees.join(', ') || 'none'}]`;
@@ -679,6 +824,511 @@ export function h12OrphanLanding(pr, nowMs = Date.now()) {
 }
 
 // ---------------------------------------------------------------------------
+// H13 — domain:* without any pm-state label, aged past one sweep cycle
+// (maintainer-reported incident, 2026-08-19).
+// ---------------------------------------------------------------------------
+
+/**
+ * The label vocabulary that counts as "a pm-state" for H13, mirroring the
+ * triage sweep's disjunct ③: any of these makes the card visible to a named
+ * reader (queue view, lane view, unlock scan, decision inbox, finding
+ * grading round, epic index, seat registry), so their absence — with routing
+ * already present — is the invisible half-annotated shape. `pm:blocking` is
+ * deliberately NOT here: it is a derived priority cache, not a state, and a
+ * card carrying only it is exactly as invisible to candidate queries.
+ */
+export const PM_STATE_LABELS = [
+  'pm:queue',
+  'pm:dispatched',
+  'pm:blocked',
+  'pm:on-hold',
+  'pm:epic',
+  'pm:seat',
+  'needs-user-decision',
+  'finding',
+];
+
+/**
+ * Labels whose NORMAL shape is domain-without-pm-state, excluded by the
+ * sweep's own protocol text (SKILL.md, Backlog sweep): flagging them would
+ * report the protocol's design as a defect.
+ */
+export const H13_EXEMPT_LABELS = ['tracking', 'status:parked', 'qa-run'];
+
+/**
+ * H13 threshold — "one sweep cycle": the triage Routine fires HOURLY and its
+ * disjunct ③ heals exactly this shape every round, so a card still in it
+ * after 2h has survived at least one full healing round it should not have —
+ * the alarm reads a failure of the healing loop, never routine intake
+ * latency (a just-landed domain label sits here only for the sweep's own
+ * ~2-minute settle window, two orders of magnitude under the threshold).
+ * Age reads `updated_at`: it needs no timeline fetch, and every healing
+ * write would bump it, so a stale `updated_at` in this shape means nothing
+ * touched the card at all. The measured specimen sat ~26h; at 2h it would
+ * have been flagged a day earlier.
+ */
+export const DOMAIN_HALF_STATE_STALE_HOURS = 2;
+
+/**
+ * The prefix H13 stamps on a self-declared-P0 row. Exported because a SECOND
+ * reader now depends on it: the markdown renderer sorts loud rows to the top
+ * of the anchor body (see `renderMarkdown`). A shared constant, not a string
+ * literal in two files — the loudness and the thing that reads the loudness
+ * must never be able to drift apart, which is the whole failure family this
+ * script belongs to.
+ */
+export const P0_SUSPECT_MARKER = '🚨 P0-SUSPECT:';
+
+/**
+ * Whether the card's own title/body self-declares P0 / data-integrity — the
+ * incident card carried its emergency-triage trigger in its body while the
+ * seat that saw it "waited for triage" in session memory. Read through
+ * `stripMarkdownCode` (H7 reading 4's careful-author protection carries
+ * over: a body QUOTING `P0` in backticks is not a self-declaration).
+ */
+export function h13SelfDeclaredP0(issue) {
+  const text = stripMarkdownCode(`${issue?.title ?? ''}\n${issue?.body ?? ''}`);
+  return /\bp0\b/i.test(text) || /data[\s-]?integrity/i.test(text);
+}
+
+/**
+ * H13 — null when clean, else the finding sentence (louder for a
+ * self-declared P0/data-integrity card, whose mandated route is the
+ * emergency-triage channel, not the next Routine fire). An unreadable
+ * `updated_at` flags rather than reads as fresh (#4690 direction, same as
+ * H10/H11/H12).
+ */
+export function h13DomainWithoutPmState(issue, nowMs = Date.now()) {
+  const labels = labelNames(issue);
+  if (!labels.some((l) => l.startsWith('domain:'))) return null;
+  if (labels.some((l) => PM_STATE_LABELS.includes(l))) return null;
+  if (labels.some((l) => H13_EXEMPT_LABELS.includes(l))) return null;
+  const updated = Date.parse(issue.updated_at ?? '');
+  const ageHours = Number.isFinite(updated) ? (nowMs - updated) / 3_600_000 : null;
+  if (ageHours !== null && ageHours <= DOMAIN_HALF_STATE_STALE_HOURS) return null;
+  const reading =
+    ageHours === null
+      ? 'an unreadable `updated_at` (which must not read as fresh)'
+      : `~${Math.round(ageHours)}h without activity (threshold ${DOMAIN_HALF_STATE_STALE_HOURS}h)`;
+  const base =
+    `\`domain:*\` with no pm-state label and ${reading} — routing landed, the state machine ` +
+    `never did, so the card is invisible to every seat's candidate query. A half-state older ` +
+    `than one sweep cycle is a defect of the healing loop (triage sweep disjunct ③), not ` +
+    `inventory: pair the domain label with its pm-state in one write, oldest first.`;
+  if (!h13SelfDeclaredP0(issue)) return base;
+  return (
+    `${P0_SUSPECT_MARKER} the card's own title/body self-declares P0/data-integrity, and for that ` +
+    `class the emergency-triage channel (immediate triage subagent) is the mandated move, ` +
+    `never the hourly Routine. ${base}`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H14 + H15 — the `pm:blocking` cache and the order that consumes it
+// (maintainer-approved 2026-08-19, verbatim: 「同意」).
+//
+// Both items read ONE structure, built once per sweep from bodies the unscoped
+// pass already fetched: the `Blocked-by:` reverse index. Everything above is a
+// predicate over a single card; these two are the first that need the whole
+// open set, because incoherence is a relation between two cards and "oldest"
+// is a relation among many. That is a shape difference, not a contract change
+// — they stay pure functions over listings the caller supplies, so the
+// self-test drives them offline exactly like H1–H13.
+// ---------------------------------------------------------------------------
+
+/**
+ * The `Blocked-by:` line's refs, in the order written.
+ *
+ * ## Why this is the file's FIRST parser for a line H4 already reads
+ *
+ * H4 asks only "is there such a line", so its regex is a presence test and
+ * extracts nothing; no other script in the repo parses these lines at all
+ * (the unlock scan is a seat procedure over a grep, not code). So there is no
+ * second parser to converge on here — this is the first, and H4 keeps its own
+ * cheaper question rather than being rewritten around this one.
+ *
+ * ## Two decisions that change what gets reported
+ *
+ * 1. **Code is NOT stripped**, unlike H7/H8/H13. Those predicates read PROSE
+ *    and must protect the careful author who quotes a spelling in backticks.
+ *    This one models a MACHINE READER: the state model calls the line
+ *    「机器可 grep 的反向索引」, and the unlock scan that consumes it greps the
+ *    literal — so a fenced `Blocked-by:` line really does fire the live
+ *    machinery, whatever the author meant. Stripping here would report
+ *    coherence against an index nothing uses; H4 (the same line's other
+ *    reader) does not strip either.
+ * 2. **Only the LEADING ref run is taken.** Real lines carry trailing prose —
+ *    「Blocked-by: #9689 (the relocation it needs is the same edit)」 — and
+ *    prose can name a second card that is context, not a blocker. Scanning
+ *    the whole value would manufacture a dependent for it, and the cost lands
+ *    on a THIRD card (a phantom "missing cache" row against someone who did
+ *    nothing wrong). So the scan walks refs and separators from the start of
+ *    the value and stops at the first token that is neither.
+ *
+ * The key is matched case-sensitively and line-anchored, byte-stable like H4
+ * and H9: a lowercase or mid-sentence spelling is a line the real scan cannot
+ * see, and reading it here would report an index the machinery does not have.
+ *
+ * @param {string} body
+ * @returns {{ repo: string|null, number: number }[]}
+ */
+export function blockedByTargets(body) {
+  const out = [];
+  // `[ \t]*`, not `\s*`: `\s` matches newlines, so with the /g/m extractor a
+  // run of blank lines could let one match begin a line early. H4's presence
+  // test cannot tell the difference; an extractor can.
+  for (const line of String(body ?? '').matchAll(/^[ \t]*Blocked-by:[ \t]*(\S.*)$/gm)) {
+    let rest = line[1];
+    for (;;) {
+      const ref = /^[\s,;+、]*(?:and[ \t]+)?([A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)?)?#(\d+)/u.exec(rest);
+      if (!ref) break;
+      out.push({ repo: ref[1] ?? null, number: Number(ref[2]) });
+      rest = rest.slice(ref[0].length);
+    }
+  }
+  return out;
+}
+
+/**
+ * target issue number -> the open issue numbers whose bodies declare it a
+ * blocker, built from ONE listing (the unscoped open-issue pass).
+ *
+ * Cross-repo refs are dropped, and that is load-bearing rather than tidy:
+ * 「Blocked-by: objectstack-ai/objectui#4356」 is a real line on this board, and
+ * reading its number as a LOCAL target would invent a dependent for whatever
+ * this repo's #4356 happens to be — a phantom finding against an unrelated
+ * card. A ref qualified with this repo (either `owner/repo#N` or the bare
+ * repo name) is kept; a bare `#N` is local by definition.
+ *
+ * Self-references are dropped too: a card cannot be its own unblocker, and
+ * counting one would make it permanently `pm:blocking`-worthy on its own say-so.
+ *
+ * @param {{ number: number, body?: string }[]} issues — OPEN issues only. The
+ *   index's whole meaning is "open cards that are waiting", so the caller's
+ *   listing is what bounds it; a closed dependent must not hold a label alive.
+ * @param {{ repo?: string }} [options] — `owner/repo`, defaulting to the swept one.
+ */
+export function buildBlockingIndex(issues, options = {}) {
+  const ownerRepo = options.repo ?? OWNER_REPO;
+  const bareRepo = ownerRepo.split('/').pop();
+  const index = new Map();
+  for (const issue of issues ?? []) {
+    for (const { repo, number } of blockedByTargets(issue.body)) {
+      if (repo !== null && repo !== ownerRepo && repo !== bareRepo) continue;
+      if (number === issue.number) continue;
+      const deps = index.get(number) ?? [];
+      if (!deps.includes(issue.number)) deps.push(issue.number);
+      index.set(number, deps);
+    }
+  }
+  return index;
+}
+
+/**
+ * How many dependent card numbers a missing-cache row names before it counts
+ * the rest. The row exists to be ACTED on — a reader wants to see who is
+ * waiting — but the markdown renderer writes into a body with a hard cap and
+ * a fold, and an unbounded fan-out list is the one row that could push others
+ * off the end. Five names the whole set for every fan-out measured on this
+ * board (the largest was one) while bounding the pathological case.
+ */
+export const BLOCKING_DEPENDENT_LIST_CAP = 5;
+
+/**
+ * H14 — null when the cache agrees with the index, else the finding sentence.
+ *
+ * @param {object} issue — an OPEN issue.
+ * @param {Map<number, number[]>} index — from `buildBlockingIndex`.
+ */
+export function h14BlockingCacheIncoherent(issue, index) {
+  const carries = labelNames(issue).includes('pm:blocking');
+  const dependents = index?.get?.(issue.number) ?? [];
+  if (carries && dependents.length === 0) {
+    return (
+      '`pm:blocking` carried while NO open card\'s `Blocked-by:` body line targets it — a stale ' +
+      'derived cache. The label is not a state a seat sets: the triage sweep derives it from the ' +
+      '`Blocked-by:` reverse index, and the lane selection order ranks it second only to ' +
+      '`priority:p0`. So a stale one is worse than an absent one — it boosts a card nothing depends ' +
+      'on, with authority. Report-only: the remedy is the triage sweep\'s derivation pass dropping ' +
+      'the label (or the missing `Blocked-by:` line landing on the card that really is waiting), ' +
+      'never a label written from this script.'
+    );
+  }
+  if (!carries && dependents.length > 0) {
+    const shown = dependents.slice(0, BLOCKING_DEPENDENT_LIST_CAP);
+    const named = shown.map((n) => `#${n}`).join(', ');
+    const more = dependents.length > shown.length ? ` +${dependents.length - shown.length} more` : '';
+    return (
+      `targeted by ${dependents.length} open card(s)' \`Blocked-by:\` body line (${named}${more}) but ` +
+      'NOT carrying `pm:blocking` — a real unblocker the selection order cannot see. The label is ' +
+      'the derived cache that makes a card outrank everything but `priority:p0`; without it this ' +
+      'card competes on age alone while the cards waiting on it cannot start. Report-only: the ' +
+      'remedy is the triage sweep\'s derivation pass applying the label, never a hand-applied one.'
+    );
+  }
+  return null;
+}
+
+/**
+ * H15 — the oldest open, UNASSIGNED `pm:blocking` card, or null.
+ *
+ * ## No threshold constant, deliberately
+ *
+ * Every other aged item here (H10/H11/H12/H13) answers "has this been
+ * abandoned?", and a threshold is what turns silence into an alarm. This row
+ * answers a different question — "is the lane taking blocking cards first?" —
+ * and the honest answer is a NUMBER, every run, for the reader to judge. A
+ * threshold would re-introduce exactly the judgement call the row exists to
+ * hand over, and would go quiet on the days the board is worst behaved but
+ * still under it. So: unconditional, one row, no constant. Nothing reddens
+ * (nothing in this file ever does).
+ *
+ * ## The age is the CARD's, not the label's, and says so
+ *
+ * `created_at`, the same quantity the selection order's own within-rank
+ * tie-break reads (同级按卡龄). The label's age would be the sharper number
+ * and is not available: it lives in a per-card timeline fetch this sweep
+ * deliberately never makes (the H2 comment fetch is the one exception, and it
+ * is confined to candidates). Reporting card age and NAMING it as card age
+ * beats reporting a number whose meaning the reader has to guess.
+ *
+ * An unreadable `created_at` sorts as maximally old rather than being skipped
+ * — the #4690 direction the whole file keeps: a value that cannot be read must
+ * surface, never quietly drop out of a "the oldest is…" claim.
+ *
+ * @param {object[]} issues — the open listing.
+ * @returns {{ issue: object, message: string } | null}
+ */
+export function h15OldestUnclaimedBlocking(issues, nowMs = Date.now()) {
+  const candidates = [];
+  let blockingTotal = 0;
+  for (const issue of issues ?? []) {
+    if (!labelNames(issue).includes('pm:blocking')) continue;
+    blockingTotal++;
+    if ((issue.assignees ?? []).length > 0) continue;
+    const created = Date.parse(issue.created_at ?? '');
+    candidates.push({
+      issue,
+      ageHours: Number.isFinite(created) ? (nowMs - created) / 3_600_000 : null,
+    });
+  }
+  if (candidates.length === 0) return null;
+  candidates.sort(
+    (a, b) =>
+      (b.ageHours ?? Infinity) - (a.ageHours ?? Infinity) || a.issue.number - b.issue.number,
+  );
+  const [oldest] = candidates;
+  const age =
+    oldest.ageHours === null
+      ? 'an unreadable `created_at` (sorted as maximally old — a timestamp that cannot be read must ' +
+        'surface, never drop out of an "oldest is…" claim)'
+      : `open ~${Math.round(oldest.ageHours)}h`;
+  return {
+    issue: oldest.issue,
+    message:
+      `oldest UNCLAIMED \`pm:blocking\` card: ${age}, ${candidates.length} of ${blockingTotal} open ` +
+      '`pm:blocking` card(s) unassigned. The lane selection order puts `pm:blocking` second only to ' +
+      '`priority:p0`, so an unclaimed one aging while fresher cards are picked is selection-order ' +
+      'drift — visible here by name instead of only in a seat\'s memory. Age is the CARD\'s ' +
+      '(`created_at`, the same quantity the order\'s within-rank tie-break reads), not the label\'s: ' +
+      'that would need a per-card timeline fetch this sweep never makes. Visibility row — no ' +
+      'threshold, it reports unconditionally, and like everything here it is patrol input, not a verdict.',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Report rendering — pure over (findings, counts), so `--self-test` pins both
+// media offline. The live sweep below picks a renderer and prints it; nothing
+// about WHAT is swept or WHICH predicates fire depends on the format.
+//
+// Two media exist because this script gained a second consumer. The first is a
+// terminal: a patrol round reads the plain lines and scrolls. The second is a
+// pinned anchor ISSUE BODY, rewritten in place by the scheduled workflow that
+// gave this sweeper a standing caller (`.github/workflows/half-state-patrol.yml`)
+// — a surface with a fold, a hard size cap, and readers who will not scroll.
+// That difference, and only that, is why the two renderers order rows
+// differently; see `renderMarkdown`.
+// ---------------------------------------------------------------------------
+
+/** Accepted `--format` values. An unrecognized one is a usage error (exit 2). */
+export const OUTPUT_FORMATS = ['plain', 'markdown'];
+
+/**
+ * GitHub's hard cap on an issue body, and the budget the markdown renderer
+ * keeps under it. A body that exceeds the cap is REJECTED by the API — the
+ * whole run's report would vanish over one long row — so the renderer trims
+ * and SAYS it trimmed. Silent truncation is the #4690 shape (an unreadable
+ * result must not read as a clean one), so the omission notice is part of the
+ * rendered body, never a log line the anchor's reader never sees.
+ */
+export const ISSUE_BODY_LIMIT = 65536;
+export const MARKDOWN_BODY_BUDGET = 60000;
+
+/** Is this finding one of H13's louder self-declared-P0 rows? */
+export function isLoudFinding(message) {
+  return String(message ?? '').startsWith(P0_SUSPECT_MARKER);
+}
+
+/**
+ * The summary sentence both media end on — the one line that says what was
+ * READ, not just what was found. It is the difference between "the board is
+ * clean" and "nothing was swept", and it carries the report-only contract so
+ * a reader who sees only this line cannot mistake it for a gate verdict.
+ *
+ * @param {{ repo: string, issues: number, unscoped: number, prs: number, merged: number }} counts
+ * @param {number} findingCount
+ */
+export function summaryLine(counts, findingCount) {
+  return (
+    `check-half-states: swept ${counts.issues} open pm-/p0-labeled issue(s), ${counts.unscoped} open ` +
+    `issue(s) in the unscoped pass (H13–H15), ${counts.prs} open PR(s) ` +
+    `and ${counts.merged} recently-merged PR(s) in ${counts.repo} — ${findingCount} half-state(s) found. ` +
+    `Report-only: findings are patrol input, not a gate verdict.`
+  );
+}
+
+/**
+ * The terminal report — byte-identical to what this script printed before the
+ * format switch existed. Findings arrive already sorted by issue number and
+ * that order is kept: a terminal has no fold, so there is nothing for a
+ * priority sort to buy here, and changing it would churn every seat's habit.
+ */
+export function renderPlain(findings, counts) {
+  const lines = findings.map(
+    ([issue, code, msg]) => `  ${code} #${issue.number} ${msg}\n     ${issue.html_url}`,
+  );
+  lines.push(summaryLine(counts, findings.length));
+  return lines.join('\n');
+}
+
+/**
+ * Provenance is a one-line string the CALLER supplies (`--provenance=…`): the
+ * script knows it swept, it does not know it was a GitHub Actions run #123 at
+ * commit abc1234, and teaching it would couple a repo-agnostic sweeper to one
+ * caller. Collapsed to a single line and length-capped here rather than
+ * trusted: it is interpolated into a markdown italic line, and a newline in it
+ * would silently break the header apart.
+ */
+export function normalizeProvenance(text) {
+  return String(text ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 300);
+}
+
+/**
+ * The anchor-body report.
+ *
+ * Row order differs from `renderPlain` on purpose, and the reason is the
+ * medium: this body is READ AT A FOLD and TRIMMED AT A CAP. A P0-SUSPECT row
+ * sitting at position 38 of 40 — or trimmed off the end entirely — is exactly
+ * the silence this sweeper's standing caller exists to end, so loud rows sort
+ * first and are therefore the last things truncation could ever reach. Within
+ * each band the issue-number order is preserved, so the list is still stable
+ * run to run and diffable in the anchor's edit history.
+ *
+ * The header is deliberately restated every run rather than left as a
+ * hand-written preamble the workflow must not clobber: the body is owned by
+ * this generator, end to end, so there is no half of it that a run can leave
+ * stale. First line is a bare literal marker with no angle brackets — the
+ * board's markers are grepped as literal text, never as comment syntax,
+ * because GitHub's body sanitizer eats short `<…>` fragments on write.
+ */
+export function renderMarkdown(findings, counts, options = {}) {
+  const provenance = normalizeProvenance(options.provenance);
+  const sweptAt = options.sweptAt instanceof Date ? options.sweptAt : new Date();
+  const rows = [...findings].sort(
+    (a, b) => Number(isLoudFinding(b[2])) - Number(isLoudFinding(a[2])) || a[0].number - b[0].number,
+  );
+  const loudCount = rows.filter(([, , msg]) => isLoudFinding(msg)).length;
+
+  const head = [
+    'os-half-state-sweep — machine-findable marker for this generated view.',
+    '',
+    '**Generated view — not a second tracker.** Authority lives on each card and PR (one-board rule);' +
+      ' this body is rewritten IN PLACE by the scheduled patrol workflow' +
+      ' (`.github/workflows/half-state-patrol.yml`) on every run, and the edit history is the archive.' +
+      ' **Report-only**: every row is patrol input, never a gate verdict, and this sweep never fixes a' +
+      ' state. Each predicate and the protocol clause it enforces are documented in' +
+      ' `scripts/pm/check-half-states.mjs`.',
+    '',
+    `_Swept ${sweptAt.toISOString()}${provenance ? ` · ${provenance}` : ''}_`,
+    '',
+    'The timestamp above is the patrol\'s own heartbeat: a `Swept` line that stops advancing means the' +
+      ' standing caller died, which is the failure this anchor was created to make visible. Read it' +
+      ' before you read the rows.',
+    '',
+  ];
+
+  if (loudCount > 0) {
+    head.push(
+      `🚨 **${loudCount} P0-SUSPECT row(s) in this sweep** — for that class the mandated move is the` +
+        ' emergency-triage channel (an immediate triage subagent), never waiting for the next hourly' +
+        ' Routine fire. They are sorted to the top of the list below.',
+      '',
+    );
+  }
+
+  head.push(`**${summaryLine(counts, rows.length)}**`, '');
+
+  if (rows.length === 0) {
+    head.push(
+      '✅ No half-states found in this sweep. This line means the board was READ and is clean — a sweep' +
+        ' that could not RUN replaces this whole body with a prerequisite/failure report instead, so a' +
+        ' green anchor is never the sound of a broken sweeper.',
+    );
+    return head.join('\n');
+  }
+
+  head.push('### Findings', '', '');
+  const body = head.join('\n');
+  const rendered = [];
+  let used = body.length;
+  for (let i = 0; i < rows.length; i++) {
+    const [issue, code, msg] = rows[i];
+    const line = `- **${code}** [#${issue.number}](${issue.html_url}) — ${msg}`;
+    // Reserve room for the omission notice itself, so the trim can always
+    // announce itself even when it fires on the very last row.
+    const notice = `\n- _… ${rows.length - i} further row(s) omitted to fit GitHub's issue-body limit; the full list is in the workflow run log._`;
+    if (used + line.length + 1 + notice.length > MARKDOWN_BODY_BUDGET) {
+      rendered.push(notice.slice(1));
+      break;
+    }
+    rendered.push(line);
+    used += line.length + 1;
+  }
+  return `${body}${rendered.join('\n')}`;
+}
+
+/**
+ * Output options off argv. Pure, so `--self-test` pins the usage errors too:
+ * a mistyped `--format` must be a LOUD non-zero exit, never a silent fallback
+ * to plain text that would leave the anchor updated with an unreadable body.
+ *
+ * @param {string[]} argv
+ * @returns {{ format: string, provenance: string, error?: string }}
+ */
+export function parseOutputOptions(argv) {
+  const out = { format: 'plain', provenance: '' };
+  for (const arg of argv ?? []) {
+    const fmt = /^--format=([\s\S]*)$/.exec(arg);
+    if (fmt) {
+      if (!OUTPUT_FORMATS.includes(fmt[1])) {
+        return {
+          ...out,
+          error: `unknown --format=${fmt[1]} — expected one of: ${OUTPUT_FORMATS.join(', ')}`,
+        };
+      }
+      out.format = fmt[1];
+      continue;
+    }
+    const prov = /^--provenance=([\s\S]*)$/.exec(arg);
+    if (prov) out.provenance = normalizeProvenance(prov[1]);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Transport prerequisite — the classifier (pure) and the probe that feeds it.
 //
 // Modelled on `scripts/cli-build-prerequisite.mjs`: the knowledge lives in pure
@@ -787,9 +1437,98 @@ function rateLimitedVerdict(tok, result, how) {
 }
 
 /**
+ * The repo-scoped half of the verdict (#9946) — the stage-2 reading, judged
+ * against a stage-1 reading that already said the transport was healthy.
+ *
+ * Returns a verdict for a refusal, or null when the repo read is fine or is
+ * something this classifier declines to name. Kept as its own function for the
+ * same reason `rateLimitedVerdict` is: the wording lives next to the only code
+ * that knows what it did and did not check.
+ *
+ * The matching condition carries NO vendor string and NO token-shape test —
+ * both were considered and rejected on #9946, and the header says why. What it
+ * matches is the structural contradiction the two stages make together: the
+ * quota endpoint reports thousands of core requests available, and a core
+ * request just got refused. That is unambiguous regardless of who refused it,
+ * and it stays true if the intercepting proxy rewrites its message tomorrow.
+ *
+ * @param {{ present: boolean, shape: string, redacted: string }} tok
+ * @param {{ status?: number, rateLimitRemaining?: number|null }} primary  the stage-1 reading
+ * @param {{ status?: number, rateLimitRemaining?: number|null, networkError?: string }} repo
+ */
+function classifyRepoRead(tok, primary, repo) {
+  if (!repo || repo.networkError) return null;
+  if (repo.status === 200 || repo.status === 301) return null;
+
+  // A genuine quota exhaustion that happened BETWEEN the two stages — rare, but
+  // it wears the same 403 and has a completely different remedy, so it must not
+  // be reported as a scope refusal.
+  if (repo.rateLimitRemaining === 0) return rateLimitedVerdict(tok, repo, 'the repo-scoped read is refused too');
+
+  const quota =
+    primary.rateLimitRemaining === null || primary.rateLimitRemaining === undefined
+      ? 'quota left'
+      : `${primary.rateLimitRemaining} core requests left`;
+
+  if (repo.status === 404) {
+    return {
+      kind: 'repo-not-visible',
+      headline: `\`${OWNER_REPO}\` is not visible to this identity — the sweep would list nothing`,
+      detail: [
+        `\`GET /rate_limit\` -> ${describeProbe(primary)}, but \`GET /repos/${OWNER_REPO}\` -> HTTP 404.`,
+        ``,
+        `GitHub answers 404 rather than 403 for a repository the caller may not know`,
+        `exists, so this is one of two things and the reading cannot say which: the`,
+        `repo name is wrong, or the credential cannot see it.`,
+      ],
+      fix: [
+        `check PM_SWEEP_REPO (currently \`${OWNER_REPO}\`), then the credential's repo scope.`,
+      ],
+    };
+  }
+
+  // 401/403 ONLY — the fourth container class as measured on 2026-08-19. Any
+  // other status is left unnamed on purpose (a 5xx is GitHub or the proxy being
+  // briefly unwell, not a scope decision), and the caller keeps its loud generic
+  // failure rather than being handed a confident wrong diagnosis.
+  if (repo.status !== 401 && repo.status !== 403) return null;
+
+  return {
+    kind: 'repo-scope-refused',
+    headline:
+      'the transport authenticates but repo-scoped reads are refused — the sweep cannot list one page',
+    detail: [
+      `\`GET /rate_limit\` -> ${describeProbe(primary)}.`,
+      `\`GET /repos/${OWNER_REPO}\` -> HTTP ${repo.status}${
+        repo.rateLimitRemaining === null || repo.rateLimitRemaining === undefined
+          ? ' with no x-ratelimit-* headers at all'
+          : ` (${repo.rateLimitRemaining} left)`
+      }.`,
+      ``,
+      `Those two readings contradict each other: the quota endpoint reports ${quota},`,
+      `and a core request was just refused anyway. A quota that is not being spent`,
+      `cannot be what is blocking the read, so something between node and GitHub is`,
+      `answering for repo-scoped paths — the shape #9946 measured, where the account-`,
+      `scoped endpoints reached GitHub (\`server: github.com\`, real request ids) while`,
+      `every repo-scoped one was refused by the egress proxy with no GitHub headers.`,
+      ``,
+      `This is reported instead of a green precisely because the stage-1 reading here`,
+      `is INDISTINGUISHABLE from the healthy Routine runner's. Before this stage`,
+      `existed the probe said the prerequisite was met and the sweep then 403'd on its`,
+      `first page — the #4690 inversion, inside the mechanism built to prevent it.`,
+    ],
+    fix: [
+      'run the sweep from a container whose egress allows repo-scoped reads (CI, or',
+      'the Routine seat class); in a proxy-mediated seat the board read stays on the',
+      '`mcp__github__*` tools, which take a different path and do work here.',
+    ],
+  };
+}
+
+/**
  * Turn probe OBSERVATIONS into a named prerequisite verdict. Pure — the network
  * lives in `probeTransport` — so `--self-test` can pin every branch against the
- * three container classes actually measured in #7412.
+ * four container classes actually measured (#7412, #9946).
  *
  * Deliberately narrow, in the same direction as `looksLikeStaleWorkspaceDist`:
  * an unrecognised status comes back as `null` (= "not a failure this classifier
@@ -797,9 +1536,13 @@ function rateLimitedVerdict(tok, result, how) {
  * confident diagnosis here would send a seat to fix a credential when GitHub was
  * merely down.
  *
- * @param {{ token?: string, authed?: object|null, anon?: object|null }} obs
+ * @param {{ token?: string, authed?: object|null, anon?: object|null, repo?: object|null }} obs
  *   `authed` / `anon` are each `{ status, rateLimitRemaining }` or
  *   `{ networkError }`; `anon` is only gathered when a token was used and failed.
+ *   `repo` is the OPTIONAL repo-scoped reading (`GET /repos/{owner}/{repo}`),
+ *   gathered only when the account-scoped evidence already reads `reachable`.
+ *   Absent, this classifies the account-scoped evidence alone — the behaviour
+ *   every caller had before #9946.
  * @returns {{ kind: string, headline: string, detail: string[], fix: string[] } | null}
  */
 export function classifyTransportProbe(obs) {
@@ -807,6 +1550,7 @@ export function classifyTransportProbe(obs) {
   const tok = describeToken(token);
   const authed = obs?.authed ?? null;
   const anon = obs?.anon ?? null;
+  const repo = obs?.repo ?? null;
   const primary = tok.present ? authed : anon;
   if (!primary) return null;
   const anonUsable = probeIsUsable(anon);
@@ -849,6 +1593,20 @@ export function classifyTransportProbe(obs) {
   }
 
   if (primary.status === 200) {
+    // Stage 2 (#9946). The account-scoped evidence is healthy — which in the
+    // fourth container class is TRUE and still does not mean the sweep can run.
+    // Only a repo-scoped reading separates that class from the Routine runner,
+    // and the two observations are indistinguishable without it.
+    const repoVerdict = repo ? classifyRepoRead(tok, primary, repo) : null;
+    if (repoVerdict) return repoVerdict;
+    if (repo && !(repo.status === 200 || repo.status === 301)) {
+      // Handed a repo reading this classifier cannot name (a 5xx, a transient
+      // network error moments after the host answered): stay unclassified
+      // rather than either vouching for the transport or blaming a credential.
+      // The caller keeps its loud generic failure — the same narrowness the
+      // account-scoped branches take.
+      return null;
+    }
     return {
       kind: 'reachable',
       headline: tok.present
@@ -948,11 +1706,64 @@ async function probeRateLimit(token) {
   }
 }
 
+/**
+ * The stage-2 reading (#9946): one repo-scoped GET, the cheapest request that
+ * exercises the same scope the sweep's every listing needs.
+ *
+ * `GET /repos/{owner}/{repo}` and not `GET /user`: the measured fourth class
+ * answers 200 on `/user` — account-scoped endpoints reach GitHub there — so an
+ * "is this a real endpoint" probe would have green-lit it just as `/rate_limit`
+ * did. What has to be exercised is the SCOPE, not the realness.
+ *
+ * Costs one core request. `/repos/{owner}/{repo}` rather than a one-item issues
+ * page because it is the smaller body and the same authorization decision.
+ */
+async function probeRepoRead(token) {
+  try {
+    const res = await fetch(`${API}/repos/${OWNER_REPO}`, {
+      headers: {
+        accept: 'application/vnd.github+json',
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    return { status: res.status, rateLimitRemaining: parseRemaining(res.headers.get('x-ratelimit-remaining')) };
+  } catch (err) {
+    return { networkError: err?.cause?.code ?? err?.cause?.message ?? err?.message ?? 'fetch failed' };
+  }
+}
+
+/**
+ * Whether the stage-1 verdict warrants spending a core request on stage 2.
+ *
+ * Only a `reachable` does — which is exactly the path that used to return a
+ * green without ever having read anything repo-scoped. Every failing class
+ * short-circuits here, so none of them costs a request more than it did before.
+ *
+ * Exported so `--self-test` can pin the sequencing: the guarantee that this
+ * script never green-lights on account-scoped evidence alone is a property of
+ * the GATHERING, not of the pure classifier (which, handed no repo reading,
+ * still classifies exactly as it always did for its other importer).
+ */
+export function needsRepoProbe(accountVerdict) {
+  return accountVerdict?.kind === 'reachable';
+}
+
 async function probeTransport() {
   const first = await probeRateLimit(TOKEN);
-  if (!TOKEN) return classifyTransportProbe({ token: '', anon: first });
-  if (first.status === 200) return classifyTransportProbe({ token: TOKEN, authed: first });
-  return classifyTransportProbe({ token: TOKEN, authed: first, anon: await probeRateLimit('') });
+  const account = !TOKEN
+    ? classifyTransportProbe({ token: '', anon: first })
+    : first.status === 200
+      ? classifyTransportProbe({ token: TOKEN, authed: first })
+      : classifyTransportProbe({ token: TOKEN, authed: first, anon: await probeRateLimit('') });
+
+  if (!needsRepoProbe(account)) return account;
+
+  // Re-classified with the repo reading added, rather than patched on top of the
+  // stage-1 verdict: one classifier, one place where a verdict is named.
+  const repo = await probeRepoRead(TOKEN);
+  return TOKEN
+    ? classifyTransportProbe({ token: TOKEN, authed: first, repo })
+    : classifyTransportProbe({ token: '', anon: first, repo });
 }
 
 /**
@@ -974,7 +1785,7 @@ function reportPrerequisiteNotMet(v, options = {}) {
   const nothing =
     swept === 0
       ? [
-          `  Nothing was swept: no issue was listed and no predicate (H1–H12) ran, so this`,
+          `  Nothing was swept: no issue was listed and no predicate (H1–H15) ran, so this`,
           `  result says NOTHING about whether the board carries half-states. It is not a`,
           `  clean board and it is not a dirty one — it is no reading at all.`,
         ]
@@ -1030,7 +1841,7 @@ async function listIssues(label) {
   return out;
 }
 
-async function sweep() {
+async function sweep(options = {}) {
   // Answered once, before any listing — so an unusable transport costs ONE
   // classified verdict instead of a raw HTTP status from whichever label page
   // happened to go first (`pm:dispatched`, in the failure #7412 recorded).
@@ -1041,21 +1852,26 @@ async function sweep() {
   const seen = new Map();
   const seenPrs = new Map();
   const seenMerged = new Map();
+  const seenUnscoped = new Map();
   try {
-    await sweepInto(findings, seen, seenPrs, seenMerged);
+    await sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped);
   } catch (err) {
-    err.sweptSoFar = seen.size + seenPrs.size + seenMerged.size;
+    err.sweptSoFar = seen.size + seenPrs.size + seenMerged.size + seenUnscoped.size;
     throw err;
   }
 
   findings.sort((a, b) => a[0].number - b[0].number);
-  for (const [issue, code, msg] of findings) {
-    console.log(`  ${code} #${issue.number} ${msg}\n     ${issue.html_url}`);
-  }
+  const counts = {
+    repo: OWNER_REPO,
+    issues: seen.size,
+    unscoped: seenUnscoped.size,
+    prs: seenPrs.size,
+    merged: seenMerged.size,
+  };
   console.log(
-    `check-half-states: swept ${seen.size} open pm-/p0-labeled issue(s), ${seenPrs.size} open PR(s) ` +
-      `and ${seenMerged.size} recently-merged PR(s) in ${OWNER_REPO} — ${findings.length} half-state(s) found. ` +
-      `Report-only: findings are patrol input, not a gate verdict.`,
+    options.format === 'markdown'
+      ? renderMarkdown(findings, counts, { provenance: options.provenance })
+      : renderPlain(findings, counts),
   );
 }
 
@@ -1089,7 +1905,26 @@ async function listRecentlyMergedPullRequests() {
   return out;
 }
 
-async function sweepInto(findings, seen, seenPrs, seenMerged) {
+/**
+ * The unscoped listing H13 needs: the domain-without-pm-state shape is
+ * DEFINED by the absence of every label the listings below key on, so no
+ * label page can ever return it — the very property that hides it from seat
+ * queries hides it from a label-scoped sweep too. Ten pages, the same cap as
+ * `listIssues`; an open backlog beyond the cap is invisible to H13 (stated
+ * boundary, same convention as H8's merged window — the finding clears when
+ * the paired write lands, not when the card ages out).
+ */
+async function listAllOpenIssues() {
+  const out = [];
+  for (let page = 1; page <= 10; page++) {
+    const batch = await rest(`/repos/${OWNER_REPO}/issues?state=open&per_page=100&page=${page}`);
+    out.push(...batch.filter((i) => !i.pull_request));
+    if (batch.length < 100) break;
+  }
+  return out;
+}
+
+async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped) {
   for (const label of ['pm:dispatched', 'pm:queue', 'pm:blocked', 'pm:seat', 'pm:on-hold', 'priority:p0']) {
     for (const issue of await listIssues(label)) seen.set(issue.number, issue);
   }
@@ -1153,6 +1988,36 @@ async function sweepInto(findings, seen, seenPrs, seenMerged) {
     const stale = h8MergedPrStillDispatched(issue, mergedWindow);
     if (stale) findings.push([issue, 'H8', stale]);
   }
+
+  // H13 — the one item whose population no label page can list (note at
+  // `listAllOpenIssues`). Kept out of `seen` so H1–H12 keep their exact
+  // inputs and the summary line stays honest about what each pass covered;
+  // the overlap with the label listings costs nothing (the predicate is
+  // label-gated and pure).
+  const unscoped = await listAllOpenIssues();
+  for (const issue of unscoped) {
+    seenUnscoped.set(issue.number, issue);
+    const halfState = h13DomainWithoutPmState(issue);
+    if (halfState) findings.push([issue, 'H13', halfState]);
+  }
+
+  // H14 + H15 — the same unscoped listing, read a second way. It is the right
+  // population for BOTH halves and neither label page could substitute: a
+  // `pm:blocking` card need carry no other label (so the label pages above can
+  // miss the subject), and the `Blocked-by:` lines that judge it are written by
+  // cards of any label at all (so they can miss the evidence). No extra fetch:
+  // the bodies are already in hand, which is exactly the "derived from the same
+  // body reads the sweep already performs" this pair was specified as.
+  const blockingIndex = buildBlockingIndex(unscoped);
+  for (const issue of unscoped) {
+    const incoherent = h14BlockingCacheIncoherent(issue, blockingIndex);
+    if (incoherent) findings.push([issue, 'H14', incoherent]);
+  }
+
+  // One row, attached to the card it names — so it links, sorts and truncates
+  // exactly like every other row and neither renderer needs a special case.
+  const oldestBlocking = h15OldestUnclaimedBlocking(unscoped);
+  if (oldestBlocking) findings.push([oldestBlocking.issue, 'H15', oldestBlocking.message]);
 }
 
 // ---------------------------------------------------------------------------
@@ -1191,6 +2056,60 @@ function selfTest() {
   t('H5: 🟢 login without assignee -> finding', typeof h5SeatStickerDesync(issue(['pm:seat'], [], '', '[PM seat] domain:devx — 🟢 os-zhuang')), 'string');
   t('H5: ⏳ vacant with assignee -> finding', typeof h5SeatStickerDesync(issue(['pm:seat'], ['os-help'], '', '[PM seat] domain:cli — ⏳ vacant')), 'string');
   t('H5: ⏳ vacant clean', h5SeatStickerDesync(issue(['pm:seat'], [], '', '[PM seat] domain:cli — ⏳ vacant')), null);
+  // #9926: the login-extraction fix. Both named shapes from the ruling.
+  t(
+    'H5: 🟢 login with (session_…) parenthetical, matching assignee -> clean',
+    h5SeatStickerDesync(issue(['pm:seat'], ['os-x'], '', '[PM seat] domain:x — 🟢 os-x (session_abc123)')),
+    null,
+  );
+  t(
+    'H5: 🟢 login with (session_…) parenthetical, no assignee -> finding',
+    typeof h5SeatStickerDesync(issue(['pm:seat'], [], '', '[PM seat] domain:x — 🟢 os-x (session_abc123)')),
+    'string',
+  );
+  // Reverse verification against the six titles pinned by the anchor sweep
+  // (#9857, run 32229942288) — four measured false positives, then the two
+  // true positives, predicted direction first: clean, clean, clean, clean,
+  // finding, finding.
+  t(
+    'H5 reverse-verify: #7623 (os-warren, consistent) -> clean',
+    h5SeatStickerDesync(issue(['pm:seat'], ['os-warren'], '', '[PM seat] skills — 🟢 os-warren (session_01AeA3nU1B5Q2pgxqxgUrexd)')),
+    null,
+  );
+  t(
+    'H5 reverse-verify: #6017 (os-elon, consistent) -> clean',
+    h5SeatStickerDesync(issue(['pm:seat'], ['os-elon'], '', '[PM seat] domain:spec — 🟢 os-elon (session_016D9wdJR14KKCxz1WgdAzcw)')),
+    null,
+  );
+  t(
+    'H5 reverse-verify: #6026 (os-zhuang, consistent) -> clean',
+    h5SeatStickerDesync(issue(['pm:seat'], ['os-zhuang'], '', '[PM seat] repo:cloud — 🟢 os-zhuang (session_0137TnZzVmkSjXxoSVgPFS6S)')),
+    null,
+  );
+  t(
+    'H5 reverse-verify: #9831 (os-warren, consistent) -> clean',
+    h5SeatStickerDesync(issue(['pm:seat'], ['os-warren'], '', '[PM seat] repo:objectos — 🟢 os-warren (session_01DXBoKN4MauvPdbMemPMqpr)')),
+    null,
+  );
+  t(
+    'H5 reverse-verify: #6367 (no assignee, · title suffix) -> finding',
+    typeof h5SeatStickerDesync(
+      issue(['pm:seat'], [], '', '[PM seat] domain:engine — 🟢 os-elon (session_019yDEhPBC3tcGkW9bkce1HM) · 在飞 1 · 队列 0'),
+    ),
+    'string',
+  );
+  t(
+    'H5 reverse-verify: #6024 (no assignee, session id with no login) -> finding',
+    typeof h5SeatStickerDesync(
+      issue(
+        ['pm:seat'],
+        [],
+        '',
+        '[PM seat] domain:cli — 🟢 session_01WeN7F6jQFpcqW2BN56RdPa · 在飞 2 · 队列 1(串行等位) · 决策箱 1 · 正文 2026-08-19 04:1xZ',
+      ),
+    ),
+    'string',
+  );
   t('H5: Routine seat needs no assignee', h5SeatStickerDesync(issue(['pm:seat'], [], '', '[PM seat] 分诊 — 🟢 Routine')), null);
   t('H5: unparseable title -> finding', typeof h5SeatStickerDesync(issue(['pm:seat'], [], '', 'devx seat registry')), 'string');
   t('H6: seat body over the soft bound -> finding', h6SeatBodyOversized(issue(['pm:seat'], [], 'x'.repeat(10_001), '[PM seat] domain:devx — ⏳ vacant')), true);
@@ -1474,6 +2393,312 @@ function selfTest() {
   t('H12: missing draft field is out of scope', h12OrphanLanding({ auto_merge: null, updated_at: hoursAgo(50) }, NOW), null);
   t('H12: merged row is out of scope', h12OrphanLanding({ ...openPr({ updated: hoursAgo(50) }), merged_at: '2026-08-13T10:00:00Z' }, NOW), null);
 
+  // -- H13: domain:* without any pm-state label, aged (2026-08-19 incident) --
+  const domainCard = (labels, updatedAt, extra = {}) => ({
+    ...issue(labels),
+    updated_at: updatedAt,
+    ...extra,
+  });
+  t('H13: aged domain card with no pm-state -> finding', typeof h13DomainWithoutPmState(domainCard(['domain:engine-core', 'bug', 'regression'], hoursAgo(26)), NOW), 'string');
+  t('H13: …and the finding names the threshold', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26)), NOW).includes(`${DOMAIN_HALF_STATE_STALE_HOURS}h`), true);
+  t('H13: …and blames the healing loop, not inventory', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26)), NOW).includes('healing loop'), true);
+  t('H13: pm:queue pairs the domain label -> clean', h13DomainWithoutPmState(domainCard(['domain:engine-core', 'pm:queue'], hoursAgo(26)), NOW), null);
+  t('H13: needs-user-decision is a state (the inbox reads it) -> clean', h13DomainWithoutPmState(domainCard(['domain:spec', 'needs-user-decision'], hoursAgo(200)), NOW), null);
+  t('H13: finding is a state (the grading round reads it) -> clean', h13DomainWithoutPmState(domainCard(['domain:cli', 'finding'], hoursAgo(200)), NOW), null);
+  // `pm:blocking` is a derived priority cache, not a state — a card carrying
+  // only it is exactly as invisible to candidate queries, so it still flags.
+  t('H13: pm:blocking alone is NOT a state -> still a finding', typeof h13DomainWithoutPmState(domainCard(['domain:services', 'pm:blocking'], hoursAgo(26)), NOW), 'string');
+  t('H13: status:parked exemption (its normal shape IS this one)', h13DomainWithoutPmState(domainCard(['domain:services', 'status:parked'], hoursAgo(200)), NOW), null);
+  t('H13: tracking exemption', h13DomainWithoutPmState(domainCard(['domain:devx', 'tracking'], hoursAgo(200)), NOW), null);
+  t('H13: qa-run exemption', h13DomainWithoutPmState(domainCard(['domain:cli', 'qa-run'], hoursAgo(200)), NOW), null);
+  t('H13: no domain label is out of scope however bare', h13DomainWithoutPmState(domainCard(['bug'], hoursAgo(200)), NOW), null);
+  t('H13: fresh half-state is intake latency, not a finding', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(1)), NOW), null);
+  t('H13: exactly at the threshold -> clean (strictly beyond fires)', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(DOMAIN_HALF_STATE_STALE_HOURS)), NOW), null);
+  // #4690 in miniature, same as H10/H11/H12: unreadable must not read as fresh.
+  t('H13: unreadable updated_at -> finding, not fresh', typeof h13DomainWithoutPmState(domainCard(['domain:engine-core'], 'not-a-date'), NOW), 'string');
+  t('H13: absent updated_at -> finding, not fresh', typeof h13DomainWithoutPmState(domainCard(['domain:engine-core'], undefined), NOW), 'string');
+  // The louder line — the measured card carried its trigger in its own body.
+  const p0Body = { body: 'P0 checklist-item failure (data-integrity DELETE regression) — priority label is triage’s to set' };
+  t('H13: body self-declaring P0 -> louder line', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26), p0Body), NOW).includes('P0-SUSPECT'), true);
+  t('H13: …which prescribes the emergency-triage channel', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26), p0Body), NOW).includes('emergency-triage'), true);
+  t('H13: data-integrity phrasing alone fires the louder line', h13SelfDeclaredP0({ title: '', body: 'a data integrity regression in DELETE' }), true);
+  t('H13: the title is scanned too', h13SelfDeclaredP0({ title: 'p0 suspect: rows vanish', body: '' }), true);
+  // Strip reuse (H7 reading 4): quoting the token in backticks is not a
+  // self-declaration, and `P0` inside a word is not the token.
+  t('H13: P0 only inside backticks is not a self-declaration', h13SelfDeclaredP0({ title: '', body: 'the card quotes `P0` in passing' }), false);
+  t('H13: P0 inside a word does not fire', h13SelfDeclaredP0({ title: '', body: 'the HTTP0 protocol note' }), false);
+  t('H13: a quiet body stays on the base line', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26), { body: 'ordinary defect' }), NOW).includes('P0-SUSPECT'), false);
+
+  // -- H14: `pm:blocking` cache coherence, both directions (2026-08-19) ------
+  // The fixtures below are REAL lines from the 2026-08-19 census of this board
+  // (234 open cards, 17 `Blocked-by:` body lines), so the parser is pinned
+  // against the shapes seats actually write rather than against invented ones.
+  const carded = (number, labels, body = '', extra = {}) => ({
+    ...issue(labels, [], body),
+    number,
+    ...extra,
+  });
+  const numbersOf = (refs) => refs.map((r) => r.number).join(',');
+
+  // The parser. Line-anchored and case-sensitive like H4/H9's readings of the
+  // same body channel.
+  t('blockedByTargets: the plain live shape', numbersOf(blockedByTargets('Blocked-by: #9823')), '9823');
+  t('blockedByTargets: a bare local ref carries no repo', blockedByTargets('Blocked-by: #9823')[0].repo, null);
+  t('blockedByTargets: mid-body line is found', numbersOf(blockedByTargets('Context first.\nBlocked-by: #7220\nMore prose.')), '7220');
+  // Live line from #9784 — trailing prose after the ref is normal.
+  t(
+    'blockedByTargets: trailing prose after the ref is ignored',
+    numbersOf(blockedByTargets('Blocked-by: #9689 (the relocation it needs is the same edit; doing them in the other order means touching the line twice).')),
+    '9689',
+  );
+  // The reason only the LEADING run is taken: a `#N` inside the trailing prose
+  // is context, not a blocker, and indexing it would file a phantom
+  // missing-cache row against a third card that did nothing wrong.
+  t(
+    'blockedByTargets: a ref inside the trailing prose is NOT a blocker',
+    numbersOf(blockedByTargets('Blocked-by: #123 (see #456 for the background)')),
+    '123',
+  );
+  t('blockedByTargets: a comma-separated run is all blockers', numbersOf(blockedByTargets('Blocked-by: #6234, #6245')), '6234,6245');
+  t('blockedByTargets: the `and` connector is a separator', numbersOf(blockedByTargets('Blocked-by: #1 and #2')), '1,2');
+  t('blockedByTargets: two lines on one card both count', numbersOf(blockedByTargets('Blocked-by: #6234\nBlocked-by: #6245')), '6234,6245');
+  // Live line from #7917 — the cross-repo shape whose number must never be
+  // read as local (see `buildBlockingIndex`).
+  t('blockedByTargets: a cross-repo qualifier is captured, not dropped', blockedByTargets('Blocked-by: objectstack-ai/objectui#4356')[0].repo, 'objectstack-ai/objectui');
+  t('blockedByTargets: …and its number is still parsed', numbersOf(blockedByTargets('Blocked-by: objectstack-ai/objectui#4356')), '4356');
+  // Byte-stable key, same discipline as H4/H9: a spelling the real grep cannot
+  // see must not become an index entry here.
+  t('blockedByTargets: lowercase key is invisible to the scan', numbersOf(blockedByTargets('blocked-by: #123')), '');
+  t('blockedByTargets: mid-sentence mention is not a line', numbersOf(blockedByTargets('seats park the Blocked-by: #123 line in comments instead')), '');
+  t('blockedByTargets: an empty-valued line yields nothing', numbersOf(blockedByTargets('Blocked-by:')), '');
+  t('blockedByTargets: missing body', numbersOf(blockedByTargets(undefined)), '');
+  // The self-reference trap: this sweeper's OWN rendered rows land in an issue
+  // body (the anchor the patrol rewrites), and those rows quote the literal.
+  // They are bullets, so the key never starts a line — pinned, because the day
+  // it does the sweeper starts indexing its own report.
+  t(
+    'blockedByTargets: a rendered finding row does not parse as a Blocked-by line',
+    numbersOf(blockedByTargets('- **H14** [#5](https://example.test/5) — targeted by 1 open card(s)\' `Blocked-by:` body line (#7)')),
+    '',
+  );
+  // Deliberately NOT stripped, unlike H7/H8/H13: this models a machine reader
+  // (the unlock scan greps the literal), so a fenced line really does fire the
+  // live machinery and must be reported as part of the index it feeds.
+  t('blockedByTargets: a fenced line still counts (this reader greps, it does not read prose)', numbersOf(blockedByTargets('```\nBlocked-by: #42\n```')), '42');
+
+  // The index.
+  const idx = (issues) => buildBlockingIndex(issues, { repo: 'objectstack-ai/objectstack' });
+  t('index: a local ref creates an entry', idx([carded(9849, [], 'Blocked-by: #9823')]).get(9823).join(','), '9849');
+  t('index: a cross-repo ref creates NO local entry', idx([carded(7917, [], 'Blocked-by: objectstack-ai/objectui#4356')]).has(4356), false);
+  t('index: the bare repo name is still local', idx([carded(10, [], 'Blocked-by: objectstack#5')]).get(5).join(','), '10');
+  t('index: the full owner/repo qualifier is local', idx([carded(10, [], 'Blocked-by: objectstack-ai/objectstack#5')]).get(5).join(','), '10');
+  t('index: a self-reference is dropped (a card cannot unblock itself)', idx([carded(5, [], 'Blocked-by: #5')]).has(5), false);
+  t('index: two dependents on one target', idx([carded(10, [], 'Blocked-by: #5'), carded(11, [], 'Blocked-by: #5')]).get(5).join(','), '10,11');
+  t('index: one dependent naming the target twice is listed once', idx([carded(10, [], 'Blocked-by: #5\nBlocked-by: #5')]).get(5).join(','), '10');
+  t('index: a card with no line contributes nothing', idx([carded(10, [], 'no dependency here')]).size, 0);
+  t('index: an empty listing is an empty index', idx([]).size, 0);
+  t('index: a missing listing does not crash', buildBlockingIndex(undefined).size, 0);
+
+  // Direction A — the label carried with nothing targeting it.
+  t('H14-A: pm:blocking with nothing targeting it -> finding', typeof h14BlockingCacheIncoherent(carded(7276, ['pm:queue', 'pm:blocking']), idx([])), 'string');
+  t('H14-A: …and it names the stale-cache reading', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])).includes('stale derived cache'), true);
+  t('H14-A: …and prescribes the derivation pass, never a label from here', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])).includes('derivation pass'), true);
+  t('H14-A: …and says why stale is worse than absent', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])).includes('with authority'), true);
+  // The negative for direction A: the label is EARNED, so nothing to report.
+  t(
+    'H14-A: pm:blocking with a real dependent -> clean',
+    h14BlockingCacheIncoherent(carded(5, ['pm:blocking']), idx([carded(10, [], 'Blocked-by: #5')])),
+    null,
+  );
+
+  // Direction B — targeted, but the cache never landed.
+  const missingIdx = idx([carded(9650, ['pm:queue'], 'Blocked-by: #9832')]);
+  t('H14-B: targeted without pm:blocking -> finding', typeof h14BlockingCacheIncoherent(carded(9832, ['bug', 'pm:dispatched', 'domain:cli']), missingIdx), 'string');
+  t('H14-B: …and it names the waiting card', h14BlockingCacheIncoherent(carded(9832, ['pm:dispatched']), missingIdx).includes('#9650'), true);
+  t('H14-B: …and calls it an invisible unblocker', h14BlockingCacheIncoherent(carded(9832, ['pm:dispatched']), missingIdx).includes('selection order cannot see'), true);
+  // The negative for direction B: no label and nobody waiting is the ordinary
+  // shape of ~230 of this board's ~234 open cards. It must be silent, or the
+  // row means nothing.
+  t('H14-B: no label and nothing targeting it -> clean', h14BlockingCacheIncoherent(carded(4321, ['pm:queue', 'domain:cli']), idx([])), null);
+  // The cross-repo consequence, end to end: #7917's objectui blocker must not
+  // manufacture a direction-B row against this repo's #4356.
+  t(
+    'H14-B: a cross-repo blocker does not flag the local card of that number',
+    h14BlockingCacheIncoherent(carded(4356, ['pm:queue']), idx([carded(7917, [], 'Blocked-by: objectstack-ai/objectui#4356')])),
+    null,
+  );
+  // Fan-out cap: named, then counted.
+  const manyDeps = idx(Array.from({ length: 7 }, (_, i) => carded(100 + i, [], 'Blocked-by: #5')));
+  t('H14-B: a large fan-out names the cap and counts the rest', h14BlockingCacheIncoherent(carded(5, ['pm:queue']), manyDeps).includes(`+${7 - BLOCKING_DEPENDENT_LIST_CAP} more`), true);
+  t('H14-B: …and reports the true total, not the capped one', h14BlockingCacheIncoherent(carded(5, ['pm:queue']), manyDeps).includes('targeted by 7 open card(s)'), true);
+  t('H14: a missing index does not crash and reads as untargeted', h14BlockingCacheIncoherent(carded(5, ['pm:blocking']), undefined) !== null, true);
+
+  // Reverse verification against the LIVE board, 2026-08-19 (234 open cards).
+  // Predicted before running: direction A fires on #7276 (the board's only
+  // `pm:blocking` card, targeted by nothing), direction B fires on the five
+  // targeted-but-unlabeled cards. Both held. Not one coherent pairing existed
+  // at that reading — the cache had drifted to 0% agreement with its index.
+  const liveBodies = [
+    carded(9849, ['pm:queue'], 'Blocked-by: #9823'),
+    carded(9784, ['pm:queue'], 'Blocked-by: #9689 (the relocation it needs is the same edit).'),
+    carded(9650, ['pm:queue'], 'Blocked-by: #9832'),
+    carded(9592, ['pm:queue'], 'Blocked-by: #9255'),
+    carded(9482, ['pm:queue'], 'Blocked-by: #9652'),
+    carded(9249, ['pm:queue'], 'Blocked-by: #9919'),
+    carded(7917, ['pm:queue'], 'Blocked-by: objectstack-ai/objectui#4356'),
+    carded(2657, ['pm:blocked'], 'Blocked-by: #6234\nBlocked-by: #6245'),
+  ];
+  const liveIdx = idx(liveBodies);
+  t('H14 reverse-verify: #7276 (the board\'s only pm:blocking card) -> stale finding', typeof h14BlockingCacheIncoherent(carded(7276, ['pm:queue', 'domain:devx', 'pm:blocking']), liveIdx), 'string');
+  t('H14 reverse-verify: #9832 (targeted by #9650, unlabeled) -> missing finding naming #9650', h14BlockingCacheIncoherent(carded(9832, ['bug', 'pm:dispatched', 'domain:cli']), liveIdx).includes('#9650'), true);
+  t('H14 reverse-verify: #9919 (targeted by #9249, unlabeled) -> missing finding', typeof h14BlockingCacheIncoherent(carded(9919, ['pm:queue', 'repo:cloud']), liveIdx), 'string');
+  // …and the four measured NON-findings from the same reading, which is what
+  // makes the six above readable as signal rather than as a predicate that
+  // flags everything: a dependent card, a closed target's dependent, the
+  // cross-repo number, and an ordinary untouched card.
+  t('H14 reverse-verify: #9650 (a waiting card, not an unblocker) -> clean', h14BlockingCacheIncoherent(carded(9650, ['pm:queue']), liveIdx), null);
+  t('H14 reverse-verify: local #4356 (the objectui blocker\'s number) -> clean', h14BlockingCacheIncoherent(carded(4356, ['pm:queue']), liveIdx), null);
+  t('H14 reverse-verify: #2657 (blocked on two CLOSED cards) -> clean', h14BlockingCacheIncoherent(carded(2657, ['pm:blocked']), liveIdx), null);
+  t('H14 reverse-verify: an ordinary open card -> clean', h14BlockingCacheIncoherent(carded(9913, ['pm:queue', 'repo:cloud']), liveIdx), null);
+
+  // -- H15: oldest unclaimed `pm:blocking` (selection-order visibility) -------
+  const blockingCard = (number, { assignees = [], created = daysAgo(3) } = {}) => ({
+    ...issue(['pm:blocking', 'pm:queue'], assignees),
+    number,
+    created_at: created,
+  });
+
+  t('H15: the oldest unclaimed card is the one reported', h15OldestUnclaimedBlocking([blockingCard(10, { created: daysAgo(2) }), blockingCard(20, { created: daysAgo(9) }), blockingCard(30, { created: daysAgo(5) })], NOW).issue.number, 20);
+  t('H15: …and the row states the age in hours', h15OldestUnclaimedBlocking([blockingCard(20, { created: hoursAgo(220) })], NOW).message.includes('open ~220h'), true);
+  t('H15: …and names the selection-order rank it exists to police', h15OldestUnclaimedBlocking([blockingCard(20)], NOW).message.includes('second only to'), true);
+  t('H15: …and declares the age is the CARD\'s, not the label\'s', h15OldestUnclaimedBlocking([blockingCard(20)], NOW).message.includes("Age is the CARD's"), true);
+  t('H15: …and declares itself thresholdless visibility, not an alarm', h15OldestUnclaimedBlocking([blockingCard(20)], NOW).message.includes('no threshold'), true);
+  t('H15: the count separates unclaimed from the total', h15OldestUnclaimedBlocking([blockingCard(10), blockingCard(20, { assignees: ['os-help'] }), blockingCard(30, { assignees: ['os-help'] })], NOW).message.includes('1 of 3 open'), true);
+  // The two "no row" shapes the card names.
+  t('H15: every pm:blocking card assigned -> no row', h15OldestUnclaimedBlocking([blockingCard(10, { assignees: ['os-help'] }), blockingCard(20, { assignees: ['os-warren'] })], NOW), null);
+  t('H15: no pm:blocking card at all -> no row', h15OldestUnclaimedBlocking([{ ...issue(['pm:queue']), number: 10, created_at: daysAgo(30) }], NOW), null);
+  t('H15: an empty listing -> no row', h15OldestUnclaimedBlocking([], NOW), null);
+  t('H15: a missing listing -> no row', h15OldestUnclaimedBlocking(undefined, NOW), null);
+  // #4690 direction, restated for an ORDERING rather than a threshold: a
+  // timestamp that cannot be read must not quietly drop out of a claim about
+  // which card is oldest.
+  t('H15: unreadable created_at sorts as maximally old', h15OldestUnclaimedBlocking([blockingCard(10, { created: daysAgo(9) }), blockingCard(20, { created: 'not-a-date' })], NOW).issue.number, 20);
+  t('H15: …and the row says so rather than printing a number', h15OldestUnclaimedBlocking([blockingCard(20, { created: 'not-a-date' })], NOW).message.includes('unreadable `created_at`'), true);
+  // Built without the fixture helper on purpose: its `created = daysAgo(3)`
+  // default fills an `undefined`, so passing one through it tests the default
+  // rather than the absent field (measured — this case was green against a
+  // 3-day-old card before the fixture was written out longhand).
+  t('H15: absent created_at is unreadable too', h15OldestUnclaimedBlocking([{ ...issue(['pm:blocking']), number: 20 }], NOW).message.includes('unreadable `created_at`'), true);
+  // Stable output run to run: equal ages break by issue number, so the anchor
+  // body does not churn between two equally-old cards.
+  t('H15: equal ages break by issue number', h15OldestUnclaimedBlocking([blockingCard(30, { created: daysAgo(4) }), blockingCard(12, { created: daysAgo(4) })], NOW).issue.number, 12);
+
+  // Reverse verification against the LIVE board, 2026-08-19. Predicted before
+  // running: NULL — the board's only `pm:blocking` card (#7276) is assigned to
+  // `os-project-manager`, which is the card's own "all-assigned -> no row"
+  // shape, measured rather than invented. Then the same card with the assignee
+  // removed, to prove the null is the board's state and not a dead predicate.
+  const live7276 = (assignees) => ({
+    ...issue(['pm:queue', 'domain:devx', 'pm:blocking'], assignees),
+    number: 7276,
+    created_at: '2026-08-10T04:30:43Z',
+  });
+  t('H15 reverse-verify: the live board (only blocking card assigned) -> no row', h15OldestUnclaimedBlocking([live7276(['os-project-manager'])], Date.parse('2026-08-19T09:00:00Z')), null);
+  t('H15 reverse-verify: …the same card unassigned DOES produce the row', h15OldestUnclaimedBlocking([live7276([])], Date.parse('2026-08-19T09:00:00Z')).issue.number, 7276);
+  t('H15 reverse-verify: …and its measured age', h15OldestUnclaimedBlocking([live7276([])], Date.parse('2026-08-19T09:00:00Z')).message.includes('open ~220h'), true);
+
+  // -- report rendering, both media (#9844) ---------------------------------
+  // The standing caller writes the markdown into a pinned issue body, so the
+  // properties pinned here are the ones a broken body would cost: the plain
+  // output must not have moved, the loud rows must outrank truncation, the
+  // trim must announce itself, and a mistyped --format must be loud.
+  const finding = (number, code, msg) => [{ number, html_url: `https://example.test/${number}` }, code, msg];
+  const counts = { repo: 'o/r', issues: 3, unscoped: 4, prs: 5, merged: 6 };
+  const quietRow = finding(200, 'H2', 'assignee set but no claim comment on the thread');
+  const loudRow = finding(900, 'H13', `${P0_SUSPECT_MARKER} the card self-declares P0. base sentence.`);
+
+  // The plain renderer is the pre-#9844 output, unchanged: two lines per
+  // finding (code/number/message, then the URL indented), summary last.
+  t(
+    'plain: a finding renders as the pre-existing two-line shape',
+    renderPlain([quietRow], counts).split('\n').slice(0, 2).join('|'),
+    '  H2 #200 assignee set but no claim comment on the thread|     https://example.test/200',
+  );
+  t('plain: the summary sentence ends the report', renderPlain([quietRow], counts).endsWith('not a gate verdict.'), true);
+  // renderPlain does NOT reorder: the live sweep hands it findings already
+  // sorted by issue number, and a terminal has no fold for a priority sort to
+  // buy anything at. Pinned in the direction that would actually regress —
+  // someone "helpfully" giving the plain path the markdown sort — by feeding
+  // it loud-first input and requiring the loud row to stay where it was put.
+  t('plain: preserves the caller\'s order, applying no priority sort', renderPlain([loudRow, quietRow], counts).indexOf('#900') < renderPlain([loudRow, quietRow], counts).indexOf('#200'), true);
+  t('plain: …and the markdown renderer on the same input DOES sort loud first', renderMarkdown([quietRow, loudRow], counts).indexOf('#900') < renderMarkdown([quietRow, loudRow], counts).indexOf('#200'), true);
+  t('summaryLine: names what was READ, not only what was found', summaryLine(counts, 0).includes('swept 3 open pm-/p0-labeled issue(s)'), true);
+
+  // The loudness contract between H13 and the renderer — one constant, two
+  // readers. If the prefix ever drifts, this pair fails rather than the alarm
+  // going quietly unsorted.
+  t('loudness: H13\'s P0 line is recognised by the renderer', isLoudFinding(h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26), p0Body), NOW)), true);
+  t('loudness: H13\'s base line is not', isLoudFinding(h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26)), NOW)), false);
+
+  // Fold discipline: loud first, issue-number order within each band.
+  const mixed = renderMarkdown([quietRow, loudRow, finding(100, 'H1', '`pm:dispatched` with no assignee')], counts);
+  t('markdown: loud rows sort above quiet ones', mixed.indexOf('#900') < mixed.indexOf('#100'), true);
+  t('markdown: quiet rows keep issue-number order', mixed.indexOf('#100') < mixed.indexOf('#200'), true);
+  t('markdown: the alarm line counts the loud rows', mixed.includes('**1 P0-SUSPECT row(s) in this sweep**'), true);
+  t('markdown: no alarm line when nothing is loud', renderMarkdown([quietRow], counts).includes('P0-SUSPECT row(s) in this sweep'), false);
+  t('markdown: rows are links, not bare numbers', mixed.includes('[#200](https://example.test/200)'), true);
+  t('markdown: the literal marker leads the body (no angle brackets to sanitize)', mixed.startsWith('os-half-state-sweep'), true);
+  t('markdown: the body carries no HTML-comment marker the sanitizer could eat', mixed.includes('<!--'), false);
+
+  // H14/H15 rows are ordinary rows in BOTH media — the property the card asked
+  // for, and the reason H15 attaches its one summary row to the card it names
+  // instead of inventing a rowless shape neither renderer knows how to place.
+  const h14Row = finding(7276, 'H14', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])));
+  const h15Row = finding(7276, 'H15', h15OldestUnclaimedBlocking([blockingCard(7276)], NOW).message);
+  t('plain: an H14 row renders in the standard two-line shape', renderPlain([h14Row], counts).startsWith('  H14 #7276 `pm:blocking` carried while'), true);
+  t('plain: …and carries the card URL on the second line', renderPlain([h14Row], counts).includes('\n     https://example.test/7276'), true);
+  t('plain: an H15 row renders the same way', renderPlain([h15Row], counts).startsWith('  H15 #7276 oldest UNCLAIMED'), true);
+  t('markdown: an H14 row renders as a link row like every other', renderMarkdown([h14Row], counts).includes('- **H14** [#7276](https://example.test/7276) — '), true);
+  t('markdown: an H15 row renders as a link row like every other', renderMarkdown([h15Row], counts).includes('- **H15** [#7276](https://example.test/7276) — '), true);
+  // Neither is loud: the P0-SUSPECT band is H13's self-declared-emergency
+  // class, and a coherence or visibility row must never outrank it at the fold.
+  t('loudness: an H14 row is not loud', isLoudFinding(h14Row[2]), false);
+  t('loudness: an H15 row is not loud', isLoudFinding(h15Row[2]), false);
+  t('markdown: a loud H13 row still sorts above an H14 row', renderMarkdown([h14Row, loudRow], counts).indexOf('#900') < renderMarkdown([h14Row, loudRow], counts).indexOf('#7276'), true);
+
+  // A clean board says it was READ. The #4690 direction, restated in the one
+  // surface where "no rows" could otherwise be mistaken for "no sweep".
+  const clean = renderMarkdown([], counts);
+  t('markdown: an empty sweep states the board was read', clean.includes('the board was READ and is clean'), true);
+  t('markdown: …and disclaims the could-not-run reading', clean.includes('could not RUN'), true);
+  t('markdown: an empty sweep still carries the summary counts', clean.includes('0 half-state(s) found'), true);
+
+  // Truncation. 400 rows of ~120 chars overrun the budget; the trim must fire,
+  // announce itself, keep the body under the cap, and never reach a loud row.
+  const many = [loudRow, ...Array.from({ length: 400 }, (_, i) => finding(1000 + i, 'H2', 'assignee set but no claim comment on the thread — '.repeat(6)))];
+  const trimmed = renderMarkdown(many, counts);
+  t('markdown: an oversized report stays under GitHub\'s body cap', trimmed.length <= ISSUE_BODY_LIMIT, true);
+  t('markdown: …and under the renderer\'s own budget', trimmed.length <= MARKDOWN_BODY_BUDGET, true);
+  t('markdown: the trim announces itself in the body', trimmed.includes('further row(s) omitted'), true);
+  t('markdown: truncation can never reach a loud row', trimmed.includes('#900'), true);
+
+  // Provenance is caller-supplied text interpolated into one italic line: a
+  // newline in it would break the header apart, so it is flattened, not trusted.
+  t('provenance: newlines are collapsed to one line', normalizeProvenance('run 7\nsha abc'), 'run 7 sha abc');
+  t('provenance: length-capped', normalizeProvenance('x'.repeat(500)).length, 300);
+  t('provenance: absent leaves the swept line alone', renderMarkdown([], counts).includes('_Swept ') && !renderMarkdown([], counts).includes(' · undefined'), true);
+  t('provenance: present is stamped after the timestamp', renderMarkdown([], counts, { provenance: 'run 7' }).includes(' · run 7_'), true);
+  t('markdown: the sweep timestamp is the patrol heartbeat', renderMarkdown([], counts, { sweptAt: new Date('2026-08-19T06:00:00Z') }).includes('_Swept 2026-08-19T06:00:00.000Z'), true);
+
+  // Usage. A mistyped --format must be a loud non-zero exit, never a silent
+  // fallback that lands terminal lines in an issue body looking like a report.
+  t('options: default format is plain', parseOutputOptions([]).format, 'plain');
+  t('options: --format=markdown is accepted', parseOutputOptions(['--format=markdown']).format, 'markdown');
+  t('options: an unknown format is a usage error', typeof parseOutputOptions(['--format=html']).error, 'string');
+  t('options: …and does NOT silently fall back', parseOutputOptions(['--format=html']).error.includes('expected one of: plain, markdown'), true);
+  t('options: --provenance is normalized on the way in', parseOutputOptions(['--provenance=a\n b']).provenance, 'a b');
+  t('options: unrelated flags are ignored', parseOutputOptions(['--probe']).format, 'plain');
+
   // -- transport prerequisite (#7412) ---------------------------------------
   // The three container classes are REAL measurements, not invented fixtures;
   // each names where it was taken, so a future transport change can be checked
@@ -1520,6 +2745,95 @@ function selfTest() {
   t('#7412 class 3 (cloud dev, measured): 401 + exhausted anon -> bad-credential', class3?.kind, 'bad-credential');
   t('…and it does NOT prescribe the token-less re-run', class3.fix.join(' ').includes('GITHUB_TOKEN= GH_TOKEN='), false);
   t('…and it names a real credential as the remedy', class3.fix[0].includes('a real GitHub token'), true);
+
+  // Class 4 — proxy-mediated cloud session, measured 2026-08-19 (#9946). The
+  // account-scoped reading is not merely 200: it is GENUINELY GitHub's, with a
+  // real request id and a real 15000-limit quota, and `GET /user` returns the
+  // real login. It is byte-for-byte indistinguishable from class 2 above. Only
+  // the repo-scoped read separates them, and it is refused with no
+  // `x-ratelimit-*` headers at all — hence `rateLimitRemaining: null`.
+  const class4 = {
+    token: 'prox_abcdefghi',
+    authed: { status: 200, rateLimitRemaining: 14_979 },
+    repo: { status: 403, rateLimitRemaining: null },
+  };
+  t('#9946 class 4 (proxy-mediated, measured): repo-scoped 403 -> repo-scope-refused', kind(class4), 'repo-scope-refused');
+  // The defect itself, pinned as its own case: the SAME container, classified
+  // without the stage-2 reading, is the false green this item exists to end.
+  // Dropping stage 2 must make this case go green again — which is what makes
+  // the fixture above a real regression pin rather than a restatement.
+  t(
+    '…and WITHOUT the repo reading the very same observations read as reachable (the defect)',
+    kind({ token: class4.token, authed: class4.authed }),
+    'reachable',
+  );
+  // It must not be legible as a credential fault: the credential is fine here
+  // (the proxy substitutes a working one), and sending a seat to hunt for a
+  // token is the wasted round #7412 already paid for once.
+  t('…and it is NOT reported as a bad credential', classifyTransportProbe(class4).kind.includes('credential'), false);
+  t(
+    '…and its evidence names the contradiction between the two stages',
+    classifyTransportProbe(class4).detail.join(' ').includes('contradict'),
+    true,
+  );
+  // Direction B, refused on the card: no vendor string is matched. The fixture
+  // carries a status and a header count and NOTHING else — no response body is
+  // observed at all — so a body-matching classifier could not have fired here.
+  t(
+    'the fourth class is matched with no response body in evidence at all',
+    Object.keys(class4.repo).join(','),
+    'status,rateLimitRemaining',
+  );
+  // Direction C, refused on the card: token SHAPE never gates. In this very
+  // class the `prox…` placeholder IS swapped for a working credential, so shape
+  // would have mispredicted it — and a real `ghp_` token behind the same proxy
+  // must classify identically.
+  t(
+    'a github-shaped token behind the same proxy classifies identically',
+    kind({ ...class4, token: 'ghp_' + 'x'.repeat(36) }),
+    'repo-scope-refused',
+  );
+  t(
+    'anonymous behind the same proxy classifies identically',
+    kind({ token: '', anon: class4.authed, repo: class4.repo }),
+    'repo-scope-refused',
+  );
+  // Class 2 extended (never rewritten — the one-observation case above still
+  // stands): the real Routine container passes BOTH stages, and must stay green
+  // now that a second stage exists.
+  t(
+    '#7412 class 2 (Routine) passes stage 2 as well -> still reachable',
+    kind({ token: 'ghp_' + 'x'.repeat(36), authed: { status: 200, rateLimitRemaining: 14_999 }, repo: { status: 200, rateLimitRemaining: 14_998 } }),
+    'reachable',
+  );
+  // A repo the identity cannot see. GitHub answers 404 rather than 403 for a
+  // repository the caller may not know exists, so the verdict must name both
+  // possible causes instead of picking one.
+  t('repo-scoped 404 -> repo-not-visible', kind({ ...class4, repo: { status: 404, rateLimitRemaining: 4999 } }), 'repo-not-visible');
+  t(
+    '…and it sends the reader to PM_SWEEP_REPO first',
+    classifyTransportProbe({ ...class4, repo: { status: 404, rateLimitRemaining: 4999 } }).fix[0].includes('PM_SWEEP_REPO'),
+    true,
+  );
+  // A quota genuinely spent between the two stages wears the same 403 and has a
+  // completely different remedy — it must not be reported as a scope refusal.
+  t('repo-scoped 403 with remaining 0 is the quota, not a scope refusal', kind({ ...class4, repo: { status: 403, rateLimitRemaining: 0 } }), 'rate-limited');
+  // Narrowness, in the same direction as the account-scoped branches: a stage-2
+  // reading this classifier cannot name must not vouch for the transport EITHER.
+  // Both of these used to be impossible to express; neither may silently pass.
+  t('repo-scoped 5xx stays unclassified, and does NOT read as reachable', kind({ ...class4, repo: { status: 502 } }), undefined);
+  t('a transient network error on stage 2 stays unclassified too', kind({ ...class4, repo: { networkError: 'ECONNRESET' } }), undefined);
+  // Sequencing (`probeTransport`'s policy, pinned because the pure classifier
+  // cannot enforce it): stage 2 fires on exactly the path that used to green,
+  // and on no other — so no FAILING class costs a request more than before.
+  t('needsRepoProbe: a reachable stage-1 spends the core request', needsRepoProbe({ kind: 'reachable' }), true);
+  t('needsRepoProbe: host-unreachable does not', needsRepoProbe({ kind: 'host-unreachable' }), false);
+  t('needsRepoProbe: bad-credential does not', needsRepoProbe({ kind: 'bad-credential' }), false);
+  t('needsRepoProbe: rate-limited does not', needsRepoProbe({ kind: 'rate-limited' }), false);
+  t('needsRepoProbe: an unclassified stage-1 does not', needsRepoProbe(null), false);
+  // Exit-code contract: every stage-2 refusal routes to PREREQUISITE NOT MET
+  // (exit 3), because the caller keys on `kind !== 'reachable'` and nothing else.
+  t('the fourth class routes to PREREQUISITE NOT MET, not to a sweep', kind(class4) !== 'reachable', true);
   // The trap itself: `/rate_limit` is exempt from the limit it reports, so a
   // 200 with 0 remaining is an EXHAUSTED quota, never a green transport. A
   // status-only reading here green-lights a sweep that cannot run (#4690).
@@ -1614,7 +2928,16 @@ if (isMain) {
       console.log(`✓ check-half-states: transport prerequisite met — ${v.headline}.`);
     });
   } else {
-    sweep().catch((err) => {
+    const options = parseOutputOptions(process.argv.slice(2));
+    if (options.error) {
+      // Bad usage is one of the three non-zero exits the header names. It must
+      // never degrade to the default format: the caller that passes --format is
+      // a workflow writing the result into a pinned issue body, and a silent
+      // fallback would land plain terminal lines there and look like a report.
+      console.error(`check-half-states: ${options.error}`);
+      process.exit(2);
+    }
+    sweep(options).catch((err) => {
       // The in-loop net. The pre-sweep probe answers the common case, but the
       // transport can also fail mid-run (a quota exhausted by this very sweep,
       // a credential revoked between pages), and those must report as the

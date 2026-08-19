@@ -25,6 +25,39 @@
  * see check-skill-id-lint.mjs). Without a gate that intent erodes one
  * well-meaning paragraph at a time.
  *
+ * ## What is covered — and the published catalog, which deliberately is not
+ *
+ * "The whole surface" above means the CEILINGS map below, which is an
+ * ENUMERATION, never a root glob: the pm-dispatch surface (SKILL.md, its
+ * references/, the per-lane job descriptions), the four other
+ * `.claude/skills/` playbook SKILL.md files, the dev-agent definition
+ * `.claude/agents/os-dev.md`, and the root `AGENTS.md`. Read a file's absence
+ * from the map as a fact to check, not an oversight to infer — `.claude/hooks/`,
+ * `.claude/settings.json` and `CLAUDE.md` carry no ceiling either.
+ *
+ * The **published** `skills/` catalog — the one that ships to customer projects
+ * — is deliberately OUTSIDE the ceiling. It is the omission worth stating
+ * because it is by far the larger surface: eleven published SKILL.md totalling
+ * ~10,400 lines, against ~3,700 covered here. Two reasons, both about the cost
+ * curve the ratchet prices rather than about size (#9923):
+ *
+ *   - What the ratchet prices is a full-file token read paid PER SEAT SESSION
+ *     and PER ROUTINE FIRE, which is what every covered file above costs. The
+ *     published catalog is read by customer projects, not by this repo's seats
+ *     — a different cost curve, and not the one this gate was built against.
+ *   - The published catalog is already a governed, human-merge-only surface
+ *     (Prime Directive #14), so growth there passes a human eye by
+ *     construction — a control a ratchet would merely duplicate. Note this
+ *     reason does not separate the two roots by itself: the covered files are
+ *     governed at merge too. What no reviewer prices THERE is the recurring
+ *     per-session read of reason one, which is why they still carry ceilings
+ *     and the published catalog does not.
+ *
+ * Extending coverage to the published root is therefore a POLICY CHANGE, not a
+ * maintenance edit: it needs its own card and a maintainer's ruling, not a
+ * CEILINGS row added in passing. The self-test pins this boundary, because
+ * enforcement cannot — a published-root entry would run perfectly green.
+ *
  * ## The ratchet discipline (shrink-only, per file)
  *
  *   - A ceiling may be LOWERED by any PR that shrinks its file — lowering is
@@ -56,6 +89,15 @@ export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/references/review-checklist.md', 82],
   ['.claude/skills/pm-dispatch/references/landing-operations.md', 82],
   ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 101],
+  // Lane job descriptions (maintainer ruling 2026-08-19: per-lane PM job
+  // descriptions move from seat-post prose into versioned skill references).
+  // Set at landed line counts (headroom 0, same convention as above).
+  ['.claude/skills/pm-dispatch/references/lanes/engine.md', 41],
+  ['.claude/skills/pm-dispatch/references/lanes/services.md', 31],
+  ['.claude/skills/pm-dispatch/references/lanes/cli.md', 37],
+  ['.claude/skills/pm-dispatch/references/lanes/devx.md', 38],
+  ['.claude/skills/pm-dispatch/references/lanes/skills.md', 36],
+  ['.claude/skills/pm-dispatch/references/lanes/spec.md', 44],
   ['.claude/agents/os-dev.md', 399],
   // #9473: the other four `.claude/skills/` are read in full by the sessions
   // that use them too — the erosion mechanism the ratchet exists to stop
@@ -65,6 +107,11 @@ export const CEILINGS = new Map([
   ['.claude/skills/checklist-author/SKILL.md', 61],
   ['.claude/skills/dogfood-verification/SKILL.md', 155],
   ['.claude/skills/spec-property-retirement/SKILL.md', 328],
+  // #9792: root AGENTS.md is the largest, most-read, most binding instruction
+  // file in the repo and had no ceiling — the hole the oversized 39-line
+  // read-layer clause (compacted by #9715) entered through. Set at its line
+  // count on `origin/main` after #9715 landed (headroom 0, same convention).
+  ['AGENTS.md', 958],
 ]);
 
 export function verdict(rel, lineCount, maxLines) {
@@ -125,7 +172,15 @@ function selfTest() {
     ['SKILL.md is covered', CEILINGS.has('.claude/skills/pm-dispatch/SKILL.md'), true],
     ['the dev-agent definition is covered', CEILINGS.has('.claude/agents/os-dev.md'), true],
     ['all five compressed references are covered', ['dispatch-runbook', 'platform-readings', 'review-checklist', 'landing-operations', 'seat-post-protocol'].every((n) => CEILINGS.has(`.claude/skills/pm-dispatch/references/${n}.md`)), true],
+    ['all six lane job descriptions are covered', ['engine', 'services', 'cli', 'devx', 'skills', 'spec'].every((n) => CEILINGS.has(`.claude/skills/pm-dispatch/references/lanes/${n}.md`)), true],
     ['the other four skills are covered (#9473)', ['checklist-test', 'checklist-author', 'dogfood-verification', 'spec-property-retirement'].every((n) => CEILINGS.has(`.claude/skills/${n}/SKILL.md`)), true],
+    ['root AGENTS.md is covered (#9792)', CEILINGS.has('AGENTS.md'), true],
+    // The boundary the header states, pinned (#9923). Enforcement cannot hold
+    // it: a ceiling on a real published SKILL.md runs green like any other row,
+    // so without this case the header paragraph could drift from the map
+    // silently. Extending coverage to the published catalog is a policy change
+    // — it lands with a maintainer ruling that also deletes this case.
+    ['the published skills/ catalog is deliberately uncovered', [...CEILINGS.keys()].some((k) => k.startsWith('skills/')), false],
   ];
   let failed = 0;
   for (const [name, actual, expected] of cases) {

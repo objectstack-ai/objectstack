@@ -39,8 +39,10 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import type { AutomationResult } from '@objectstack/spec/contracts';
+import { resolveThrownHttpError } from '@objectstack/types';
 
 import { HttpDispatcher } from './http-dispatcher.js';
+import { dispatchFlowAction, isFlowActionRefusal } from './action-execution.js';
 
 const FLOW = 'crm_convert_lead_wizard';
 
@@ -314,5 +316,170 @@ describe('#9446 — both doors read ONE table, so they cannot drift', () => {
         expect(action.response.status).toBe(404);
         expect(trigger.response.status).toBe(404);
         expect(action.response.body.error.code).toBe(trigger.response.body.error.code);
+    });
+});
+
+/**
+ * #9585 — the payload BESIDE the status. After #9446 the two doors agreed on
+ * `400 FLOW_FAILED` and diverged on exactly one thing left: the trigger door
+ * shipped the flow author's `errorMessage` and the run `summary` in
+ * `error.details`, and `/actions` shipped neither — its throw is served
+ * through `resolveThrownHttpError`, whose closed `details` list (#8016 /
+ * #9106) deliberately drops a thrown `.details`. Maintainer ruling
+ * (2026-08-19, Option B): a typed refusal carrier (`FlowActionRefusal`,
+ * `action-execution.ts`) that the `/actions` handler recognises AHEAD of its
+ * generic catch, carrying exactly those two fields; the shared resolver stays
+ * untouched.
+ *
+ * The pins here are door-AGAINST-door wherever the contract is agreement:
+ * this card exists because the doors diverged, and a suite that only checked
+ * the `/actions` side would sit green while they drifted apart again.
+ */
+describe("#9585 — the failed run's artefacts ride BOTH doors' 400 details", () => {
+    const AUTHOR_MESSAGE = 'We could not create the opportunity — check the amount and try again.';
+    const SUMMARY = {
+        selected: 0, acted: 0, skipped: 0, unmeasured: 0,
+        nodes: [{ nodeId: 'create_opportunity', nodeType: 'create_record', status: 'failure', runs: 1, failures: 1 }],
+    } as AutomationResult['summary'];
+    /** The ran-and-failed exit WITH the artefacts the flow's author declared. */
+    const FAILED_WITH_ARTEFACTS: AutomationResult = {
+        ...RAN_AND_FAILED,
+        errorMessage: AUTHOR_MESSAGE,
+        summary: SUMMARY,
+    };
+
+    it("/actions delivers the author's errorMessage and the run summary in its 400 details", async () => {
+        const { dispatcher } = makeDispatcher({ result: FAILED_WITH_ARTEFACTS });
+
+        const res: any = await viaAction(dispatcher);
+
+        expect(res.response.status).toBe(400);
+        expect(res.response.body.error.code).toBe('FLOW_FAILED');
+        // The author's text is DELIVERED — the declared ≠ delivered gap this
+        // card closes — and it is not folded into the message either: the raw
+        // engine error stays the human-readable message, still naming the flow
+        // (this door's wording, unchanged since #3962).
+        expect(res.response.body.error.details.errorMessage).toBe(AUTHOR_MESSAGE);
+        expect(res.response.body.error.message).toContain(FLOW);
+        expect(res.response.body.error.message).toContain("Node 'create_opportunity' failed");
+        expect(res.response.body.error.message).not.toContain(AUTHOR_MESSAGE);
+        // WHICH node failed survives — the summary's whole job.
+        expect(res.response.body.error.details.summary).toEqual(SUMMARY);
+        // `code` is promoted out of `details` into the declared field by the
+        // shared envelope builder, never duplicated (`error-envelope.ts`).
+        expect(res.response.body.error.details.code).toBeUndefined();
+    });
+
+    it('one failed run, two doors, ONE details payload — the drift pin', async () => {
+        const { dispatcher } = makeDispatcher({ result: FAILED_WITH_ARTEFACTS });
+
+        const action: any = await viaAction(dispatcher);
+        const trigger: any = await viaTrigger(dispatcher);
+
+        // The #9446 half: same status, same code …
+        expect(action.response.status).toBe(400);
+        expect(trigger.response.status).toBe(400);
+        expect(action.response.body.error.code).toBe('FLOW_FAILED');
+        expect(trigger.response.body.error.code).toBe('FLOW_FAILED');
+        // … and the #9585 half: the payload beside them, compared DOOR AGAINST
+        // DOOR rather than against a literal, so a door that drops or renames
+        // either field reddens here even if its own per-door pin is edited in
+        // the same change. (The messages differ on purpose — this door names
+        // the flow, the trigger door's URL already does — so the message is
+        // deliberately NOT part of this equality.)
+        expect(action.response.body.error.details.errorMessage)
+            .toBe(trigger.response.body.error.details.errorMessage);
+        expect(action.response.body.error.details.summary)
+            .toEqual(trigger.response.body.error.details.summary);
+        // Anchor the compared value once, so both doors shipping `undefined`
+        // can never satisfy the equality above.
+        expect(trigger.response.body.error.details.errorMessage).toBe(AUTHOR_MESSAGE);
+    });
+
+    it('a failed run WITHOUT artefacts invents none, at either door', async () => {
+        // `errorMessage` is set only when the author wrote one; `summary` only
+        // when the engine measured one. Neither door manufactures an empty in
+        // their place — absent means absent, at both doors identically.
+        const { dispatcher } = makeDispatcher({ result: RAN_AND_FAILED });
+
+        const action: any = await viaAction(dispatcher);
+        const trigger: any = await viaTrigger(dispatcher);
+
+        for (const res of [action, trigger]) {
+            expect(res.response.status).toBe(400);
+            expect(res.response.body.error.code).toBe('FLOW_FAILED');
+            expect(res.response.body.error.details?.errorMessage).toBeUndefined();
+            expect(res.response.body.error.details?.summary).toBeUndefined();
+        }
+    });
+
+    it('a never-dispatched refusal ships NO run artefacts at either door, even when the result carries them', async () => {
+        // A refused dispatch has no run to report — no author failure text, no
+        // node log. A producer that stamps the incidental fields anyway must
+        // not have them served as run evidence: the artefacts ride the
+        // ran-and-failed row ONLY, the same no-inventing rule the trigger door
+        // has always stated on its 400 arm.
+        const { dispatcher } = makeDispatcher({
+            result: { ...DISABLED, errorMessage: AUTHOR_MESSAGE, summary: SUMMARY },
+        });
+
+        const action: any = await viaAction(dispatcher);
+        const trigger: any = await viaTrigger(dispatcher);
+
+        for (const res of [action, trigger]) {
+            expect(res.response.status).toBe(409);
+            expect(res.response.body.error.code).toBe('FLOW_DISABLED');
+            expect(res.response.body.error.details?.errorMessage).toBeUndefined();
+            expect(res.response.body.error.details?.summary).toBeUndefined();
+        }
+    });
+
+    it("a door that does not recognise the carrier serves yesterday's exact answer — and the shared resolver stays closed", async () => {
+        // The MCP `run_action` bridge shares `dispatchFlowAction` and has no
+        // recognition branch — by the ruling's scope, not by accident (#9585
+        // is bounded to the one door). Its safety property is that the carrier
+        // stamps `status`, `code` and `message` exactly as the plain throw it
+        // replaced, so `resolveThrownHttpError` answers the same
+        // `400 FLOW_FAILED` with the same text and only the run details stay
+        // behind: degradation to the PREVIOUS answer, never to a different
+        // one. The `details: undefined` pin is the ruling's other boundary
+        // made mechanical — the resolver's closed list (#8016 / #9106) does
+        // not read a thrown payload, and a future widening that made it do so
+        // would redden here, surfacing the contradiction instead of landing it
+        // silently.
+        const automation = {
+            execute: vi.fn(async () => FAILED_WITH_ARTEFACTS),
+            getFlow: vi.fn(async () => ({ name: FLOW })),
+        };
+        const deps: any = { resolveService: async () => automation };
+
+        let thrown: unknown;
+        try {
+            await dispatchFlowAction(deps, {} as any, flowAction, {
+                objectName: 'crm_lead', record: {}, params: {}, ec: {}, envId: 'platform',
+            });
+        } catch (e) {
+            thrown = e;
+        }
+
+        expect(isFlowActionRefusal(thrown)).toBe(true);
+        const resolved = resolveThrownHttpError(thrown);
+        expect(resolved.status).toBe(400);
+        expect(resolved.code).toBe('FLOW_FAILED');
+        expect(resolved.message).toContain(FLOW);
+        expect(resolved.message).toContain("Node 'create_opportunity' failed");
+        expect(resolved.details).toBeUndefined();
+    });
+
+    it('recognition is the BRAND, not the field shape — a lookalike throw stays on the generic path', async () => {
+        // A script handler cannot impersonate the flow door's channel by
+        // throwing `{ status, code, runDetails }`: the guard reads the
+        // carrier's own brand. The lookalike still gets the ordinary
+        // status-honouring exit (`errorFromThrown`), which drops the
+        // unrecognised payload — exactly what every other thrower gets.
+        expect(isFlowActionRefusal({
+            status: 400, code: 'FLOW_FAILED', message: 'fake',
+            runDetails: { errorMessage: 'not yours' },
+        })).toBe(false);
     });
 });

@@ -17,6 +17,7 @@ import {
   getApprovalNodeConfigJsonSchema,
   normalizeDecisionOutputs,
 } from './approval.zod';
+import { BUILTIN_MEMBERSHIP_ROLES } from '../identity/membership-role';
 
 describe('ApproverType', () => {
   it('should accept all valid approver types', () => {
@@ -74,6 +75,29 @@ describe('ApproverType', () => {
     for (const spelling of Object.keys(DEPRECATED_APPROVER_TYPES)) {
       expect(NON_AUTHORABLE_APPROVER_TYPES).toContain(spelling);
     }
+  });
+});
+
+// `ORG_MEMBERSHIP_LEVELS` once hand-spelled a three-value copy of the
+// membership vocabulary while `sys_member.role` enforced four, so the enforced
+// `delegated_admin` tier (ADR-0105 D8) could not be authored as an approver.
+// The list is now DERIVED from `BUILTIN_MEMBERSHIP_ROLES`; these pins keep the
+// derivation from ever being silently replaced by a copy again.
+describe('ORG_MEMBERSHIP_LEVELS derives from BUILTIN_MEMBERSHIP_ROLES', () => {
+  it('is the same list, in the same display order, as the sys_member.role vocabulary', () => {
+    expect([...ORG_MEMBERSHIP_LEVELS]).toEqual([...BUILTIN_MEMBERSHIP_ROLES]);
+  });
+
+  it('admits delegated_admin — an enforced sys_member.role value — as an approver tier', () => {
+    expect(ORG_MEMBERSHIP_LEVELS).toContain('delegated_admin');
+  });
+
+  it('exposes the whole vocabulary on the wire picker surface, deprecated alias included', () => {
+    expect(APPROVER_VALUE_SOURCES.org_membership_level).toEqual({
+      source: 'enum',
+      values: [...BUILTIN_MEMBERSHIP_ROLES],
+    });
+    expect(APPROVER_VALUE_SOURCES.role).toEqual(APPROVER_VALUE_SOURCES.org_membership_level);
   });
 });
 

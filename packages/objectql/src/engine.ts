@@ -3170,6 +3170,51 @@ export class ObjectQL implements IObjectQLEngine {
    * `isSystem` on the read: resolving the install's organization must not
    * depend on the caller's own reach, and this runs on writes that have no
    * caller reach at all.
+   *
+   * [#9261] "The probe found no organizations" and "the probe could not run"
+   * are different facts (ADR-0110 D3), and this returns the FIRST one only when
+   * it measured it. The `catch {}` this replaces answered both with `[]`, which
+   * `resolveSystemWriteOrganization` reads as `no-organization-yet` — so one
+   * transient failure silently skipped both halves of the #8844 ruling: the
+   * single-organization stamp (rows land untenanted and fork exactly the
+   * counter the ruling exists to protect) and the multi-organization REFUSAL
+   * (fail-open on a guard that must be loud, the #8895 shape). The memo made
+   * the damage outlive the outage — the invented answer was cached until an
+   * organization write happened to clear it.
+   *
+   * **Exactly one cause is benign, and it was measured rather than assumed.**
+   * `sys_organization` ROUTES but its TABLE was never provisioned (schema sync
+   * not run yet): it cannot hold a row, so zero really is the count. Asked
+   * through the shared `isMissingTableError` predicate
+   * (`@objectstack/metadata/errors`, #4825) — the same call
+   * `resolveFileReferences` and `cascadeDeleteRelations` make — never a
+   * hand-rolled code test.
+   *
+   * ⚠️ The old comment's "`sys_organization` may not be registered at all (a
+   * lean embedding, a bare-kernel test)" is NOT a second benign cause, and a
+   * predicate written for it would have guarded a case that cannot reach this
+   * catch. Measured on this seam:
+   *
+   *  - an object missing from the REGISTRY does not fail the read at all on a
+   *    driver that tolerates an unknown table — {@link find} returns `[]`
+   *    through the normal path, never entering the catch;
+   *  - a strict driver surfaces that same install as a MISSING TABLE, i.e. as
+   *    the one benign cause above;
+   *  - and "no driver at all" cannot reach here: {@link getDriver} answers every
+   *    object from the default driver, which the first {@link registerDriver}
+   *    always sets and nothing ever clears, so the only engine whose routing
+   *    fails for `sys_organization` is one with no drivers — where the write
+   *    that would have asked already failed on its OWN object.
+   *
+   * Everything else — connection loss, pool exhaustion, a timeout mid-boot, a
+   * datasource that never connected ({@link DatasourceUnavailableError}), a
+   * permission denial — means organizations may well exist and simply were not
+   * seen. It PROPAGATES, envelope intact, and ⛔ nothing is memoised on that
+   * path: the write that asked fails loudly instead of being filed under a
+   * guessed topology, and the next write re-probes rather than inheriting the
+   * guess. No new error code and no new response field — the caller receives
+   * the probe's own failure, the same disposition #8895 gave the
+   * referential-integrity probe.
    */
   private async probeInstallOrganizations(): Promise<readonly string[]> {
     if (this.organizationProbeMemo) return this.organizationProbeMemo;
@@ -3184,10 +3229,10 @@ export class ObjectQL implements IObjectQLEngine {
         .map((r: any) => (r?.id ?? r?._id))
         .filter((id: unknown) => id != null && String(id) !== '')
         .map((id: unknown) => String(id));
-    } catch {
-      // `sys_organization` may not be registered at all (a lean embedding, a
-      // bare-kernel test). No organizations is the honest reading, and it is
-      // the branch that changes nothing.
+    } catch (error) {
+      // The one benign cause only — anything else is an outage, not an
+      // emptiness, and must not be memoised as one.
+      if (!isMissingTableError(error)) throw error;
       ids = [];
     }
     this.organizationProbeMemo = ids;
@@ -10450,9 +10495,17 @@ export class ObjectQL implements IObjectQLEngine {
         // even when the child's set holds other members and member removal
         // would leave it non-empty — a state the #9447 ruling accepts.
         // Measured, pinned as current behaviour, and carded separately rather
-        // than changed here: today `[]` still satisfies `required` in the
-        // record validator (#9476), so this blanket refusal is what keeps an
-        // emptied required set from landing silently.
+        // than changed here. What justifies refusing is the paragraph above,
+        // not the validator's tolerance: the escalation refuses THIS relation
+        // before its own set_null write runs, so the caller is told
+        // `DELETE_RESTRICTED` about the record it asked to delete, instead of
+        // the child's own `required` 400 — which names a field that is not on
+        // that record's object at all. The predecessor of this comment rested
+        // it on `[]` still satisfying `required` in the record validator,
+        // which made this refusal the only thing between an emptied required
+        // set and a silent write; #9476 landed and `[]` is rejected there now
+        // too, so the refusal is no longer that last guard. It is the one that
+        // fires early, against the right record.
         if (behavior === 'set_null' && fdef.required === true) {
           behavior = 'restrict';
         }

@@ -6,10 +6,9 @@ import { createLocalAccountIssuer, createOAuthAccountIssuer } from '@better-auth
  * backfillAccountIssuer — stamp `sys_account.issuer` on rows written before
  * better-auth 1.7.
  *
- * 1.7 restructured account identity: what used to be `account.accountId` is now
- * `account.providerAccountId`, and every account carries a REQUIRED `issuer`
+ * 1.7 restructured account identity: every account carries a REQUIRED `issuer`
  * naming the authority that vouched for that id. Sign-in resolves accounts with
- * `findAccountByKey({ issuer, providerAccountId })`, so a row whose `issuer` is
+ * `findAccountByKey({ issuer, accountId })`, so a row whose `issuer` is
  * NULL is invisible to better-auth — the user's password or social link simply
  * stops resolving. This helper closes that gap at boot, once, in place.
  *

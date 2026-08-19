@@ -35,7 +35,7 @@ export const SysAccount = ObjectSchema.create({
   // this, where `accountId` is the account ROW id (better-auth 1.7 narrowed
   // the body from the old `{ providerId, accountId }` pair, and `accountId`
   // no longer means the provider's id for the user — that field is now
-  // `providerAccountId`). The form is locked to the row's values so it acts
+  // `accountId`). The form is locked to the row's values so it acts
   // as a one-click confirmation rather than a free-form edit.
   //
   // `link_social` is the self-service counterpart — a toolbar action
@@ -306,7 +306,7 @@ export const SysAccount = ObjectSchema.create({
   indexes: [
     { fields: ['user_id'], unique: false },
     { fields: ['provider_id', 'account_id'], unique: true },
-    // better-auth 1.7 resolves accounts by (issuer, providerAccountId) and
+    // better-auth 1.7 resolves accounts by (issuer, accountId) and
     // declares that pair unique on its own `account` table — mirror it here so
     // the physical table enforces the same identity key the auth code assumes.
     { fields: ['issuer', 'account_id'], unique: true },

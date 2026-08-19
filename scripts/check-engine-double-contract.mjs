@@ -136,6 +136,114 @@
 //               scans. Without it a typo'd or retired verb makes an entry
 //               unreachable -- it would reconcile against nothing, forever,
 //               and read as a live exemption.
+//   RETAINED    a double that WAS pinned still is. The pinned population is
+//               enumerated in `engine-double-contract.pinned.json`, so a pin
+//               that leaves names itself instead of decrementing a printed
+//               integer nobody compares (#9680). See the block below.
+//
+// ## RETAINED, and why the pinned set is enumerated rather than counted (#9680)
+//
+// The four invariants above ratchet the LEDGERED population in both directions
+// -- measured on this branch, deleting a DEBT-ledgered double's member reddens
+// (`RECONCILED: baseline entry for … declares no engine double with a delete
+// any more`), and so does dropping one of the five doubles behind the EXEMPT
+// entry (`down to 4 … from the baseline's 5`). The PINNED population had no
+// such ratchet, and that asymmetry is the whole of #9680: DISCOVERED fires at
+// zero, never at one-fewer-than-yesterday, and PINNED iterates the discovered
+// set, so a pinned double that stops declaring the member simply LEAVES.
+//
+// Discovery requires the member to exist, so absence is invisible by
+// construction. Measured, two directions, on `packages/core/src/utils/
+// migration-journal.test.ts`:
+//
+//   delete the whole `async delete(…)` member   OK -- 318 pinned (was 319), exit 0
+//   delete only the `assertEngineDeleteDispatch` call   x PINNED …, exit 1
+//
+// The control going red is what makes the first line a blind spot rather than a
+// broken harness: the gate pins the dispatch behaviour of a member that EXISTS.
+//
+// ## Why an identity ledger and not a count, priced rather than assumed
+//
+// A count-delta ("319, shrink-fails") is the cheaper artifact and was rejected
+// on two measurements, not on taste:
+//
+//   - It cannot see a SWAP. One double loses `delete` while another gains one
+//     and the total is unchanged, so the instrument reads clean while coverage
+//     moved. An enumeration compares membership, so the swap is two rows.
+//   - Its remedy carries no information. A legitimate removal and this card's
+//     defect produce the SAME one-character diff (`319` -> `318`), so review
+//     cannot tell them apart and the only available habit is "bump the number"
+//     -- the failure mode a ratchet exists to prevent, re-created by the
+//     ratchet itself.
+//
+// The maintenance objection to an enumeration is real but was measured and is
+// small. Measured over the FULL population: 3,103 first-parent commits on
+// `main` in the month to 2026-08-18 (`git log --first-parent
+// --since=2026-07-18 --until=2026-08-18 origin/main`). Membership of the pinned
+// set changed in 111 of them for `delete` (3.6%) and 103 for `update` (3.3%);
+// 162 and 160 files ENTERED, and exactly ONE left per verb.
+//
+// ⛔ An earlier revision of this comment read "the 269 commits ... changed in 7
+// commits (2.6%) ... zero left". 269 was the depth of the shallow clone the
+// measuring agent ran in, not the month's traffic, and the 7 and the "zero"
+// were themselves computed over only those 269 commits -- so every number in
+// the sentence, numerator included, described a ~9% sample. It is re-measured
+// here rather than rescaled: the true rate is HIGHER than the sample reported,
+// which is the direction that swapping only the denominator would have hidden.
+//
+// The single departure per verb is the case worth stating precisely, because it
+// is the nuisance an identity ledger is accused of and it did not behave like
+// one: f16e54e1d deleted `protocol-delete-object-package-binding-guard.test.ts`
+// and added a replacement carrying both pins in the SAME commit, so repo-wide
+// coverage never dropped. It lands in the "file gone from disk" world below,
+// whose remedy is mechanical and carries no judgement call. Across the whole
+// month there were ZERO instances of the shape this ratchet exists to catch --
+// file present, verb gone -- and zero per-file counts that shrank without
+// reaching zero.
+//
+// Method, stated so this can be redone rather than trusted: membership is
+// proxied by `assertEngine…Dispatch(` call sites in test files under the scan
+// roots, calibrated on 2026-08-19 against this gate's own ledger as it then
+// stood -- 0 false negatives on the file sets, and every (file, verb) row but
+// ONE agreeing on the exact count. That calibration is a dated measurement, not
+// a standing property; anyone re-running it must first prove their clone covers
+// the window; a shallow one silently answers for its own depth, which is the
+// whole reason this paragraph had to be rewritten.
+//
+// So the additions the ratchet does redden on are already in conversation with
+// this gate (they are new fakes that had to write `assert…Dispatch` because
+// PINNED demanded it). Set against the DEBT ledger this gate already carries,
+// the pinned ledger is the same file format, the same order of magnitude and
+// the same reconciliation shape -- so it is the maintenance cost already being
+// paid for the other ledger, not a new one. Both sizes are printed by a run and
+// countable in the artifacts; they are deliberately not copied into this prose,
+// because `--write` moves one of them and nothing here would notice.
+//
+// ## How a LEGITIMATE decrease is expressed (the anti-nuisance half)
+//
+// `node scripts/check-engine-double-contract.mjs --write`, then commit. That is
+// the whole remedy, it is the repo's existing ratchet idiom (see
+// check-slot-lookup-ratchet.mjs's `--update`), and it is mechanical -- there is
+// no number to choose, so there is no number to fudge.
+//
+// What keeps that from degenerating into "regenerate on red" is that the gate
+// CLASSIFIES the loss before asking for anything, and says which of three
+// worlds it is in:
+//
+//   file gone from disk         a deleted test. Legitimate; regenerate.
+//   file present, verb gone     THE #9680 DEFECT. The member was dropped while
+//                               the fake and its file live on. Loud, and named.
+//   fewer doubles than pinned   the same defect at a finer grain: the file pins
+//                               several and one member was deleted. Nothing else
+//                               in this gate reacts, because a fake is still there.
+//   all doubles present,        the double went UNGUARDED -- already an error
+//   fewer pinned                under PINNED above, and cross-named here so one
+//                               output explains the whole picture.
+//
+// A count can reach none of those three, because by the time it has been
+// decremented the identity is gone. And `--write` prints every loss it is about
+// to record, so the author reads what left at the moment they regenerate rather
+// than discovering it in review.
 //
 // ## Why "routes through the shared predicate" and not "mirrors the guard"
 //
@@ -163,13 +271,14 @@
 // while degrading. What it can do is make the rejection surface impossible to
 // drift, which is the half that shipped #4434.
 
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, writeFileSync } from 'node:fs';
 import { join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BASELINE_PATH = join(ROOT, 'scripts', 'engine-double-contract.baseline.json');
+const PINNED_LEDGER_PATH = join(ROOT, 'scripts', 'engine-double-contract.pinned.json');
 const SCAN_ROOTS = ['packages', 'examples'];
 
 /**
@@ -675,6 +784,183 @@ function scanSource(fileName, text, slice = SLICES[0]) {
   };
   visit(sf);
   return doubles;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// THE UNRECOGNISED CENSUS (#9747) -- the third verdict, printed and never fatal
+// ════════════════════════════════════════════════════════════════════════════
+//
+// The four invariants above answer "is the discovered population guarded".
+// DISCOVERED answers "is the population non-empty". Neither can answer the
+// question #9747 measured across nine instances in this repo:
+//
+//   > how many constructs did this gate SEE and fail to understand?
+//
+// A construct the recognizer cannot read is in NEITHER half of the ledger. It
+// is not pinned, it is not baselined, it is not exempt -- it is absent, and
+// absence reads to every consumer of this script's output as "clean". That is
+// #8639's shape exactly (a `vi.fn(fn)` initializer the unwrap did not read),
+// and #8639 was found by luck rather than by this gate saying anything.
+//
+// ## What this section is NOT
+//
+// ⛔ It does not widen discovery by one construct. `scanSource` is untouched
+// and this census cannot reach it: the two walks share no state, so no count
+// here can move a double into or out of the pinned population. Widening the
+// matcher has been separately priced and separately DECLINED (#8845, #9165's
+// 2b), and this card's own scoping says so. Counting is the whole act.
+//
+// ⛔ It never fails a run. Per the 2026-08-18 ruling on #9747 the third state
+// is VISIBILITY ONLY: no new required context, no new merge-blocking failure.
+//
+// ## Why not `exit 2`, when the in-tree prior art uses `exit 2`
+//
+// Four places in this repo already spell a third state -- `check-where-matcher-
+// conformance` (missing baseline => `exit 2`, explicitly distinct from a
+// finding's `exit 1`), `check-published-readme-exports` (hard refusal),
+// `check-governed-merges`' header ("non-zero exits classify the ENVIRONMENT,
+// not the tree"), and the drift guard added by #9700. Every one of them exits
+// non-zero because the gate is REFUSING TO RUN: the environment is broken and
+// no verdict about the tree is available.
+//
+// This verdict is the opposite. The run completed, every invariant was
+// evaluated, and the count is an observation ABOUT the run. Spelling it
+// `exit 2` would make it a failing CI job, which is precisely what the ruling
+// forbids. So it matches the convention where the convention is about
+// SEMANTICS -- a named third state, distinct from both "clean" and "finding",
+// printed rather than inferred -- and deliberately not where the convention is
+// about the exit code. The line carries a stable, greppable prefix
+// (`UNRECOGNISED [<gate>]:`) so a round report can pick it up without a new
+// merge-blocking context existing anywhere.
+//
+// ## SCOPED-OUT is not UNRECOGNISED, and the difference is the whole point
+//
+// #8662 is the instance that sharpens this: `check-where-matcher-conformance`
+// drops inverted survivor filters as OUT_OF_SCOPE **correctly, by its own
+// definition**, and that correct verdict still reads as "nothing to see". A
+// census that folded those into "unrecognised" would report noise on day one
+// and discredit the direction. So the two are counted apart:
+//
+//   SCOPED OUT    the gate has a STATED criterion that excludes this construct
+//                 and the criterion is right. `delete: vi.fn()` carries no
+//                 implementation at all, so there is no behaviour that could be
+//                 looser than `ObjectQL.delete` -- `unwrapCallImpl`'s own
+//                 census argues exactly this. Reported as a number only.
+//
+//   UNRECOGNISED  an implementation demonstrably EXISTS and this gate cannot
+//                 reach it: the initializer carries a function the unwrap
+//                 declined, or it roots at a binding this file declares. Each
+//                 one is a double that could be looser than the producer and
+//                 is in no ledger. Reported by file, line and spelling.
+//
+// The discriminator is structural, never an allowlist of callee names -- the
+// same choice `unwrapCallImpl` documents, and for the same reason: an
+// allowlist goes silently blind the day someone writes a new wrapper.
+
+/** Short, single-line echo of a construct, for the census rows. */
+function censusSnippet(node, sf) {
+  return node.getText(sf).replace(/\s+/g, ' ').slice(0, 96);
+}
+
+/** Every identifier this file itself declares (functions, consts, lets). */
+function declaredBindings(sf) {
+  const names = new Set();
+  const visit = (n) => {
+    if (ts.isFunctionDeclaration(n) && n.name) names.add(n.name.text);
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name)) names.add(n.name.text);
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return names;
+}
+
+/**
+ * One file's unrecognised / scoped-out constructs for one slice.
+ *
+ * The population it walks is the same structural evidence discovery uses -- a
+ * construct declaring the slice's verb alongside at least two engine siblings
+ * -- so a row here is never something the gate had no business reading. What
+ * separates it from `scanSource` is the single step where discovery stops:
+ * `implOf` answered null, so `isEngineVerbShape` was never asked and the
+ * construct left the population without any verdict being recorded.
+ */
+function censusSource(fileName, text, slice) {
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const declared = declaredBindings(sf);
+  const unrecognised = [];
+  const scopedOut = [];
+
+  const consider = (members, node) => {
+    const names = new Set();
+    let member = null;
+    for (const m of members) {
+      const n = memberName(m);
+      if (n) names.add(n);
+      // `memberName` reads a shorthand's identifier too, so `{ update }` lands
+      // here as a declaration of the verb -- which is what we want.
+      if (n === slice.verb) member = m;
+    }
+    if (!member) return;
+    const siblings = [...names].filter((n) => ENGINE_SIBLINGS.has(n) && n !== slice.verb);
+    if (siblings.length < 2) return;
+    if (implOf(member)) return;                 // discovery read it -- in the population
+    const line = sf.getLineAndCharacterOfPosition(member.getStart(sf)).line + 1;
+    const row = { line, text: censusSnippet(member, sf) };
+
+    if (ts.isShorthandPropertyAssignment(member)) {
+      unrecognised.push({ ...row, why: 'shorthand -- the implementation is a binding elsewhere in scope' });
+      return;
+    }
+    const init = (ts.isPropertyAssignment(member) || ts.isPropertyDeclaration(member))
+      ? member.initializer : null;
+    if (!init) {
+      scopedOut.push({ ...row, why: 'declaration only (a signature or an abstract member): no body exists' });
+      return;
+    }
+    let carriesFn = false;
+    const scan = (n) => {
+      if (ts.isFunctionExpression(n) || ts.isArrowFunction(n)) carriesFn = true;
+      ts.forEachChild(n, scan);
+    };
+    scan(init);
+    if (carriesFn) {
+      unrecognised.push({ ...row, why: 'the initializer carries a function this gate declined to unwrap' });
+      return;
+    }
+    let root = init;
+    while (ts.isCallExpression(root) || ts.isPropertyAccessExpression(root)) root = root.expression;
+    if (ts.isIdentifier(root) && declared.has(root.text)) {
+      unrecognised.push({ ...row, why: `the initializer roots at \`${root.text}\`, which this file declares` });
+      return;
+    }
+    scopedOut.push({ ...row, why: 'no implementation anywhere (a bare mock or a value), so nothing can be looser than the producer' });
+  };
+
+  const visit = (n) => {
+    if (ts.isObjectLiteralExpression(n)) consider(n.properties, n);
+    else if (ts.isClassDeclaration(n) || ts.isClassExpression(n)) consider(n.members, n);
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return { unrecognised, scopedOut };
+}
+
+/** The census across every scanned file and every slice. */
+function censusUnrecognised() {
+  const rows = [];
+  let scopedOut = 0;
+  for (const abs of testFiles()) {
+    const rel = relative(ROOT, abs).split(sep).join('/');
+    const text = readFileSync(abs, 'utf8');
+    for (const slice of SLICES) {
+      if (!new RegExp(`\\b${slice.verb}\\s*[(:,}]`).test(text)) continue;
+      const c = censusSource(abs, text, slice);
+      scopedOut += c.scopedOut.length;
+      for (const u of c.unrecognised) rows.push({ verb: slice.verb, file: rel, ...u });
+    }
+  }
+  rows.sort((a, b) => (a.file === b.file ? a.line - b.line : a.file < b.file ? -1 : 1));
+  return { rows, scopedOut };
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1190,6 +1476,231 @@ function readBaseline() {
   return JSON.parse(readFileSync(BASELINE_PATH, 'utf8'));
 }
 
+/**
+ * The RETAINED ledger (#9680) — the enumerated pinned population.
+ *
+ * Deliberately a SEPARATE artifact from `engine-double-contract.baseline.json`
+ * rather than more rows in it. The baseline is a set of hand-written MEASURED
+ * justifications whose readability this file's header calls the gate's whole
+ * value ("shrink-only, hand reviewed"); folding the generated rows in would
+ * bury the reasons under a census that ALREADY OUTNUMBERS them -- and, by the
+ * opposite polarities below, can only outnumber them further -- blurring which
+ * rows a human must agree to.
+ * These two ledgers also answer to opposite polarities — the baseline records
+ * debt and may only SHRINK, this one records coverage and may only GROW — so a
+ * reader who conflates them reads every ratchet in this file backwards.
+ *
+ * A missing file reads as an empty ledger so a fresh checkout bootstraps
+ * through `--write` rather than crashing, exactly as `readBaseline` does.
+ */
+function readPinnedLedger() {
+  if (!existsSync(PINNED_LEDGER_PATH)) return { entries: [] };
+  return JSON.parse(readFileSync(PINNED_LEDGER_PATH, 'utf8'));
+}
+
+/**
+ * The pinned population as (file, verb, pinned-count) rows, sorted for a stable
+ * diff.
+ *
+ * Counted per FILE and not merely as membership, because a file may hold more
+ * than one pinned double for a verb — the rows reading `"pinned"` above 1 in
+ * `engine-double-contract.pinned.json` are the live list, and the ledger is
+ * where to read how many there are rather than here. A membership-only ledger
+ * would let a file that pins two deletes drop to one in silence, which is this
+ * card's defect at a finer grain.
+ */
+function censusPinned(slices) {
+  const rows = [];
+  for (const { slice, found } of slices) {
+    for (const { file, doubles } of found) {
+      const pinned = doubles.filter((d) => d.pinned).length;
+      if (pinned > 0) rows.push({ file, verb: slice.verb, pinned });
+    }
+  }
+  rows.sort((a, b) => (a.file === b.file ? a.verb.localeCompare(b.verb) : a.file.localeCompare(b.file)));
+  return rows;
+}
+
+/**
+ * The (file, verb) key for every map in this section.
+ *
+ * `JSON.stringify` of the pair rather than a joined string: a separator has to
+ * be a character neither half can contain, and the obvious candidates are worse
+ * than they look -- a space can appear in a path, and the NUL that would be
+ * unambiguous is a raw control byte this repo bans outright
+ * (`scripts/check-nul-bytes.mjs`), which is not a rule to route around inside a
+ * gate. Stringifying the pair has no separator to collide on at all.
+ */
+const pairKey = (file, verb) => JSON.stringify([file, verb]);
+
+/**
+ * How many doubles the scan still DECLARES per (file, verb), pinned or not.
+ *
+ * Distinct from `censusPinned`, and the distinction carries the whole
+ * classification below. A double that went UNGUARDED leaves the census (which
+ * counts pinned doubles) but stays here (which counts declared ones), while a
+ * double whose member was DELETED leaves both. Reading the census alone would
+ * report every newly-unguarded double as "the member was dropped" -- the wrong
+ * remedy attached to the wrong story.
+ *
+ * Counted rather than a membership Set, because a file may pin several doubles
+ * for one verb (the ledger rows reading `"pinned"` above 1 are the live list,
+ * as above). Membership alone cannot separate
+ * "the file pinned two deletes and now pins one because a MEMBER WAS DELETED"
+ * from "...because a member stopped calling the predicate", and those two want
+ * opposite remedies: restore the member vs re-pin it.
+ */
+function declaredCounts(slices) {
+  const counts = new Map();
+  for (const { slice, found } of slices) {
+    for (const { file, doubles } of found) counts.set(pairKey(file, slice.verb), doubles.length);
+  }
+  return counts;
+}
+
+/**
+ * Which of the four worlds a lost pin is in -- see the RETAINED block in the
+ * header. A pure function so the self-test can drive all four without a
+ * filesystem full of fixtures.
+ *
+ * Order matters: a file that is gone cannot also have "lost a member", so disk
+ * is asked first; then whether the verb is declared at all; then whether FEWER
+ * doubles are declared than the ledger pinned, which is the only evidence that
+ * separates a deleted member from a member that merely stopped being pinned.
+ */
+function classifyPinLoss({ onDisk, declared, wasPinned }) {
+  if (!onDisk) return 'file-removed';
+  if (declared === 0) return 'double-removed';
+  if (declared < wasPinned) return 'members-removed';
+  return 'unpinned';
+}
+
+const REGEN = 'node scripts/check-engine-double-contract.mjs --write';
+
+/**
+ * RETAINED's errors, as a pure function of two censuses and the ledger.
+ *
+ * `onDisk` is injected so the self-test can drive all three loss worlds without
+ * creating and deleting real files.
+ */
+function retainedErrors(census, ledger, ledgerExists, declared, onDisk) {
+  const errors = [];
+
+  // Bootstrap. Without this a missing artifact reports one "not in the ledger"
+  // error per census row -- hundreds of them, and growing, since this ledger is
+  // grow-only -- which reads as a catastrophe and buries the one-line fix.
+  if (!ledgerExists) {
+    return [
+      `RETAINED: ${relative(ROOT, PINNED_LEDGER_PATH)} is missing. That file IS the pinned `
+        + 'population; without it this gate is back to printing an integer nobody compares '
+        + `(#9680). Bootstrap it with \`${REGEN}\` and commit it.`,
+    ];
+  }
+
+  const found = new Map(census.map((r) => [pairKey(r.file, r.verb), r.pinned]));
+  const recorded = new Map();
+
+  for (const entry of ledger.entries) {
+    // Same reasoning as DECLARED: an entry naming a verb no slice scans
+    // reconciles against nothing forever, so it would read as permanent
+    // coverage while protecting nothing.
+    if (!SCANNED_VERBS.has(entry.verb)) {
+      errors.push(
+        `RETAINED: pinned-ledger entry for ${entry.file} names verb ${JSON.stringify(entry.verb)}, `
+          + `which no slice scans (known: ${[...SCANNED_VERBS].join(', ')}). An entry no slice `
+          + 'reaches can never lose its pin, so it records coverage that cannot be checked — fix '
+          + 'the verb or delete the entry.',
+      );
+      continue;
+    }
+    recorded.set(pairKey(entry.file, entry.verb), entry.pinned);
+  }
+
+  // ── The loss direction: a pin the ledger records that the scan no longer sees.
+  for (const entry of ledger.entries) {
+    if (!SCANNED_VERBS.has(entry.verb)) continue;
+    const now = found.get(pairKey(entry.file, entry.verb)) ?? 0;
+    if (now >= entry.pinned) continue;
+
+    const world = classifyPinLoss({
+      onDisk: onDisk(entry.file),
+      declared: declared.get(pairKey(entry.file, entry.verb)) ?? 0,
+      wasPinned: entry.pinned,
+    });
+    const slice = SLICES.find((s) => s.verb === entry.verb);
+    const head = `RETAINED [${entry.verb}]: ${entry.file}`;
+
+    if (world === 'file-removed') {
+      errors.push(
+        `${head} is gone from disk, and the pinned ledger still records ${entry.pinned} pinned `
+          + `${entry.verb} double(s) there. A deleted test is a LEGITIMATE decrease: run `
+          + `\`${REGEN}\` and commit the ledger. There is no number to choose and no judgement to `
+          + 'make — the diff records which pin left, which is the review signal a bare count '
+          + 'could never carry.',
+      );
+    } else if (world === 'double-removed') {
+      errors.push(
+        `${head} is still on disk but declares NO engine double with a ${entry.verb} any more, `
+          + `while the pinned ledger records ${entry.pinned}. This is the #9680 shape exactly: the `
+          + 'member was DROPPED rather than the test deleted, and discovery needs the member to '
+          + 'exist, so the double left the population and every other invariant in this gate '
+          + `passed over it in silence (measured: 319 pinned -> 318, exit 0). Restore the `
+          + `${entry.verb}() member and its \`${slice.pinCall}\` call. ONLY if the double is `
+          + `genuinely and intentionally gone — the fake no longer stands in for the engine at `
+          + `all — run \`${REGEN}\` and commit, so the ledger diff records which pin left.`,
+      );
+    } else if (world === 'members-removed') {
+      const declaredNow = declared.get(pairKey(entry.file, entry.verb)) ?? 0;
+      errors.push(
+        `${head} declares ${declaredNow} engine double(s) with a ${entry.verb}, down from the `
+          + `${entry.pinned} the pinned ledger records as pinned. This is the #9680 shape at a `
+          + 'finer grain: the file still holds a fake, so nothing else in this gate reacts, but '
+          + `${entry.pinned - declaredNow} ${entry.verb}() member(s) were DELETED and the coverage `
+          + 'they carried left with them. Restore the member(s) and their '
+          + `\`${slice.pinCall}\` call. ONLY if the double(s) are genuinely and intentionally gone `
+          + `— that fake no longer stands in for the engine — run \`${REGEN}\` and commit, so the `
+          + 'ledger diff records which pin left.',
+      );
+    } else {
+      errors.push(
+        `${head} still declares every ${entry.verb} double the ledger counted, but only ${now} of `
+          + `${entry.pinned} route through ${[...slice.symbols][0]} any more. The double went `
+          + 'UNGUARDED rather than absent, so the PINNED error naming this same file is the one to '
+          + 'act on — this line exists so one output explains the whole picture. Re-pin it; do '
+          + `NOT reach for \`${REGEN}\`, which would record the loss as intended.`,
+      );
+    }
+  }
+
+  // ── The growth direction: coverage the ledger does not yet know about.
+  //
+  // An error rather than a silent accept, and the reason is decay: measured over
+  // the month to 2026-08-18, 8 files ENTERED the pinned set per verb and none
+  // left, so a ledger that only had to be touched on removals would never be
+  // touched at all and every new double would sit outside the ratchet forever —
+  // this card's blind spot, re-opened on the newest code. The remedy is the same
+  // one command, and the author is already in conversation with this gate.
+  for (const row of census) {
+    const was = recorded.get(pairKey(row.file, row.verb));
+    if (was === undefined) {
+      errors.push(
+        `RETAINED [${row.verb}]: ${row.file} pins ${row.pinned} engine double(s) that the pinned `
+          + 'ledger does not record. New pinned coverage is GOOD and nothing is wrong with your '
+          + `change — the ledger just has to learn about it, or it never protects this file. Run `
+          + `\`${REGEN}\` and commit.`,
+      );
+    } else if (row.pinned > was) {
+      errors.push(
+        `RETAINED [${row.verb}]: ${row.file} now pins ${row.pinned} engine double(s), ledger `
+          + `records ${was}. Coverage grew, which is the direction this ledger wants — run `
+          + `\`${REGEN}\` and commit so the new double is ratcheted too.`,
+      );
+    }
+  }
+
+  return errors;
+}
+
 // ── The ratchet-remedy authority convention (#8435) ──────────────────────────
 //
 // Four independent PRs, four authors, four brand-new test files, one shift --
@@ -1374,6 +1885,22 @@ function audit() {
     }
   }
 
+  // ── RETAINED (#9680) — the pinned population is enumerated, not counted ───
+  //
+  // Runs AFTER the per-slice loop because it reads the same `slices` the loop
+  // built. It adds no criterion to the four above and changes no verdict any of
+  // them reaches: every error below concerns a (file, verb) pair the ledger
+  // names, or one the census found and the ledger does not.
+  const census = censusPinned(slices);
+  const pinnedLedger = readPinnedLedger();
+  errors.push(...retainedErrors(
+    census,
+    pinnedLedger,
+    existsSync(PINNED_LEDGER_PATH),
+    declaredCounts(slices),
+    (file) => existsSync(join(ROOT, file)),
+  ));
+
   // ── The consumer seams (#8194) ────────────────────────────────────────────
   const seamFiles = scanAllSeams();
   const seamCount = seamFiles.reduce((n, f) => n + f.seams.length, 0);
@@ -1415,11 +1942,64 @@ function audit() {
     }
   }
 
-  return { slices, baseline, errors, seamFiles, seamCount };
+  return { slices, baseline, errors, seamFiles, seamCount, census, pinnedLedger };
+}
+
+const PINNED_LEDGER_COMMENT =
+  'GENERATED — the RETAINED ledger of check-engine-double-contract.mjs (#9680). Regenerate with '
+  + '`node scripts/check-engine-double-contract.mjs --write`; never hand-edit. Each row is one '
+  + '(file, verb) whose engine double routes through the producer\'s dispatch predicate. This is '
+  + 'the OPPOSITE polarity to engine-double-contract.baseline.json: that ledger records DEBT and '
+  + 'may only shrink, this one records COVERAGE and may only grow. A row that disappears is a '
+  + 'pinned double that left the population — the blind spot #9680 measured, where deleting a '
+  + 'double\'s delete() member took 319 pinned to 318 with the gate green. Read a removal in this '
+  + 'file\'s diff as a coverage loss and check it was intended.';
+
+/**
+ * Regenerate the RETAINED ledger (#9680).
+ *
+ * Prints every LOSS it is about to record before writing. That is the half that
+ * keeps `--write` from becoming the "bump the number" reflex ruling this gate
+ * out was meant to prevent: the author reads which pin left at the moment they
+ * regenerate, rather than meeting it in review — or not at all.
+ */
+function writeLedger() {
+  const { slices } = audit();
+  const census = censusPinned(slices);
+  const before = readPinnedLedger();
+  const was = new Map((before.entries ?? []).map((e) => [pairKey(e.file, e.verb), e.pinned]));
+  const now = new Map(census.map((r) => [pairKey(r.file, r.verb), r.pinned]));
+
+  const losses = [];
+  for (const [k, n] of was) {
+    const after = now.get(k) ?? 0;
+    const [file, verb] = JSON.parse(k);
+    if (after < n) losses.push(`[${verb}] ${file}: ${n} pinned -> ${after}`);
+  }
+  const gains = [...now].filter(([k, n]) => n > (was.get(k) ?? 0)).length;
+
+  writeFileSync(
+    PINNED_LEDGER_PATH,
+    `${JSON.stringify({ $comment: PINNED_LEDGER_COMMENT, entries: census }, null, 2)}\n`,
+  );
+
+  console.log('');
+  if (losses.length) {
+    console.log(`  ⛔ RECORDING ${losses.length} PIN LOSS(ES) — read these before you commit:`);
+    for (const l of losses) console.log(`     - ${l}`);
+    console.log('     Each line is coverage this gate will no longer hold. If any of them is a');
+    console.log('     dropped member rather than a deleted test, restore it instead of committing.');
+  } else {
+    console.log('  No pin losses — this regeneration only records new or grown coverage.');
+  }
+  console.log(
+    `\ncheck-engine-double-contract --write: ${census.length} (file, verb) row(s), `
+      + `${gains} added or grown, ${losses.length} lost.\n`,
+  );
 }
 
 function report() {
-  const { slices, baseline, errors, seamFiles, seamCount } = audit();
+  const { slices, baseline, errors, seamFiles, seamCount, census } = audit();
 
   console.log('');
   let totalPinned = 0;
@@ -1439,6 +2019,28 @@ function report() {
       + `recordNotFoundError, ${local} through a locally minted error, `
       + `${seamCount - shared - local} not refusing at all.`,
   );
+  console.log('');
+
+  // ── The UNRECOGNISED verdict (#9747) ──────────────────────────────────────
+  // Printed on EVERY run, green or red, and before the failure branch below:
+  // a count that only appears on a clean run would be invisible exactly when a
+  // reader is looking hardest. It is a verdict, never a finding -- nothing
+  // here can change this script's exit code.
+  // Named `unrecognised`, not `census`: report() already holds the PINNED
+  // census destructured from audit() (#9680's RETAINED ledger). Two distinct
+  // populations in one scope, so they carry two distinct names.
+  const unrecognised = censusUnrecognised();
+  console.log(
+    `UNRECOGNISED [engine-double-contract]: ${unrecognised.rows.length} construct(s) in ${SCAN_ROOTS.join(", ")} `
+      + `declare a scanned verb (${[...SCANNED_VERBS].join(', ')}) alongside engine siblings, and this gate `
+      + 'could not read the implementation -- so they are in NEITHER the pinned population nor the ledger. '
+      + `${unrecognised.scopedOut} further construct(s) are SCOPED OUT by a stated criterion and are not counted here. `
+      + 'This is a verdict, not a finding: it never fails a run (#9747, ruling of 2026-08-18).',
+  );
+  for (const r of unrecognised.rows) {
+    console.log(`  unrecognised [${r.verb}]  ${r.file}:${r.line}  ${r.why}`);
+    console.log(`      ${r.text}`);
+  }
   console.log('');
 
   if (errors.length) {
@@ -1477,7 +2079,15 @@ function report() {
   const debt = baseline.entries.filter((e) => e.kind !== 'EXEMPT').length;
   console.log(
     `check-engine-double-contract: OK — ${totalPinned} pinned, ${debt} in the DEBT ledger, `
-      + `${exempt.length} exempt.\n`,
+      + `${exempt.length} exempt.`,
+  );
+  // Say that the pinned number is now RATCHETED, not merely printed. Before
+  // #9680 this line ended at "319 pinned" and that integer was the only trace a
+  // vanished double left; a reader had no way to tell a checked count from a
+  // reported one, which is what let 319 -> 318 read as success.
+  console.log(
+    `check-engine-double-contract: ${census.length} (file, verb) row(s) held by the RETAINED `
+      + `ledger — a pin that leaves names itself.\n`,
   );
 }
 
@@ -2224,6 +2834,196 @@ class Svc {
     + 'predicate discriminates rather than approving everything)',
     !ratchetRemedyCarriesAuthority(unmarkedOffer));
 
+
+  // ── RETAINED (#9680): the pinned population is enumerated, not counted ─────
+  //
+  // Driven through the two pure functions the invariant is built from, so all
+  // four loss worlds are exercised without creating and deleting real files.
+  // `onDisk` and the two censuses are injected for exactly that reason.
+  const LEDGER_OK = true;
+  const noDisk = () => false;
+  const onDisk = () => true;
+  const dcount = (pairs) => new Map(pairs.map(([f, v, n]) => [pairKey(f, v), n]));
+  const anyOf = (errs, needle) => errs.some((e) => e.includes(needle));
+
+  // The census reads PINNED doubles, the declared census reads ALL of them.
+  // Both directions, because conflating them is what made the first draft of
+  // this invariant tell a file whose member was deleted to "re-pin" it.
+  const mixedSlices = [{
+    slice: SLICES[0],
+    found: [{ file: 'a.test.ts', doubles: [{ pinned: true }, { pinned: false }] }],
+  }];
+  expect('censusPinned counts only the PINNED doubles',
+    censusPinned(mixedSlices).length === 1 && censusPinned(mixedSlices)[0].pinned === 1);
+  expect('declaredCounts counts pinned AND unpinned doubles',
+    declaredCounts(mixedSlices).get(pairKey('a.test.ts', 'delete')) === 2);
+  expect('censusPinned omits a file whose doubles are all unpinned',
+    censusPinned([{ slice: SLICES[0], found: [{ file: 'b.test.ts', doubles: [{ pinned: false }] }] }])
+      .length === 0);
+
+  // ── The four loss worlds, each separated from its neighbours.
+  expect('a file gone from disk classifies as file-removed',
+    classifyPinLoss({ onDisk: false, declared: 0, wasPinned: 1 }) === 'file-removed');
+  expect('a file on disk declaring no double classifies as double-removed',
+    classifyPinLoss({ onDisk: true, declared: 0, wasPinned: 1 }) === 'double-removed');
+  expect('fewer doubles declared than pinned classifies as members-removed',
+    classifyPinLoss({ onDisk: true, declared: 1, wasPinned: 2 }) === 'members-removed');
+  expect('every double still declared classifies as unpinned',
+    classifyPinLoss({ onDisk: true, declared: 2, wasPinned: 2 }) === 'unpinned');
+
+  // ── The clean direction: a ledger that matches the census reports nothing.
+  // Without this every assertion below could pass on a function that always
+  // errors, which is the guard-that-cannot-pass twin of #4118.
+  const cleanLedger = { entries: [{ file: 'a.test.ts', verb: 'delete', pinned: 1 }] };
+  const cleanCensus = [{ file: 'a.test.ts', verb: 'delete', pinned: 1 }];
+  expect('a ledger matching the census is silent',
+    retainedErrors(cleanCensus, cleanLedger, LEDGER_OK,
+      dcount([['a.test.ts', 'delete', 1]]), onDisk).length === 0);
+
+  // ── Each loss world reaches its OWN message, and never a neighbour's.
+  const lostFile = retainedErrors([], cleanLedger, LEDGER_OK, dcount([]), noDisk);
+  expect('a deleted test file is reported as a legitimate decrease',
+    lostFile.length === 1 && anyOf(lostFile, 'gone from disk')
+      && anyOf(lostFile, 'LEGITIMATE decrease'));
+
+  const lostDouble = retainedErrors([], cleanLedger, LEDGER_OK, dcount([]), onDisk);
+  expect('a dropped member on a live file is reported as the #9680 defect',
+    lostDouble.length === 1 && anyOf(lostDouble, 'declares NO engine double')
+      && anyOf(lostDouble, '#9680'));
+  expect('the dropped-member message does NOT read as a legitimate decrease',
+    !anyOf(lostDouble, 'gone from disk'));
+
+  const twoPinned = { entries: [{ file: 'a.test.ts', verb: 'delete', pinned: 2 }] };
+  const lostOne = retainedErrors([{ file: 'a.test.ts', verb: 'delete', pinned: 1 }], twoPinned,
+    LEDGER_OK, dcount([['a.test.ts', 'delete', 1]]), onDisk);
+  expect('one member deleted out of two pinned is reported as members-removed',
+    lostOne.length === 1 && anyOf(lostOne, 'down from the 2'));
+  expect('the members-removed message does not tell the author to re-pin',
+    !anyOf(lostOne, 'Re-pin it'));
+
+  const wentLoose = retainedErrors([], cleanLedger, LEDGER_OK,
+    dcount([['a.test.ts', 'delete', 1]]), onDisk);
+  expect('a double that went unguarded is reported as unpinned, not as absent',
+    wentLoose.length === 1 && anyOf(wentLoose, 'went UNGUARDED')
+      && !anyOf(wentLoose, 'declares NO engine double'));
+  expect('the unpinned message refuses the regeneration remedy',
+    anyOf(wentLoose, 'do NOT reach for'));
+
+  // ── The growth direction. Both spellings, because a new FILE and a new double
+  // in a known file arrive by different routes and only one was in the first draft.
+  const grewNew = retainedErrors([{ file: 'new.test.ts', verb: 'delete', pinned: 1 }],
+    { entries: [] }, LEDGER_OK, dcount([['new.test.ts', 'delete', 1]]), onDisk);
+  expect('a newly pinned file the ledger does not record is reported',
+    grewNew.length === 1 && anyOf(grewNew, 'does not record'));
+  expect('new coverage is not reported as anyone’s mistake',
+    anyOf(grewNew, 'nothing is wrong with your change'));
+
+  const grewMore = retainedErrors([{ file: 'a.test.ts', verb: 'delete', pinned: 2 }], cleanLedger,
+    LEDGER_OK, dcount([['a.test.ts', 'delete', 2]]), onDisk);
+  expect('a file that pins MORE than the ledger records is reported',
+    grewMore.length === 1 && anyOf(grewMore, 'Coverage grew'));
+
+  // ── Bootstrap: a missing ledger is ONE error, not one per row. The failure
+  // this guards is a fresh checkout reporting one problem per census row for a
+  // single missing file.
+  const missing = retainedErrors(
+    [{ file: 'a.test.ts', verb: 'delete', pinned: 1 }, { file: 'b.test.ts', verb: 'update', pinned: 1 }],
+    { entries: [] }, false, dcount([]), onDisk);
+  expect('a missing pinned ledger reports exactly one bootstrap error',
+    missing.length === 1 && anyOf(missing, 'is missing'));
+
+  // ── DECLARED's twin for this ledger: an entry naming a verb no slice scans
+  // can never lose its pin, so it would record coverage nothing checks.
+  const badVerb = retainedErrors([], { entries: [{ file: 'a.test.ts', verb: 'destroy', pinned: 1 }] },
+    LEDGER_OK, dcount([]), onDisk);
+  expect('a pinned-ledger entry naming an unscanned verb is rejected',
+    badVerb.length === 1 && anyOf(badVerb, 'no slice scans'));
+  expect('an unscanned-verb entry is not ALSO reported as a lost pin',
+    !anyOf(badVerb, 'gone from disk') && !anyOf(badVerb, 'declares NO engine double'));
+
+  // ── The reason this invariant exists, stated as an assertion: the pinned
+  // population must be enumerated. A ledger holding only a COUNT cannot express
+  // the swap that motivated #9680 -- one file loses a pin, another gains one --
+  // so the census rows carry identity, and this fails if they ever stop.
+  expect('census rows carry file identity, not just a total',
+    censusPinned(mixedSlices)[0].file === 'a.test.ts'
+      && typeof censusPinned(mixedSlices)[0].verb === 'string');
+  const swapBefore = { entries: [{ file: 'x.test.ts', verb: 'delete', pinned: 1 }] };
+  const swapAfter = [{ file: 'y.test.ts', verb: 'delete', pinned: 1 }];
+  const swap = retainedErrors(swapAfter, swapBefore, LEDGER_OK,
+    dcount([['y.test.ts', 'delete', 1]]), onDisk);
+  expect('a SWAP (one pin lost, one gained, total unchanged) is reported both ways',
+    swap.length === 2 && anyOf(swap, 'x.test.ts') && anyOf(swap, 'y.test.ts'));
+
+  // ── The UNRECOGNISED census (#9747) ────────────────────────────────────────
+  //
+  // Both directions on every limb, and the third direction this card exists for:
+  // a construct that is CORRECTLY out of scope must count as SCOPED OUT, never
+  // as unrecognised. #8662 is why -- a correct OUT_OF_SCOPE verdict that reads
+  // as noise discredits the whole direction on day one.
+  const D = SLICES.find((s) => s.verb === 'delete');
+  const censusFake = (deleteMember, header = '') => `${header}
+function makeEngine() {
+  return {
+    async find(o: string, opts?: any) { return []; },
+    async insert(o: string, data: any) { return data; },
+    ${deleteMember}
+  };
+}
+`;
+
+  let c = censusSource('c.test.ts', censusFake('async delete(o: string, opts?: any) { return true; },'), D);
+  expect('#9747 — a construct the gate CAN read is not in the census (it is in the population)',
+    c.unrecognised.length === 0 && c.scopedOut.length === 0);
+
+  c = censusSource('c.test.ts', censusFake('delete: overrides.delete ?? vi.fn(async (o: string, opts?: any) => true),'), D);
+  expect('#9747 — an initializer carrying a function the unwrap declined is UNRECOGNISED',
+    c.unrecognised.length === 1 && c.unrecognised[0].why.includes('declined to unwrap'));
+
+  c = censusSource('c.test.ts', censusFake('delete: del,',
+    'const del = async (o: string, opts?: any) => true;\n'), D);
+  expect('#9747 — an initializer rooting at a binding this file declares is UNRECOGNISED',
+    c.unrecognised.length === 1 && c.unrecognised[0].why.includes('`del`'));
+
+  // The shorthand limb is driven on the UPDATE slice, not delete: `{ delete }`
+  // is not valid shorthand (a reserved word), so the delete spelling could
+  // never occur in the tree and a fixture using it would assert nothing. Every
+  // shorthand row the real corpus carries is an `update`.
+  c = censusSource('c.test.ts', `
+const update = async (o: string, data: any, opts?: any) => data;
+const engine: any = { registry: {}, insert: async (o: string, d: any) => d, findOne: async (o: string) => null, update };
+`, SLICES.find((s) => s.verb === 'update'));
+  expect('#9747 — a shorthand member is UNRECOGNISED',
+    c.unrecognised.length === 1 && c.unrecognised[0].why.includes('shorthand'));
+
+  // ⛔ The H4 trap, pinned in both spellings: a bare mock and a mock returning a
+  // VALUE carry no implementation at all, so nothing about them could be looser
+  // than the producer. `unwrapCallImpl`'s own census argues this. They must be
+  // SCOPED OUT -- counting them would put 117 correct rows in the report today.
+  c = censusSource('c.test.ts', censusFake('delete: vi.fn(),'), D);
+  expect('#9747 — `vi.fn()` is SCOPED OUT, not unrecognised',
+    c.unrecognised.length === 0 && c.scopedOut.length === 1);
+
+  c = censusSource('c.test.ts', censusFake('delete: vi.fn().mockResolvedValue(true),'), D);
+  expect('#9747 — a mock returning a VALUE is SCOPED OUT, not unrecognised',
+    c.unrecognised.length === 0 && c.scopedOut.length === 1);
+
+  // The census reads the SAME structural evidence discovery does: a construct
+  // with fewer than two engine siblings was never this gate's business, and
+  // reporting it would be the noise the ruling's pilot is meant to avoid.
+  c = censusSource('c.test.ts', `const notAnEngine = { delete: del };\nconst del = async (o: string) => true;\n`, D);
+  expect('#9747 — a construct with fewer than two engine siblings is in NEITHER census bucket',
+    c.unrecognised.length === 0 && c.scopedOut.length === 0);
+
+  // ⛔ Visibility only: the census must not be able to move discovery. Same
+  // source, both walks -- the double count is what it was before this section
+  // existed. Without this limb "it only counts" is a claim, not a property.
+  const visSrc = censusFake('delete: del,', 'const del = async (o: string, opts?: any) => true;\n');
+  expect('#9747 — a construct in the UNRECOGNISED census is still absent from the population '
+    + '(the census cannot widen discovery)',
+    censusSource('c.test.ts', visSrc, D).unrecognised.length === 1
+      && scanSource('c.test.ts', visSrc, D).length === 0);
+
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\ncheck-engine-double-contract --self-test: ${failures.length} failure(s).\n`);
@@ -2244,9 +3044,15 @@ class Svc {
       + 'inline / const-bound / one-wrapper options forms, refuses to read a $in predicate as '
       + 'by-id, accepts a probe, a driver boolean and a one-method-hop helper as refusals alike, '
       + 'separates the shared envelope from a local mint, discounts a refusal that lands after '
-      + 'the receipt, and REPORTS the seam that answers without refusing at all.',
+      + 'the receipt, and REPORTS the seam that answers without refusing at all; and, on the '
+      + 'UNRECOGNISED CENSUS (#9747), counts a construct whose implementation exists but cannot '
+      + 'be reached (a defaulted mock, a local binding, a shorthand), SCOPES OUT the two '
+      + 'spellings that carry no implementation at all rather than reporting them as noise, '
+      + 'ignores constructs with too few engine siblings to be in scope, and cannot move one '
+      + 'double into or out of the population it counts.',
   );
 }
 
 if (process.argv.includes('--self-test')) selfTest();
+else if (process.argv.includes('--write')) writeLedger();
 else report();
