@@ -400,7 +400,12 @@ describe('#9941 runOrganizationAddMember — capability ordering on a degraded d
   });
 
   it('forwards userId/role/organizationId (accepting snake_case spellings) and the request headers to the vendor', async () => {
-    const addMember = vi.fn(async () => ({ id: 'mem_new', userId: 'usr_1', organizationId: 'org_1', role: 'member' }));
+    const addMember = vi.fn(async (_opts: { body: Record<string, unknown>; headers?: Headers }) => ({
+      id: 'mem_new',
+      userId: 'usr_1',
+      organizationId: 'org_1',
+      role: 'member',
+    }));
     const req = post({ user_id: 'usr_1', role: ['member'], organization_id: 'org_1' });
     const res = await runOrganizationAddMember({ getAuthApi: async () => ({ addMember }) }, req);
     expect(res.status).toBe(200);
