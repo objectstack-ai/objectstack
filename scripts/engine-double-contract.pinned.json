@@ -1102,6 +1102,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/revoke-session-match-guard.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/revoke-session-match-guard.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/session-of-record.test.ts",
       "verb": "delete",
       "pinned": 1
