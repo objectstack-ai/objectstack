@@ -188,7 +188,8 @@ Storage backend has moved out of `MetadataPlugin` and into the dedicated
 `IStorageService` contract (`@objectstack/spec/contracts/storage-service`).
 `@objectstack/service-storage` ships local-FS and S3 adapters; the cloud
 control plane (`packages/services/service-cloud/src/cloud-artifact-api-plugin.ts`)
-uses the kernel-registered `file-storage` service for content-addressable
+uses the kernel-registered storage service (slot `storage`; resolved there via
+the deprecated v17 alias `file-storage`, #9683) for content-addressable
 artifact persistence (`artifacts/${projectId}/${commitId}.json`).
 
 - [x] Object-storage abstraction available via `StorageServicePlugin`

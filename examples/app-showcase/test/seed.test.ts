@@ -184,11 +184,13 @@ describe('showcase stack', () => {
     // Four dataset-bound analytics reports: summary, chart, matrix, joined.
     expect((stack.reports ?? []).length).toBe(4);
     expect((stack.flows ?? []).length).toBeGreaterThan(0);
-    // Nine flat positions (contributor/manager/exec/auditor/ops/
-    // field_ops_delegate/client_portal_user, plus finance/legal for the v16
-    // approval sign-off flows) — the ADR-0090 distribution layer; `everyone`
-    // and `guest` are built-in anchors and never declared by the app.
-    expect((stack.positions ?? []).length).toBe(9);
+    // Ten flat positions (contributor/manager/exec/auditor/ops/
+    // field_ops_delegate/client_liaison/client_portal_user, plus finance/legal
+    // for the v16 approval sign-off flows) — the ADR-0090 distribution layer;
+    // `everyone` and `guest` are built-in anchors and never declared by the app.
+    // `client_liaison` arrived with the FLS read-mask fixture (#9308 fixture 4):
+    // it is the holder of the app's only `readable: false` grant.
+    expect((stack.positions ?? []).length).toBe(10);
     expect((stack.agents ?? []).length).toBe(0); // AI agents are an enterprise (service-ai) feature; the open showcase ships none
   });
 });

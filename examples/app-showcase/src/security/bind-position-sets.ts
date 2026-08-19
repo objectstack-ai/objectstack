@@ -43,6 +43,7 @@ export const POSITION_PERMISSION_SET_BINDINGS: ReadonlyArray<readonly [position:
   ['auditor', 'showcase_auditor'],
   ['ops', 'showcase_ops'],
   ['field_ops_delegate', 'showcase_field_ops_delegate'],
+  ['client_liaison', 'showcase_client_liaison'],
   ['client_portal_user', 'showcase_guest_portal'],
 ];
 

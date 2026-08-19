@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// check-runtime-services-index (#9604, #9630) -- hold the runtime-services
-// chapter's two INDEX lists to the pages that actually exist, and each page's
-// documented registry slot to a real `registerService` call.
+// check-runtime-services-index (#9604, #9630, #9684) -- hold the runtime-services
+// chapter's INDEX lists to the pages that actually exist, each page's documented
+// registry slot to a real `registerService` call, and every published stability
+// label to the page that declares it.
 //
 //   node scripts/check-runtime-services-index.mjs
 //   node scripts/check-runtime-services-index.mjs --self-test   # verify the checker itself
@@ -19,7 +20,9 @@
 //   3. `kernel/index.mdx`            -> the `services.*` table
 //
 // and each page additionally claims the registry slot it is resolved by (see
-// "The fourth claim" below).
+// "The fourth claim" below) and the stability label it ships under, which
+// `versioning.mdx`'s "Current Matrix" repeats for the whole chapter (see "The
+// fifth claim" below).
 //
 // None of the three is generated, so each drifts from the tree one edit at a
 // time, and nothing reads them: `check:docs-audit-scope` derives WHICH pages the
@@ -45,11 +48,11 @@
 //   * the chapter's own binding note tells the reader that no literal
 //     `services.*` object is injected and that plugin code goes through
 //     `ctx.getService(...)`;
-//   * the registered slot is `file-storage` (`storage-service-plugin.ts:237`),
-//     and NOTHING registers `storage`.
+//   * the registered slot was `file-storage` (`storage-service-plugin.ts`),
+//     and at the time NOTHING registered `storage`.
 //
 // Following both instructions together produced `ctx.getService('storage')`,
-// which throws `[Kernel] Service 'storage' not found`. Seven of the eight pages
+// which threw `[Kernel] Service 'storage' not found`. Seven of the eight pages
 // were fine only because their accessor and their slot happened to be the same
 // word, so the chapter had exactly one unannounced exception and no way to
 // notice a second one.
@@ -57,17 +60,50 @@
 // So each page now declares `- **Registry slot:** \`<key>\``, and this gate holds
 // that declaration to a production `registerService`/`registerServiceFactory`
 // call under `packages/`. Note what is deliberately NOT required: the slot does
-// not have to equal the accessor. `file-storage` is canonical -- it is the
-// `CoreServiceName` member, `CORE_SERVICE_PROVIDER` maps it, and the CLI, email
-// plugin and HTTP dispatcher all resolve it -- so a docs defect must never be
-// "fixed" by renaming the slot or adding a `registerService('storage', ...)`
-// alias. The rule is only: say which key you mean, and be right.
+// not have to equal the accessor -- the rule is only: say which key you mean,
+// and be right. (History: at #9630 time `file-storage` was the canonical slot
+// and this header warned against "fixing" the docs by renaming it; the
+// 2026-08-18 maintainer ruling on #9683 then renamed the slot deliberately --
+// `storage` is canonical, `file-storage` stays registered as a deprecated v17
+// alias of the same instance -- so today BOTH keys are really registered and
+// the storage page declares `storage`.)
 //
 // Test files are excluded from the sweep on purpose: a slot only a fixture
 // registers is not a platform surface a reader can resolve. The sweep is also
 // multiline-aware, because `plugin-audit` puts its key on the line after the
 // `(` -- a line-at-a-time grep reports a confident zero for it, and a wrongly
 // measured absence is precisely the failure this check exists to rule out.
+//
+// ## The fifth claim: the stability LABEL each surface publishes (#9684)
+//
+// Checks 1-4 hold page EXISTENCE and ORDER; check 5 holds the registry slot.
+// Nothing held the two tables that publish a page's STABILITY, and the same
+// class of drift landed a third time on this one chapter in a day:
+// `versioning.mdx`'s "Current Matrix" shipped SEVEN rows for EIGHT pages --
+// `services.sms` missing again, from a fifth enumeration of the same chapter,
+// found by a human re-reading it rather than by anything mechanical.
+//
+// So the matrix is now held to the pages on disk (membership and order, like
+// the chapter list), and both tables that repeat a label -- the matrix and the
+// `services.*` table in `kernel/index.mdx` -- are held to the page's own
+// `- **Stability:** \`<label>\`` bullet. The second half is the one with lasting
+// value: membership checking catches a MISSING row, but a row that lists the
+// page and contradicts its label is a live lie a reader plans an upgrade
+// against, and until now nothing could see it.
+//
+// The page is the source of truth for its own label, exactly as the pages on
+// disk are the source of truth for membership -- it is the thing a reader lands
+// on. So a disagreement is always reported against the TABLE, never the page,
+// and a page that declares no label at all is a finding: the tables that repeat
+// it cannot be checked without it.
+//
+// Deliberately NOT checked here: the label VOCABULARY. `stable` /
+// `experimental` are enumerated twice more (the "Stability Legend" table in
+// `index.mdx` and the "Stability Labels" bullets in `versioning.mdx`), and
+// nothing holds those two to each other or to the labels in use. Deriving a
+// vocabulary from one of them would make this gate the authority on which
+// labels exist -- a bigger claim than "the tables agree with the pages", and a
+// separate finding.
 //
 // ## What "derived" means here
 //
@@ -116,6 +152,7 @@ const KERNEL_INDEX = 'content/docs/kernel/index.mdx';
 const PACKAGES_DIR = 'packages';
 const PAGE_SUFFIX = '-service.mdx';
 const META_SUFFIX = '-service';
+const VERSIONING_FILE = 'versioning.mdx';
 
 /** Directories that never hold a production registration. */
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.turbo', '.next', 'coverage']);
@@ -134,8 +171,8 @@ const REGISTER_RE = /register(?:Service|ServiceFactory)\s*(?:<[^>]*>)?\s*\(\s*['
 // ---------------------------------------------------------------------------
 // Derivation
 
-/** Accessor names from the pages that exist, plus each page's declared title
- *  and its declared registry slot. */
+/** Accessor names from the pages that exist, plus each page's declared title,
+ *  its declared registry slot and its declared stability label. */
 export function readPages(chapterDir) {
   return readdirSync(chapterDir)
     .filter((f) => f.endsWith(PAGE_SUFFIX))
@@ -145,7 +182,8 @@ export function readPages(chapterDir) {
       const text = readFileSync(join(chapterDir, file), 'utf8');
       const m = /^title:\s*(.+?)\s*$/m.exec(text);
       const slot = /^-\s+\*\*Registry slot:\*\*\s+`([^`]+)`/m.exec(text);
-      return { name, file, title: m ? m[1] : null, slot: slot ? slot[1] : null };
+      const stability = /^-\s+\*\*Stability:\*\*\s+`([^`]+)`/m.exec(text);
+      return { name, file, title: m ? m[1] : null, slot: slot ? slot[1] : null, stability: stability ? stability[1] : null };
     });
 }
 
@@ -193,13 +231,31 @@ export function readKernelTable(kernelText) {
     .map((m) => ({ accessor: m[1], href: m[2] }));
 }
 
+// ONE shape covers BOTH tables that publish a stability label, because both
+// already write the accessor in the first cell and the label in the second:
+//
+//   versioning.mdx   | `services.data` | `stable` |
+//   kernel/index.mdx | [`services.data`](/docs/kernel/runtime-services/data-service) | stable | ... |
+//
+// It is anchored to `^|` on purpose. The chapter index's other lists are PROSE
+// -- `- \`services.sms\`` bullets and `- Security: \`packages/...\`` canonical-source
+// rows -- so none of them can be read as a stability claim. That is what keeps
+// the deliberately-unchecked Source-of-Truth list (and its extra `Security` row,
+// #9629) out of reach of this limb.
+const STABILITY_ROW_RE = /^\|\s*\[?`services\.([A-Za-z0-9_]+)`\]?(?:\([^)]*\))?\s*\|\s*`?([A-Za-z0-9_-]+)`?\s*\|/gm;
+
+/** Table rows that publish a stability label for an accessor, in table order. */
+export function readStabilityRows(text) {
+  return [...text.matchAll(STABILITY_ROW_RE)].map((m) => ({ accessor: m[1], stability: m[2] }));
+}
+
 // ---------------------------------------------------------------------------
 // Comparison
 
 const missing = (expected, actual) => expected.filter((n) => !actual.includes(n));
 const extra = (expected, actual) => actual.filter((n) => !expected.includes(n));
 
-export function check({ pages, metaOrder, chapterList, kernelTable, registeredSlots }) {
+export function check({ pages, metaOrder, chapterList, kernelTable, registeredSlots, stabilityMatrix, kernelStability }) {
   const findings = [];
   const add = (where, msg) => findings.push({ where, msg });
 
@@ -245,16 +301,15 @@ export function check({ pages, metaOrder, chapterList, kernelTable, registeredSl
   //    above hold page EXISTENCE and ORDER to each other; none of them reads a
   //    single line of `packages/`, so a page could document a slot nothing has
   //    ever registered and stay green -- which is exactly what shipped:
-  //    `services.storage` was resolvable only as `file-storage`, the accessor
-  //    and the slot differed on that one page alone, and the page never said
-  //    so. A reader following the chapter's own binding note wrote
-  //    `ctx.getService('storage')` and got a throw.
+  //    `services.storage` was resolvable only as `file-storage` at the time,
+  //    the accessor and the slot differed on that one page alone, and the page
+  //    never said so. A reader following the chapter's own binding note wrote
+  //    `ctx.getService('storage')` and got a throw. (#9683 later renamed the
+  //    slot to `storage` by maintainer ruling, keeping `file-storage` as a
+  //    deprecated v17 alias registration.)
   //
-  //    The accessor is NOT required to equal the slot -- `file-storage` is
-  //    canonical (`CoreServiceName`, `CORE_SERVICE_PROVIDER`, three internal
-  //    consumers) and renaming it to satisfy a docs page would be backwards.
-  //    What is required is that the page SAYS which one it is, and that what it
-  //    says is true.
+  //    The accessor is NOT required to equal the slot. What is required is
+  //    that the page SAYS which one it is, and that what it says is true.
   if (registeredSlots) {
     for (const p of pages) {
       if (!p.slot) {
@@ -272,14 +327,60 @@ export function check({ pages, metaOrder, chapterList, kernelTable, registeredSl
     }
   }
 
+  // 6. The "Current Matrix" in versioning.mdx <-> the pages on disk (#9684).
+  //    A FIFTH enumeration of the same chapter, and the third one to drift off
+  //    it in a day: seven rows for eight pages, `services.sms` missing again.
+  //    Order is held for the same reason check 3 holds the chapter list's --
+  //    the matrix follows meta.json's nav order today, and that convention is
+  //    the only thing that tells the next author WHERE a new row goes.
+  if (stabilityMatrix) {
+    const rows = stabilityMatrix.map((r) => r.accessor);
+    const where = `${CHAPTER_DIR}/${VERSIONING_FILE}`;
+    for (const n of missing(onDisk, rows)) add(where, `"Current Matrix" has no row for \`services.${n}\` (${n}${PAGE_SUFFIX} exists)`);
+    for (const n of extra(onDisk, rows)) add(where, `"Current Matrix" has a row for \`services.${n}\` but ${n}${PAGE_SUFFIX} does not exist`);
+    const navOrder = metaOrder.filter((n) => rows.includes(n));
+    const rowed = rows.filter((n) => metaOrder.includes(n));
+    if (navOrder.join() !== rowed.join()) {
+      add(where, `"Current Matrix" row order ${JSON.stringify(rowed)} does not follow meta.json "pages" order ${JSON.stringify(navOrder)}`);
+    }
+  }
+
+  // 7. Every published stability LABEL == the label its page declares (#9684).
+  //    Check 6 catches a MISSING row; this catches a WRONG one -- a table that
+  //    lists the page and contradicts it. That is the strictly more valuable
+  //    half: a reader plans an upgrade against a guarantee the page never made,
+  //    and membership checking passes it silently. The page is the source of
+  //    truth, so the finding is always reported against the TABLE.
+  const labelled = [
+    [`${CHAPTER_DIR}/${VERSIONING_FILE}`, '"Current Matrix"', stabilityMatrix],
+    [KERNEL_INDEX, '`services.*` table', kernelStability],
+  ].filter(([, , rows]) => rows);
+  if (labelled.length) {
+    for (const p of pages) {
+      if (!p.stability) {
+        add(`${CHAPTER_DIR}/${p.file}`, `no \`- **Stability:** \`<label>\`\` bullet -- the page is the source of truth for its own label, and the tables that repeat it cannot be checked without it`);
+      }
+    }
+    for (const [where, what, rows] of labelled) {
+      for (const r of rows) {
+        const page = pages.find((p) => p.name === r.accessor);
+        if (!page || !page.stability) continue; // membership / missing-bullet findings above already name it
+        if (page.stability !== r.stability) {
+          add(where, `${what} labels \`services.${r.accessor}\` \`${r.stability}\`, but ${page.file} declares \`${page.stability}\` -- fix the table, the page is the source of truth`);
+        }
+      }
+    }
+  }
+
   return findings;
 }
 
-export function summarise({ pages, chapterList, kernelTable, registeredSlots }) {
+export function summarise({ pages, chapterList, kernelTable, registeredSlots, stabilityMatrix }) {
   const slots = registeredSlots
     ? `, and ${pages.filter((p) => p.slot).length} declared registry slot(s) vs ${registeredSlots.size} registered key(s)`
     : '';
-  return `${pages.length} chapter page(s) vs meta.json "pages", ${chapterList.length} chapter-list bullet(s) and ${kernelTable.length} kernel/index.mdx table row(s)${slots}`;
+  const matrix = stabilityMatrix ? `, ${stabilityMatrix.length} stability-matrix row(s)` : '';
+  return `${pages.length} chapter page(s) vs meta.json "pages", ${chapterList.length} chapter-list bullet(s) and ${kernelTable.length} kernel/index.mdx table row(s)${matrix}${slots}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -289,10 +390,17 @@ function run(root) {
   const pages = readPages(chapterDir);
   const metaOrder = readMetaOrder(chapterDir);
   const chapterList = readChapterList(readFileSync(join(chapterDir, 'index.mdx'), 'utf8'));
-  const kernelTable = readKernelTable(readFileSync(join(root, KERNEL_INDEX), 'utf8'));
+  const kernelText = readFileSync(join(root, KERNEL_INDEX), 'utf8');
+  const kernelTable = readKernelTable(kernelText);
   const registeredSlots = readRegisteredSlots(root);
+  const versioningPath = join(chapterDir, VERSIONING_FILE);
   if (pages.length === 0) throw new Error(`no ${PAGE_SUFFIX} pages found under ${CHAPTER_DIR} -- refusing to report OK over an empty set`);
-  const input = { pages, metaOrder, chapterList, kernelTable, registeredSlots };
+  if (!existsSync(versioningPath)) {
+    throw new Error(`${CHAPTER_DIR}/${VERSIONING_FILE} not found -- its stability matrix is one of the enumerations this gate holds; refusing to report OK without it`);
+  }
+  const stabilityMatrix = readStabilityRows(readFileSync(versioningPath, 'utf8'));
+  const kernelStability = readStabilityRows(kernelText);
+  const input = { pages, metaOrder, chapterList, kernelTable, registeredSlots, stabilityMatrix, kernelStability };
   return { findings: check(input), summary: summarise(input) };
 }
 
@@ -310,10 +418,12 @@ function main() {
     console.error('  one) so all three enumerations agree; the chapter list follows meta.json "pages" order.');
     console.error('  A "Registry slot" finding is different: the page must name the key ctx.getService() really');
   console.error('  resolves it by. Fix the PAGE, never the slot -- the registered key is the contract (#9630).');
+    console.error('  A "Current Matrix" / stability finding is the other way round: the page\'s own Stability');
+    console.error('  bullet is the source of truth, so fix the TABLE that repeats it (#9684).');
   console.error('  The "Source of Truth" canonical-source list is deliberately not checked -- see the header.');
     process.exit(1);
   }
-  console.log(`✓ check-runtime-services-index: ${summary} -- all enumerations agree and every declared slot is really registered (Source-of-Truth list not in scope).`);
+  console.log(`✓ check-runtime-services-index: ${summary} -- all enumerations agree, every declared slot is really registered, and every published stability label matches its page (Source-of-Truth list not in scope).`);
 }
 
 // ---------------------------------------------------------------------------
@@ -352,16 +462,33 @@ function selfTest() {
     writeFileSync(join(dir, PACKAGES_DIR, 'svc/src/__tests__/fake.ts'), "ctx.registerService('testonly', {});");
 
     const slotFor = (n) => n;
-    const writeTree = ({ pages = names, meta = names, list = names, table = names, titleFor = (n) => `services.${n}`, hrefFor = (n) => `${n}-service`, slot = slotFor } = {}) => {
+    const writeTree = ({
+      pages = names, meta = names, list = names, table = names,
+      titleFor = (n) => `services.${n}`, hrefFor = (n) => `${n}-service`, slot = slotFor,
+      // #9684: the page bullet is the source of truth; each table repeats it.
+      // The table defaults READ the page's label, so a fixture only has to say
+      // where it wants them to disagree.
+      stability = () => 'stable',
+      matrix = names, matrixLabel = (n) => stability(n) ?? 'stable', kernelLabel = (n) => stability(n) ?? 'stable',
+      versioning = true,
+    } = {}) => {
       for (const f of readdirSync(chapter)) rmSync(join(chapter, f), { force: true });
       for (const n of pages) {
         const declared = slot(n);
         const bullet = declared === null ? '' : `\n- **Registry slot:** \`${declared}\` — resolve with \`ctx.getService('${declared}')\`.\n`;
-        writeFileSync(join(chapter, `${n}${PAGE_SUFFIX}`), `---\ntitle: ${titleFor(n)}\n---\n${bullet}`);
+        const label = stability(n);
+        const stabilityBullet = label === null ? '' : `\n- **Stability:** \`${label}\`\n`;
+        writeFileSync(join(chapter, `${n}${PAGE_SUFFIX}`), `---\ntitle: ${titleFor(n)}\n---\n${stabilityBullet}${bullet}`);
+      }
+      if (versioning) {
+        writeFileSync(
+          join(chapter, VERSIONING_FILE),
+          `---\ntitle: v\n---\n\n## Stability Labels\n\n- \`stable\`: x\n- \`experimental\`: y\n\n## Current Matrix\n\n| Service | Stability |\n|:--|:--|\n${matrix.map((n) => `| \`services.${n}\` | \`${matrixLabel(n)}\` |`).join('\n')}\n`,
+        );
       }
       writeFileSync(join(chapter, 'meta.json'), JSON.stringify({ pages: ['index', ...meta.map((n) => `${n}${META_SUFFIX}`), 'examples'] }));
       writeFileSync(join(chapter, 'index.mdx'), `# x\n\n${list.map((n) => `- \`services.${n}\``).join('\n')}\n\n## Source of Truth\n\n- Security: \`packages/spec/src/contracts/security-service.ts\`\n`);
-      writeFileSync(join(dir, KERNEL_INDEX), `# k\n\n${table.map((n) => `| [\`services.${n}\`](/docs/kernel/runtime-services/${hrefFor(n)}) | stable | d |`).join('\n')}\n`);
+      writeFileSync(join(dir, KERNEL_INDEX), `# k\n\n${table.map((n) => `| [\`services.${n}\`](/docs/kernel/runtime-services/${hrefFor(n)}) | ${kernelLabel(n)} | d |`).join('\n')}\n`);
     };
     const findingsFor = (opts) => { writeTree(opts); return run(dir).findings; };
 
@@ -417,7 +544,65 @@ function selfTest() {
       'a page with no Registry slot bullet is caught',
     );
 
+    // ── Check 6: the stability matrix vs the pages on disk (#9684) ─────────
+    // The defect itself: seven rows for eight pages.
+    const shortMatrix = findingsFor({ matrix: ['data', 'email'] });
+    assert(
+      shortMatrix.some((f) => f.where.endsWith(VERSIONING_FILE) && f.msg.includes('no row for `services.sms`')),
+      `the "Current Matrix" omitting a real page is caught -- got ${JSON.stringify(shortMatrix)}`,
+    );
+    assert(
+      findingsFor({ matrix: [...names, 'ghost'] }).some((f) => f.where.endsWith(VERSIONING_FILE) && f.msg.includes('`services.ghost`')),
+      'a matrix row for a page that does not exist is caught',
+    );
+    assert(
+      findingsFor({ matrix: ['data', 'sms', 'email'] }).some((f) => f.where.endsWith(VERSIONING_FILE) && f.msg.includes('does not follow meta.json')),
+      'a matrix in the wrong order is caught (membership alone would pass)',
+    );
+
+    // ── Check 7: a WRONG row, not just a missing one (#9684) ───────────────
+    // Membership checking passes both of these: the row is present and names a
+    // real page, it just contradicts the label that page declares.
+    const wrongMatrix = findingsFor({ matrixLabel: (n) => (n === 'sms' ? 'experimental' : 'stable') });
+    assert(
+      wrongMatrix.some((f) => f.where.endsWith(VERSIONING_FILE) && f.msg.includes('`experimental`') && f.msg.includes('declares `stable`')),
+      `a matrix row contradicting the page it describes is caught, naming both labels -- got ${JSON.stringify(wrongMatrix)}`,
+    );
+    const wrongKernel = findingsFor({ kernelLabel: (n) => (n === 'sms' ? 'experimental' : 'stable') });
+    assert(
+      wrongKernel.some((f) => f.where === KERNEL_INDEX && f.msg.includes('`services.sms`') && f.msg.includes('declares `stable`')),
+      `the kernel table publishing a label its page contradicts is caught too -- got ${JSON.stringify(wrongKernel)}`,
+    );
+    // A page whose label legitimately differs from its siblings is ACCEPTED --
+    // the rule is "the tables repeat what the page says", never "all pages match".
+    assert(
+      findingsFor({ stability: (n) => (n === 'sms' ? 'experimental' : 'stable') }).length === 0,
+      'a page whose label differs from its siblings is silent when both tables repeat it correctly',
+    );
+    // No bullet, nothing to check the tables against -- silence is not a pass.
+    assert(
+      findingsFor({ stability: (n) => (n === 'sms' ? null : 'stable') }).some((f) => f.where.endsWith(`sms${PAGE_SUFFIX}`) && f.msg.includes('**Stability:**')),
+      'a page with no Stability bullet is caught',
+    );
+
+    // ── #9629 stays the maintainer's call ──────────────────────────────────
+    // The chapter index's Source-of-Truth list carries a `Security` row for a
+    // service this chapter has no page for. It is PROSE, so no stability limb
+    // can see it -- pinned directly on the parser, and again on a failing tree.
+    assert(
+      readStabilityRows(readFileSync(join(chapter, 'index.mdx'), 'utf8')).length === 0,
+      'the chapter index\'s prose lists (incl. the Source-of-Truth `Security` row) are never read as stability rows',
+    );
+    assert(
+      shortMatrix.every((f) => !/[Ss]ecurity/.test(f.msg)),
+      'no finding drags the Source-of-Truth list\'s Security row in (#9629 is not decided here)',
+    );
+
     // ── Refuses to report OK over nothing ───────────────────────────────────
+    let threwVersioning = false;
+    try { findingsFor({ versioning: false }); } catch { threwVersioning = true; }
+    assert(threwVersioning, 'a chapter with no versioning.mdx is rejected, never reported OK over a matrix that is not there');
+
     let threw = false;
     try { findingsFor({ pages: [], meta: [], list: [], table: [] }); } catch { threw = true; }
     assert(threw, 'an EMPTY chapter is rejected, never reported OK');
@@ -430,7 +615,7 @@ function selfTest() {
     for (const f of failures) console.error(`  • ${f}`);
     process.exit(1);
   }
-  console.log(`✓ check-runtime-services-index --self-test: ${checked} assertions over a temp fixture (real run() path); every limb -- chapter list, kernel table, meta.json, order, href, title premise, registry slot (incl. the split-line registration), empty tree -- observed FAILING and observed silent.`);
+  console.log(`✓ check-runtime-services-index --self-test: ${checked} assertions over a temp fixture (real run() path); every limb -- chapter list, kernel table, meta.json, order, href, title premise, registry slot (incl. the split-line registration), stability matrix (missing row, stale row, order) and stability LABEL on both tables, empty tree, missing versioning.mdx -- observed FAILING and observed silent.`);
 }
 
 if (process.argv.includes('--self-test')) selfTest();

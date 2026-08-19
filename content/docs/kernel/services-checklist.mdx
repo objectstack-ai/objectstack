@@ -51,7 +51,7 @@ The ObjectStack protocol defines **15 kernel services** registered via the `Core
 │                    Plugin Layer                           │
 │  All other services: analytics, auth, automation,        │
 │  ui, realtime, notification, ai, i18n,                   │
-│  search, file-storage, cache, queue, job                 │
+│  search, storage, cache, queue, job                      │
 │                                                          │
 │  Discovery API reports availability per service          │
 │  (available / degraded / stub / unavailable) so          │
@@ -75,7 +75,7 @@ The ObjectStack protocol defines **15 kernel services** registered via the `Core
 | 8 | **notification** | `optional` | 7 | ❌ Plugin Required | `@objectstack/service-messaging` |
 | 9 | **ai** | `optional` | — | ❌ Nothing ships in this repo | `@objectstack/service-ai` (Cloud/EE — not installable, so the table entry is `null`) |
 | 10 | **i18n** | `core` | 3 | ✅ Built-in (in-memory fallback) | `@objectstack/service-i18n` |
-| 11 | **file-storage** | `optional` | — | ❌ Plugin Required | `@objectstack/service-storage` |
+| 11 | **storage** (deprecated v17 alias: `file-storage`, #9683) | `optional` | — | ❌ Plugin Required | `@objectstack/service-storage` |
 | 12 | **search** | `optional` | — | ❌ Nothing ships | — |
 | 13 | **cache** | `core` | — | ✅ Built-in (in-memory fallback) | `@objectstack/service-cache` |
 | 14 | **queue** | `core` | — | ✅ Built-in (in-memory fallback) | `@objectstack/service-queue` |
@@ -480,11 +480,11 @@ AppPlugin will:
 
 ## 11–15. Infrastructure Services
 
-`cache`, `queue`, and `job` are `core` services: like `i18n`, the kernel auto-injects an in-memory fallback when no plugin registers them (see `CORE_FALLBACK_FACTORIES` in `packages/core/src/fallbacks/`). The `optional` services (`file-storage`, `search`) stay disabled until a plugin provides them.
+`cache`, `queue`, and `job` are `core` services: like `i18n`, the kernel auto-injects an in-memory fallback when no plugin registers them (see `CORE_FALLBACK_FACTORIES` in `packages/core/src/fallbacks/`). The `optional` services (`storage`, `search`) stay disabled until a plugin provides them.
 
 | Service | Description |
 |:--------|:------------|
-| **file-storage** | Unified upload/download/delete via `@objectstack/service-storage`, which mounts `/api/v1/storage` itself. Adapters: local FS and S3 (the S3 adapter's `endpoint` + path-style options cover S3-compatible services such as MinIO and R2). |
+| **storage** (deprecated v17 alias: `file-storage`, #9683) | Unified upload/download/delete via `@objectstack/service-storage`, which mounts `/api/v1/storage` itself. Adapters: local FS and S3 (the S3 adapter's `endpoint` + path-style options cover S3-compatible services such as MinIO and R2). |
 | **search** | **Nothing ships.** `ISearchService` and the engine enum (`elasticsearch`, `meilisearch`, …) exist in `@objectstack/spec`, but no package implements the contract or registers the `search` slot, so `CORE_SERVICE_PROVIDER.search` is `null`. |
 | **cache** | General-purpose cache. In-memory fallback; memory or Redis adapter via `@objectstack/service-cache`. |
 | **queue** | Message queue. In-memory fallback; durable DB-backed adapter (`sys_job_queue`) via `@objectstack/service-queue` (no BullMQ/Redis adapter is shipped). |

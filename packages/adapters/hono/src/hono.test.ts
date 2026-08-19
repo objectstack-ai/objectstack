@@ -91,6 +91,7 @@ describe('createHonoApp', () => {
       const res = await app.request('/api');
       expect(res.status).toBe(200);
       const json = await res.json();
+      expect(json.success).toBe(true);
       expect(json.data).toBeDefined();
       expect(json.data.version).toBe('1.0');
       expect(mockDispatcher.getDiscoveryInfo).toHaveBeenCalledWith('/api');
@@ -100,6 +101,7 @@ describe('createHonoApp', () => {
       const res = await app.request('/api/discovery');
       expect(res.status).toBe(200);
       const json = await res.json();
+      expect(json.success).toBe(true);
       expect(json.data).toBeDefined();
       expect(mockDispatcher.getDiscoveryInfo).toHaveBeenCalledWith('/api');
     });
@@ -109,6 +111,7 @@ describe('createHonoApp', () => {
       const res = await customApp.request('/v2');
       expect(res.status).toBe(200);
       const json = await res.json();
+      expect(json.success).toBe(true);
       expect(json.data).toBeDefined();
       expect(mockDispatcher.getDiscoveryInfo).toHaveBeenCalledWith('/v2');
     });
@@ -118,6 +121,7 @@ describe('createHonoApp', () => {
       const res = await customApp.request('/v2/discovery');
       expect(res.status).toBe(200);
       const json = await res.json();
+      expect(json.success).toBe(true);
       expect(json.data).toBeDefined();
       expect(mockDispatcher.getDiscoveryInfo).toHaveBeenCalledWith('/v2');
     });
@@ -620,6 +624,7 @@ describe('createHonoApp', () => {
       const res = await outerApp.request('/api/v1');
       expect(res.status).toBe(200);
       const json = await res.json();
+      expect(json.success).toBe(true);
       expect(json.data).toBeDefined();
       expect(mockDispatcher.getDiscoveryInfo).toHaveBeenCalledWith('/api/v1');
     });
@@ -630,6 +635,7 @@ describe('createHonoApp', () => {
       const res = await outerApp.request('/api/v1/discovery');
       expect(res.status).toBe(200);
       const json = await res.json();
+      expect(json.success).toBe(true);
       expect(json.data).toBeDefined();
       expect(mockDispatcher.getDiscoveryInfo).toHaveBeenCalledWith('/api/v1');
     });

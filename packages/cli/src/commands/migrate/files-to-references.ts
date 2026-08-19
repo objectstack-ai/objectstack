@@ -194,7 +194,9 @@ export default class MigrateFilesToReferences extends Command {
       }
       const getStorage = () => {
         try {
-          return stack.kernel.getService('file-storage');
+          // Canonical slot since #9683 (service-storage also registers the
+          // deprecated `file-storage` alias with the same instance in v17).
+          return stack.kernel.getService('storage');
         } catch {
           return null;
         }

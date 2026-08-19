@@ -1132,7 +1132,9 @@ export class HttpDispatcher {
             this.resolveService(kernel, CoreServiceName.enum.auth),
             this.resolveService(kernel, CoreServiceName.enum.search),
             this.resolveService(kernel, CoreServiceName.enum.realtime),
-            this.resolveService(kernel, CoreServiceName.enum['file-storage']),
+            // Canonical slot since #9683; service-storage registers the
+            // deprecated `file-storage` alias as the same instance in v17.
+            this.resolveService(kernel, CoreServiceName.enum.storage),
             this.resolveService(kernel, CoreServiceName.enum.analytics),
             this.resolveService(kernel, CoreServiceName.enum.ai),
             this.resolveService(kernel, CoreServiceName.enum.notification),
@@ -1166,7 +1168,8 @@ export class HttpDispatcher {
         // Same predicate ⇒ same answer. #4000 did this for `analytics` alone;
         // #4058 extended it to the rest of the dispatcher-owned domains.
         //
-        // [#4087] `file-storage` is the one slot here whose surface is NOT a
+        // [#4087] `storage` (spelled `file-storage` before #9683) is the one
+        // slot here whose surface is NOT a
         // dispatcher domain any more — the `/storage` bridge was retired and
         // service-storage mounts `/api/v1/storage` itself. The predicate still
         // holds, for the same reason and one step removed: `handlerReady` is
@@ -1485,7 +1488,7 @@ export class HttpDispatcher {
                 // MEASURED: async export is driven by automation or by the
                 // queue — the same disjunction `getDiscovery()` uses.
                 export: { enabled: hasAutomation || hasQueue },
-                // MEASURED: chunked upload rides the file-storage surface, so
+                // MEASURED: chunked upload rides the storage surface, so
                 // it is exactly `files` on this host. Two vocabulary keys with
                 // one answer is a fact about the host (one storage surface
                 // serving both), not a copy-paste.
@@ -1616,7 +1619,14 @@ export class HttpDispatcher {
                 notification:   notificationRegistered ? svcAvailable(routes.notifications, undefined, notificationSvc) : svcUnavailable('notification'),
                 ai:             aiRegistered ? svcAvailable(routes.ai, undefined, aiSvc) : svcUnavailable('ai'),
                 i18n:           i18nRegistered ? svcAvailable(routes.i18n, undefined, i18nSvc) : svcUnavailable('i18n'),
-                'file-storage': filesRegistered ? svcAvailable(routes.storage, undefined, filesSvc) : svcUnavailable('file-storage'),
+                // Keyed by the canonical slot (#9683), and mirrored VERBATIM
+                // under the deprecated `file-storage` alias key below —
+                // existing consumers (objectui's console endpoint catalog)
+                // read that key off this document, so it stays until the
+                // alias retires at the next major. One slot, two spellings,
+                // byte-equal rows.
+                storage:        filesRegistered ? svcAvailable(routes.storage, undefined, filesSvc) : svcUnavailable('storage'),
+                'file-storage': filesRegistered ? svcAvailable(routes.storage, undefined, filesSvc) : svcUnavailable('storage'),
                 // [#7602] Presence-gated, and correctly so: this map reports
                 // what is REGISTERED, not what is served. The `route` argument
                 // is already `undefined` — no `/search` is advertised on the

@@ -107,6 +107,12 @@ const UNJUDGED_ROWS = matrix.entries.filter((e) => !e.object.startsWith('showcas
 const MARKER: Record<string, string> = {
   showcase_account: 'name',
   showcase_announcement: 'title',
+  // [#9308 fixture 2] The share-link object. It enters this sweep because the
+  // matrix gained a `showcase_client_liaison × showcase_client_brief` row, and
+  // the sweep is DERIVED from the matrix — a new granted object arrives here
+  // automatically, which is the design. Only the fixture maps grow; not one
+  // assertion below changes.
+  showcase_client_brief: 'title',
   showcase_contact: 'name',
   showcase_inquiry: 'name',
   showcase_invoice: 'name',
@@ -141,6 +147,11 @@ interface PayloadCtx {
 const PAYLOAD: Record<string, (c: PayloadCtx) => Record<string, unknown>> = {
   showcase_account: (c) => ({ name: c.mark, status: 'prospect' }),
   showcase_announcement: (c) => ({ title: c.mark }),
+  // `status` is left at its `draft` default on purpose: this sweep judges CRUD
+  // bits, and a brief that is not `published` cannot be mint-eligible for a
+  // share link — so a row this sweep leaves behind can never become an
+  // accidental share-link fixture for another file.
+  showcase_client_brief: (c) => ({ title: c.mark, project: c.projectId }),
   showcase_contact: (c) => ({ name: c.mark, email: `contact-${Date.now()}@probe.test` }),
   showcase_inquiry: (c) => ({ name: c.mark, email: `inq-${Date.now()}@probe.test`, message: 'matrix probe' }),
   showcase_invoice: (c) => ({ name: c.mark, account: c.accountId, status: 'draft', owner: c.email }),
@@ -425,8 +436,18 @@ describe('showcase: persona × CRUD-cell matrix (#9481)', () => {
     const deny = VERDICTS.filter((c) => c.expected === 'deny');
     // A matrix in which everything denies proves nothing about over-tightening,
     // and one in which everything allows proves nothing about enforcement.
-    expect(allow.length, 'the ALLOW half is what catches an over-tightening regression').toBe(50);
-    expect(deny.length, 'the DENY half is what catches a widening regression').toBe(50);
+    //
+    // These two are a CENSUS of the matrix, so they move whenever the matrix
+    // legitimately grows — and the arithmetic of each move belongs here, or the
+    // next author cannot tell a widened grant from a widened fixture.
+    // 50/50 → 54/54 with the two rows #9308 added, both on the new
+    // `showcase_client_liaison` set:
+    //   • × showcase_client_brief — create/read/edit allow, delete deny  (3/1)
+    //   • × showcase_project      — read allow; create/edit/delete deny  (1/3)
+    // No pre-existing cell changed side; `git diff` on access-matrix.json is
+    // the check that this is still true.
+    expect(allow.length, 'the ALLOW half is what catches an over-tightening regression').toBe(54);
+    expect(deny.length, 'the DENY half is what catches a widening regression').toBe(54);
 
     // Every set and every object of the business-object matrix was really driven.
     expect([...new Set(VERDICTS.map((c) => c.set))].sort()).toEqual(SETS);

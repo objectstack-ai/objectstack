@@ -49,7 +49,7 @@ plugins: [
     seedAdminUser: true,
     services: {
       dispatcher: false,     // Skip extended API routes
-      'file-storage': false, // Skip the storage service
+      storage: false,        // Skip the storage service ('file-storage' also accepted as its deprecated v17 alias)
     },
   }),
 ]
@@ -67,7 +67,7 @@ plugins: [
 | Hono Server | `@objectstack/plugin-hono-server` | HTTP server on configured port |
 | REST API | `@objectstack/rest` | Auto-generated CRUD + metadata endpoints |
 | Dispatcher | `@objectstack/runtime` | Auth routes, GraphQL, packages, storage bridges |
-| Storage | `@objectstack/service-storage` | `file-storage` service (local-disk adapter, files under `./storage`) |
+| Storage | `@objectstack/service-storage` | `storage` service (local-disk adapter, files under `./storage`; also registered under the deprecated `file-storage` alias) |
 | Realtime | `@objectstack/service-realtime` | `realtime` service (in-memory adapter) |
 | I18n | `@objectstack/service-i18n` | Auto-registered when the stack declares translations |
 

@@ -298,14 +298,14 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
   // dispatcher domain, now that those domains gate on `handlerReady` too.
   it('should not advertise routes for self-declared stubs in the other dispatcher-owned slots', async () => {
     const mockServices = new Map<string, any>();
-    for (const name of ['automation', 'notification', 'ai', 'i18n', 'file-storage']) {
+    for (const name of ['automation', 'notification', 'ai', 'i18n', 'storage']) {
       mockServices.set(name, { __serviceInfo: { status: 'stub', message: 'dev fake' } });
     }
 
     protocol = new ObjectStackProtocolImplementation(engine, () => mockServices);
     const discovery = await protocol.getDiscovery();
 
-    for (const name of ['automation', 'notification', 'ai', 'i18n', 'file-storage']) {
+    for (const name of ['automation', 'notification', 'ai', 'i18n', 'storage']) {
       expect(discovery.services[name].enabled, `${name}.enabled`).toBe(true);
       expect(discovery.services[name].status, `${name}.status`).toBe('stub');
       expect(discovery.services[name].handlerReady, `${name}.handlerReady`).toBe(false);
@@ -322,14 +322,14 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
   // them.
   it('should keep advertising routes for degraded implementations that really serve', async () => {
     const mockServices = new Map<string, any>();
-    mockServices.set('file-storage', { __serviceInfo: { status: 'degraded', message: 'in-memory' } });
+    mockServices.set('storage', { __serviceInfo: { status: 'degraded', message: 'in-memory' } });
     mockServices.set('i18n', { __serviceInfo: { status: 'degraded', message: 'in-memory' } });
 
     protocol = new ObjectStackProtocolImplementation(engine, () => mockServices);
     const discovery = await protocol.getDiscovery();
 
-    expect(discovery.services['file-storage'].status).toBe('degraded');
-    expect(discovery.services['file-storage'].handlerReady).toBe(true);
+    expect(discovery.services['storage'].status).toBe('degraded');
+    expect(discovery.services['storage'].handlerReady).toBe(true);
     expect(discovery.routes.storage).toBe('/api/v1/storage');
     expect(discovery.routes.i18n).toBe('/api/v1/i18n');
   });
@@ -396,17 +396,34 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
     }
   });
 
-  it('should map file-storage service to storage route', async () => {
+  it('should map the storage service slot to the storage route', async () => {
     const mockServices = new Map<string, any>();
-    mockServices.set('file-storage', {});
+    mockServices.set('storage', {});
     
     protocol = new ObjectStackProtocolImplementation(engine, () => mockServices);
     
     const discovery = await protocol.getDiscovery();
     
-    expect(discovery.services['file-storage'].enabled).toBe(true);
-    expect(discovery.services['file-storage'].status).toBe('available');
+    expect(discovery.services['storage'].enabled).toBe(true);
+    expect(discovery.services['storage'].status).toBe('available');
     expect(discovery.routes.storage).toBe('/api/v1/storage');
+  });
+
+  // [#9683] `file-storage` is the deprecated v17 alias of the `storage` slot.
+  // Existing discovery readers key on it, so both producers mirror the
+  // canonical row verbatim under the alias key until it retires at the next
+  // major — filled or empty alike.
+  it('mirrors the storage row verbatim under the deprecated file-storage alias key', async () => {
+    const filled = new Map<string, any>([['storage', {}]]);
+    protocol = new ObjectStackProtocolImplementation(engine, () => filled);
+    const withStorage = await protocol.getDiscovery();
+    expect(withStorage.services['file-storage']).toEqual(withStorage.services['storage']);
+    expect(withStorage.services['file-storage'].enabled).toBe(true);
+
+    protocol = new ObjectStackProtocolImplementation(engine, () => new Map());
+    const without = await protocol.getDiscovery();
+    expect(without.services['file-storage']).toEqual(without.services['storage']);
+    expect(without.services['file-storage'].enabled).toBe(false);
   });
 
   it('should use consistent /api/v1/ route prefix for all services', async () => {
@@ -491,7 +508,7 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
     const mockServices = new Map<string, any>();
     mockServices.set('automation', {});
     mockServices.set('search', {});
-    mockServices.set('file-storage', {});
+    mockServices.set('storage', {});
 
     protocol = new ObjectStackProtocolImplementation(engine, () => mockServices);
     const discovery = await protocol.getDiscovery();

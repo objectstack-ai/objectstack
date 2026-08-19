@@ -110,7 +110,7 @@ export interface StorageServicePluginOptions {
  * }));
  * await kernel.bootstrap();
  *
- * const storage = kernel.getService('file-storage');
+ * const storage = kernel.getService('storage');
  * await storage.upload('file.txt', Buffer.from('hello'));
  * ```
  */
@@ -119,8 +119,14 @@ export class StorageServicePlugin implements Plugin {
   /**
    * Services init() registers on every path (ADR-0116, #4131) — lets the
    * kernel name this plugin when a consumer requires one before it inits.
+   *
+   * `storage` is the canonical slot (maintainer ruling 2026-08-18, #9683);
+   * `file-storage` is its deprecated v17 alias, registered as the SAME
+   * instance so existing callers of either spelling resolve identically —
+   * the `http.server` / `http-server` pattern. The alias registration is
+   * dropped through the standard retirement flow at the next major.
    */
-  providesServices = ['file-storage'];
+  providesServices = ['storage', 'file-storage'];
   /**
    * init() registers sys_file / sys_upload_session / sys_attachment through
    * the `manifest` service ObjectQLPlugin provides — order-if-present so the
@@ -234,6 +240,8 @@ export class StorageServicePlugin implements Plugin {
       );
     });
 
+    ctx.registerService('storage', this.storage);
+    // Deprecated v17 alias — same instance under the old spelling (#9683).
     ctx.registerService('file-storage', this.storage);
     ctx.logger.info(
       `StorageServicePlugin: registered ${adapter} storage adapter (swappable, metrics=${this.metrics.constructor?.name ?? 'unknown'})`,
@@ -385,7 +393,7 @@ export class StorageServicePlugin implements Plugin {
         } else if (!httpServer) {
           ctx.logger.warn(
             'StorageServicePlugin: no HTTP server available — REST routes not registered. ' +
-              'File storage is still accessible programmatically via kernel.getService("file-storage").',
+              'File storage is still accessible programmatically via kernel.getService("storage").',
           );
         }
       }

@@ -16,7 +16,8 @@ import type {
  * inner adapter.
  *
  * Used by `StorageServicePlugin` so the kernel can register a stable
- * `file-storage` reference at init time, while the underlying adapter
+ * `storage` reference (plus its deprecated v17 `file-storage` alias, #9683)
+ * at init time, while the underlying adapter
  * (local FS / S3) is rebuilt on every `settings:changed` event for
  * the `storage` namespace.
  *

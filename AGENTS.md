@@ -300,6 +300,13 @@ every `update_pull_request` edit; the session-URL form survives both write paths
 this is unknown, and the guidance does not depend on the answer — do not spend a
 session establishing it. Comments are a different path and unaffected.
 
+**GitHub mutates body BYTES — spell poison-shaped tokens out in words, never literally.**
+Regex literals and script-tag-shaped tokens go in fenced code with the dangerous
+character spelled out, or are described in words (fences do NOT protect them); after
+writing any less-than fragment, read the body back and verify it survived. The two
+measured mutation shapes and their triggers live in pm-dispatch `references/platform-readings.md`.
+⛔ A body reading short only through the API is probably intact — check the rendered page before "repairing" it; a rewrite destroys a correct card.
+
 Even inside your own worktree, operate defensively:
 
 1. **Only touch the files your task needs.** Don't "fix" unrelated diffs, reverts, or
@@ -646,12 +653,14 @@ their output is current; the wrapper reports that each run rather than staying s
 
 ## Skills (`skills/`)
 
-Consult the matching `SKILL.md` when working in its domain: `objectstack-platform`, `objectstack-data`, `objectstack-query`, `objectstack-api`, `objectstack-ui`, `objectstack-automation`, `objectstack-ai`, `objectstack-i18n`, `objectstack-formula` (CEL).
+Two roots; **the filesystem is the catalog**. Consult the matching `SKILL.md` when
+working in its domain — browse the directory, never a hand-written list here (two
+such lists drifted stale as skills landed; a reader who trusts a list cannot see
+what it is missing):
 
-`skills/` is the **published** catalog (it ships to customer projects). Repo-internal
-agent playbooks live in `.claude/skills/` and must carry `metadata.internal: true`:
-`dogfood-verification` (boot and drive the real app in a browser) and
-`spec-property-retirement` (ADR-0049 enforce-or-remove — the full retirement kit).
+- `skills/` — the **published** catalog (it ships to customer projects).
+- `.claude/skills/` — repo-internal agent playbooks; every entry must carry
+  `metadata.internal: true`.
 
 ⛔ **Both roots are governed surfaces**: a PR touching either is human-merge only and may
 never be queued, armed or flipped out of draft — **Prime Directive #14**. No per-PR check
