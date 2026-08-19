@@ -72,9 +72,16 @@
  *   H3  `pm:queue` + `pm:dispatched` both present — reads as available to the
  *       queue view and in-flight to the lane view; neither is trustworthy
  *       (#5925 2026-08-09 correction, the measured specimen).
- *   H4  `pm:blocked` without a `Blocked-by:` body line — the machine half of
- *       the label is the body line; without it the unlock sweep can never
- *       return the card (state model, label discipline).
+ *   H4  `pm:blocked` with a `Blocked-by:` line in NEITHER channel — body nor
+ *       comment. The machine half of the label is that line; without it the
+ *       unlock sweep can never return the card (state model, label
+ *       discipline). It reads TWO channels because seats write two: the MCP
+ *       body-escaping hazard (#8813) makes a body rewrite the riskier write,
+ *       so the line is deliberately parked in a comment — 26 of 40 blocked
+ *       cards were body-clean at the 2026-08-19 census, and a body-only read
+ *       reported every one of them as having left the machine nothing. Either
+ *       channel discharges the duty; the finding names both so a reader knows
+ *       which one to fix (#8941, and the #9948 gauge-recalibration ruling).
  *   H5  `pm:seat` sticker whose title/assignee pair is out of sync — the
  *       seat-sticker protocol makes 标题、assignee、正文 a same-write triple:
  *       a title claiming 🟢 <login> must have that login as assignee; a title
@@ -171,6 +178,16 @@
  *       unblocker the selection order cannot see. Report-only, and pointedly
  *       so: the producer is the triage sweep's derivation pass, so the remedy
  *       is always a derivation that runs, never a label written from here.
+ *       The index it reads is the UNION of both channels (body ∪ comment),
+ *       for the same reason H4 reads both — and here the cost of reading one
+ *       was measured: #9465 and #9968 were reported stale while their
+ *       dependents (#9709/#9828 and #9969/#9652) stated the wait in comments.
+ *       That is the 「量具错位」 the 2026-08-19 ruling on #9948 named — 「修量
+ *       具而非追假 stale」 — and both shapes are regression pins now. The two
+ *       directions treat an INCOMPLETE index differently on purpose: stale is
+ *       a claim about absent evidence and is suspended when any gated comment
+ *       fetch failed, while missing is a claim about evidence in hand and
+ *       cannot be manufactured by reading more. See the predicate.
  *       Both directions were non-empty at the reading this item landed on
  *       (2026-08-19, 234 open cards, 17 `Blocked-by:` body lines): ONE stale
  *       card and FIVE missing ones, with not a single coherent pairing on the
@@ -488,10 +505,164 @@ export function h3QueueAndDispatched(issue) {
   return labels.includes('pm:queue') && labels.includes('pm:dispatched');
 }
 
-export function h4BlockedNoBlockedBy(issue) {
-  const labels = labelNames(issue);
-  if (!labels.includes('pm:blocked')) return false;
-  return !/^\s*Blocked-by:\s*\S/m.test(issue.body ?? '');
+// ---------------------------------------------------------------------------
+// The `Blocked-by:` COMMENT channel — read by H4 and by the H14 index alike.
+//
+// ## Stated boundary: no read-closure cut-off, because REST carries none
+//
+// The seat-post protocol's read-closure rule is 「只读晚于正文最后编辑时间的
+// 评论」 — comments NEWER than the body's last edit — on the stated ground that
+// 「两个时刻都是平台盖章的硬读数,比对即得」. One of those two stamps is not
+// available here. A comment's `created_at` is on every row, but an ISSUE's
+// body-edit time is on no REST payload at all: the issues API carries
+// `created_at`/`updated_at` only, body edit history lives behind GraphQL
+// `userContentEdits`, and this file is REST-only by a standing operational
+// note (the loop's hot path stays on the core quota). The issue timeline
+// endpoint does not record body edits either.
+//
+// So the cut-off is NOT implemented, rather than implemented against a proxy.
+// The one proxy in reach — `updated_at` — is worse than nothing: it bumps when
+// a comment is POSTED, so "newer than the body's last edit" would be false for
+// every comment ever written, and the fallback would read nothing while
+// looking like it read. A check that cannot fail is the shape this file exists
+// to catch, not to add.
+//
+// Reading the whole first page instead errs in ONE direction, and it is the
+// safe one. Extra evidence can only ADD `Blocked-by:` edges: it can clear an
+// H4 row (the duty really was discharged, in the other channel) and it can
+// clear an H14 stale row (something really is waiting), which is the
+// recalibration #9948 ruled for. What it cannot do is invent a card's silence.
+// The residual cost is a genuinely OBSOLETE comment edge — a line written, then
+// the body rewritten to drop the dependency — which needs the source card to
+// still be open, still labelled, and still body-clean; in that state the source
+// card is itself mis-stated, and surfacing its edge is not the worse error.
+// The seat rule's own rationale (「评论无界增长」, a token tax) does not bite
+// here either: the fetch is gated to a bounded candidate set and capped at one
+// page, the same trade H2, H16 and H17 make.
+// ---------------------------------------------------------------------------
+
+/**
+ * Is there a machine-readable `Blocked-by:` line in this text?
+ *
+ * H4's original presence test, extracted verbatim so the BODY channel's
+ * behaviour is byte-identical to what it always was, and so the COMMENT
+ * channel asks the same question of the same shape rather than a second,
+ * subtly different one.
+ *
+ * A presence test, deliberately, and NOT `blockedByTargets(...).length > 0`:
+ * the two readers of this line answer different questions and must keep
+ * doing so. H4 asks 「did the author leave the machine anything at all」 —
+ * `Blocked-by: TBD` and `Blocked-by: objectstack-ai/objectui#4356` both
+ * discharge the duty — while the index asks 「which LOCAL open card does this
+ * wait on」 and correctly extracts nothing from either. Collapsing them would
+ * make H4 fire on a card whose cross-repo blocker is stated perfectly well.
+ */
+export function hasBlockedByLine(text) {
+  return /^\s*Blocked-by:\s*\S/m.test(text ?? '');
+}
+
+/**
+ * Which cards are worth a `Blocked-by:` comment fetch.
+ *
+ * Exported for the same reason `h17NeedsComments` and `h16NeedsDetail` are: a
+ * policy that decides what gets READ AT ALL is where a silent hole would live,
+ * so it is pinned by the self-test rather than buried in the sweep loop.
+ *
+ * Gated on a CLEAN BODY first, then on state:
+ *
+ *   - `pm:blocked` — the population H4 judges, and the edge SOURCES the index
+ *     is missing (a seat parks the line in a comment; the body stays clean).
+ *   - `pm:blocking` — the population H14's stale direction judges. Their own
+ *     comments matter as index sources too: a `pm:blocking` card that is
+ *     itself waiting on another `pm:blocking` card contributes the very edge
+ *     that defends that other card from a stale verdict.
+ *
+ * A card whose body already carries the line is never fetched: its duty is
+ * discharged in the channel the machinery already reads, and the census bound
+ * this gate exists to honour (~2/3 of blocked cards are body-clean) is exactly
+ * the complement.
+ */
+export function needsBlockedByComments(issue) {
+  if (hasBlockedByLine(issue?.body)) return false;
+  const labels = labelNames(issue ?? {});
+  return labels.includes('pm:blocked') || labels.includes('pm:blocking');
+}
+
+/**
+ * Every `Blocked-by:` ref carried by a card's comments, in order.
+ *
+ * The comment channel read the way the INDEX reads it — `blockedByTargets`
+ * per comment body, this file's one parser for the line, so cross-repo and
+ * self-reference filtering downstream behave identically whichever channel a
+ * ref arrived in.
+ */
+export function commentBlockedByTargets(commentBodies) {
+  const out = [];
+  for (const body of commentBodies ?? []) out.push(...blockedByTargets(body));
+  return out;
+}
+
+/**
+ * H4 — null when clean, else the finding sentence.
+ *
+ * ## Two channels, one duty (#8941 / #10061)
+ *
+ * The label's machine half is a `Blocked-by:` line, and the reason it must
+ * exist is the unlock sweep: without one, nothing can ever return the card.
+ * But seats deliberately park that line in a COMMENT rather than the body —
+ * the MCP body-escaping hazard (#8813) makes a body rewrite the riskier
+ * write — and 26 of 40 blocked cards measured on 2026-08-19 were body-clean
+ * for exactly that reason. Reading the body alone reported every one of them
+ * as a card that had left the machine nothing, which is false: the duty was
+ * met, in the other channel. So a comment carrying the line CLEARS H4, and the
+ * finding sentence names both channels so a reader can tell which one to fix.
+ *
+ * ## Three input states, never two (#4690)
+ *
+ * `commentBodies` distinguishes them deliberately:
+ *
+ *   - `undefined` — the channel was not consulted (a caller reading bodies
+ *     only). The sentence claims nothing about comments, and this is exactly
+ *     the pre-#10061 reading, preserved rather than silently upgraded.
+ *   - `null` — consulted and UNREADABLE. The row still FIRES, because going
+ *     quiet here would make a transport failure shrink the patrol below where
+ *     it stood before the fallback existed; the sentence says the second
+ *     channel could not be read instead of asserting that it is empty.
+ *   - `string[]` — read. Both channels judged, for real.
+ *
+ * The unreadable case fires where H14's stale direction goes QUIET on the same
+ * failure, and the asymmetry is deliberate, not an inconsistency. H4's remedy
+ * is "add a line" — idempotent, cheap, and harmless if a comment already had
+ * one. H14-stale's remedy is "drop a label the selection order depends on" —
+ * destructive, and the measured false positive this whole fallback exists to
+ * end. An unreadable reading must surface on the cheap side and must never
+ * drive the expensive one.
+ */
+export function h4BlockedNoBlockedBy(issue, commentBodies) {
+  if (!labelNames(issue).includes('pm:blocked')) return null;
+  if (hasBlockedByLine(issue.body)) return null;
+  const remedy =
+    ' The unlock sweep greps this literal line, so without it in SOME channel nothing can ' +
+    'ever return this card to the queue — the block outlives its blocker in silence.';
+  if (commentBodies === undefined) {
+    return '`pm:blocked` without a `Blocked-by:` body line.' + remedy;
+  }
+  if (commentBodies === null) {
+    return (
+      '`pm:blocked` without a `Blocked-by:` body line, and this card\'s comment thread could ' +
+      'NOT be read this sweep — so the second channel (a `Blocked-by:` line parked in a comment, ' +
+      'which is how most blocked cards on this board state it) is unjudged, not empty. Read the ' +
+      'thread by hand before acting: an unreadable channel is not an absent one (#4690).' + remedy
+    );
+  }
+  if (commentBodies.some((body) => hasBlockedByLine(body))) return null;
+  return (
+    '`pm:blocked` with a `Blocked-by:` line in NEITHER channel — not in the body, and not in any ' +
+    'comment on the thread (both were read). Either channel discharges the duty: seats park the ' +
+    'line in a comment on purpose, because rewriting a body through the MCP escaping hazard ' +
+    '(#8813) is the riskier write. So this is not a formatting nit — no machine reader anywhere ' +
+    'knows what this card is waiting for.' + remedy
+  );
 }
 
 // H5 returns null (in sync), a string naming the desync, or undefined when the
@@ -1079,14 +1250,38 @@ export function blockedByTargets(body) {
  * @param {{ number: number, body?: string }[]} issues — OPEN issues only. The
  *   index's whole meaning is "open cards that are waiting", so the caller's
  *   listing is what bounds it; a closed dependent must not hold a label alive.
- * @param {{ repo?: string }} [options] — `owner/repo`, defaulting to the swept one.
+ * ## Two channels, UNIONED — never a priority order (#10061)
+ *
+ * `options.comments` supplies, per source card number, the comment bodies the
+ * sweep's gated fallback read. Refs found there are added to the refs found in
+ * the body; neither channel wins, because both are real. A card whose body
+ * says `Blocked-by: #A` and whose comment says `Blocked-by: #B` is waiting on
+ * BOTH, and a priority order would silently drop one of two live dependencies
+ * — the same class of loss as reading the body alone, just rarer.
+ *
+ * Dedup is per (target, source) as before, so a card naming one target in both
+ * channels is listed once. Cross-repo and self-reference filtering is applied
+ * to comment-borne refs identically: the ref is filtered by what it SAYS, and
+ * the channel it arrived in changes nothing about that.
+ *
+ * A source card absent from the map contributes its body only — which is every
+ * card the gate did not select, and is why the map is a bound on cost rather
+ * than a change of meaning.
+ *
+ * @param {{ repo?: string, comments?: Map<number, string[]> }} [options] —
+ *   `repo` is `owner/repo`, defaulting to the swept one.
  */
 export function buildBlockingIndex(issues, options = {}) {
   const ownerRepo = options.repo ?? OWNER_REPO;
   const bareRepo = ownerRepo.split('/').pop();
+  const comments = options.comments ?? null;
   const index = new Map();
   for (const issue of issues ?? []) {
-    for (const { repo, number } of blockedByTargets(issue.body)) {
+    const refs = [
+      ...blockedByTargets(issue.body),
+      ...commentBlockedByTargets(comments?.get?.(issue.number)),
+    ];
+    for (const { repo, number } of refs) {
       if (repo !== null && repo !== ownerRepo && repo !== bareRepo) continue;
       if (number === issue.number) continue;
       const deps = index.get(number) ?? [];
@@ -1110,15 +1305,42 @@ export const BLOCKING_DEPENDENT_LIST_CAP = 5;
 /**
  * H14 — null when the cache agrees with the index, else the finding sentence.
  *
+ * ## The two directions do NOT owe the index the same completeness (#10061)
+ *
+ * They make opposite claims, so an INCOMPLETE index endangers exactly one:
+ *
+ *   - STALE ("nothing targets it") is a claim about ABSENT evidence. Every
+ *     edge the sweep failed to read is a card that might be pointing at this
+ *     one, so an index with any unread source cannot support the claim at all.
+ *     `options.indexComplete === false` therefore silences this direction —
+ *     unreadable evidence is not absent evidence (#4690), and the remedy this
+ *     row prescribes (drop a label the selection order ranks second only to
+ *     `priority:p0`) is destructive enough that a guess is worse than silence.
+ *     The summary line's `comment fallback read on X of Y` is what states the
+ *     gap, exactly as H16's and H17's `read X of Y` do for theirs.
+ *   - MISSING ("targeted, but the label never landed") is a claim about
+ *     evidence IN HAND. Reading more sources can only ADD edges, never remove
+ *     one, so an incomplete index cannot manufacture this row. It stays live
+ *     regardless — going quiet there would trade a real finding for nothing.
+ *
+ * This is the recalibration #9948 ruled for on 2026-08-19 (「修量具而非追假
+ * stale」): the measured false stales #9465 and #9968 were both cards whose
+ * dependents state the wait in a COMMENT, and both are pinned in the self-test.
+ *
  * @param {object} issue — an OPEN issue.
  * @param {Map<number, number[]>} index — from `buildBlockingIndex`.
+ * @param {{ indexComplete?: boolean }} [options] — `false` when any gated
+ *   comment fetch failed, i.e. the index is known to be missing edges.
  */
-export function h14BlockingCacheIncoherent(issue, index) {
+export function h14BlockingCacheIncoherent(issue, index, options = {}) {
   const carries = labelNames(issue).includes('pm:blocking');
   const dependents = index?.get?.(issue.number) ?? [];
+  const indexComplete = options.indexComplete ?? true;
   if (carries && dependents.length === 0) {
+    if (!indexComplete) return null;
     return (
-      '`pm:blocking` carried while NO open card\'s `Blocked-by:` body line targets it — a stale ' +
+      '`pm:blocking` carried while NO open card\'s `Blocked-by:` line — body OR comment — targets ' +
+      'it, judged against the full two-channel index — a stale ' +
       'derived cache. The label is not a state a seat sets: the triage sweep derives it from the ' +
       '`Blocked-by:` reverse index, and the lane selection order ranks it second only to ' +
       '`priority:p0`. So a stale one is worse than an absent one — it boosts a card nothing depends ' +
@@ -1132,7 +1354,8 @@ export function h14BlockingCacheIncoherent(issue, index) {
     const named = shown.map((n) => `#${n}`).join(', ');
     const more = dependents.length > shown.length ? ` +${dependents.length - shown.length} more` : '';
     return (
-      `targeted by ${dependents.length} open card(s)' \`Blocked-by:\` body line (${named}${more}) but ` +
+      `targeted by ${dependents.length} open card(s)' \`Blocked-by:\` line, body or comment ` +
+      `(${named}${more}), but ` +
       'NOT carrying `pm:blocking` — a real unblocker the selection order cannot see. The label is ' +
       'the derived cache that makes a card outrank everything but `priority:p0`; without it this ' +
       'card competes on age alone while the cards waiting on it cannot start. Report-only: the ' +
@@ -1762,7 +1985,9 @@ export function isLoudFinding(message) {
  * without them still renders a sentence, never the string `undefined`.
  *
  * @param {{ repo: string, issues: number, unscoped: number, prs: number,
- *   merged: number, conflictProbed?: number, conflictCandidates?: number }} counts
+ *   merged: number, conflictProbed?: number, conflictCandidates?: number,
+ *   holdProbed?: number, holdCandidates?: number, fallbackProbed?: number,
+ *   fallbackCandidates?: number }} counts
  * @param {number} findingCount
  */
 export function summaryLine(counts, findingCount) {
@@ -1770,12 +1995,21 @@ export function summaryLine(counts, findingCount) {
   const candidates = counts.conflictCandidates ?? 0;
   const held = counts.holdProbed ?? 0;
   const holdCandidates = counts.holdCandidates ?? 0;
+  // The third `read X of Y` pair, and the one with a consequence the other two
+  // do not have: a shortfall here does not merely leave rows out, it SILENCES
+  // H14's stale direction (see the predicate). A reader seeing a quiet stale
+  // section needs this number to tell "the cache is coherent" from "the sweep
+  // declined to judge it".
+  const fbProbed = counts.fallbackProbed ?? 0;
+  const fbCandidates = counts.fallbackCandidates ?? 0;
   return (
     `check-half-states: swept ${counts.issues} open pm-/p0-labeled issue(s), ${counts.unscoped} open ` +
     `issue(s) in the unscoped pass (H13–H15), ${counts.prs} open PR(s) ` +
     `(merge state read on ${probed} of ${candidates} H16 candidate(s)) ` +
     `and ${counts.merged} recently-merged PR(s) in ${counts.repo} — ${findingCount} half-state(s) found. ` +
     `Hold comments read on ${held} of ${holdCandidates} H17 candidate(s). ` +
+    `\`Blocked-by:\` comment fallback read on ${fbProbed} of ${fbCandidates} candidate(s)` +
+    `${fbProbed < fbCandidates ? " — H14's stale direction is SUSPENDED for this sweep (the index is known incomplete)" : ''}. ` +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -2543,7 +2777,12 @@ async function sweep(options = {}) {
   const seenUnscoped = new Map();
   // H16's per-row fetch is the one input that can fail partially, so its
   // tally rides out of the sweep and into the summary line (see `summaryLine`).
-  const stats = { conflictCandidates: 0, conflictProbed: 0 };
+  const stats = {
+    conflictCandidates: 0,
+    conflictProbed: 0,
+    fallbackCandidates: 0,
+    fallbackProbed: 0,
+  };
   // H17's gathering rides out of the sweep the same way, because it has the
   // same per-row failure mode as H16's detail pass and therefore owes the
   // summary line the same `read X of Y`.
@@ -2566,6 +2805,8 @@ async function sweep(options = {}) {
     conflictProbed: stats.conflictProbed,
     holdCandidates: hold.candidates,
     holdProbed: hold.probed,
+    fallbackCandidates: stats.fallbackCandidates,
+    fallbackProbed: stats.fallbackProbed,
   };
   // The oracle is read ONCE per sweep, after gathering: it is a local
   // `git ls-files`, not a request, and every candidate token is checked
@@ -2653,6 +2894,30 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, stat
   };
   let lastHoldError = null;
 
+  // The `Blocked-by:` comment fallback (#8941 / #10061). Same shared cache, so
+  // a card that is `pm:blocked` AND assigned AND on hold still costs ONE fetch
+  // across H2, H17 and this. `comments` holds what was read; `unreadable` holds
+  // the cards whose fetch failed — the two are kept apart on purpose, because
+  // "read, and it carries nothing" and "could not be read" are the pair this
+  // whole item exists to stop conflating.
+  const fallback = { comments: new Map(), unreadable: new Set() };
+  let lastFallbackError = null;
+  const gatherBlockedByComments = async (issue) => {
+    if (fallback.comments.has(issue.number) || fallback.unreadable.has(issue.number)) return;
+    stats.fallbackCandidates = (stats.fallbackCandidates ?? 0) + 1;
+    try {
+      const bodies = await commentsFor(issue);
+      stats.fallbackProbed = (stats.fallbackProbed ?? 0) + 1;
+      fallback.comments.set(issue.number, bodies);
+    } catch (err) {
+      lastFallbackError = err;
+      fallback.unreadable.add(issue.number);
+    }
+  };
+  /** What H4 gets for a card: `undefined` unconsulted, `null` unreadable, else the bodies. */
+  const fallbackFor = (issue) =>
+    fallback.unreadable.has(issue.number) ? null : fallback.comments.get(issue.number);
+
   for (const issue of seen.values()) {
     const labels = labelNames(issue);
     if (h1DispatchedNoAssignee(issue)) {
@@ -2661,9 +2926,14 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, stat
     if (h3QueueAndDispatched(issue)) {
       findings.push([issue, 'H3', '`pm:queue` and `pm:dispatched` both present']);
     }
-    if (h4BlockedNoBlockedBy(issue)) {
-      findings.push([issue, 'H4', '`pm:blocked` without a `Blocked-by:` body line']);
-    }
+    // H4 — judged across BOTH channels. The fetch is gated by
+    // `needsBlockedByComments`, so it costs a request only for the body-clean
+    // cards whose verdict it can actually change (~2/3 of the blocked
+    // population by the 2026-08-19 census); a card whose body already carries
+    // the line is answered without touching the network, exactly as before.
+    if (needsBlockedByComments(issue)) await gatherBlockedByComments(issue);
+    const unblockedByNothing = h4BlockedNoBlockedBy(issue, fallbackFor(issue));
+    if (unblockedByNothing) findings.push([issue, 'H4', unblockedByNothing]);
     const restartless = h9OnHoldNoRestartWhen(issue);
     if (restartless) findings.push([issue, 'H9', restartless]);
     const staleP0 = h10StaleUnclaimedP0(issue);
@@ -2798,9 +3068,29 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, stat
   // cards of any label at all (so they can miss the evidence). No extra fetch:
   // the bodies are already in hand, which is exactly the "derived from the same
   // body reads the sweep already performs" this pair was specified as.
-  const blockingIndex = buildBlockingIndex(unscoped);
+  //
+  // …with ONE fetching pass in front of it, and it has to be here rather than
+  // in the label loop above: `pm:blocking` is not one of the labels that loop
+  // lists, so those cards are first visible in this listing. The gate is the
+  // same one H4 used, the cache is the same, and a card already gathered above
+  // is a no-op — so the union of the two passes is still at most one request
+  // per card.
   for (const issue of unscoped) {
-    const incoherent = h14BlockingCacheIncoherent(issue, blockingIndex);
+    if (needsBlockedByComments(issue)) await gatherBlockedByComments(issue);
+  }
+  // Total failure is the transport, not a board where no card parks the line
+  // in a comment — the same #4690 judgement H16 and H17 make, and the same
+  // predicate, deliberately shared rather than re-derived. A PARTIAL shortfall
+  // is a bounded gap: it stays, and it costs H14's stale direction (below)
+  // plus a summary-line clause, rather than the sweep.
+  if (h16DetailPassUnreadable(stats.fallbackCandidates, stats.fallbackProbed)) {
+    throw lastFallbackError;
+  }
+
+  const blockingIndex = buildBlockingIndex(unscoped, { comments: fallback.comments });
+  const indexComplete = fallback.unreadable.size === 0;
+  for (const issue of unscoped) {
+    const incoherent = h14BlockingCacheIncoherent(issue, blockingIndex, { indexComplete });
     if (incoherent) findings.push([issue, 'H14', incoherent]);
   }
 
@@ -2839,9 +3129,59 @@ function selfTest() {
   t('H2: blockquoted prose containing claim -> still a finding', h2AssigneeNoClaimComment(issue(['pm:dispatched'], ['os-help']), ['> the next seat should claim: only after the ruling lands']), true);
   t('H3: both queue labels -> finding', h3QueueAndDispatched(issue(['pm:queue', 'pm:dispatched'])), true);
   t('H3: dispatched alone -> clean', h3QueueAndDispatched(issue(['pm:dispatched'])), false);
-  t('H4: blocked without body line -> finding', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting on upstream')), true);
-  t('H4: blocked with Blocked-by line -> clean', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'Blocked-by: #123')), false);
-  t('H4: unblocked card is out of scope', h4BlockedNoBlockedBy(issue([], [], '')), false);
+  // H4 — the label gate and the BODY channel, unchanged by the two-channel
+  // read: a caller that does not consult comments gets the reading it always
+  // got, and the sentence it gets claims nothing about a channel nobody read.
+  t('H4: blocked without body line -> finding', typeof h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting on upstream')), 'string');
+  t('H4: blocked with Blocked-by line -> clean', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'Blocked-by: #123')), null);
+  t('H4: unblocked card is out of scope', h4BlockedNoBlockedBy(issue([], [], '')), null);
+  t('H4: …and an unconsulted comment channel is not claimed as empty', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting on upstream')).includes('NEITHER channel'), false);
+  t('H4: the body-only sentence still names the unlock sweep as the stake', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting on upstream')).includes('unlock sweep greps'), true);
+
+  // H4 — the COMMENT channel (#8941 / #10061). Four shapes, positive and
+  // negative, plus the unreadable one that is neither.
+  t('H4: body clean but a comment carries the line -> clean', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting on upstream'), ['triage note', 'Blocked-by: #9465']), null);
+  t('H4: body line AND a comment line (the union shape) -> clean', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'Blocked-by: #123'), ['Blocked-by: #9465']), null);
+  t('H4: neither channel -> finding', typeof h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting on upstream'), ['triage note', 'graded p2']), 'string');
+  t('H4: …and the sentence names BOTH channels', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), ['nothing here']).includes('NEITHER channel'), true);
+  t('H4: …and says a comment discharges the duty too', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), ['nothing here']).includes('Either channel discharges'), true);
+  t('H4: an empty comment thread is a real reading, not an unconsulted one', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), []).includes('NEITHER channel'), true);
+  // Unreadable is neither of the two: the row FIRES (a transport failure must
+  // not shrink the patrol below its pre-fallback reach) and says why.
+  t('H4: an UNREADABLE comment thread still fires', typeof h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), null), 'string');
+  t('H4: …but never claims the second channel is empty', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), null).includes('NEITHER channel'), false);
+  t('H4: …and says the thread could not be read', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), null).includes('could'), true);
+  t('H4: …citing the unreadable-is-not-absent rule', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), null).includes('#4690'), true);
+  // A comment line clears H4 whatever the ref says: H4's question is "did the
+  // author leave the machine anything", which a cross-repo blocker answers.
+  t('H4: a cross-repo comment line still discharges the duty', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), ['Blocked-by: objectstack-ai/objectui#4356']), null);
+  t('H4: a valueless comment line does NOT (nothing follows the key)', typeof h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), ['Blocked-by:']), 'string');
+  t('H4: a mid-sentence mention in a comment is not a line', typeof h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), ['seats park the Blocked-by: #1 line in comments']), 'string');
+  t('H4: the label gate outranks the comment channel', h4BlockedNoBlockedBy(issue(['pm:queue'], [], 'waiting'), ['nothing']), null);
+
+  // The real measured comment, byte-for-byte from #9828's triage backfill —
+  // the shape the fallback exists to read (a `Blocked-by:` line on its own,
+  // wrapped in ordinary prose above and below).
+  const liveBackfillComment =
+    'Triage backfill (machine-readable index line; the prose "Unblock when: epic #9465 completes" ' +
+    'was invisible to the unlock scan\'s grep):\n\nBlocked-by: #9465\n\nNo state change — the epic ' +
+    'is still open (4/5 sub-issues done); this line only makes the existing wait scannable.';
+  t('H4: the measured #9828 backfill comment clears the card', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'body carries no line'), [liveBackfillComment]), null);
+
+  // The gathering policy — what gets READ AT ALL.
+  t('gate: a body-clean pm:blocked card is a candidate', needsBlockedByComments(issue(['pm:blocked'], [], 'no line here')), true);
+  t('gate: a body-clean pm:blocking card is a candidate', needsBlockedByComments(issue(['pm:blocking'], [], 'no line here')), true);
+  t('gate: a pm:blocked card whose body already carries the line is NOT', needsBlockedByComments(issue(['pm:blocked'], [], 'Blocked-by: #1')), false);
+  t('gate: a pm:blocking card whose body already carries the line is NOT', needsBlockedByComments(issue(['pm:blocking'], [], 'Blocked-by: #1')), false);
+  t('gate: an ordinary queued card buys no fetch', needsBlockedByComments(issue(['pm:queue'], [], 'no line here')), false);
+  t('gate: an on-hold card buys no fetch from THIS item', needsBlockedByComments(issue(['pm:on-hold'], [], 'no line here')), false);
+  t('gate: a missing issue does not crash', needsBlockedByComments(undefined), false);
+
+  // The comment-side ref extractor — the index's reader of the same channel.
+  t('commentBlockedByTargets: one line across two comments', commentBlockedByTargets(['prose', 'Blocked-by: #7']).map((r) => r.number).join(','), '7');
+  t('commentBlockedByTargets: refs from several comments accumulate', commentBlockedByTargets(['Blocked-by: #7', 'Blocked-by: #8']).map((r) => r.number).join(','), '7,8');
+  t('commentBlockedByTargets: no comments at all', commentBlockedByTargets(undefined).length, 0);
+  t('commentBlockedByTargets: a cross-repo ref keeps its qualifier for filtering', commentBlockedByTargets(['Blocked-by: objectstack-ai/objectui#4356'])[0].repo, 'objectstack-ai/objectui');
   t('H5: 🟢 login matching assignee -> clean', h5SeatStickerDesync(issue(['pm:seat'], ['os-zhuang'], '', '[PM seat] domain:devx — 🟢 os-zhuang')), null);
   t('H5: 🟢 login without assignee -> finding', typeof h5SeatStickerDesync(issue(['pm:seat'], [], '', '[PM seat] domain:devx — 🟢 os-zhuang')), 'string');
   t('H5: ⏳ vacant with assignee -> finding', typeof h5SeatStickerDesync(issue(['pm:seat'], ['os-help'], '', '[PM seat] domain:cli — ⏳ vacant')), 'string');
@@ -3289,6 +3629,20 @@ function selfTest() {
   t('index: an empty listing is an empty index', idx([]).size, 0);
   t('index: a missing listing does not crash', buildBlockingIndex(undefined).size, 0);
 
+  // The comment channel in the index — a UNION with the body, never a priority
+  // order (#10061).
+  const idxc = (issues, comments) =>
+    buildBlockingIndex(issues, { repo: 'objectstack-ai/objectstack', comments: new Map(comments) });
+  t('index: a comment-only edge is a real edge', idxc([carded(9828, ['pm:blocked'], 'body has no line')], [[9828, ['Blocked-by: #9465']]]).get(9465).join(','), '9828');
+  t('index: body and comment edges UNION rather than override', idxc([carded(10, [], 'Blocked-by: #5')], [[10, ['Blocked-by: #6']]]).get(5).join(',') + '|' + idxc([carded(10, [], 'Blocked-by: #5')], [[10, ['Blocked-by: #6']]]).get(6).join(','), '10|10');
+  t('index: the same target in both channels is listed once', idxc([carded(10, [], 'Blocked-by: #5')], [[10, ['Blocked-by: #5']]]).get(5).join(','), '10');
+  t('index: two comments naming two targets both land', [...idxc([carded(10, [], '')], [[10, ['Blocked-by: #5', 'Blocked-by: #6']]]).keys()].sort((a, b) => a - b).join(','), '5,6');
+  t('index: a cross-repo ref in a COMMENT is dropped like a body one', idxc([carded(7917, [], '')], [[7917, ['Blocked-by: objectstack-ai/objectui#4356']]]).has(4356), false);
+  t('index: a self-reference in a COMMENT is dropped too', idxc([carded(5, [], '')], [[5, ['Blocked-by: #5']]]).has(5), false);
+  t('index: comments for a card not in the listing contribute nothing', idxc([carded(10, [], '')], [[99, ['Blocked-by: #5']]]).size, 0);
+  t('index: an absent comments map leaves the body reading untouched', buildBlockingIndex([carded(10, [], 'Blocked-by: #5')], { repo: 'objectstack-ai/objectstack' }).get(5).join(','), '10');
+  t('index: an empty comment list for a card is harmless', idxc([carded(10, [], 'Blocked-by: #5')], [[10, []]]).get(5).join(','), '10');
+
   // Direction A — the label carried with nothing targeting it.
   t('H14-A: pm:blocking with nothing targeting it -> finding', typeof h14BlockingCacheIncoherent(carded(7276, ['pm:queue', 'pm:blocking']), idx([])), 'string');
   t('H14-A: …and it names the stale-cache reading', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])).includes('stale derived cache'), true);
@@ -3350,6 +3704,70 @@ function selfTest() {
   t('H14 reverse-verify: local #4356 (the objectui blocker\'s number) -> clean', h14BlockingCacheIncoherent(carded(4356, ['pm:queue']), liveIdx), null);
   t('H14 reverse-verify: #2657 (blocked on two CLOSED cards) -> clean', h14BlockingCacheIncoherent(carded(2657, ['pm:blocked']), liveIdx), null);
   t('H14 reverse-verify: an ordinary open card -> clean', h14BlockingCacheIncoherent(carded(9913, ['pm:queue', 'repo:cloud']), liveIdx), null);
+
+  // -- H14 + the comment channel: the two MEASURED false stales (#10061) -----
+  //
+  // Both were reported stale on 2026-08-19 by a body-only index while their
+  // dependents stated the wait in comments. The comment bodies below are the
+  // real ones from those threads, trimmed to the load-bearing lines. These are
+  // regression pins: a body-only index makes each of the two "-> stale" rows
+  // pass and each of the two "-> clean" rows fail.
+  const falseStaleSources = [
+    // #9465 (epic, `pm:blocking`): both dependents are body-clean.
+    carded(9709, ['pm:blocked'], 'Card body: add the console-injection guard to release.yml.'),
+    carded(9828, ['pm:blocked'], 'Card body: cut-rc.yml points a curator at an expired deadline.'),
+    // #9968 (decision card, `pm:blocking`): same shape.
+    carded(9969, ['pm:blocked'], 'Card body: consumerless vendor `/admin/` surface posture.'),
+    carded(9652, ['pm:blocked'], 'Card body: set-role veto tension in the same vendor-admin family.'),
+  ];
+  const falseStaleComments = new Map([
+    [9709, ['First-touch grading (triage seat): promoted out of `finding` -> `pm:blocked`, type Task.\n\nBlocked-by: #9465\n\nPremise re-checked on current values.']],
+    [9828, [liveBackfillComment]],
+    [9969, ['Triage: graded `pm:blocked` · `domain:services` · type Task, blocked behind the family decision.\n\nBlocked-by: #9968\n']],
+    [9652, ['Triage: same family as #9968; the ruling there sets this one.\n\nBlocked-by: #9968\n']],
+  ]);
+  const bodyOnlyIdx = idx(falseStaleSources);
+  const unionIdx = buildBlockingIndex(falseStaleSources, {
+    repo: 'objectstack-ai/objectstack',
+    comments: falseStaleComments,
+  });
+  const epic9465 = carded(9465, ['domain:devx', 'pm:epic', 'pm:blocking']);
+  const decision9968 = carded(9968, ['pm:decision', 'pm:blocking']);
+  // The defect, pinned: this is what the body-only index reported.
+  t('H14 false-stale: #9465 reads STALE against a body-only index', h14BlockingCacheIncoherent(epic9465, bodyOnlyIdx)?.includes('stale derived cache'), true);
+  t('H14 false-stale: #9968 reads STALE against a body-only index', h14BlockingCacheIncoherent(decision9968, bodyOnlyIdx)?.includes('stale derived cache'), true);
+  // The fix: the same two cards against the two-channel index.
+  t('H14 false-stale: #9465 is CLEAN once comment edges are read', h14BlockingCacheIncoherent(epic9465, unionIdx), null);
+  t('H14 false-stale: #9968 is CLEAN once comment edges are read', h14BlockingCacheIncoherent(decision9968, unionIdx), null);
+  t('H14 false-stale: …because #9709 and #9828 both point at #9465', unionIdx.get(9465).join(','), '9709,9828');
+  t('H14 false-stale: …and #9969 and #9652 both point at #9968', unionIdx.get(9968).join(','), '9969,9652');
+  // Direction B rides the same union: a comment-only edge is enough to call a
+  // card an invisible unblocker.
+  t('H14-B: a comment-only edge produces a missing-cache row', h14BlockingCacheIncoherent(carded(9465, ['domain:devx']), unionIdx)?.includes('#9709'), true);
+  t('H14-B: …and the sentence names the channel pair', h14BlockingCacheIncoherent(carded(9465, ['domain:devx']), unionIdx).includes('body or comment'), true);
+  t('H14-A: …the stale sentence names both channels too', h14BlockingCacheIncoherent(epic9465, bodyOnlyIdx).includes('body OR comment'), true);
+
+  // -- H14 under an INCOMPLETE index (a gated comment fetch failed) ----------
+  //
+  // Asymmetric on purpose: stale is a claim about ABSENT evidence and must not
+  // be made from an index known to be missing edges (#4690); missing is a
+  // claim about evidence in hand, which reading more sources can only add to.
+  t('H14-A: stale is SUSPENDED when the index is known incomplete', h14BlockingCacheIncoherent(epic9465, bodyOnlyIdx, { indexComplete: false }), null);
+  t('H14-A: …and still fires when the index is complete', typeof h14BlockingCacheIncoherent(epic9465, bodyOnlyIdx, { indexComplete: true }), 'string');
+  t('H14-A: …and completeness defaults to true for body-only callers', typeof h14BlockingCacheIncoherent(epic9465, bodyOnlyIdx), 'string');
+  t('H14-B: missing SURVIVES an incomplete index', h14BlockingCacheIncoherent(carded(9465, ['domain:devx']), unionIdx, { indexComplete: false })?.includes('#9709'), true);
+  t('H14-B: …and an earned label stays clean either way', h14BlockingCacheIncoherent(epic9465, unionIdx, { indexComplete: false }), null);
+
+  // The summary line carries the third `read X of Y` pair, and says out loud
+  // when the shortfall cost H14 its stale direction.
+  const fbCounts = (fallbackProbed, fallbackCandidates) => ({
+    repo: 'objectstack-ai/objectstack', issues: 1, unscoped: 1, prs: 0, merged: 0,
+    fallbackProbed, fallbackCandidates,
+  });
+  t('summary: the fallback pair is reported', summaryLine(fbCounts(24, 26), 3).includes('comment fallback read on 24 of 26 candidate(s)'), true);
+  t('summary: a shortfall announces the suspended stale direction', summaryLine(fbCounts(24, 26), 3).includes('stale direction is SUSPENDED'), true);
+  t('summary: a complete pass says nothing about suspension', summaryLine(fbCounts(26, 26), 3).includes('SUSPENDED'), false);
+  t('summary: absent fallback counts still render a sentence', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('comment fallback read on 0 of 0'), true);
 
   // -- H15: oldest unclaimed `pm:blocking` (selection-order visibility) -------
   const blockingCard = (number, { assignees = [], created = daysAgo(3) } = {}) => ({
