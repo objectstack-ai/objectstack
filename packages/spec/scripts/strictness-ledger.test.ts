@@ -359,7 +359,14 @@ describe('posture reading, with a red control for each', () => {
     // declared home the wire contract moved into. A strip site that exists on
     // purpose still counts here; this map measures posture, not intent, which
     // is exactly why the ledger row carries the intent in prose.
-    expect(countStripSites(at('ui/view.zod.ts'))).toBe(3);
+    //
+    // 3 → 4 at #9933: `ViewColumnStateSchema` — the inner shape of the
+    // runtime-only `columnState` personalization overlay key, strip BY DESIGN
+    // (the console owns the internals of this per-user state, so a future
+    // console-written inner key must not 422 against an older server). Wire,
+    // not debt; the ledger row carries the intent, and the authoring doors
+    // reject the carrier key by name (`view-metadata-schema.test.ts` §#9933).
+    expect(countStripSites(at('ui/view.zod.ts'))).toBe(4);
   });
 
   it('lets a chained posture override the idiom in either direction (#5072)', () => {
