@@ -185,11 +185,8 @@ changeset 流、无 `packages/`;合并队列 + required `build` + `merge_group` 
 
 | 标签 | 包家族 |
 |:--|:--|
-| `domain:engine-core` | `packages/objectql`、`packages/core`、`packages/formula`(CEL / `matches-filter` / RLS 谓词求值)、`plugin-pinyin-search`(落点在编译/查询核心) |
-| `domain:metadata` | `packages/metadata*`(加载、注册、持久化、缓存、目录)、`packages/platform-objects` |
-| `domain:drivers` | `packages/drivers/driver-*`(维护者 2026-08-05 对 `driver-memory` / `driver-mongodb` 族有投入冻结指令;`formula` / `driver-sql` 不受影响) |
-| `domain:services` | `packages/services/*`、`packages/connectors/*`、`packages/triggers/*`、`plugin-approvals`、`plugin-webhooks`、`plugin-email`、`plugin-reports`、`embedder-openai`、`knowledge-*` |
-| `domain:identity` | `plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit` |
+| `domain:engine` | `packages/objectql`、`packages/core`、`packages/formula`(CEL / `matches-filter` / RLS 谓词求值)、`plugin-pinyin-search`(落点在编译/查询核心);`packages/metadata*`(加载、注册、持久化、缓存、目录)、`packages/platform-objects`;`packages/drivers/driver-*`(维护者 2026-08-05 对 `driver-memory` / `driver-mongodb` 族有投入冻结指令;`formula` / `driver-sql` 不受影响)—— 车道合并(维护者 2026-08-19:「engine-core + metadata + drivers -> engine, identity + services → services 怎么样?」),原 `domain:engine-core` / `domain:metadata` / `domain:drivers` 三标签**退役**(只退出流通;GitHub 标签对象保留 —— 删标签会剥光已关卡、毁掉存档,止住流通的是本表) |
+| `domain:services` | `packages/services/*`、`packages/connectors/*`、`packages/triggers/*`、`plugin-approvals`、`plugin-webhooks`、`plugin-email`、`plugin-reports`、`embedder-openai`、`knowledge-*`;`plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit`(2026-08-19 并入,原 `domain:identity` 标签**退役**,同上只退流通不删对象) |
 | `domain:devx` | `packages/lint`、`packages/sdui-parser`、`content/docs/**`、`apps/docs`、`scripts/`(门禁类;与 `domain:skills` 的分界按门禁的 SUBJECT:治理 agent 指令面/governed 面的归 skills,治理代码/文档质量的归本域)—— 与 `domain:spec` 相交的三面按「是否围着 spec 契约转」切分 |
 | `domain:skills` | 两个技能根:`.claude/skills/**`(含本文件)+ `skills/**`(维护者 2026-08-11 裁定单设座位,与维护者走专题讨论;skills 更新 ADR-class,见 Guardrails);指令架构文件:根 `AGENTS.md` + 根 `CLAUDE.md`(所有面向 agent 的宪法文本);governed 面(统一定义见 ACCEPT 路径分叉)的治理执行文件:`.github/CODEOWNERS`(治理路由半边)+ SUBJECT 是 governed 面本身的门禁/审计(现为 `scripts/pm/check-governed-merges.mjs`,一句话见守卫索引;未来同类同判)—— 维护者 2026-08-18 裁决:「skills 相关的应该都归你管,为什么派给了 devx」 |
 | `domain:spec` | `packages/spec` 整包唯一契约,语义/文本/机器三面同席:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及围着 spec 契约转的工具链(门禁/生成器/lint 规则/报错散文/references 管线)—— 一般开发工具面留 `devx`(维护者 2026-08-09 裁决);席内分派判据见下文「spec 席内分派参考」 |
@@ -205,8 +202,7 @@ changeset 流、无 `packages/`;合并队列 + required `build` + `merge_group` 
 默认 sweep-first),否则语义面;**任何改变接受/拒绝行为的卡,不论多小,按语义面处理**。机器面改
 「围着契约转的机器」,与文本面无交集,⛔ 不碰 `packages/spec/src/**/*.zod.ts` 与 strictness 台账。
 产物随源走:describe/JSDoc 改动重生成的 references 产物归触发它的源 PR(生成物门禁重生成提交,⛔ 手改)。
-`metadata` 自 `engine-core` 的二次切分按包边界(无例外);改元数据**格式/接受面**的照旧归 `domain:spec`,
-`/meta` 路由本体在 `packages/rest` 归 `domain:cli`;拿不准 FLAG 回分诊。
+改元数据**格式/接受面**的照旧归 `domain:spec`,`/meta` 路由本体在 `packages/rest` 归 `domain:cli`;拿不准 FLAG 回分诊。
 
 **单一生产者。** `domain:*` 只由分诊座位产出;打标签 ≠ 认领;**未打标签的 issue 任何人不得认领
 ** —— 那意味着分诊还没走到,不是「可以自己判一下」。
