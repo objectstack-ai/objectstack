@@ -105,6 +105,17 @@ jobs:
             const crossCutting = data.crossCuttingSymbols || [];
             const weak = data.weakAnchorsDropped || [];
             const coarse = data.packageMentionDocs || [];
+            // ── HOW MUCH OF THE SDK BRIDGE'S DECLARED SURFACE THIS RUN COULD REACH (#9572)
+            // The `sdk` anchor kind is what puts `api/client-sdk.mdx` on the list, and it
+            // rides one hop: a registrar's `path:` tail selecting a route-ledger row. A row
+            // no tail can select is invisible to EVERY run — measured on `9ff11921a`, 45 of
+            // 221 client-bound rows are reachable and 176 are not, and 88 of those 176 name
+            // a client method at least one hand-written page carries. None of that printed
+            // anywhere before this block: the run simply never mentioned the SDK page and
+            // looked healthy. A structural blind spot is exactly what the "what this run
+            // could not see" section is for, so it is rendered here beside the per-run
+            // narrowings rather than left for a reader to infer from a gap.
+            const bridge = data.bridgeCoverage || null;
             // ── WHICH TREE THIS WAS COMPUTED ON (#9519) ─────────────────────────────
             // The row set is a fact about two commits and this comment named neither.
             // Pages are read with `readFileSync` from the WORKING TREE, and on a
@@ -193,6 +204,14 @@ jobs:
             if (crossCutting.length) limits.push(`**${crossCutting.length}** cross-cutting symbol(s) contributed no route anchor: \`${crossCutting.join('`, `')}\``);
             if (overbroad.length) limits.push(`**${overbroad.length}** anchor(s) matched too much of the corpus to be a work list: \`${overbroad.join('`, `')}\``);
             if (weak.length) limits.push(`**${weak.length}** name(s) were too generic to anchor anything (single lowercase words)`);
+            if (bridge && bridge.measured && bridge.unreachable > 0) limits.push(`the SDK route bridge reached **${bridge.reachable}** of **${bridge.clientRows}** client-bound route-ledger rows — the other **${bridge.unreachable}** have no registrar \`path:\` tail to select them, so pages documenting THEIR client methods cannot appear above, on this or any run: \`node scripts/docs-audit/affected-docs.mjs --bridge-coverage\``);
+            // A broken scan is not a coverage number and must not read like one — see
+            // `bridgeCoverageFrom`. Rendered outside the collapsed section below, because
+            // "the bridge found no ledger at all" is not a limit of this run, it is a
+            // defect in the tool that every subsequent run will keep reporting as clean.
+            const bridgeBroken = (bridge && bridge.measured && (bridge.brokenScan || []).length)
+              ? ['', `> ⛔ The SDK route bridge's own scan came back structurally empty: ${bridge.brokenScan.join('; ')}. Treat every \`sdk\` row above as unavailable rather than absent.`]
+              : [];
             // Rendered whenever there is anything to say, INCLUDING when the only thing to
             // say is "the wide net exists and holds N pages". A short list is the right
             // answer here, but a reader must be able to tell a short list from a blind one
@@ -231,7 +250,7 @@ jobs:
               // whose own tree does yield a row is owed the reason. With no anchors the
               // run has no opinion to disagree with, and the bytes would be pure noise on
               // every docs-tooling-only PR (#9037 — every byte here is relayed).
-              body = [marker, '### 📓 Docs Drift Check', headline, ...limitsBlock,
+              body = [marker, '### 📓 Docs Drift Check', headline, ...bridgeBroken, ...limitsBlock,
                 ...(anchorList.length ? treeBlock : [])].join('\n');
             } else {
               const detail = (data.detail || []).reduce((m, d) => (m[d.doc] = d.via, m), {});
@@ -280,6 +299,7 @@ jobs:
                   );
                 }
               }
+              body.push(...bridgeBroken);
               body.push(...limitsBlock);
               body.push(...treeBlock);
               body.push(

@@ -8,6 +8,7 @@
 //   node scripts/docs-audit/affected-docs.mjs --all         # every hand-written doc (full audit)
 //   node scripts/docs-audit/affected-docs.mjs --json [...]   # emit JSON {docs, anchors, anchorlessChanges, ...} instead of a path list
 //   node scripts/docs-audit/affected-docs.mjs --self-test    # pin the change classifiers, package-root and ANCHOR derivations (no repo state needed)
+//   node scripts/docs-audit/affected-docs.mjs --bridge-coverage [--json]   # how much of the DECLARED client-bound route surface the `sdk` bridge can reach (diff-free)
 //
 // Scope: hand-written docs only = content/docs/**/*.mdx MINUS content/docs/references/**
 // (references are generated from packages/spec and handled by a separate regenerate pass).
@@ -45,6 +46,14 @@
 //             (`meta.getAudit`). The declared cross-surface table is what carries the
 //             derivation over the boundary the package graph cannot cross, and it is what
 //             puts `api/client-sdk.mdx` back on the list.
+//             ⚠️ ITS REACH IS PARTIAL AND NOW SAYS SO (#9572). The hop needs a registrar
+//             `path:` tail to select the ledger row; measured on `9ff11921a`, 45 of the
+//             221 client-bound rows have one and 176 do not, so those 176 are invisible
+//             to EVERY run rather than to some. `bridgeCoverage` publishes that ratio on
+//             every run that uses the bridge, and `--bridge-coverage` answers it with no
+//             diff at all — because a reader who cannot see the shortfall reads the
+//             bridge's silence as "no page documents this", which is the #9192 failure
+//             one surface down.
 //   command — the CLI command PHRASE a changed command file implements
 //             (`packages/cli/src/commands/meta/resync.ts` → `os meta resync`). Derived
 //             from the oclif filesystem convention, never from a curated table — see the
@@ -266,7 +275,14 @@ const DECL_PATTERNS = [
  * Where route REGISTRARS live. Deliberately a filename convention rather than a hand-kept
  * file list — the same choice the package-root derivation made for the same reason (#4162:
  * a hardcoded list fails again on container number eight). A registrar this misses costs
- * recall on the `sdk` anchor kind only, and `anchorlessChanges` reports the silence.
+ * recall on the `sdk` anchor kind only.
+ *
+ * ⛔ THE SECOND HALF OF THAT SENTENCE USED TO READ "and `anchorlessChanges` reports the
+ * silence". It does not, and #9572 measured why: `anchorlessChanges` fires per changed
+ * FILE that yielded ZERO anchors, while a handler change in a missed registrar yields its
+ * own symbol anchors, so the run is never anchorless and prints nothing. The silence was
+ * reported by no field at all until `bridgeCoverage` existed. Keep that distinction in
+ * mind before leaning on any other field to "report" a gap: the populations differ.
  */
 const REGISTRAR_FILE_RE = /(?:^|\/)(?:[\w.-]*route[\w.-]*|[\w.-]*-server)\.ts$/;
 
@@ -472,6 +488,51 @@ function rulePatternFor(span) {
 if (args.includes('--self-test')) {
   selfTest();
   process.exit(0);
+}
+
+// --- 0b. `--bridge-coverage` — the sdk bridge's reach over the DECLARED surface -------
+//
+// Diff-free on purpose: reach is a fact about the TREE, so this mode answers on any
+// checkout with no ref, which is what makes the number replayable and ratchetable
+// (#9572). The advisory run reports the same numbers inline, but only when a change
+// happened to carry a bridgeable symbol; this mode is the one that always answers.
+//
+// EXIT CODE. The 45-of-221 ratio is REPORTED, never a verdict — the #9747 family's
+// ruling is that a narrow recognizer should say "unrecognised", and turning today's
+// shortfall into a red would be widening-by-CI, which that card declines. What DOES
+// exit non-zero is `brokenScan`: a scan that found no ledger, no tail, or a ledger it
+// could no longer parse is broken rather than clean, and that verdict cannot fire on a
+// tree where the scan works at all.
+if (args.includes('--bridge-coverage')) {
+  const { registrarFiles, ledgers, registrarByTail } = scanRouteSurface();
+  const coverage = bridgeCoverageFrom(ledgers, registrarByTail.keys());
+  const tails = [...registrarByTail.keys()];
+  const selects = (route) => tails.some((t) => route.replace(/^[A-Z*]+\s+/, '').endsWith(t));
+  if (asJson) {
+    process.stdout.write(JSON.stringify({
+      ...coverage,
+      registrarFiles: registrarFiles.filter((f) => !LEDGER_FILE_RE.test(f)),
+      unreachableRows: ledgers.flatMap(({ file, rows }) =>
+        rows.filter((r) => r.client && !selects(r.route)).map((r) => ({ file, route: r.route, client: r.client }))),
+    }, null, 2) + '\n');
+  } else {
+    console.log(`sdk route bridge — reach over the declared client-bound surface`);
+    console.log(`  registrar files scanned .... ${registrarFiles.filter((f) => !LEDGER_FILE_RE.test(f)).length}`);
+    console.log(`  route tails produced ....... ${coverage.tails}`);
+    console.log(`  ledger files ............... ${coverage.ledgers.length}`);
+    console.log(`  client-bound ledger rows ... ${coverage.clientRows}`);
+    console.log(`    reachable ................ ${coverage.reachable}`);
+    console.log(`    UNREACHABLE .............. ${coverage.unreachable}`);
+    for (const l of coverage.ledgers) {
+      console.log(`      ${String(l.unreachable).padStart(4)} of ${String(l.clientRows).padEnd(4)} unreachable  ${l.file}`);
+    }
+    // The 176 rows themselves are one flag away, never printed by default: this mode is
+    // a CI gate step (`check-affected-docs.mjs`), and 176 lines of known blind spot in
+    // every job log is the noise that trains a reader to stop reading the whole section.
+    console.log(`  → the unreachable rows themselves: this command with --json`);
+  }
+  for (const v of coverage.brokenScan) console.error(`✗ broken scan: ${v}`);
+  process.exit(coverage.brokenScan.length ? 1 : 0);
 }
 
 function sh(cmd) {
@@ -1015,6 +1076,109 @@ function parseRegistrarSource(text) {
     }
   }
   return byTail;
+}
+
+/**
+ * How much of the DECLARED client-bound route surface the `sdk` bridge can actually
+ * reach — pure, so `--self-test` pins it with fixtures and no repo state (#9572).
+ *
+ * WHY THIS IS REPORTED AND NOT INFERRED. The bridge's one hop from a changed symbol to
+ * `api/client-sdk.mdx` is `registrar tail` ⟶ `ledger row`, and a ledger row no registrar
+ * tail can select is STRUCTURALLY unreachable: no symbol change bridges to it, ever. The
+ * file's own note on `REGISTRAR_FILE_RE` says a missed registrar "costs recall on the
+ * `sdk` anchor kind only, and `anchorlessChanges` reports the silence" — measured on
+ * `9ff11921a`, neither half of that holds. `anchorlessChanges` fires per changed FILE
+ * with ZERO anchors, and a handler change yields its own symbol anchors, so the run is
+ * never anchorless; the reach shortfall prints nowhere. 45 of 221 client-bound rows are
+ * reachable and the other 176 are silent — and 88 of those 176 name a client method that
+ * at least one hand-written page carries, so half the blind spot is a finding this tool
+ * would report if it could see it, not an empty region (measured; see the header of
+ * `--bridge-coverage`).
+ *
+ * ⛔ This function MEASURES, it does not widen. Nothing here changes which rows bridge;
+ * the recognizer is exactly as narrow as it was. The #9747 family's ruling is that a
+ * recognizer narrower than the repo must report "unrecognised" rather than render as a
+ * verdict, and this is that report for this bridge.
+ *
+ * @param {Array<{file: string, rows: Array<{route: string, client: string|null}>}>} ledgers
+ * @param {Iterable<string>} tails  every route tail the registrar scan produced
+ */
+function bridgeCoverageFrom(ledgers, tails) {
+  const tailList = [...tails];
+  // The same suffix test PHASE 2 bridges with, so this cannot drift from what it measures:
+  // a tail selects a row when the row's wire path ends with it (`GET ` prefix stripped).
+  const selects = (route) => tailList.some((t) => route.replace(/^[A-Z*]+\s+/, '').endsWith(t));
+  const byLedger = [];
+  let clientRows = 0;
+  let reachable = 0;
+  for (const { file, rows } of ledgers) {
+    const bound = rows.filter((r) => r.client);
+    const hit = bound.filter((r) => selects(r.route));
+    clientRows += bound.length;
+    reachable += hit.length;
+    byLedger.push({ file, clientRows: bound.length, reachable: hit.length, unreachable: bound.length - hit.length, rowsParsed: rows.length });
+  }
+  // ZERO IS NOT A CLEAN REPO, IT IS A BROKEN SCAN — `check-engine-double-contract`'s
+  // invariant, applied to this population (#9747 quotes it as the germ worth
+  // generalising). Each of these is a structural break in the scan itself, not a
+  // coverage number: they cannot fire on a tree where the scan works at all, so they
+  // carry a VERDICT while the 45/221 ratio carries only a report.
+  //
+  // ⛔ NOT here, deliberately: "a ledger with zero CLIENT-bound rows". Two of today's
+  // seven ledgers (`datasource-route-ledger.ts`, `settings-route-ledger.ts`) are wholly
+  // `server-only` by design — 15 rows, no client binding — so that shape is a correct
+  // answer, and pinning it would be a false red on an accurate ledger.
+  const brokenScan = [];
+  if (!ledgers.length) brokenScan.push('no route-ledger file was found at all — the ledger walk selected nothing, so every `sdk` anchor is silently unavailable');
+  if (!tailList.length) brokenScan.push('the registrar scan produced no route tail at all — the symbol → route → sdk bridge cannot fire for any change');
+  for (const l of byLedger) {
+    if (l.rowsParsed === 0) brokenScan.push(`${l.file} matched the ledger convention but parsed 0 rows — the row recognizer no longer reads this file's shape`);
+  }
+  return { measured: true, clientRows, reachable, unreachable: clientRows - reachable, tails: tailList.length, ledgers: byLedger, brokenScan };
+}
+
+/**
+ * Walk `packages/**` for the two declared tables the `sdk` bridge rides on. Split out of
+ * PHASE 2 so `--bridge-coverage` can measure the same surface the bridge uses, from the
+ * same walk — a second walk here is exactly the drift #4851 billed us for.
+ */
+function scanRouteSurface() {
+  const registrarFiles = [];
+  const walkSrc = (dir) => {
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.name === 'node_modules' || e.name === 'dist' || e.name === '.turbo') continue;
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walkSrc(p);
+      else if (e.isFile() && e.name.endsWith('.ts') && !isTestFile(e.name)) {
+        const rel = relative(repoRoot, p);
+        if (LEDGER_FILE_RE.test(rel) || REGISTRAR_FILE_RE.test(rel)) registrarFiles.push(rel);
+      }
+    }
+  };
+  walkSrc(join(repoRoot, 'packages'));
+
+  const ledgers = [];
+  const ledgerRows = [];
+  const registrarByTail = new Map();
+  for (const rel of registrarFiles) {
+    let text;
+    try { text = readFileSync(join(repoRoot, rel), 'utf8'); } catch { continue; }
+    if (LEDGER_FILE_RE.test(rel)) {
+      const rows = parseLedgerSource(text);
+      ledgers.push({ file: rel, rows });
+      ledgerRows.push(...rows);
+    }
+    if (REGISTRAR_FILE_RE.test(rel)) {
+      for (const [tail, ids] of parseRegistrarSource(text)) {
+        let acc = registrarByTail.get(tail);
+        if (!acc) registrarByTail.set(tail, (acc = new Set()));
+        for (const id of ids) acc.add(id);
+      }
+    }
+  }
+  return { registrarFiles, ledgers, ledgerRows, registrarByTail };
 }
 
 /** `{ route, client }` rows out of a route ledger — the declared cross-surface table. */
@@ -1883,6 +2047,55 @@ function selfTest() {
   ];
   for (const [label, want, got] of computedOnCases) check('computedOnFrom', label, 'computedOn', want, got);
 
+  // --- the sdk bridge's REACH over the declared surface (#9572) ---------------
+  // What these pin is the honesty of the number, not its value: a reachable row must be
+  // counted reachable, an unreachable one must be counted unreachable, and a scan that
+  // came back structurally empty must carry a VERDICT rather than a clean-looking zero.
+  const covLedgers = [
+    { file: 'a-route-ledger.ts', rows: [
+      // selected by the `/:type/:name/audit` tail — the bridge's worked example
+      { route: 'GET /api/v1/meta/:type/:name/audit', client: 'meta.getAudit' },
+      // a literal whose registrar writes it as `${metaPath}/:type`: the interpolation is
+      // stripped, `/:type` is one segment, `routeTailOf` declines it, and no tail selects
+      // this row — the single largest cause behind today's 176 (34 rest rows).
+      { route: 'GET /api/v1/meta/:type', client: 'meta.getItems' },
+      // better-auth mounts this one: no `path:` property exists anywhere to produce a tail
+      { route: 'POST /api/v1/auth/sign-in/email', client: 'auth.login' },
+      // server-only rows are not part of the population at all
+      { route: 'GET /health', client: null },
+    ] },
+  ];
+  const cov = bridgeCoverageFrom(covLedgers, ['/:type/:name/audit', '/:type/:name/history']);
+  const covCases = [
+    ['only client-bound rows are counted — a server-only row is not a miss', 3, cov.clientRows],
+    ['a row a tail selects is reachable', 1, cov.reachable],
+    ['a row no tail selects is UNREACHABLE, not clean', 2, cov.unreachable],
+    ['reachable + unreachable is the whole population', 3, cov.reachable + cov.unreachable],
+    ['a working scan carries no broken-scan verdict', 0, cov.brokenScan.length],
+    ['the answer is marked as measured', true, cov.measured],
+  ];
+  for (const [label, want, got] of covCases) check('bridgeCoverageFrom', label, 'coverage', want, got);
+
+  // ZERO IS NOT A CLEAN REPO, IT IS A BROKEN SCAN. Each arm below currently reports
+  // `0 of 0 unreachable` — arithmetically true, and the exact shape #9747 catalogues as
+  // a false green. `.some(...)` on the text, so a reworded verdict does not fail the pin
+  // while a MISSING verdict does.
+  const noLedgers = bridgeCoverageFrom([], ['/:type/:name/audit']);
+  check('bridgeCoverageFrom', 'no ledger file at all is a verdict, not `0 of 0`', 'brokenScan',
+    true, noLedgers.brokenScan.some((v) => v.includes('no route-ledger file')));
+  const noTails = bridgeCoverageFrom(covLedgers, []);
+  check('bridgeCoverageFrom', 'a registrar scan with no tail is a verdict, not "everything unreachable"', 'brokenScan',
+    true, noTails.brokenScan.some((v) => v.includes('no route tail')));
+  check('bridgeCoverageFrom', 'and it still reports the population it could not reach', 'unreachable', 3, noTails.unreachable);
+  const unreadable = bridgeCoverageFrom([{ file: 'b-route-ledger.ts', rows: [] }], ['/x/:y']);
+  check('bridgeCoverageFrom', 'a ledger that matched the convention but parsed 0 rows is a verdict', 'brokenScan',
+    true, unreadable.brokenScan.some((v) => v.includes('parsed 0 rows')));
+  // ⛔ The counter-case, and it is the one that keeps the verdict above honest: two of
+  // today's seven ledgers are wholly `server-only`, so ZERO CLIENT-BOUND ROWS is a
+  // correct answer and must never be a verdict.
+  const serverOnly = bridgeCoverageFrom([{ file: 'c-route-ledger.ts', rows: [{ route: 'GET /api/v1/datasources', client: null }] }], ['/x/:y']);
+  check('bridgeCoverageFrom', 'an all-server-only ledger is accurate, not broken', 'brokenScan', 0, serverOnly.brokenScan.length);
+
   // PRESENCE, not merely shape. The field is worth nothing unless it reaches the JSON
   // the workflow renders, and a rename or a dropped line there returns the comment to
   // the unnamed-tree state this field exists to end — with every pin above still green.
@@ -1891,6 +2104,16 @@ function selfTest() {
   const ownSource = readFileSync(new URL(import.meta.url), 'utf8');
   check('emit', 'the emitted JSON actually carries `computedOn`', 'affected-docs.mjs',
     true, /\bcomputedOn:\s*computedOnIdentity\(/.test(ownSource));
+  // Same reasoning for the reach field, and one hop further: #9433 measured that a new
+  // JSON key with no render branch in `docs-drift-check.yml` is HALF-WIRED — it reads as
+  // published while no reader ever sees it. So both ends are pinned, from the two files.
+  check('emit', 'the emitted JSON actually carries `bridgeCoverage`', 'affected-docs.mjs',
+    true, /\bbridgeCoverage:\s*coverage,/.test(ownSource));
+  const driftWorkflow = (() => {
+    try { return readFileSync(new URL('../../.github/workflows/docs-drift-check.yml', import.meta.url), 'utf8'); } catch { return null; }
+  })();
+  check('emit', 'the drift comment RENDERS `bridgeCoverage` — an unrendered key is half-wired (#9433)', 'docs-drift-check.yml',
+    true, driftWorkflow === null || /data\.bridgeCoverage/.test(driftWorkflow));
 
   if (failed) {
     console.error(`\n✗ affected-docs self-test failed (${failed} case(s)).`);
@@ -2092,37 +2315,15 @@ for (const token of [...commandAnchors.keys()].sort()) {
 // `api/client-sdk.mdx` back on the list for a `packages/metadata-protocol` change.
 const sdkAnchors = new Set();
 const crossCuttingSymbols = [];
+// HOW MUCH OF THE DECLARED SURFACE THE BRIDGE COULD REACH (#9572). Reported, never
+// implied — see `bridgeCoverageFrom`. `measured: false` is the honest answer for a run
+// whose bridge never ran, and it is spelled out rather than rendered as a zero: this
+// file draws that distinction everywhere else (`computedOn.dirty`'s null arm is the
+// same rule), and a fabricated `0 of 0` here would read as "nothing to reach".
+let bridgeCoverage = { measured: false, reason: 'no bridgeable symbol in this change — the sdk route bridge did not run' };
 if (bridgeSymbols.length) {
-  const registrarFiles = [];
-  const walkSrc = (dir) => {
-    let entries;
-    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const e of entries) {
-      if (e.name === 'node_modules' || e.name === 'dist' || e.name === '.turbo') continue;
-      const p = join(dir, e.name);
-      if (e.isDirectory()) walkSrc(p);
-      else if (e.isFile() && e.name.endsWith('.ts') && !isTestFile(e.name)) {
-        const rel = relative(repoRoot, p);
-        if (LEDGER_FILE_RE.test(rel) || REGISTRAR_FILE_RE.test(rel)) registrarFiles.push(rel);
-      }
-    }
-  };
-  walkSrc(join(repoRoot, 'packages'));
-
-  const ledgerRows = [];
-  const registrarByTail = new Map();
-  for (const rel of registrarFiles) {
-    let text;
-    try { text = readFileSync(join(repoRoot, rel), 'utf8'); } catch { continue; }
-    if (LEDGER_FILE_RE.test(rel)) ledgerRows.push(...parseLedgerSource(text));
-    if (REGISTRAR_FILE_RE.test(rel)) {
-      for (const [tail, ids] of parseRegistrarSource(text)) {
-        let acc = registrarByTail.get(tail);
-        if (!acc) registrarByTail.set(tail, (acc = new Set()));
-        for (const id of ids) acc.add(id);
-      }
-    }
-  }
+  const { ledgers, ledgerRows, registrarByTail } = scanRouteSurface();
+  bridgeCoverage = bridgeCoverageFrom(ledgers, registrarByTail.keys());
 
   // symbol → route, capped: the bridge answers "which routes mention this name", and for
   // a CROSS-CUTTING helper that is every route it is wired into. Measured on the REST
@@ -2218,11 +2419,19 @@ const overbroadNote = overbroadAnchors.length
 const crossCuttingNote = crossCuttingSymbols.length
   ? `; ${crossCuttingSymbols.length} cross-cutting symbol(s) contributed no route anchor (${crossCuttingSymbols.join(', ')})`
   : '';
+// The bridge's own reach, stated on every run that used it (#9572). Without this line a
+// reader cannot tell "no page documents this route's SDK method" from "this route is one
+// of the 176 the bridge structurally cannot select", and those are opposite facts.
+const bridgeCoverageNote = bridgeCoverage.measured
+  ? `; the sdk route bridge reached ${bridgeCoverage.reachable} of ${bridgeCoverage.clientRows} client-bound ledger row(s)`
+    + (bridgeCoverage.unreachable ? ` — ⚠️ ${bridgeCoverage.unreachable} unreachable, so pages documenting THEIR client methods are invisible to this run (\`--bridge-coverage\` lists them)` : '')
+    + (bridgeCoverage.brokenScan.length ? `; ⛔ ${bridgeCoverage.brokenScan.length} broken-scan verdict(s): ${bridgeCoverage.brokenScan.join('; ')}` : '')
+  : '';
 
 emit(
   affected.map((a) => a.doc),
   changedPackages,
-  `${affected.length} docs name something this change touched (${anchorSummary}) across ${changedPackages.length} changed package(s) since ${sinceRef}${skipNote}${anchorlessNote}${unmappedCommandNote}${unanchoredRuleNote}${crossCuttingNote}${overbroadNote}`,
+  `${affected.length} docs name something this change touched (${anchorSummary}) across ${changedPackages.length} changed package(s) since ${sinceRef}${skipNote}${anchorlessNote}${unmappedCommandNote}${unanchoredRuleNote}${crossCuttingNote}${bridgeCoverageNote}${overbroadNote}`,
   affected,
   { testFilesSkipped, scriptFilesSkipped, devOnlyManifestsSkipped },
   {
@@ -2231,6 +2440,7 @@ emit(
     unmappedCommandFiles,
     unanchoredRuleBlocks,
     crossCuttingSymbols,
+    bridgeCoverage,
     weakAnchorsDropped,
     overbroadAnchors,
     packageMentionDocs,
@@ -2312,6 +2522,9 @@ function emit(docList, changedPackages, summary, detail, skipped = {}, anchorInf
     anchors: anchorList = [], anchorlessChanges: anchorless = [], crossCuttingSymbols: crossCutting = [],
     weakAnchorsDropped: weak = [], overbroadAnchors: overbroad = [], packageMentionDocs: coarse = [],
     unmappedCommandFiles: unmappedCommands = [], unanchoredRuleBlocks: unanchoredRules = [],
+    // `null` for the `--all` arm, which derives no anchors and runs no bridge. Distinct
+    // from `{ measured: false }`, which means the bridge was available and stood down.
+    bridgeCoverage: coverage = null,
   } = anchorInfo;
   if (asJson) {
     process.stdout.write(
@@ -2355,6 +2568,12 @@ function emit(docList, changedPackages, summary, detail, skipped = {}, anchorInf
           // The other declared narrowing: symbols wired into so many routes that the
           // route bridge would have answered "every route" instead of "this one".
           crossCuttingSymbols: crossCutting,
+          // How much of the DECLARED client-bound route surface the bridge could reach
+          // this run (#9572). The two narrowings above are per-run and data-dependent;
+          // this one is STRUCTURAL — a ledger row no registrar tail selects is invisible
+          // to every run, forever, and until this field existed nothing printed that.
+          // Machine-readable on purpose: it is the source a ratchet would read.
+          bridgeCoverage: coverage,
           // Anchors the two guards removed, each with the reason it was removed. Neither
           // guard is allowed to narrow the list silently — that is the #9192 failure mode
           // one level down, and these two fields are what keep it reviewable.
