@@ -53,32 +53,41 @@ export const SEMCONV = {
     storageErrorsTotal: 'storage_errors_total',
 
     // ── Cache — emitted by `@objectstack/service-cache` adapters ──
-    //
-    // ⚠️ A flat zero on this family means "NO CONFIGURED CONSUMER", not "no
-    // cache activity" — and unlike the HTTP families above it is not an
-    // instrumentation gap. The adapters hold the host's registry and count
-    // every call they receive (#9832 wired that, #9951 pins it), so a zero
-    // here is TRUE; what it fails to say is WHY.
-    //
-    // The reason is that nothing consults the `cache` service unconditionally.
-    // Every production consumer is a rate-limit / budget counter store, and
-    // each one is gated on an explicit declaration somebody has to write:
-    // better-auth's per-IP counters (settings `rate_limit_max` /
-    // `rate_limit_window_seconds`), the dispatcher's inbound limiter and its
-    // declarative per-endpoint buckets (an armed `rateLimit` budget — both
-    // register nothing at all when none is declared), and the per-number OTP
-    // send budget (an SMS send path). A default install declares none of them,
-    // so `cache_lookups_total` stays at 0 while the process serves traffic
-    // normally.
-    //
-    // ⇒ Read a flat `cache_*` as a question about CONFIGURATION, never as a
-    // 0% hit rate or a broken adapter. An operator wiring a cache hit-rate
-    // panel should confirm at least one consumer above is armed first.
-    /** Counter, labels: `adapter` (`memory`|`redis`), `result` (`hit`|`miss`). */
+    // Uniform emitter; what varies is who CONSULTS the service — see below.
+    /**
+     * Counter, labels: `adapter` (`memory`|`redis`), `result` (`hit`|`miss`).
+     *
+     * ⚠️ A flat zero means "NO CONFIGURED CONSUMER", not "no cache activity",
+     * and — unlike the HTTP families above — it is NOT an instrumentation gap.
+     * The adapters hold the host's registry and count every call they receive
+     * (#9832 wired that; #9951 pins it), so a zero here is TRUE. What it fails
+     * to communicate is WHY.
+     *
+     * The why: nothing consults the `cache` service unconditionally. Every
+     * production consumer is a rate-limit / budget counter store, and each is
+     * gated on a declaration somebody has to write — better-auth's per-IP
+     * counters (`rate_limit_max` / `rate_limit_window_seconds` in auth
+     * settings), the dispatcher's inbound limiter and its declarative
+     * per-endpoint buckets (an armed `rateLimit` budget; with none declared
+     * the dispatcher registers no limiter at all), and the per-number OTP send
+     * budget (an SMS send path). A default install declares none of them, so
+     * this counter stays at 0 while the server handles traffic normally.
+     *
+     * ⇒ Read a flat `cache_*` as a question about CONFIGURATION, never as a 0%
+     * hit rate or a broken adapter. Before trusting a cache hit-rate panel,
+     * confirm at least one consumer above is actually armed.
+     */
     cacheLookupsTotal: 'cache_lookups_total',
-    /** Counter, labels: `adapter`, `op` (`set`|`delete`|`clear`). */
+    /**
+     * Counter, labels: `adapter`, `op` (`set`|`delete`|`clear`). Same
+     * "zero = no configured consumer" reading as `cacheLookupsTotal` above.
+     */
     cacheWritesTotal: 'cache_writes_total',
-    /** Counter, labels: `adapter`, `op`, `errorClass`. */
+    /**
+     * Counter, labels: `adapter`, `op`, `errorClass`. Same "zero = no
+     * configured consumer" reading as `cacheLookupsTotal` above — a zero is
+     * "nothing was asked of the cache", not "every call succeeded".
+     */
     cacheErrorsTotal: 'cache_errors_total',
 
     // ── Background jobs — emitted by `@objectstack/runtime`'s AppPlugin ──

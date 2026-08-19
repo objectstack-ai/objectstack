@@ -42,3 +42,9 @@ This is the mirror image of the HTTP note that landed alongside it: there a
 zero means "not instrumented"; here a zero is a true count of a service nothing
 asked anything of. The two are deliberately worded so they cannot be read as
 the same statement.
+
+The note is attached as per-family JSDoc rather than a `//` group header, and
+that placement is load-bearing: `tsup`'s dts generation drops line comments, so
+only the JSDoc form reaches `dist/index.d.ts` — i.e. the operator's IDE hover,
+which is where somebody wiring a `cache_lookups_total` panel actually meets the
+declaration. Verified in the built artifact, not assumed.
