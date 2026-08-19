@@ -60,6 +60,15 @@ import { refuseUnknownQueryParams } from './query-allowlist.js';
 import type { DirectMountedRoute, MountedRouteSource } from './direct-mount.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
+// [#9741] Declared request shapes for the meta-read doors below — imported so
+// each door's request literal is compiled against the spec contract instead of
+// being smuggled past it with `as any` (see `TransportScopedMetaRequest`).
+import type {
+    GetMetaItemsRequest,
+    GetMetaItemRequest,
+    GetMetaItemCachedRequest,
+    GetMetaItemLayeredRequest,
+} from '@objectstack/spec/api';
 // [#8073] The closed ADR-0112 error vocabulary, so the explain family's single
 // refusal emitter types its `code` parameter as the vocabulary rather than as
 // `string` — an invented code is a compile error at the call site instead of a
@@ -108,6 +117,25 @@ import { sendError as sendEnvelopeError } from '@objectstack/types';
  * widen this contract.
  */
 export type RestProtocol = DataProtocol & MetadataProtocol;
+
+/**
+ * [#9741] Typed TRANSPORT envelope for the meta-read doors.
+ *
+ * `environmentId` is the multi-kernel routing key, and it is OUT of the
+ * protocol request shape **by explicit maintainer decision** (ruling recorded
+ * 2026-08-18 on #9741): `resolveProtocol(environmentId)` selects the target
+ * kernel *before* the protocol call, and the implementation's parameter types
+ * (`@objectstack/metadata-protocol`) never read it off the request — the spec
+ * schemas (`protocol.zod.ts`) record the same exclusion schema-side. The doors
+ * here still spread it into the outgoing payload (long-standing wire shape,
+ * deliberately unchanged by the ruling), so this alias declares that one
+ * transport-level member on top of the declared request type. The point is
+ * what it makes the compiler do: every OTHER key in a door's request literal
+ * is now checked against the spec contract — an undeclared member is a compile
+ * error at the call site, not a cast-and-hope. Never add protocol members
+ * here; a key that belongs to the request belongs in the spec schema.
+ */
+type TransportScopedMetaRequest<R> = R & { environmentId?: string };
 import {
     buildFieldMetaMap,
     referenceFieldNames,
@@ -2566,13 +2594,19 @@ export class RestServer {
         const layeredOrganizationId = organizationIdForMetaRead(
             req.params.type, layeredCtx?.tenantId,
         );
-        const layered = await p.getMetaItemLayered({
+        // [#9741] This door never carried an `as any`, but `p: any` meant its
+        // request literal was never checked either — the same blind spot with
+        // a different spelling. Typing the literal (spec shape + the
+        // transport-level `environmentId`, see `TransportScopedMetaRequest`)
+        // makes an undeclared key a compile error here too.
+        const layeredRequest: TransportScopedMetaRequest<GetMetaItemLayeredRequest> = {
             type: req.params.type,
             name: req.params.name,
             ...(layeredPackageId ? { packageId: layeredPackageId } : {}),
             ...(environmentId ? { environmentId } : {}),
             ...(layeredOrganizationId ? { organizationId: layeredOrganizationId } : {}),
-        });
+        };
+        const layered = await p.getMetaItemLayered(layeredRequest);
         // [ADR-0106 D5(4)] The layered view is a schema-bearing exit —
         // `code`, `overlay` and `effective` are each a full object schema.
         // Both entry points (the canonical `/layers` path and the deprecated
@@ -3974,13 +4008,18 @@ export class RestServer {
                         const listOrganizationId = organizationIdForMetaRead(
                             req.params.type, listCtx?.tenantId,
                         );
-                        const items = await p.getMetaItems({
+                        // [#9741] Typed against the spec request shape plus the
+                        // transport-level `environmentId` — the `as any` this
+                        // literal used to carry is retired now that the spec
+                        // declares `previewDrafts` (and `organizationId`, #9726).
+                        const listRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
                             type: req.params.type,
                             packageId,
                             ...(previewDrafts ? { previewDrafts: true } : {}),
                             ...(environmentId ? { environmentId } : {}),
                             ...(listOrganizationId ? { organizationId: listOrganizationId } : {}),
-                        } as any);
+                        };
+                        const items = await p.getMetaItems(listRequest);
 
                         // RBAC-filter app metadata for authenticated users so
                         // privileged apps (Studio, Setup, etc.) and gated nav
@@ -4826,7 +4865,14 @@ export class RestServer {
                             const cacheI18n = await this.resolveI18nService(environmentId, req);
                             const cacheLocale = this.extractLocale(req, cacheI18n);
 
-                            const result = await p.getMetaItemCached({
+                            // [#9741] Typed request — `as any` retired. The
+                            // cached read carries NO draft-visibility members
+                            // on purpose: this branch is unreachable when
+                            // `previewDrafts` / `?state=draft` are set (the
+                            // fork above bypasses the cache for both), and the
+                            // implementation's `getMetaItemCached` signature
+                            // declares neither.
+                            const cachedRequest: TransportScopedMetaRequest<GetMetaItemCachedRequest> = {
                                 type: req.params.type,
                                 name: req.params.name,
                                 cacheRequest,
@@ -4840,7 +4886,8 @@ export class RestServer {
                                 // enters the ETag there, so the validator states
                                 // the scope rather than inheriting it.
                                 ...(readOrganizationId ? { organizationId: readOrganizationId } : {}),
-                            } as any);
+                            };
+                            const result = await p.getMetaItemCached(cachedRequest);
 
                             if (result.notModified) {
                                 res.status(304).send();
@@ -4944,18 +4991,26 @@ export class RestServer {
                             const stateParam = typeof req.query?.state === 'string'
                                 ? req.query.state.toLowerCase()
                                 : undefined;
-                            const envelope = await p.getMetaItem({
+                            // [#9741] Typed against the spec request shape —
+                            // the `as any` this literal used to carry is
+                            // retired now that the spec declares `state` and
+                            // `previewDrafts` (and `organizationId`, #9726).
+                            // No transport envelope: this door does not thread
+                            // `environmentId` (the kernel was already resolved
+                            // above), so the plain declared shape suffices.
+                            const itemRequest: GetMetaItemRequest = {
                                 type: req.params.type,
                                 name: req.params.name,
                                 packageId,
-                                ...(stateParam === 'draft' ? { state: 'draft' } : {}),
+                                ...(stateParam === 'draft' ? { state: 'draft' as const } : {}),
                                 ...(previewDrafts ? { previewDrafts: true } : {}),
                                 // [#9454] The uncached arm — `dashboard`'s route
                                 // (`isDashboardType`), and every read the cache
                                 // exclusions divert here. Same hoisted scope as
                                 // the cached arm above, by construction.
                                 ...(readOrganizationId ? { organizationId: readOrganizationId } : {}),
-                            } as any) as Record<string, any>;
+                            };
+                            const envelope = await p.getMetaItem(itemRequest) as Record<string, any>;
 
                             // [#5563] `getMetaItem` answers the envelope
                             // `{ type, name, item, lock, … }`. Unwrap ONCE here;

@@ -55,7 +55,7 @@ describe('StorageServicePlugin observability wiring', () => {
     });
     await plugin.init(ctx);
 
-    const storage = ctx._services.get('file-storage');
+    const storage = ctx._services.get('storage');
     await storage.upload('k.txt', Buffer.from('hi'));
     await storage.download('k.txt');
 
@@ -75,7 +75,7 @@ describe('StorageServicePlugin observability wiring', () => {
       bindToSettings: false,
     }).init(ctx);
 
-    const storage = ctx._services.get('file-storage');
+    const storage = ctx._services.get('storage');
     await storage.upload('k.txt', Buffer.from('hi'));
     expect(metrics.samples.some((s) => s.name === SEMCONV.storageOperationsTotal)).toBe(true);
   });
@@ -98,7 +98,7 @@ describe('StorageServicePlugin observability wiring', () => {
     // `buildAdapterFromValues` returns a new adapter that should be wired
     // with the same metrics registry resolved during init().
     const next = await (plugin as any).buildAdapterFromValues({ adapter: 'local', local_root: root2 });
-    const storage = ctx._services.get('file-storage');
+    const storage = ctx._services.get('storage');
     storage.swap(next);
 
     const before = metrics.samples.length;
@@ -114,7 +114,7 @@ describe('StorageServicePlugin observability wiring', () => {
       local: { rootDir: root },
       bindToSettings: false,
     }).init(ctx);
-    const storage = ctx._services.get('file-storage');
+    const storage = ctx._services.get('storage');
     await storage.upload('k.txt', Buffer.from('hi'));
     const buf = await storage.download('k.txt');
     expect(buf.toString('utf-8')).toBe('hi');

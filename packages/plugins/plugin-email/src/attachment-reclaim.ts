@@ -5,7 +5,7 @@
  *
  * ## The one job this does
  *
- * Attachment bytes written to the `file-storage` capability by
+ * Attachment bytes written to the `storage` capability by
  * `attachment-storage.ts` are a **delivery artifact**: once the `sys_email`
  * row they belong to is terminal and a grace window has passed, nothing will
  * ever need them again. This module deletes them and rewrites the row's
@@ -186,7 +186,7 @@ export async function reclaimAttachmentContent(
     // job, and say so if nothing can.
     return rearmOrStall(
       opts, rowId, graceMs,
-      'the file-storage capability is not mounted on the process running the reclaim job, so the content '
+      'the storage capability is not mounted on the process running the reclaim job, so the content '
       + 'cannot be deleted here',
     );
   }
@@ -296,7 +296,7 @@ async function rearmOrStall(
     `EmailServicePlugin: out-of-row attachment content for sys_email row '${rowId}' could NOT be reclaimed and `
     + `could NOT be rescheduled — ${reason}. Those storage objects will now stay in the backend forever unless `
     + 'they are deleted by hand. Fix: keep the durable queue service (@objectstack/service-queue over an '
-    + 'ObjectQL engine) and the file-storage capability (@objectstack/service-storage) mounted on the process '
+    + 'ObjectQL engine) and the storage capability (@objectstack/service-storage) mounted on the process '
     + `that consumes email jobs, then delete the leftovers under the row's key prefix.`,
   );
   return { kind: 'stalled', rowId, reason };

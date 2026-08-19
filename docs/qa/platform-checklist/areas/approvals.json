@@ -8,7 +8,7 @@
       "title": "Per-group sign-off (会签) needs one approval from EACH group",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "browser",
       "personas": ["approver holding exactly one group (e.g. manager)", "second approver holding the other group (e.g. finance/auditor)"],
@@ -19,8 +19,8 @@
           "seed-approval-demo.ts wiring: dev admin holds manager/finance/legal/exec but NOT auditor, so the manager group resolves to the admin and the finance group to Ada Auditor only; EXP-2001 ($1,500) sits under the $5,000 committee threshold so the quorum flow does not also open on it; submitter is Mei Phone (usr_showcase_phone_demo)"
         ],
         "knownGaps": [
-          "Ada Auditor exists as a routable sys_user row only — better-auth sign-in for her needs an account provisioned at runtime (seed-approval-demo.ts: 'sign-in still needs a better-auth account'); the finance-group decision therefore needs either a provisioned Ada account or the server-granted admin override (can_override) — the run record must state which path was used",
-          "provisioning that account needs more than a password hash: better-auth 1.7.0-rc.2 requires the credential account's issuer to equal local:credential (packages/plugins/plugin-auth/src/backfill-account-issuer.ts, CREDENTIAL_ISSUER). Without that one field, sign-in fails INVALID_EMAIL_OR_PASSWORD behind a misleading 'User not found' warn — the user exists and the hash is right, so the warn sends you looking in exactly the wrong place. With it set, prefer the real Ada session over the admin override (#7517)"
+          "[CLOSED by #9308 fixture 1 — the gap text stays because it carries the reason] Ada Auditor used to exist as a routable sys_user row only, so the finance-group decision needed either a hand-provisioned Ada account or the server-granted admin override (can_override), and the run record had to state which path was used. She is now a real login on a stock boot, so drive the REAL Ada session: the admin override is no longer an acceptable substitute here, because a decision laundered through the admin cannot show that the two groups resolved to two different people",
+          "[CLOSED by #9308 fixture 1 — the gap text stays because it carries the reason] provisioning that account needs more than a password hash: better-auth 1.7.0-rc.2 requires the credential account's issuer to equal local:credential (packages/plugins/plugin-auth/src/backfill-account-issuer.ts, CREDENTIAL_ISSUER). Without that one field, sign-in fails INVALID_EMAIL_OR_PASSWORD behind a misleading 'User not found' warn — the user exists and the hash is right, so the warn sends you looking in exactly the wrong place. What changed: examples/app-showcase/src/security/seed-approval-demo.ts now provisions the credential account itself (ensureCredentialAccount) through better-auth's own $context — its hasher, its internalAdapter.createAccount, and the issuer READ OFF the dev admin's own credential row rather than re-spelled — so both demo personas sign in with DEMO_PERSONA_PASSWORD ('showcase123', demo-personas.ts) on a stock dev boot. packages/qa/dogfood/test/showcase-demo-personas-loginable.dogfood.test.ts pins the sign-in end to end. Dev-only by construction: the bootstrap runs only when the dev admin exists, and that admin is hard-gated on NODE_ENV=development"
         ]
       },
       "steps": [
@@ -86,7 +86,8 @@
         { "revision": 1, "date": "2026-08-07", "change": "initial import from the #3358 evidence run (decisive oracle: group drops but request stays pending)", "ref": "#3358" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 3, "date": "2026-08-10", "change": "entry path refreshed: the inbox is opened through the account app's Approvals nav entry (component route) rather than the bare /system/approvals deep link, so the item exercises the path a real user takes after #7213", "ref": "#7331" },
-        { "revision": 4, "date": "2026-08-11", "change": "knownGaps records the better-auth issuer=local:credential provisioning detail — the one field that decides whether Ada can be driven as a real second session or the run falls back to the admin override; it used to be rediscovered every sweep, behind a 'User not found' warn that points at the wrong cause", "ref": "#7530" }
+        { "revision": 4, "date": "2026-08-11", "change": "knownGaps records the better-auth issuer=local:credential provisioning detail — the one field that decides whether Ada can be driven as a real second session or the run falls back to the admin override; it used to be rediscovered every sweep, behind a 'User not found' warn that points at the wrong cause", "ref": "#7530" },
+        { "revision": 5, "date": "2026-08-18", "change": "the fixture blocker is CLOSED, not merely documented: the showcase now provisions Ada's better-auth credential account at boot (issuer derived from the dev admin's own row), so she signs in on stock seeds. knownGaps rewritten as closed-by-fixture rather than deleted — the issuer detail is the reason the gap existed and the next sweep still needs it. The admin-override fallback is withdrawn as an acceptable path for this item", "ref": "#9308" }
       ]
     },
     {
@@ -243,7 +244,7 @@
       "title": "A submitter who is not an approver sees no approver buttons",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "browser",
       "personas": ["submitter holding NO approver position on their own pending request"],
@@ -252,11 +253,11 @@
         "requires": ["one pending request routed to a position its submitter does not hold"],
         "knownGaps": [
           "stock seeds route every request to positions the admin holds, so the admin is an approver on all of them (#3358) — needs one request addressed away from the signed-in persona",
-          "the natural persona exists since #3411 — Mei Phone (usr_showcase_phone_demo) submits EXP-2001/EXP-DEMO and holds no approver position — but she is a sys_user row only: signing in as her needs a better-auth account provisioned at runtime (seed-approval-demo.ts)",
-          "provisioning that account needs more than a password hash: better-auth 1.7.0-rc.2 requires the credential account's issuer to equal local:credential (packages/plugins/plugin-auth/src/backfill-account-issuer.ts, CREDENTIAL_ISSUER). Without that one field, sign-in fails INVALID_EMAIL_OR_PASSWORD behind a misleading 'User not found' warn — the user exists and the hash is right, so the warn sends you looking in exactly the wrong place. With it set this item's blocker is payable at runtime rather than blocked(fixture) (#7517)"
+          "[CLOSED by #9308 fixture 1 — the gap text stays because it carries the reason] the natural persona has existed since #3411 — Mei Phone (usr_showcase_phone_demo) submits EXP-2001/EXP-DEMO and holds no approver position — but she was a sys_user row only, so signing in as her needed an account provisioned by hand. She is now a real login on a stock boot: seed-approval-demo.ts gives both demo personas a better-auth credential account (ensureCredentialAccount), password DEMO_PERSONA_PASSWORD ('showcase123', demo-personas.ts)",
+          "[CLOSED by #9308 fixture 1 — the gap text stays because it carries the reason] provisioning that account needs more than a password hash: better-auth 1.7.0-rc.2 requires the credential account's issuer to equal local:credential (packages/plugins/plugin-auth/src/backfill-account-issuer.ts, CREDENTIAL_ISSUER). Without that one field, sign-in fails INVALID_EMAIL_OR_PASSWORD behind a misleading 'User not found' warn — the user exists and the hash is right, so the warn sends you looking in exactly the wrong place. The showcase now derives that issuer from the dev admin's own credential row and stamps it, so the field cannot drift from what better-auth looks accounts up under; packages/qa/dogfood/test/showcase-demo-personas-loginable.dogfood.test.ts pins both the issuer and the sign-in",
+          "the FIRST gap above is unaffected and still governs the fixture: stock seeds route every request to positions the admin holds, so the item's request must remain the one addressed AWAY from the signed-in persona (Mei's EXP-2001). A run that signs in as the admin proves nothing here, loginable personas or not"
         ]
       },
-      "blocked": { "by": "fixture", "ref": "#3358 (needs a request routed to a position the viewing submitter does not hold)" },
       "steps": [
         "provision a sign-in account for the no-position submitter persona (Mei Phone) or an equivalent fixture user; sign in as that persona",
         "open the inbox through the account app's Approvals nav entry (/_console/apps/com.objectstack.account/component/approvals/inbox) — the 我发起的 tab must list her pending EXP-2001 request; the bare /system/approvals route stays supported but is not the user path being tested here (#7234)",
@@ -304,7 +305,8 @@
         { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358; upgraded the oracle from DOM-only to both-sides (UI absence + server rejection)", "ref": "#3358" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 3, "date": "2026-08-10", "change": "entry path refreshed to the account app's Approvals nav entry (component route) after #7213/#7234", "ref": "#7331" },
-        { "revision": 4, "date": "2026-08-11", "change": "knownGaps records the better-auth issuer=local:credential provisioning detail — with it, Mei's sign-in is provisionable at runtime and this item's standing fixture blocker becomes payable instead of permanent", "ref": "#7530" }
+        { "revision": 4, "date": "2026-08-11", "change": "knownGaps records the better-auth issuer=local:credential provisioning detail — with it, Mei's sign-in is provisionable at runtime and this item's standing fixture blocker becomes payable instead of permanent", "ref": "#7530" },
+        { "revision": 5, "date": "2026-08-18", "change": "UNBLOCKED. The showcase provisions Mei's better-auth credential account at boot, so the submitter persona this item is built around is a real, stock login and `blocked(fixture)` is removed. knownGaps rewritten as closed-by-fixture rather than deleted, and the one gap that is NOT closed (stock requests route to the admin, so the persona choice is still load-bearing) is restated so it does not get read as closed by association", "ref": "#9308" }
       ]
     },
     {
@@ -631,7 +633,7 @@
       "title": "An active out-of-office delegation reroutes an individually-routed approver to the delegate; expiring the window hands the slot back",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["dev admin — the DELEGATOR A: the delegation row is written BY them FOR them (sys_approval_delegation is self-service-only, so the delegator must be whoever is authenticated)", "a SECOND REAL runtime account — the DELEGATE B (Ada Auditor usr_showcase_auditor_demo, provisioned as a real login per knownGaps), who holds their own bearer token and decides the rerouted request as themselves"],
@@ -643,7 +645,7 @@
         ],
         "knownGaps": [
           "⛔ the delegation CANNOT be set up as a third party on behalf of another delegator: sys_approval_delegation is self-service-only and there is no admin exemption (#4839 — bindDelegationWriteGuard rejects a foreign delegator_id with FORBIDDEN, and an absent one is stamped to the caller). Combined with the seeded demo personas having no auth account of their own, the 'admin delegates on behalf of Mei' shape this item used to prescribe is not constructible by ANYBODY. The run drives the mirror image instead — the admin delegates their OWN slot to a real second account — which is also the stronger test, because the delegate decides under a genuinely separate identity and the audit's no-laundering clause becomes falsifiable (#7517)",
-          "provisioning a seeded demo persona as a real login needs more than a password hash: better-auth 1.7.0-rc.2 requires the credential account's issuer to equal local:credential (packages/plugins/plugin-auth/src/backfill-account-issuer.ts, CREDENTIAL_ISSUER). Without that one field, sign-in fails INVALID_EMAIL_OR_PASSWORD behind a misleading 'User not found' warn — the user exists and the hash is right, so the warn sends you looking in exactly the wrong place. With it set, B is constructible: drive the real second account rather than recording blocked(fixture) (#7517)",
+          "[CLOSED by #9308 fixture 1 — the gap text stays because it carries the reason] provisioning a seeded demo persona as a real login needs more than a password hash: better-auth 1.7.0-rc.2 requires the credential account's issuer to equal local:credential (packages/plugins/plugin-auth/src/backfill-account-issuer.ts, CREDENTIAL_ISSUER). Without that one field, sign-in fails INVALID_EMAIL_OR_PASSWORD behind a misleading 'User not found' warn — the user exists and the hash is right, so the warn sends you looking in exactly the wrong place. Delegate B is now constructible with no setup: seed-approval-demo.ts provisions Ada Auditor's credential account at boot (issuer derived from the dev admin's own row), password DEMO_PERSONA_PASSWORD ('showcase123', demo-personas.ts), pinned by packages/qa/dogfood/test/showcase-demo-personas-loginable.dogfood.test.ts. Drive the real second account; do not record blocked(fixture) for this reason",
           "authoring the scratch flow needs a writable/scratch package — the showcase ships read-only"
         ]
       },
@@ -707,7 +709,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "initial — pins the #1322 OOO delegation reroute: active A→B window reroutes an individually-routed slot to B (audited + notified, decided under B's own identity); expiry hands it back to A at resolution time", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-11", "change": "persona shape rewritten around what is constructible: the old fixture had the admin write a delegation on behalf of a non-admin delegator, which sys_approval_delegation's self-service-only guard refuses from everybody (#4839) and which the named delegator could not do either (no auth account). Now A = the signed-in admin delegating their OWN slot and B = a second REAL runtime account deciding with its own bearer token — the mirror image #7517 actually drove, and the stronger test. Added the foreign-delegator refusal as a negative and the better-auth issuer provisioning detail to knownGaps", "ref": "#7530" }
+        { "revision": 2, "date": "2026-08-11", "change": "persona shape rewritten around what is constructible: the old fixture had the admin write a delegation on behalf of a non-admin delegator, which sys_approval_delegation's self-service-only guard refuses from everybody (#4839) and which the named delegator could not do either (no auth account). Now A = the signed-in admin delegating their OWN slot and B = a second REAL runtime account deciding with its own bearer token — the mirror image #7517 actually drove, and the stronger test. Added the foreign-delegator refusal as a negative and the better-auth issuer provisioning detail to knownGaps", "ref": "#7530" },
+        { "revision": 3, "date": "2026-08-18", "change": "delegate B needs no hand-provisioning any more: the showcase gives Ada Auditor a real better-auth credential account on a stock boot, so the issuer knownGap is rewritten as closed-by-fixture. The OTHER two gaps are untouched and still bind — the self-service-only delegation guard (#4839) and the writable/scratch package the individually-routed flow needs", "ref": "#9308" }
       ]
     },
     {

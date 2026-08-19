@@ -46,6 +46,28 @@
       "sharingModel": "private"
     },
     {
+      "permissionSet": "showcase_client_liaison",
+      "object": "showcase_client_brief",
+      "create": true,
+      "read": true,
+      "edit": true,
+      "delete": false,
+      "viewAllRecords": false,
+      "modifyAllRecords": false,
+      "sharingModel": "public_read"
+    },
+    {
+      "permissionSet": "showcase_client_liaison",
+      "object": "showcase_project",
+      "create": false,
+      "read": true,
+      "edit": false,
+      "delete": false,
+      "viewAllRecords": false,
+      "modifyAllRecords": false,
+      "sharingModel": "public_read_write"
+    },
+    {
       "permissionSet": "showcase_contributor",
       "object": "showcase_account",
       "create": false,

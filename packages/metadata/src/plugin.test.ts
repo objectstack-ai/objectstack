@@ -58,6 +58,78 @@ describe('MetadataPlugin — bootstrap × watch coupling (D2)', () => {
     });
 });
 
+// `MetadataPluginOptions.watch` documents its own default as `false` — the posture both
+// non-test construction sites (`runtime/standalone-stack.ts`, `cli/commands/serve.ts`)
+// assert explicitly, citing an EMFILE hazard: `watch: true` recursively polls the whole
+// project root. The constructor used to implement the opposite, and it did so in TWO
+// places — an object literal covering the omitted key, and a `?? true` fallback covering
+// an explicit `undefined` — so both entry shapes are pinned here, on the OBSERVABLE
+// (whether a watcher object exists) rather than on the resolved options value alone.
+describe('MetadataPlugin — watch defaults to false, matching its documented contract', () => {
+    it('attaches NO filesystem watcher when the caller passes no options at all', () => {
+        const plugin = new MetadataPlugin();
+        const mgr = (plugin as any).manager as NodeMetadataManager;
+        expect((mgr as any).watcher).toBeUndefined();
+        expect((plugin as any).options.watch).toBe(false);
+    });
+
+    it('attaches NO filesystem watcher when the `watch` key is omitted', () => {
+        const plugin = new MetadataPlugin({
+            config: { bootstrap: 'eager' },
+        });
+        const mgr = (plugin as any).manager as NodeMetadataManager;
+        expect((mgr as any).watcher).toBeUndefined();
+        expect((plugin as any).options.watch).toBe(false);
+    });
+
+    it('attaches NO filesystem watcher when `watch` is explicitly undefined', () => {
+        const plugin = new MetadataPlugin({
+            watch: undefined,
+            config: { bootstrap: 'eager' },
+        });
+        const mgr = (plugin as any).manager as NodeMetadataManager;
+        expect((mgr as any).watcher).toBeUndefined();
+        // Normalized, not merely absent: every read of this flag — including the
+        // `start()`-time FileSystemRepository `disableWatch`, which keys on `=== false`
+        // rather than on a nullish fallback — must see the same resolved default.
+        expect((plugin as any).options.watch).toBe(false);
+    });
+
+    it('lazy bootstrap also attaches NO filesystem watcher by default', () => {
+        const plugin = new MetadataPlugin({
+            config: { bootstrap: 'lazy' },
+        });
+        const mgr = (plugin as any).manager as NodeMetadataManager;
+        expect((mgr as any).watcher).toBeUndefined();
+    });
+
+    // CONTROL — this is a default flip, NOT a removal of the capability. Co-located with
+    // the pins above deliberately: a regression that disabled watching outright would
+    // leave every `toBeUndefined()` above green.
+    it('still attaches a filesystem watcher when `watch: true` is explicit', () => {
+        const plugin = new MetadataPlugin({
+            watch: true,
+            config: { bootstrap: 'eager' },
+        });
+        const mgr = (plugin as any).manager as NodeMetadataManager;
+        expect((mgr as any).watcher).toBeDefined();
+        expect((plugin as any).options.watch).toBe(true);
+        return mgr.stopWatching();
+    });
+
+    // The sealed-runtime carve-out is independent of the default and must stay intact:
+    // `artifact-only` forces watching off even against an explicit `watch: true`.
+    it('artifact-only bootstrap still short-circuits an explicit `watch: true`', () => {
+        const plugin = new MetadataPlugin({
+            watch: true,
+            config: { bootstrap: 'artifact-only' },
+        });
+        const mgr = (plugin as any).manager as NodeMetadataManager;
+        expect((mgr as any).watcher).toBeUndefined();
+        expect((plugin as any).options.watch).toBe(true);
+    });
+});
+
 // ─────────────────────────────────────────────────────────────────────────
 // PR-10e regression: artifact view items have no top-level `name`. Their
 // identity is the target object (encoded in `list.data.object` /

@@ -249,7 +249,7 @@ describe('nothing is deleted early', () => {
     });
 
     expect(out.kind).toBe('rearmed');
-    expect((out as any).reason).toContain('file-storage capability is not mounted');
+    expect((out as any).reason).toContain('storage capability is not mounted');
   });
 
   it('states the consequence at `error` when it cannot re-arm — those bytes are now permanent', async () => {

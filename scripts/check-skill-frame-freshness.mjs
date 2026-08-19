@@ -818,7 +818,7 @@ function selfTest() {
       label: 'stale tree + authoritative ref → ERROR naming the stale files (the #5866 shape)',
       run: () => evaluate({ root: dir, ref: current }),
       expect: 'error',
-      wants: [/STRUCTURALLY BEHIND/, /\.claude\/agents\/os-dev\.md/, /2 axes: long-term-soundness/, /3 axes: business-need/, new RegExp(REMEDY.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))],
+      wants: [/STRUCTURALLY BEHIND/, /\.claude\/agents\/os-dev\.md/, /3 axes: long-term-soundness/, /4 axes: business-need/, new RegExp(REMEDY.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))],
     });
     cases.push({
       label: 'the SAME stale tree, fetch impossible → degrades to WARN, exit 0, same diagnosis',

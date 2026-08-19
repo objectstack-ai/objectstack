@@ -9,7 +9,8 @@
   "exports": {
     ".": "./objectstack.config.ts",
     "./objectstack.config": "./objectstack.config.ts",
-    "./coverage": "./src/coverage.ts"
+    "./coverage": "./src/coverage.ts",
+    "./security-personas": "./src/security/demo-personas.ts"
   },
   "scripts": {
     "dev": "objectstack dev --seed-admin",
