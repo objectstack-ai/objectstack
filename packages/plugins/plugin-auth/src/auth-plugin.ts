@@ -57,6 +57,12 @@ import {
   authPluginManifestHeader,
 } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
+import { judgePlatformAdmin, type PlatformAdminActor } from './platform-admin-gate.js';
+import {
+  runAdminBanUser,
+  runAdminUnbanUser,
+  type AdminBanEndpointDeps,
+} from './admin-ban-endpoints.js';
 
 
 /**
@@ -1751,25 +1757,12 @@ export class AuthPlugin implements Plugin {
           return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'disabled must be a boolean' } }, 400);
         }
 
+        // Platform-admin gate (ADR-0068 D2) — one shared judge for every
+        // ObjectStack `/admin/*` mount; see platform-admin-gate.ts.
         const authApi = await this.authManager!.getApi();
         const session = await authApi.getSession({ headers: c.req.raw.headers });
-        if (!session?.user?.id) {
-          return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in first' } }, 401);
-        }
-        // Platform-admin gate. ADR-0068 removed the `user.role = 'admin'`
-        // synthesis, so a stale `role === 'admin'` check now rejects even
-        // platform admins. Accept the canonical signals customSession carries
-        // (the derived `isPlatformAdmin` alias / `platform_admin` in roles[]),
-        // with the legacy admin-plugin `role` scalar as a fallback. Mirrors the
-        // /admin/unlock-user gate below.
-        const u: any = session.user;
-        const isAdmin =
-          u?.isPlatformAdmin === true ||
-          (Array.isArray(u?.positions) && u.positions.includes('platform_admin')) ||
-          u?.role === 'admin';
-        if (!isAdmin) {
-          return c.json({ success: false, error: { code: 'PERMISSION_DENIED', message: 'Admin role required' } }, 403);
-        }
+        const verdict = judgePlatformAdmin(session);
+        if (!verdict.ok) return c.json(verdict.refusal.body, verdict.refusal.status);
 
         // Write through the same ObjectQL data engine that better-auth's
         // adapter uses. We target the snake_case table name (`sys_oauth_application`,
@@ -1858,23 +1851,11 @@ export class AuthPlugin implements Plugin {
           return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'userId is required' } }, 400);
         }
 
+        // Platform-admin gate (ADR-0068 D2) — see platform-admin-gate.ts.
         const authApi = await this.authManager!.getApi();
         const session = await authApi.getSession({ headers: c.req.raw.headers });
-        if (!session?.user?.id) {
-          return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in first' } }, 401);
-        }
-        // Platform-admin gate. Accept any of the equivalent signals the
-        // customSession plugin may carry (ADR-0068): the derived
-        // `isPlatformAdmin` alias, the canonical `platform_admin` in roles[],
-        // or the legacy admin-plugin `role` scalar.
-        const u: any = session.user;
-        const isAdmin =
-          u?.isPlatformAdmin === true ||
-          (Array.isArray(u?.positions) && u.positions.includes('platform_admin')) ||
-          u?.role === 'admin';
-        if (!isAdmin) {
-          return c.json({ success: false, error: { code: 'PERMISSION_DENIED', message: 'Admin role required' } }, 403);
-        }
+        const verdict = judgePlatformAdmin(session);
+        if (!verdict.ok) return c.json(verdict.refusal.body, verdict.refusal.status);
 
         const ok = await this.authManager!.unlockUser(userId);
         if (!ok) {
@@ -1919,21 +1900,12 @@ export class AuthPlugin implements Plugin {
         getTenancy: () => this.tenancy ?? undefined,
         logger: ctx.logger,
       });
-      const gateAdmin = async (c: any): Promise<{ id: string; email?: string } | Response> => {
+      const gateAdmin = async (c: any): Promise<PlatformAdminActor | Response> => {
         const authApi = await this.authManager!.getApi();
         const session = await (authApi as any).getSession({ headers: c.req.raw.headers });
-        if (!session?.user?.id) {
-          return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in first' } }, 401);
-        }
-        const u: any = session.user;
-        const isAdmin =
-          u?.isPlatformAdmin === true ||
-          (Array.isArray(u?.positions) && u.positions.includes('platform_admin')) ||
-          u?.role === 'admin';
-        if (!isAdmin) {
-          return c.json({ success: false, error: { code: 'PERMISSION_DENIED', message: 'Admin role required' } }, 403);
-        }
-        return { id: String(u.id), email: typeof u.email === 'string' ? u.email : undefined };
+        const verdict = judgePlatformAdmin(session);
+        if (!verdict.ok) return c.json(verdict.refusal.body, verdict.refusal.status);
+        return verdict.actor;
       };
 
       rawApp.post(`${basePath}/admin/create-user`, async (c: any) => {
@@ -1963,6 +1935,82 @@ export class AuthPlugin implements Plugin {
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           ctx.logger.error('[AuthPlugin] admin/create-user failed', err);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        }
+      });
+
+      // ── #9652: ban / unban, re-mounted with the ADR-0068 gate ────────────
+      //
+      // These SHADOW better-auth's native `/admin/ban-user` and
+      // `/admin/unban-user`. The vendor's `admin` plugin authorizes on the
+      // legacy `user.role === 'admin'` scalar that ADR-0068 D2 stopped
+      // synthesizing, and it exposes no option that can be pointed at
+      // ObjectStack's predicate — a MEASURED property of the installed
+      // version, written up in admin-ban-endpoints.ts. The result was that the
+      // `sys_user` Ban / Unban buttons 403'd for every platform admin on any
+      // deployment with the admin plugin on (SCIM forces it, ADR-0071).
+      //
+      // ⚠️ Shadowing detaches better-auth hooks keyed on the path: the
+      // break-glass last-local-credential guard used to fire on
+      // `/admin/ban-user` from `auth-manager.ts`. `runAdminBanUser` re-runs it
+      // from the shared module.
+      const adminBanDeps = (): AdminBanEndpointDeps => ({
+        getAuthContext: () => this.authManager!.getAuthContext(),
+      });
+
+      /**
+       * Refuse when the admin plugin is off, exactly as create-user does.
+       *
+       * Without this the shadowing mounts would answer 200 on a deployment
+       * that has no admin plugin — writing `banned: true` while the vendor's
+       * session hook that ENFORCES a ban is not loaded. That is a
+       * declared-but-not-enforced ban: the console reports success and the
+       * banned user signs straight back in. `banUser` on the api surface is
+       * the same seam create-user tests for.
+       */
+      const adminPluginMissing = async (c: any): Promise<Response | undefined> => {
+        const authApi: any = await this.authManager!.getApi();
+        if (typeof authApi.banUser === 'function') return undefined;
+        return c.json(
+          { success: false, error: { code: 'NOT_IMPLEMENTED', message: 'The better-auth admin plugin is not enabled (auth.plugins.admin)' } },
+          501,
+        );
+      };
+
+      rawApp.post(`${basePath}/admin/ban-user`, async (c: any) => {
+        try {
+          const actor = await gateAdmin(c);
+          if (actor instanceof Response) return actor;
+          const unavailable = await adminPluginMissing(c);
+          if (unavailable) return unavailable;
+          // Attributed to the admin for the same reason create-user is: the
+          // write is driven server-side and never passes through
+          // `AuthManager.handleRequest`, so the request-scoped actor seam is
+          // not open unless we open it here.
+          const { status, body } = await runAttributedToUser(actor.id, () =>
+            runAdminBanUser(adminBanDeps(), actor, c.req.raw),
+          );
+          return c.json(body, status as any);
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          ctx.logger.error('[AuthPlugin] admin/ban-user failed', err);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        }
+      });
+
+      rawApp.post(`${basePath}/admin/unban-user`, async (c: any) => {
+        try {
+          const actor = await gateAdmin(c);
+          if (actor instanceof Response) return actor;
+          const unavailable = await adminPluginMissing(c);
+          if (unavailable) return unavailable;
+          const { status, body } = await runAttributedToUser(actor.id, () =>
+            runAdminUnbanUser(adminBanDeps(), actor, c.req.raw),
+          );
+          return c.json(body, status as any);
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          ctx.logger.error('[AuthPlugin] admin/unban-user failed', err);
           return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
         }
       });
