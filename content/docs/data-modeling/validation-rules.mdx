@@ -256,12 +256,12 @@ lives in the `multiple` and `required` doc blocks of
 [Field reference](/docs/references/data/field)), and it makes `required` on a
 multi-value lookup mean **non-empty array**.
 
-<Callout type="warn">
-The `required`-means-non-empty half is **declared but not yet enforced** by the record
-validator: today `[]` passes the required check on both insert and update, because the
-check treats only `undefined`, `null` and blank strings as missing. Validate emptiness
-in application code until that lands (tracked in #9476). The representation guarantee
-above (`[]`, never `null`) is live.
+<Callout type="info">
+The `required`-means-non-empty half is **enforced by the record validator** (#9476, per
+the #9447 ruling): an explicit `[]` is rejected on insert, and on any update that
+supplies the field — exactly as `null` and `""` are on a single-value required field. An
+update that omits the field never fails this check, so legacy rows stay editable. No
+application-level emptiness check is needed.
 </Callout>
 
 ### `master_detail`
