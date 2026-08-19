@@ -31,16 +31,32 @@
 // cases now pin is +2 apps, +2 capabilities, +1 readable object, +1 readable
 // field, all recovered.
 //
-// ## Why the baseline must arrive as a SERVICE here, not as an `everyone` row
+// ## Why the baseline must arrive through the RESOLVER, not as an `everyone` row
 //
 // `resolveUserAuthzGrants` already expands the implicit `everyone` position and
 // whatever is bound to it — that path was never on the cliff, and a fixture
 // that delivered the baseline that way would pass before and after the fix.
-// The deployment baseline is a different channel: SecurityPlugin registers
-// `security.baselinePermissionSets` (#7555 — the app-declared baseline composed
-// with the platform `member_default`), and `baselinePermissionSetNames` is the
-// only thing that reads it. That channel is the one the cliff gated, so these
-// fixtures bind the baseline set to NO position and supply it as the service.
+// The deployment baseline is a different channel, so these fixtures bind the
+// baseline set to NO position and let the resolver apply it.
+//
+// ## What #7616 changed about these cases, and what it did NOT
+//
+// The composition itself is no longer this file's: both handlers now delegate
+// to `ISecurityService.resolvePermissionSetsForContext` on the `security`
+// service — the enforcement path's own resolution — instead of composing the
+// requested names and loading `sys_permission_set` themselves. So the ADDITIVE
+// RULE is pinned where it now lives (plugin-security's own cases); the double
+// below stands for the contract, not for the rule.
+//
+// What these cases still measure is the half that is genuinely this file's and
+// is what a user sees: the endpoints hand the caller's context to that resolver
+// and PROJECT the answer onto the wire correctly — apps in `/me/apps`,
+// capabilities and object/field access in `/auth/me/permissions`. The counts
+// below are therefore unchanged from the #7608 fix, and they are the reason a
+// regression in the projection still fails here rather than in plugin-security.
+// The delegation itself is pinned at the bottom of this file: one resolver
+// call per request, the caller's context passed whole, and NONE of the
+// `security.*` internal handles read.
 
 import { describe, it, expect } from 'vitest';
 import { Hono } from 'hono';
@@ -103,25 +119,54 @@ function permissionSet(
 }
 
 /**
- * plugin-security's `PermissionEvaluator`, on the DB-backed branch this caller
- * exercises. plugin-hono-server must not depend on plugin-security (OPTIONAL in
- * the stacks these endpoints serve), so the double covers the one method both
- * handlers call — and it records every identifier list it is handed, which is
- * how the cases below can also state the mechanism (one call, baseline inside)
- * alongside the user-visible count.
+ * [#7616] A stand-in for `ISecurityService.resolvePermissionSetsForContext` —
+ * the ONE resolution both handlers delegate to. plugin-hono-server must not
+ * depend on plugin-security (OPTIONAL in the stacks these endpoints serve), so
+ * the double covers the one contract method both handlers call, and records
+ * every context it is handed so the delegation cases can state the mechanism
+ * alongside the user-visible counts.
+ *
+ * It reproduces exactly the two properties of the plugin's resolution these
+ * cases stand on — requested = positions ∪ explicit sets ∪ baseline, ADDITIVE
+ * and unconditional (ADR-0090 D5), and the sets returned WHOLE from
+ * `sys_permission_set` — and nothing else. ⚠️ It is a stand-in, not the
+ * authority: an assertion about the RULE belongs in plugin-security, where the
+ * rule is. Everything asserted here is about what the endpoints do with the
+ * answer.
  */
-function makeEvaluator() {
-    const calls: string[][] = [];
+function makeSecurityService(rows: Row[], baseline: string[]) {
+    const calls: any[] = [];
+    const parse = (v: unknown, fallback: unknown) =>
+        typeof v === 'string' ? JSON.parse(v || JSON.stringify(fallback)) : v ?? fallback;
     return {
         calls,
-        resolvePermissionSets: async (
-            identifiers: string[],
-            _metadata: unknown,
-            _bootstrap: unknown[] | undefined,
-            dbLoader?: (names: string[]) => Promise<unknown[]>,
-        ) => {
-            calls.push([...identifiers]);
-            return dbLoader ? dbLoader(identifiers) : [];
+        service: {
+            resolvePermissionSetsForContext: async (context: any) => {
+                calls.push(context);
+                const requested: string[] = [
+                    ...(Array.isArray(context?.positions) ? context.positions : []),
+                    ...(Array.isArray(context?.permissions) ? context.permissions : []),
+                ];
+                if (context?.userId) {
+                    for (const name of baseline) {
+                        if (!requested.includes(name)) requested.push(name);
+                    }
+                }
+                // Resolution ORDER, like the plugin's: requested order, not row
+                // order — the response's `permissionSets` array reports it.
+                return requested.flatMap((name) =>
+                    rows
+                        .filter((r) => r.name === name)
+                        .map((r) => ({
+                            name: r.name,
+                            label: r.label,
+                            objects: parse(r.object_permissions, {}),
+                            fields: parse(r.field_permissions, {}),
+                            systemPermissions: parse(r.system_permissions, []),
+                            tabPermissions: parse(r.tab_permissions, {}),
+                        })),
+                );
+            },
         },
     };
 }
@@ -133,12 +178,23 @@ const metadata = { list: async () => [] as unknown[] };
  * position. `explicitGrant` is the ONLY axis — it adds a single
  * `sys_user_permission_set` row, the "first real grant" D5 names.
  */
-function mount({ explicitGrant, baseline = [BASELINE], grantedSetId = 'ps_ops' }: {
+function mount({
+    explicitGrant,
+    baseline = [BASELINE],
+    grantedSetId = 'ps_ops',
+    legacyHandles = true,
+}: {
     explicitGrant: boolean;
-    /** The registered `security.baselinePermissionSets`; `null` = slot unclaimed. */
-    baseline?: string[] | null;
+    /** The deployment baseline the RESOLVER applies (its business since #7616). */
+    baseline?: string[];
     /** Which set the explicit grant binds — `ps_baseline` for the overlap case. */
     grantedSetId?: 'ps_ops' | 'ps_baseline';
+    /**
+     * Whether the locator carries the `security.*` handles this file used to
+     * resolve from. Present by DEFAULT, exactly as a real stack registers them,
+     * so the cases below prove the answer no longer depends on them.
+     */
+    legacyHandles?: boolean;
 }) {
     const tables: Record<string, Row[]> = {
         sys_user: [{ id: USER, email: 'member@example.com' }],
@@ -174,7 +230,7 @@ function mount({ explicitGrant, baseline = [BASELINE], grantedSetId = 'ps_ops' }
             { name: 'billing', requiredPermissions: ['billing.manage'] },
         ],
     };
-    const evaluator = makeEvaluator();
+    const security = makeSecurityService(tables.sys_permission_set, baseline);
     const services: Record<string, unknown> = {
         auth: {
             api: {
@@ -186,24 +242,37 @@ function mount({ explicitGrant, baseline = [BASELINE], grantedSetId = 'ps_ops' }
         },
         objectql: makeQl(tables),
         metadata,
-        'security.permissions': evaluator,
+        security: security.service,
     };
-    // [#7555] The composed baseline, as SecurityPlugin registers it. Omitted
-    // entirely for the unclaimed-slot case, where the locator THROWS (as the
-    // real kernel's does) and `baselinePermissionSetNames` falls back.
-    if (baseline !== null) services['security.baselinePermissionSets'] = baseline;
+    if (legacyHandles) {
+        // The handles this file used to resolve its own answer from, wired the
+        // way SecurityPlugin wires them. They are here to be IGNORED: a
+        // permission-set resolution rebuilt locally would read them and pass,
+        // so their presence is what gives `lookups` below its teeth.
+        services['security.permissions'] = {
+            resolvePermissionSets: async () => {
+                throw new Error('the endpoints must not resolve permission sets themselves');
+            },
+        };
+        services['security.bootstrapPermissionSets'] = [];
+        services['security.baselinePermissionSets'] = baseline;
+        services['security.fallbackPermissionSet'] = baseline[0] ?? null;
+    }
+    /** Every service name the endpoints asked the locator for, in order. */
+    const lookups: string[] = [];
     const app = new Hono();
     registerCurrentUserEndpoints({
         rawApp: app,
         ctx: {
             logger: { debug() {}, warn() {} },
             getService: <T,>(name: string): T => {
+                lookups.push(name);
                 if (!(name in services)) throw new Error(`[Kernel] Service '${name}' not found`);
                 return services[name] as T;
             },
         },
     });
-    return { app, evaluator };
+    return { app, security, lookups };
 }
 
 const permissionsOf = async (app: any) =>
@@ -248,31 +317,31 @@ describe('/me/apps — the baseline survives the first explicit grant (#7608)', 
         expect(one).not.toContain('billing');
     });
 
-    it('resolves ONCE, with the baseline inside the request (no second, gated call)', async () => {
-        // The mechanism behind the counts above: the baseline is an INPUT to
-        // the single resolution, not a consolation prize for resolving to
-        // nothing. Asserting the call shape here is what lets the cases above
-        // stay about apps.
-        const { app, evaluator } = mount({ explicitGrant: true });
+    it('[#7616] resolves ONCE, by delegating the caller\'s CONTEXT (no local resolution)', async () => {
+        // The mechanism behind the counts above. Pre-#7616 this handler
+        // composed a NAME LIST and called the evaluator with a DB loader of its
+        // own; it now hands the resolver the context and merges what comes
+        // back. Asserting the call shape here is what lets the cases above stay
+        // about apps.
+        const { app, security } = mount({ explicitGrant: true });
         await app.request(`http://localhost${ME_APPS}`);
 
-        expect(evaluator.calls).toHaveLength(1);
-        expect(evaluator.calls[0]).toContain(BASELINE);
-        expect(evaluator.calls[0]).toContain(EXPLICIT);
+        expect(security.calls).toHaveLength(1);
+        expect(security.calls[0].userId).toBe(USER);
+        // The caller's own grants arrive as the context's fields — NOT
+        // pre-composed with the baseline by this file.
+        expect(security.calls[0].permissions).toContain(EXPLICIT);
+        expect(security.calls[0].permissions).not.toContain(BASELINE);
     });
 
-    it('does not duplicate a baseline name the caller already holds explicitly', async () => {
-        // A member granted the baseline set DIRECTLY must not have it pushed a
-        // second time: `resolvePermissionSets` would merge the same set into
-        // itself, and the DB loader's `limit: names.length` would over-read.
-        // The plugin's copy guards this with `if (!requested.includes(name))`;
-        // this is the case that keeps the guard honest here.
-        const { app, evaluator } = mount({ explicitGrant: true, grantedSetId: 'ps_baseline' });
-        await app.request(`http://localhost${ME_APPS}`);
+    it('a member granted the baseline set DIRECTLY sees it once, not twice', async () => {
+        // The overlap case, kept as a USER-VISIBLE assertion: a member whose
+        // one explicit grant IS the baseline set must come out with exactly the
+        // baseline's apps. De-duplicating the requested names is the resolver's
+        // job since #7616 — what must hold here is that merging a set into
+        // itself does not change the projection.
+        const { app } = mount({ explicitGrant: true, grantedSetId: 'ps_baseline' });
 
-        const requested = evaluator.calls[0];
-        expect(requested).toContain(BASELINE);
-        expect(requested.filter((n) => n === BASELINE)).toHaveLength(1);
         expect(await appNamesOf(app)).toEqual(['home', 'reports']);
     });
 });
@@ -320,35 +389,57 @@ describe('/auth/me/permissions — the same rule on the object/field surface (#7
         expect(one.systemPermissions.length - zero.systemPermissions.length).toBe(1);
     });
 
-    it('resolves ONCE here too, with the baseline inside the request', async () => {
-        const { app, evaluator } = mount({ explicitGrant: true });
+    it('[#7616] delegates here too — one call, the caller\'s context, no name list', async () => {
+        const { app, security } = mount({ explicitGrant: true });
         await app.request(`http://localhost${ME_PERMISSIONS}`);
 
-        expect(evaluator.calls).toHaveLength(1);
-        expect(evaluator.calls[0]).toContain(BASELINE);
-        expect(evaluator.calls[0]).toContain(EXPLICIT);
+        expect(security.calls).toHaveLength(1);
+        expect(security.calls[0].userId).toBe(USER);
+        expect(security.calls[0].permissions).toContain(EXPLICIT);
+        expect(security.calls[0].permissions).not.toContain(BASELINE);
     });
 });
 
 describe('the baseline is a floor, not a licence (#7608)', () => {
     it('a deployment declaring an EMPTY baseline resolves the explicit grant alone', async () => {
-        // The additive push must degrade to a plain resolution when there is
-        // nothing to add — not throw, and not invent `member_default` on a
-        // deployment that deliberately declared none.
-        const { app, evaluator } = mount({ explicitGrant: true, baseline: [] });
+        // A deployment that deliberately declared no baseline must come out
+        // with the explicit grant and nothing invented on top of it.
+        const { app } = mount({ explicitGrant: true, baseline: [] });
 
         expect(await appNamesOf(app)).toEqual(['exports']);
-        expect(evaluator.calls[0]).not.toContain(BASELINE);
     });
 
-    it('an UNCLAIMED baseline slot still applies the `member_default` default, additively', async () => {
-        // No SecurityPlugin baseline registration at all: `getService` throws,
-        // both reads in `baselinePermissionSetNames` fall through, and the bare
-        // `member_default` default stands — which in this fixture IS the
-        // baseline set, so the member keeps it through their grant.
-        const { app } = mount({ explicitGrant: true, baseline: null });
+    it('[#7616] the answer does not depend on the `security.*` internal handles', async () => {
+        // REPLACES the case that pinned this file's own baseline fallback
+        // chain (`security.baselinePermissionSets` → `security.fallback-
+        // PermissionSet` → a bare `member_default`). That chain is deleted:
+        // which baseline a deployment applies is the resolver's answer now, and
+        // an assertion about the chain would pass here while measuring nothing
+        // this file still does.
+        //
+        // What replaces it is the property that makes the deletion true. The
+        // contract calls `security.permissions` and its siblings implementation
+        // internals, "deliberately NOT part of this contract"; the default
+        // fixture registers them anyway, and the endpoints must never ask for
+        // them. The `security.permissions` double THROWS if called, so a
+        // re-introduced local resolution fails loudly rather than quietly
+        // agreeing.
+        const withHandles = mount({ explicitGrant: true });
+        const withoutHandles = mount({ explicitGrant: true, legacyHandles: false });
 
-        expect(await appNamesOf(app)).toEqual(['exports', 'home', 'reports']);
+        expect(await appNamesOf(withHandles.app)).toEqual(['exports', 'home', 'reports']);
+        expect(await appNamesOf(withoutHandles.app)).toEqual(['exports', 'home', 'reports']);
+        for (const name of [
+            'security.permissions',
+            'security.bootstrapPermissionSets',
+            'security.baselinePermissionSets',
+            'security.fallbackPermissionSet',
+        ]) {
+            expect(withHandles.lookups).not.toContain(name);
+        }
+        // The control: the locator WAS asked for the published service, so the
+        // assertion above is a real absence and not an empty recording.
+        expect(withHandles.lookups).toContain('security');
     });
 
     it('an app whose requiredPermissions nobody holds stays filtered for both members', async () => {

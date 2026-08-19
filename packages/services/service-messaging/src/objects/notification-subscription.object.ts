@@ -6,11 +6,18 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * `sys_notification_subscription` — who is subscribed to a topic (ADR-0030
  * Layer 3).
  *
- * Declares standing interest in a `topic` by a `principal` (`role:x`, `team:x`,
- * `user:id`, or a bare user id). Where a producer emits with `audience:
- * 'subscribers'` (or no explicit audience), the resolver expands the topic's
- * subscriptions into recipients — the opt-in counterpart to the explicit
- * audience most producers pass today.
+ * Declares standing interest in a `topic` by a `principal` (see that field for
+ * the accepted selector forms).
+ *
+ * ⚠️ [#9807] The subscription→recipient expansion is **NOT WIRED in this
+ * repo**: `AudienceSpec` (`messaging-service.ts`) has no `'subscribers'`
+ * member, `EmitInput.audience` is REQUIRED, and no `RecipientResolver` branch
+ * expands a topic's subscriptions — so nothing here reads these rows at
+ * runtime. Every delivery today comes from the explicit `audience` a producer
+ * passes to `emit()`, which makes the Setup "Notification Subscriptions" grid
+ * admin-authored data, NOT a live routing control. The ADR-0030 Layer-3
+ * expansion is future work, deferred on measured zero pull; ADR-0012/0030
+ * describe that target state, not today's behaviour.
  *
  * Distinct from `sys_notification_preference`: a subscription says "include me
  * for this topic"; a preference says "but mute it on this channel".
@@ -45,7 +52,13 @@ export const NotificationSubscription = ObjectSchema.create({
             label: 'Principal',
             required: true,
             searchable: true,
-            description: "Subscriber selector: 'role:x' | 'team:x' | 'user:id' | bare user id.",
+            // [#9807] Kept in step with what `RecipientResolver.resolveOne()` really
+            // accepts for a string spec, so this does not under-describe the day the
+            // expansion above is wired: an email-shaped value is matched against
+            // `sys_user` (kept verbatim when no user matches), and anything otherwise
+            // unrecognized falls through as a bare user id.
+            description:
+                "Subscriber selector: 'role:x' | 'team:x' | 'user:id' | 'owner_of:object:id' | an email | a bare user id.",
         }),
 
         enabled: Field.boolean({
