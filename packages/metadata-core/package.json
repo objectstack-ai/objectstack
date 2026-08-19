@@ -50,7 +50,7 @@
     }
   },
   "devDependencies": {
-    "@types/node": "^26.1.2",
+    "@types/node": "^26.2.0",
     "fast-check": "^4.9.0",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
