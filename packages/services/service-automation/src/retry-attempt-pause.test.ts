@@ -273,26 +273,53 @@ describe('#9510 — a pause on a RETRY attempt is durable, not a burned attempt'
         expect(storedViaRetry?.nodeType).toBe(storedViaExecute?.nodeType);
         expect(storedViaRetry?.correlation).toBe(storedViaExecute?.correlation);
 
-        // ⚠️ The one thing that does NOT match, asserted rather than skirted.
-        // `executeWithoutRetry` seeds none of the engine-owned variables
+        // ⭐ [#9704] The variable ENVIRONMENT matches too — and this block is
+        // where the divergence used to be pinned as measured behaviour.
+        // `executeWithoutRetry` seeded none of the engine-owned variables
         // `execute()` binds (`$runId`, `$flowName`, `$flowLabel`, `record` and
-        // its flattened fields, `previous`), so a retry attempt has always run
-        // in a smaller environment than the first — filed as #9704, a divergent
-        // run environment rather than a lost pause, and out of scope here: it
-        // afflicts every retry attempt, pausing or not, and predates this card.
+        // its flattened fields, `previous`), so a retry attempt ran in a
+        // strictly SMALLER environment than the first: under strict CEL an
+        // unbound name ABORTS a predicate instead of yielding false (#4697), so
+        // a start condition or edge predicate reading `previous` (#3427) or a
+        // bare record field failed on the retry for a reason attempt 1 never
+        // hit, and a pausing node on a retry attempt saw no `$runId` to map its
+        // external state back with (ADR-0019). Both methods now seed through
+        // one helper (`seedRunVariables`), so the two snapshots are compared to
+        // EACH OTHER — the same discipline the result envelope above uses.
         //
-        // It is pinned as TODAY's measured behaviour, deliberately, so #9704
-        // cannot be repaired silently. When it is repaired these three
-        // assertions are the ones that go red, and the correct edit is to
-        // delete them and add `variables` to the parity block above.
-        const engineOwned = ['$runId', '$flowName', '$flowLabel', 'previous', 'record'];
-        for (const name of engineOwned) {
-            expect(Object.keys(storedViaExecute?.variables ?? {})).toContain(name);
-            expect(Object.keys(storedViaRetry?.variables ?? {})).not.toContain(name);
-        }
-        // What the two DO share: the run's own work. Both snapshots carry the
-        // pausing node's inputs, so the continuation is a real continuation on
-        // either route — the half this card is about.
+        // `$runId` is per-run by nature, so it is asserted against the run id
+        // each route actually returned and then normalized for the comparison.
+        // Asserting it by VALUE is the point: a snapshot merely *carrying* a
+        // `$runId` that names a different run is the ADR-0019 mapping hole this
+        // card is about, and a presence-only check cannot see it.
+        expect(storedViaRetry?.variables?.$runId).toBe(viaRetry.runId);
+        expect(storedViaExecute?.variables?.$runId).toBe(viaExecute.runId);
+        const vars = (s: { variables: Record<string, unknown> } | null) => ({
+            ...(s?.variables ?? {}),
+            $runId: '<runId>',
+        });
+        expect(vars(storedViaRetry)).toEqual(vars(storedViaExecute));
+
+        // …and the engine-owned bindings pinned by VALUE on the RETRY route,
+        // not merely by parity: the comparison above is equally satisfied if
+        // BOTH routes lose them, which is the shape a later "simplification" of
+        // the shared helper would take.
+        expect(storedViaRetry?.variables?.$flowName).toBe('flaky_approval');
+        expect(storedViaRetry?.variables?.$flowLabel).toBe('flaky_approval');
+        // `previous` is bound ALWAYS — to `null` on the create leg, since that
+        // is what lets a start condition discriminate create vs update (#3427).
+        // `toHaveProperty` rather than a `?.previous` read: the defect was the
+        // key being ABSENT, and absent and `null` both read as `null`.
+        expect(storedViaRetry?.variables).toHaveProperty('previous', null);
+        expect(storedViaRetry?.variables?.record).toEqual({ id: 'ord_9510', amount: 500 });
+        // The trigger record's own fields flattened to top-level names — what
+        // makes a bare `amount` reference resolve on a retry attempt.
+        expect(storedViaRetry?.variables?.amount).toBe(500);
+        expect(storedViaRetry?.variables?.id).toBe('ord_9510');
+
+        // What the two shared even BEFORE the repair: the run's own work. Both
+        // snapshots carry the pausing node's inputs, so the continuation is a
+        // real continuation on either route — the half #9510 was about.
         expect(storedViaRetry?.variables?.['flaky.ok']).toEqual(storedViaExecute?.variables?.['flaky.ok']);
         expect(storedViaRetry?.variables?.$record).toEqual(storedViaExecute?.variables?.$record);
 
