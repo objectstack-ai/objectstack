@@ -19,14 +19,28 @@
  * stay in the deployment repo.
  */
 export const SEMCONV = {
-    // ── HTTP — emitted by `@objectstack/runtime`'s instrumentRouteHandler ──
-    /** Counter, labels: `method`, `route`, `status`. */
+    // ── HTTP — emitter differs per family, see each ────────────────────
+    /**
+     * Counter, labels: `method`, `route`, `status`. Emitted by the TRANSPORT
+     * through the `IHttpServer.afterResponse` seam (#9835), so it covers
+     * every inbound request on the server rather than only the routes the
+     * runtime dispatcher registers.
+     */
     httpRequestsTotal: 'http_requests_total',
-    /** Histogram (ms), labels: `method`, `route`. */
+    /**
+     * Histogram (ms), labels: `method`, `route`. Emitted by the TRANSPORT
+     * through the same seam (#9834). It measures the REQUEST as the transport
+     * sees it — first sight to the response existing, middleware chain and
+     * body parse included — not the handler's share of it.
+     */
     httpRequestDurationMs: 'http_request_duration_ms',
     /**
-     * Counter, labels: `method`, `route`. Incremented when an
-     * in-flight handler throws after the response is sent.
+     * Counter, labels: `method`, `route`. Incremented when an in-flight
+     * handler throws after the response is sent. Emitted by
+     * `@objectstack/runtime`'s `instrumentRouteHandler`, and NOT movable to
+     * the seam above as-is: the observation carries a status but no throw
+     * signal, so a transport-side emitter would count a different population
+     * (#9834 records the fork).
      */
     httpRequestErrorsTotal: 'http_request_errors_total',
 
