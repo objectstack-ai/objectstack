@@ -297,7 +297,33 @@ const CROSS_PACKAGE_TEST_INPUTS = {
     // `engines.protocol`, `objectstack.manifest.json` `specVersion`) that the
     // ratchets in that test assert, so a change to the stamper is exactly the
     // change those ratchets exist to catch (#9264).
-    globs: ['content/**', 'scripts/sync-template-versions.mjs'],
+    //
+    // `.github/workflows/scaffold-e2e.yml` is READ, not merely mentioned:
+    // src/scaffold-e2e-boot-probe.test.ts extracts the three boot-and-probe
+    // `run:` scripts out of that file and EXECUTES them, so the workflow is
+    // literally the code under test. It is the workflow that gates this package
+    // (its `paths:` filter is `packages/create-objectstack/**`), which is why
+    // the test lives here rather than beside a shell script in spec (#9779).
+    //
+    // The last three are NAMED in that test's header rather than read, the same
+    // shape as `check-nul-bytes.mjs` and `sync-template-versions.mjs` above and
+    // settled the same way: the literal collector takes quoted paths without
+    // parsing, so a mention forces a declaration, and declaring three
+    // rarely-touched files is cheaper than rewording prose to dodge a scanner.
+    // `serve.ts` earns it on the merits too — its `flags.dev || NODE_ENV ===
+    // 'development'` port-shift gate is the single fact that decides which fix
+    // those workflow blocks need, so a change to that branch is exactly the
+    // change the test's premise would need re-measuring against. The two sibling
+    // scripts are cited for the contrast that keeps the fixes from being copied
+    // between them.
+    globs: [
+      'content/**',
+      'scripts/sync-template-versions.mjs',
+      '.github/workflows/scaffold-e2e.yml',
+      'packages/cli/src/commands/serve.ts',
+      'scripts/gen-sdui-manifest.sh',
+      'scripts/publish-smoke.sh',
+    ],
   },
 };
 

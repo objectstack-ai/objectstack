@@ -190,7 +190,11 @@
         "!coverage/**",
         "!.turbo/**",
         "$TURBO_ROOT$/content/**",
-        "$TURBO_ROOT$/scripts/sync-template-versions.mjs"
+        "$TURBO_ROOT$/scripts/sync-template-versions.mjs",
+        "$TURBO_ROOT$/.github/workflows/scaffold-e2e.yml",
+        "$TURBO_ROOT$/packages/cli/src/commands/serve.ts",
+        "$TURBO_ROOT$/scripts/gen-sdui-manifest.sh",
+        "$TURBO_ROOT$/scripts/publish-smoke.sh"
       ]
     },
     "test:e2e": {
