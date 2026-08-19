@@ -245,6 +245,35 @@ describe('createDispatcherPlugin — HTTP route registration', () => {
     }
   });
 
+  // #9813 (inheriting the #9436 maintainer ruling, 2026-08-18, option A):
+  // machine-read discovery bodies answer the declared envelope. Both bodies
+  // used to be a bare `{ data }` — one key short of BaseResponseSchema — which
+  // objectui's envelope-discriminating readers (`typeof body.success ===
+  // 'boolean' && 'data' in body`) mis-parsed. The pin is the exact top-level
+  // key set, not just `success`: an extra sibling key would be the strayKeys
+  // dialect arriving back.
+  it('envelopes both discovery bodies as { success: true, data }', async () => {
+    const { server, handlers } = makeFakeServer();
+    const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
+    await plugin.start?.(makeCtx(server));
+
+    for (const route of ['GET /.well-known/objectstack', 'GET /api/v1/discovery']) {
+      const handler = handlers[route];
+      expect(handler, `${route} should be registered`).toBeTypeOf('function');
+      let body: any;
+      const res: any = {
+        header: () => {},
+        json: (b: unknown) => { body = b; },
+      };
+      await handler({}, res);
+      expect(body?.success, `${route} success flag`).toBe(true);
+      expect(body?.data, `${route} data payload`).toBeDefined();
+      // The payload stays under `data` — the flip was additive, nothing moved.
+      expect(body.data.routes, `${route} discovery document under data`).toBeDefined();
+      expect(Object.keys(body).sort(), `${route} top-level keys`).toEqual(['data', 'success']);
+    }
+  });
+
   // ADR-0076 D11 / OQ#9 — single owner for ${prefix}/discovery. When the REST
   // plugin is registered on the same kernel it serves /api/v1/discovery itself;
   // which payload a client saw used to depend on plugin start order

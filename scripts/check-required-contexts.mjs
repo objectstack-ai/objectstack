@@ -427,9 +427,21 @@ export const REQUIRED_CONTEXTS = [
 export const INSTRUCTION_SURFACES = [
   {
     // The merge-queue rule ("the queue enforces only the required set"),
-    // naming both blocking contexts. States the required set ⇒ mustName.
+    // naming every blocking context. States the required set ⇒ mustName.
+    // Widened to all six by the #9677 ruling (2026-08-18): the sentence had
+    // named two and called the other four advisory-and-rides-through, which
+    // is the misclassification that puts a PR into the queue to be ejected.
+    // The full set is pinned here so the corrected sentence cannot rot back
+    // — a rename in ANY of the six now reddens this gate instead.
     file: 'AGENTS.md',
-    mustName: ['Lint & Repo Gates', 'TypeScript Type Check'],
+    mustName: [
+      'Lint & Repo Gates',
+      'TypeScript Type Check',
+      'Test Core',
+      'Dogfood Regression Gate',
+      'Build Core',
+      'Temporal Conformance (live PG + MySQL)',
+    ],
   },
   {
     // The review seat's gate-clearance step: confirm both jobs' `conclusion`

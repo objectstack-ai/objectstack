@@ -862,6 +862,27 @@ describe('ApprovalService (node era)', () => {
     expect(req.pending_approvers.sort()).toEqual(['u1', 'u2']);
   });
 
+  // `ORG_MEMBERSHIP_LEVELS` is derived from `BUILTIN_MEMBERSHIP_ROLES`, so the
+  // ADR-0105 D8 tier is authorable — and the expander routes it like any other
+  // tier (the filter carries the value straight to `sys_member.role`).
+  it('delegated_admin tier (ADR-0105 D8) expands to its members like any other tier', async () => {
+    engine._tables['sys_member'] = [
+      { id: 'm1', user_id: 'u1', role: 'delegated_admin', organization_id: 't1' },
+      { id: 'm2', user_id: 'u2', role: 'admin', organization_id: 't1' }, // other tier
+    ];
+    const input = {
+      ...tierInput('org_membership_level'),
+      config: {
+        approvers: [{ type: 'org_membership_level' as any, value: 'delegated_admin' }],
+        behavior: 'first_response' as const,
+        lockRecord: true,
+      },
+    };
+    const req = await svc.openNodeRequest(input, CTX);
+    if ('autoApproved' in req) throw new Error('expected a pending request, not an auto-approve outcome');
+    expect(req.pending_approvers).toEqual(['u1']);
+  });
+
   it('deprecated `role` alias resolves IDENTICALLY to org_membership_level', async () => {
     engine._tables['sys_member'] = [
       { id: 'm1', user_id: 'u1', role: 'admin', organization_id: 't1' },

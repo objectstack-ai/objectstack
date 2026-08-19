@@ -1743,6 +1743,63 @@ export default class Serve extends Command {
         // No translations and no explicit i18n plugin — this is fine, kernel fallback works
       }
 
+      // ── Observability backends (#9832) ──────────────────────────────────
+      // Auto-wire observability from env so production deployments can ship
+      // metrics / errors to OTLP backends (Grafana Cloud, Honeycomb, …)
+      // without app-level glue. Falls back to noop when OS_OBS_EXPORTER is
+      // unset / unknown — zero-cost when off, and never crashes boot if
+      // exporter init throws.
+      //
+      // Built EXACTLY ONCE per serve process, and this is the only call site.
+      // The dispatcher block further down reads THIS binding rather than
+      // calling again: a second `buildServeObservability()` would construct a
+      // SECOND exporter — for `OS_OBS_EXPORTER=otlp` two
+      // `OtlpHttpMetricsRegistry` instances with two independent flush timers,
+      // double-exporting every series to the same backend.
+      //
+      // Registered as a SERVICE here — ahead of the transport (immediately
+      // below), the dispatcher, and the capability providers (cache, storage)
+      // — because every consumer resolves the canonical chain (explicit
+      // option → `observability:metrics` service → nothing) inside its OWN
+      // `init()`, and the kernel runs all of Phase 1 in resolved order with
+      // registration order preserved between plugins that have no edge
+      // (`resolvePluginOrder`). Registering after a consumer is registering
+      // too late: that consumer has already fallen through to its no-op and
+      // will never look again. This is exactly what `ObservabilityServicePlugin`'s
+      // own JSDoc tells hosts to do ("Register this plugin BEFORE any plugin
+      // that wants to consume the services").
+      //
+      // Deliberately NOT gated on `flags.server`: cache and storage are
+      // registered on the `--no-server` path too, and their metrics are just
+      // as real there.
+      //
+      // Registered ONLY when a backend is actually configured. An all-noop
+      // registration would still be truthy at every consumer's step 2 and
+      // would arm the transport's per-request middleware seam on deployments
+      // that export nothing — the per-request cost #9650 deliberately kept off
+      // an unconfigured deployment.
+      const observability = await buildServeObservability();
+      // Skip if the config already mounts its own — `ctx.registerService`
+      // throws on a duplicate name, which would turn a host that wired its own
+      // backends into a boot failure.
+      const configHasObservabilityService = plugins.some(
+        (p: any) => p.name === 'com.objectstack.observability.service'
+            || p.constructor?.name === 'ObservabilityServicePlugin'
+      );
+      if (observability && !configHasObservabilityService) {
+        try {
+          const { ObservabilityServicePlugin } = await import('@objectstack/runtime');
+          await kernel.use(new ObservabilityServicePlugin({
+            metrics: observability.metrics,
+            errors: observability.errorReporter,
+          }));
+          trackPlugin('ObservabilityService');
+        } catch {
+          // @objectstack/runtime unavailable — every consumer keeps its no-op
+          // default, exactly as before this block existed.
+        }
+      }
+
       // Add HTTP server plugin BEFORE config plugins so that the
       // http-server service is available for any plugin that needs it
       // during init/start (e.g. AuthPlugin).
@@ -2556,12 +2613,15 @@ export default class Serve extends Command {
         // Register Dispatcher plugin (auth, graphql, analytics, packages, hub, storage, automation)
         try {
           const { createDispatcherPlugin } = await import('@objectstack/runtime');
-          // Auto-wire observability from env so production deployments
-          // can ship metrics / errors to OTLP backends (Grafana Cloud,
-          // Honeycomb, etc.) without app-level glue. Falls back to noop
-          // when OS_OBS_EXPORTER is unset / unknown — zero-cost when
-          // off, and never crashes boot if exporter init throws.
-          const observability = await buildServeObservability();
+          // `observability` is the ONE block built above (#9832), reused
+          // here rather than rebuilt: a second `buildServeObservability()`
+          // call would stand up a second exporter with its own flush timer.
+          // Passing it explicitly keeps the dispatcher on step 1 of the
+          // resolution chain, so its behaviour is unchanged by the service
+          // registration above — and because `armHttpRequestCounter` latches
+          // per server object (#9835), the transport having armed the same
+          // registry in Phase 1 makes this plugin's arming a no-op instead of
+          // a second observer on the same series.
           await kernel.use(
             createDispatcherPlugin({
               scoping: { enableProjectScoping, projectResolution },

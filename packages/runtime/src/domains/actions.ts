@@ -354,19 +354,47 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         // here — RLS/FLS-bypassing elevation is a script-BODY property, and a
         // flow does not get it.
         if (actionType === 'flow') {
-            const result = await actionExec.dispatchFlowAction(deps, _context, actionDef, {
-                objectName,
-                record,
-                params: reqParams,
-                recordId,
-                ec,
-                envId: _context?.environmentId,
-            });
+            let result: any;
+            try {
+                result = await actionExec.dispatchFlowAction(deps, _context, actionDef, {
+                    objectName,
+                    record,
+                    params: reqParams,
+                    recordId,
+                    ec,
+                    envId: _context?.environmentId,
+                });
+            } catch (err) {
+                // [#9585] The typed refusal carrier, recognised BEFORE the
+                // generic catch below (maintainer ruling, Option B): a flow
+                // that RAN and failed carries the author's `errorMessage` and
+                // the run `summary`, and they ride `error.details` here
+                // exactly as the trigger door ships them
+                // (`domains/automation.ts`) — same exit, same field names, so
+                // objectui's `flowResponse.ts` reads both doors identically.
+                // `details.code` is promoted into `error.code` by the shared
+                // envelope builder (`error-envelope.ts`), never duplicated.
+                //
+                // Everything else — the never-dispatched rows (404/409/422),
+                // the unclassified residual, a crashed handler — rethrows to
+                // the generic catch unchanged: this branch adds ONE recognised
+                // shape at ONE door, it does not restructure the catch, and
+                // the shared `resolveThrownHttpError` stays the rule for every
+                // other thrower (#8016 / #9106 — its closed `details` list is
+                // deliberate, not a gap this branch works around).
+                if (actionExec.isFlowActionRefusal(err)) {
+                    return {
+                        handled: true,
+                        response: deps.error(err.message, err.status, { code: err.code, ...err.runDetails }),
+                    };
+                }
+                throw err;
+            }
             // [#3962] Single wrap: `data` is the handler's return value, exactly as
-        // every other domain serializes. The former inner `{success, data}`
-        // envelope existed only to carry a failure signal at HTTP 200; failures
-        // carry a status now, so the extra layer lost its job.
-        return { handled: true, response: deps.success(result) };
+            // every other domain serializes. The former inner `{success, data}`
+            // envelope existed only to carry a failure signal at HTTP 200; failures
+            // carry a status now, so the extra layer lost its job.
+            return { handled: true, response: deps.success(result) };
         }
 
         // [#2849] Same trusted-mode elevation as the MCP path — keep it audible.

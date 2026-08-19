@@ -27,7 +27,9 @@ import {
     flowIsUnknown,
     flowNotFoundMessage,
     FLOW_NOT_FOUND_STATUS,
+    type FlowRefusalCode,
 } from './flow-dispatch-status.js';
+import type { FlowRunSummary } from '@objectstack/spec/automation';
 // [#5138] The ONE 404 envelope a single-record path answers. Imported rather
 // than re-spelled so `callData`'s ObjectQL fallback and the protocol service it
 // falls back FROM cannot disagree about what "this id names no row" looks like.
@@ -565,6 +567,85 @@ export function seedFlowActionParams(_deps: ActionExecutionDeps,
 }
 
 /**
+ * Brand for {@link FlowActionRefusal} — `Symbol.for`, so recognition keeps
+ * working even if two module instances of this file ever coexist (src vs
+ * dist), where an `instanceof` would silently answer false.
+ */
+const FLOW_ACTION_REFUSAL_BRAND = Symbol.for('objectstack.runtime.flowActionRefusal');
+
+/**
+ * The run artefacts a failed flow dispatch carries beside its status and code
+ * — EXACTLY the two fields the trigger door ships in `error.details` on its
+ * own `400 FLOW_FAILED` arm (`domains/automation.ts`), same names, same
+ * source (`AutomationResult.errorMessage` / `.summary`). A third key here is
+ * a contract widening the #9585 ruling does not cover.
+ */
+export interface FlowActionRunDetails {
+    /** The flow AUTHOR's own failure text (`flow.errorMessage`). */
+    errorMessage?: string;
+    /** The run's per-node accounting — WHICH node failed (#4354). */
+    summary?: FlowRunSummary;
+}
+
+/**
+ * [#9585] The typed refusal carrier for a flow ACTION that ran and failed.
+ *
+ * Maintainer ruling, 2026-08-19 (Option B on #9585): the `/actions` door must
+ * deliver the flow author's `errorMessage` and the run `summary` the way the
+ * trigger door already does — but this door THROWS, and the shared resolver
+ * (`resolveThrownHttpError`, `@objectstack/types`) builds `details` from a
+ * closed list that deliberately drops a thrown `.details` (#8016 / #9106).
+ * Widening that list would let ANY throw anywhere declare wire payload — the
+ * exact thing #9106 narrowed `code` to prevent, and the rejected Option A.
+ * So the widening stays out of the shared rule: this named, closed carrier is
+ * recognised by the `/actions` handler AHEAD of its generic catch
+ * (`domains/actions.ts`, via {@link isFlowActionRefusal}) and mapped to
+ * `deps.error(message, status, { code, ...runDetails })` — the trigger door's
+ * own exit, byte for byte.
+ *
+ * A door that does NOT recognise it (the MCP `run_action` bridge, or any
+ * future caller of {@link dispatchFlowAction}) still serves it exactly as it
+ * served the plain throw this replaces: `status`, `code` and `message` are
+ * stamped identically, so `resolveThrownHttpError` reads the same
+ * `400 FLOW_FAILED` and the same text, and only the run details stay behind.
+ * Degrading to yesterday's answer — never to a different one — is what makes
+ * this carrier safe to throw on a path two transports share.
+ */
+export class FlowActionRefusal extends Error {
+    /** HTTP status this refusal answers with — the #9378 table's 400 row. */
+    readonly status: number;
+    /** ADR-0112 `error.code` — registered, never minted here. */
+    readonly code: FlowRefusalCode;
+    /** The two run artefacts the door carries into `error.details`. */
+    readonly runDetails: FlowActionRunDetails;
+
+    constructor(
+        message: string,
+        refusal: { status: number; code: FlowRefusalCode },
+        runDetails: FlowActionRunDetails,
+    ) {
+        super(message);
+        this.name = 'FlowActionRefusal';
+        this.status = refusal.status;
+        this.code = refusal.code;
+        this.runDetails = runDetails;
+        (this as Record<PropertyKey, unknown>)[FLOW_ACTION_REFUSAL_BRAND] = true;
+    }
+}
+
+/**
+ * Recognition predicate for {@link FlowActionRefusal} — the `/actions`
+ * handler asks this BEFORE its generic catch logic runs. Brand-based rather
+ * than `instanceof` (see {@link FLOW_ACTION_REFUSAL_BRAND}); a foreign object
+ * that merely copies the field names is not recognised, so no script handler
+ * can impersonate the flow door's channel by throwing a lookalike.
+ */
+export function isFlowActionRefusal(e: unknown): e is FlowActionRefusal {
+    return typeof e === 'object' && e !== null
+        && (e as Record<PropertyKey, unknown>)[FLOW_ACTION_REFUSAL_BRAND] === true;
+}
+
+/**
  * Dispatch a `type: 'flow'` action through the automation service.
  *
  * The ONE implementation both headless surfaces share — the MCP `run_action`
@@ -591,11 +672,15 @@ export function seedFlowActionParams(_deps: ActionExecutionDeps,
  * RAN and rejected" — a false statement for the two never-dispatched exits it
  * caught, told to a caller whose only machine-readable signal is that code.
  *
- * The throw carries `status` and `code` and the route serves them through
- * `errorFromThrown`; `error.details` is whatever `resolveThrownHttpError`
- * reads off a thrown value, so the trigger door's `errorMessage` / `summary`
- * details do NOT ride this door — see the shared module's note on what the
- * table deliberately does not answer.
+ * The never-dispatched throws carry `status` and `code` and the route serves
+ * them through `errorFromThrown`; `error.details` there is whatever
+ * `resolveThrownHttpError` reads off a thrown value, and that resolver's
+ * closed list stays untouched (#8016 / #9106). [#9585] The ran-and-failed row
+ * is the one exception, by maintainer ruling: it throws the typed
+ * {@link FlowActionRefusal} carrier, which the `/actions` handler recognises
+ * ahead of its generic catch and serves with the trigger door's own
+ * `errorMessage` / `summary` details — see the carrier's doc for the whole
+ * mechanism and the fallback story.
  *
  * Forwarding the caller's identity (rather than just executing the flow) is
  * what lets a `runAs: 'user'` flow enforce RLS as the invoker instead of
@@ -654,20 +739,34 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
     // caller a run had failed when no node ever executed.
     const refusal = classifyFlowRefusal(action.target, result);
     if (refusal) {
-        const err: any = new Error(
-            // The ran-and-failed row keeps THIS door's wording, byte for byte:
-            // it has been on the wire since #3962, the ruling is about status
-            // and code, and re-labelling a message nobody asked about would be
-            // an unruled change riding along. It also names the flow, which
-            // this door needs and the trigger door does not — the flow name is
-            // in that route's URL and is nowhere in this one. The two
-            // never-dispatched rows are NEW here, so they take the shared
-            // table's message: the producer's own words, exactly as the
-            // trigger door serves them.
-            refusal.code === 'FLOW_FAILED'
-                ? `Flow '${action.target}' failed: ${result.error ?? 'unknown error'}`
-                : refusal.message,
-        );
+        // The ran-and-failed row keeps THIS door's wording, byte for byte:
+        // it has been on the wire since #3962, the ruling is about status
+        // and code, and re-labelling a message nobody asked about would be
+        // an unruled change riding along. It also names the flow, which
+        // this door needs and the trigger door does not — the flow name is
+        // in that route's URL and is nowhere in this one. The two
+        // never-dispatched rows are NEW here, so they take the shared
+        // table's message: the producer's own words, exactly as the
+        // trigger door serves them.
+        if (refusal.code === 'FLOW_FAILED') {
+            // [#9585] The typed carrier, run artefacts read EXACTLY as the
+            // trigger door reads them (`domains/automation.ts`, its 400 arm):
+            // present when the producer wrote them, never invented. Only this
+            // row carries them — a never-dispatched refusal has no author
+            // failure text and no node log to point at, so emitting either
+            // there would be this door inventing run evidence for a run that
+            // never started, which is why the two rows below stay plain
+            // throws.
+            throw new FlowActionRefusal(
+                `Flow '${action.target}' failed: ${result.error ?? 'unknown error'}`,
+                refusal,
+                {
+                    ...(result.errorMessage !== undefined ? { errorMessage: result.errorMessage } : {}),
+                    ...(result.summary !== undefined ? { summary: result.summary } : {}),
+                },
+            );
+        }
+        const err: any = new Error(refusal.message);
         err.status = refusal.status;
         err.code = refusal.code;
         throw err;

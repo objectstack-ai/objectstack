@@ -1461,7 +1461,32 @@ export const PageAccordionProps = strictObject({
     },
   }, {
     label: I18nLabelSchema,
-    icon: z.string().optional(),
+    /**
+     * Panel-trigger icon, and the reason this key carries a docblock at all: a
+     * liveness sweep read it as declared-but-unenforced and opened a retirement
+     * candidate against it, which cost a full dispatch cycle before the
+     * cross-repo read point was found (#9397, closed premise-overtaken; #9881
+     * is the rider that records the liveness here so the next sweep cannot
+     * re-derive the same false candidate).
+     *
+     * The key is LIVE at the objectui pin this repo builds against
+     * (`.objectui-sha` = `82a94170c`): `containers.tsx:851-853` renders
+     * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
+     * `AccordionTrigger`, grouped with the label in the trigger's one wrapping
+     * span, and the renderer's registration publishes the key to the Studio
+     * block designer at `:898` (the `items` input, documented as
+     * `[{ label, icon?, collapsed?, children }]`).
+     *
+     * Vocabulary is Lucide, resolved through objectui's `LazyIcon`
+     * (`lib/lazy-icon.tsx` — kebab-case or PascalCase, normalised to
+     * kebab-case, with a fallback when the name is not a real Lucide icon), the
+     * same slot every other authorable icon on this surface uses. Contrast the
+     * item `value` prescribed against above: the same renderer OVERWRITES that
+     * one, and a read point is precisely what separates the two verdicts.
+     */
+    icon: z.string().optional().describe(
+      'Lucide icon name rendered in the panel trigger, left of the label. Read on this component — the renderer draws it via `LazyIcon`; contrast the item `value` beside it, which the renderer overwrites with `panel-<index>`.',
+    ),
     collapsed: z.boolean().default(false),
     children: z.array(z.unknown()).describe('Child components'),
   })),

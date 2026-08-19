@@ -51,11 +51,18 @@
  *
  * ## What this table does NOT answer, and why each door still owns it
  *
- * **The envelope.** The trigger door RETURNS a built response and can carry
- * `errorMessage` / `summary` in `error.details`; `/actions` THROWS, and a
- * throw's structured context is only what `resolveThrownHttpError`
- * (`@objectstack/types`) reads off the thrown value. Status and code are the
- * contract the #9378 ruling settled; the payload beside them is not.
+ * **The envelope.** The trigger door RETURNS a built response and carries
+ * `errorMessage` / `summary` in `error.details` on its 400 arm; `/actions`
+ * THROWS, and a throw's structured context is only what
+ * `resolveThrownHttpError` (`@objectstack/types`) reads off the thrown value —
+ * a closed list that deliberately drops a thrown `.details` (#8016 / #9106).
+ * [#9585] The ran-and-failed row is the ruled exception: `/actions` throws the
+ * typed `FlowActionRefusal` carrier (`action-execution.ts`) that its handler
+ * recognises ahead of the generic catch, so BOTH doors now ship those two
+ * fields on `400 FLOW_FAILED` — but the mechanism stays each door's own, and
+ * the shared resolver stays untouched. Status and code are the contract the
+ * #9378 ruling settled; the payload beside them is #9585's, bounded to that
+ * one row at those two doors.
  *
  * **What an UNCLASSIFIED `success: false` means.** {@link classifyFlowRefusal}
  * returns `undefined` for a refusal the producer did not classify, and the two
