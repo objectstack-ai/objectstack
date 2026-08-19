@@ -92,7 +92,13 @@ interface AuthContextLike {
       userId: string;
       providerId: string;
       issuer: string;
-      providerAccountId: string;
+      /**
+       * The STABLE better-auth 1.7 spelling. `1.7.0-rc.2` briefly called this
+       * `providerAccountId` and stable 1.7.0 renamed it back (#3002) — under
+       * the rc.2 spelling the account row is written with no account id and
+       * the persona silently stays un-loginable.
+       */
+      accountId: string;
       password: string;
     }) => Promise<unknown>;
   };
@@ -176,7 +182,7 @@ async function assignPositions(
  *
  * ## Why this is read and not written
  *
- * better-auth 1.7 keys account identity on `(issuer, providerAccountId)`:
+ * better-auth 1.7 keys account identity on `(issuer, accountId)`:
  * `findAccountByKey` looks a credential up under the issuer better-auth mints
  * for itself, so a row carrying any other value — or none — is INVISIBLE and
  * sign-in fails `INVALID_EMAIL_OR_PASSWORD` behind a "User not found" warn that
@@ -245,7 +251,7 @@ async function ensureCredentialAccount(
       userId,
       providerId: 'credential',
       issuer,
-      providerAccountId: userId,
+      accountId: userId,
       password: hashed,
     });
     ctx.logger?.info?.('[showcase] approval-demo persona is now loginable', { userId });
