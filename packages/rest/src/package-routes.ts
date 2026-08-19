@@ -23,6 +23,12 @@ import {
 } from '@objectstack/types';
 import { mountDirectRoutes, type DirectMountedRoute } from './direct-mount.js';
 import { readSingleQueryValue, repeatedQueryParamMessage } from './query-multiplicity.js';
+// [#9846] The declared meta-read shapes for the `protocol.getMetaItems` seam
+// below — imported so this module's idea of the request/response is the SPEC's
+// idea of it, not a hand-rolled restatement that the spec can drift away from
+// while this file keeps compiling green. Same discipline as the sibling
+// meta-read doors in `rest-server.ts` (#9805 / #9741).
+import type { GetMetaItemsRequest, GetMetaItemsResponse } from '@objectstack/spec/api';
 
 /**
  * [#7033 / #7023] The authorization gate for the REST package transport.
@@ -234,7 +240,16 @@ export interface PackageRoutesOptions {
    * permission sets and bindings).
    */
   protocol?: {
-    getMetaItems?(req: { type: string }): Promise<{ items: any[] }>;
+    /**
+     * [#9846] Request/response types are the SPEC's declared shapes, so a
+     * change to `GetMetaItemsRequest` (a narrowed `type` vocabulary, a newly
+     * required member, a renamed key) is a compile error HERE instead of a
+     * silent drift. The member stays OPTIONAL and both call sites keep their
+     * `typeof … === 'function'` feature-detection: `MetadataProtocol` declares
+     * this verb REQUIRED, and adopting that whole would change what this seam
+     * tolerates — a behaviour question, deliberately not answered here.
+     */
+    getMetaItems?(req: GetMetaItemsRequest): Promise<GetMetaItemsResponse>;
     // [#7780] `allTenants` is the explicit carrier for cross-tenant uninstall
     // semantics; the protocol refuses a call that names neither it nor an
     // `organizationId` (`TENANT_SCOPE_REQUIRED`, 400).
@@ -260,6 +275,59 @@ export interface PackageRoutesOptions {
     systemPermissions?: string[];
   } | undefined>;
 }
+
+/**
+ * [#9846] Compile-time pin for the `protocol.getMetaItems` seam above.
+ *
+ * WHAT IT CATCHES: that the option's request/response types are still the
+ * SPEC's declared shapes rather than a hand-rolled restatement of them. The
+ * defect this card closes is not a wrong call today — both call sites send a
+ * valid request — it is that a LOCAL structural re-declaration lets the spec
+ * move underneath this module (a narrowed `type` vocabulary, a newly required
+ * member, a renamed key) while this file keeps compiling green. A test that
+ * only drove today's call sites would not notice that; an EXACT type equality
+ * does, because it fails both when someone re-hand-rolls the local shape and
+ * when the spec's shape changes without this seam being re-read.
+ *
+ * WHY IT LIVES HERE and not in a `*.test.ts`: this package's `tsconfig.json`
+ * EXCLUDES its `*.test.ts` / `*.spec.ts` files, and no sibling gate
+ * type-checks them either, so a type-level assertion written in a test file
+ * would be compiled by nothing — a phantom check that evaluates never and
+ * stays green when deleted. It sits in compiled source instead, where the
+ * package's own `typecheck` script (which CI runs) evaluates it.
+ *
+ * Mutual assignability would NOT do: the old local `{ type: string }` and
+ * `GetMetaItemsRequest` are assignable in both directions, so an
+ * assignability check passes on exactly the shape this card removed.
+ */
+type ExactlyEqual<X, Y> =
+  (<T>() => T extends X ? 1 : 2) extends (<T>() => T extends Y ? 1 : 2) ? true : false;
+
+/** Fails to instantiate unless its argument is exactly `true`. */
+type Pinned<T extends true> = T;
+
+type DeclaredGetMetaItems = NonNullable<NonNullable<PackageRoutesOptions['protocol']>['getMetaItems']>;
+
+/** The REQUEST type is exactly the spec's `GetMetaItemsRequest`. */
+export type _PinGetMetaItemsRequestIsSpecDeclared = Pinned<
+  ExactlyEqual<Parameters<DeclaredGetMetaItems>[0], GetMetaItemsRequest>
+>;
+
+/** The RESPONSE type is exactly the spec's `GetMetaItemsResponse`. */
+export type _PinGetMetaItemsResponseIsSpecDeclared = Pinned<
+  ExactlyEqual<Awaited<ReturnType<DeclaredGetMetaItems>>, GetMetaItemsResponse>
+>;
+
+/**
+ * The member stays OPTIONAL. `MetadataProtocol` declares `getMetaItems` as a
+ * REQUIRED member; adopting it whole would change what this seam tolerates
+ * (both call sites feature-detect with `typeof … === 'function'`), which is a
+ * behaviour question this card does not answer. This pin fails if a later
+ * edit quietly makes the member required.
+ */
+export type _PinGetMetaItemsStaysOptional = Pinned<
+  undefined extends NonNullable<PackageRoutesOptions['protocol']>['getMetaItems'] ? true : false
+>;
 
 /**
  * Register package management API routes
@@ -485,7 +553,16 @@ export function registerPackageRoutes(
         try {
           const result = await options.protocol.getMetaItems({ type: 'package' });
           if (result?.items) {
-            for (const item of result.items) {
+            // [#9846] The declared `GetMetaItemsResponse` types `items` as
+            // `unknown[]` — the spec says nothing about what a metadata item
+            // CONTAINS. The registry-specific keys read below (`manifest.id`)
+            // are not spec-declared, so the ELEMENT read stays runtime-shaped
+            // on purpose, exactly as the sibling meta-read doors do via
+            // `metaItemsArray` in `rest-server.ts`. The seam itself is now
+            // spec-typed; this coercion is confined to the read and changes
+            // no behaviour (a malformed entry still throws into the catch
+            // below, as it did when the local shape claimed `any[]`).
+            for (const item of result.items as any[]) {
               const id = item.manifest?.id || item.id;
               if (id) {
                 packagesMap.set(id, {
