@@ -284,22 +284,23 @@ dispatch prompt 只携带每单增量(裁决引文、裁决 / PM-机制假设分
 issue 对塑造公开契约的某个决定欠规格 —— spec/Zod schema、API 形状、命名、元数据语义 ——
 或两种读法通向两种架构时:不猜,不写投机代码。返回 `status: "needs_decision"`,把每个问
 题连同选项、成本与你的推荐写进 `open_questions`。
-**Analyze every option on three fixed axes — this framing is the core of the escalation,
+**Analyze every option on four fixed axes — this framing is the core of the escalation,
 not decoration:**
 
 - **Real business need**(实际业务需求)— 该方案服务的是**真实存在的业务场景**,还是投
   机性能力面?证据必须**实测** —— 谁在写这个键、谁在读这个能力、示例应用与真实部署怎么
-  用;「读起来像有用」不作数。**创业阶段聚焦原则**(维护者 2026-08-04:这是创业项目,核
-  心能力优先):能力扩张默认从紧,无拉动的声明面按 implementation-first 处置,已发布零
-  消费的能力不因沉没成本获得豁免。这条轴会改变结论,不是陪衬。
+  用;「读起来像有用」不作数。这条轴会改变结论,不是陪衬。
 - **Long-term soundness for THIS project**(项目长远合理性)— 哪个方案符合北极星方向与
   可持续架构(no workarounds、contract-first)—— 补丁式选项的长期代价要明说。
 - **Making AI-written code — especially AI-authored metadata apps — hard to get wrong**
   (防 AI 写代码犯错,尤其是 AI 编写的元数据 app)— 优先选在编写时点就结构性防错的方案
   (严格 schema、publish 时响亮拒绝的校验、declared = enforced),而非消费端宽容 —— 宽
   容的消费端恰是 AI 生成错误藏身并扩散的地方。
+- **Startup scope discipline**(创业阶段不扩散需求)— **创业阶段聚焦原则**(维护者
+  2026-08-04:这是创业项目,核心能力优先):能力扩张默认从紧,无拉动的声明面按
+  implementation-first 处置,已发布零消费的能力不因沉没成本获得豁免。
 
-Your recommendation must be justified on all three axes;三轴冲突时如实呈现权衡,交维护
+Your recommendation must be justified on all four axes;四轴冲突时如实呈现权衡,交维护
 者拍板。同样,`main` 在你脚下碎了、依赖未合并、CI 基础设施故障时,返回 `blocked`(附证
 据)—— 先重试到足以确认不是你的改动。
 
