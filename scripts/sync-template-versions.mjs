@@ -499,6 +499,30 @@ function selfTest() {
     checked++;
     if (!condition) failures.push(message);
   };
+  const reportFailures = () => {
+    if (failures.length === 0) return;
+    console.error(`\n✗ sync-template-versions --self-test — ${failures.length} failure(s)\n`);
+    for (const failure of failures) console.error(`  • ${failure}`);
+    process.exit(1);
+  };
+
+  // ── Control G: the fixture table covers every declared stamp ──────────────
+  //
+  // Checked before any fixture exists, and FATAL on its own, because
+  // `buildFixture` indexes `SELF_TEST_BODIES` by key: an uncovered row makes it
+  // throw a bare `TypeError: SELF_TEST_BODIES[stamp.key] is not a function`
+  // out of Control A, which kills the process before the failure list is ever
+  // printed. Measured by adding a fourth TEXT_STAMPS row with no body: the run
+  // still exits 1, so the gate itself holds — but the one message written for
+  // this exact case was dead output in the exact case it was written for, and
+  // the next author reads a harness crash instead of "you declared a stamp and
+  // owe it a fixture body". Ordering is the whole fix; the case is unchanged.
+  assert(
+    TEXT_STAMPS.length > 0 && TEXT_STAMPS.every((stamp) => typeof SELF_TEST_BODIES[stamp.key] === 'function'),
+    'every TEXT_STAMPS row has a fixture body, so a newly declared stamp cannot sit outside every case here — ' +
+      `missing: ${JSON.stringify(TEXT_STAMPS.filter((s) => !SELF_TEST_BODIES[s.key]).map((s) => s.key))}`,
+  );
+  reportFailures();
 
   const scratch = mkdtempSync(join(tmpdir(), 'sync-template-versions-selftest-'));
   const fixtureDir = (name) => {
@@ -508,13 +532,6 @@ function selfTest() {
   };
 
   try {
-    // ── Control G: the fixture table covers every declared stamp ────────────
-    assert(
-      TEXT_STAMPS.length > 0 && TEXT_STAMPS.every((stamp) => typeof SELF_TEST_BODIES[stamp.key] === 'function'),
-      'every TEXT_STAMPS row has a fixture body, so a newly declared stamp cannot sit outside every case here — ' +
-        `missing: ${JSON.stringify(TEXT_STAMPS.filter((s) => !SELF_TEST_BODIES[s.key]).map((s) => s.key))}`,
-    );
-
     // ── Control A: a CLEAN corpus is REACHED, and left byte-identical and UNWRITTEN ──
     //
     // The over-eagerness control, and the one direction a live run can never
@@ -700,11 +717,7 @@ function selfTest() {
     rmSync(scratch, { recursive: true, force: true });
   }
 
-  if (failures.length > 0) {
-    console.error(`\n✗ sync-template-versions --self-test — ${failures.length} failure(s)\n`);
-    for (const failure of failures) console.error(`  • ${failure}`);
-    process.exit(1);
-  }
+  reportFailures();
   console.log(
     `✓ sync-template-versions --self-test: ${checked} assertions over temp fixtures, running the real CLI. ` +
       'A CLEAN corpus is observed REACHED, byte-identical and UNWRITTEN; a missing stamp, a missing file, an ' +
