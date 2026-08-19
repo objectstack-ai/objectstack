@@ -28,8 +28,9 @@
 //   node scripts/partition-test-shards.mjs --self-test
 //
 // <turbo-ls.json> is the output of `turbo ls [--affected] --output=json`
-// (shape: {packages:{items:[{name,path}]}}; `turbo ls` is marked experimental,
-// so the shape is asserted loudly below rather than defaulted around).
+// (shape: {packages:{count,items:[{name,path}]}}; `turbo ls` is marked
+// experimental, so the payload is asserted loudly in readPackageItems() below
+// rather than defaulted around).
 // Prints the selected shard's package names, one per line -- possibly zero
 // lines, which the caller must treat as "nothing to run", NOT as "no filter":
 // a `turbo run test` with no --filter args runs the entire workspace.
@@ -78,6 +79,51 @@ export function partition(items, shardCount) {
   return bins;
 }
 
+// Reads the package list out of a `turbo ls --output=json` payload, asserting
+// two independent properties. They fail for different reasons and both are
+// loud, because the failure this whole file guards against is the quiet one --
+// a shard that tested nothing and went green.
+//
+//   SHAPE -- `packages.items` must be an array. `turbo ls` is experimental, so
+//            an upgrade that renames or restructures this becomes a red step
+//            naming the cause rather than an empty shard.
+//   SIZE  -- when the payload carries turbo's own `packages.count`, it must
+//            equal `items.length`. turbo never breaks this itself (measured on
+//            2.10.10: the bare, `--filter` and `--affected` forms all agree),
+//            so a payload that DOES has been hand-mutated or truncated between
+//            turbo and here and is not trustworthy about how many packages
+//            this shard is meant to see. There is exactly one such mutator in
+//            this repo -- `--union-into` in check-cross-package-test-inputs.mjs,
+//            which appends the cross-package scans the dependency graph cannot
+//            reach -- and it maintains `count`. This assertion is what makes
+//            that a checked fact instead of a convention: it wrote a `count: 0`
+//            document alongside two items for as long as nobody looked.
+//
+// A payload carrying NO `count` is accepted on purpose. The field is redundant
+// with the array, so its ABSENCE cannot mis-shard anything, while its
+// DISAGREEMENT can; requiring it would turn a turbo upgrade that merely dropped
+// a field nobody reads into a red Test Core on every PR. Note this is a
+// redundancy check, not lenient parsing -- a `count` that is present and wrong
+// is rejected, never repaired.
+export function readPackageItems(parsed, listPath) {
+  const items = parsed?.packages?.items;
+  if (!Array.isArray(items)) {
+    throw new Error(
+      `${listPath}: expected \`turbo ls --output=json\` shape {packages:{items:[...]}} -- ` +
+        'did an experimental-command upgrade change the output?'
+    );
+  }
+  const count = parsed.packages.count;
+  if (count !== undefined && count !== items.length) {
+    throw new Error(
+      `${listPath}: packages.count is ${JSON.stringify(count)} but packages.items holds ` +
+        `${items.length} -- the payload contradicts itself about its own size, so it has ` +
+        'been hand-mutated or truncated since `turbo ls` wrote it. Refusing to shard it.'
+    );
+  }
+  return items;
+}
+
 function selfTest() {
   const mk = (name, weight) => ({ name, weight });
   // Coverage + determinism: every package lands in exactly one bin, and two
@@ -101,6 +147,32 @@ function selfTest() {
   if (empty.some((bin) => bin.names.length > 0)) throw new Error('empty input produced packages');
   const sparse = partition([mk('only', 5)], 3);
   if (sparse.flatMap((bin) => bin.names).join() !== 'only') throw new Error('sparse input lost the package');
+
+  // Payload assertions. The document reaching this script has two writers --
+  // `turbo ls` and `--union-into` in check-cross-package-test-inputs.mjs -- so
+  // "count agrees with items" is a cross-script invariant; this is its reading
+  // half (the writing half is that script's own `--self-test`).
+  const threw = (fn) => {
+    try {
+      fn();
+      return false;
+    } catch {
+      return true;
+    }
+  };
+  const doc = (packages) => ({ packageManager: 'pnpm9', packages });
+  const two = [{ name: 'a', path: 'p' }, { name: 'b', path: 'q' }];
+  if (readPackageItems(doc({ count: 2, items: two }), 'f').length !== 2) throw new Error('payload: a consistent list was rejected');
+  if (readPackageItems(doc({ items: two }), 'f').length !== 2) throw new Error('payload: a list with no count was rejected');
+  if (readPackageItems(doc({ count: 0, items: [] }), 'f').length !== 0) throw new Error('payload: a legitimately empty list was rejected');
+  // The exact document `--union-into` used to write: two items, count still 0.
+  if (!threw(() => readPackageItems(doc({ count: 0, items: two }), 'f'))) throw new Error('payload: count 0 beside 2 items was accepted');
+  if (!threw(() => readPackageItems(doc({ count: 3, items: two }), 'f'))) throw new Error('payload: an over-count was accepted');
+  if (!threw(() => readPackageItems(doc({ count: '2', items: two }), 'f'))) throw new Error('payload: a non-numeric count was accepted');
+  if (!threw(() => readPackageItems(doc({ count: 2 }), 'f'))) throw new Error('payload: a missing items array was accepted');
+  if (!threw(() => readPackageItems(doc({ count: 0, items: {} }), 'f'))) throw new Error('payload: a non-array items was accepted');
+  if (!threw(() => readPackageItems({}, 'f'))) throw new Error('payload: a document with no packages key was accepted');
+
   console.log('partition-test-shards: self-test OK');
 }
 
@@ -131,13 +203,7 @@ function main() {
   if (shardIndex > shardCount) throw new Error(`--shard ${shardSpec}: index exceeds count`);
 
   const parsed = JSON.parse(readFileSync(listPath, 'utf8'));
-  const items = parsed?.packages?.items;
-  if (!Array.isArray(items)) {
-    throw new Error(
-      `${listPath}: expected \`turbo ls --output=json\` shape {packages:{items:[...]}} -- ` +
-        'did an experimental-command upgrade change the output?'
-    );
-  }
+  const items = readPackageItems(parsed, listPath);
   const weighted = [];
   for (const it of items) {
     if (typeof it?.name !== 'string' || typeof it?.path !== 'string') {

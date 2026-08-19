@@ -1010,6 +1010,34 @@ function expectedInputs(globs) {
 }
 
 /**
+ * `turbo ls --output=json` emits `packages.count` beside `packages.items`, and
+ * keeps the two equal -- measured on turbo 2.10.10, all of the bare, `--filter`
+ * and `--affected` forms agree. So `count` is TURBO's field, not this script's
+ * invention, and a document we have appended to is a valid `turbo ls` payload
+ * only while the count moves with the array.
+ *
+ * Nothing reads `count` today, which is exactly what makes it cheap to keep
+ * true and expensive to leave stale: the consumer is partition-test-shards.mjs,
+ * whose stated posture is to assert this payload's shape LOUDLY so an
+ * experimental-command upgrade becomes a red step naming the cause rather than
+ * a silently empty shard. A hand-mutated document that contradicts itself about
+ * its own size is the input to that assertion. The reader now checks the
+ * agreement (`readPackageItems()` there), so this is a checked invariant across
+ * the two scripts rather than a convention someone has to remember.
+ *
+ * Reconciling inside the SERIALIZER rather than as a statement beside the write
+ * is the point: `unionInto()` has exactly one `writeFileSync`, and it has no
+ * other source of bytes, so "appended to `items` but forgot to move `count`" is
+ * not a state this script can reach. A separate `reconcile(); write();` pair
+ * would have re-created the original defect the first time someone added a
+ * second write path.
+ */
+function serializePackageList(parsed) {
+  parsed.packages.count = parsed.packages.items.length;
+  return JSON.stringify(parsed);
+}
+
+/**
  * Layer A. Adds any declaring package whose globs the diff touches to the
  * package list ci.yml is about to shard, so the scan runs on the PR that
  * actually changed its inputs.
@@ -1045,7 +1073,10 @@ function unionInto(listPath, changedPath) {
     items.push({ name, path: join(REPO_ROOT, dir) });
     added.push(`${name}  (declared glob matched ${hit})`);
   }
-  writeFileSync(listPath, JSON.stringify(parsed));
+  // The push above changed the list's size, so the size the document DECLARES
+  // moves with it -- serializePackageList() is the only way this function turns
+  // `parsed` into bytes, precisely so that cannot be skipped.
+  writeFileSync(listPath, serializePackageList(parsed));
   if (added.length) {
     console.log('Cross-package scans pulled into this run because the diff touched their declared inputs:');
     for (const a of added) console.log(`  + ${a}`);
@@ -1370,6 +1401,20 @@ function selfTest() {
   ok('but it DOES cover that directory as a listing', coversDirectory('packages/lint/src', ['packages/lint/src/**']));
   ok('a single-file glob does not cover the directory it sits in', !coversDirectory('scripts', ['scripts/check-nul-bytes.mjs']));
   ok('a directory that does not exist is covered by nothing', !coversDirectory('scripts/no-such-dir-9763', ['**']));
+
+  // `--union-into`'s output document. `packages.count` is turbo's field and the
+  // append changes the size it describes, so the two are one operation -- these
+  // pin the half of the cross-script invariant this side owns (the reader's
+  // half is partition-test-shards.mjs `--self-test`).
+  // These run the real serializer -- the one and only source of the bytes
+  // `unionInto()` writes -- and assert on the parsed-back document, so they pin
+  // what lands on disk rather than an intermediate object.
+  const written = (packages) => JSON.parse(serializePackageList({ packageManager: 'pnpm9', packages })).packages;
+  ok('count follows an appended item', written({ count: 0, items: [{ name: 'a', path: 'p' }, { name: 'b', path: 'q' }] }).count === 2);
+  ok('a correct count is left correct', written({ count: 1, items: [{ name: 'a', path: 'p' }] }).count === 1);
+  ok('count follows an empty list down', written({ count: 7, items: [] }).count === 0);
+  ok('the write never invents items', written({ count: 0, items: [] }).items.length === 0);
+  ok('the write leaves turbo\'s other fields alone', JSON.parse(serializePackageList({ packageManager: 'pnpm9', packages: { count: 0, items: [] } })).packageManager === 'pnpm9');
 
   const failed = cases.filter((c) => !c.cond);
   for (const c of cases) console.log(`${c.cond ? 'ok  ' : 'FAIL'} ${c.label}`);

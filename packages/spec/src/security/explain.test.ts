@@ -74,12 +74,17 @@ describe('ExplainLayerSchema — the ten-layer pipeline + contributor shape', ()
         { kind: 'position', name: 'approver', via: 'delegation from u_boss until 2026-08-01', state: 'active' },
         { kind: 'permission_set', name: 'approve_set', via: 'position:approver' },
         { kind: 'position', name: 'payroll_approver', via: 'held until 2026-07-01 — expired', state: 'expired' },
+        // [#8714 / ADR-0049] the second member of the shared held-state
+        // vocabulary: the catalogue row is switched off.
+        { kind: 'permission_set', name: 'crm_full', via: 'held — deactivated', state: 'deactivated' },
         { kind: 'system', name: 'platform_admin' },
       ],
     });
-    expect(full.contributors.map((c) => c.kind)).toEqual(['position', 'permission_set', 'position', 'system']);
+    expect(full.contributors.map((c) => c.kind)).toEqual(['position', 'permission_set', 'position', 'permission_set', 'system']);
     // [ADR-0091 D2] the lifecycle state member L3 reads for the "expired" report
     expect(full.contributors[2].state).toBe('expired');
+    // [#8714 / ADR-0049] the shared vocabulary's deactivated member
+    expect(full.contributors[3].state).toBe('deactivated');
     expect(full.contributors[1].state).toBeUndefined();
   });
 
@@ -88,6 +93,10 @@ describe('ExplainLayerSchema — the ten-layer pipeline + contributor shape', ()
       layer: 'principal', verdict: 'neutral', detail: 'x',
       contributors: [{ kind: 'role', name: 'x' }],
     })).toThrow();
+    // [#8714] `suspended` is deliberately a STILL-UNKNOWN value: it proves the
+    // reason enumeration stays CLOSED (extended only deliberately), not merely
+    // widened. If a future lifecycle control legitimately adds `suspended`,
+    // replace this pin with another unknown value in the same edit.
     expect(() => ExplainLayerSchema.parse({
       layer: 'principal', verdict: 'neutral', detail: 'x',
       contributors: [{ kind: 'position', name: 'x', state: 'suspended' }],

@@ -395,7 +395,7 @@ async function writeAdminAudit(
   }
 }
 
-function mapAuthApiError(error: unknown, fallback: string): EndpointResult {
+export function mapAuthApiError(error: unknown, fallback: string): EndpointResult {
   const e = error as {
     statusCode?: number;
     status?: number | string;

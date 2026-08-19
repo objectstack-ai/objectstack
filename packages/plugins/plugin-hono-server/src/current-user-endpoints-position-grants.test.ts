@@ -25,6 +25,15 @@
 // surfaced. A negative asserted on its own would pass in the pre-fix world for
 // the wrong reason — because the resolver produced nothing at all, not because
 // it judged the invalid row correctly.
+//
+// [#7616] The grant aggregation these cases are about is UNCHANGED: it is
+// `resolveUserAuthzGrants` filling `execCtx.positions` / `execCtx.permissions`,
+// and this file's diff for that card touched none of it. What changed is the
+// step AFTER — the endpoints hand that context to
+// `ISecurityService.resolvePermissionSetsForContext` instead of resolving the
+// names themselves — so the double below is a stand-in for that contract method
+// rather than for the evaluator, and every case still measures what it did: a
+// position-bound set's capabilities reaching the wire.
 
 import { describe, it, expect } from 'vitest';
 import { Hono } from 'hono';
@@ -85,22 +94,42 @@ function permissionSet(id: string, name: string, systemPermissions: string[]): R
 }
 
 /**
- * A stand-in for plugin-security's `PermissionEvaluator` on its DB-backed
- * branch: resolve the requested identifiers through the loader the endpoint
- * supplies. plugin-hono-server must not depend on plugin-security (that
- * package is OPTIONAL in the stacks these endpoints serve), so the double
- * covers the one method both handlers call — and it is the DB branch that
- * matters here, since the identifiers under test are exactly what the endpoint
- * feeds it.
+ * [#7616] A stand-in for `ISecurityService.resolvePermissionSetsForContext` —
+ * the ONE resolution both handlers delegate to. plugin-hono-server must not
+ * depend on plugin-security (that package is OPTIONAL in the stacks these
+ * endpoints serve), so the double covers the one contract method both handlers
+ * call.
+ *
+ * It resolves the caller's own names — `positions ∪ permissions`, which is
+ * exactly what `resolveUserAuthzGrants` put on the context and therefore what
+ * these cases are about — out of the `sys_permission_set` rows the fixture
+ * seeded. No deployment baseline is added: these fixtures declare none, and the
+ * additive-baseline rule has its own file.
  */
-const evaluator = {
-    resolvePermissionSets: async (
-        identifiers: string[],
-        _metadata: unknown,
-        _bootstrap: unknown[] | undefined,
-        dbLoader?: (names: string[]) => Promise<unknown[]>,
-    ) => (dbLoader ? dbLoader(identifiers) : []),
-};
+function makeSecurityService(rows: Row[]) {
+    const parse = (v: unknown, fallback: unknown) =>
+        typeof v === 'string' ? JSON.parse(v || JSON.stringify(fallback)) : v ?? fallback;
+    return {
+        resolvePermissionSetsForContext: async (context: any) => {
+            const requested: string[] = [
+                ...(Array.isArray(context?.positions) ? context.positions : []),
+                ...(Array.isArray(context?.permissions) ? context.permissions : []),
+            ];
+            return requested.flatMap((name) =>
+                rows
+                    .filter((r) => r.name === name)
+                    .map((r) => ({
+                        name: r.name,
+                        label: r.label,
+                        objects: parse(r.object_permissions, {}),
+                        fields: parse(r.field_permissions, {}),
+                        systemPermissions: parse(r.system_permissions, []),
+                        tabPermissions: parse(r.tab_permissions, {}),
+                    })),
+            );
+        },
+    };
+}
 
 /** Minimal `metadata` — present so the endpoint takes its full (non-degraded) branch. */
 const metadata = { list: async () => [] as unknown[] };
@@ -123,7 +152,7 @@ function mount({ tables, activeOrg = ACTIVE_ORG }: MountOptions) {
         },
         objectql: makeQl(tables),
         metadata,
-        'security.permissions': evaluator,
+        security: makeSecurityService(tables.sys_permission_set ?? []),
     };
     const app = new Hono();
     registerCurrentUserEndpoints({

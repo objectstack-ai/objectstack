@@ -44,7 +44,13 @@ import {
     type EnableLike,
 } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { IAuthService, IMetadataService, IObjectQLEngine, Logger } from '@objectstack/spec/contracts';
+import type {
+    IAuthService,
+    IMetadataService,
+    IObjectQLEngine,
+    ISecurityService,
+    Logger,
+} from '@objectstack/spec/contracts';
 import { allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 
 /** API prefix these endpoints mount under unless the host overrides it. */
@@ -115,9 +121,11 @@ const ENVIRONMENT_UNAVAILABLE = {
 function contextForKernel(kernel: any, from: CurrentUserEndpointsContext): CurrentUserEndpointsContext {
     return {
         // Sync `getService`, like every other read on this surface. Per-environment
-        // kernels register `auth` / `objectql` / `metadata` /
-        // `security.permissions` as INSTANCES (their plugins register them in
-        // `init()`), so they are in the service map by the time a request arrives.
+        // kernels register `auth` / `objectql` / `metadata` / `security` as
+        // INSTANCES rather than async providers, so they are in the service map
+        // by the time a request arrives. (`security` is registered in the
+        // plugin's `start()` rather than its `init()` — later than the others,
+        // still long before any request reaches this file.)
         getService: <T>(name: string): T | undefined => kernel?.getService?.(name) as T | undefined,
         logger: from.logger,
         getKernel: () => kernel,
@@ -263,30 +271,13 @@ export function foldWildcardSuperUser(objects: Record<string, any>): void {
 
 
 /**
- * The `security.permissions` slot, as these two handlers use it.
+ * The permission-set fields the two handlers merge out of a resolution.
  *
- * [#4251] plugin-security registers its `PermissionEvaluator` under this name;
- * the slot has no `packages/spec` contract, so this declares the ONE method both
- * handlers call rather than erasing the lookup. Structural on purpose —
- * plugin-hono-server must not take a runtime dependency on plugin-security,
- * which is OPTIONAL in the stacks these endpoints serve (the `!evaluator`
- * branches below are exactly its absence).
- *
- * The parameter types are the loose shapes this caller passes, not the
- * evaluator's own: it takes `metadataService: any` and resolves to parsed
- * `PermissionSet`s, while the DB loader here yields the projected subset the
- * merges below read. Declaring what is passed and read keeps the claim honest.
+ * Deliberately looser than the contract's `PermissionSet`: it declares what
+ * these two handlers READ, so the merges below stay honest about the columns
+ * they depend on while the resolution itself is the plugin's (see
+ * {@link permissionSetResolver}).
  */
-interface PermissionEvaluatorSurface {
-    resolvePermissionSets(
-        identifiers: string[],
-        metadataService: unknown,
-        bootstrapPermissionSets?: unknown[],
-        dbLoader?: (unresolved: string[]) => Promise<unknown[]>,
-    ): Promise<ResolvedPermissionSetLike[]>;
-}
-
-/** The permission-set fields the two handlers merge out of a resolution. */
 interface ResolvedPermissionSetLike {
     name?: string;
     objects?: Record<string, unknown>;
@@ -315,86 +306,72 @@ function isWriteOptedIn(v: boolean | { enabled?: boolean } | undefined | null): 
 }
 
 /**
- * [#7555, ADR-0090 D5] The baseline permission-set NAMES this deployment
- * applies to a human principal — read from SecurityPlugin, never re-derived.
+ * [#7616] The ONE permission-set resolution both handlers below use —
+ * `ISecurityService.resolvePermissionSetsForContext`, reached through the
+ * `security` service. Returns `null` when no such resolver is registered.
  *
- * The plugin registers `security.baselinePermissionSets` (the app-declared
- * baseline COMPOSED with the platform `member_default`); this file's two
- * resolutions must ask for that list rather than the single
- * `security.fallbackPermissionSet` name, or an app that declares an `isDefault`
- * set gets the pre-#7555 DISPLACEMENT here — its members' capability and tab
- * surface computed from the app set alone, disagreeing with the data plane one
- * function call away.
+ * ## Why a delegation, and not the local resolution this replaces
  *
- * The `security.fallbackPermissionSet` read is kept as the fallback for a
- * SecurityPlugin too old to register the list, and the bare `member_default`
- * default for a stack with no SecurityPlugin at all — both pre-existing
- * behaviours, unchanged.
+ * This file used to resolve the caller's sets itself, twice: composing the
+ * requested names (positions ∪ explicit sets ∪ the deployment baseline),
+ * building its own `sys_permission_set` DB loader, and calling the evaluator
+ * directly. That made one rule THREE copies — the enforcement path's, and one
+ * per endpoint — and it drifted three times, each divergence found only after
+ * it reached a user:
+ *
+ * - **#7608** — both endpoints kept the fallback CLIFF the additive ADR-0090 D5
+ *   baseline abolishes, so a member who received their FIRST grant went from
+ *   2 apps to 1 on `/me/apps` while the data plane kept their baseline;
+ * - **#7555** — an app-declared `isDefault` set DISPLACED `member_default`
+ *   here rather than composing with it;
+ * - **#6334** — the grant aggregation missed `sys_user_position` /
+ *   `sys_position_permission_set` entirely (closed by delegating to
+ *   `resolveUserAuthzGrants`; this is that precedent extended one step).
+ *
+ * The contract's own header states the rule this restores: a consumer that
+ * re-derives these answers locally "will drift the moment the enforcement path
+ * changes. Ask this service instead."
+ *
+ * ## Two absences, and only ONE of them was dropped
+ *
+ * - **A SecurityPlugin too old to carry the method** — GONE. The method ships
+ *   in `@objectstack/spec@17.0.0`, so a floor carrying it can be assumed and
+ *   the local copy that stood in for it is deleted outright rather than kept
+ *   as a third path.
+ * - **No SecurityPlugin at all** — KEPT, and it is why this returns `null`
+ *   rather than throwing. The plugin is OPTIONAL in the stacks these endpoints
+ *   serve and each handler has a defined degraded answer for its absence, so
+ *   the resolution is reached through the SERVICE LOCATOR and never through a
+ *   package import. Delegating must not turn an optional dependency into a
+ *   runtime one.
+ *
+ * The contract declares the method OPTIONAL, so the narrowing below is what the
+ * TYPE demands too — the unguarded call does not compile.
+ *
+ * ## What "absent" now means, precisely
+ *
+ * The degraded branches used to key on `security.permissions`, which the
+ * contract names an implementation internal ("deliberately NOT part of this
+ * contract"). They key on the published service instead, and that is a real
+ * difference in ONE state: SecurityPlugin registers `security.permissions` in
+ * `init()`, but the `security` service only in `start()` — which RETURNS EARLY
+ * when the engine cannot take middleware. A stack in that state has no security
+ * middleware registered at all, so the data plane enforces NOTHING; the
+ * degraded branch's own premise ("matches server behaviour when SecurityPlugin
+ * isn't registered") is satisfied there, while the previous answer — a
+ * restrictive map computed against enforcement that does not exist — was the
+ * console-hides-what-the-API-allows false NEGATIVE #7608 is about.
  */
-function baselinePermissionSetNames(ctx: { getService: <T>(name: string) => T | undefined }): string[] {
-    const composed = (() => {
-        try { return ctx.getService<string[] | undefined>('security.baselinePermissionSets'); }
-        catch { return undefined; }
+function permissionSetResolver(
+    ctx: { getService: <T>(name: string) => T | undefined },
+): ((context: ExecutionContext) => Promise<ResolvedPermissionSetLike[]>) | null {
+    const security = (() => {
+        try { return ctx.getService<Partial<ISecurityService>>('security') ?? null; }
+        catch { return null; }
     })();
-    if (Array.isArray(composed)) return composed;
-    const declared: string | null = (() => {
-        try { return ctx.getService<string | null>('security.fallbackPermissionSet') ?? 'member_default'; }
-        catch { return 'member_default'; }
-    })();
-    return declared ? [declared] : [];
-}
-
-/**
- * [#7608, ADR-0090 D5] The permission-set names to resolve for an
- * AUTHENTICATED caller: their own grants ∪ the deployment baseline, ADDITIVE
- * and unconditional.
- *
- * This mirrors `SecurityPlugin.resolvePermissionSetsForContext` — the data
- * plane's resolution — deliberately and by name, because the two used to
- * disagree. Both handlers below resolved the caller's own names first and
- * applied the baseline only in a SECOND call gated on
- * `resolved.length === 0`: the fallback CLIFF D5 abolishes, verbatim —
- *
- *   > The fallback cliff is abolished. Today's semantics ("fallback applies
- *   > only while the user has *zero* explicit grants") mean the first real
- *   > grant silently removes the user's baseline. `everyone` is additive like
- *   > any other position: baseline ∪ explicit, always.
- *
- * The plane it left disagreeing with is one function call away. The engine
- * middleware resolves additively, so a member who received their FIRST
- * position or permission-set grant kept the baseline on the data plane and
- * lost it here: `/auth/me/permissions` reported object/field access narrower
- * than a read actually returns, and `/me/apps` dropped every app whose
- * `requiredPermissions` or tab visibility came from the baseline. The
- * fail-direction is CLOSED (the console hides what the API allows), which is
- * why it read as cosmetic for as long as it did.
- *
- * Pushing the baseline into `requested` also retires the second
- * `resolvePermissionSets` call outright rather than merely widening its guard:
- * once the baseline is in the FIRST call's input, a second call over a SUBSET
- * of those same names can add nothing.
- *
- * No `principalKind === 'agent'` branch, unlike the plugin's copy — and that is
- * a property of this surface, not an omission. D10 withholds the human baseline
- * from an agent principal because its ceiling must stay exactly its
- * scope-derived set; these two endpoints are reached only through
- * {@link makeExecutionContextResolver}, which resolves a better-auth SESSION
- * and never marks a principal kind. An agent has no session to present here, so
- * the branch would be unreachable code asserting a case this transport cannot
- * produce.
- */
-function effectivePermissionSetNames(
-    execCtx: { positions?: unknown; permissions?: unknown },
-    baselineNames: string[],
-): string[] {
-    const requested: string[] = [
-        ...(Array.isArray(execCtx.positions) ? execCtx.positions as string[] : []),
-        ...(Array.isArray(execCtx.permissions) ? execCtx.permissions as string[] : []),
-    ];
-    for (const name of baselineNames) {
-        if (!requested.includes(name)) requested.push(name);
-    }
-    return requested;
+    const resolve = security?.resolvePermissionSetsForContext;
+    if (typeof resolve !== 'function') return null;
+    return (context) => resolve.call(security, context);
 }
 
 /**
@@ -733,69 +710,33 @@ export function registerCurrentUserEndpoints(
             return c.json({ authenticated: false });
         }
         try {
-            // [#4093] Guarded like the three lookups below, not bare:
-            // `getService` THROWS on an unregistered slot, and since
-            // plugin-dev stopped stubbing `security.permissions` (a fake
-            // that answered "allowed" for everything) an unclaimed slot is
-            // the ordinary state of a stack without SecurityPlugin. Bare,
-            // it landed in the outer catch — same fail-open body, but
-            // logged as "/auth/me/permissions failed", which reads as a
-            // fault on every console navigation instead of the deliberate
-            // `!evaluator` branch right below.
+            // [#4093] Guarded, not bare: `getService` THROWS on an
+            // unregistered slot, and an unclaimed one is the ordinary state of
+            // a stack without SecurityPlugin. Bare, it landed in the outer
+            // catch — same fail-open body, but logged as
+            // "/auth/me/permissions failed", which reads as a fault on every
+            // console navigation instead of the deliberate degraded branch
+            // right below.
             const metadata = (() => {
                 try { return ctx.getService<IMetadataService>('metadata') ?? null; } catch { return null; }
             })();
-            const evaluator = (() => {
-                try { return ctx.getService<PermissionEvaluatorSurface>('security.permissions') ?? null; }
-                catch { return null; }
-            })();
-            const bootstrap: any[] = (() => {
-                try { return ctx.getService<any[]>('security.bootstrapPermissionSets') ?? []; }
-                catch { return []; }
-            })();
-            const baselineNames: string[] = baselinePermissionSetNames(ctx);
-            // DB loader: surfaces user-defined permission sets
-            // (created via the admin UI as `sys_permission_set`
-            // rows) that aren't in metadata or bootstrap.
+            // [#7616] The resolution is the plugin's, reached through the
+            // published contract; `null` is SecurityPlugin's absence. See
+            // {@link permissionSetResolver} for which absence this drops and
+            // which it keeps.
+            const resolvePermissionSets = permissionSetResolver(ctx);
+            // Read for the registry/schema lookups the merge annotations below
+            // need — no longer for a permission-set DB loader of our own.
             const ql = (() => {
                 try { return ctx.getService<IObjectQLEngine>('objectql') ?? null; }
                 catch { return null; }
             })();
-            const dbLoader = ql
-                ? async (names: string[]) => {
-                    let rows: any;
-                    try {
-                        rows = await ql.find(
-                            'sys_permission_set',
-                            { where: { name: { $in: names } }, limit: names.length },
-                            { context: { isSystem: true } },
-                        );
-                    } catch {
-                        rows = [];
-                    }
-                    const list = Array.isArray(rows) ? rows : rows?.records ?? [];
-                    return list.map((r: any) => ({
-                        name: r.name,
-                        label: r.label,
-                        objects: typeof r.object_permissions === 'string'
-                            ? JSON.parse(r.object_permissions || '{}')
-                            : r.object_permissions ?? {},
-                        fields: typeof r.field_permissions === 'string'
-                            ? JSON.parse(r.field_permissions || '{}')
-                            : r.field_permissions ?? {},
-                        // #2752 follow-through: DB-loaded sets used to drop
-                        // their capability + tab columns, so a direct grant
-                        // of e.g. `setup.access` never surfaced here.
-                        systemPermissions: typeof r.system_permissions === 'string'
-                            ? JSON.parse(r.system_permissions || '[]')
-                            : r.system_permissions ?? [],
-                        tabPermissions: typeof r.tab_permissions === 'string'
-                            ? JSON.parse(r.tab_permissions || '{}')
-                            : r.tab_permissions ?? {},
-                    }));
-                }
-                : undefined;
-            if (!evaluator || !metadata) {
+            // The `!metadata` half of this guard is UNCHANGED and deliberate:
+            // it is not the resolver's input any more (the plugin supplies its
+            // own), but a stack with no metadata service degraded here before
+            // and must keep degrading here, or this becomes a second behaviour
+            // change riding on the delegation.
+            if (!resolvePermissionSets || !metadata) {
                 // Auth resolved but security plugin isn't wired — emit
                 // an empty-but-authenticated body so the frontend can
                 // fail-open with full access (matches server behaviour
@@ -810,14 +751,16 @@ export function registerCurrentUserEndpoints(
                     fields: {},
                 });
             }
-            // [#7608] Resolve the same way SecurityPlugin middleware does:
-            // position names + explicit permission-set names + the deployment
-            // baseline, all in ONE call — see effectivePermissionSetNames for
-            // why the baseline is additive rather than a second, cliff-gated
-            // resolution.
-            const requested = effectivePermissionSetNames(execCtx, baselineNames);
-            const resolved: ResolvedPermissionSetLike[] = await evaluator
-                .resolvePermissionSets(requested, metadata, bootstrap, dbLoader)
+            // [#7616] The caller's sets, resolved ONCE by the owner of the
+            // rule: positions expanded, the ADR-0090 D5 baseline applied
+            // ADDITIVELY (never as a `resolved.length === 0` cliff), the D10
+            // agent-principal rule honoured, deactivated `sys_permission_set`
+            // rows dropped — all of it the enforcement path's own answer rather
+            // than this file's re-derivation of it.
+            //
+            // Fails CLOSED on a throw, as the contract requires: no sets merge
+            // to no access, which is what the body below then reports.
+            const resolved: ResolvedPermissionSetLike[] = await resolvePermissionSets(execCtx)
                 .catch(() => []);
             // Most-permissive merge of `objects` and `fields` across
             // all resolved permission sets — same semantics as
@@ -985,49 +928,22 @@ export function registerCurrentUserEndpoints(
             const tabs: Record<string, string> = { ...((execCtx as any).tabPermissions ?? {}) };
             let failOpen = true;
             try {
-                const evaluator = ctx.getService<PermissionEvaluatorSurface>('security.permissions');
-                failOpen = !evaluator;
-                if (evaluator) {
-                    const metadata = ctx.getService<IMetadataService>('metadata');
-                    const bootstrap: any[] = (() => {
-                        try { return ctx.getService<any[]>('security.bootstrapPermissionSets') ?? []; }
-                        catch { return []; }
-                    })();
-                    // [#7608] Baseline ∪ explicit, in ONE resolution — the
-                    // same additive rule /auth/me/permissions applies above
-                    // and the engine middleware applies on the data plane.
-                    const requested = effectivePermissionSetNames(
-                        execCtx as { positions?: unknown; permissions?: unknown },
-                        baselinePermissionSetNames(ctx),
-                    );
-                    const qlSvc = (() => {
-                        try { return ctx.getService<IDataEngine>('objectql') ?? null; } catch { return null; }
-                    })();
-                    const dbLoader = qlSvc
-                        ? async (names: string[]) => {
-                            let rows: any;
-                            try {
-                                rows = await qlSvc.find(
-                                    'sys_permission_set',
-                                    { where: { name: { $in: names } }, limit: names.length },
-                                    { context: { isSystem: true } },
-                                );
-                            } catch { rows = []; }
-                            const list = Array.isArray(rows) ? rows : rows?.records ?? [];
-                            return list.map((r: any) => ({
-                                name: r.name,
-                                systemPermissions: typeof r.system_permissions === 'string'
-                                    ? JSON.parse(r.system_permissions || '[]')
-                                    : r.system_permissions ?? [],
-                                tabPermissions: typeof r.tab_permissions === 'string'
-                                    ? JSON.parse(r.tab_permissions || '{}')
-                                    : r.tab_permissions ?? {},
-                            }));
-                        }
-                        : undefined;
-                    const resolved: ResolvedPermissionSetLike[] = await evaluator
-                        .resolvePermissionSets(requested, metadata, bootstrap, dbLoader)
-                        .catch(() => []);
+                // [#7616] The SAME resolution `/auth/me/permissions` uses, from
+                // the same owner. What stays local is only the PROJECTION —
+                // this surface reads capabilities and tabs off the resolved
+                // sets, that one merges objects and fields — which is exactly
+                // the split the contract keeps ("the merge semantics stay with
+                // the CALLER, deliberately: two consumers legitimately project
+                // different subsets of the same sets"). The narrower COLUMN
+                // set this handler's own DB loader used to fetch was never the
+                // projection: the columns it dropped are read by nobody here,
+                // so loading the sets whole changes what is in memory and
+                // nothing that reaches the wire.
+                const resolvePermissionSets = permissionSetResolver(ctx);
+                failOpen = !resolvePermissionSets;
+                if (resolvePermissionSets) {
+                    const resolved: ResolvedPermissionSetLike[] =
+                        await resolvePermissionSets(execCtx).catch(() => []);
                     const tabRank: Record<string, number> = { hidden: 0, default_off: 1, default_on: 2, visible: 3 };
                     for (const ps of resolved) {
                         for (const sp of (Array.isArray(ps?.systemPermissions) ? ps.systemPermissions : [])) {
