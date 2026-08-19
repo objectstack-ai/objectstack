@@ -255,8 +255,8 @@ const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/cli/src/commands/**',
       'packages/metadata/src/**',
       // `realtime-protocol.mdx` is named in a comment rather than read, the
-      // same shape as `check-nul-bytes.mjs` and `sync-template-versions.mjs`
-      // and settled the same way: a mention forces a declaration, and
+      // same shape as `check-nul-bytes.mjs` on the @objectstack/cli entry
+      // above and settled the same way: a mention forces a declaration, and
       // declaring the file is cheaper than rewording prose to dodge the
       // scanner. Here the coupling is real on top of being cheap — that page
       // is what documents the PLANNED realtime transports (`/ws`, SSE
@@ -288,15 +288,29 @@ const CROSS_PACKAGE_TEST_INPUTS = {
     // src/template-consistency.test.ts reads doc frontmatter by repo-relative
     // path to decide which templates are internal.
     //
-    // `sync-template-versions.mjs` is named in a comment rather than read, the
-    // same shape as `check-nul-bytes.mjs` above and settled the same way: a
-    // mention forces a declaration, and declaring the file is cheaper than
-    // rewording prose to dodge the scanner. Here the coupling is real on top of
-    // being cheap — that script STAMPS the three per-template version surfaces
-    // (`package.json` @objectstack/* ranges, `objectstack.config.ts`
-    // `engines.protocol`, `objectstack.manifest.json` `specVersion`) that the
-    // ratchets in that test assert, so a change to the stamper is exactly the
-    // change those ratchets exist to catch (#9264).
+    // `sync-template-versions.mjs` is a real cross-package READ. Since #9648,
+    // src/template-version-stamps.test.ts loads the script by URL to assert its
+    // declaration surface (`stampedPaths()`, `findTemplateDirs()`, the
+    // `TEXT_STAMPS` table) and runs it with `execFileSync` over a two-template
+    // fixture (#9554). It was a mention before that test existed, which is what
+    // the rationale here used to say.
+    //
+    // The glob does not rest on that one test, so deleting it would not make
+    // this declaration wrong — only smaller. The script STAMPS the three
+    // per-template version surfaces (`package.json` @objectstack/* ranges,
+    // `objectstack.config.ts` `engines.protocol`, `objectstack.manifest.json`
+    // `specVersion`) that template-consistency.test.ts ratchets, so a change to
+    // the stamper is exactly the change those ratchets exist to catch (#9264).
+    //
+    // What FORCES the glob, though, is neither read. Both tests spell the path
+    // as `join(repoRoot, 'scripts', 'sync-template-versions.mjs')`, and the
+    // literal collector below only sees a whole repo-relative path inside ONE
+    // quoted string — so what it actually picks up is the quoted mention in
+    // each test's header comment. Measured: dropping the glob fails this gate
+    // naming the file; dropping the glob AND unquoting both mentions passes.
+    // So do not reword those mentions into unquoted prose on the theory that
+    // the read has the radius covered — it does not, until the collector
+    // learns this spelling (#9763).
     globs: ['content/**', 'scripts/sync-template-versions.mjs'],
   },
 };

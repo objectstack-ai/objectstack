@@ -35,20 +35,22 @@
 // positive evidence that the published spec is still in the bundle. The fresh
 // witness alone cannot distinguish "injection worked" from "some other copy".
 //
-// ## Substring safety
+// ## Probe derivation lives in ./console-spec-probes.mjs
 //
-// A probe is only usable if a literal search can tell the two specs apart, so
-// each candidate is checked against the ENTIRE other spec's built output, not
-// against a string set. Descriptions are routinely REWORDED by appending a
-// clause, which makes the old text a prefix of the new one — three of the first
-// candidates measured here were exactly that, and a set-difference check called
-// them unique when a substring search would have matched both.
+// Not here, because objectstack#9667 added a SECOND consumer: this script can
+// only run where BOTH specs exist, which is inside a build. On a console-dist
+// cache HIT there is no objectui build tree and therefore no vendored spec, so
+// nothing could re-ask the question about the restored artifact. Two scripts,
+// one derivation — see that module's header.
 //
-// ## When the two specs agree
+// ## This script also writes the provenance stamp
 //
-// If neither side has text the other lacks, there is nothing to detect and the
-// check reports "no skew" and exits 0. That is a real state — the build right
-// after a spec publish — not a failure.
+// On success it records the probes it chose into `<dist>/.objectstack-injection.json`,
+// so `pnpm check:console-injection` can replay them against a restored dist that
+// this script can no longer be run against. Written LAST, only once every
+// assertion below is green — unlike the `.objectui-sha` stamp, which
+// build-console.sh writes before its canary assert (the asymmetry ci.yml's
+// split restore/save comment calls out).
 //
 // Usage:
 //   node scripts/assert-console-spec-injection.mjs \
@@ -59,13 +61,16 @@
 // Exit: 0 = injection proven (or no skew to prove) · 1 = injection failed
 //       2 = inconclusive / cannot run
 
-import fs from 'node:fs';
 import path from 'node:path';
 
-/** Export conditions a browser/ESM bundler picks, in preference order.
- *  `types` is deliberately absent — it sits first in each condition object and
- *  would resolve every subpath at a `.d.mts` file. */
-const IMPORT_CONDITIONS = ['import', 'module', 'browser', 'default'];
+import {
+  ProbeError,
+  describeCandidates,
+  pickProbe,
+  readBundle,
+  readSpecBlob,
+  writeStamp,
+} from './console-spec-probes.mjs';
 
 function fail(message) {
   console.error(`✗ assert-console-spec-injection: ${message}`);
@@ -86,101 +91,52 @@ function parseArgs(argv) {
   return out;
 }
 
-function pickImportTarget(value) {
-  if (typeof value === 'string') return value;
-  if (value === null || typeof value !== 'object') return null;
-  if (Array.isArray(value)) {
-    for (const candidate of value) {
-      const hit = pickImportTarget(candidate);
-      if (hit) return hit;
-    }
-    return null;
-  }
-  for (const condition of IMPORT_CONDITIONS) {
-    if (!Object.hasOwn(value, condition)) continue;
-    const hit = pickImportTarget(value[condition]);
-    if (hit) return hit;
-  }
-  return null;
-}
-
-/** Every JS file a package's exports map resolves to, concatenated once. */
-function readSpecBlob(packageDir, label) {
-  const manifestPath = path.join(packageDir, 'package.json');
-  if (!fs.existsSync(manifestPath)) fail(`${label} spec has no package.json at \`${manifestPath}\``);
-  let exportsMap;
-  try {
-    exportsMap = JSON.parse(fs.readFileSync(manifestPath, 'utf8')).exports;
-  } catch (error) {
-    fail(`${label} \`${manifestPath}\` is not readable JSON (${error.message})`);
-  }
-  if (!exportsMap || typeof exportsMap !== 'object') fail(`${label} spec declares no exports map`);
-
-  const chunks = [];
-  for (const value of Object.values(exportsMap)) {
-    const target = pickImportTarget(value);
-    if (!target || !/\.(js|mjs|cjs)$/.test(target)) continue;
-    const absolute = path.resolve(packageDir, target);
-    if (!fs.existsSync(absolute)) continue;
-    chunks.push(fs.readFileSync(absolute, 'utf8'));
-  }
-  if (chunks.length === 0) fail(`${label} spec at \`${packageDir}\` has no built JavaScript to compare`);
-  return chunks.join('\n');
-}
-
-/**
- * Candidate probe strings: Zod `.describe()` arguments.
- *
- * They are prose written by spec authors, which makes them stable across a
- * bundler (plain string literals, preserved by minification) and specific enough
- * that a match is not a coincidence — the property objectstack#8134's own
- * measurement relied on, and the reason a bare key name like `object` is
- * unusable here (`optionsFrom.object` false-positives).
- */
-function describeCandidates(blob) {
-  const found = new Set();
-  const pattern = /\.describe\(\s*(["'])((?:\\.|(?!\1)[^\\])*)\1\s*\)/g;
-  for (const match of blob.matchAll(pattern)) {
-    const text = match[2];
-    // Long enough to be unique, short enough to survive intact, and free of
-    // escapes and line breaks so a literal search means what it says.
-    if (text.length < 32 || text.length > 160) continue;
-    if (/[\\\r\n]/.test(text)) continue;
-    found.add(text);
-  }
-  return [...found].sort();
-}
-
-/** First candidate present in `mine` and absent from `theirs`, as raw text. */
-function pickProbe(candidates, theirs) {
-  for (const candidate of candidates) {
-    if (!theirs.includes(candidate)) return candidate;
-  }
-  return null;
-}
-
 const args = parseArgs(process.argv);
 
 const assetsDir = path.resolve(args.assets);
-if (!fs.existsSync(assetsDir)) fail(`assets dir \`${assetsDir}\` does not exist`);
-const assetChunks = [];
-for (const entry of fs.readdirSync(assetsDir, { withFileTypes: true })) {
-  if (entry.isFile() && /\.(js|mjs|cjs)$/.test(entry.name)) {
-    assetChunks.push(fs.readFileSync(path.join(assetsDir, entry.name), 'utf8'));
-  }
-}
-if (assetChunks.length === 0) fail(`no JavaScript assets under \`${assetsDir}\``);
-const bundle = assetChunks.join('\n');
+// The dist root is the assets dir's parent: build-console.sh passes
+// `<dist>/assets`, so this is where the .objectui-sha stamp already lives.
+const distDir = path.dirname(assetsDir);
 
-const injectedBlob = readSpecBlob(path.resolve(args.injected), 'injected');
-const vendoredBlob = readSpecBlob(path.resolve(args.vendored), 'vendored');
+let bundle;
+let injectedBlob;
+let vendoredBlob;
+try {
+  bundle = readBundle(assetsDir);
+  injectedBlob = readSpecBlob(path.resolve(args.injected), 'injected');
+  vendoredBlob = readSpecBlob(path.resolve(args.vendored), 'vendored');
+} catch (error) {
+  if (!(error instanceof ProbeError)) throw error;
+  fail(error.message);
+}
 
 const freshWitness = pickProbe(describeCandidates(injectedBlob), vendoredBlob);
 const staleDetector = pickProbe(describeCandidates(vendoredBlob), injectedBlob);
 
+/** Record what this build proved, for check:console-injection to replay. */
+function stamp(skew) {
+  try {
+    writeStamp(distDir, [
+      {
+        name: '@objectstack/spec',
+        injectedFrom: path.resolve(args.injected),
+        skew,
+        freshWitness,
+        staleDetector,
+      },
+    ]);
+  } catch (error) {
+    // A dist we cannot stamp is still a dist this script just proved good.
+    // Failing here would turn a green build red over provenance bookkeeping;
+    // check:console-injection reports the missing stamp on its own terms.
+    console.warn(`⚠ could not write the injection stamp: ${error.message}`);
+  }
+}
+
 if (!freshWitness && !staleDetector) {
   console.log('✓ Injected and vendored @objectstack/spec declare the same descriptions');
   console.log('  — no observable skew, so nothing for this check to assert.');
+  stamp(false);
   process.exit(0);
 }
 
@@ -223,4 +179,5 @@ if (freshPresent !== true) {
 console.log("✓ Console bundle carries THIS tree's @objectstack/spec, and only it.");
 console.log(`    present (injected only): "${freshWitness}"`);
 if (staleDetector) console.log(`    absent  (vendored only): "${staleDetector}"`);
+stamp(true);
 process.exit(0);

@@ -102,7 +102,7 @@ export const TEMPLATES: Record<string, {
   srcFiles: Record<string, (name: string, namespace: string) => string>;
 }> = {
   app: {
-    description: 'Full application with objects, views, and actions',
+    description: 'Full application with objects',
     get dependencies() {
       const v = pkgVersion();
       // No driver is listed on purpose. `@objectstack/runtime` already depends
@@ -195,7 +195,7 @@ export default ${toCamelCase(namespace)}Item;
   },
 
   plugin: {
-    description: 'Reusable plugin with objects and extensions',
+    description: 'Reusable plugin with objects',
     get dependencies() {
       return {
         '@objectstack/spec': pkgVersion(),
