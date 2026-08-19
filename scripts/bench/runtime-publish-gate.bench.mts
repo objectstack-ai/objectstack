@@ -17,11 +17,13 @@
  *   npx tsx scripts/bench/runtime-publish-gate.bench.mts --objects 21,105,420 --iterations 50
  *
  * Requires `pnpm --filter '@objectstack/lint^...' build && pnpm --filter
- * @objectstack/lint build` first: the gate is imported through the package's
- * `./runtime` export, which resolves to `dist/`, so an unbuilt or stale `dist`
- * reports the cost of the OLD registry (this is the `ablation-dist-preflight`
- * hazard; the run prints the rules it actually dispatched so a stale build is
- * visible in the output rather than silent).
+ * @objectstack/lint build` first: the gate is imported straight from
+ * `packages/lint/dist/runtime.js` — the built artifact the `./runtime` export
+ * points at, reached by path because this script is outside the workspace
+ * graph — so an unbuilt or stale `dist` reports the cost of the OLD registry
+ * (this is the `ablation-dist-preflight` hazard; the run prints the rules it
+ * actually dispatched, so a stale build shows up as a changed rule list rather
+ * than as a silently wrong number).
  *
  * ⚠️ Not a CI gate. Wall-clock numbers are machine-dependent and this asserts
  * no threshold; it prints, and the operator compares.
@@ -83,6 +85,22 @@ import { runRuntimeAuthoringRules } from '../../packages/lint/dist/runtime.js';
 import * as showcaseObjects from '../../examples/app-showcase/src/data/objects/index.js';
 import { allFlows } from '../../examples/app-showcase/src/automation/flows/index.js';
 
+// Ambient `process` / `console`, declared to exactly the members used below.
+// `scripts/**` is inside the ROOT tsconfig's program, and that config carries
+// `lib: ['ES2020']` with no `types` — so Node's globals are absent and every
+// use of them is a root-ledger tsc error (measured: 19 from this file alone,
+// which is how it first landed). tsx provides the real objects at run time.
+// Same shape and same reason as the ambient `process` in
+// `examples/app-showcase/objectstack.config.ts`: narrow the declaration to
+// what is actually called rather than widening the root's type surface, so
+// this file pays its own way through `pnpm check:type-check-debt` instead of
+// pushing a shrink-only ratchet back up.
+declare const process: {
+  argv: string[];
+  hrtime: { bigint(): bigint };
+};
+declare const console: { log(...args: unknown[]): void };
+
 type AnyRec = Record<string, any>;
 
 function arg(name: string, fallback: string): string {
@@ -113,7 +131,17 @@ const WRITTEN_OBJECT: AnyRec = {
   fields: { name: { type: 'text', label: 'Name' } },
 };
 
-/** N objects cloned from the shipped showcase corpus, names suffixed to stay unique. */
+/**
+ * N objects cloned from the shipped showcase corpus, names suffixed to stay unique.
+ *
+ * ⚠️ The clone is `JSON.parse(JSON.stringify(...))`, so any FUNCTION-valued key
+ * in a showcase declaration is dropped rather than copied. Harmless for what is
+ * measured here — the runtime gate receives `sys_metadata` bodies, which are
+ * JSON at rest, so a JSON round-trip is the shape the real door sees — but it
+ * does mean this seed is a lower bound on a declaration whose authored surface
+ * lives partly in functions. Stated because the file's honesty about its own
+ * seed is the thing that makes a number taken from it re-runnable.
+ */
 function seedReal(n: number): AnyRec[] {
   const out: AnyRec[] = [];
   for (let i = 0; out.length < n; i++) {
