@@ -273,7 +273,7 @@
  *      sweep cannot start.
  *
  * The paragraph this replaces claimed "unauthenticated works at 60 req/h". That
- * is not a fact about this script's environment. Three container classes have
+ * is not a fact about this script's environment. Four container classes have
  * been measured and no two agree:
  *
  *   PM seat session (#7412 as filed) — proxy denies the host (curl 403 with and
@@ -290,19 +290,88 @@
  *       behind the same NAT. Meanwhile `curl` answered 200 BOTH ways, because it
  *       honours HTTPS_PROXY and the proxy substitutes a real credential — the
  *       misleading pre-flight point 1 warns about, measured.
+ *   Proxy-mediated cloud session (#9946, measured 2026-08-19) — the same
+ *       container class as above, but with node routed THROUGH the agent proxy
+ *       (`NODE_OPTIONS=--use-env-proxy`, which is what a seat is told to use for
+ *       live GitHub reads from node). The proxy substitutes a real credential
+ *       for the placeholder, so ACCOUNT-scoped endpoints answer as GitHub and
+ *       the identity is genuine — while every REPO-scoped endpoint is refused by
+ *       the proxy itself. Live mode cannot run, and the reading that used to say
+ *       it could is the reason this probe now has a second stage.
  *
- * That last class also produced the trap worth naming: `/rate_limit` is EXEMPT
+ * That fourth class is the one that broke the probe, and its mechanism is worth
+ * stating exactly, because the obvious hypothesis is WRONG and was measured to
+ * be wrong. `/rate_limit` there is not the proxy fabricating a quota: it carries
+ * `server: github.com`, a real `x-github-request-id`, and a 15000-limit core
+ * quota, and `GET /user` on the same transport returns the real login. GitHub
+ * really did answer, and the credential really does authenticate. What the proxy
+ * intercepts is the OTHER side — the repo-scoped reads:
+ *
+ *   GET /rate_limit                          -> 200, remaining 14979, server: github.com
+ *   GET /user                                -> 200, the real login
+ *   GET /repos/objectstack-ai/objectstack    -> 403, NO x-ratelimit-* headers,
+ *                                               NO server: github.com, and a body
+ *                                               from the proxy vendor, not GitHub
+ *
+ * So no amount of care applied to `/rate_limit` can classify this container: the
+ * account-scoped observation is genuinely healthy, and is identical to the
+ * Routine runner's. Only a REPO-scoped read separates them, which is why the
+ * probe now takes one — and why `GET /user` would not have done: it is
+ * account-scoped and answers 200 here. The discriminator is not "a real
+ * endpoint", it is "the KIND of endpoint the sweep actually needs".
+ *
+ * Two things this fourth class deliberately does NOT do, both because the file
+ * has already recorded the decision against them:
+ *   - it does not pattern-match the proxy's refusal body. That body is a vendor
+ *     string that can change under us, and this classifier stays narrow about
+ *     what it will name (the `looksLikeStaleWorkspaceDist` posture below).
+ *   - it does not read the 14-character `prox…` token shape as disqualifying.
+ *     Token shape enriches wording and never gates a request — an unknown future
+ *     prefix must still be SENT so GitHub gets to be the judge — and in this very
+ *     class that placeholder IS swapped for a working credential, so the shape
+ *     would have mispredicted the outcome in both directions.
+ * What it matches instead is a pure structural contradiction, with no vendor
+ * string and no shape test in it: the quota endpoint reports thousands of core
+ * requests available, and a core request just got refused.
+ *
+ * The third class also produced the trap worth naming: `/rate_limit` is EXEMPT
  * from the limit it reports. With the quota spent it still answers 200 (carrying
  * `x-ratelimit-remaining: 0`) while every other endpoint answers 403 — so a
  * probe that reads only the status code cheerfully green-lights a sweep that
  * cannot make one request. The first draft of the probe below did exactly that.
  * `probeIsUsable` is that lesson, and the self-test pins it.
  *
- * So the script PROBES (`GET /rate_limit`, which costs no core quota) before it
- * sweeps. A failed probe prints a classified PREREQUISITE NOT MET report naming
+ * So the script PROBES before it sweeps, in two stages, and the staging is the
+ * whole cost story:
+ *
+ *   1. `GET /rate_limit` — costs no core quota, and is what separates the first
+ *      three classes from each other (unreachable / bad credential / exhausted).
+ *      Any verdict OTHER than `reachable` stops here, exactly as before.
+ *   2. `GET /repos/{OWNER_REPO}` — fired ONLY when stage 1 came back
+ *      `reachable`, i.e. only on the path that used to return a green. Costs
+ *      one core request, accepted deliberately (#9946): a probe whose answer
+ *      does not predict what the sweep can do is worth less than the request it
+ *      saves, and the sweep it green-lights spends a request per label page
+ *      anyway.
+ *
+ * Consequence worth being explicit about: the three FAILING classes cost exactly
+ * what they cost before (one request, no core quota), and the healthy path costs
+ * one core request more than it did. Nothing on a failing path got slower or
+ * more expensive.
+ *
+ * A failed probe prints a classified PREREQUISITE NOT MET report naming
  * which of the two requirements is unmet and the one command that satisfies it —
  * never a sweep result. `--probe` runs that check alone, which is what a seat
  * should use to answer "can live mode run in THIS container?".
+ *
+ * The repo-scoped stage is an OPTIONAL observation on the pure classifier, not a
+ * required one: `classifyTransportProbe` handed no `repo` reading classifies the
+ * account-scoped evidence alone, exactly as it always did. That keeps the other
+ * importer of this classifier (`scripts/pm/ci-failure.mjs`, which reads the
+ * Actions API and gathers its own account-scoped observations) behaving
+ * identically. The guarantee that THIS script never green-lights on stage 1
+ * alone therefore lives in `probeTransport` / `needsRepoProbe`, which is where
+ * the gathering policy belongs — and it is pinned in the self-test.
  *
  * Deliberately NOT decided here: whether these scripts should grow an MCP-backed
  * transport or a required-real-token doctrine. That depends on where
@@ -1368,9 +1437,98 @@ function rateLimitedVerdict(tok, result, how) {
 }
 
 /**
+ * The repo-scoped half of the verdict (#9946) — the stage-2 reading, judged
+ * against a stage-1 reading that already said the transport was healthy.
+ *
+ * Returns a verdict for a refusal, or null when the repo read is fine or is
+ * something this classifier declines to name. Kept as its own function for the
+ * same reason `rateLimitedVerdict` is: the wording lives next to the only code
+ * that knows what it did and did not check.
+ *
+ * The matching condition carries NO vendor string and NO token-shape test —
+ * both were considered and rejected on #9946, and the header says why. What it
+ * matches is the structural contradiction the two stages make together: the
+ * quota endpoint reports thousands of core requests available, and a core
+ * request just got refused. That is unambiguous regardless of who refused it,
+ * and it stays true if the intercepting proxy rewrites its message tomorrow.
+ *
+ * @param {{ present: boolean, shape: string, redacted: string }} tok
+ * @param {{ status?: number, rateLimitRemaining?: number|null }} primary  the stage-1 reading
+ * @param {{ status?: number, rateLimitRemaining?: number|null, networkError?: string }} repo
+ */
+function classifyRepoRead(tok, primary, repo) {
+  if (!repo || repo.networkError) return null;
+  if (repo.status === 200 || repo.status === 301) return null;
+
+  // A genuine quota exhaustion that happened BETWEEN the two stages — rare, but
+  // it wears the same 403 and has a completely different remedy, so it must not
+  // be reported as a scope refusal.
+  if (repo.rateLimitRemaining === 0) return rateLimitedVerdict(tok, repo, 'the repo-scoped read is refused too');
+
+  const quota =
+    primary.rateLimitRemaining === null || primary.rateLimitRemaining === undefined
+      ? 'quota left'
+      : `${primary.rateLimitRemaining} core requests left`;
+
+  if (repo.status === 404) {
+    return {
+      kind: 'repo-not-visible',
+      headline: `\`${OWNER_REPO}\` is not visible to this identity — the sweep would list nothing`,
+      detail: [
+        `\`GET /rate_limit\` -> ${describeProbe(primary)}, but \`GET /repos/${OWNER_REPO}\` -> HTTP 404.`,
+        ``,
+        `GitHub answers 404 rather than 403 for a repository the caller may not know`,
+        `exists, so this is one of two things and the reading cannot say which: the`,
+        `repo name is wrong, or the credential cannot see it.`,
+      ],
+      fix: [
+        `check PM_SWEEP_REPO (currently \`${OWNER_REPO}\`), then the credential's repo scope.`,
+      ],
+    };
+  }
+
+  // 401/403 ONLY — the fourth container class as measured on 2026-08-19. Any
+  // other status is left unnamed on purpose (a 5xx is GitHub or the proxy being
+  // briefly unwell, not a scope decision), and the caller keeps its loud generic
+  // failure rather than being handed a confident wrong diagnosis.
+  if (repo.status !== 401 && repo.status !== 403) return null;
+
+  return {
+    kind: 'repo-scope-refused',
+    headline:
+      'the transport authenticates but repo-scoped reads are refused — the sweep cannot list one page',
+    detail: [
+      `\`GET /rate_limit\` -> ${describeProbe(primary)}.`,
+      `\`GET /repos/${OWNER_REPO}\` -> HTTP ${repo.status}${
+        repo.rateLimitRemaining === null || repo.rateLimitRemaining === undefined
+          ? ' with no x-ratelimit-* headers at all'
+          : ` (${repo.rateLimitRemaining} left)`
+      }.`,
+      ``,
+      `Those two readings contradict each other: the quota endpoint reports ${quota},`,
+      `and a core request was just refused anyway. A quota that is not being spent`,
+      `cannot be what is blocking the read, so something between node and GitHub is`,
+      `answering for repo-scoped paths — the shape #9946 measured, where the account-`,
+      `scoped endpoints reached GitHub (\`server: github.com\`, real request ids) while`,
+      `every repo-scoped one was refused by the egress proxy with no GitHub headers.`,
+      ``,
+      `This is reported instead of a green precisely because the stage-1 reading here`,
+      `is INDISTINGUISHABLE from the healthy Routine runner's. Before this stage`,
+      `existed the probe said the prerequisite was met and the sweep then 403'd on its`,
+      `first page — the #4690 inversion, inside the mechanism built to prevent it.`,
+    ],
+    fix: [
+      'run the sweep from a container whose egress allows repo-scoped reads (CI, or',
+      'the Routine seat class); in a proxy-mediated seat the board read stays on the',
+      '`mcp__github__*` tools, which take a different path and do work here.',
+    ],
+  };
+}
+
+/**
  * Turn probe OBSERVATIONS into a named prerequisite verdict. Pure — the network
  * lives in `probeTransport` — so `--self-test` can pin every branch against the
- * three container classes actually measured in #7412.
+ * four container classes actually measured (#7412, #9946).
  *
  * Deliberately narrow, in the same direction as `looksLikeStaleWorkspaceDist`:
  * an unrecognised status comes back as `null` (= "not a failure this classifier
@@ -1378,9 +1536,13 @@ function rateLimitedVerdict(tok, result, how) {
  * confident diagnosis here would send a seat to fix a credential when GitHub was
  * merely down.
  *
- * @param {{ token?: string, authed?: object|null, anon?: object|null }} obs
+ * @param {{ token?: string, authed?: object|null, anon?: object|null, repo?: object|null }} obs
  *   `authed` / `anon` are each `{ status, rateLimitRemaining }` or
  *   `{ networkError }`; `anon` is only gathered when a token was used and failed.
+ *   `repo` is the OPTIONAL repo-scoped reading (`GET /repos/{owner}/{repo}`),
+ *   gathered only when the account-scoped evidence already reads `reachable`.
+ *   Absent, this classifies the account-scoped evidence alone — the behaviour
+ *   every caller had before #9946.
  * @returns {{ kind: string, headline: string, detail: string[], fix: string[] } | null}
  */
 export function classifyTransportProbe(obs) {
@@ -1388,6 +1550,7 @@ export function classifyTransportProbe(obs) {
   const tok = describeToken(token);
   const authed = obs?.authed ?? null;
   const anon = obs?.anon ?? null;
+  const repo = obs?.repo ?? null;
   const primary = tok.present ? authed : anon;
   if (!primary) return null;
   const anonUsable = probeIsUsable(anon);
@@ -1430,6 +1593,20 @@ export function classifyTransportProbe(obs) {
   }
 
   if (primary.status === 200) {
+    // Stage 2 (#9946). The account-scoped evidence is healthy — which in the
+    // fourth container class is TRUE and still does not mean the sweep can run.
+    // Only a repo-scoped reading separates that class from the Routine runner,
+    // and the two observations are indistinguishable without it.
+    const repoVerdict = repo ? classifyRepoRead(tok, primary, repo) : null;
+    if (repoVerdict) return repoVerdict;
+    if (repo && !(repo.status === 200 || repo.status === 301)) {
+      // Handed a repo reading this classifier cannot name (a 5xx, a transient
+      // network error moments after the host answered): stay unclassified
+      // rather than either vouching for the transport or blaming a credential.
+      // The caller keeps its loud generic failure — the same narrowness the
+      // account-scoped branches take.
+      return null;
+    }
     return {
       kind: 'reachable',
       headline: tok.present
@@ -1529,11 +1706,64 @@ async function probeRateLimit(token) {
   }
 }
 
+/**
+ * The stage-2 reading (#9946): one repo-scoped GET, the cheapest request that
+ * exercises the same scope the sweep's every listing needs.
+ *
+ * `GET /repos/{owner}/{repo}` and not `GET /user`: the measured fourth class
+ * answers 200 on `/user` — account-scoped endpoints reach GitHub there — so an
+ * "is this a real endpoint" probe would have green-lit it just as `/rate_limit`
+ * did. What has to be exercised is the SCOPE, not the realness.
+ *
+ * Costs one core request. `/repos/{owner}/{repo}` rather than a one-item issues
+ * page because it is the smaller body and the same authorization decision.
+ */
+async function probeRepoRead(token) {
+  try {
+    const res = await fetch(`${API}/repos/${OWNER_REPO}`, {
+      headers: {
+        accept: 'application/vnd.github+json',
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    return { status: res.status, rateLimitRemaining: parseRemaining(res.headers.get('x-ratelimit-remaining')) };
+  } catch (err) {
+    return { networkError: err?.cause?.code ?? err?.cause?.message ?? err?.message ?? 'fetch failed' };
+  }
+}
+
+/**
+ * Whether the stage-1 verdict warrants spending a core request on stage 2.
+ *
+ * Only a `reachable` does — which is exactly the path that used to return a
+ * green without ever having read anything repo-scoped. Every failing class
+ * short-circuits here, so none of them costs a request more than it did before.
+ *
+ * Exported so `--self-test` can pin the sequencing: the guarantee that this
+ * script never green-lights on account-scoped evidence alone is a property of
+ * the GATHERING, not of the pure classifier (which, handed no repo reading,
+ * still classifies exactly as it always did for its other importer).
+ */
+export function needsRepoProbe(accountVerdict) {
+  return accountVerdict?.kind === 'reachable';
+}
+
 async function probeTransport() {
   const first = await probeRateLimit(TOKEN);
-  if (!TOKEN) return classifyTransportProbe({ token: '', anon: first });
-  if (first.status === 200) return classifyTransportProbe({ token: TOKEN, authed: first });
-  return classifyTransportProbe({ token: TOKEN, authed: first, anon: await probeRateLimit('') });
+  const account = !TOKEN
+    ? classifyTransportProbe({ token: '', anon: first })
+    : first.status === 200
+      ? classifyTransportProbe({ token: TOKEN, authed: first })
+      : classifyTransportProbe({ token: TOKEN, authed: first, anon: await probeRateLimit('') });
+
+  if (!needsRepoProbe(account)) return account;
+
+  // Re-classified with the repo reading added, rather than patched on top of the
+  // stage-1 verdict: one classifier, one place where a verdict is named.
+  const repo = await probeRepoRead(TOKEN);
+  return TOKEN
+    ? classifyTransportProbe({ token: TOKEN, authed: first, repo })
+    : classifyTransportProbe({ token: '', anon: first, repo });
 }
 
 /**
@@ -2515,6 +2745,95 @@ function selfTest() {
   t('#7412 class 3 (cloud dev, measured): 401 + exhausted anon -> bad-credential', class3?.kind, 'bad-credential');
   t('…and it does NOT prescribe the token-less re-run', class3.fix.join(' ').includes('GITHUB_TOKEN= GH_TOKEN='), false);
   t('…and it names a real credential as the remedy', class3.fix[0].includes('a real GitHub token'), true);
+
+  // Class 4 — proxy-mediated cloud session, measured 2026-08-19 (#9946). The
+  // account-scoped reading is not merely 200: it is GENUINELY GitHub's, with a
+  // real request id and a real 15000-limit quota, and `GET /user` returns the
+  // real login. It is byte-for-byte indistinguishable from class 2 above. Only
+  // the repo-scoped read separates them, and it is refused with no
+  // `x-ratelimit-*` headers at all — hence `rateLimitRemaining: null`.
+  const class4 = {
+    token: 'prox_abcdefghi',
+    authed: { status: 200, rateLimitRemaining: 14_979 },
+    repo: { status: 403, rateLimitRemaining: null },
+  };
+  t('#9946 class 4 (proxy-mediated, measured): repo-scoped 403 -> repo-scope-refused', kind(class4), 'repo-scope-refused');
+  // The defect itself, pinned as its own case: the SAME container, classified
+  // without the stage-2 reading, is the false green this item exists to end.
+  // Dropping stage 2 must make this case go green again — which is what makes
+  // the fixture above a real regression pin rather than a restatement.
+  t(
+    '…and WITHOUT the repo reading the very same observations read as reachable (the defect)',
+    kind({ token: class4.token, authed: class4.authed }),
+    'reachable',
+  );
+  // It must not be legible as a credential fault: the credential is fine here
+  // (the proxy substitutes a working one), and sending a seat to hunt for a
+  // token is the wasted round #7412 already paid for once.
+  t('…and it is NOT reported as a bad credential', classifyTransportProbe(class4).kind.includes('credential'), false);
+  t(
+    '…and its evidence names the contradiction between the two stages',
+    classifyTransportProbe(class4).detail.join(' ').includes('contradict'),
+    true,
+  );
+  // Direction B, refused on the card: no vendor string is matched. The fixture
+  // carries a status and a header count and NOTHING else — no response body is
+  // observed at all — so a body-matching classifier could not have fired here.
+  t(
+    'the fourth class is matched with no response body in evidence at all',
+    Object.keys(class4.repo).join(','),
+    'status,rateLimitRemaining',
+  );
+  // Direction C, refused on the card: token SHAPE never gates. In this very
+  // class the `prox…` placeholder IS swapped for a working credential, so shape
+  // would have mispredicted it — and a real `ghp_` token behind the same proxy
+  // must classify identically.
+  t(
+    'a github-shaped token behind the same proxy classifies identically',
+    kind({ ...class4, token: 'ghp_' + 'x'.repeat(36) }),
+    'repo-scope-refused',
+  );
+  t(
+    'anonymous behind the same proxy classifies identically',
+    kind({ token: '', anon: class4.authed, repo: class4.repo }),
+    'repo-scope-refused',
+  );
+  // Class 2 extended (never rewritten — the one-observation case above still
+  // stands): the real Routine container passes BOTH stages, and must stay green
+  // now that a second stage exists.
+  t(
+    '#7412 class 2 (Routine) passes stage 2 as well -> still reachable',
+    kind({ token: 'ghp_' + 'x'.repeat(36), authed: { status: 200, rateLimitRemaining: 14_999 }, repo: { status: 200, rateLimitRemaining: 14_998 } }),
+    'reachable',
+  );
+  // A repo the identity cannot see. GitHub answers 404 rather than 403 for a
+  // repository the caller may not know exists, so the verdict must name both
+  // possible causes instead of picking one.
+  t('repo-scoped 404 -> repo-not-visible', kind({ ...class4, repo: { status: 404, rateLimitRemaining: 4999 } }), 'repo-not-visible');
+  t(
+    '…and it sends the reader to PM_SWEEP_REPO first',
+    classifyTransportProbe({ ...class4, repo: { status: 404, rateLimitRemaining: 4999 } }).fix[0].includes('PM_SWEEP_REPO'),
+    true,
+  );
+  // A quota genuinely spent between the two stages wears the same 403 and has a
+  // completely different remedy — it must not be reported as a scope refusal.
+  t('repo-scoped 403 with remaining 0 is the quota, not a scope refusal', kind({ ...class4, repo: { status: 403, rateLimitRemaining: 0 } }), 'rate-limited');
+  // Narrowness, in the same direction as the account-scoped branches: a stage-2
+  // reading this classifier cannot name must not vouch for the transport EITHER.
+  // Both of these used to be impossible to express; neither may silently pass.
+  t('repo-scoped 5xx stays unclassified, and does NOT read as reachable', kind({ ...class4, repo: { status: 502 } }), undefined);
+  t('a transient network error on stage 2 stays unclassified too', kind({ ...class4, repo: { networkError: 'ECONNRESET' } }), undefined);
+  // Sequencing (`probeTransport`'s policy, pinned because the pure classifier
+  // cannot enforce it): stage 2 fires on exactly the path that used to green,
+  // and on no other — so no FAILING class costs a request more than before.
+  t('needsRepoProbe: a reachable stage-1 spends the core request', needsRepoProbe({ kind: 'reachable' }), true);
+  t('needsRepoProbe: host-unreachable does not', needsRepoProbe({ kind: 'host-unreachable' }), false);
+  t('needsRepoProbe: bad-credential does not', needsRepoProbe({ kind: 'bad-credential' }), false);
+  t('needsRepoProbe: rate-limited does not', needsRepoProbe({ kind: 'rate-limited' }), false);
+  t('needsRepoProbe: an unclassified stage-1 does not', needsRepoProbe(null), false);
+  // Exit-code contract: every stage-2 refusal routes to PREREQUISITE NOT MET
+  // (exit 3), because the caller keys on `kind !== 'reachable'` and nothing else.
+  t('the fourth class routes to PREREQUISITE NOT MET, not to a sweep', kind(class4) !== 'reachable', true);
   // The trap itself: `/rate_limit` is exempt from the limit it reports, so a
   // 200 with 0 remaining is an EXHAUSTED quota, never a green transport. A
   // status-only reading here green-lights a sweep that cannot run (#4690).
