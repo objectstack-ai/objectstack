@@ -729,12 +729,14 @@ export function runnableInvocation({ check, filter, direct }) {
  * (`packages/spec/src/index.ts`) goes from 7 matched families to 34. That is
  * the "22 leads is the same as none" failure in the header, bought wholesale.
  *
- * What stays out of reach, deliberately: a population that is a top-level FILE
- * (`README.md`, `ARCHITECTURE.md` — the rest of `check-doc-anchors`' corpus).
- * A bare filename carries no separator either, and accepting one would admit
- * every `package.json` / `turbo.json` / `tsconfig.json` basename a gate joins
- * with a package directory — the same explosion, one class over. A miss there
- * costs one card one CI round; that is the side this file errs on.
+ * What stays out of reach, deliberately: a top-level FILE named as a bare
+ * LITERAL (`README.md`). A bare filename carries no separator either, and
+ * accepting one would admit every `package.json` / `turbo.json` /
+ * `tsconfig.json` basename a gate joins with a package directory — the same
+ * explosion, one class over. A miss there costs one card one CI round; that is
+ * the side this file errs on. What is refused is the literal, never the file:
+ * a gate whose population really is a root file reaches it through the escape
+ * hatch below, and several now do.
  *
  * Re-measured (#9964) on 114 families x 6326 tracked files, narrowing that
  * admission to bare `*.md` literals naming a real tracked root file makes the
@@ -1784,8 +1786,11 @@ export function residueLines({ discovered, matched, undetermined, silent, unfilt
       ` · ${silent} silent (their sources name paths, none of which cover yours).`,
     '  A `silent` verdict is this derivation\'s weakest claim, not a clearance, and there are two ways to earn it that have' +
       ' nothing to do with your paths: a gate that computes its own population and names only its baseline artifact scores' +
-      ' silent for every card in the tree, and so does one whose population is a top-level FILE (`README.md`) — a literal' +
-      ' with no path separator is refused as too generic, so the gate reads your file while naming nothing that can match it.',
+      ' silent for every card in the tree, and so does one whose population is a repo-root FILE it spells as a bare' +
+      ' filename — a literal with no path separator is refused as too generic, so the gate reads your file while naming' +
+      ' nothing that can match it. That second one is escapable, and gates have escaped it: a gate whose population really' +
+      ' is a root file reaches it by declaring the subtree spelling (`AGENTS.md/**`), after which it is no longer silent' +
+      " for that file. hintCovers' docblock carries the measurement and what the refusal buys.",
     `  ${unfiltered} of the ${discovered} sit only in workflows that declare no pull_request path filter — CI schedules those on` +
       ' EVERY pull request, so no path derivation can narrow them and their verdict above is about relevance, never schedule.',
     `  ${unreachable} of the ${discovered} declare a population that reaches NOTHING in the tree, swept over ${swept} tracked file(s) —` +
@@ -2618,8 +2623,10 @@ function selfTest() {
   t('a declared subtree does not reach a sibling root', !hintCovers('content/**', 'contentious/x.md'));
   // A top-level FILE stays out of reach on purpose: accepting a bare filename
   // would admit every `package.json` basename a gate joins with a package dir.
-  // Pinned so the loss reads as a decision, not an oversight — it is the rest
-  // of check-doc-anchors' corpus (README.md, ARCHITECTURE.md).
+  // Pinned so the loss reads as a decision, not an oversight. What is refused
+  // is the LITERAL, never the file — a gate whose population really is a root
+  // file reaches it by declaring the subtree spelling, which is what the
+  // rootFileDeclarations cases below pin.
   t('a bare top-level FILE name is refused, the decided loss', !hintCovers('README.md', 'README.md'));
 
   // The three live declarations the refusal used to swallow, read from the real
@@ -3399,6 +3406,18 @@ function selfTest() {
   t('the residue summary states each bucket', residue.some((l) => l.includes('35 undetermined')) && residue.some((l) => l.includes('55 silent')));
   t('the residue summary points at the flag that lists the unplaced families', residue.some((l) => l.includes('--residue') && l.includes('90')));
   t('the residue summary names NO gate — the property the deleted prose lacked', !/check:[\w:-]+/.test(residue.join('\n')));
+  // The same rot, one noun over (#10012). The top-level-FILE clause used to
+  // illustrate the unreachable class with `README.md`, which was honest until
+  // that gate declared `README.md/**` — after which the sentence offered, as
+  // its example of a population nothing can reach, the one root file in this
+  // repo that a card DOES derive. A specimen here is a claim about the tree
+  // that this function has no way to keep true; the escape hatch is the half
+  // that cannot go stale, because it restates the rule rather than the tree.
+  // The first pin holds only the literal that actually rotted — a future
+  // specimen spelled some other way would slip it, which is why the second
+  // pin, that the durable half is present at all, is the load-bearing one.
+  t('the residue names no repo-root file as an unreachable specimen', !residue.join('\n').includes('README.md'));
+  t('and states the escape hatch instead, which restates the rule and cannot rot', residue.some((l) => l.includes('subtree spelling')));
   t('the residue summary still names the convention KINDS it derives', residue.some((l) => l.includes('adds or edits a test file')));
   // The schedule half (#9171). The count is the size of the answer this
   // derivation cannot give — families CI runs on every PR — and printing it is

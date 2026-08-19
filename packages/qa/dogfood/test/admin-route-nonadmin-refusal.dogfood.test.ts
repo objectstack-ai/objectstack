@@ -25,7 +25,7 @@
 //     `.options.method`, which is why `auth-route-ledger.conformance.test.ts`
 //     uses the same seam. Measured here: 24 routes.
 //
-// Union: 31 routes at the configuration this file boots (7 + 9 + 2 + 4 + 9). Both halves are
+// Union: 31 routes at the configuration this file boots (11 + 9 + 2 + 9). Both halves are
 // asserted non-empty, and the union is cross-checked against a small ANCHOR set,
 // so a derivation that silently returns nothing cannot make the sweep vacuous.
 //
@@ -46,9 +46,11 @@
 // ── The payloads are load-bearing, and this is the file's sharpest edge ───────
 //
 // MEASURED: better-auth validates the request body BEFORE it reaches the admin
-// check, and so do the ObjectStack `/admin/sso/*`, `/admin/unlock-user` and
+// check, and so do the ObjectStack `/admin/unlock-user` and
 // `/admin/oauth2/toggle-disabled` mounts (their handlers read and shape-check
-// `body` before calling `getSession`). Fire an EMPTY body at
+// `body` before calling `getSession`; the `/admin/sso/*` bridges gate FIRST
+// since #9653, but their payloads stay valid so the admin-side probe reaches
+// the semantic answer). Fire an EMPTY body at
 // `/admin/ban-user` and a plain member receives:
 //
 //     400 {"message":"[body.userId] Invalid input: …","code":"VALIDATION_ERROR"}
@@ -65,11 +67,12 @@
 // A refusal-only suite stays green if a route starts refusing EVERYONE, so each
 // bucket that can carry an allowed side does:
 //
-//   `objectstack-gate` (7 routes) — the full contrast. A plain member is refused
+//   `objectstack-gate` (11 routes) — the full contrast. A plain member is refused
 //     403 PERMISSION_DENIED, an anonymous caller 401 UNAUTHENTICATED, and the
 //     platform admin is NOT refused: the same request reaches the handler and
 //     comes back 2xx (unlock-user) or a SEMANTIC error (404 RESOURCE_NOT_FOUND
-//     for a missing OAuth client). That is what proves the member's 403 is a
+//     for a missing OAuth client; the capability errors on the `/admin/sso/*`
+//     bridges while SSO is off). That is what proves the member's 403 is a
 //     gate verdict and not a payload the server rejects for everyone.
 //
 //   `better-auth-gate` (9 routes) — refusal side only, DELIBERATELY. On this
@@ -113,23 +116,18 @@
 //     self-scoped, not an admin operation). Asserting a 403 on these would be
 //     asserting a bug.
 //
-//   `capability-disabled` (4 routes) — the `/admin/sso/*` bridges. Unlike their
-//     five ObjectStack siblings these carry NO ObjectStack-side gate: they
-//     re-dispatch the request into better-auth "so all of its gates run"
-//     (`register-sso-provider.ts`). On this stack the SSO capability is off, so
-//     all three callers — anonymous, member AND platform admin — receive the
-//     identical capability error (404 SSO_REGISTER_FAILED / 404
-//     SAML_REGISTER_FAILED / 400 DOMAIN_VERIFICATION_DISABLED / 404
-//     verify_domain_failed). Authorization is therefore NOT OBSERVABLE on these
-//     four here, and this file says so instead of pretending: their delegated
-//     gate is UNPROVEN by this pin, and an SSO-enabled deployment is where it
-//     would have to be proven. The universal invariant still covers them.
-//
-//     The one assertion made is a tripwire, not a pin on the disabled state:
-//     member and admin must receive the SAME answer. The day SSO is enabled in
-//     this fixture those answers diverge, this goes red, and whoever enabled it
-//     has to move the route into a bucket that actually checks its gate —
-//     rather than inheriting a green that stopped meaning anything.
+//   (`capability-disabled` — RETIRED by #9653.) The four `/admin/sso/*` bridges
+//     used to carry no ObjectStack-side gate, so with SSO off every caller got
+//     the identical capability error and authorization was not observable here;
+//     this bucket held a member-vs-admin-must-match tripwire for exactly that.
+//     #9653 put the inline ADR-0068 platform-admin gate in front of all four
+//     (before the bridge delegates into better-auth), which is the transition
+//     the tripwire existed to force: the routes now live in `objectstack-gate`,
+//     where anon 401 / member 403 / admin-not-refused IS asserted. The member's
+//     refusal no longer depends on the capability at all — the gate answers
+//     first — and the SSO-ENABLED member-refusal assertion lives in
+//     `plugin-auth/src/admin-sso-bridge-gate.test.ts`, beside the measured
+//     vendor posture that makes the gate load-bearing.
 //
 //   `not-mounted` (9 routes) — better-auth publishes the `/admin/oauth2/*`
 //     resource and client endpoints from the oidcProvider plugin, which this
@@ -159,7 +157,6 @@ type Bucket =
   | 'objectstack-gate'
   | 'better-auth-gate'
   | 'self-scoped'
-  | 'capability-disabled'
   | 'not-mounted';
 
 interface RouteExpectation {
@@ -215,8 +212,15 @@ function expectationsFor(targetUserId: string): Record<string, RouteExpectation>
       body: { client_id: 'refusal-probe-client', disabled: true },
       note: 'admin passes the gate and lands on RESOURCE_NOT_FOUND for the unknown client',
     },
+    // ── #9653: the /admin/sso/* bridges, gated ahead of their delegation ────
+    //
+    // The ADR-0068 gate runs BEFORE the bridge re-dispatches into better-auth,
+    // so anon/member get the gate's 401/403 whether or not SSO is enabled. The
+    // platform admin passes the gate and lands on the capability answer (SSO
+    // is off in this boot) — a semantic error, exactly like toggle-disabled's
+    // RESOURCE_NOT_FOUND, and NOT a [401,403] gate refusal.
     'POST /api/v1/auth/admin/sso/register': {
-      bucket: 'capability-disabled',
+      bucket: 'objectstack-gate',
       body: {
         providerId: 'refusal-probe-oidc',
         issuer: 'https://issuer.example',
@@ -224,9 +228,10 @@ function expectationsFor(targetUserId: string): Record<string, RouteExpectation>
         clientId: 'probe-client',
         clientSecret: 'probe-secret',
       },
+      note: 'admin passes the gate and lands on 404 SSO_REGISTER_FAILED while SSO is off',
     },
     'POST /api/v1/auth/admin/sso/register-saml': {
-      bucket: 'capability-disabled',
+      bucket: 'objectstack-gate',
       body: {
         providerId: 'refusal-probe-saml',
         issuer: 'https://saml-issuer.example',
@@ -234,14 +239,17 @@ function expectationsFor(targetUserId: string): Record<string, RouteExpectation>
         entryPoint: 'https://saml-issuer.example/sso',
         cert: 'PROBE-CERT',
       },
+      note: 'admin passes the gate and lands on 404 SAML_REGISTER_FAILED while SSO is off',
     },
     'POST /api/v1/auth/admin/sso/request-domain-verification': {
-      bucket: 'capability-disabled',
+      bucket: 'objectstack-gate',
       body: { providerId: 'refusal-probe-oidc' },
+      note: 'admin passes the gate and lands on 400 DOMAIN_VERIFICATION_DISABLED while SSO is off',
     },
     'POST /api/v1/auth/admin/sso/verify-domain': {
-      bucket: 'capability-disabled',
+      bucket: 'objectstack-gate',
       body: { providerId: 'refusal-probe-oidc' },
+      note: 'admin passes the gate and lands on 404 verify_domain_failed while SSO is off',
     },
 
     // ── #9652: ban / unban moved from the vendor to an ObjectStack mount ────
@@ -568,30 +576,9 @@ describe('#9482 C9: every derived /admin/ route refuses a non-admin', () => {
     // `adminRoles: ['admin']`), and pinning EITHER side of that would be wrong.
   }, 600_000);
 
-  it('the /admin/sso/* bridges answer identically to member and admin — authorization is not observable here', async () => {
-    // NOT a pin on the capability being off. It is the tripwire described in
-    // the header: while SSO is disabled these four cannot distinguish a caller,
-    // so a bucket that claimed to check their gate would be checking nothing.
-    // Enabling SSO makes member and admin diverge and turns this red on
-    // purpose, so the routes get reclassified instead of coasting on a green.
-    const routes = derived.all.filter((r) => expectations[r]?.bucket === 'capability-disabled');
-    expect(routes.length, 'no capability-disabled routes were derived').toBeGreaterThan(0);
-
-    for (const route of routes) {
-      const member = await fire(route, memberToken);
-      const admin = await fire(route, adminToken);
-      expect(
-        member.status >= 200 && member.status < 300,
-        `${route}: a plain member got a success answer — ${member.body}`,
-      ).toBe(false);
-      expect(
-        `${member.status} ${member.code}`,
-        `${route}: member and platform admin no longer receive the same answer, so this route ` +
-          `IS now authorization-observable. Move it to a bucket that asserts its gate — ` +
-          `member=${member.status} ${member.code}, admin=${admin.status} ${admin.code}`,
-      ).toBe(`${admin.status} ${admin.code}`);
-    }
-  }, 300_000);
+  // (The `capability-disabled` tripwire that used to sit here is retired: #9653
+  // gated the four /admin/sso/* bridges, which now carry the objectstack-gate
+  // bucket's full three-way contrast above — see the header.)
 
   it('the self-scoped admin routes answer a non-admin without leaking a privileged result', async () => {
     const hasPermission = 'POST /api/v1/auth/admin/has-permission';

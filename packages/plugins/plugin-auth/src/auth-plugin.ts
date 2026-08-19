@@ -1807,6 +1807,20 @@ export class AuthPlugin implements Plugin {
       }
     });
 
+    // ── ADR-0068 D2/D4 — the ONE platform-admin gate helper for every raw
+    // `/admin/*` mount below (see platform-admin-gate.ts for the judge and
+    // its unit-tested posture matrix). Returns the admitted actor, or the
+    // refusal Response to hand straight back. Hoisted here (#9653) so the
+    // four `/admin/sso/*` bridges and the #2766 admin-user block share one
+    // spelling instead of accreting per-mount copies.
+    const gateAdmin = async (c: any): Promise<PlatformAdminActor | Response> => {
+      const authApi = await this.authManager!.getApi();
+      const session = await (authApi as any).getSession({ headers: c.req.raw.headers });
+      const verdict = judgePlatformAdmin(session);
+      if (!verdict.ok) return c.json(verdict.refusal.body, verdict.refusal.status);
+      return verdict.actor;
+    };
+
     // ────────────────────────────────────────────────────────────────────
     // SSO admin: register an external OIDC IdP from the flat metadata form
     // (ADR-0024). `@better-auth/sso`'s POST /sso/register expects the protocol
@@ -1818,12 +1832,27 @@ export class AuthPlugin implements Plugin {
     // strips them → a provider with `oidc_config = null` that can never
     // complete a login. This thin bridge reshapes the flat form body into the
     // nested shape and RE-DISPATCHES it through the real /sso/register endpoint
-    // (via the better-auth handler) so the admin gate, the public-routable
-    // trustedOrigins allowance, discovery hydration, and secret handling all
-    // still run. No bespoke persistence. Retire when the action framework
-    // gains nested-param support.
+    // (via the better-auth handler) so the public-routable trustedOrigins
+    // allowance, discovery hydration, and secret handling all still run. No
+    // bespoke persistence. Retire when the action framework gains nested-param
+    // support.
+    //
+    // #9653 — ADR-0068 D4: the platform-admin gate runs HERE, before the
+    // bridge delegates. Registering an identity provider is a platform-
+    // operator action, and the delegated authorization is NOT a substitute:
+    // measured on the installed @better-auth/sso 1.7.1, the vendor's
+    // /sso/register admits ANY authenticated user when no organizationId is
+    // supplied (the org-admin check is inside `if (ctx.body.organizationId)`),
+    // and the auth-manager before-hook that narrows this admits org
+    // owners/admins, who are not platform admins (ADR-0068). Gating first
+    // also un-masks the refusal labels: an anonymous caller used to get the
+    // capability error (404 SSO_REGISTER_FAILED), never a 401. Anonymous-
+    // first ordering — identity error before capability error — so the gate
+    // runs ahead of the bridge's own body validation.
     rawApp.post(`${basePath}/admin/sso/register`, async (c: any) => {
       try {
+        const gated = await gateAdmin(c);
+        if (gated instanceof Response) return gated;
         const { status, body } = await runRegisterSsoProviderFromForm(
           (req) => this.authManager!.handleRequest(req),
           c.req.raw,
@@ -1900,13 +1929,7 @@ export class AuthPlugin implements Plugin {
         getTenancy: () => this.tenancy ?? undefined,
         logger: ctx.logger,
       });
-      const gateAdmin = async (c: any): Promise<PlatformAdminActor | Response> => {
-        const authApi = await this.authManager!.getApi();
-        const session = await (authApi as any).getSession({ headers: c.req.raw.headers });
-        const verdict = judgePlatformAdmin(session);
-        if (!verdict.ok) return c.json(verdict.refusal.body, verdict.refusal.status);
-        return verdict.actor;
-      };
+      // Gate: the shared `gateAdmin` hoisted above the SSO mounts (#9653).
 
       rawApp.post(`${basePath}/admin/create-user`, async (c: any) => {
         try {
@@ -2092,6 +2115,10 @@ export class AuthPlugin implements Plugin {
     // admin gate + provisioning all run. Returns SP ACS + metadata URLs.
     rawApp.post(`${basePath}/admin/sso/register-saml`, async (c: any) => {
       try {
+        // #9653 — same ADR-0068 D4 platform-admin gate as /admin/sso/register
+        // above, judged before the bridge delegates.
+        const gated = await gateAdmin(c);
+        if (gated instanceof Response) return gated;
         const { status, body } = await runRegisterSamlProviderFromForm(
           (req) => this.authManager!.handleRequest(req),
           c.req.raw,
@@ -2113,6 +2140,11 @@ export class AuthPlugin implements Plugin {
     // success/error. A 404 from the inner endpoint = feature OFF for this env.
     rawApp.post(`${basePath}/admin/sso/request-domain-verification`, async (c: any) => {
       try {
+        // #9653 — same ADR-0068 D4 platform-admin gate as /admin/sso/register
+        // above; the identity answer comes before the capability answer, so an
+        // anonymous caller gets 401 even while OS_SSO_DOMAIN_VERIFICATION is off.
+        const gated = await gateAdmin(c);
+        if (gated instanceof Response) return gated;
         const { status, body } = await runRequestDomainVerification(
           (req) => this.authManager!.handleRequest(req),
           c.req.raw,
@@ -2127,6 +2159,9 @@ export class AuthPlugin implements Plugin {
 
     rawApp.post(`${basePath}/admin/sso/verify-domain`, async (c: any) => {
       try {
+        // #9653 — same ADR-0068 D4 platform-admin gate as /admin/sso/register.
+        const gated = await gateAdmin(c);
+        if (gated instanceof Response) return gated;
         const { status, body } = await runVerifyDomain(
           (req) => this.authManager!.handleRequest(req),
           c.req.raw,
