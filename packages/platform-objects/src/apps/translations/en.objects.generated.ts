@@ -1228,6 +1228,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Client ID",
         help: "Public OAuth client identifier"
       },
+      client_discovery_id: {
+        label: "Client Discovery ID",
+        help: "Opaque identifier the provider uses to look this client up on the discovery path, kept apart from the public `client_id`"
+      },
       client_secret: {
         label: "Client Secret",
         help: "OAuth client secret — stored as a SHA-256 digest, never plaintext (`@better-auth/oauth-provider`'s `storeClientSecret`, which defaults to hashed whenever the jwt plugin is enabled; wired in plugin-auth's `AuthManager.buildPluginList()`, oidcProvider branch). Shown once at registration."
@@ -1271,6 +1275,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       scopes: {
         label: "Allowed Scopes",
         help: "JSON-serialized list of scopes the client may request"
+      },
+      client_credentials_scopes: {
+        label: "Client-Credentials Scopes",
+        help: "JSON-serialized list of scopes the client may request on the client_credentials grant, where there is no user to consent — kept apart from `scopes`, which governs user-delegated grants"
       },
       subject_type: {
         label: "Subject Type",
