@@ -77,12 +77,26 @@ export const SysAuditLog = ObjectSchema.create({
     // adds the action and the screen that answers its question in one stroke.
     // `record_views` is the "who viewed this record" query as a list: actor
     // first, because that is the column an auditor scans.
+    //
+    // [#9539, maintainer ruling 2026-08-18 + triage auto-adjudication
+    // 2026-08-19, both Option 1] `ip_address` was dropped from this column
+    // list: `buildRow` in `read-audit.ts` never stamps it (client-fingerprint
+    // fields are populated on auth events only — see the README), so on every
+    // `read` row this column could ever show, it was structurally empty. On a
+    // compliance screen a blank cell reads as "captured, and none" rather than
+    // "not captured" — 审计面宁窄勿谎, the same principle #7675/#8147/#8315
+    // applied to enum values, one layer down on a column. Replaced with
+    // `actor`, which the read writer DOES stamp on every row and which is the
+    // one column that attributes a service principal (`svc:<name>`) rather
+    // than just falling back to a null `user_id`. Pinned by
+    // `sys-audit-log-record-views-columns.test.ts`: this view's columns must
+    // stay a subset of the read writer's actually-stamped key set.
     record_views: {
       type: 'grid',
       name: 'record_views',
       label: 'Record Views',
       data: { provider: 'object', object: 'sys_audit_log' },
-      columns: ['created_at', 'user_id', 'object_name', 'record_id', 'ip_address'],
+      columns: ['created_at', 'user_id', 'object_name', 'record_id', 'actor'],
       filter: [{ field: 'action', operator: 'in', value: ['read'] }],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
