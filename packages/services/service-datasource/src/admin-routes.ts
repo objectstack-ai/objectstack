@@ -1,10 +1,10 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { PluginContext } from '@objectstack/core';
-// The authentication floor: the platform's ONE anonymous-deny decision plus the
-// ONE identity resolution every other HTTP seam reads. Both are imported rather
-// than restated — see `requireAuthenticated` below for why a local check would
-// be the wrong shape even if it were written correctly.
+// The authorization floor: the platform's ONE anonymous-deny decision plus the
+// ONE identity-and-capability resolution every other HTTP seam reads. Both are
+// imported rather than restated — see `requireDatasourceAdmin` below for why a
+// local check would be the wrong shape even if it were written correctly.
 import {
   resolveAuthzContext,
   shouldDenyAnonymous,
@@ -82,13 +82,15 @@ const SERVICE_ERROR_CODE: Record<ServiceName, ErrorCode> = {
  *
  * `GET /datasources/drivers` is static metadata and needs neither service.
  *
- * ## Every route above requires authentication (#9391)
+ * ## Every route above requires the platform-settings capability (#9391, #9593)
  *
  * All eleven — reads, writes and the static catalog alike — answer `401`
- * `UNAUTHENTICATED` to a caller with no resolvable identity, before any service
- * is resolved and before any handler body runs. See `requireAuthenticated`
- * inside the registrar for how that decision is reached and why it has to be
- * made here rather than inherited from a seam.
+ * `UNAUTHENTICATED` to a caller with no resolvable identity and `403`
+ * `PERMISSION_DENIED` to a caller who resolves but holds no
+ * `manage_platform_settings`, before any service is resolved and before any
+ * handler body runs. See `requireDatasourceAdmin` inside the registrar for how
+ * both decisions are reached, why they have to be made here rather than
+ * inherited from a seam, and why the capability is neither minted nor split.
  *
  * The catalog route is included on purpose. It needs no service and reveals no
  * deployment data, but the family's own route ledger dispositions it
@@ -200,6 +202,64 @@ function buildGetSession(ctx: PluginContext): ((headers: Headers) => Promise<unk
   };
 }
 
+/**
+ * The capability every route in this family demands (#9593).
+ *
+ * ## Matched, never minted
+ *
+ * `manage_platform_settings` is the capability the adjacent Setup-admin
+ * families already gate on, and three independent measurements converge on it:
+ *
+ *  - **The sibling settings namespaces.** `@objectstack/service-settings`'s
+ *    manifests split into two cohorts. The tenant-facing, cosmetic ones —
+ *    `branding`, `company`, `localization`, `feature-flags` — declare
+ *    `readPermission: 'setup.access'` / `writePermission: 'setup.write'`. The
+ *    platform-infrastructure ones that carry connection configuration and
+ *    credentials — `mail`, `storage`, `sms`, `auth`, `ai`, `knowledge`, and
+ *    `packages/objectql`'s lifecycle namespace — declare
+ *    `manage_platform_settings` for BOTH. A datasource is a driver plus a DSN
+ *    plus a bound `sys_secret`; it belongs to the second cohort by
+ *    construction, not by analogy.
+ *  - **This plugin's own Setup nav entry.** `datasource-admin-plugin.ts`
+ *    contributes `nav_datasources` into the Setup app's `group_integrations`
+ *    slot with `requiredPermissions: ['manage_platform_settings']`. The
+ *    console door was already gated at this capability while the HTTP door
+ *    behind it took any authenticated caller — declared-but-unenforced (Prime
+ *    Directive #10) with the declaration and the gap in one package. Gating
+ *    here makes declared equal enforced and takes away no console anyone could
+ *    already reach.
+ *  - **The capability's own definition.** `PLATFORM_CAPABILITIES`
+ *    (`packages/spec/src/security/capabilities.ts`) describes it as
+ *    "Configure global platform settings (mail, storage, AI, licensing, …) and
+ *    platform-only Setup pages" — the class this family is in, named in the
+ *    registry rather than inferred here.
+ *
+ * ## Why there is no read/write split
+ *
+ * The card leaves the split to measurement, and the measurement says no. The
+ * cohort that splits is the cosmetic one; the credential-bearing cohort does
+ * not, and its reads are the reason. A read here is not a name list: `GET
+ * /datasources/:name` returns the stored connection config — host, port,
+ * database, user, `redactedConfigKeys` and the `hasSecret` handle flag — and
+ * `GET /:name/remote-tables` returns a live introspection of a remote schema.
+ * That is the same class of data `mail`, `storage` and `auth` gate their reads
+ * on, and a lower read capability would publish a deployment's connection
+ * topology to every authenticated tenant user, which is most of what the write
+ * gate is protecting. `GET /drivers` is static and could stand lower, and is
+ * held at the same line for the reason the authentication floor gave: a family
+ * whose floor has one hole has to be read route by route.
+ *
+ * ⚠️ Not a platform-admin gate. `admin_full_access` carries
+ * `manage_platform_settings` in its `systemPermissions`
+ * (`plugin-security/src/objects/default-permission-sets.ts`), so every platform
+ * admin holds it already and needs no bypass; a deployment can equally grant it
+ * to an operator set that is not a full admin. There is deliberately no
+ * `isPlatformAdmin` / posture arm here — that would be a SECOND policy beside
+ * the capability, and the sibling gate in `@objectstack/rest`'s
+ * `package-routes.ts` reads the held set only, for the same reason.
+ */
+export const DATASOURCE_ADMIN_CAPABILITY = 'manage_platform_settings';
+
 export function registerDatasourceAdminRoutes(
   server: IHttpServer,
   ctx: PluginContext,
@@ -208,9 +268,24 @@ export function registerDatasourceAdminRoutes(
   const root = `${basePath}/datasources`;
 
   /**
-   * The authentication floor for this whole family (#9391). Answers `401
-   * UNAUTHENTICATED` and returns `true` when the caller must be refused, so
-   * every handler opens with `if (await requireAuthenticated(req, res)) return;`.
+   * The authorization floor for this whole family (#9391 authentication, #9593
+   * capability). Answers `401 UNAUTHENTICATED` or `403 PERMISSION_DENIED` and
+   * returns `true` when the caller must be refused, so every handler opens with
+   * `if (await requireDatasourceAdmin(req, res)) return;`.
+   *
+   * ## One resolution, two decisions — deliberately not two guards
+   *
+   * The identity and the held capabilities come out of the SAME
+   * `resolveAuthzContext` call. Splitting this into an authentication guard
+   * followed by a capability guard would resolve the request twice, and two
+   * resolutions of one request can disagree — the second read is a fresh set of
+   * `sys_*` queries against a store another request may have written in
+   * between. One read, then both decisions off that one envelope.
+   *
+   * The order is fixed: anonymous first. A caller with no identity must be told
+   * it has no identity, not that its (empty) capability set is insufficient —
+   * the latter is both wrong and a hint that the credential was read and
+   * rejected on other grounds.
    *
    * ## Why this module needs its own line at all
    *
@@ -262,12 +337,30 @@ export function registerDatasourceAdminRoutes(
    * wrapper is this surface's, while the status, code and message are the
    * shared ones. Same reasoning, same shape, as `package-routes.ts`.
    *
-   * Authentication and nothing more: whether these routes should FURTHER
-   * require a platform-configuration capability is a separate, separately-ruled
-   * question (#9593) and is deliberately absent here.
+   * The capability refusal takes the STANDARD-catalog code for its status:
+   * `403` `PERMISSION_DENIED`, which `HttpStatusErrorCodeMap` names for 403 and
+   * `StandardErrorCode` describes as "User lacks required permission".
+   * Deliberately NOT `FORBIDDEN`, which the sibling `package-routes.ts` emits:
+   * that spelling is a grandfathered pre-gate synonym (ADR-0112 D3's
+   * `STANDARD_SYNONYM_WAIVERS`), waived for the three packages already putting
+   * it on the wire, and the waiver schema's own words are that it "keeps a WIRE
+   * VALUE registered; it does not endorse the spelling for new code". A
+   * standard member needs no per-package ledger registration either — the same
+   * reason `SERVICE_UNAVAILABLE` and `RESOURCE_NOT_FOUND` appear below while
+   * `@objectstack/service-datasource`'s ledger entry lists only its own two
+   * registered codes.
+   *
+   * ## What the message says, and what it withholds
+   *
+   * The capability's name and nothing else. A refused caller needs to know
+   * which grant to ask an administrator for; it must not learn whether the
+   * named datasource exists, which services this deployment wired, or anything
+   * else it was not entitled to read — which is also why this check, like the
+   * anonymous one, runs BEFORE `resolve()` and before any handler body.
    */
-  const requireAuthenticated = async (req: any, res: any): Promise<boolean> => {
+  const requireDatasourceAdmin = async (req: any, res: any): Promise<boolean> => {
     let userId: string | undefined;
+    let systemPermissions: string[] = [];
     try {
       const headers = toWebHeaders(req?.headers);
       if (headers) {
@@ -292,16 +385,33 @@ export function registerDatasourceAdminRoutes(
         }
         const authz = await resolveAuthzContext({ ql, headers, getSession });
         userId = authz.userId;
+        // The same envelope, read twice. `systemPermissions` is the resolver's
+        // aggregate of every permission set the caller holds (user-bound and
+        // position-bound alike) — the field `package-routes.ts` and the `/meta`
+        // gate read, so this family gates on the platform's capability
+        // resolution rather than a second reading of `sys_*`.
+        systemPermissions = Array.isArray(authz.systemPermissions) ? authz.systemPermissions : [];
       }
     } catch {
-      // Fail closed: an identity that could not be resolved is not an identity.
+      // Fail closed: an identity that could not be resolved is not an identity,
+      // and grants that could not be read are not grants.
       userId = undefined;
+      systemPermissions = [];
     }
     // `isSystem` is deliberately not read off anything the wire can reach —
     // `ResolvedAuthzContext` has no such field, and inbound HTTP never carries
     // one, so the only way past this line is a resolved caller.
     if (shouldDenyAnonymous({ userId, method: req?.method })) {
       sendError(res, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE);
+      return true;
+    }
+    if (!systemPermissions.includes(DATASOURCE_ADMIN_CAPABILITY)) {
+      sendError(
+        res,
+        403,
+        'PERMISSION_DENIED',
+        `Managing datasources requires the \`${DATASOURCE_ADMIN_CAPABILITY}\` capability.`,
+      );
       return true;
     }
     return false;
@@ -386,7 +496,7 @@ export function registerDatasourceAdminRoutes(
   // failure surfaced as the adapter's non-envelope 500 instead of the 400 its
   // eight siblings answer.
   server.get(root, async (req: any, res: any) => {
-    if (await requireAuthenticated(req, res)) return;
+    if (await requireDatasourceAdmin(req, res)) return;
     const svc = resolve(res, 'datasource-admin', 'listDatasources');
     if (!svc) return;
     try {
@@ -401,7 +511,7 @@ export function registerDatasourceAdminRoutes(
   // Studio connection form). Static metadata — no service dependency, so it
   // is always available even before any datasource-admin service is wired.
   server.get(`${root}/drivers`, async (req: any, res: any) => {
-    if (await requireAuthenticated(req, res)) return;
+    if (await requireDatasourceAdmin(req, res)) return;
     sendOk(res, { drivers: DRIVER_CATALOG });
   });
 
@@ -427,7 +537,7 @@ export function registerDatasourceAdminRoutes(
   // question #7606 owns globally; honouring it is correct under either answer,
   // so this route does not pre-empt it.
   server.get(`${root}/:name/remote-tables`, async (req: any, res: any) => {
-    if (await requireAuthenticated(req, res)) return;
+    if (await requireDatasourceAdmin(req, res)) return;
     const svc = resolve(res, 'external-datasource', 'listRemoteTables');
     if (!svc) return;
     try {
@@ -450,7 +560,7 @@ export function registerDatasourceAdminRoutes(
   // after the static `/drivers` route so that literal segment is never captured
   // as a name.
   server.get(`${root}/:name`, async (req: any, res: any) => {
-    if (await requireAuthenticated(req, res)) return;
+    if (await requireDatasourceAdmin(req, res)) return;
     const svc = resolve(res, 'datasource-admin', 'getDatasource');
     if (!svc) return;
     try {
@@ -463,7 +573,7 @@ export function registerDatasourceAdminRoutes(
   });
 
   server.post(`${root}/:name/test`, async (req: any, res: any) => {
-    if (await requireAuthenticated(req, res)) return;
+    if (await requireDatasourceAdmin(req, res)) return;
     const svc = resolve(res, 'external-datasource', 'testConnection');
     if (!svc) return;
     try {
@@ -487,7 +597,7 @@ export function registerDatasourceAdminRoutes(
   // plainly. Genuine refusals — an unknown name, a throwing store — still take
   // the `badRequest` arm below.
   server.post(`${root}/:name/migrate-credential`, async (req: any, res: any) => {
-    if (await requireAuthenticated(req, res)) return;
+    if (await requireDatasourceAdmin(req, res)) return;
     const svc = resolve(res, 'datasource-admin', 'migrateCredential');
     if (!svc) return;
     try {
@@ -499,7 +609,7 @@ export function registerDatasourceAdminRoutes(
   });
 
   server.post(`${root}/:name/object-draft`, async (req: any, res: any) => {
-    if (await requireAuthenticated(req, res)) return;
+    if (await requireDatasourceAdmin(req, res)) return;
     const svc = resolve(res, 'external-datasource', 'generateObjectDraft');
     if (!svc) return;
     const { table, ...opts } = (req.body as Record<string, unknown>) ?? {};
@@ -515,7 +625,7 @@ export function registerDatasourceAdminRoutes(
   // Probe a connection without persisting anything. Registered before the
   // `:name` routes so the literal `test` segment is never captured as a name.
   server.post(`${root}/test`, async (req: any, res: any) => {
-    if (await requireAuthenticated(req, res)) return;
+    if (await requireDatasourceAdmin(req, res)) return;
     const svc = resolve(res, 'datasource-admin', 'testConnection');
     if (!svc) return;
     const { draft, secret } = splitSecret(req.body);
@@ -529,7 +639,7 @@ export function registerDatasourceAdminRoutes(
 
   // Create a runtime datasource.
   server.post(root, async (req: any, res: any) => {
-    if (await requireAuthenticated(req, res)) return;
+    if (await requireDatasourceAdmin(req, res)) return;
     const svc = resolve(res, 'datasource-admin', 'createDatasource');
     if (!svc) return;
     const { draft, secret } = splitSecret(req.body);
@@ -543,7 +653,7 @@ export function registerDatasourceAdminRoutes(
 
   // Patch a runtime datasource.
   server.patch(`${root}/:name`, async (req: any, res: any) => {
-    if (await requireAuthenticated(req, res)) return;
+    if (await requireDatasourceAdmin(req, res)) return;
     const svc = resolve(res, 'datasource-admin', 'updateDatasource');
     if (!svc) return;
     const { draft, secret } = splitSecret(req.body);
@@ -557,7 +667,7 @@ export function registerDatasourceAdminRoutes(
 
   // Remove a runtime datasource.
   server.delete(`${root}/:name`, async (req: any, res: any) => {
-    if (await requireAuthenticated(req, res)) return;
+    if (await requireDatasourceAdmin(req, res)) return;
     const svc = resolve(res, 'datasource-admin', 'removeDatasource');
     if (!svc) return;
     try {

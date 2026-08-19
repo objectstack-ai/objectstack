@@ -38,22 +38,26 @@ import { describe, it, expect, vi } from 'vitest';
 import { BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import { registerDatasourceAdminRoutes } from '../admin-routes.js';
+import {
+  ENTITLED_CREDENTIAL,
+  createSessionAuthService,
+  createGrantsEngine,
+} from './entitled-caller.fixture.js';
 
 /**
- * The family requires authentication (#9391), so every request below carries a
- * session and the mock context resolves an `auth` service that admits it. The
- * subject here is the ENVELOPE of the success and refusal bodies; an
- * unauthenticated fixture would replace all of them with the guard's 401 and
- * this file would stop covering what it exists to cover. The 401's own
- * envelope is asserted by `admin-routes-auth-guard.test.ts`.
+ * The family requires authentication (#9391) and the `manage_platform_settings`
+ * capability (#9593), so every request below carries an ENTITLED caller's
+ * session and the mock context resolves both the `auth` service that admits it
+ * and the data engine its grants resolve from. The subject here is the ENVELOPE
+ * of the success and refusal bodies; an unauthenticated fixture would replace
+ * all of them with the guard's 401 and an unentitled one with its 403, and this
+ * file would stop covering what it exists to cover. Both refusal envelopes are
+ * asserted by `admin-routes-auth-guard.test.ts`; the entitlement itself comes
+ * from the one `entitled-caller.fixture.ts` definition that pin uses.
  */
-const SESSION = 'Bearer test-session';
-const authService = {
-  api: {
-    getSession: async ({ headers }: { headers: Headers }) =>
-      headers?.get?.('authorization') === SESSION ? { user: { id: 'u_test' } } : null,
-  },
-};
+const SESSION = ENTITLED_CREDENTIAL;
+const authService = createSessionAuthService();
+const grantsEngine = createGrantsEngine();
 
 const req = (path: string, init?: RequestInit) =>
   new Request(`http://local${path}`, {
@@ -67,7 +71,15 @@ const req = (path: string, init?: RequestInit) =>
 
 function mount(svc: unknown) {
   const server = new HonoHttpServer(0);
-  const ctx = { getService: vi.fn((name: string) => (name === 'auth' ? authService : svc)) } as any;
+  const ctx = {
+    getService: vi.fn((name: string) =>
+      name === 'auth'
+        ? authService
+        : name === 'objectql' || name === 'data'
+          ? grantsEngine
+          : svc,
+    ),
+  } as any;
   registerDatasourceAdminRoutes(server, ctx, '/api/v1');
   return server.getRawApp();
 }

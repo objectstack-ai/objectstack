@@ -3,6 +3,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import { registerDatasourceAdminRoutes } from '../admin-routes.js';
+import {
+  ENTITLED_CREDENTIAL,
+  createSessionAuthService,
+  createGrantsEngine,
+} from './entitled-caller.fixture.js';
 
 /**
  * End-to-end routing test against the REAL `HonoHttpServer` adapter — the same
@@ -14,30 +19,41 @@ import { registerDatasourceAdminRoutes } from '../admin-routes.js';
  */
 
 /**
- * The credential every request in this file carries, and the fake `auth`
- * service that admits it.
+ * The credential every request in this file carries, and the fakes that admit
+ * it.
  *
- * This family requires authentication (#9391), so a fixture that presented no
- * identity would answer 401 to every case below — a suite measuring the guard
+ * This family requires authentication (#9391) AND the
+ * `manage_platform_settings` capability (#9593), so a fixture that presented no
+ * identity would answer 401 to every case below, and one that presented an
+ * unentitled identity would answer 403 — either way a suite measuring the guard
  * instead of the routing and failure-attribution it exists to measure. The
- * guard itself has its own both-sides pin, `admin-routes-auth-guard.test.ts`;
- * here an authenticated caller is the premise, not the subject.
+ * guard itself has its own three-posture pin,
+ * `admin-routes-auth-guard.test.ts`; here an ENTITLED caller is the premise,
+ * not the subject, and both halves of that entitlement come from the one
+ * `entitled-caller.fixture.ts` definition the pin uses.
  */
-const SESSION = 'Bearer test-session';
-const authService = {
-  api: {
-    getSession: async ({ headers }: { headers: Headers }) =>
-      headers?.get?.('authorization') === SESSION ? { user: { id: 'u_test' } } : null,
-  },
-};
+const SESSION = ENTITLED_CREDENTIAL;
+const authService = createSessionAuthService();
+const grantsEngine = createGrantsEngine();
 
 /**
- * Wrap a `getService` so `auth` resolves to the fake above and every other
- * lookup keeps the behaviour the case under test wired — including throwing,
- * which is what drives the resolver's catch arm.
+ * Wrap a `getService` so `auth` and the data engine resolve to the fakes above
+ * and every other lookup keeps the behaviour the case under test wired —
+ * including throwing, which is what drives the resolver's catch arm.
+ *
+ * The engine is intercepted rather than delegated for the same reason `auth`
+ * is: the guard resolves the caller's grants off `objectql`/`data`, and a case
+ * that deliberately wires a throwing or absent service to exercise a 503 would
+ * otherwise be answering 403 before it ever reached the arm it is testing.
  */
 const withAuth = (getService: (name: string) => unknown) =>
-  vi.fn((name: string) => (name === 'auth' ? authService : getService(name)));
+  vi.fn((name: string) =>
+    name === 'auth'
+      ? authService
+      : name === 'objectql' || name === 'data'
+        ? grantsEngine
+        : getService(name),
+  );
 
 const json = (path: string, init?: RequestInit) =>
   new Request(`http://local${path}`, {
