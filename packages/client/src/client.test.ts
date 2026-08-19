@@ -23,6 +23,67 @@ function createMockClient(body: any, status = 200) {
     return { client, fetchMock };
 }
 
+// [#9934] The producer-marked user-facing refusal text (`userMessage`) — the
+// SDK surfaces it from BOTH live envelopes' declared spots, the same
+// two-dialect rule as `code`/`fields`, so the console can render a marked hook
+// refusal and keep its generic #3821 substitution for everything unmarked.
+describe('[#9934] err.userMessage — the user-facing marking, both dialects', () => {
+    const USER_TEXT = '该记录已进入结账期，暂不能修改。';
+
+    it('reads the FLAT envelope (top-level userMessage)', async () => {
+        const { client } = createMockClient({
+            error: 'close-period guard refused the write',
+            userMessage: USER_TEXT,
+            object: 'ufm_task',
+        }, 403);
+
+        const err: any = await client.data.update('ufm_task', 'rec1', { name: 'x' })
+            .then(() => { throw new Error('expected the update to reject'); }, (e) => e);
+
+        expect(err.httpStatus).toBe(403);
+        expect(err.userMessage).toBe(USER_TEXT);
+        expect(err.message).toBe('close-period guard refused the write');
+    });
+
+    it('reads the WRAPPED envelope (error.userMessage)', async () => {
+        const { client } = createMockClient({
+            success: false,
+            error: {
+                code: 'PERMISSION_DENIED',
+                message: 'close-period guard refused the write',
+                httpStatus: 403,
+                userMessage: USER_TEXT,
+            },
+        }, 403);
+
+        const err: any = await client.data.update('ufm_task', 'rec1', { name: 'x' })
+            .then(() => { throw new Error('expected the update to reject'); }, (e) => e);
+
+        expect(err.code).toBe('PERMISSION_DENIED');
+        expect(err.userMessage).toBe(USER_TEXT);
+    });
+
+    it('an unmarked refusal attaches NO userMessage — nothing is promoted from message', async () => {
+        const { client } = createMockClient({
+            error: 'close-period guard refused the write',
+            code: 'PERMISSION_DENIED',
+        }, 403);
+
+        const err: any = await client.data.update('ufm_task', 'rec1', { name: 'x' })
+            .then(() => { throw new Error('expected the update to reject'); }, (e) => e);
+
+        expect(err.code).toBe('PERMISSION_DENIED');
+        expect(err.userMessage).toBeUndefined();
+    });
+
+    it('a blank or non-string marking is ignored', async () => {
+        const { client } = createMockClient({ error: 'refused', userMessage: '   ' }, 403);
+        const err: any = await client.data.update('ufm_task', 'rec1', { name: 'x' })
+            .then(() => { throw new Error('expected the update to reject'); }, (e) => e);
+        expect(err.userMessage).toBeUndefined();
+    });
+});
+
 describe('ObjectStackClient', () => {
     it('should initialize with correct configuration', () => {
         const client = new ObjectStackClient({ baseUrl: 'http://localhost:3000' });

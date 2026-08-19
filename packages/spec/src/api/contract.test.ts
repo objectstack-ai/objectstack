@@ -44,6 +44,38 @@ describe('ApiErrorSchema', () => {
 
     expect(error.details).toBeDefined();
   });
+
+  // [#9934] The producer-side user-facing marking (objectui#5210 ruling):
+  // presence is the producer's opt-in, absence keeps the consumer's generic
+  // substitution (#3821 preserved by construction).
+  it('carries a producer-marked `userMessage` verbatim', () => {
+    const error = ApiErrorSchema.parse({
+      code: 'PERMISSION_DENIED',
+      message: 'close-period guard refused the write',
+      userMessage: '该记录已进入结账期，暂不能修改。',
+      httpStatus: 403,
+    });
+
+    expect(error.userMessage).toBe('该记录已进入结账期，暂不能修改。');
+    // The marking rides ALONGSIDE `message`, never instead of it.
+    expect(error.message).toBe('close-period guard refused the write');
+  });
+
+  it('an unmarked error parses with the key ABSENT — the default is unmarked', () => {
+    const error = ApiErrorSchema.parse({
+      code: 'PERMISSION_DENIED',
+      message: 'refused',
+    });
+    expect('userMessage' in error).toBe(false);
+  });
+
+  it('rejects a non-string marking — the field is the text, not a flag', () => {
+    expect(ApiErrorSchema.safeParse({
+      code: 'PERMISSION_DENIED',
+      message: 'refused',
+      userMessage: true,
+    }).success).toBe(false);
+  });
 });
 
 describe('BaseResponseSchema', () => {

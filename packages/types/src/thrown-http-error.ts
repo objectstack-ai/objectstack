@@ -136,6 +136,31 @@ export interface ThrownHttpError {
   /** The thrown message, UNSANITISED — see the module note on disclosure. */
   message: string;
   /**
+   * The producer's user-facing refusal text, verbatim — present exactly when
+   * the throw carried a non-empty string `userMessage` (#9934).
+   *
+   * This is the producer-side opt-in the objectui#5210 ruling asked for
+   * (maintainer, 2026-08-19, option 1): an application hook's refusal has no
+   * way to distinguish author-written user guidance from platform diagnostics,
+   * so the console substitutes a generic string on 403 (the recorded #3821
+   * fix) and every author-written remedy is suppressed with the diagnostics.
+   * A producer that sets `userMessage` on the thrown error is saying, at throw
+   * time, "this exact text is addressed to the END USER" — a consumer renders
+   * it verbatim and keeps the generic substitution for everything unmarked.
+   *
+   * Deliberately a FIELD carrying the text, not a boolean beside `message`:
+   * the mark and the marked text are one value, so a boundary that rewraps or
+   * substitutes `message` (sanitisation, truncation, the sandbox debug
+   * wrapper) can never accidentally promote platform prose into the marked
+   * channel — the #3821 protection holds by construction. Read through
+   * {@link declaredUserMessage}, never with an inline `typeof` probe.
+   *
+   * Status-agnostic on purpose (the ruling's second constraint): a 400, 403,
+   * 409 or 503 refusal may all carry it. It never REPLACES `message` — the
+   * diagnostic channel keeps its wording for logs and developers.
+   */
+  userMessage?: string;
+  /**
    * Structured context: spec-validation `issues[]`, record-validation
    * `fields[]`. Absent rather than `{}` when the throw carried none, so an
    * empty object never reads as "there is context here".
@@ -156,6 +181,7 @@ export interface ThrownHttpError {
  * | code | `VALIDATION_FAILED` if it is one → a REGISTERED `.code` → derived from the status |
  * | declaredCode | `VALIDATION_FAILED` if it is one → any non-empty string `.code` → absent |
  * | message | `.message` when it is a string → `String(error)` |
+ * | userMessage | a non-empty string `.userMessage` → absent (see {@link declaredUserMessage}) |
  *
  * Both status spellings are read because both are produced in this repo:
  * `plugin-approvals`' lifecycle hooks and `metadata-protocol` throw
@@ -200,14 +226,37 @@ export function resolveThrownHttpError(error: unknown, fallbackStatus = 500): Th
     ...(validation ? { fields: validation.fields } : {}),
   };
 
+  const userMessage = declaredUserMessage(error);
+
   return {
     status,
     ...(declaredStatus !== undefined ? { declaredStatus } : {}),
     code,
     ...(declaredCode !== undefined ? { declaredCode } : {}),
     message: typeof e?.message === 'string' ? e.message : String(error),
+    ...(userMessage !== undefined ? { userMessage } : {}),
     ...(Object.keys(details).length > 0 ? { details } : {}),
   };
+}
+
+/**
+ * The user-facing refusal text a thrown error DECLARED, or `undefined` when it
+ * declared none (#9934). See {@link ThrownHttpError.userMessage} for what the
+ * declaration means and why it is a text-carrying field rather than a flag.
+ *
+ * The ONE read every boundary applies — the REST classification door, the
+ * dispatcher door, and the sandbox side-channel all call this rather than
+ * probing `error.userMessage` themselves, so "what counts as marked" cannot
+ * fork per door the way the `status`/`statusCode` spelling once did (#7525).
+ *
+ * A non-string or blank `userMessage` is NOT a declaration: `undefined`, a
+ * number, `''` and whitespace-only all answer `undefined`, so nothing invents
+ * a marked message for a producer that never wrote one — absent means the
+ * consumer keeps its generic substitution (#3821 preserved by construction).
+ */
+export function declaredUserMessage(error: unknown): string | undefined {
+  const declared = (error as { userMessage?: unknown } | null | undefined)?.userMessage;
+  return typeof declared === 'string' && declared.trim().length > 0 ? declared : undefined;
 }
 
 /**

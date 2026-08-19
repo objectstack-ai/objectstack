@@ -365,6 +365,21 @@ export type FieldError = z.input<typeof FieldErrorSchema>;
 export const EnhancedApiErrorSchema = lazySchema(() => z.object({
   code: StandardErrorCode.describe('Machine-readable error code'),
   message: z.string().describe('Human-readable error message'),
+  /**
+   * The producer's user-facing refusal text, verbatim — the same field, with
+   * the same semantics, as `ApiErrorSchema.userMessage` (`contract.zod.ts`,
+   * which carries the full rationale): the producer-side opt-in that marks a
+   * refusal message as addressed to the END USER (#9934, maintainer ruling
+   * 2026-08-19 on objectui#5210). Present exactly when the producer opted in
+   * at throw time; absent means consumers keep their generic substitution
+   * (#3821 preserved by construction). Status-agnostic; never replaces
+   * `message`.
+   */
+  userMessage: z.string().optional().describe(
+    'Producer-marked user-facing refusal text, verbatim (#9934) — see ApiErrorSchema.userMessage. '
+    + 'Present only when the producer opted in at throw time; unmarked errors keep the generic '
+    + 'consumer substitution (#3821).',
+  ),
   category: ErrorCategory.optional().describe('Error category'),
   httpStatus: z.number().optional().describe('HTTP status code'),
   retryable: z.boolean().default(false).describe('Whether the request can be retried'),

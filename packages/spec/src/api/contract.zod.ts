@@ -46,6 +46,49 @@ export const ApiErrorSchema = lazySchema(() => z.object({
    */
   declaredCode: z.string().optional().describe('The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106)'),
   message: z.string().describe('Readable error message'),
+  /**
+   * The producer's user-facing refusal text, verbatim — the producer-side
+   * opt-in channel for "this exact text is addressed to the END USER" (#9934;
+   * maintainer ruling 2026-08-19 on objectui#5210, option 1).
+   *
+   * ## The problem it solves
+   *
+   * The platform gave an application hook no way to distinguish author-written
+   * user guidance from platform diagnostics, so the console form deliberately
+   * discards the server `message` on 403 and substitutes a generic string —
+   * the recorded #3821 fix for raw platform diagnostics leaking to end users.
+   * That substitution also suppressed every deliberate, localized refusal a
+   * hook author wrote, and incentivized misusing 400 (whose messages render)
+   * for permission refusals. This field is the distinction, declared ONCE at
+   * the contract level.
+   *
+   * ## Semantics
+   *
+   *  - **Producer-side opt-in, at throw time.** A hook (or any producer) sets
+   *    `userMessage` on the thrown error; the boundaries carry it to the wire
+   *    (`declaredUserMessage` in `@objectstack/types` is the one read).
+   *  - **Presence IS the marking.** A consumer that sees this field renders it
+   *    verbatim in user-facing surfaces; when it is absent the consumer keeps
+   *    its generic substitution — the default is unmarked, so #3821's
+   *    protection is preserved by construction.
+   *  - **Status-agnostic.** Not a 403 special case: any refusal status may
+   *    carry it.
+   *  - **A field carrying the text, not a boolean beside `message`.** The mark
+   *    and the marked text are one value, so a boundary that rewraps or
+   *    substitutes `message` (sanitisation, truncation, the sandbox debug
+   *    wrapper) can never accidentally promote platform prose into the marked
+   *    channel. Platform/driver code never sets it. Same audience-split
+   *    precedent as `developerMessage` on the DELETE_RESTRICTED envelope
+   *    (#7307), pointed the other way.
+   *
+   * It never replaces `message` — the diagnostic channel keeps its own wording
+   * for logs and developers.
+   */
+  userMessage: z.string().optional().describe(
+    'Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the '
+    + 'producer opted in at throw time; consumers render it to end users and keep their '
+    + 'generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`.',
+  ),
   category: z.string().optional().describe('Error category (e.g. validation, authorization)'),
   /**
    * The numeric HTTP status, when a producer chooses to mirror it into the body.

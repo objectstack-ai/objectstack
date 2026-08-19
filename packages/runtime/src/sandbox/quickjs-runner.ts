@@ -284,8 +284,8 @@ export class QuickJSScriptRunner implements ScriptRunner {
         `function(e){
               globalThis.__error = (e && e.message) ? (e.name + ': ' + e.message) : String(e);
               try {
-                globalThis.__errorInfo = (e && (e.code || e.fields || e.status || e['${SANDBOX_FAULT_PROP}']))
-                  ? JSON.stringify({ code: e.code, fields: e.fields, status: e.status, sandboxFault: e['${SANDBOX_FAULT_PROP}'] === true })
+                globalThis.__errorInfo = (e && (e.code || e.fields || e.status || e.userMessage || e['${SANDBOX_FAULT_PROP}']))
+                  ? JSON.stringify({ code: e.code, fields: e.fields, status: e.status, userMessage: e.userMessage, sandboxFault: e['${SANDBOX_FAULT_PROP}'] === true })
                   : undefined;
               } catch (_) { globalThis.__errorInfo = undefined; }
             }`;
@@ -970,8 +970,20 @@ function safeJsonStringify(v: unknown): string {
  * error that NAMES its own HTTP status is asking to be served with it" — so
  * nothing downstream needed teaching; the number simply never arrived. A
  * number, like `code`, carries no host state.
+ *
+ * [#9934] `userMessage` is the fourth member — the producer-side user-facing
+ * marking (see `declaredUserMessage` in `@objectstack/types`). A hook or
+ * action BODY is the authoring surface the marking exists for: an app author
+ * writes `const e = new Error(msg); e.userMessage = msg; throw e`, and the
+ * text must survive the VM flattening the throw to a string, or the marking
+ * dies exactly where its primary producers live. Crossing INTO the VM is safe
+ * for the same reason `code` is: the value is author-written user-facing text
+ * by construction (platform and driver code never sets the field), so it
+ * carries no host state a sandboxed body could exfiltrate — and it keeps the
+ * established property that a body which catches, inspects and re-throws a
+ * host error does not lose the structured payload.
  */
-const SANDBOX_ERROR_PASSTHROUGH = ['code', 'fields', 'status'] as const;
+const SANDBOX_ERROR_PASSTHROUGH = ['code', 'fields', 'status', 'userMessage'] as const;
 
 /**
  * Marshal a HOST error into the VM as a rejectable QuickJS error handle,
@@ -980,7 +992,7 @@ const SANDBOX_ERROR_PASSTHROUGH = ['code', 'fields', 'status'] as const;
  * The caller owns the returned handle and must dispose it.
  */
 function hostErrorToVm(vm: QuickJSContext, err: unknown): QuickJSHandle {
-  const e = err as { name?: string; message?: string; code?: unknown; fields?: unknown; status?: unknown };
+  const e = err as { name?: string; message?: string; code?: unknown; fields?: unknown; status?: unknown; userMessage?: unknown };
   const errH = err instanceof Error
     ? vm.newError({ name: e.name || 'Error', message: e.message ?? '' })
     : vm.newError({ name: 'Error', message: String(err) });
@@ -1003,6 +1015,14 @@ function hostErrorToVm(vm: QuickJSContext, err: unknown): QuickJSHandle {
     if (typeof e?.status === 'number' && Number.isFinite(e.status)) {
       const h = vm.newNumber(e.status);
       vm.setProp(errH, 'status', h);
+      h.dispose();
+    }
+    // [#9934] Non-empty strings only, same one-read rule as every other
+    // boundary (`declaredUserMessage`): a blank or non-string value is not a
+    // declaration and must not become one by crossing the VM.
+    if (typeof e?.userMessage === 'string' && e.userMessage.trim().length > 0) {
+      const h = vm.newString(e.userMessage);
+      vm.setProp(errH, 'userMessage', h);
       h.dispose();
     }
     // [#4431] Mark the sandbox's OWN faults so the pump loop can tell them
@@ -1237,6 +1257,16 @@ export class SandboxError extends Error {
    * against a nonexistent record was answered `RECORD_NOT_FOUND` at status 400.
    */
   readonly status?: number;
+  /**
+   * [#9934] The user-facing refusal text the error that crossed OUT of the VM
+   * was marked with — the producer-side opt-in of the objectui#5210 ruling. A
+   * body that throws `e.userMessage = '…'` is saying that exact text is
+   * addressed to the END USER; the HTTP boundaries carry it to the wire's
+   * `userMessage` channel and consumers render it verbatim, keeping the
+   * generic #3821 substitution for everything unmarked. Absent unless the
+   * body's own throw declared it — the sandbox never invents one.
+   */
+  readonly userMessage?: string;
   constructor(message: string, innerMessage?: string, info?: SandboxErrorInfo) {
     super(message);
     this.name = 'SandboxError';
@@ -1244,6 +1274,7 @@ export class SandboxError extends Error {
     if (info?.code) this.code = info.code;
     if (info?.fields) this.fields = info.fields;
     if (typeof info?.status === 'number') this.status = info.status;
+    if (info?.userMessage) this.userMessage = info.userMessage;
   }
 }
 
@@ -1253,6 +1284,8 @@ export interface SandboxErrorInfo {
   fields?: unknown[];
   /** [#7867] See {@link SandboxError.status}. */
   status?: number;
+  /** [#9934] See {@link SandboxError.userMessage}. */
+  userMessage?: string;
   /**
    * [#4431] The error that crossed `__error` was the SANDBOX's own fault — a
    * denied capability, an unavailable `ctx.api`, a marshalling failure — not
@@ -1284,7 +1317,7 @@ function readErrorInfo(vm: QuickJSContext): SandboxErrorInfo | undefined {
   } catch {
     return undefined;
   }
-  const p = parsed as { code?: unknown; fields?: unknown; status?: unknown; sandboxFault?: unknown };
+  const p = parsed as { code?: unknown; fields?: unknown; status?: unknown; userMessage?: unknown; sandboxFault?: unknown };
   const info: SandboxErrorInfo = {};
   if (typeof p?.code === 'string' && p.code) info.code = p.code;
   if (Array.isArray(p?.fields)) info.fields = p.fields;
@@ -1292,8 +1325,13 @@ function readErrorInfo(vm: QuickJSContext): SandboxErrorInfo | undefined {
   // number JSON-round-trips to `null`, and `NaN` would satisfy `typeof` while
   // making `errorFromThrown` emit a nonsense status line.
   if (typeof p?.status === 'number' && Number.isFinite(p.status)) info.status = p.status;
+  // [#9934] Non-empty strings only — the same "what counts as marked" rule as
+  // `declaredUserMessage` (`@objectstack/types`), applied at this boundary too.
+  if (typeof p?.userMessage === 'string' && p.userMessage.trim().length > 0) info.userMessage = p.userMessage;
   if (p?.sandboxFault === true) info.sandboxFault = true;
-  return info.code || info.fields || info.status !== undefined || info.sandboxFault ? info : undefined;
+  return info.code || info.fields || info.status !== undefined || info.userMessage !== undefined || info.sandboxFault
+    ? info
+    : undefined;
 }
 
 /**

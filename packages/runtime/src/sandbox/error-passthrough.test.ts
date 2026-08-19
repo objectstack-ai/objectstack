@@ -237,3 +237,69 @@ describe('[#7867] an error that names its own HTTP status keeps it across the bo
         expect(err.status).toBeUndefined();
     });
 });
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * [#9934] `userMessage` — the fourth allowlisted property: the producer-side
+ * user-facing marking (objectui#5210 ruling). A sandboxed BODY is the authoring
+ * surface the marking exists for, so the author's opt-in must survive the VM
+ * flattening the throw to a string — in both directions, like the other three.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+describe('[#9934] a body-authored user-facing marking crosses the boundary', () => {
+    const USER_TEXT = '该记录已进入结账期，暂不能修改。';
+
+    it('carries `userMessage` onto the thrown SandboxError — the marking the HTTP doors read', async () => {
+        const err = await run(
+            `var e = new Error('close-period guard refused');
+             e.status = 403;
+             e.userMessage = ${JSON.stringify(USER_TEXT)};
+             throw e;`,
+            new Error('unused'),
+        ).catch((e) => e);
+
+        expect(err).toBeInstanceOf(SandboxError);
+        expect(err.status).toBe(403);
+        expect(err.userMessage).toBe(USER_TEXT);
+        // The message channels are untouched — the marking rides ALONGSIDE.
+        expect(err.innerMessage).toBe('close-period guard refused');
+    });
+
+    it('an unmarked throw carries NO userMessage — the sandbox never invents one', async () => {
+        const err = await run(
+            `var e = new Error('refused'); e.status = 403; throw e;`,
+            new Error('unused'),
+        ).catch((e) => e);
+
+        expect(err).toBeInstanceOf(SandboxError);
+        expect(err.userMessage).toBeUndefined();
+    });
+
+    it('a blank marking is not a declaration', async () => {
+        const err = await run(
+            `var e = new Error('refused'); e.userMessage = '   '; throw e;`,
+            new Error('unused'),
+        ).catch((e) => e);
+
+        expect(err.userMessage).toBeUndefined();
+    });
+
+    it('a body can read `userMessage` off a rejected host write, and a re-throw keeps it', async () => {
+        // Host → VM → host, the round trip the other three properties already
+        // guarantee: a body that catches, inspects and re-throws a marked host
+        // refusal must not strip the marking.
+        const marked = Object.assign(new Error('guard refused'), {
+            code: 'PERMISSION_DENIED',
+            status: 403,
+            userMessage: USER_TEXT,
+        });
+        const err = await run(
+            `try { await ctx.api.object('invoice').update({ id: 1 }); }
+             catch (e) { if (e.userMessage !== ${JSON.stringify(USER_TEXT)}) throw new Error('lost'); throw e; }`,
+            marked,
+        ).catch((e) => e);
+
+        expect(err).toBeInstanceOf(SandboxError);
+        expect(err.userMessage).toBe(USER_TEXT);
+        expect(err.code).toBe('PERMISSION_DENIED');
+    });
+});

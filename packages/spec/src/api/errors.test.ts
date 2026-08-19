@@ -143,6 +143,24 @@ describe('EnhancedApiErrorSchema', () => {
     expect(error.documentation).toContain('objectstack.dev');
   });
 
+  // [#9934] Same field, same semantics as `ApiErrorSchema.userMessage` — the
+  // producer-side user-facing marking of the objectui#5210 ruling.
+  it('carries a producer-marked `userMessage` verbatim, and stays absent when unmarked', () => {
+    const marked = EnhancedApiErrorSchema.parse({
+      code: 'PERMISSION_DENIED',
+      message: 'close-period guard refused the write',
+      userMessage: '该记录已进入结账期，暂不能修改。',
+    });
+    expect(marked.userMessage).toBe('该记录已进入结账期，暂不能修改。');
+    expect(marked.message).toBe('close-period guard refused the write');
+
+    const unmarked = EnhancedApiErrorSchema.parse({
+      code: 'PERMISSION_DENIED',
+      message: 'refused',
+    });
+    expect('userMessage' in unmarked).toBe(false);
+  });
+
   it('should accept rate limit error with retry info', () => {
     const error = EnhancedApiErrorSchema.parse({
       code: 'RATE_LIMIT_EXCEEDED',

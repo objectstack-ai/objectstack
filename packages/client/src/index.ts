@@ -4990,7 +4990,20 @@ export class ObjectStackClient {
         // actually carries.
         error.details = errorBody?.details ?? errorBody?.error?.details ?? errorBody;
         if (fieldErrors) error.fields = fieldErrors;
-        
+        // [#9934] The producer-marked user-facing refusal text
+        // (`ApiErrorSchema.userMessage`) — read from both live envelopes'
+        // declared spots, same two-dialect rule as `code`/`fields` above: the
+        // flat body carries it at the top level, the wrapped one inside
+        // `error`. Presence means the PRODUCER opted in at throw time; a UI
+        // renders `err.userMessage` verbatim and keeps its generic
+        // substitution (#3821) whenever it is absent — never promote
+        // `err.message` into the marked channel client-side.
+        const asUserMessage = (v: unknown) => (typeof v === 'string' && v.trim() ? v : undefined);
+        const userMessage =
+          asUserMessage(errorBody?.userMessage)
+          ?? asUserMessage(errorBody?.error?.userMessage);
+        if (userMessage) error.userMessage = userMessage;
+
         throw error;
     }
     
