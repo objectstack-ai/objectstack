@@ -348,7 +348,15 @@ export function h5SeatStickerDesync(issue) {
   const status = m[2].trim();
   const assignees = (issue.assignees ?? []).map((a) => a.login);
   if (status.startsWith('🟢')) {
-    const holder = status.replace('🟢', '').trim();
+    // The login is only the FIRST whitespace-delimited token after the emoji.
+    // Everything past it — the `(session_…)` parenthetical every active seat
+    // title carries by protocol, and any `·`-separated suffix (in-flight
+    // counts, queue depth, a body-edit timestamp) — is display, not identity,
+    // and must never be compared against the assignee list (#9926: this used
+    // to take the WHOLE remainder as the holder, so a consistent seat post
+    // like `🟢 os-warren (session_…)` mismatched `[os-warren]` on every
+    // sweep).
+    const holder = status.replace('🟢', '').trim().split(/\s+/u)[0] ?? '';
     if (holder === 'Routine') return null; // Routine seats keep assignee empty by design
     if (!assignees.includes(holder)) {
       return `title says 🟢 ${holder} but assignees are [${assignees.join(', ') || 'none'}]`;
@@ -1559,6 +1567,60 @@ function selfTest() {
   t('H5: 🟢 login without assignee -> finding', typeof h5SeatStickerDesync(issue(['pm:seat'], [], '', '[PM seat] domain:devx — 🟢 os-zhuang')), 'string');
   t('H5: ⏳ vacant with assignee -> finding', typeof h5SeatStickerDesync(issue(['pm:seat'], ['os-help'], '', '[PM seat] domain:cli — ⏳ vacant')), 'string');
   t('H5: ⏳ vacant clean', h5SeatStickerDesync(issue(['pm:seat'], [], '', '[PM seat] domain:cli — ⏳ vacant')), null);
+  // #9926: the login-extraction fix. Both named shapes from the ruling.
+  t(
+    'H5: 🟢 login with (session_…) parenthetical, matching assignee -> clean',
+    h5SeatStickerDesync(issue(['pm:seat'], ['os-x'], '', '[PM seat] domain:x — 🟢 os-x (session_abc123)')),
+    null,
+  );
+  t(
+    'H5: 🟢 login with (session_…) parenthetical, no assignee -> finding',
+    typeof h5SeatStickerDesync(issue(['pm:seat'], [], '', '[PM seat] domain:x — 🟢 os-x (session_abc123)')),
+    'string',
+  );
+  // Reverse verification against the six titles pinned by the anchor sweep
+  // (#9857, run 32229942288) — four measured false positives, then the two
+  // true positives, predicted direction first: clean, clean, clean, clean,
+  // finding, finding.
+  t(
+    'H5 reverse-verify: #7623 (os-warren, consistent) -> clean',
+    h5SeatStickerDesync(issue(['pm:seat'], ['os-warren'], '', '[PM seat] skills — 🟢 os-warren (session_01AeA3nU1B5Q2pgxqxgUrexd)')),
+    null,
+  );
+  t(
+    'H5 reverse-verify: #6017 (os-elon, consistent) -> clean',
+    h5SeatStickerDesync(issue(['pm:seat'], ['os-elon'], '', '[PM seat] domain:spec — 🟢 os-elon (session_016D9wdJR14KKCxz1WgdAzcw)')),
+    null,
+  );
+  t(
+    'H5 reverse-verify: #6026 (os-zhuang, consistent) -> clean',
+    h5SeatStickerDesync(issue(['pm:seat'], ['os-zhuang'], '', '[PM seat] repo:cloud — 🟢 os-zhuang (session_0137TnZzVmkSjXxoSVgPFS6S)')),
+    null,
+  );
+  t(
+    'H5 reverse-verify: #9831 (os-warren, consistent) -> clean',
+    h5SeatStickerDesync(issue(['pm:seat'], ['os-warren'], '', '[PM seat] repo:objectos — 🟢 os-warren (session_01DXBoKN4MauvPdbMemPMqpr)')),
+    null,
+  );
+  t(
+    'H5 reverse-verify: #6367 (no assignee, · title suffix) -> finding',
+    typeof h5SeatStickerDesync(
+      issue(['pm:seat'], [], '', '[PM seat] domain:engine — 🟢 os-elon (session_019yDEhPBC3tcGkW9bkce1HM) · 在飞 1 · 队列 0'),
+    ),
+    'string',
+  );
+  t(
+    'H5 reverse-verify: #6024 (no assignee, session id with no login) -> finding',
+    typeof h5SeatStickerDesync(
+      issue(
+        ['pm:seat'],
+        [],
+        '',
+        '[PM seat] domain:cli — 🟢 session_01WeN7F6jQFpcqW2BN56RdPa · 在飞 2 · 队列 1(串行等位) · 决策箱 1 · 正文 2026-08-19 04:1xZ',
+      ),
+    ),
+    'string',
+  );
   t('H5: Routine seat needs no assignee', h5SeatStickerDesync(issue(['pm:seat'], [], '', '[PM seat] 分诊 — 🟢 Routine')), null);
   t('H5: unparseable title -> finding', typeof h5SeatStickerDesync(issue(['pm:seat'], [], '', 'devx seat registry')), 'string');
   t('H6: seat body over the soft bound -> finding', h6SeatBodyOversized(issue(['pm:seat'], [], 'x'.repeat(10_001), '[PM seat] domain:devx — ⏳ vacant')), true);
