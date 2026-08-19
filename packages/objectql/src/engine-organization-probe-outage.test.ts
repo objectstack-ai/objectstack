@@ -52,6 +52,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { ObjectQL } from './engine.js';
 
@@ -145,6 +146,9 @@ const lastWrite = (observed: ObservedWrite[], object: string) =>
 const systemInsert = (engine: ObjectQL, subject: string) =>
   engine.insert('dispatch_order', { subject }, { context: SYSTEM_CTX } as any);
 
+/** The probe's own read, spelled exactly as `probeInstallOrganizations` issues it. */
+const PROBE_QUERY: EngineQueryOptions = { fields: ['id'], limit: 2, context: { isSystem: true } };
+
 describe('#9261 a non-benign probe failure no longer becomes "no organizations"', () => {
   it('propagates the outage instead of proceeding unstamped, and writes nothing', async () => {
     // The `single` install that HAS one organization — the ruling requires the
@@ -231,9 +235,7 @@ describe('#9261 the benign causes still answer the empty probe', () => {
     // POSITIVE CONTROL — the unroutable read really does raise that error, and
     // it really is outside the benign predicate. Without this the case below
     // would be a zero-hit measurement of nothing.
-    const unroutable = await engine
-      .find('sys_organization', { fields: ['id'], limit: 2, context: { isSystem: true } } as any)
-      .catch((e) => e);
+    const unroutable = await engine.find('sys_organization', PROBE_QUERY).catch((e) => e);
     expect((unroutable as Error).message).toContain("No driver available for object 'sys_organization'");
 
     // …and the system insert stops on `dispatch_order`, one frame BEFORE the
