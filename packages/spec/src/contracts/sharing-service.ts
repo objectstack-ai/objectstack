@@ -598,7 +598,7 @@ export type HierarchyScope = 'unit' | 'unit_and_below' | 'own_and_reports';
  * The name follows the repo-wide convention: #3280 made `organizationId` the
  * blessed developer-facing name for the caller's active org (matching the
  * `organization_id` column and `current_user.organizationId` in RLS) and #3290
- * removed the `session.tenantId` alias in v11; `scripts/check-org-identifier.mjs`
+ * removed the `session.tenantId` alias in v16; `scripts/check-org-identifier.mjs`
  * keeps it that way.
  */
 export interface HierarchyScopeContext {

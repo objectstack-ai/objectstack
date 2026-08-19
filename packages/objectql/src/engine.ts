@@ -2906,7 +2906,7 @@ export class ObjectQL implements IObjectQLEngine {
       // active org (matches the `organization_id` column, `current_user`
       // RLS shape, and seed rows). It comes from `execCtx.tenantId`, which the
       // kernel resolves from `session.activeOrganizationId`. The deprecated
-      // `session.tenantId` alias (#3280) was removed here in v11 (#3290) — the
+      // `session.tenantId` alias (#3280) was removed here in v16 (#3290) — the
       // driver-layer `execCtx.tenantId` knob is a separate axis and stays.
       organizationId: execCtx.tenantId,
       positions: execCtx.positions,

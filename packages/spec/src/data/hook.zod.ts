@@ -614,7 +614,7 @@ export const HookContextSchema = lazySchema(() => z.object({
      * `organization_id` column, `current_user.organizationId` (RLS/sharing),
      * and seed rows. `null`/`undefined` on unscoped (platform/community) calls.
      *
-     * The former `session.tenantId` alias (#3280) was removed in the v11 major
+     * The former `session.tenantId` alias (#3280) was removed in the v16 major
      * (#3290): read the org under this single blessed name. The generic
      * driver-layer isolation knob (`ExecutionContext.tenantId`,
      * `DriverOptions.tenantId`) is a distinct, configurable axis and is

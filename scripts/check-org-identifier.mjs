@@ -9,7 +9,8 @@
 // reads `ctx.user.organizationId` / `ctx.session.organizationId`, matching the
 // `organization_id` column and `current_user.organizationId` in RLS. The old
 // `ctx.session.tenantId` was a deprecated alias; #3290 REMOVED it from the
-// hook/action `ctx.session` surface entirely (v11 major), so any session-borne
+// hook/action `ctx.session` surface entirely (the v16 major — see
+// `content/docs/releases/v16.mdx`), so any session-borne
 // `tenantId` read in an authoring body now resolves to `undefined` and is
 // simply a bug.
 //

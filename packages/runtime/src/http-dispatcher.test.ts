@@ -3965,7 +3965,7 @@ describe('HttpDispatcher — action body ctx.user identity (#2701)', () => {
     expect(user.permissions).toEqual(['convert_lead']);
     expect(user.email).toBe('rep@acme.test');
     // #3280 made `organizationId` the blessed name; the `tenantId` alias was
-    // removed in v11 (#3290) and must no longer be emitted on ctx.user.
+    // removed in v16 (#3290) and must no longer be emitted on ctx.user.
     expect(user.organizationId).toBe('org_acme');
     expect(user.tenantId).toBeUndefined();
   });

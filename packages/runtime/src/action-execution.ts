@@ -949,7 +949,7 @@ export function enforceActionParams(deps: ActionExecutionDeps,
  *
  * `organizationId` is the blessed name for the caller's active org — the
  * same value as the `organization_id` column and `current_user.organizationId`
- * (RLS). The deprecated `session.tenantId` alias (#3280) was removed in v11
+ * (RLS). The deprecated `session.tenantId` alias (#3280) was removed in v16
  * (#3290); the driver-layer `ExecutionContext.tenantId` it is sourced from is
  * a distinct, configurable axis and stays. Returns `undefined` — never `{}` —
  * for a genuinely context-less / self-invoked call, so a body can tell "no

@@ -655,7 +655,7 @@ jobs:
 
       # #3280/#3290 org-identifier guard: `organizationId` is the blessed
       # developer-facing name for the caller's active org in hook/action bodies;
-      # the `session.tenantId` alias was REMOVED in v11 (#3290). Keeps our own
+      # the `session.tenantId` alias was REMOVED in v16 (#3290). Keeps our own
       # reference code (examples/, apps/, AND packages/) — which authors and AIs
       # copy from — off the removed name. Hard-fail (surfaces carry zero
       # occurrences today); tests, comments, skills/ and docs/ are excluded, and

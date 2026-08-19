@@ -1348,7 +1348,7 @@ export function installAuditWriters(
     // [#9516] The fallback arm reads `organizationId` — the ONLY name the
     // engine emits. `ObjectQL.buildSession` builds the hook session as a fixed
     // key-set literal with no spread, and the `session.tenantId` alias (#3280)
-    // was removed repo-wide in the v11 major (#3290). This arm spelled the
+    // was removed repo-wide in the v16 major (#3290). This arm spelled the
     // removed name, so it resolved to `undefined` and the guard above could
     // never fire: every case it names — no organization column, NULL column —
     // stamped `organization_id: null` and went permanently invisible behind the

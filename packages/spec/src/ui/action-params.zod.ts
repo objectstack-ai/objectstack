@@ -252,7 +252,7 @@ export interface ActionEngineFacade {
  * under two names. `positions` is canonical — it is the ADR-0090 D3 vocabulary
  * the rest of the platform already uses — and `roles` is the alias kept alive
  * only for the length of the window, then removed on the path
- * `session.tenantId` already walked (#3280 deprecate → #3290 removed in v11).
+ * `session.tenantId` already walked (#3280 deprecate → #3290 removed in v16).
  * The announcement a reader migrates from is the ADR-0087 semantic migration
  * `action-session-roles-to-positions`. Two live spellings is the MIGRATION,
  * not the destination; phase 1 withheld `positions` precisely so that the
@@ -331,7 +331,7 @@ export const ActionSessionSchema = lazySchema(() => z.object({
    * `current_user.organizationId` (RLS). Sourced from
    * `ExecutionContext.tenantId`, which is the distinct driver-level isolation
    * axis and keeps its own name; the deprecated `session.tenantId` alias
-   * (#3280) was removed in v11 (#3290) and must not come back.
+   * (#3280) was removed in v16 (#3290) and must not come back.
    */
   organizationId: z.string().optional().describe('Active organization id (blessed developer-facing name; absent when the call is org-less)'),
 
@@ -384,7 +384,7 @@ export const ActionSessionSchema = lazySchema(() => z.object({
    * one spelling ADR-0090 D3 forbids. Migration prescription and acceptance
    * criteria: the ADR-0087 semantic migration
    * `action-session-roles-to-positions`. Removal follows the `session.tenantId`
-   * alias precedent (#3280 deprecated → #3290 removed in v11), i.e. one
+   * alias precedent (#3280 deprecated → #3290 removed in v16), i.e. one
    * deprecation window after #5613's runtime half lands, not before.
    *
    * Why it is still declared at all: it is what the runtime produces today,

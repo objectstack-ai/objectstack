@@ -942,7 +942,7 @@ export class ObjectQLPlugin implements Plugin {
       }
       // Stamp the driver-layer `tenant_id` column from the caller's active org.
       // The hook session exposes it as `organizationId` (the `session.tenantId`
-      // alias was removed in v11, #3290); the column name is a separate axis.
+      // alias was removed in v16, #3290); the column name is a separate axis.
       if (isInsert && session?.organizationId && hasField(objectName, 'tenant_id')) {
         record.tenant_id = record.tenant_id ?? session.organizationId;
       }

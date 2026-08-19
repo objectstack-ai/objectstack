@@ -85,7 +85,7 @@ describe('#5697 — action `ctx.session` matches its declared contract', () => {
     it('translates `ExecutionContext.tenantId` to the blessed `organizationId`', () => {
         const built = build({ tenantId: 'org_acme' });
         expect(built).toEqual({ organizationId: 'org_acme' });
-        // The v11-removed alias (#3280 / #3290) must not reappear.
+        // The v16-removed alias (#3280 / #3290) must not reappear.
         expect('tenantId' in built!).toBe(false);
     });
 
