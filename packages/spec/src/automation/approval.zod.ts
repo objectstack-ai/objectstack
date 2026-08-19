@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { BUILTIN_MEMBERSHIP_ROLES } from '../identity/membership-role';
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 
@@ -44,8 +45,9 @@ export const ApproverType = z.enum([
    * reusing it here would silently alias one of the two times.
    */
   'expression',
-  // The better-auth ORG-MEMBERSHIP TIER (sys_member.role: owner / admin /
-  // member), spelled with the projection name ADR-0057 D7 mandates and
+  // The ORG-MEMBERSHIP TIER (`sys_member.role` — the whole closed
+  // `BUILTIN_MEMBERSHIP_ROLES` vocabulary, ObjectStack-owned; see
+  // `ORG_MEMBERSHIP_LEVELS` below), spelled with the projection name ADR-0057 D7 mandates and
   // ADR-0090 D3 assumes ("relabelled `org_membership_level` … its UI label is
   // 'organization membership', never 'role'"). NOT an org position: a value
   // like 'sales_manager' matches nobody — author `position` for those.
@@ -135,8 +137,20 @@ export type ApproverValueBinding =
   /** Declared-but-unenforced — do not offer for authoring (#3508). */
   | { source: 'unsupported' };
 
-/** Org-membership tiers (`sys_member.role`: better-auth's closed set). */
-export const ORG_MEMBERSHIP_LEVELS = ['owner', 'admin', 'member'] as const;
+/**
+ * Org-membership tiers (`sys_member.role`) — DERIVED from
+ * {@link BUILTIN_MEMBERSHIP_ROLES}, never re-spelled.
+ *
+ * The vocabulary is ObjectStack's own closed membership-role list (ADR-0108),
+ * not "better-auth's closed set" as this comment once claimed:
+ * `delegated_admin` is ObjectStack's ADR-0105 D8 addition to the column. A
+ * hand-spelled copy here carried the stale three-value list, so the one tier
+ * the column enforces but the copy omitted could not be authored as an
+ * approver. Deriving makes the drift unrepresentable: the approver picker
+ * offers exactly what `sys_member.role` stores, and the next tier addition
+ * reaches this surface automatically.
+ */
+export const ORG_MEMBERSHIP_LEVELS = BUILTIN_MEMBERSHIP_ROLES;
 
 /**
  * The CLOSED root set an `expression` approver may reference (#3447 P2).
