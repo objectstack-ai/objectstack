@@ -8,13 +8,13 @@
   `scripts/`(门禁类)、`.github/workflows/`(门禁接线)、`.githooks/`、
   `examples/**` 测试基建面、`docker/README.md`。
 - 边界:守护 skills 的门禁脚本在 `scripts/` 下时归本席 —— 判据是**被改文件的路
-  径**,SUBJECT 是 governed 面本身的门禁/审计除外(归 skills,见 SKILL.md 域车道
-  表);`.claude/workflows/` ≠ `.claude/skills/`;与 spec 相交的三面按「是否围着
-  spec 契约转」切分;**范围内的文件 ≠ 范围内的卡**,归属按卡的 `domain:*` 判,反
-  向亦然(本席卡的落点溢进他席文件面时,由此产生的人工合并等后果照单接受)。
+  径**,SUBJECT 例外与 spec 三面切分在 SKILL.md 域车道表;`.claude/workflows/`
+  ≠ `.claude/skills/`;**范围内的文件 ≠ 范围内的卡**,归属按卡的 `domain:*` 判,
+  反向亦然(本席卡的落点溢进他席文件面时,由此产生的人工合并等后果照单接受)。
 
 ## 常设承诺
 
+- **每轮巡检第一判据**:先读半状态巡查锚(`half-state-patrol.yml` 置顶 issue)点名本道卡/PR/座位贴的 H 行,逐行认领或处置,再做其余判据;锚行未处置 ⛔ 不开新派发。
 - `content/docs/releases/**` 是 release-owned,恰两条通道:完整性缺口逐卡批准
   (⛔ 不构成先例);事实错误走专用 docs-only PR。发布页作用域只管 v16 及以后。
 - ⛔ 不做任何发布动作,含改根 `version` 脚本链;**能点绿的门禁不等于该点绿**。

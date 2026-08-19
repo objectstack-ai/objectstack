@@ -8,16 +8,16 @@
   恒英文);`scripts/pm/**` PM 循环工具;指令架构文件:根 `AGENTS.md` + 根
   `CLAUDE.md`;governed 面的治理执行文件(`.github/CODEOWNERS` 治理路由半边 +
   SUBJECT 是 governed 面本身的门禁/审计)。全量判据与裁决引文在 SKILL.md 域车道
-  表;governed 面统一定义见 SKILL.md「ACCEPT 之后的路径分叉」,判定命令
-  `node scripts/pm/check-governed-merges.mjs --test` 带路径。
+  表;governed 面统一定义见 SKILL.md「ACCEPT 之后的路径分叉」。
 - QA 管理循环执行归本席;qa-run 记录是协议载体不是工作;契约复审(条款②复审链)归
   分诊席,本席仅过渡期代行。
 
 ## 常设承诺
 
+- **每轮巡检第一判据**:先读半状态巡查锚(`half-state-patrol.yml` 置顶 issue)点名本道卡/PR/座位贴的 H 行,逐行认领或处置,再做其余判据;锚行未处置 ⛔ 不开新派发。
 - 四维分析先于派发与复核。
-- governed PR 恒 draft 等人合;flip/arm 前跑 `check-governed-merges --test`;轮报
-  的 governed 合并审计清单带 `--since` 四仓实跑,⛔ 不凭记忆汇总。
+- governed PR 恒 draft 等人合;flip/arm 前跑 `check-governed-merges --test`(带
+  路径);轮报的 governed 合并审计清单带 `--since` 四仓实跑,⛔ 不凭记忆汇总。
 - 档位从 `--tier` 推导引用;pm-dispatch 根 fable 强制;条款②闸门照现行;限额豁免
   floor opus。
 - 棘轮逐行付账,⛔ re-wrap;付账砍点逐条核幸存 —— 被砍内容若在别处无家,砍掉就是

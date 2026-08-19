@@ -3706,6 +3706,53 @@ export class RestServer {
         }
     }
 
+    /**
+     * The metadata route table itself — every `{basePath}{metadata.prefix}/…`
+     * route, in one body so that they share one registration order.
+     *
+     * ⚠️ **`this.routeManager` is not the real route manager while this
+     * runs.** {@link registerMetadataEndpoints} swaps in a wrapping registrar
+     * for exactly the duration of this call and restores it in a `finally`,
+     * so every `register(...)` below is handed a handler already wrapped in
+     * the anonymous-deny gate. That swap is why this body is a separate
+     * method rather than inlined — it needs a call boundary to scope it to.
+     * Two consequences when editing here: a route added below inherits the
+     * gate for free (the point — the next new route cannot forget it), and a
+     * route that must NOT be gated cannot simply be added below. It belongs
+     * outside the swap, with its own reason written down.
+     *
+     * **`basePath` decides both mount and shape, and this body runs once per
+     * base.** `registerRoutes` calls it for the unscoped base (`/api/v1`) and
+     * for the environment-scoped one (`/api/v1/environments/:environmentId`)
+     * per `enableProjectScoping` / `projectResolution`, so every route below
+     * is mounted up to twice. `isScoped` is derived from that string and from
+     * nothing else, and it alone decides whether a handler reads
+     * `req.params.environmentId` or passes `undefined`. Keep per-call state
+     * local: the two passes share this method, not their routes.
+     *
+     * What actually mounts is gated further by `metadata.endpoints.types` /
+     * `.items` / `.item` — the routes below are the maximum, not a guarantee.
+     *
+     * Families, in registration order: the type list (`/meta`, and its
+     * `/meta/types` spelling) → whole-store operations (`/diagnostics`,
+     * `/_drafts`, `/_migrate-stored`) → the per-type list (`/:type`) → the
+     * book tree (`/book/:name/tree`) → the per-item read/write
+     * (`/:type/:name`) with its sub-resources (`references`, `layers`,
+     * `history`, `audit`, `diff`, `publish`, `rollback`, `published`, and the
+     * object FSM read `state/:field`) → the compound-name twins spelled
+     * `/:type/:section/:name`.
+     *
+     * Two ordering facts are load-bearing rather than cosmetic. Matching is
+     * first-match-wins, so a literal-prefixed route must stay ABOVE the
+     * `:type`-parameterised route it shares a SEGMENT COUNT with — the three
+     * collisions that implies are pinned by
+     * `meta-route-registration-order.test.ts`, and dropping below the line is
+     * how `/meta/types` once answered as an empty metadata type. And a
+     * compound-name twin is the SAME operation reached by a name spelled in
+     * two segments, so a gate or an org scope added to one door must be added
+     * to its twin — gating one and not the other leaves the twin as the
+     * bypass.
+     */
     private registerMetadataEndpointsInner(basePath: string): void {
         const { metadata } = this.config;
         const metaPath = `${basePath}${metadata.prefix}`;
