@@ -27,6 +27,7 @@ import {
     classifyFlowRefusal,
     flowIsUnknown,
     flowNotFoundMessage,
+    isPausedRun,
     FLOW_NOT_FOUND_STATUS,
 } from '../flow-dispatch-status.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
@@ -489,6 +490,14 @@ function flowDefinitionRefusal(err: any): unknown {
  * | flow disabled              | never dispatched   | `409` `FLOW_DISABLED` |
  * | flow has no start node     | never dispatched   | `422` `FLOW_NO_START_NODE` |
  * | ran and failed (incl. the retry-strategy exits) | ran, rejected | `400` `FLOW_FAILED` |
+ * | ran and PAUSED (whichever attempt) | ran, suspended | `200` + `runId` / `screen` |
+ *
+ * [#9510] The last row is NON-TERMINAL and is answered by its own arm at the
+ * bottom of this function. The durable pause is not a refusal, and since the
+ * suspend arm was restored to the engine's retry path it arrives from two
+ * producers — `execute()`'s catch and `retryExecution` — which this door must
+ * NOT be able to tell apart. See that arm for why it is written separately from
+ * the terminal success it happens to answer identically.
  *
  * [#9446] **The table itself now lives in `../flow-dispatch-status.js`** — one
  * definition, read by this door and by `/actions` (`action-execution.ts`) —
@@ -586,6 +595,34 @@ async function respondToFlowTrigger(
             response: deps.error(refusal.message, refusal.status, { code: refusal.code, ...runDetails }),
         };
     }
+    // [#9510] THE THIRD STATE, answered deliberately. A run that dispatched and
+    // then SUSPENDED at a pausing node (ADR-0019) is neither refused nor
+    // finished: its continuation is persisted, and the `200` here carries the
+    // `runId` — and the `screen`, for a screen flow — that the caller continues
+    // it with at `POST /:name/runs/:runId/resume`, the door just below.
+    //
+    // The answer is unchanged from what this door has always given a paused
+    // run, and that IS the requirement rather than an accident of ordering: it
+    // must be the SAME answer a pause on the first attempt gets, because a
+    // pause on a retry attempt is the same user-visible situation reached by a
+    // different route. Two answers for one situation would replace #9510's LOST
+    // pause with an inconsistent one. Pinned as an equality between the two
+    // routes — engine-side in `service-automation`'s
+    // `retry-attempt-pause.test.ts`, and on the wire through a real engine in
+    // `@objectstack/verify`'s `automation-trigger-paused-run.test.ts`.
+    //
+    // ⛔ Its own arm even though it returns what the terminal exit below
+    // returns. The two are different STATEMENTS about the run — "still running,
+    // here is how to continue it" versus "it finished" — and collapsing them
+    // recreates exactly the fall-through this card is about: a non-terminal
+    // result that no reader on the path ever names is one edit away from being
+    // classified as a terminal one.
+    if (isPausedRun(result)) {
+        return { handled: true, response: deps.success(result) };
+    }
+    // Terminal success: the run reached an `end` node, and `deps.success` serves
+    // the engine result as the response data (`output`, `successMessage`,
+    // `summary`).
     return { handled: true, response: deps.success(result) };
 }
 
@@ -606,7 +643,9 @@ async function respondToFlowTrigger(
  *   POST   /:name/trigger        → execute (legacy: trigger/:name also supported;
  *                                  unknown name → 404, disabled → 409 `FLOW_DISABLED`,
  *                                  no start node → 422 `FLOW_NO_START_NODE`, a run that
- *                                  ran and failed → 400 `FLOW_FAILED`; #9378 + #9415)
+ *                                  ran and failed → 400 `FLOW_FAILED`; #9378 + #9415;
+ *                                  a run that PAUSED → 200 with `runId` / `screen`,
+ *                                  on whichever attempt it paused — #9510)
  *   POST   /:name/toggle         → toggleFlow (unknown name → 404, #7535)
  *   GET    /:name/runs           → listRuns (query: limit, cursor — validated, #7300;
  *                                  status — validated AND honoured, #7359)

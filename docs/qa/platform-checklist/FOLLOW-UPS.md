@@ -136,3 +136,33 @@ Ledger 182 → 190 items; `coverage.json` 28 mapped / 2 waived → **30 mapped /
   `integration-system.datasource-credential-refusal-matrix`) assert guards that are
   already shipped and already public in their ADRs/issues; nothing here discloses an
   unfixed hole.
+
+## 6. Resolution 2026-08-18 — §3's fixture list, three of seven paid (#9308)
+
+§3 above is left exactly as written; this section is its resolution row, per this file's
+own append-never-rewrite rule. Three of the seven fixtures §3 asked for landed in
+`examples/app-showcase/**`, and the checklist items they unblock were revised in the same
+change (gap text kept and marked closed-by-fixture, `revision` bumped, `history`
+appended — the #7670 pattern).
+
+| §3 line | landed as | items unblocked |
+|---|---|---|
+| "a `publicSharing.enabled` object" | `showcase_client_brief` — `redactFields`, `maxExpiryDays`, and an `eligibility` predicate, with a `published` AND a `draft` brief seeded so the predicate is falsifiable | `access-security.share-link-capability-tokens` (was `blocked(fixture)`, now runnable) |
+| "a second signed-up (non-admin) user in seeds" | both demo personas get a better-auth credential account at boot (`seed-approval-demo.ts` → `ensureCredentialAccount`), issuer derived from the dev admin's own row | `approvals.per-group-signoff`, `approvals.viewer-gating-submitter-side` (was `blocked(fixture)`), `approvals.ooo-delegation-reroute` |
+| — (not in §3; found by #9308) | `showcase_client_liaison` — the app's first `readable: false` FLS grant | `access-security.fls-mask-and-strip` clause 5, whose UI half had no reachable fixture |
+
+**Still open from §3, unchanged and still correctly listed there:** the OIDC/social IdP,
+the gantt fixture variants, the not-auto-bound audience suggestion, the
+`IMPORT_CONSOLE_LIVE` import harness, and the escalation clock-control harness.
+
+**One fixture #9308 scoped but did NOT land: the writable-package summary field** for
+`automation.rollup-summary-filter`'s editor half. It is not seed data and could not be
+made into seed data. A writable package is a DB-backed `sys_packages` row plus authored
+`sys_metadata` items (`isWritablePackage`: a booted CODE package is read-only by
+definition, and the showcase is one), and a roll-up needs a parent AND a child object, so
+the fixture is a boot-time metadata-authoring bootstrap that mints two tables on every
+fresh boot of the reference app. Whether the showcase should ship a permanent writable
+base is a showcase design call with consequences beyond this item — it is also the
+contrast side `access-security.readonly-package-locks-studio` needs — so it is filed
+separately rather than guessed at. The item keeps its `blocked(fixture)` and its
+`knownGap` untouched.

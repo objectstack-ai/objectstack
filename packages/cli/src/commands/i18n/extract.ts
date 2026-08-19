@@ -136,6 +136,16 @@ export default class I18nExtract extends Command {
         locales,
         fill: flags.fill as FillStrategy,
         filter,
+        // Merge (the default) never overwrites an existing non-default-locale
+        // entry, so correcting a source label/description does not propagate
+        // into a locale that already holds a translation of the old text —
+        // a present-but-stale string is not a gap, only a missing one is. This
+        // is deliberate, not an oversight: the alternative, --no-merge, wipes
+        // every hand translation in the bundle, not just the ones the schema
+        // changed. The maintenance path is a translator re-editing the leaf in
+        // place (the generated bundle header names it); nothing here or in
+        // `os i18n check` distinguishes that deliberate edit from a leaf
+        // nobody has looked at since the source moved.
         mergeExisting: !flags['no-merge'],
       });
 

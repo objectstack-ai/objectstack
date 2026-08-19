@@ -52,6 +52,38 @@ describe('init command — published scaffold', () => {
   });
 });
 
+describe('template description accuracy — matches what srcFiles emits (#9737)', () => {
+  // A template's `description` is what `printKV('Template', …)` and
+  // `content/docs/deployment/cli.mdx` show a user at the moment they pick
+  // `-t <template>` — so a description claiming a metadata kind the template
+  // never writes (the `app`/`plugin` "views"/"actions"/"extensions" claims
+  // this pin exists for) is a load-bearing lie, not cosmetic copy. Each kind
+  // maps to the `src/` subdirectory its files would live under; a claim with
+  // no matching `srcFiles` entry, in either direction, is the drift #9737
+  // found.
+  const KIND_CLAIMS: Array<{ kind: string; claimPattern: RegExp; dirPrefix: string }> = [
+    { kind: 'objects', claimPattern: /\bobjects?\b/i, dirPrefix: 'src/objects/' },
+    { kind: 'views', claimPattern: /\bviews?\b/i, dirPrefix: 'src/views/' },
+    { kind: 'actions', claimPattern: /\bactions?\b/i, dirPrefix: 'src/actions/' },
+    { kind: 'extensions', claimPattern: /\bextensions?\b/i, dirPrefix: 'src/extensions/' },
+  ];
+
+  it.each(Object.keys(TEMPLATES))('template "%s" only claims metadata kinds it actually writes', (key) => {
+    const t = TEMPLATES[key];
+    const emittedPaths = Object.keys(t.srcFiles);
+    for (const { kind, claimPattern, dirPrefix } of KIND_CLAIMS) {
+      const claims = claimPattern.test(t.description);
+      const emits = emittedPaths.some((p) => p.startsWith(dirPrefix));
+      if (claims) {
+        expect(
+          emits,
+          `template "${key}" description claims "${kind}" but srcFiles has no ${dirPrefix}* entry (description: "${t.description}")`,
+        ).toBe(true);
+      }
+    }
+  });
+});
+
 describe('native build allowlist (pnpm-workspace.yaml)', () => {
   // pnpm 10+ blocks dependency build scripts by default. Without an allowlist,
   // the scaffold installs but `serve` crashes with "Could not locate the
