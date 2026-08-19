@@ -26,6 +26,68 @@ export interface LintIssue {
   fix?: string;
 }
 
+/**
+ * A {@link LintIssue} that also states the HUMAN-READABLE location, for rules
+ * that are adapted into `AuthoringFinding` (`packages/lint/src/authoring-rules.ts`).
+ *
+ * `AuthoringFinding` declares two location slots with different jobs — `where`
+ * ("human-readable location", e.g. `object "leave_request"`) and `path` ("config
+ * path", e.g. `objects[3].sharingModel`) — and every CLI command renders the
+ * first as the line's prefix: `os validate` prints
+ * `• ${where}: ${message}` and then `rule: ${rule}  at ${path}`.
+ *
+ * `LintIssue` carries only the positional `path`, so the three ADR-0120
+ * uniqueness rules' registry adapters had nothing else to map and set
+ * `where: f.path`. Measured on `origin/main`: an author saw
+ * `• objects[44].indexes[1]: "sys_account" declares index …  at objects[44].indexes[1]`
+ * — the same positional string twice, and an index into the MERGED object array
+ * that appears in no file the author wrote (44 objects from
+ * `@objectstack/platform-objects` plus one from `@objectstack/metadata-core`).
+ * No information was lost — the object's name is in the message — but the
+ * location slot said nothing the `at` clause did not already say, and every
+ * other rule in the table spells it `object "sys_account"`.
+ *
+ * Stating `where` at the PRODUCER rather than reconstructing it in the adapter
+ * is deliberate: only the rule still holds the object it walked. Making it
+ * REQUIRED here (rather than adding `where?` to `LintIssue` and writing
+ * `f.where ?? f.path` at the adapter) is the same discipline — a consumer-side
+ * fallback would let the next rule ship the positional spelling again, silently.
+ *
+ * `path` is unchanged and stays positional: it is the slot that is SUPPOSED to
+ * be a config path, `os validate` prints it after `at`, and the runtime gate's
+ * `fingerprint` reads `where` and `path` together (making `where` more specific
+ * cannot merge two findings that were distinct).
+ */
+export interface LocatedLintIssue extends LintIssue {
+  /** Human-readable location, e.g. `object "sys_account" · index 'uniq_org_email'`. */
+  where: string;
+}
+
+/** `object "sys_account"` — the spelling the rest of the authoring table uses. */
+function objectWhere(obj: any): string {
+  return `object "${obj?.name}"`;
+}
+
+/**
+ * `object "sys_account" · index 'uniq_org_email'`.
+ *
+ * A declared index's `name` is optional, so an unnamed one is identified by the
+ * columns the author actually wrote (`· index [provider_id, account_id]`) — searchable
+ * in their source, which a bare ordinal is not. The ordinal is the last resort
+ * for an index that has neither, and is scoped to the named object rather than
+ * to the merged stack array.
+ */
+function indexWhere(obj: any, idx: any, j: number, cols: readonly string[]): string {
+  const named = typeof idx?.name === 'string' && idx.name.trim() ? `'${idx.name.trim()}'` : '';
+  const label = named || (cols.length > 0 ? `[${cols.join(', ')}]` : `#${j}`);
+  return `${objectWhere(obj)} · index ${label}`;
+}
+
+/** `object "sys_account" · field 'email'` — the field-scoped form of the above. */
+function fieldWhere(obj: any, fieldName: string): string {
+  return `${objectWhere(obj)} · field '${fieldName}'`;
+}
+
 // ─── Heuristics ─────────────────────────────────────────────────────
 
 const RELATIONSHIP_TYPES = new Set(['lookup', 'master_detail']);
@@ -162,8 +224,8 @@ function indexUniqueScope(u: unknown): 'organization' | 'global' {
  * Wiring: own AUTHORING_RULES entry (validate/build), and `lintDataModel`
  * calls it for `os lint` — each command reports each finding exactly once.
  */
-export function lintUnscopedDeclaredIndexes(objects: any[]): LintIssue[] {
-  const issues: LintIssue[] = [];
+export function lintUnscopedDeclaredIndexes(objects: any[]): LocatedLintIssue[] {
+  const issues: LocatedLintIssue[] = [];
   if (!Array.isArray(objects) || objects.length === 0) return issues;
 
   for (let i = 0; i < objects.length; i++) {
@@ -173,13 +235,15 @@ export function lintUnscopedDeclaredIndexes(objects: any[]): LintIssue[] {
     for (let j = 0; j < declaredIndexes.length; j++) {
       const idx = declaredIndexes[j];
       if (idx?.unique !== true) continue; // fires on the bare spelling only
-      const cols = Array.isArray(idx?.fields)
-        ? idx.fields.filter((f: unknown) => typeof f === 'string').join(', ')
-        : '';
+      const colList: string[] = Array.isArray(idx?.fields)
+        ? idx.fields.filter((f: unknown) => typeof f === 'string')
+        : [];
+      const cols = colList.join(', ');
       const indexLabel = typeof idx?.name === 'string' && idx.name.trim() ? ` '${idx.name.trim()}'` : '';
       issues.push({
         severity: 'warning',
         rule: UNIQUE_UNSCOPED_DECLARED_INDEX,
+        where: indexWhere(obj, idx, j, colList),
         message:
           `"${obj.name}" declares index${indexLabel} [${cols}] with bare \`unique: true\` — a unique index whose scope is ` +
           `unstated (ADR-0120). Today the bare spelling materializes over exactly its \`fields\`, i.e. installation-wide; ` +
@@ -225,8 +289,8 @@ export function lintUnscopedDeclaredIndexes(objects: any[]): LintIssue[] {
  * Advisory. The resulting stack is well-defined — the cost is an intent that
  * never takes effect, not a broken artifact — so this never fails a build.
  */
-export function lintUniqueDeclarations(objects: any[]): LintIssue[] {
-  const issues: LintIssue[] = [];
+export function lintUniqueDeclarations(objects: any[]): LocatedLintIssue[] {
+  const issues: LocatedLintIssue[] = [];
   if (!Array.isArray(objects) || objects.length === 0) return issues;
 
   for (let i = 0; i < objects.length; i++) {
@@ -290,6 +354,11 @@ export function lintUniqueDeclarations(objects: any[]): LintIssue[] {
       issues.push({
         severity: 'warning',
         rule: UNIQUE_DOUBLE_DECLARATION,
+        // More specific than `path` on purpose: this rule's finding is about ONE
+        // column, but its `path` has always been the whole object (`objects[i]`)
+        // because the defect straddles `fields.<name>.unique` and an entry of
+        // `indexes`. `where` can name the column without picking one of the two.
+        where: fieldWhere(obj, name),
         message,
         path: `objects[${i}]`,
         fix,
@@ -325,8 +394,8 @@ export function lintUniqueDeclarations(objects: any[]): LintIssue[] {
  * unique declared on the organization column ALONE, which is not a composite and
  * has no per-organization reading to recover.
  */
-export function lintLegacyOrganizationComposites(objects: any[]): LintIssue[] {
-  const issues: LintIssue[] = [];
+export function lintLegacyOrganizationComposites(objects: any[]): LocatedLintIssue[] {
+  const issues: LocatedLintIssue[] = [];
   if (!Array.isArray(objects) || objects.length === 0) return issues;
 
   for (let i = 0; i < objects.length; i++) {
@@ -351,6 +420,7 @@ export function lintLegacyOrganizationComposites(objects: any[]): LintIssue[] {
       issues.push({
         severity: 'warning',
         rule: UNIQUE_LEGACY_ORGANIZATION_COMPOSITE,
+        where: indexWhere(obj, idx, j, cols),
         message:
           `"${obj.name}" declares index${indexLabel} [${cols.join(', ')}] with ${spelling} and lists the organization ` +
           `column '${tenantColumn}' itself — the hand-written per-organization composite that predates the scope ` +

@@ -1121,7 +1121,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
       lintUnscopedDeclaredIndexes(Array.isArray(stack.objects) ? (stack.objects as unknown[]) : []).map((f) => ({
         severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
         rule: f.rule,
-        where: f.path,
+        where: f.where,
         path: f.path,
         message: f.message,
         hint: f.fix ?? '',
@@ -1146,7 +1146,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
       lintUniqueDeclarations(Array.isArray(stack.objects) ? (stack.objects as unknown[]) : []).map((f) => ({
         severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
         rule: f.rule,
-        where: f.path,
+        where: f.where,
         path: f.path,
         message: f.message,
         hint: f.fix ?? '',
@@ -1172,7 +1172,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
       lintLegacyOrganizationComposites(Array.isArray(stack.objects) ? (stack.objects as unknown[]) : []).map((f) => ({
         severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
         rule: f.rule,
-        where: f.path,
+        where: f.where,
         path: f.path,
         message: f.message,
         hint: f.fix ?? '',
