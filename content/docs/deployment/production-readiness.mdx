@@ -78,6 +78,18 @@ on `http_requests_total` there means "not instrumented", never "no traffic".
 The shipped Hono adapter implements it; verify a custom adapter with
 `typeof server.afterResponse === 'function'` before trusting its numbers.
 
+**A flat `cache_*` means "no configured consumer"**, and that reading is the
+opposite of the one above: the `@objectstack/service-cache` adapters *are*
+instrumented and do hold the host's registry, so a zero on
+`cache_lookups_total` is a true count — of a service nothing asked anything
+of. Nothing consults the `cache` service unconditionally; every production
+consumer is a rate-limit or budget counter store gated on an explicit
+declaration (better-auth's `rate_limit_max` / `rate_limit_window_seconds`, the
+dispatcher's inbound and per-endpoint `rateLimit` budgets, the per-number OTP
+send budget). Declare none and the family sits at 0 under normal traffic, so
+treat a cache hit-rate panel as reporting on your configuration before you
+treat it as reporting on your cache.
+
 Rate limiting is the one piece you wire at the adapter layer (Fastify
 preHandler, Hono middleware, etc.) because that's where you have
 reliable access to the caller's IP and authenticated identity. See
