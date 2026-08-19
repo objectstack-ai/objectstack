@@ -77,6 +77,15 @@
  *     baseline artifact scores silent for every card in the tree. All three
  *     buckets are now accounted for in the closing summary, and `--residue`
  *     names the two unmatched ones runnably — see residueLines;
+ *   - an UNREACHABLE check is one whose whole declared population matches
+ *     nothing in the tree — every path literal its own source names is a path
+ *     this repo does not have. It is not a fourth bucket and it is not about
+ *     your paths: it is a standing fact about the REPO, swept from the tracked
+ *     files, and it cuts across the three verdicts the way the
+ *     unfiltered-workflow count does. A family in that state scores the same
+ *     quiet green for every card whether it still works or not, which is #4690
+ *     one level up. Counted in the summary on every run and named, with the
+ *     reason it could not reach, under `--residue` — see unreachableFamilies;
  *   - a CONVENTION-TRIGGERED check is one the path derivation can never reach,
  *     because it counts a population it computes for itself and so names no
  *     path literal to match. Those are derived from the change's KIND instead
@@ -112,10 +121,14 @@
  * this tool cannot narrow is a fact the reader is owed, not one to keep quiet.
  *
  * The output is print-only and exits 0 on a completed derivation; a run that
- * cannot read the workflows or package.json exits non-zero (#4690: unreadable
- * input must never look like an empty answer). The no-path mode inherits that
- * rule for its own input: a change set it cannot compute, and a change set that
- * comes back empty, both exit non-zero rather than derive over nothing.
+ * cannot read the workflows, package.json, or the tracked-file corpus the
+ * reachability sweep needs exits non-zero (#4690: unreadable input must never
+ * look like an empty answer). The no-path mode inherits that rule for its own
+ * input: a change set it cannot compute, and a change set that comes back
+ * empty, both exit non-zero rather than derive over nothing. The sweep
+ * inherits it twice — over an empty corpus, and over an answer in which EVERY
+ * declaring family reached nothing, which is a broken recognizer wearing a
+ * finding's clothes.
  */
 
 import { spawnSync } from 'node:child_process';
