@@ -38,6 +38,12 @@ import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES } from '@objectstack/metada
 // this defect existed precisely because the lifecycle routes had no copy of it,
 // and a second copy would be the next place it drifts.
 import { isWritablePackage } from '@objectstack/metadata-protocol';
+// [#9960] The uninstall seam's DECLARED shapes, from the same producer and for
+// the same reason as the predicate above: this door reached `deletePackage`
+// through `(protocol as any)` and routinely sent two keys — `organizationId`
+// and `keepData` — that the sibling REST door's own option type could not even
+// express. One statement of the contract, imported by both doors.
+import type { DeletePackageRequest, DeletePackageResponse } from '@objectstack/metadata-protocol';
 // [#8443] ADR-0112's disclosure rule (#8086 / #8136 / #8333), and the DECLARED
 // 422 that keeps the one quotable population quotable. Both imported from the
 // producer for the reason the line above is: this door's seed-apply fallback is
@@ -890,13 +896,29 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // Persisted removal (AI/runtime packages live in sys_metadata, not
             // just the in-memory registry — the registry uninstall alone would
             // leave the rows and tables behind).
-            let persisted: unknown = undefined;
-            const protocol = await deps.resolveService(_context, 'protocol');
-            if (protocol && typeof (protocol as any).deletePackage === 'function') {
+            let persisted: DeletePackageResponse | undefined = undefined;
+            // [#9960] `protocol` is an UNCONTRACTED service slot — `ServiceSlotContracts`
+            // leaves it unmapped on purpose ("no written contract … rather than being
+            // given a shape nothing checks") — so `resolveService` hands this door an
+            // `any`. That `any` is what let the call below send keys no declared shape
+            // named: `organizationId` (the key that decides an uninstall's blast radius)
+            // and `keepData` are exactly the two the sibling REST door's option type
+            // could not express, and nothing compared the two doors' requests. Narrowed
+            // HERE to the producer's declared verb, so what this door sends is checked
+            // against the contract the implementation states.
+            //
+            // The `typeof … === 'function'` probe STAYS and the member stays optional:
+            // the verb is absent from the spec's `PackageProtocol` (every member of
+            // which is optional anyway), the slot takes whatever a host registers under
+            // the name, and registrants carrying no `deletePackage` are real in-tree.
+            // A capability question, asked as a capability probe — not a cast.
+            const protocol: { deletePackage?(request: DeletePackageRequest): Promise<DeletePackageResponse> } | undefined =
+                await deps.resolveService(_context, 'protocol');
+            if (protocol && typeof protocol.deletePackage === 'function') {
                 try {
                     const organizationId = await deps.resolveActiveOrganizationId(_context);
                     const keepData = query?.keepData === 'true' || query?.keepData === '1';
-                    persisted = await (protocol as any).deletePackage({
+                    persisted = await protocol.deletePackage({
                         packageId: id,
                         ...(organizationId ? { organizationId } : {}),
                         ...(keepData ? { keepData: true } : {}),
@@ -906,8 +928,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 }
             }
 
-            const deletedCount = (persisted as any)?.deletedCount ?? 0;
-            const failedCount = (persisted as any)?.failedCount ?? 0;
+            const deletedCount = persisted?.deletedCount ?? 0;
+            const failedCount = persisted?.failedCount ?? 0;
 
             // [#7557] A failed persistence used to ride inside a 200: this
             // handler stated `success: true` unconditionally and forwarded the
@@ -941,8 +963,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                         {
                             code: 'PACKAGE_DELETE_PARTIAL',
                             registryRemoved,
-                            failed: (persisted as any)?.failed,
-                            cleanups: (persisted as any)?.cleanups,
+                            failed: persisted?.failed,
+                            cleanups: persisted?.cleanups,
                         },
                     ),
                 };

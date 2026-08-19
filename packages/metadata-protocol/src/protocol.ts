@@ -3225,6 +3225,67 @@ export interface UninstallCleanupOutcome {
 }
 
 /**
+ * [#9960] The declared REQUEST shape of
+ * {@link ObjectStackProtocolImplementation.deletePackage} — the ONE statement
+ * of this verb's contract, imported by every seam that speaks it.
+ *
+ * WHY IT IS NAMED. `deletePackage` has no `packages/spec` declaration (it is
+ * absent from `PackageProtocol`), and until this type existed its shape was
+ * stated THREE times, differently, by the three modules that share the seam:
+ * an inline structural type on the method below; a narrower restatement on
+ * `PackageRoutesOptions.protocol.deletePackage` in `@objectstack/rest`, which
+ * named neither `organizationId` nor `keepData`; and no type at all in the
+ * dispatcher twin (`packages/runtime/src/domains/packages.ts`), which reached
+ * the verb through `(protocol as any)` and routinely sent exactly the two keys
+ * the REST restatement could not express. Naming the shape once, HERE at the
+ * producer, is what makes the other two seams compile-checked against the
+ * contract instead of each against its own copy.
+ *
+ * ⛔ Deliberately NOT declared in `packages/spec`: minting protocol surface for
+ * a verb with zero external consumers is declare-and-maintain the platform has
+ * not asked for. Should an external consumer ever appear, the spec declaration
+ * is its own card for the spec seat, not a rider on a typing convergence.
+ *
+ * `organizationId` is the load-bearing member. The tenant-scope gate in
+ * `deletePackage` refuses a call naming neither it nor `allTenants`
+ * (`TENANT_SCOPE_REQUIRED`, 400 — #7780), so it is precisely the key whose
+ * presence decides an uninstall's blast radius, and it was the key the REST
+ * seam's own type had no word for.
+ */
+export interface DeletePackageRequest {
+    packageId: string;
+    /**
+     * Scope the uninstall to ONE organization's rows (#7705). Omitted together
+     * with `allTenants` ⇒ refused, never inferred as "every tenant" (#7780).
+     */
+    organizationId?: string;
+    /** DECLARE a cross-tenant uninstall. Never deduced from an absent org (#7780). */
+    allTenants?: boolean;
+    actor?: string;
+    /** Remove the metadata but PRESERVE each object's physical table. */
+    keepData?: boolean;
+}
+
+/**
+ * [#9960] The declared RESPONSE shape of
+ * {@link ObjectStackProtocolImplementation.deletePackage}, stated once for the
+ * same reason as {@link DeletePackageRequest}.
+ *
+ * `deleted` is part of it. The REST seam's restatement omitted that member
+ * entirely, so a caller reading the option's type was told this verb reports
+ * only a COUNT of what it removed — while the producer has always returned the
+ * per-item list beside it.
+ */
+export interface DeletePackageResponse {
+    success: boolean;
+    deletedCount: number;
+    failedCount: number;
+    deleted: Array<{ type: string; name: string; state: string }>;
+    failed: Array<{ type: string; name: string; error: string; code?: string }>;
+    cleanups: UninstallCleanupOutcome[];
+}
+
+/**
  * Post-persistence metadata-mutation notification (#2588). Emitted by
  * `saveMetaItem` / `publishMetaItem` / `deleteMetaItem` AFTER the write
  * landed. `type` is the singular metadata type name. Subscribe via
@@ -15376,20 +15437,7 @@ export class ObjectStackProtocolImplementation implements
      * so each object's table is torn down once. Per-item failures are collected
      * without aborting the rest.
      */
-    async deletePackage(request: {
-        packageId: string;
-        organizationId?: string;
-        allTenants?: boolean;
-        actor?: string;
-        keepData?: boolean;
-    }): Promise<{
-        success: boolean;
-        deletedCount: number;
-        failedCount: number;
-        deleted: Array<{ type: string; name: string; state: string }>;
-        failed: Array<{ type: string; name: string; error: string; code?: string }>;
-        cleanups: UninstallCleanupOutcome[];
-    }> {
+    async deletePackage(request: DeletePackageRequest): Promise<DeletePackageResponse> {
         // [#7780] A cross-tenant uninstall must be DECLARED, never inferred from
         // an absent parameter. Maintainer ruling (2026-08-12):
         // 跨租户卸载必须显式声明,缺省缺参永远不等于「全部租户」.
