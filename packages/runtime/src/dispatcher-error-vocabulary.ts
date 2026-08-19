@@ -134,8 +134,11 @@ export type CodeDoor = 'dispatcher' | 'rest' | 'plugin-route' | 'none';
 
 export type CodeVerdict =
     /**
-     * Reaches a wire `error.code` verbatim and the ledger does not know it.
-     * The body cannot parse. ⇒ #8846's registration input.
+     * Reaches a wire and the ledger does not know it. Since #9106 the door
+     * narrows — the unregistered spelling rides the wire's `declaredCode`
+     * instead of `error.code`, so the body now parses; the producer's
+     * semantic code is silently demoted off `error.code` until registered.
+     * ⇒ #8846's registration input.
      */
     | 'pending-registration'
     /**
