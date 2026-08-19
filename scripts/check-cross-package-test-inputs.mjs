@@ -1024,10 +1024,17 @@ function expectedInputs(globs) {
  * its own size is the input to that assertion. The reader now checks the
  * agreement (`readPackageItems()` there), so this is a checked invariant across
  * the two scripts rather than a convention someone has to remember.
+ *
+ * Reconciling inside the SERIALIZER rather than as a statement beside the write
+ * is the point: `unionInto()` has exactly one `writeFileSync`, and it has no
+ * other source of bytes, so "appended to `items` but forgot to move `count`" is
+ * not a state this script can reach. A separate `reconcile(); write();` pair
+ * would have re-created the original defect the first time someone added a
+ * second write path.
  */
-function reconcilePackageCount(packages) {
-  packages.count = packages.items.length;
-  return packages;
+function serializePackageList(parsed) {
+  parsed.packages.count = parsed.packages.items.length;
+  return JSON.stringify(parsed);
 }
 
 /**
@@ -1067,11 +1074,9 @@ function unionInto(listPath, changedPath) {
     added.push(`${name}  (declared glob matched ${hit})`);
   }
   // The push above changed the list's size, so the size the document DECLARES
-  // has to move with it -- see reconcilePackageCount(). Unconditional rather
-  // than `if (added.length)`: the invariant is a property of the document we
-  // write, not of whether this particular run had anything to add.
-  reconcilePackageCount(parsed.packages);
-  writeFileSync(listPath, JSON.stringify(parsed));
+  // moves with it -- serializePackageList() is the only way this function turns
+  // `parsed` into bytes, precisely so that cannot be skipped.
+  writeFileSync(listPath, serializePackageList(parsed));
   if (added.length) {
     console.log('Cross-package scans pulled into this run because the diff touched their declared inputs:');
     for (const a of added) console.log(`  + ${a}`);
@@ -1401,11 +1406,15 @@ function selfTest() {
   // append changes the size it describes, so the two are one operation -- these
   // pin the half of the cross-script invariant this side owns (the reader's
   // half is partition-test-shards.mjs `--self-test`).
-  const counted = (packages) => reconcilePackageCount(packages).count;
-  ok('count follows an appended item', counted({ count: 0, items: [{ name: 'a', path: 'p' }, { name: 'b', path: 'q' }] }) === 2);
-  ok('a correct count is left correct', counted({ count: 1, items: [{ name: 'a', path: 'p' }] }) === 1);
-  ok('count follows an empty list down', counted({ count: 7, items: [] }) === 0);
-  ok('the reconciliation never invents items', reconcilePackageCount({ count: 0, items: [] }).items.length === 0);
+  // These run the real serializer -- the one and only source of the bytes
+  // `unionInto()` writes -- and assert on the parsed-back document, so they pin
+  // what lands on disk rather than an intermediate object.
+  const written = (packages) => JSON.parse(serializePackageList({ packageManager: 'pnpm9', packages })).packages;
+  ok('count follows an appended item', written({ count: 0, items: [{ name: 'a', path: 'p' }, { name: 'b', path: 'q' }] }).count === 2);
+  ok('a correct count is left correct', written({ count: 1, items: [{ name: 'a', path: 'p' }] }).count === 1);
+  ok('count follows an empty list down', written({ count: 7, items: [] }).count === 0);
+  ok('the write never invents items', written({ count: 0, items: [] }).items.length === 0);
+  ok('the write leaves turbo\'s other fields alone', JSON.parse(serializePackageList({ packageManager: 'pnpm9', packages: { count: 0, items: [] } })).packageManager === 'pnpm9');
 
   const failed = cases.filter((c) => !c.cond);
   for (const c of cases) console.log(`${c.cond ? 'ok  ' : 'FAIL'} ${c.label}`);
