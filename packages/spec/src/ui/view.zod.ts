@@ -1401,6 +1401,15 @@ const exportOptionsPdfUnionError = (issue: { input?: unknown }): string | undefi
 export const ListViewSchema = lazySchema(() => strictObject({
   surface: 'this list view',
   history: VIEW_HISTORY,
+  guidance: {
+    // [#9933] Runtime-only overlay key, deliberately NOT declared here: this
+    // is the AUTHORING shape, and column order/widths are per-user state the
+    // console grid writes through the `view` metadata API (objectui's
+    // `gridNonAuthorKeys` disposition). The overlay-validation face declares
+    // it (`flattenedViewOverlayFields` / `viewItemWireFields`); an author who
+    // writes it here gets this prescription instead of a bare typo suggestion.
+    columnState: 'Column order/widths are per-user runtime personalization the console grid writes through the `view` metadata API — not authored metadata. Remove it from authored metadata.',
+  },
 }, {
   name: SnakeCaseIdentifierSchema.optional().describe('Internal view name (lowercase snake_case)'),
   label: I18nLabelSchema.optional(), // Display label override (supports i18n)
@@ -2970,6 +2979,53 @@ function viewItemArmShape<K extends 'list' | 'form'>(viewKind: K, config: z.ZodT
   };
 }
 
+/**
+ * [#9933] The per-user column layout the console's grid persists through the
+ * `view` metadata door — an **explicitly runtime-only overlay key**, admitted
+ * where overlays are validated and deliberately NOT authorable.
+ *
+ * Modeled on what the write actually sends (measured on objectui#5233's
+ * os-dev-report and `ObjectGridColumnState` in objectui's
+ * `plugin-grid/src/ObjectGrid.tsx`): `onColumnStateChange` emits
+ * `{ order?: string[]; widths?: Record<string, number> }` — the merged result
+ * of a column reorder and a resize — and `persistViewPatch` PUTs it as the
+ * `columnState` key of a personalization overlay. Until this key was declared,
+ * a `columnState`-only patch carried no key any {@link ViewMetadataSchema}
+ * member declared, so {@link assertViewIdentity} refused the body ("no
+ * recognized `view` key") and the write 422'd — the ruled patch-only write
+ * (objectstack#7494 comment 5261754173) could not land. It survived only
+ * inside the fat write's copied base, i.e. laundered past validation.
+ *
+ * Posture decisions, both deliberate:
+ *  - **Not `.strict()`**: the console owns the internals of this per-user
+ *    state (objectui's `gridNonAuthorKeys` ruling, 2026-08-18), so a future
+ *    console key here must not 422 against an older server. The two known
+ *    keys are typed; unknown inner keys parse (and `saveMetaItem` stores the
+ *    original body verbatim anyway).
+ *  - **Not exported, not on {@link ListViewSchema}**: exporting would mint a
+ *    protocol def / authorable-surface entries, and declaring it on the
+ *    authoring shape would bless hand-authoring a payload the product writes
+ *    on the user's behalf. Author-writability is a DIFFERENT spec change,
+ *    explicitly out of #9933's scope; the authoring doors keep rejecting the
+ *    key by name (see `VIEW_ITEM_SURFACE.guidance` and `ListViewSchema`'s
+ *    `guidance`).
+ *
+ * Declared ABOVE the ViewItem section on purpose: `viewItemWireFields()` reads
+ * it, and under `OS_EAGER_SCHEMAS=1` every `lazySchema` factory runs at module
+ * init in file order — a `const` declared below its first eager reader is a
+ * TDZ `ReferenceError` at import time (the `strict-object.ts` docblock carries
+ * the measured incident).
+ */
+const ViewColumnStateSchema = z.object({
+  order: z.array(z.string()).optional()
+    .describe('Column order as field names, leftmost first (runtime-only per-user state — written by the console grid, never authored).'),
+  widths: z.record(z.string(), z.number()).optional()
+    .describe('Column widths in pixels, keyed by field name (runtime-only per-user state — written by the console grid, never authored).'),
+}).describe(
+  'Runtime-only personalization overlay key (#9933): the per-user column layout (order/widths) the console grid '
+  + 'persists through the `view` metadata API. NOT authorable — authoring doors reject it by name; do not write it in metadata source.',
+);
+
 /** The authoring surface `defineViewItem` and Studio's create form are judged by. */
 const VIEW_ITEM_SURFACE = {
   surface: 'this view item',
@@ -2982,6 +3038,8 @@ const VIEW_ITEM_SURFACE = {
     // instead of leaving them to guess.
     isPinned: 'Pinning is per-user Studio state, not authored metadata — the console writes it through the `view` metadata API. Remove it from authored metadata.',
     sortOrder: 'Switcher position is per-user Studio state, not authored metadata — use `order` for the authored default. Remove it from authored metadata.',
+    // [#9933] Runtime-only overlay key — same disposition as the two above.
+    columnState: 'Column order/widths are per-user runtime personalization the console grid writes through the `view` metadata API — not authored metadata. Remove it from authored metadata.',
   },
 } as const;
 
@@ -3036,6 +3094,13 @@ function viewItemWireFields() {
       .describe('Studio round-trip: view pinned in the switcher (per-user state, written by the console — not authored).'),
     sortOrder: z.number().int().optional()
       .describe('Studio round-trip: position within the switcher (per-user state, written by the console — not authored).'),
+    // [#9933] Same disposition as the two keys above: per-user state the
+    // console writes through the `view` metadata API. `updateView` PUTs
+    // `{ ...current, ...partial }`, so on a standalone ViewItem record the
+    // key arrives at THIS member's top level; declaring it validates the
+    // shape where `.strip()` used to let it ride through unchecked.
+    columnState: ViewColumnStateSchema.optional()
+      .describe('Studio round-trip: per-user column order/widths (runtime-only state, written by the console grid — not authored). #9933'),
   };
 }
 
@@ -3246,6 +3311,13 @@ function flattenedViewOverlayFields() {
         + 'personalization PUTs (#2555).',
       ),
     label: I18nLabelSchema.optional().describe('Display label (inherited from the shadowed entry — #2555).'),
+    // [#9933] Runtime-only overlay key — declared HERE (the overlay-validation
+    // face) and on `viewItemWireFields()`, never on an authoring shape. This is
+    // what lets a `columnState`-only personalization patch through the
+    // identity precondition (the vocabulary is derived from the members' keys)
+    // AND gets its inner shape genuinely validated instead of ridden past
+    // `.strip()` unchecked.
+    columnState: ViewColumnStateSchema.optional(),
     isDefault: z.boolean().optional(),
     order: z.number().int().optional(),
     scope: ViewScopeSchema.optional(),

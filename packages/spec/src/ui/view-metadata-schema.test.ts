@@ -14,7 +14,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
-import { ViewMetadataSchema } from './view.zod';
+import { ListViewSchema, ViewItemSchema, ViewMetadataSchema } from './view.zod';
 
 const PLACEHOLDER_DATA = { provider: 'object', object: 'crm_lead' } as const;
 
@@ -374,6 +374,124 @@ describe('ViewMetadataSchema — genuine validation across the three runtime sha
       // openness under test is about UNKNOWN keys, not the binding pair.)
       const r = ViewMetadataSchema.safeParse({ isPinned: true, someFutureStudioKey: 'x', object: 'crm_lead', viewKind: 'list' });
       expect(r.success).toBe(true);
+    });
+  });
+
+  // ── #9933: `columnState` — runtime-only overlay key, BOTH halves pinned ───
+  //
+  // The maintainer-accepted ruling (objectui#5233, 「全部接受」 2026-08-19):
+  // `columnState` is admitted to the view-metadata surface as an EXPLICITLY
+  // runtime-only overlay key — accepted where overlays are validated, NOT
+  // authorable (objectui's `gridNonAuthorKeys` disposition). The two halves
+  // below are the card's executable acceptance criterion; a change that flips
+  // either one is reversing a ruling, not tidying a schema.
+  describe('columnState — runtime-only overlay key (#9933)', () => {
+    // The REAL payload, measured: objectui's `persistViewPatch` sends
+    // `{ columnState: { order?, widths? }, _isOverride: true }` and
+    // `normalizeViewMetadata` inherits `name`/`object`/`viewKind` from the
+    // shadowed entry (#2555). Before #9933 this body carried no declared key,
+    // so the identity precondition 422'd it — the ruled patch-only write for
+    // a column drag could not persist.
+    it('HALF 1 — the overlay face accepts a `columnState`-only patch (the objectui#5233 payload)', () => {
+      const r = ViewMetadataSchema.safeParse({
+        name: 'showcase_task.default',
+        object: 'showcase_task',
+        viewKind: 'list',
+        _isOverride: true, // objectui's private marker — undeclared, rides `.strip()` as before
+        columnState: { order: ['email', 'name'], widths: { email: 240 } },
+      });
+      expect(r.success).toBe(true);
+    });
+
+    it('HALF 1 — a baseline-less columnState patch is refused at the MEMBERS (binding pair, #7741), not the precondition', () => {
+      // `columnState` is vocabulary now, so the precondition stays inert; what
+      // refuses the unbound body is the members' object+viewKind requirement.
+      const r = ViewMetadataSchema.safeParse({ columnState: { order: ['name'] } });
+      expect(r.success).toBe(false);
+      if (r.success) return;
+      expect(r.error.issues[0]!.code).toBe('invalid_union');
+      expect(JSON.stringify(r.error.issues)).not.toContain('Not a `view` body');
+    });
+
+    it('HALF 1 — the inner shape is genuinely validated, not passthrough', () => {
+      // A declared key that validated nothing would be the same laundering the
+      // fat write did, one level down.
+      expect(ViewMetadataSchema.safeParse({
+        name: 'v', object: 'o', viewKind: 'list', columnState: { order: 'email' },
+      }).success).toBe(false);
+      expect(ViewMetadataSchema.safeParse({
+        name: 'v', object: 'o', viewKind: 'list', columnState: 'wide',
+      }).success).toBe(false);
+      // …while a console-owned FUTURE inner key parses (deliberately not
+      // `.strict()`: the console owns the internals, and an older server must
+      // not 422 a newer console).
+      expect(ViewMetadataSchema.safeParse({
+        name: 'v', object: 'o', viewKind: 'list', columnState: { order: ['a'], pinnedLeft: ['b'] },
+      }).success).toBe(true);
+    });
+
+    it('HALF 1 — a merged ViewItem-record write carries it on the wire member (`{...current, ...partial}`)', () => {
+      const r = ViewMetadataSchema.safeParse({
+        name: 'crm_lead.all',
+        object: 'crm_lead',
+        viewKind: 'list',
+        config: { type: 'grid', columns: ['name'], data: PLACEHOLDER_DATA },
+        columnState: { widths: { name: 120 } },
+        isPinned: true,
+      });
+      expect(r.success).toBe(true);
+    });
+
+    it('HALF 2 — the authoring face still REJECTS `columnState` as an authored key, BY NAME', () => {
+      // `defineViewItem` / Studio's create form are judged by the strict
+      // `ViewItemSchema`; the refusal must name the key and carry the
+      // runtime-only prescription, not fall back to a typo suggestion.
+      const r = ViewItemSchema.safeParse({
+        name: 'crm_lead.all',
+        object: 'crm_lead',
+        viewKind: 'list',
+        config: { type: 'grid', columns: ['name'], data: PLACEHOLDER_DATA },
+        columnState: { order: ['name'] },
+      });
+      expect(r.success).toBe(false);
+      if (r.success) return;
+      const text = JSON.stringify(r.error.issues);
+      expect(text).toContain('`columnState`');
+      expect(text).toContain('per-user runtime personalization');
+    });
+
+    it('HALF 2 — an authored list CONFIG carrying `columnState` is rejected by name too', () => {
+      const r = ListViewSchema.safeParse({ type: 'grid', columns: ['name'], columnState: { order: ['name'] } });
+      expect(r.success).toBe(false);
+      if (r.success) return;
+      const text = JSON.stringify(r.error.issues);
+      expect(text).toContain('`columnState`');
+      expect(text).toContain('per-user runtime personalization');
+      // …and through the metadata door: a ViewItem whose CONFIG smuggles it is
+      // refused (the record member validates `config` with the strict shape).
+      expect(ViewMetadataSchema.safeParse({
+        name: 'crm_lead.all', object: 'crm_lead', viewKind: 'list',
+        config: { type: 'grid', columns: ['name'], columnState: { order: ['name'] } },
+      }).success).toBe(false);
+    });
+
+    it('sibling runtime keys are UNCHANGED — each still parses alone with the binding pair', () => {
+      // The accept-set widening is exactly one key; the four measured siblings
+      // (186/10/8/2 spec hits on the card) keep their prior behavior.
+      for (const patch of [
+        { sort: [{ field: 'name', order: 'asc' }] },
+        { rowHeight: 'compact' },
+        { hiddenFields: ['name'] },
+        { inlineEdit: true },
+      ] as const) {
+        expect(ViewMetadataSchema.safeParse({
+          name: 'v', object: 'crm_lead', viewKind: 'list', ...patch,
+        }).success).toBe(true);
+      }
+      // …and garbage keys are still refused: vocabulary grew by one, not open.
+      expect(ViewMetadataSchema.safeParse({
+        name: 'v', object: 'crm_lead', viewKind: 'list', colState: { order: [] },
+      }).success).toBe(false);
     });
   });
 
