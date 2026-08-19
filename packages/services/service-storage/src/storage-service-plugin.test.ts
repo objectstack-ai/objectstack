@@ -92,8 +92,11 @@ describe('StorageServicePlugin: settings live-wire', () => {
     });
     const ctx = makeCtx();
     await plugin.init(ctx);
-    const canonical = ctx.getService<IStorageService>('storage');
-    const alias = ctx.getService<IStorageService>('file-storage');
+    // Plain calls with casts, not `getService<T>(...)` — the fake ctx's
+    // getService is untyped, and each type-argument call adds a frozen-debt
+    // TS2347 to this package's shrink-only type-check ledger.
+    const canonical = ctx.getService('storage') as IStorageService;
+    const alias = ctx.getService('file-storage') as IStorageService;
     expect(alias).toBeInstanceOf(SwappableStorageService);
     expect(alias).toBe(canonical);
   });
