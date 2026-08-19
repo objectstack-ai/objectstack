@@ -284,12 +284,22 @@ jobs:
 
       # Governed-merges audit self-test (#9495) — same family, same split as
       # the half-state sweeper above: the live sweep enumerates the governed
-      # merges (docs/adr/**, .claude/**, skills/**, AGENTS.md, CLAUDE.md)
-      # since a date/ref for the PM round report — report-only by design, the
-      # human-merge-is-the-review-record regime's detection half — while this
-      # step runs only the offline self-test (pure predicates + replay
-      # fixtures; no network, no token), so the predicates cannot rot unrun
-      # the way an uninvoked self-test does (#4690).
+      # merges since a date/ref for the PM round report — report-only by
+      # design, the human-merge-is-the-review-record regime's detection half
+      # — while this step runs only the offline self-test (pure predicates +
+      # replay fixtures; no network, no token), so the predicates cannot rot
+      # unrun the way an uninvoked self-test does (#4690).
+      #
+      # ⛔ WHICH surfaces are governed is deliberately NOT restated here
+      # (#9840). The register is `GOVERNED_SURFACES` in
+      # `scripts/pm/check-governed-merges.mjs`, and this comment used to spell
+      # the five out by hand — a copy nothing read. The register grew three
+      # times in two days, and the two hand copies a seat DOES act on went
+      # stale twice (#9395, #9511); those two are pinned by the step below,
+      # over backtick spans inside an anchored region. A bare YAML comment
+      # cannot present that shape, so this one points at the register rather
+      # than restating it: the copy that does not exist cannot go stale.
+      # ⛔ Do not helpfully re-add the list here.
       - name: Governed-merges audit self-test
         run: pnpm check:pm-governed-merges
 
