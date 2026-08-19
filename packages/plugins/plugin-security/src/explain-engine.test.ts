@@ -186,7 +186,9 @@ describe('explainAccess (ADR-0090 D6)', () => {
       },
     });
     const principal = d.layers.find((l) => l.layer === 'principal')!;
-    const dropped = principal.contributors.filter((c: any) => c.state === 'expired' || c.state === 'deactivated');
+    // `contributors` is the z.input type (defaulted, so optional pre-parse) —
+    // normalize rather than dereference, keeping the test-layer TEST_DEBT flat.
+    const dropped = (principal.contributors ?? []).filter((c) => c.state === 'expired' || c.state === 'deactivated');
     expect(dropped).toEqual([
       { kind: 'permission_set', name: 'quarter_close_admin', via: 'held until 2026-06-01T00:00:00Z — expired', state: 'expired' },
       { kind: 'permission_set', name: 'crm_full', via: 'held — deactivated', state: 'deactivated' },
