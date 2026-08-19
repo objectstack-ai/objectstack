@@ -10392,6 +10392,30 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#9688] What a `multiple: true` reference slot holds once the deleted
+   * record's membership is removed — the ONE computation behind both the
+   * per-row `required` judgement in {@link ObjectQL.cascadeDeleteRelations}
+   * and the `set_null` write that judgement gates.
+   *
+   * One function rather than two readings that happen to match, because the
+   * judgement decides whether the write may run at all: a predicate computing
+   * the remainder differently could clear a delete and then have the write
+   * land the empty required set the judgement exists to refuse — or refuse a
+   * delete whose write would have produced a perfectly legal non-empty set.
+   *
+   * `String(v) !== String(id)` is the same reading
+   * {@link ObjectQL.storedReferenceIncludes} applies when narrowing
+   * `dependents`, so the member removed is exactly the member that made the
+   * row a dependent. A non-array value is normalized to the array spelling
+   * rather than dismissed, for the same reason the narrowing compares it: an
+   * off-shape bare scalar in a `multiple: true` slot is still a reference.
+   */
+  private static remainderAfterMemberRemoval(stored: unknown, id: string | number): unknown[] {
+    const current: unknown[] = Array.isArray(stored) ? stored : [stored];
+    return current.filter((v) => String(v) !== String(id));
+  }
+
+  /**
    * Apply referential delete behavior for relations pointing AT this record,
    * before it is removed. For every registered object with a `master_detail`
    * or `lookup` field referencing `object`, honor the field's `deleteBehavior`:
@@ -10408,8 +10432,12 @@ export class ObjectQL implements IObjectQLEngine {
    * lifecycle); `lookup` defaults to `set_null` — except a `set_null` default
    * on a REQUIRED lookup escalates to `restrict` (you can't null a NOT NULL
    * FK; restricting with a clear dependent-count message beats a misleading
-   * "<field> is required" 400 from the child). Only runs for single-id
-   * deletes — multi/predicate deletes skip cascade (logged).
+   * "<field> is required" 400 from the child) — and on a `multiple: true`
+   * required lookup that escalation is decided per ROW after the dependents
+   * probe (#9688): a row that keeps another member takes the member removal,
+   * a row the removal would EMPTY keeps the refusal, and the refusal counts
+   * only those rows. Only runs for single-id deletes — multi/predicate
+   * deletes skip cascade (logged).
    */
   private async cascadeDeleteRelations(
     object: string,
@@ -10490,29 +10518,42 @@ export class ObjectQL implements IObjectQLEngine {
         // escalation is a property of the RESOLVED behavior plus `required`,
         // not of what the author typed.
         //
-        // It also runs BEFORE the `multiValued` branch below and keys on
-        // `required` alone, so a `multiple: true` required lookup is refused
-        // even when the child's set holds other members and member removal
-        // would leave it non-empty — a state the #9447 ruling accepts.
-        // Measured, pinned as current behaviour, and carded separately rather
-        // than changed here. What justifies refusing is the paragraph above,
-        // not the validator's tolerance: the escalation refuses THIS relation
-        // before its own set_null write runs, so the caller is told
+        // [#9688] The rationale above is also what BOUNDS the escalation, and
+        // on a `multiple: true` field it does not reach every row. The
+        // set_null limb there does not clear the slot: since #9438 it removes
+        // the deleted MEMBER and writes the remainder. So "a cleared required
+        // FK trips the child's validator" is true of exactly one case — the
+        // row whose set the removal would EMPTY, since `[]` is what the #9447
+        // ruling (maintainer, 2026-08-18) says violates `required` on a
+        // multi-value field, and what the record validator has rejected since
+        // #9476. A row that still holds another live member is written a
+        // NON-EMPTY set, which `required` accepts and no validator objects
+        // to; refusing its parent's delete was broader than the contract, and
+        // refused it citing a failure that could not have happened.
+        //
+        // Emptiness is a property of a ROW, not of the field — and no row has
+        // been read at this point. So the multi-value half of the escalation
+        // is DEFERRED to just after the dependents probe (search
+        // `requiredSetNull` below), where the rows are known and exactly
+        // narrowed. The single-valued half stays here and is unchanged:
+        // clearing a scalar FK always writes `null`, so its premise needs no
+        // row to hold.
+        //
+        // The deferral changes WHEN the decision is made, never who it is
+        // reported to: a row that does keep the refusal still refuses THIS
+        // relation before its own set_null write runs, so the caller is told
         // `DELETE_RESTRICTED` about the record it asked to delete, instead of
-        // the child's own `required` 400 — which names a field that is not on
-        // that record's object at all. The predecessor of this comment rested
-        // it on `[]` still satisfying `required` in the record validator,
-        // which made this refusal the only thing between an emptied required
-        // set and a silent write; #9476 landed and `[]` is rejected there now
-        // too, so the refusal is no longer that last guard. It is the one that
-        // fires early, against the right record.
-        if (behavior === 'set_null' && fdef.required === true) {
+        // the child's own `required` 400 naming a field that is not on that
+        // record's object at all.
+        //
+        // [#9362] `multiValued` is declared here rather than at the probe
+        // because the probe's filter spelling, the set_null write below and
+        // — since #9688 — this escalation all turn on it.
+        const multiValued = fdef.multiple === true;
+        const requiredSetNull = behavior === 'set_null' && fdef.required === true;
+        if (requiredSetNull && !multiValued) {
           behavior = 'restrict';
         }
-
-        // [#9362] Declared here rather than at the probe because BOTH the
-        // set_null write below and the probe's filter spelling turn on it.
-        const multiValued = fdef.multiple === true;
 
         let dependents: any[];
         try {
@@ -10569,6 +10610,36 @@ export class ObjectQL implements IObjectQLEngine {
           );
         }
         if (!dependents || dependents.length === 0) continue;
+
+        // [#9688] The deferred half of the required escalation, decided per
+        // ROW now that the rows are read and exactly narrowed — every row
+        // here genuinely holds `id`, so its remainder is its set minus that
+        // one member.
+        //
+        // The emptiness question is asked through
+        // `remainderAfterMemberRemoval`, which is the SAME computation the
+        // set_null write below performs. One function, two call sites, so the
+        // judgement cannot predict a shape the write would not produce: a
+        // predicate that computed the remainder even slightly differently
+        // could clear the delete and then let the write land the very `[]`
+        // this judgement exists to prevent.
+        //
+        // ANY row that would be emptied refuses the WHOLE delete — a delete
+        // either happens or it does not, and a partial cascade is not on
+        // offer. `dependents` is reduced to those rows first, because every
+        // number the refusal reports reads it: `dependentCount`, the
+        // localized message's `count`, and the developerMessage. Counting the
+        // rows this delete no longer refuses over is the second defect the
+        // card names, and it is fixed by the same statement.
+        if (requiredSetNull && multiValued) {
+          const emptied = dependents.filter(
+            (row) => ObjectQL.remainderAfterMemberRemoval(row?.[fieldName], id).length === 0,
+          );
+          if (emptied.length > 0) {
+            behavior = 'restrict';
+            dependents = emptied;
+          }
+        }
 
         if (behavior === 'restrict') {
           // [#7307] TWO messages, two audiences — because this error has two
@@ -10657,16 +10728,15 @@ export class ObjectQL implements IObjectQLEngine {
               // written as `[]`, which `Array.prototype.filter` already
               // yields, never `null`.
               //
-              // `String(v) !== String(id)` is the same reading
-              // `storedReferenceIncludes` applies when narrowing `dependents`
-              // above, so the member removed here is exactly the member that
-              // made this row a dependent. An off-shape bare scalar in a
-              // `multiple: true` slot is normalized to the array spelling by
-              // this write, for the same reason the narrowing compares it
-              // rather than dismissing it.
-              const stored = dep?.[fieldName];
-              const current: unknown[] = Array.isArray(stored) ? stored : [stored];
-              const next = current.filter((v) => String(v) !== String(id));
+              // [#9688] The remainder is computed by
+              // `remainderAfterMemberRemoval`, which the per-row required
+              // judgement above calls on the same row: this write is only
+              // reached for a row that judgement measured as keeping at least
+              // one other member, and the two must agree by construction.
+              // The reading it applies — `String(v) !== String(id)`, and an
+              // off-shape bare scalar normalized to the array spelling — is
+              // documented there.
+              const next = ObjectQL.remainderAfterMemberRemoval(dep?.[fieldName], id);
               await this.update(childName, { id: depId, [fieldName]: next }, { context: referentialCtx } as any);
             } else {
               await this.update(childName, { id: depId, [fieldName]: null }, { context: referentialCtx } as any);
