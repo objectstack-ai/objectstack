@@ -1,6 +1,15 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { PluginContext } from '@objectstack/core';
+// [#9686] The anonymous-deny floor: one DECISION function and one set of
+// semantics (status / code / message) shared by every HTTP seam on the
+// platform, so this family can never drift on who counts as anonymous.
+import {
+  shouldDenyAnonymous,
+  ANONYMOUS_DENY_STATUS,
+  ANONYMOUS_DENY_CODE,
+  ANONYMOUS_DENY_MESSAGE,
+  type PluginContext,
+} from '@objectstack/core';
 import type { IExternalDatasourceService, IHttpServer } from '@objectstack/spec/contracts';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 import { sendOk, sendError } from '@objectstack/types';
@@ -60,12 +69,105 @@ import { mountDirectRoutes, type DirectMountedRoute } from './direct-mount.js';
  * is not a second envelope flag, so it belongs inside `data` rather than being
  * dropped.
  */
+export interface ExternalDatasourceRoutesOptions {
+  /**
+   * [#9686] Resolve the caller's execution context for a federation request.
+   *
+   * Wired by `direct-mount-composition.ts` to the `RestServer`'s own resolver —
+   * the SAME identity resolution the `/meta` REST gate, the runtime dispatcher
+   * and the sibling `registerPackageRoutes` gate read, so this family can never
+   * admit a different set of callers than the rest of the surface. That
+   * resolver admits every credential kind the platform admits (a better-auth
+   * session AND a `sys_api_key`), which is what makes this a floor rather than
+   * a second, narrower policy: reading only a session here would be cheaper and
+   * wrong in the direction that matters, refusing an SDK caller holding a key
+   * the platform accepts everywhere else.
+   *
+   * It is a RESOLVER, not a resolved context: the lookups behind it (auth
+   * service, engine) happen per request, so a deployment whose auth plugin
+   * registers after the REST plugin is not frozen into a boot-instant "no auth
+   * service" snapshot that would refuse every authenticated caller.
+   *
+   * Absent ⇒ the gate FAILS CLOSED (401). `isSystem` is never resolved from
+   * inbound HTTP.
+   */
+  resolveExecutionContext?: (req: any) => Promise<{
+    userId?: string | null;
+    isSystem?: boolean;
+  } | undefined>;
+}
+
 export function registerExternalDatasourceRoutes(
   server: IHttpServer,
   ctx: PluginContext,
   basePath = '/api/v1',
+  options: ExternalDatasourceRoutesOptions = {},
 ): readonly DirectMountedRoute[] {
   const ext = `${basePath}/datasources/:name/external`;
+
+  /**
+   * [#9686] The authentication floor for this whole family. Answers
+   * `401 UNAUTHENTICATED` and returns `true` when the caller must be refused,
+   * so every handler opens with `if (await refuseAnonymous(req, res)) return;`.
+   *
+   * ## Why this registrar needs its own line
+   *
+   * These five routes are mounted straight onto `IHttpServer` by
+   * `direct-mount-composition.ts`, so they pass through none of the seams that
+   * produce the platform's 401s: `RestServer.enforceAuth` is a private method
+   * invoked inside that server's OWN handlers (it guards `/data`, `/meta`,
+   * `/batch`, `/security/explain`), not middleware a direct mount is routed
+   * through, and the dispatcher domains' floor runs inside the dispatcher.
+   * Being composed by `RestServer` is not itself a guard. The sibling
+   * direct-mount registrar in this package (`package-routes.ts`) reached the
+   * same conclusion for the same reason, as did the datasource-admin family
+   * one package over (`service-datasource/src/admin-routes.ts`, #9391) — whose
+   * two `external-datasource` routes are the DECLARED TWINS of the first two
+   * here (`remote-tables-twin.equivalence.test.ts`, #4249 / #7955). One
+   * operation cannot answer 401 at one spelling and serve at the other.
+   *
+   * ## What is reused rather than restated
+   *
+   *  - the DECISION — `shouldDenyAnonymous` (`@objectstack/core`), the one
+   *    function every HTTP seam shares. `isSystem` is not settable from the
+   *    wire and a CORS `OPTIONS` preflight passes, both by its construction.
+   *    No `path` is passed: the control-plane allowlist exists for `/auth`,
+   *    `/health`, `/ready` and `/discovery`, and nothing here is one of those.
+   *  - the IDENTITY — {@link ExternalDatasourceRoutesOptions.resolveExecutionContext},
+   *    the `RestServer`'s own resolution, handed to this registrar by the same
+   *    composition step that already hands it to `registerPackageRoutes`.
+   *  - the ENVELOPE — the shared `sendError`, like every other body in this
+   *    module (`check:route-envelope` pins it at zero hand-written bodies), so
+   *    the status, code and message are the platform's while the wrapper is
+   *    this surface's (ADR-0112's two live envelopes, read per the seam called).
+   *
+   * ## Fail closed, and why the check sits FIRST
+   *
+   * Anything that throws — synchronously or as a rejected promise — and
+   * anything resolving to no identity is a refusal; there is no configuration,
+   * posture or absent service that opens these routes. The check runs before
+   * the `external-datasource` lookup so an anonymous caller cannot learn from a
+   * `503` which services a deployment has wired, and — for the two routes that
+   * write — so the refusal provably precedes the write rather than following it.
+   *
+   * Authentication and nothing more: whether these routes should FURTHER
+   * require a capability is the separately-ruled question #9593 asks of the
+   * admin family, and is deliberately absent here.
+   */
+  const refuseAnonymous = async (req: any, res: any): Promise<boolean> => {
+    let authz: { userId?: string | null; isSystem?: boolean } | undefined;
+    try {
+      authz = await options.resolveExecutionContext?.(req);
+    } catch {
+      // An identity that could not be resolved is not an identity.
+      authz = undefined;
+    }
+    if (shouldDenyAnonymous({ userId: authz?.userId, isSystem: authz?.isSystem, method: req?.method })) {
+      sendError(res, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE);
+      return true;
+    }
+    return false;
+  };
 
   /**
    * The `external-datasource` slot's occupant (ADR-0015 §4.5).
@@ -116,6 +218,7 @@ export function registerExternalDatasourceRoutes(
       path: `${ext}/tables`,
       metadata: { summary: 'List remote tables on an external datasource', tags: ['datasources'] },
       handler: async (req: any, res: any) => {
+        if (await refuseAnonymous(req, res)) return;
         const svc = externalService();
         if (!svc?.listRemoteTables) return unavailable(res);
         try {
@@ -134,6 +237,7 @@ export function registerExternalDatasourceRoutes(
       path: `${ext}/tables/:remote/draft`,
       metadata: { summary: 'Generate an Object draft from a remote table', tags: ['datasources'] },
       handler: async (req: any, res: any) => {
+        if (await refuseAnonymous(req, res)) return;
         const svc = externalService();
         if (!svc?.generateObjectDraft) return unavailable(res);
         try {
@@ -158,6 +262,7 @@ export function registerExternalDatasourceRoutes(
       path: `${ext}/tables/:remote/import`,
       metadata: { summary: 'Import a remote table as a federated object', tags: ['datasources'] },
       handler: async (req: any, res: any) => {
+        if (await refuseAnonymous(req, res)) return;
         const svc = externalService();
         if (!svc?.importObject) return unavailable(res);
         try {
@@ -184,6 +289,7 @@ export function registerExternalDatasourceRoutes(
       path: `${ext}/refresh-catalog`,
       metadata: { summary: 'Refresh the external datasource catalog snapshot', tags: ['datasources'] },
       handler: async (req: any, res: any) => {
+        if (await refuseAnonymous(req, res)) return;
         const svc = externalService();
         if (!svc?.refreshCatalog) return unavailable(res);
         try {
@@ -201,6 +307,7 @@ export function registerExternalDatasourceRoutes(
       path: `${ext}/validate`,
       metadata: { summary: 'Validate the federated objects on a datasource', tags: ['datasources'] },
       handler: async (req: any, res: any) => {
+        if (await refuseAnonymous(req, res)) return;
         const svc = externalService();
         if (!svc?.validateAll) return unavailable(res);
         try {
