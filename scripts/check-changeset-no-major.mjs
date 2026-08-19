@@ -181,25 +181,60 @@
  * rather than 0 (#4690): a gate that cannot read its input has verified nothing,
  * and exiting 0 there reads as "no violations" in every checks list.
  *
- * ## What `--self-test` covers, and what it does NOT (#6923, still true)
+ * ## What `--self-test` covers, and what a green tick from this file means (#6923)
  *
- * Read this before trusting a green tick from this file. The enforcing half it
- * fixtures is still, on CI, unexecuted — and #7005 did not change that.
+ * Read this before trusting a green tick. Both halves below are stated as a
+ * condition rather than as a reading of the release phase the repo happens to be
+ * in — the wording they replace was the latter, and `changeset pre exit`
+ * falsified it without touching a line of code (see RE-DERIVED at the end).
  *
- *   COVERED — every decision this file makes: the frontmatter dialects, the
- *   pre-mode/exit-mode switch in BOTH directions, the diff scoping driven
- *   through real temp git repositories (including a real `refs/pull/N/merge`
- *   shape with a base branch that keeps moving), and the rendered text of the
- *   offenders report.
+ *   COVERED, IN EVERY REPO PHASE — every decision this file makes: the
+ *   frontmatter dialects, the pre-mode/exit-mode switch in BOTH directions, the
+ *   diff scoping driven through real temp git repositories (including a real
+ *   `refs/pull/N/merge` shape with a base branch that keeps moving), and the
+ *   rendered text of the offenders report. None of it can move with the release
+ *   train: the fixtures pass `judge()` its `pre` argument directly and build
+ *   their own throwaway repos, and the assertions that did read the real
+ *   `.changeset/` for its PHASE were removed at #8654 (see the reader block in
+ *   `--self-test`). They run in a job with no label exemption —
+ *   `check:changeset-gate-self-tests`, lint.yml's ESLint job (#6509/PR #6917) —
+ *   so they execute on every PR.
  *
- *   NOT COVERED — the CI path. `.changeset/pre.json` says `"mode": "pre"`, so
- *   the real scan below still takes the exemption branch and exits 0 on every
- *   run; the `enforce` verdict has never been produced by a CI invocation of
- *   this script and still is not after #7005. What #6923 changed is that it is
- *   produced by fixtures on every PR, in a job with no label exemption
- *   (`check:changeset-gate-self-tests`, lint.yml's ESLint job — #6509/PR #6917).
- *   Fixtured is not the same as executed, and this note exists so the next
- *   reader does not read one as the other.
+ *   WHICH GREEN TICK — this file has two, they rule out different things, and
+ *   the text is what distinguishes them:
+ *
+ *     "introduces no `major` bump"      the `clean` verdict. Decided BEFORE
+ *                                       pre-mode is consulted — the verdict
+ *                                       ORDER in `judge` is contract, and pinned
+ *                                       by `--self-test` — so it means what it
+ *                                       says in every phase.
+ *
+ *     "in pre-release mode (tag: …)"    the `exempt` verdict. A `major` WAS
+ *                                       introduced and stood aside for the
+ *                                       window. Reachable ONLY while
+ *                                       `.changeset/pre.json` parses with
+ *                                       `"mode": "pre"`.
+ *
+ *   So the question a reader must answer is not "green or red" but WHICH green.
+ *   What the phase governs is only whether the real scan can reach `enforce` at
+ *   all: never inside a pre-release window, always outside one — absent, `"exit"`
+ *   and unreadable all enforce. `--list` prints the mode it read; an ordinary run
+ *   does not, which is exactly why the two ticks are worded apart.
+ *
+ *   Fixtured is still not the same as executed, and keeping those two apart is
+ *   what this note is for. The enforcing branch is reached by the real scan only
+ *   on a PR that introduces a `major` outside a pre-release window — rare by
+ *   construction, since the guard exists to make that PR rare — so `--self-test`
+ *   remains the only thing that exercises it on a routine basis.
+ *
+ *   RE-DERIVED, not re-worded. This paragraph used to read "`.changeset/pre.json`
+ *   says `"mode": "pre"`, so the real scan below still takes the exemption branch
+ *   and exits 0 on every run; the `enforce` verdict has never been produced by a
+ *   CI invocation of this script". That was a measurement of the RC window the
+ *   repo was in, not a property of this file, and it understated the gate in the
+ *   direction that flatters it. It is replaced by the condition above rather than
+ *   re-dated, because a dated reading of this paragraph goes stale again at the
+ *   next `changeset pre enter`.
  *
  * ## The frontmatter dialects, measured against the real parser
  *
