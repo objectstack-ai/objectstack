@@ -112,6 +112,59 @@
  * file) but share no vocabulary, no baseline and no verdict: a seam red under
  * one is untouched by the other.
  *
+ * ## THE THIRD VERDICT (#9747, maintainer ruling of 2026-08-18)
+ *
+ * Both rules above end in one of two states: a finding, or `clean`. #9747
+ * measured nine instances in this repo where a gate printed the second while
+ * meaning something else entirely — "I saw nothing I understood" — and two of
+ * them (#8897, #9657) are this file's own. The ruling accepted a THIRD state:
+ *
+ *   > N constructs in the scan roots matched no rule in this gate's vocabulary
+ *   > — printed and counted, visible in round reports; NOT a failure, and NO
+ *   > new merge-blocking context.
+ *
+ * This file is one of the three pilot gates. What it now prints, on every run:
+ *
+ *   UNRECOGNISED [durability-degradation-log-level]: N of M discovered seam(s)
+ *   answer their catch through a call this checker could not read as a log
+ *
+ * The log-level rule can answer this honestly because its LOG-CALLEE
+ * vocabulary is a closed, structural thing — `resolveLogCallee` already
+ * returns `unreadable` for a call it cannot read, and #9657 is precisely the
+ * damage that fact does when it stays private. Before this, `unreadable` was
+ * collected only to choose a FINDING's verdict, so a seam that was correctly
+ * green and also carried something unreadable reported nothing at all.
+ *
+ * ## Why this is not `exit 2`, when the in-tree prior art is
+ *
+ * Four places already spell a third state and every one of them exits
+ * non-zero: `check-where-matcher-conformance` (missing baseline => `exit 2`,
+ * explicitly distinct from a finding's `exit 1`), `check-published-readme-
+ * exports` (hard refusal — "cannot tell debt from a new defect"),
+ * `check-governed-merges`' header ("non-zero exits classify the ENVIRONMENT,
+ * not the tree"), and #9700's drift guard. All four are the gate REFUSING TO
+ * RUN: the environment is broken and no verdict about the tree exists.
+ *
+ * This verdict is the opposite — the run completed and the count is an
+ * observation about it. `exit 2` would make it a failing CI job, which the
+ * ruling forbids in as many words. So the convention is matched where the
+ * convention is about SEMANTICS (a named third state, printed rather than
+ * inferred, distinct from both `clean` and a finding) and deliberately not
+ * where it is about the exit code. The line carries a stable, greppable
+ * prefix — `UNRECOGNISED [<gate>]:` — so a round report can pick it up
+ * without any new merge-blocking context existing anywhere.
+ *
+ * ## Why the READ-SEAM rule prints NOT APPLICABLE instead of a number
+ *
+ * Measured, not assumed — see the note at that rule's own verdict. Its
+ * vocabulary is callee NAMES, and "a storage read I do not know about" cannot
+ * be counted without the spelling heuristic the vocabulary note refuses. A
+ * census over its three scan roots returns 25 candidates of which the
+ * majority (`JSON.parse`, `Array.isArray`, `getService`) are correctly out of
+ * scope, so a count there would be noise on day one. Printing NOT APPLICABLE
+ * rather than nothing is deliberate: an absent row cannot be told apart from
+ * "nobody looked", which is this card's own subject.
+ *
  * ## Usage
  *
  *     node scripts/check-durability-degradation-log-level.mjs             # audit (both rules)
@@ -2150,6 +2203,42 @@ function runReadSeamRule({ list = false } = {}) {
         console.log('');
     }
 
+    // ── The UNRECOGNISED verdict for THIS rule (#9747): stated, not invented ──
+    //
+    // The ruling asked for "N constructs in the scan roots matched no rule in
+    // this gate's vocabulary" as a third verdict. For the log-level rule above
+    // that is answerable and answered. For THIS rule it is not, and the honest
+    // act is to say so in the output rather than print a number.
+    //
+    // Measured, not asserted. This rule's vocabulary is DRIVER_READ_CALLEES
+    // (`find`/`findOne`/`count`, anchored to `IDataDriver`). A census over the
+    // three scan roots asking "which catches carry this rule's HARM shape —
+    // invent an unreported answer — while guarding a call the vocabulary does
+    // not name?" returns 25 sites, and the callee histogram is
+    // `Array.isArray` (5), `.raw` (3), a callback `fn` (3), `JSON.parse` (3),
+    // `getService` (2), `getDriver` (2), `toJSONSchema`, `stringify` … Most of
+    // them are not storage reads at all. Reporting those as "unrecognised"
+    // would put ~20 correct rows in the count on day one, which is the #8662
+    // failure the pilot must avoid: a correct out-of-scope verdict rendered as
+    // noise discredits the direction for every gate after it.
+    //
+    // Narrowing that 25 to the genuine storage reads requires exactly the
+    // name-heuristic ("a callee matching /find|query|fetch|getAll/") this
+    // rule's own vocabulary note refuses, and refuses for a measured reason.
+    // So: proposal 2 does not apply per-construct here. The line below is
+    // printed anyway, because a pilot gate that emitted NO row would leave a
+    // round report unable to tell "measured at zero" from "nobody looked" —
+    // this card's own subject.
+    console.log(
+        'UNRECOGNISED [durability-read-invention]: NOT APPLICABLE — this rule cannot enumerate what it ' +
+            'failed to recognise. Its vocabulary is callee NAMES anchored to IDataDriver ' +
+            `(${[...DRIVER_READ_CALLEES.keys()].join(', ')}), and the only way to count "a read I do not ` +
+            'know about" is the spelling heuristic the vocabulary note deliberately refuses. Measured ' +
+            'on this tree: 25 catches carry the harm shape while guarding a non-vocabulary call, and ' +
+            'the majority are JSON.parse / Array.isArray / getService — correctly out of scope. A count ' +
+            'here would be noise, so none is invented (#9747, H3).',
+    );
+
     const baseline = loadReadInventionBaseline();
     const allowed = new Map((baseline.entries ?? []).map((e) => [`${e.file}::${e.fn}`, e]));
     const violations = [];
@@ -2248,7 +2337,7 @@ function runReadSeamRule({ list = false } = {}) {
         ).length;
         const passThrough = seams.filter((s) => s.invents.some((i) => i.startsWith('pass-through'))).length;
         console.log(
-            `✓ read-seam invention (#5186 + #6451, ${READ_SEAM_SCAN_ROOTS.length} package roots): ${seams.length} read seam(s), none invents an unreported answer` +
+            `✓ read-seam invention (#5186 + #6451, ${READ_SEAM_SCAN_ROOTS.length} package roots, vocabulary ${[...DRIVER_READ_CALLEES.keys()].join('/')}): ${seams.length} read seam(s), none invents an unreported answer` +
                 (discriminated > 0 ? ` (${discriminated} answer on a type-discriminated benign branch)` : '') +
                 (passThrough > 0 ? ` (${passThrough} pass an input through, reported)` : '') +
                 (allowed.size > 0 ? ` (${allowed.size} baselined)` : '') +
@@ -2372,6 +2461,37 @@ function run({ list = false } = {}) {
             if (s.propagates && s.propagatesWhy) console.log(`      why: ${s.propagatesWhy}`);
         }
         console.log('');
+    }
+
+    // ── The UNRECOGNISED verdict (#9747) ─────────────────────────────────────
+    //
+    // Printed on EVERY run, before the failure branches: a count that appeared
+    // only on a clean run would be invisible exactly when a reader is looking
+    // hardest. It is a verdict, never a finding — nothing here changes the
+    // exit code. See "THE THIRD VERDICT" in the header for why this is not
+    // spelled `exit 2` even though the in-tree prior art is.
+    const unreadableSeams = seams.filter((s) => s.unreadable.length > 0);
+    const verdictRestsOnIt = unreadableSeams.filter(
+        (s) =>
+            !s.rethrows &&
+            !s.propagates &&
+            s.loud.length === 0 &&
+            s.quiet.length === 0 &&
+            s.conditional.length === 0,
+    );
+    console.log(
+        `UNRECOGNISED [durability-degradation-log-level]: ${unreadableSeams.length} of ${seams.length} ` +
+            'discovered seam(s) answer their catch through a call this checker could not read as a log ' +
+            `(${verdictRestsOnIt.length} where nothing else in the catch could be read either, so the ` +
+            'verdict rests entirely on a construct outside this vocabulary). Not a failure and not a ' +
+            'clean bill: it is the count of what the recognizer did not understand (#9747, ruling of ' +
+            '2026-08-18).',
+    );
+    for (const s of unreadableSeams) {
+        console.log(
+            `  unrecognised  ${s.file}:${s.catchLine}  guards ${s.callee}()  ` +
+                `could not read: ${s.unreadable.join(', ')}`,
+        );
     }
 
     const baseline = loadBaseline();
@@ -3179,7 +3299,17 @@ function selfTest() {
         const kindsMismatch =
             c.expectKinds !== undefined &&
             JSON.stringify(kinds) !== JSON.stringify([...c.expectKinds].sort());
-        if (got !== c.expectViolation || countMismatch || seamMismatch || sitesMismatch || kindsMismatch) {
+        // `expectUnrecognised` pins the #9747 census — how many discovered seams
+        // carry a call the log resolver could not read at all. It is deliberately
+        // independent of `expectViolation`: the whole point of the third verdict
+        // is that a seam can be correctly GREEN and still contain something this
+        // checker did not understand, and before #9747 that combination printed
+        // nothing anywhere.
+        const unrecognised = seams.filter((x) => x.unreadable.length > 0).length;
+        const unrecognisedMismatch =
+            c.expectUnrecognised !== undefined && unrecognised !== c.expectUnrecognised;
+        if (got !== c.expectViolation || countMismatch || seamMismatch || sitesMismatch || kindsMismatch
+            || unrecognisedMismatch) {
             failures++;
             console.error(
                 `  ✗ ${c.name}: expected violation=${c.expectViolation}` +
@@ -3187,7 +3317,9 @@ function selfTest() {
                     (c.expectSeams !== undefined ? ` seams=${c.expectSeams}` : '') +
                     (c.expectSitesUsed !== undefined ? ` sitesUsed=${JSON.stringify(c.expectSitesUsed)}` : '') +
                     (c.expectKinds !== undefined ? ` kinds=${JSON.stringify(c.expectKinds)}` : '') +
+                    (c.expectUnrecognised !== undefined ? ` unrecognised=${c.expectUnrecognised}` : '') +
                     `, got violation=${got} count=${findings.length} seams=${seams.length}` +
+                    (c.expectUnrecognised !== undefined ? ` unrecognised=${unrecognised}` : '') +
                     (c.expectSitesUsed !== undefined ? ` sitesUsed=${JSON.stringify(usedList)}` : '') +
                     (c.expectKinds !== undefined ? ` kinds=${JSON.stringify(kinds)}` : ''),
             );
