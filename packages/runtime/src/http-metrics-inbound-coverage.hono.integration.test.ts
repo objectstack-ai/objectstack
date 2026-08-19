@@ -593,7 +593,7 @@ describe('#9650 §4 — the transport seam that was ruled, and its edges', () =>
         kernel.use(
             new HonoServerPlugin({
                 port: 0,
-                cors: { enabled: true, origin: '*' },
+                cors: { enabled: true, origins: '*' },
                 observability: { metrics },
             }),
         );
