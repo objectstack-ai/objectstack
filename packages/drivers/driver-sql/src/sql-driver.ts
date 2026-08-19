@@ -887,7 +887,8 @@ function backendStatementFaultError(object: string, cause: unknown): Error {
  * one. Everything above is reasoning about how long a legitimate metadata-lock
  * holder can plausibly hold it — a property of the lock, not of who is waiting
  * on it. Boot's difference from the flush is what happens when the bound fires
- * (boot warns and carries on; the flush refuses), never how long it waits.
+ * (boot reports at `error` and carries on; the flush refuses), never how long
+ * it waits.
  *
  * ⛔ Deliberately NOT configurable, and deliberately NOT retried — the 2026-08-17
  * ruling's explicit minimality. Both wait for measured demand. A knob added now
@@ -3982,6 +3983,45 @@ export class SqlDriver implements IDataDriver {
     warn: (msg, meta) => console.warn(msg, meta ?? ''),
     error: (msg, meta) => console.error(msg, meta ?? ''),
   };
+
+  /**
+   * [#9609] Emit on the durability-degradation channel: `error` when the
+   * injected sink has one, `warn` when it does not.
+   *
+   * # Why a named method and not the inline `(this.logger.error ?? this.logger.warn)(…)`
+   *
+   * Two reasons, and the second is the load-bearing one.
+   *
+   * ① It names the AGENTS.md channel at the call site, so the level is read as
+   * a classification ("this is durability, not functionality") rather than as
+   * an adjective someone picked. The `error?` field above already documents
+   * that channel; this is its verb.
+   *
+   * ② `check-durability-degradation-log-level.mjs` cannot SEE the inline
+   * fallback. Its `loggerLevel()` matches the shape `<logger|log|console>.<level>(…)`
+   * — a call whose expression is a property access. `(a ?? b)(…)` is a call on
+   * a PARENTHESIZED expression, so the matcher returns nothing and the catch is
+   * reported as `catch swallows the failure with no log at all` — a false
+   * silent-swallow on code that is loud at runtime. Measured, not inferred:
+   * with `runWideningAlters` in the vocabulary, both widening catches reported
+   * exactly that while calling the fallback inline.
+   *
+   * ⛔ Deliberately NOT `this.logger.error?.(…)`, which the gate DOES recognise.
+   * That spelling drops the message entirely for a sink that has no `error` —
+   * turning a durability-critical failure into true silence in order to
+   * satisfy a matcher, which is the failure this whole rule exists to prevent. The gate follows
+   * same-file helpers transitively (its header says so, and the audit reports
+   * sites as `loud (error@… via <helper>())`), so routing through this method
+   * keeps the fallback AND is correctly classified.
+   *
+   * The pre-existing inline uses in this file (the ADR-0120 D4 index sites) are
+   * left alone on purpose — they are a separate change with a separate blast
+   * radius, and the matcher blind spot itself is filed rather than patched here.
+   */
+  protected logDurabilityFailure(msg: string, meta?: any): void {
+    if (this.logger.error) this.logger.error(msg, meta);
+    else this.logger.warn(msg, meta);
+  }
 
   /** Whether the underlying database is a SQLite variant (sqlite3 or better-sqlite3). */
   protected get isSqlite(): boolean {
@@ -8113,9 +8153,11 @@ export class SqlDriver implements IDataDriver {
    * better for boot than it is for an operator: a boot blocked on another
    * session's metadata lock waits 31,536,000 seconds having printed nothing,
    * and boot is the path nobody can retry from a prompt. Bounding it turns
-   * that into a bounded wait plus the widening's own `logger.warn` — which,
+   * that into a bounded wait plus the widening's own durability log — which,
    * until the bound reached here, could never fire at all: the ALTER never
-   * returned, so its catch never ran.
+   * returned, so its catch never ran. #9609 raised that line from `warn` to
+   * `error`; the level is the operator's only signal, and the swallow below is
+   * exactly what makes an un-run ALTER invisible without it.
    *
    * What stays gated on {@link flushDeferredSchemaDdl} is the REFUSAL, and
    * only it. Boot still swallows: correctness never depends on the widening
@@ -8150,8 +8192,8 @@ export class SqlDriver implements IDataDriver {
           } catch (err) {
             // #9542: the bound is armed on both callers, the ESCAPE is not.
             // Off the flush this rethrows the server's own error, which the
-            // widening's catch logs and swallows — boot's policy unchanged,
-            // now reached by a wait that ends.
+            // widening's catch reports and swallows — boot's policy
+            // unchanged, now reached by a wait that ends.
             if (this.flushingDeferredDdl && isMysqlLockWaitTimeout(err)) {
               throw deferredDdlLockWaitError(table, DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS, err);
             }
@@ -8219,9 +8261,14 @@ export class SqlDriver implements IDataDriver {
       // lock wait that the flush bounded is the operator's answer to a command
       // they ran, and dropping it would report success for work not done.
       if (isDeferredDdlLockWaitRefusal(err)) throw err;
-      this.logger.warn(
-        `[sql-driver] could not widen MySQL datetime columns on ${table}; ` +
-        `writes stay correct, but the 2038 ceiling and millisecond truncation remain`,
+      this.logDurabilityFailure(
+        `[sql-driver] FAILED to widen MySQL datetime columns on ${table} — the DDL did not run and boot ` +
+        `continued: the columns are still legacy TIMESTAMP, so every write to them keeps truncating ` +
+        `milliseconds and keeps the 2038 ceiling, while reads return exactly what was stored and nothing ` +
+        `else reports the table as un-widened. Fix: identify the metadata-lock holder with ` +
+        '`SHOW PROCESSLIST` or `performance_schema.metadata_locks` (or resolve the error in this ' +
+        'record\'s meta), end it, then re-run `os migrate apply` or restart — the widening is ' +
+        're-detected from `information_schema` and is idempotent, so re-running is safe.',
         { error: err instanceof Error ? err.message : String(err) },
       );
     }
@@ -8269,9 +8316,21 @@ export class SqlDriver implements IDataDriver {
    * keeps the milliseconds instead, matching the canonical form's resolution
    * and the `DATETIME(3)` precedent (#3942).
    *
-   * Failures are logged and swallowed for the usual reason; the only cost of a
-   * `TIME(0)` column that could not be widened is second-rounding of fractional
-   * writes — which is today's behaviour.
+   * Failures are swallowed for the usual reason; the only cost of a `TIME(0)`
+   * column that could not be widened is second-rounding of fractional writes —
+   * which is today's behaviour.
+   *
+   * # The level is `error`, and that is a separate question from the swallow (#9609)
+   *
+   * Swallow-vs-throw was adjudicated (#9542) and is unchanged: boot must not go
+   * down over a migration. `warn`-vs-`error` was never separately decided, and
+   * AGENTS.md → "Degradation log levels" decides it with one question — after
+   * the degradation, does the system still look normal from the outside while
+   * something it claims is persisted has not landed? Both halves hold: boot
+   * completes and serves traffic, and its `error` limb names this case by name
+   * ("DDL that was supposed to run did not"). Nothing else reports the column
+   * as un-widened, so the level IS the signal. Same reasoning, same level, on
+   * {@link migrateMysqlDatetimeColumns}.
    */
   protected async migrateMysqlTimeColumns(
     table: string,
@@ -8307,9 +8366,15 @@ export class SqlDriver implements IDataDriver {
       // lock wait that the flush bounded is the operator's answer to a command
       // they ran, and dropping it would report success for work not done.
       if (isDeferredDdlLockWaitRefusal(err)) throw err;
-      this.logger.warn(
-        `[sql-driver] could not widen MySQL time columns on ${table}; ` +
-        `fractional-second writes keep rounding to whole seconds`,
+      this.logDurabilityFailure(
+        `[sql-driver] FAILED to widen MySQL time columns on ${table} — the DDL did not run and boot ` +
+        `continued: the columns are still zero-precision TIME, so every fractional-second write to them ` +
+        `keeps being ROUNDED to whole seconds — the stored wall clock is not the one that was asked for — ` +
+        `while reads return exactly what was stored and nothing else reports the table as un-widened. ` +
+        'Fix: identify the metadata-lock holder with `SHOW PROCESSLIST` or ' +
+        '`performance_schema.metadata_locks` (or resolve the error in this record\'s meta), end it, then ' +
+        're-run `os migrate apply` or restart — the widening is re-detected from `information_schema` ' +
+        'and is idempotent, so re-running is safe.',
         { error: err instanceof Error ? err.message : String(err) },
       );
     }

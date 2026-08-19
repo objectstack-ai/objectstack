@@ -1104,7 +1104,7 @@ on, and every removed `ETL*` name fails at `tsc`.
 <Callout type="warn">
   **17.0.0 breaking:** the base delay here was `retryDelayMs` and is now
   `backoffMs` — same value, same meaning. `retryDelayMs` is rejected with the
-  rename; `os migrate meta --from 16` rewrites it for you.
+  rename; `os migrate meta --from 16` lists the edit for you to apply.
 </Callout>
 
 | Property | Type | Description |
@@ -1310,13 +1310,14 @@ to do it — never the message text:
 The first three never dispatched anything: no node executed, no record was
 written, and there is no run to look up. Only `400` describes a run.
 
-**The same table answers at the action door.** Invoking a `type: 'flow'`
-[action](/docs/ui/actions) through `POST /api/v1/actions/:object/:action`
-dispatches the same flow through the same service call, and it classifies the
-outcome the same way — the table above has one definition that both doors read,
-so they cannot answer one engine outcome differently. Declared endpoints
-(`type: 'flow'`) are the remaining exception: they still answer `200` for every
-outcome, so read `data.success` there rather than the status.
+**The same table answers at every door that dispatches a flow.** Invoking a
+`type: 'flow'` [action](/docs/ui/actions) through
+`POST /api/v1/actions/:object/:action`, and calling a declared `type: 'flow'`
+[endpoint](/docs/protocol/kernel/http-protocol) under `/api/v1/apps/`, both
+dispatch the same flow through the same service call and classify the outcome
+the same way — the table above has one definition that all three doors read, so
+they cannot answer one engine outcome differently. Branch on the status and
+`error.code` at any of them.
 
 ```
 POST /api/v1/automation/order_approval/trigger

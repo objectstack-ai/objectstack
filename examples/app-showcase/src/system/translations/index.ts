@@ -1,12 +1,21 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * English + Simplified Chinese labels for the core showcase objects.
+ * English + Simplified Chinese labels for the core showcase objects — and for
+ * the app shell those objects are read in.
  *
  * Covers EVERY field surfaced as a column on the showcase pages so a list never
  * mixes locales (the prior bundle translated only a handful, leaving columns
  * like Project / Assignee / Progress falling back to their English field label
  * next to translated 状态 / 优先级 — an obvious inconsistency on a zh-CN session).
+ *
+ * The `apps.showcase_app` block carries the sidebar — navigation items and
+ * group headers — for that same reason one level up: the columns were
+ * translated under an English menu, and the sentence above, scoped to columns,
+ * is exactly why nothing caught it. This is a description of what this file
+ * CONTAINS, not a wider guarantee: it does not claim every declared surface of
+ * the showcase is translated. `scripts/i18n-coverage-baseline.json` is the
+ * measure of what still is not.
  */
 export const ShowcaseTranslationBundle = {
   en: {
@@ -107,6 +116,35 @@ export const ShowcaseTranslationBundle = {
           stage: { label: 'Stage' },
           lead_score: { label: 'Lead score' },
           notes: { label: 'Notes' },
+        },
+      },
+      // [#9308 fixture 2] The share-link object. Translated on BOTH sides at
+      // once, key for key: `check-i18n-coverage` is a two-sided ratchet, so an
+      // `en` entry landing without its zh-CN mirror is what WIDENS the gap
+      // rather than closing it. Every string the object declares is here —
+      // label, pluralLabel, description, all seven field labels and both
+      // `status` options — which is what returns the count to its baseline
+      // instead of merely stopping its growth.
+      showcase_client_brief: {
+        label: 'Client Brief',
+        pluralLabel: 'Client Briefs',
+        // Byte-for-byte the string the object DECLARES. A bundle entry
+        // overrides the schema label for its locale, so a "tidied" English
+        // description here would silently rewrite the product copy under the
+        // guise of translating it — the en side's job is to mirror, not edit.
+        description:
+          'A client-facing project brief published by opaque share link — the showcase\'s `publicSharing` demonstration (ADR-0047).',
+        fields: {
+          title: { label: 'Title' },
+          summary: { label: 'Client Summary' },
+          project: { label: 'Project' },
+          status: {
+            label: 'Status',
+            options: { draft: 'Draft', published: 'Published' },
+          },
+          internal_notes: { label: 'Internal Notes' },
+          deal_value: { label: 'Deal Value' },
+          owner_id: { label: 'Owner' },
         },
       },
       showcase_invoice: {
@@ -445,6 +483,37 @@ export const ShowcaseTranslationBundle = {
           who_is_this: { label: '这是谁' },
         },
       },
+      // [#9308 fixture 2] The zh-CN mirror of the `en` block above, key for
+      // key. Renderings follow the ones this bundle already established rather
+      // than being coined fresh: 标题 / 项目 / 状态 / 备注 / 负责人 are the words
+      // showcase_task and showcase_invoice already use for the same concepts,
+      // which is the whole point of the file — a list must not mix a translated
+      // 状态 with an English Owner next to it.
+      showcase_client_brief: {
+        label: '客户简报',
+        // Chinese does not inflect for number, so the plural is the same word —
+        // the same shape 客户 / 客户 and 联系人 / 联系人 already take here.
+        pluralLabel: '客户简报',
+        // A faithful rendering of the SAME sentence the en side carries,
+        // including the ADR reference — dropping half of it in translation is
+        // the locale degradation this bundle exists to prevent.
+        description:
+          '面向客户的项目简报，通过不透明的分享链接对外发布——本示例应用对 `publicSharing` 的演示（ADR-0047）。',
+        fields: {
+          title: { label: '标题' },
+          summary: { label: '客户摘要' },
+          project: { label: '项目' },
+          status: {
+            label: '状态',
+            // 已发布 follows the 已完成 pattern this bundle uses for a state
+            // that has been reached, rather than the bare verb 发布.
+            options: { draft: '草稿', published: '已发布' },
+          },
+          internal_notes: { label: '内部备注' },
+          deal_value: { label: '交易金额' },
+          owner_id: { label: '负责人' },
+        },
+      },
       showcase_invoice: {
         label: '发票',
         pluralLabel: '发票',
@@ -647,6 +716,132 @@ export const ShowcaseTranslationBundle = {
           showcase_zoo_t_or: { label: 'OR —— select || rating' },
           showcase_zoo_t_not: { label: 'NOT —— !boolean' },
           showcase_zoo_t_ternary: { label: '三元 —— rating ? :' },
+        },
+      },
+    },
+    // ── The app shell: sidebar navigation ────────────────────────────────
+    // A THIRD key space, addressed by the navigation node's stable `id`
+    // regardless of tree depth: `apps.<app>.navigation.<id>.label`, applied by
+    // `translateApp` (`@objectstack/spec/system/i18n-resolver`) at the `/meta`
+    // boundary in `@objectstack/rest`. Nothing under `objects.*` answers for
+    // it — a nav entry whose label was authored ('Projects', not the bare
+    // `showcase_project`) keeps that authored label, so the object's translated
+    // `pluralLabel` never reaches the sidebar. Which is why a zh-CN session
+    // showed translated view tabs, columns, field labels and option values
+    // under an English sidebar: the bundle carried no app keys at all.
+    //
+    // Every labelled node of `ui/apps/index.ts` is here — 49 items and the 8
+    // `grp_*` group headers, the exact set `os lint` reports for this app.
+    // `nav_sep_reports` is a separator: it declares no label, so there is
+    // nothing to translate and no key for it.
+    //
+    // Wording reuses the vocabulary this bundle already established rather than
+    // minting a second word per idea: 项目 / 任务 / 客户 / 联系人 / 发票 / 设置
+    // from the object blocks, 任务清单 · 工时按状态分布 · 活动时间线 ·
+    // 工作地点地图 · 看板 · 日历 from `showcase_task._views`, 排期 from its
+    // `_sections`, 分流 from `showcase_inquiry._views.triage`, 业务单元 from
+    // the platform bundle's `sys_business_unit`.
+    apps: {
+      showcase_app: {
+        // The app's own name, rendered at the top of the same sidebar
+        // (`apps.<name>.label`, objectui's `useObjectLabel().appLabel`). Left
+        // untranslated it reproduces the mixed shell one line above the tree
+        // this block fixes. Setup and Account translate theirs; Studio keeps
+        // its product name. This app is named for what it does, not branded,
+        // so it translates.
+        label: '功能展示',
+        navigation: {
+          // Landing + the page-authoring teaching index — the two ungrouped
+          // entries above every group.
+          nav_capability_map: { label: '能力地图' },
+          nav_start_here: { label: '页面搭建' },
+
+          // Workspace — the app working like a real product.
+          grp_workspace: { label: '工作区' },
+          nav_my_work: { label: '我的工作' },
+          // 审批 matches the platform bundle's `group_approvals`; the page is
+          // the reviewer's queue, not the request list.
+          nav_review_queue: { label: '审批' },
+          nav_new_project_wizard: { label: '新建项目（向导）' },
+          // The object's own `pluralLabel` above (showcase_preference).
+          nav_settings: { label: '设置' },
+
+          // Data Model — one entry per object list. Each reads the word this
+          // bundle already gives that object.
+          grp_data: { label: '数据模型' },
+          nav_projects: { label: '项目' },
+          nav_tasks: { label: '任务' },
+          nav_accounts: { label: '客户' },
+          nav_contacts: { label: '联系人' },
+          nav_invoices: { label: '发票' },
+          // `showcase_expense_report` has no translated object label (it sits
+          // inside check-i18n-coverage's frozen baseline), so this renders the
+          // nav label directly; 报销单 is the standard word for the document.
+          nav_expense_reports: { label: '报销单' },
+          nav_products: { label: '产品' },
+          nav_teams: { label: '团队' },
+          nav_categories: { label: '分类' },
+          nav_business_units: { label: '业务单元' },
+          nav_field_zoo: { label: '字段动物园' },
+          nav_cascade: { label: '级联选择' },
+
+          // Data slices — the same object under a pre-applied filter. Each
+          // reads the option label of the value it filters on, so the entry
+          // says the same word as the cells it lists (进行中 / 紧急 / 评审中,
+          // from `showcase_task.fields.status|priority.options`).
+          grp_slices: { label: '数据切片（筛选）' },
+          nav_slice_in_progress: { label: '进行中的任务' },
+          nav_slice_urgent: { label: '紧急任务' },
+          nav_slice_review: { label: '评审中的任务' },
+
+          // Analytics.
+          grp_analytics: { label: '数据分析' },
+          nav_command_center: { label: '指挥中心（大屏）' },
+          nav_ops: { label: '交付运营' },
+          nav_revenue_pulse: { label: '营收概览（带筛选）' },
+          nav_charts: { label: '图表画廊' },
+          // View-scoped and report entries whose surface this bundle already
+          // names: 任务清单 is `showcase_task._views.tabular`, 工时按状态分布
+          // is `_views.chart` — the same list under the same word.
+          nav_report_tabular: { label: '任务清单' },
+          nav_report_summary: { label: '工时按状态分布' },
+          nav_report_chart: { label: '工时按状态分布（图表）' },
+          nav_report_matrix: { label: '状态 × 优先级' },
+          nav_report_joined: { label: '任务总览' },
+
+          // The page-authoring gallery, split by authoring KIND. All four
+          // headers share one word with `nav_start_here` above, exactly as the
+          // English shares "Authoring" with "Page Authoring".
+          grp_auth_structured: { label: '页面搭建 · 结构化' },
+          nav_gallery: { label: '组件画廊' },
+          nav_styling_gallery: { label: '样式（ADR-0065）' },
+          nav_page_variables: { label: '页面变量' },
+          nav_contact_form: { label: '联系表单' },
+          nav_project_workspace: { label: '新建项目 + 任务' },
+          nav_task_workbench: { label: '任务工作台' },
+          nav_task_triage: { label: '任务分流（标签页）' },
+          // The page's base filter hides completed projects rather than
+          // matching `status = active`, so this says 进行中 rather than 活跃.
+          nav_active_projects: { label: '进行中的项目' },
+
+          grp_auth_viz: { label: '页面搭建 · 可视化' },
+          nav_task_all_views: { label: '全部视图' },
+          nav_task_board: { label: '任务看板' },
+          nav_task_calendar: { label: '任务日历' },
+          // 画廊 is objectui's own word for the gallery view type, shared here
+          // with 组件画廊 / 图表画廊 above.
+          nav_task_gallery: { label: '任务画廊' },
+          nav_task_schedule: { label: '团队排期' },
+          nav_task_timeline: { label: '活动时间线' },
+          nav_task_map: { label: '工作地点地图' },
+
+          grp_auth_html: { label: '页面搭建 · HTML' },
+          nav_command_center_jsx: { label: '指挥中心' },
+
+          grp_auth_react: { label: '页面搭建 · React' },
+          nav_crm_workbench: { label: 'CRM 工作台 · 主从视图' },
+          nav_task_desk: { label: '任务处理台 · 抽屉与弹窗' },
+          nav_renewals_pipeline: { label: '续约管道 · 汇总与区块' },
         },
       },
     },

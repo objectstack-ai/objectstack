@@ -621,17 +621,42 @@ const opportunities = await engine.find('opportunity', {
 ```
 
 **On Delete Options:**
-- `set_null`: Set field to null when referenced record is deleted
+- `set_null`: Clear the reference when the referenced record is deleted. On a
+  single-value lookup the stored id becomes `null`; on a `multiple: true` lookup the
+  reference is a set, so only the deleted **member** is removed and the remaining
+  members are kept
 - `restrict`: Prevent deletion if references exist
 - `cascade`: Delete this record when referenced record is deleted
 
-> **Required foreign keys.** A `required: true` lookup cannot be nulled, so the
-> *default* `set_null` automatically escalates to `restrict` on such a field —
-> deleting the parent is refused with `409 DELETE_RESTRICTED` (the response
-> carries `dependentObject` and `dependentCount`) instead of a confusing
-> "&lt;field&gt; is required" validation error. To delete the children along with
-> the parent, set `deleteBehavior: cascade` explicitly. An explicit `set_null`
-> or `cascade` is always honored as written.
+> **Residual shape of a multi-value reference.** A `multiple: true` lookup emptied by
+> member removal is written as `[]`, **never `null`**. That is not a cascade
+> convention: the representation binds every writer — cascade repair, form clears and
+> API writes alike — so a reader of an array field never needs a null branch. The
+> guarantee is pinned by `FieldSchema`, in the `multiple` doc block of
+> `packages/spec/src/data/field.zod.ts` (rendered in the
+> [Field reference](/docs/references/data/field)).
+
+> **Required foreign keys.** A `required: true` lookup cannot be nulled, so
+> `set_null` escalates to `restrict` on such a field — deleting the parent is
+> refused with `409 DELETE_RESTRICTED` (the response carries `dependentObject`
+> and `dependentCount`) instead of a confusing "&lt;field&gt; is required"
+> validation error. To delete the children along with the parent, set
+> `deleteBehavior: cascade` explicitly.
+>
+> The escalation applies to **any** `set_null` on a required lookup — the
+> default and one written out as `deleteBehavior: set_null` alike. The engine
+> tests the *resolved* behavior, so it cannot tell the two apart: writing
+> `set_null` explicitly on a required lookup does not opt out of the refusal,
+> and it does not change the outcome in any way. `cascade` and `restrict` are
+> the two values that are honored as written. On a `multiple: true` required
+> lookup the refusal comes first as well, before the member-removal rule below
+> applies — so the parent delete is refused even when the child's set holds
+> other members.
+>
+> On `master_detail` the same reading applies from the other side: `restrict`
+> is the only value that deviates from `cascade`, so an explicit
+> `deleteBehavior: set_null` on a master-detail reference is *not* honored —
+> the child is cascaded away.
 >
 > The refusal carries **two** messages, for two audiences. `error` is written for
 > the person who clicked delete: it is rendered in the caller's locale from the

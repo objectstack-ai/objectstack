@@ -29,13 +29,21 @@
  * framework cannot infer.
  */
 
-const BINDINGS: ReadonlyArray<readonly [position: string, permissionSet: string]> = [
+/**
+ * The persona bindings, exported because they are the only place that answers
+ * "which permission sets does a position actually hold?" — the question a
+ * sharing rule with a `position` recipient has to answer before its grant can
+ * mean anything (a share row for a principal with no object-level `allowRead`
+ * is never consulted). `inert-wirings.test.ts` §6 reads this list.
+ */
+export const POSITION_PERMISSION_SET_BINDINGS: ReadonlyArray<readonly [position: string, permissionSet: string]> = [
   ['contributor', 'showcase_contributor'],
   ['manager', 'showcase_manager'],
   ['exec', 'showcase_executive'],
   ['auditor', 'showcase_auditor'],
   ['ops', 'showcase_ops'],
   ['field_ops_delegate', 'showcase_field_ops_delegate'],
+  ['client_liaison', 'showcase_client_liaison'],
   ['client_portal_user', 'showcase_guest_portal'],
 ];
 
@@ -72,7 +80,7 @@ async function findOneByName(ctx: BindHostContext, object: string, name: string)
 export function registerShowcasePositionBindings(ctx: BindHostContext): void {
   const run = async (): Promise<void> => {
     let created = 0;
-    for (const [positionName, setName] of BINDINGS) {
+    for (const [positionName, setName] of POSITION_PERMISSION_SET_BINDINGS) {
       const position = await findOneByName(ctx, 'sys_position', positionName);
       const set = await findOneByName(ctx, 'sys_permission_set', setName);
       if (!position?.id || !set?.id) {
@@ -100,7 +108,7 @@ export function registerShowcasePositionBindings(ctx: BindHostContext): void {
         });
       }
     }
-    ctx.logger?.info?.('[showcase] position bindings ensured', { created, total: BINDINGS.length });
+    ctx.logger?.info?.('[showcase] position bindings ensured', { created, total: POSITION_PERMISSION_SET_BINDINGS.length });
   };
 
   // Bind on `kernel:bootstrapped` — the anchor that fires only after every

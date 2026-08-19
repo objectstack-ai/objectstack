@@ -31,7 +31,18 @@ export interface JobLoggerLike {
 export interface DbJobAdapterOptions {
   /** Maximum executions kept in memory per job (default 100) */
   maxExecutions?: number;
-  /** Soft cap on sys_job_run rows recorded per job (defaults to none — handled by retention jobs) */
+  /**
+   * Record each scheduled or triggered execution as a `sys_job_run` row —
+   * inserted at the start of every attempt and updated to its terminal status
+   * when that attempt settles. Default **`true`**.
+   *
+   * This is an on/off switch for run history, NOT a retention cap: setting it to
+   * `false` means no rows are written at all — not the per-attempt rows above,
+   * and not {@link DbJobAdapter.replay}'s synthetic `trigger: 'replay'` row —
+   * so `sys_job_run` stays empty for this adapter and `listExecutionsByStatus`
+   * has nothing to read. The one thing unaffected either way is the `sys_job`
+   * row's own `last_status` / `run_count` / `failure_count` counters.
+   */
   recordRuns?: boolean;
 }
 
@@ -69,8 +80,13 @@ function uid(prefix: string): string {
  * Persisted side effects:
  *   - `schedule(name, …)` upserts a `sys_job` row (active=true)
  *   - `cancel(name)` marks the row inactive
- *   - every execution writes a `sys_job_run` row
- *   - every execution updates `sys_job.last_run_at / last_status / run_count / failure_count`
+ *   - every execution writes a `sys_job_run` row per attempt — unless
+ *     {@link DbJobAdapterOptions.recordRuns} is `false`, the on/off switch for
+ *     run history, which writes none of them, {@link DbJobAdapter.replay}'s
+ *     synthetic `trigger: 'replay'` row included.
+ *   - every execution updates `sys_job.last_run_at / last_status / run_count /
+ *     failure_count` — unconditionally: `recordRuns` gates the per-attempt rows
+ *     above, never these counters.
  *
  * The persistence is best-effort: a DB failure is logged but does not
  * break job execution. This keeps a healthy job system resilient to
@@ -137,6 +153,16 @@ export class DbJobAdapter implements IJobService {
     return this.inner.listJobs();
   }
 
+  /**
+   * Replay a job's most recent execution, tagging its run `trigger: 'replay'`.
+   *
+   * The synthetic `sys_job_run` row this writes is governed by
+   * {@link DbJobAdapterOptions.recordRuns} exactly as every other run row is:
+   * with the flag `false` the handler still runs and no row is written — not
+   * this synthetic one, and not the per-attempt row the execution itself
+   * would produce. `sys_job_run` is run history, not an audit trail; an
+   * operator who switched history off gets nothing durable from this path.
+   */
   async replay(name: string, data?: unknown): Promise<void> {
     // Same execution path as trigger but tag the run as 'replay'.
     const handlers = (this.inner as any).jobs?.get?.(name);
@@ -144,7 +170,13 @@ export class DbJobAdapter implements IJobService {
     // Reuse trigger; the wrap function uses a closure flag — simpler:
     // expose by calling inner.trigger with a marker via data is intrusive,
     // so we record a synthetic run row before/after to ensure 'replay' tag.
-    const runId = await this.startRun(name, 'replay');
+    //
+    // Gated exactly as `wrap`'s per-attempt row is: `recordRuns` is the on/off
+    // switch for run history and this row is run history, so an operator who
+    // turned it off gets no replay rows either. Ungated, this was the one write
+    // that ignored the flag — the artifact of the gate landing on one of two
+    // `startRun` call sites, never a designed carve-out for replay.
+    const runId = this.recordRuns ? await this.startRun(name, 'replay') : undefined;
     try {
       await this.inner.trigger(name, data);
       // The wrap already recorded a run; settle our synthetic row the same way
@@ -161,12 +193,12 @@ export class DbJobAdapter implements IJobService {
       const [last] = await this.inner.getExecutions(name, 1);
       const status = last?.status;
       if (status === 'degraded' || status === 'timeout' || status === 'failed') {
-        await this.finishRun(runId, status, last.error);
+        if (runId) await this.finishRun(runId, status, last.error);
       } else {
-        await this.finishRun(runId, 'success');
+        if (runId) await this.finishRun(runId, 'success');
       }
     } catch (err) {
-      await this.finishRun(runId, 'failed', err instanceof Error ? err.message : String(err));
+      if (runId) await this.finishRun(runId, 'failed', err instanceof Error ? err.message : String(err));
       throw err;
     }
   }

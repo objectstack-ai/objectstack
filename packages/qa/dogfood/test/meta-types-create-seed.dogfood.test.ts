@@ -86,14 +86,27 @@ describe('dogfood: /meta/types exposes authoritative create seeds (spec-derived 
     expect(await viaTypes.json()).toEqual(await viaBase.json());
   }, 30_000);
 
-  // The disguise, pinned: an unknown type answers the catch-all's shape, and
-  // `/meta/types` must NOT look like that. Without this, a future registration
-  // that puts `/meta/types` back under `/meta/:type` would still return 200 and
+  // The disguise, pinned: `/meta/types` must NOT be the `/meta/:type` catch-all
+  // answering under a different name. Without this, a future registration that
+  // puts `/meta/types` back under `/meta/:type` would still return 200 and
   // every assertion above would fail with a confusing "entries is empty".
+  //
+  // [#9488] The contrast used to be `200 {type, items: []}` vs `200 {entries}`.
+  // The catch-all now REFUSES a type name that names nothing — it used to serve
+  // it as a real-but-empty collection, which was indistinguishable from a type
+  // that exists and holds nothing, and disagreed with the write door for the
+  // same name. That makes this contrast sharper rather than weaker, so the
+  // test's own claim is unchanged and only the catch-all's half is restated.
+  //
+  // ADR-0112: `code` AND `status`. A bare "not 200" would pass on any refusal
+  // at all, including the 404 that would mean the catch-all had stopped being
+  // mounted — which is the failure this file exists to notice.
   it('is not the /meta/:type catch-all wearing a 200', async () => {
     const bogus = await stack.apiAs(token, 'GET', '/meta/zzz_not_a_type');
-    expect(bogus.status).toBe(200);
-    expect(await bogus.json()).toEqual({ type: 'zzz_not_a_type', items: [] });
+    expect(bogus.status).toBe(400);
+    const bogusBody = (await bogus.json()) as Record<string, any>;
+    expect(bogusBody.code ?? bogusBody.error?.code).toBe('INVALID_REQUEST');
+    expect(JSON.stringify(bogusBody)).toContain("'zzz_not_a_type' is not a metadata type");
 
     const real = await stack.apiAs(token, 'GET', '/meta/types');
     const body = (await real.json()) as Record<string, unknown>;

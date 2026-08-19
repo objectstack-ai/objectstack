@@ -24,8 +24,12 @@
  *   1. assign the dev-seeded admin to `manager` / `finance` / `legal` so they
  *      are a resolvable approver on every demo request (and can act in the
  *      inbox);
- *   2. provision a phone-based demo user so the "phone sign-in surfaces" show
- *      a real number in the All Users list + record detail;
+ *   2. provision the two demo personas — a phone-based user so the "phone
+ *      sign-in surfaces" show a real number in the All Users list + record
+ *      detail, and an auditor — AND give each a better-auth credential account
+ *      so they can genuinely sign in (#9308 fixture 1), which is what makes any
+ *      two-identity demo (会签, submitter-side gating, OOO delegation)
+ *      observable without inventing accounts by hand;
  *   3. launch one flow per approval behavior through the real automation engine,
  *      so genuine, resumable pending requests land in the inbox — Invoice Dual
  *      Sign-off (`unanimous`: finance ∧ legal), High-Value Committee
@@ -44,7 +48,12 @@
  * this file really creates, or a reassignment writes an inbox row addressed to
  * nobody (#7746). One registry, two consumers — so the two cannot drift apart.
  */
-import { ADMIN_EMAIL, PHONE_DEMO_USER, AUDITOR_DEMO_USER } from './demo-personas.js';
+import {
+  ADMIN_EMAIL,
+  PHONE_DEMO_USER,
+  AUDITOR_DEMO_USER,
+  DEMO_PERSONA_PASSWORD,
+} from './demo-personas.js';
 
 const SYS = { isSystem: true } as const;
 
@@ -67,6 +76,31 @@ interface ApprovalDemoContext {
   getService?: <T = unknown>(name: string) => Promise<T>;
   logger?: { info?: (...a: unknown[]) => void; warn?: (...a: unknown[]) => void };
   hook?: (event: string, handler: () => Promise<void> | void) => void;
+}
+
+/**
+ * The slice of better-auth's own `$context` this file uses to make a persona
+ * LOGINABLE — the same two members `plugin-auth`'s admin `set-user-password`
+ * endpoint reaches for when it provisions a credential for a user that arrived
+ * without one (`admin-user-endpoints.ts` → `AuthContextLike`). Structural, so
+ * the showcase gains no dependency on better-auth's types.
+ */
+interface AuthContextLike {
+  password: { hash: (password: string) => Promise<string> };
+  internalAdapter: {
+    createAccount: (account: {
+      userId: string;
+      providerId: string;
+      issuer: string;
+      providerAccountId: string;
+      password: string;
+    }) => Promise<unknown>;
+  };
+}
+
+/** The `auth` service `plugin-auth` registers (its `AuthManager`). */
+interface AuthManagerLike {
+  getAuthContext: () => Promise<AuthContextLike>;
 }
 
 /** Minimal shape of the automation engine we drive (see service-automation). */
@@ -137,6 +171,95 @@ async function assignPositions(
 }
 
 /**
+ * Read the issuer better-auth actually minted for the DEV ADMIN's local
+ * password account, so a persona's credential row is stamped with the same one.
+ *
+ * ## Why this is read and not written
+ *
+ * better-auth 1.7 keys account identity on `(issuer, providerAccountId)`:
+ * `findAccountByKey` looks a credential up under the issuer better-auth mints
+ * for itself, so a row carrying any other value — or none — is INVISIBLE and
+ * sign-in fails `INVALID_EMAIL_OR_PASSWORD` behind a "User not found" warn that
+ * points at the `sys_user` row, which is fine, rather than at the account, which
+ * is not. That one field is the whole reason a hand-hashed password was never
+ * enough, and it is what four checklist items had recorded as a knownGap.
+ *
+ * The value is `plugin-auth`'s to own (`CREDENTIAL_ISSUER` in
+ * `backfill-account-issuer.ts`), and an example app re-spelling a platform
+ * constant is how the two start disagreeing. So it is DERIVED from the admin
+ * account this same runtime already minted: whatever better-auth used there is
+ * by construction what a sign-in will look these personas up under.
+ *
+ * Undefined when it cannot be derived — never a guess. `backfill-account-issuer`
+ * makes the same call for the same reason: "a wrong issuer is indistinguishable
+ * from a missing one at sign-in, and it also occupies the unique slot the
+ * correct row needs."
+ */
+async function credentialIssuerFromAdmin(
+  ctx: ApprovalDemoContext,
+  adminUserId: string,
+): Promise<string | undefined> {
+  const account = await findOne(ctx, 'sys_account', {
+    user_id: adminUserId,
+    provider_id: 'credential',
+  });
+  const issuer = account?.issuer;
+  return typeof issuer === 'string' && issuer.length > 0 ? issuer : undefined;
+}
+
+/**
+ * Give a provisioned persona a better-auth credential account, so it can
+ * actually SIGN IN (#9308 fixture 1).
+ *
+ * Goes through better-auth's own `$context` — its hasher and its
+ * `internalAdapter.createAccount` — rather than writing `sys_account` by hand:
+ * the same path `plugin-auth`'s admin `set-user-password` takes for a user
+ * onboarded without a credential (see `admin-user-endpoints.ts`). A raw insert
+ * would have to reproduce better-auth's hash format and its id/column mapping,
+ * which is two more things that can silently drift out of agreement with the
+ * code that reads them back.
+ *
+ * Idempotent: a persona that already holds a credential account is left alone,
+ * so a persistent dev database keeps whatever password its operator set.
+ */
+async function ensureCredentialAccount(
+  ctx: ApprovalDemoContext,
+  userId: string,
+  issuer: string,
+  password: string,
+): Promise<boolean> {
+  const existing = await findOne(ctx, 'sys_account', {
+    user_id: userId,
+    provider_id: 'credential',
+  });
+  if (existing) return false;
+  try {
+    const auth = await ctx.getService?.<AuthManagerLike>('auth');
+    if (!auth || typeof auth.getAuthContext !== 'function') {
+      ctx.logger?.warn?.('[showcase] approval-demo: no auth service — persona stays un-loginable', { userId });
+      return false;
+    }
+    const authCtx = await auth.getAuthContext();
+    const hashed = await authCtx.password.hash(password);
+    await authCtx.internalAdapter.createAccount({
+      userId,
+      providerId: 'credential',
+      issuer,
+      providerAccountId: userId,
+      password: hashed,
+    });
+    ctx.logger?.info?.('[showcase] approval-demo persona is now loginable', { userId });
+    return true;
+  } catch (err) {
+    ctx.logger?.warn?.('[showcase] approval-demo credential provisioning failed (persona stays un-loginable)', {
+      userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return false;
+  }
+}
+
+/**
  * Provision a demo persona row (best-effort). Returns the user id, whether it
  * was just created or already present, so callers can route positions at it.
  */
@@ -156,10 +279,11 @@ async function ensureDemoUser(
     ctx.logger?.info?.('[showcase] approval-demo persona provisioned', { email: user.email });
     return user.id;
   } catch (err) {
-    // Non-fatal: sign-in still needs a better-auth account; this row just makes
-    // the persona visible in the All Users list + record detail, and routable
-    // as an approver.
-    ctx.logger?.warn?.('[showcase] approval-demo persona insert failed (surfaces only)', {
+    // Non-fatal, and the whole persona is lost when it happens: with no row
+    // there is nothing for `ensureCredentialAccount` to attach a credential to,
+    // so the persona is neither visible in the All Users list nor routable as an
+    // approver nor able to sign in.
+    ctx.logger?.warn?.('[showcase] approval-demo persona insert failed (persona unavailable)', {
       email: user.email,
       error: err instanceof Error ? err.message : String(err),
     });
@@ -263,6 +387,33 @@ export function registerShowcaseApprovalDemo(ctx: ApprovalDemoContext): void {
     // holders and the request stays open until each group has answered.
     const auditorId = await ensureDemoUser(ctx, AUDITOR_DEMO_USER);
     if (auditorId) await assignPositions(ctx, auditorId, ['auditor'], organizationId, 'auditor');
+
+    // [#9308 fixture 1] Make both personas SIGN-INABLE. Provisioning them as
+    // rows was never the hard half — the credential account was, and the issuer
+    // is the one field that decides whether better-auth can find it. Derived
+    // once from the admin's own account and reused for both personas; when it
+    // cannot be derived, nothing is written (a wrong issuer is worse than an
+    // absent one — see `credentialIssuerFromAdmin`).
+    //
+    // This is what turns "a second user exists" into "a second user can act":
+    // the per-group 会签 demo needs Ada to decide the `finance` group under her
+    // OWN identity rather than through the admin's override, the submitter-side
+    // viewer gating needs Mei to look at her own pending request, and an
+    // out-of-office delegation is only falsifiable when the delegate holds a
+    // separate bearer token.
+    const credentialIssuer = await credentialIssuerFromAdmin(ctx, adminId);
+    if (!credentialIssuer) {
+      ctx.logger?.warn?.(
+        '[showcase] approval-demo: could not derive the credential issuer from the dev admin — '
+        + 'demo personas stay un-loginable (sign in as the admin instead)',
+      );
+    } else {
+      for (const personaId of [submitterId, auditorId]) {
+        if (personaId) {
+          await ensureCredentialAccount(ctx, personaId, credentialIssuer, DEMO_PERSONA_PASSWORD);
+        }
+      }
+    }
 
     let engine: AutomationEngineLike | undefined;
     try {

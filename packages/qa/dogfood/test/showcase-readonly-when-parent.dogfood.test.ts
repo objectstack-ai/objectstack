@@ -11,8 +11,10 @@
 // `previous` and had no `parent`, so every one of those predicates faulted, the
 // fail-OPEN branch let the write through, and a single PATCH rewrote the
 // quantity and unit price of a settled invoice's line — HTTP 200, value
-// persisted, while the grid still drew the cell locked. ADR-0057 D10 makes the
-// SERVER the enforcement point and the client courtesy; here it was inverted.
+// persisted, while the grid still drew the cell locked. The rule this repo
+// cites as ADR-0057 D10 (an attribution, not a resolvable anchor — #9628)
+// makes the SERVER the enforcement point and the client courtesy; here it was
+// inverted.
 //
 // This is the issue's own repro, run against the shipped metadata rather than a
 // hand-built fixture: the unit + engine suites in `@objectstack/objectql` pin

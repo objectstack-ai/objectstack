@@ -129,7 +129,23 @@ function baseProtocol(overrides: Record<string, any> = {}) {
             version: 'v0',
             routes: { data: '', metadata: '', ui: '', auth: '/auth' },
         }),
-        getMetaTypes: vi.fn().mockResolvedValue([]),
+        // [#9488] The listing must advertise what this double SERVES. The
+        // list route now refuses a `:type` that neither the static spelling
+        // contract nor this listing carries, and `widget` is in neither by
+        // construction — it is chosen precisely because it is outside every
+        // map. A double that served a document for it while advertising an
+        // empty type set would be refused before the localization under test
+        // ever ran, and the failure would read as an i18n regression.
+        //
+        // BOTH spellings, because `getMetaItems` below answers both (that is
+        // what `canonicalType` is for) and a listing narrower than the double's
+        // own reach would be the same inconsistency one fold further along.
+        // Derived from `RAW_BY_NAME` rather than restated, so a document added
+        // there arrives advertised.
+        getMetaTypes: vi.fn(async () => ({
+            types: Object.keys(RAW_BY_NAME).flatMap((t) => [t, `${t}s`]),
+            entries: [],
+        })),
         getMetaItems: vi.fn(async ({ type }: any) => {
             const doc = documentFor(type);
             return doc ? [doc] : [];

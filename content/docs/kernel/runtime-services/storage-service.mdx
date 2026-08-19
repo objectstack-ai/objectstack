@@ -7,6 +7,46 @@ description: File/object storage contract for upload/download and presigned URL 
 
 - **Stability:** `stable`
 - **Canonical source:** `packages/spec/src/contracts/storage-service.ts`
+- **Registry slot:** `file-storage` — **not** `storage`; resolve with
+  `ctx.getService('file-storage')`. See [Accessor name vs registry
+  slot](#accessor-name-vs-registry-slot).
+
+## Accessor name vs registry slot
+
+`services.storage` is this chapter's **accessor spelling** — the name the contract surface
+is documented under. The **registry slot** is the string the kernel actually keys the
+implementation by, and for storage the two differ:
+
+| | value |
+|:--|:--|
+| Documented accessor | `services.storage` |
+| Registry slot | `file-storage` |
+| Resolve with | `ctx.getService('file-storage')` |
+
+This is the **only** service in this chapter where they differ; for the other seven the
+accessor and the slot are the same word. There is no `storage` alias — nothing calls
+`registerService('storage', ...)` anywhere in the platform — so resolving the accessor
+spelling throws rather than returning an empty value:
+
+```ts
+ctx.getService('storage');       // ✗ throws: [Kernel] Service 'storage' not found
+ctx.getService('file-storage');  // ✓ the IStorageService documented below
+```
+
+`file-storage` is the canonical spelling, not an implementation detail: it is the member
+listed in `CoreServiceName` (`packages/spec/src/system/core-services.zod.ts`),
+`CORE_SERVICE_PROVIDER` maps it to `@objectstack/service-storage`, and it is the key the
+`/api/v1/discovery` document reports this service's availability under.
+
+<Callout type="warn" title="Not this: the client SDK storage accessor">
+A second `storage` accessor exists and is easy to reach for by mistake.
+`ObjectStackClient.storage` (`packages/client/src/index.ts`) is the **browser/HTTP client**
+surface — `upload(file, scope)`, `getDownloadUrl(fileId)`, `getPresignedUrl(req)`,
+`initChunkedUpload(req)` — which calls `/api/v1/storage` over the wire. It is a different
+shape from the server-side `IStorageService` documented on this page, which takes storage
+**keys** and returns `Buffer`s. Neither one is reachable through
+`ctx.getService('storage')`.
+</Callout>
 
 ## Core Methods
 

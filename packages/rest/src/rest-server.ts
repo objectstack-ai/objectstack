@@ -39,6 +39,7 @@ import {
     // (`domains/meta.ts`), not a REST-local restatement of it. See the module's
     // own header for why the decision belongs to the caller and why it lives in
     // `metadata-core`.
+    organizationIdForMetaRead,
     organizationIdForMetaWrite,
 } from '@objectstack/metadata-core';
 import { RouteManager, type RouteEntry } from './route-manager.js';
@@ -69,7 +70,7 @@ import type { ErrorCode } from '@objectstack/spec/api';
 // that export rather than re-declaring the literal beside a "mirrors spec" comment.
 import { IMPORT_JOB_MAX_ROWS } from '@objectstack/spec/api';
 import { PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
-import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
+import { PLURAL_TO_SINGULAR, canonicalMetaUrlType, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import { preferredLocaleFromHeader } from '@objectstack/spec/system';
@@ -1507,6 +1508,134 @@ export class RestServer {
     }
 
     /**
+     * [#9488] Refuse a `GET /meta/:type` LIST whose `:type` segment names no
+     * metadata type — the read half of the verdict the WRITE door has enforced
+     * since #8421.
+     *
+     * ## The disagreement this closes
+     *
+     * `PUT /api/v1/meta/totally_invented_type/x` answers `400` /
+     * `INVALID_REQUEST` / *"'totally_invented_type' is not a metadata type"*
+     * (`refuseUnmintableMetaType` in `@objectstack/metadata-protocol`), while
+     * `GET /api/v1/meta/totally_invented_type` answered `200
+     * {"items":[]}` — so the two doors disagreed about which type names exist.
+     * A 200-with-an-empty-collection is indistinguishable from "this type
+     * exists and holds nothing", which is the same trap
+     * `GET /meta/app?id=<unknown>` was filed for: a typo'd or renamed type
+     * reads as an empty surface rather than as a mistake.
+     *
+     * ## Why the static verdict alone is NOT the rule here
+     *
+     * #8421 considered and REJECTED raising `unrecognisedMetaTypeRefusal` on
+     * the read entries, for a reason that is still true: the live type set
+     * legitimately holds keys the static contract does not. An ordinary
+     * `registerApp` puts `data`, `kind`, `package` and `policy` into
+     * `SchemaRegistry`, `GET /api/v1/meta/types` enumerates exactly that set,
+     * and a plugin's own type enters the live set as a side effect of
+     * registering items of it (`content/docs/plugins/adding-a-metadata-type.mdx`:
+     * *"A third-party package's type instead enters the live set as a side
+     * effect of registering items of that type"*). Refusing on the static
+     * verdict alone would answer `400` for types this same service advertises
+     * — trading one declared-≠-served gap for another, which is the objection
+     * verbatim.
+     *
+     * So the rule is the UNION of the two authorities the platform already
+     * has, and neither is restated here: the static spelling contract
+     * (`unrecognisedMetaTypeRefusal`, the predicate the write door consults)
+     * and the live listing (`getMetaTypes`, the one `GET /meta/types` serves).
+     * A name in neither is a name nothing can serve, which is exactly the
+     * population this card is about. ⛔ Do not hand-write a list of type names
+     * here — both halves are derived (Prime Directive #8).
+     *
+     * ## Order, cost, and the failure mode
+     *
+     * The static verdict runs FIRST and is silent for all 68 accepted
+     * spellings, so an ordinary list request pays nothing at all; the live
+     * probe is reached only by a request already headed for a refusal. That is
+     * the same shape the write door uses (static verdict, then
+     * `metaTypeNamespaceExists`), for the same reason.
+     *
+     * It fails OPEN. A host whose protocol carries no `getMetaTypes`, or whose
+     * listing cannot be read, keeps today's answer rather than earning a
+     * refusal — inventing "no such type" from an unreachable authority would
+     * be an existence claim stated while the authority was unreachable, the
+     * very thing `metaTypeNamespaceExists` refuses to do in the write door.
+     * The cost is that the defect survives an outage; the alternative is
+     * refusing a type that does exist.
+     *
+     * ## Scope — deliberately the LIST door only
+     *
+     * ⛔ Not the compound arity. `/meta/lead/views/all_leads` carries an OBJECT
+     * name in the `:type` segment, which no static contract can enumerate;
+     * that is exemption 1 of the write door and it is honoured here by simply
+     * not being this route. ⛔ Not the single-item doors: measured on this
+     * branch, `GET /meta/<invented>/x` already answers `404
+     * RESOURCE_NOT_FOUND` and the `/references`, `/layers`, `/history`,
+     * `/audit`, `/diff`, `/published` limbs already answer `501
+     * NOT_IMPLEMENTED` — all distinguishable from a served answer, so none of
+     * them carries this defect.
+     *
+     * @returns nothing; THROWS the refusal, so the handler's own `catch`
+     *          shapes it through `handleRouteError` and the wire body is
+     *          byte-identical to the write door's for the same condition. A
+     *          hand-built body here would author a second dialect for one
+     *          condition and would tick this file's `check:route-envelope`
+     *          dialect ratchets UP.
+     */
+    private async refuseUnknownMetaListType(p: any, urlType: unknown): Promise<void> {
+        if (typeof urlType !== 'string' || urlType.length === 0) return;
+        const unrecognised = unrecognisedMetaTypeRefusal(urlType);
+        if (!unrecognised) return;
+        if (await this.metaTypeIsLive(p, urlType)) return;
+        const err: any = new Error(
+            `[invalid_request] '${unrecognised.type}' is not a metadata type. The platform declares `
+            + `no such type and this deployment has registered no items under it, so an empty `
+            + `collection here would be indistinguishable from a type that exists and holds `
+            + `nothing. GET /api/v1/meta/types lists the types this deployment carries.`,
+        );
+        err.code = 'INVALID_REQUEST';
+        err.status = 400;
+        throw err;
+    }
+
+    /**
+     * [#9488] Does this deployment's LIVE type set carry this `/meta/:type`
+     * segment? The second half of {@link refuseUnknownMetaListType}'s union.
+     *
+     * Reads the same accessor `GET /meta/types` serves, and tolerates both
+     * shapes it is known to arrive in — the protocol's `{ types, entries }`
+     * and the bare `string[]` older hosts and stubs return. Both sides of the
+     * comparison are folded through `canonicalMetaUrlType`, the platform's own
+     * spelling fold, so a registry storing the plural and a URL carrying the
+     * singular still meet; nothing about spelling is re-derived here.
+     *
+     * `getMetaTypes` is called optionally on purpose: four `getMetaItems`
+     * call sites in this file already are, because a host may occupy the
+     * protocol slot with an object that does not implement the whole surface.
+     *
+     * Returns `true` — "cannot disprove, so do not refuse" — for every
+     * unreadable outcome: no accessor, a rejected call, or a listing in a
+     * shape this cannot read. See the caller's doc for why that direction.
+     */
+    private async metaTypeIsLive(p: any, urlType: string): Promise<boolean> {
+        let listing: unknown;
+        try {
+            listing = await (p as any)?.getMetaTypes?.();
+        } catch {
+            return true;
+        }
+        const types: unknown = Array.isArray(listing)
+            ? listing
+            : (listing && typeof listing === 'object' && Array.isArray((listing as any).types))
+                ? (listing as any).types
+                : null;
+        if (!Array.isArray(types)) return true;
+        const wanted = canonicalMetaUrlType(urlType);
+        return types.some((t: unknown) => typeof t === 'string'
+            && (t === urlType || canonicalMetaUrlType(t) === wanted));
+    }
+
+    /**
      * [#3963] Is this request a READ of the audience-gated book/doc surface —
      * the one metadata surface whose own declaration (`book.audience`) can
      * authorize an anonymous caller?
@@ -2420,11 +2549,29 @@ export class RestServer {
         // not in its two callers, so both entry points answer identically.
         if (refuseRepeatedQueryParams(req, res, ['package'])) return;
         const layeredPackageId = req.query?.package || undefined;
+        // [#9454] State the ORG scope, exactly as the `/published` overlay read
+        // already does. Without it the layered view resolved the env-wide row
+        // only, so an author who had just saved an org overlay opened Studio to
+        // `overlay: null` and the code layer — the write receipted as live, the
+        // editor reporting it absent. This is the DIAGNOSTIC view of what is
+        // stored per layer, so an unstated scope does not merely miss a row: it
+        // misreports the very thing being diagnosed.
+        // ⚠️ NOT a new org-resolution seam — `resolveExecCtx` is memoised per
+        // request (WeakMap keyed by `req`), the same result 40+ handlers here
+        // already share. Registry-gated via `organizationIdForMetaRead` so a
+        // non-overridable type keeps reading env-wide (see that predicate for
+        // why naming the org unconditionally would resurrect #6190's phantoms).
+        const layeredCtx = await this.resolveExecCtx(environmentId, req)
+            .catch(() => undefined);
+        const layeredOrganizationId = organizationIdForMetaRead(
+            req.params.type, layeredCtx?.tenantId,
+        );
         const layered = await p.getMetaItemLayered({
             type: req.params.type,
             name: req.params.name,
             ...(layeredPackageId ? { packageId: layeredPackageId } : {}),
             ...(environmentId ? { environmentId } : {}),
+            ...(layeredOrganizationId ? { organizationId: layeredOrganizationId } : {}),
         });
         // [ADR-0106 D5(4)] The layered view is a schema-bearing exit —
         // `code`, `overlay` and `effective` are each a full object schema.
@@ -3797,6 +3944,15 @@ export class RestServer {
                         const packageId = req.query?.package || undefined;
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const p = await this.resolveProtocol(environmentId, req);
+                        // [#9488] …and BEFORE any listing work: a `:type` that
+                        // names no metadata type is refused here rather than
+                        // served as a real-but-empty collection, which the write
+                        // door has refused since #8421. See
+                        // {@link refuseUnknownMetaListType} for the union it
+                        // consults, why the static verdict alone is the wrong
+                        // rule on a READ door, and why it throws instead of
+                        // building a body.
+                        await this.refuseUnknownMetaListType(p, req.params?.type);
                         // ADR-0033/0037 draft-overlay preview: `?preview=draft`
                         // overlays pending drafts on the active list, exactly as
                         // the runtime dispatcher's /metadata/:type route does —
@@ -3805,11 +3961,25 @@ export class RestServer {
                         // published-only world.
                         const previewDrafts = typeof req.query?.preview === 'string'
                             && req.query.preview.toLowerCase() === 'draft';
+                        // [#9454] The scoped listing is the second door the
+                        // card measured absent (`?object=` unchanged after a
+                        // runtime PUT). `getMetaItems` unions the env-wide and
+                        // org scopes under org-wins precedence — but only when
+                        // the caller names an org; unnamed, it returns the
+                        // env-wide partition alone and the author's new item is
+                        // simply not in the list. Same memoised `resolveExecCtx`
+                        // and same registry gate as every other read door here.
+                        const listCtx = await this.resolveExecCtx(environmentId, req)
+                            .catch(() => undefined);
+                        const listOrganizationId = organizationIdForMetaRead(
+                            req.params.type, listCtx?.tenantId,
+                        );
                         const items = await p.getMetaItems({
                             type: req.params.type,
                             packageId,
                             ...(previewDrafts ? { previewDrafts: true } : {}),
                             ...(environmentId ? { environmentId } : {}),
+                            ...(listOrganizationId ? { organizationId: listOrganizationId } : {}),
                         } as any);
 
                         // RBAC-filter app metadata for authenticated users so
@@ -4616,6 +4786,22 @@ export class RestServer {
                         // the cache exclusion here AND by the gate itself in
                         // the uncached branch below; one predicate, two sites.
                         const isAudienceGatedType = metaType === 'book' || metaType === 'doc';
+                        // [#9454] ONE org resolution for BOTH arms of the fork
+                        // below, computed ABOVE it on purpose. `view` takes the
+                        // cached arm; `dashboard` bypasses it via
+                        // `isDashboardType` and takes the uncached arm. A scope
+                        // threaded into only one arm fixes exactly ONE of the
+                        // five org-overridable types while the receipt keeps
+                        // claiming success for the rest — the half-fix this
+                        // card's pin exists to forbid. Hoisting it makes the
+                        // two arms incapable of disagreeing about scope.
+                        // ⚠️ NOT a new seam: memoised per request, and this
+                        // handler resolves the same context again further down.
+                        const readCtx = await this.resolveExecCtx(environmentId, req)
+                            .catch(() => undefined);
+                        const readOrganizationId = organizationIdForMetaRead(
+                            req.params.type, readCtx?.tenantId,
+                        );
                         if (metadata.enableCache && p.getMetaItemCached && !isAppType && !isDashboardType && !isDraftRead && !previewDrafts && !packageScoped && !isAudienceGatedType) {
                             // [ADR-0106 D3] When a projection applies, the
                             // protocol is NOT allowed to judge the conditional
@@ -4646,6 +4832,14 @@ export class RestServer {
                                 cacheRequest,
                                 ...(cacheLocale ? { locale: cacheLocale } : {}),
                                 ...(environmentId ? { environmentId } : {}),
+                                // [#9454] The cached door is the `view` arm, and
+                                // it used to hard-code a two-key delegation to
+                                // `getMetaItem` — it could not express an org at
+                                // all, so this threading is paired with a widened
+                                // signature in `metadata-protocol`. The org also
+                                // enters the ETag there, so the validator states
+                                // the scope rather than inheriting it.
+                                ...(readOrganizationId ? { organizationId: readOrganizationId } : {}),
                             } as any);
 
                             if (result.notModified) {
@@ -4756,6 +4950,11 @@ export class RestServer {
                                 packageId,
                                 ...(stateParam === 'draft' ? { state: 'draft' } : {}),
                                 ...(previewDrafts ? { previewDrafts: true } : {}),
+                                // [#9454] The uncached arm — `dashboard`'s route
+                                // (`isDashboardType`), and every read the cache
+                                // exclusions divert here. Same hoisted scope as
+                                // the cached arm above, by construction.
+                                ...(readOrganizationId ? { organizationId: readOrganizationId } : {}),
                             } as any) as Record<string, any>;
 
                             // [#5563] `getMetaItem` answers the envelope
@@ -5333,7 +5532,53 @@ export class RestServer {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
                     const p = await this.resolveProtocol(environmentId, req);
                     if (typeof (p as any).auditMetaItem !== 'function') {
-                        res.json({ events: [] });
+                        // [#9426 / ADR-0110 D3] A MISS and a FAULT are different
+                        // facts, and this branch is the second one: the resolved
+                        // protocol cannot read an audit trail AT ALL, so the
+                        // question was never asked. Answering `{ events: [] }`
+                        // reported it as the first — "the trail WAS read and this
+                        // item has no entries" — on a COMPLIANCE surface, where
+                        // Studio's 审计日志 / Audit log tab renders the empty case
+                        // as *nobody touched this item*. That is precisely the
+                        // claim a compliance reader must not be given on false
+                        // pretenses.
+                        //
+                        // ⚠️ This is NOT the unprovisioned-table condition this
+                        // route's header comment describes. That one lives one
+                        // layer down, inside
+                        // `ObjectStackProtocolImplementation.auditMetaItem`,
+                        // which catches a failed read and returns `{ events: [] }`
+                        // after a `console.warn` — a path that requires the method
+                        // to EXIST and to be CALLED. The two are separate frames
+                        // in separate packages, and this branch returns BEFORE the
+                        // call, so refusing here leaves the unprovisioned-table
+                        // answer exactly as it was.
+                        //
+                        // Refusing HERE rather than asserting at assembly is
+                        // deliberate, and is the reasoning PR #9425 landed one
+                        // route over. `auditMetaItem` is not a member of
+                        // `RestProtocol` (= `DataProtocol & MetadataProtocol`) and
+                        // is not declared in `packages/spec` at all — it is an
+                        // ADR-0076 D9 server-only extension, which is why it is
+                        // reached through a runtime cast. A host that implements
+                        // the DECLARED contract exactly is therefore a CONFORMING
+                        // deployment that lands here with no type error, and a
+                        // boot-time assertion would promote an undeclared optional
+                        // extension into a required one — a `packages/spec`
+                        // contract decision, not a route one.
+                        //
+                        // Envelope per #7035: the ADR-0112 NESTED
+                        // `{ error: { code, message } }` the sibling `/meta` 501
+                        // refusals converged on — never the bare-string or
+                        // sibling-`code` dialects, which make `body.error.code`
+                        // read `undefined` and which `check:route-envelope`
+                        // counts, shrink-only, on this file.
+                        res.status(501).json({
+                            error: {
+                                code: 'NOT_IMPLEMENTED',
+                                message: 'protocol.auditMetaItem() is not available in this kernel',
+                            },
+                        });
                         return;
                     }
                     // [#6877] Same `Number(...)` → `NaN` → dropped-limit shape as
@@ -5927,10 +6172,23 @@ export class RestServer {
                         // read this route mirrors.
                         if (refuseRepeatedQueryParams(req, res, ['package'])) return;
                         const packageId = req.query?.package || undefined;
+                        // [#9454] The compound-name door serves EVERY type
+                        // through one generic `getMetaItem` — including the
+                        // org-overridable ones — so it needs the same scope the
+                        // single-segment read it mirrors now states. Left
+                        // org-blind it would be the surviving route that keeps
+                        // answering from the wrong partition after the other
+                        // doors are fixed.
+                        const compoundCtx = await this.resolveExecCtx(environmentId, req)
+                            .catch(() => undefined);
+                        const compoundOrganizationId = organizationIdForMetaRead(
+                            req.params.type, compoundCtx?.tenantId,
+                        );
                         const envelope = await p.getMetaItem({
                             type: req.params.type,
                             name: compoundName,
                             packageId,
+                            ...(compoundOrganizationId ? { organizationId: compoundOrganizationId } : {}),
                         } as any) as Record<string, any>;
                         // [ADR-0106 D5(4)] Compound names express sub-resources,
                         // and no object uses one today — but this route serves

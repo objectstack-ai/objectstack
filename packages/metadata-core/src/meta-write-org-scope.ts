@@ -115,3 +115,51 @@ export function organizationIdForMetaWrite(
     if (activeOrganizationId === undefined) return undefined;
     return declaresOrgOverride(type) ? activeOrganizationId : undefined;
 }
+
+/**
+ * [#9454] The read-side twin: the `organizationId` a metadata READ of `type`
+ * should carry, given the session's active organization.
+ *
+ * ── Why a read door has to ask this at all ────────────────────────────────
+ *
+ * `organizationIdForMetaWrite` above stops the runtime MINTING org-scoped rows
+ * for types that have no per-org read channel. It says nothing about serving
+ * the rows that types WITH such a channel legitimately produce — and the REST
+ * `/meta` read doors were never told. A `PUT` of an org-overridable type
+ * (`view`, `dashboard`, `report`, `translation`, `email_template`) landed an
+ * org-scoped row, answered `200 state:'active'`, and then every REST read door
+ * asked for the row WITHOUT naming an organization. `getMetaItem` resolves
+ * `(orgId ? findOverlay(orgId) : undefined) ?? findOverlay(null)`, so an
+ * org-less read resolves the env-wide row only: the author's work was
+ * persisted, receipted as live, and served by nothing. That is #9454.
+ *
+ * ── Why it is registry-derived and NOT a bare `ctx?.tenantId` ─────────────
+ *
+ * ⛔ The tempting shorter fix — pass the active org at every read site — is
+ * wrong in a way that only shows on databases with history. Deployments that
+ * ran before the #6190 ruling contain PHANTOM org-scoped rows for types the
+ * registry declares non-overridable (`object`, `flow`, … — the runtime used to
+ * stamp `organization_id` on every type; `reportUnhydratableOrgScopedRows` is
+ * the audit that warns about the survivors). Boot hydration walks past those
+ * rows deliberately, so they are dead. A read door that named the org for
+ * EVERY type would resolve them again — resurrecting, on the read side, exactly
+ * the phantom writes #6190 stopped minting, and serving a document that
+ * vanishes at the next restart. Gating the read on the same static registry
+ * flag keeps the two sides answering one question.
+ *
+ * ⇒ This is deliberately the same predicate as the write side, not a parallel
+ * one: read scope and write scope CANNOT drift, because both are
+ * {@link declaresOrgOverride}. If a registry entry flips `allowOrgOverride`,
+ * both doors move together and there is nothing to keep in sync by hand.
+ *
+ * Returns the active org for a type the registry declares per-org overridable,
+ * and `undefined` — env-wide, today's behaviour for every read — otherwise.
+ * An anonymous or org-less caller reads exactly what it reads today.
+ */
+export function organizationIdForMetaRead(
+    type: string,
+    activeOrganizationId: string | undefined,
+): string | undefined {
+    if (activeOrganizationId === undefined) return undefined;
+    return declaresOrgOverride(type) ? activeOrganizationId : undefined;
+}

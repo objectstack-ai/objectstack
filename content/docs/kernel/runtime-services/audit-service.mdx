@@ -1,23 +1,101 @@
 ---
 title: services.audit
-description: Audit write bridge currently used by settings/runtime integrations.
+description: Write ingress for audit events that are not CRUD — today, auth session events.
 ---
 
 # `services.audit`
 
 - **Stability:** `experimental`
-- **Canonical source:** `packages/services/service-settings/src/settings-service.types.ts`
+- **Canonical source:** `packages/plugins/plugin-audit/src/auth-event-audit.ts`
+- **Registry slot:** `audit` — resolve with `ctx.getService('audit')`.
 
-`services.audit` is currently a lightweight sink abstraction used by runtime services (for example `service-settings`) to emit append-only audit entries.
+`services.audit` is the kernel service slot that `@objectstack/plugin-audit` registers
+during `init()`. It is the **write ingress for audit events that are not CRUD** — today,
+auth session events — and every call appends one row to `sys_audit_log`.
+
+Record-level `create` / `update` / `delete` rows do **not** travel through this slot. The
+same plugin writes those from ObjectQL lifecycle hooks, with no service call involved, so
+resolving this service is only ever necessary for events the CRUD lifecycle cannot see.
 
 ## Method
 
+The slot's entire surface is one method:
+
 ```ts
-services.audit.record(entry: {
+services.audit.recordAuthEvent(event: {
+  action: 'login' | 'logout';
+  userId: string;
+  sessionId?: string;
+  organizationId?: string;
+  ipAddress?: string;
+  userAgent?: string;
+  actor?: string;
+  context?: Record<string, unknown>;
+}): Promise<void>
+```
+
+- **`action`** is a closed literal union. Every `sys_audit_log` field is `readonly` and
+  validation skips readonly/system fields, so the object's declared action vocabulary
+  validates nothing in either direction — a misspelled action would be accepted silently.
+  This union is the only structural protection an author gets, which is why the caller
+  hands over an **event** (what happened) rather than a row (what to store).
+- **`userId`** is required and must be a real `sys_user` id — it lands on the strict
+  `user_id` lookup.
+- **`sessionId`** lands on `record_id`, with `object_name` fixed to `sys_session`, so the
+  ledger row is navigable to the session it describes.
+- **`organizationId`** is the session's active organization. It stamps the row's tenant
+  columns, and an unstamped row is one that non-administrator members can never see
+  through the security layer's predicate.
+- **`actor`** is the principal that *caused* the event when that is not the subject — an
+  administrator's user id on an impersonation session. Omitted, the subject is recorded as
+  having acted for themselves.
+- **`context`** is free-form and is serialized into `metadata`, e.g. the endpoint that
+  produced the event (`/sign-in/email`, `/sign-out`).
+
+## Notes
+
+- This API is intentionally write-only. It is not a query API.
+- For querying audit history, use `services.data` against `sys_audit_log`/`sys_activity` objects.
+- The slot is registered in `init()`, while the data engine only resolves at
+  `kernel:ready`. The sink therefore resolves its engine per call, so it is safe to hold a
+  reference from the moment the plugin initializes.
+- `@objectstack/plugin-auth` is the only in-repo consumer. It resolves the slot lazily
+  through a locally-declared structural surface and calls it from the session lifecycle,
+  so neither package depends on the other.
+
+## Typical Errors
+
+`recordAuthEvent` **never throws**. An audit write must not turn a valid sign-in into an
+error, so every failure is caught, and callers do not need a surrounding `try`/`catch`.
+The consequences are worth knowing precisely, because none of them are visible from the
+caller's side:
+
+- A failed ledger insert is reported at `error` level **once per process** — every later
+  failure drops to `debug` — and the row is simply lost. Nothing retries it. The sign-in
+  itself succeeded and returned 200, so the shipped `auth_events` list view and the
+  system-overview widgets keep showing an empty, healthy-looking screen.
+- The call **silently no-ops** when no data engine resolves, or when `userId` is absent.
+  A caller that passes an event without a subject records nothing and is told nothing.
+- The most common cause of a failing insert is a datasource split rather than a broken
+  write: `sys_audit_log` carries an ADR-0057 `audit` lifecycle class, which routes it to a
+  dedicated `telemetry` datasource whenever one is registered — `os dev` provisions one by
+  default as a sibling SQLite file. A "no such table" here usually means the write ran
+  against a different datasource than the one the table was created in.
+
+## Not this: the settings audit sink
+
+A second, unrelated audit shape shares the word *audit* and is easy to reach for by
+mistake. `SettingsAuditSink` — canonical source
+`packages/services/service-settings/src/settings-service.types.ts` — is a
+**constructor-injected** sink that `service-settings` calls after a settings write lands:
+
+```ts
+record(entry: {
   namespace: string;
   key: string;
   scope: SpecifierScope;
   userId?: string;
+  tenantId?: string;
   actor?: string;
   action: 'set' | 'reset';
   valueDigest: string;
@@ -26,11 +104,8 @@ services.audit.record(entry: {
 }): Promise<void> | void
 ```
 
-## Notes
-
-- This API is intentionally write-only.
-- For querying audit history, use `services.data` against `sys_audit_log`/`sys_activity` objects.
-
-## Typical Errors
-
-Sink implementations should avoid throwing into user paths: the runtime caller (for example `service-settings`) awaits `record()` without a surrounding `try`/`catch`, so a throwing sink propagates its error and fails the caller's write.
+It is never registered as, or resolved from, this service slot, and the settings service
+wraps the call in its own `try`/`catch` so a throwing sink cannot fail the write it
+describes. Calling `getService('audit').record({ ... })` therefore fails with a
+`TypeError`: the resolved object has no `record`, and it accepts neither `'set'` nor
+`'reset'`.

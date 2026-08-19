@@ -29,6 +29,7 @@ export {
   AuditorPosition,
   OpsPosition,
   FieldOpsDelegatePosition,
+  ClientLiaisonPosition,
   ClientPortalUserPosition,
   allPositions,
 } from './positions.js';
@@ -42,6 +43,7 @@ export {
   MemberDefaultPermissionSet,
   GuestPortalPermissionSet,
   FieldOpsDelegatePermissionSet,
+  ClientLiaisonPermissionSet,
   allPermissionSets,
 } from './permission-sets.js';
 
@@ -51,9 +53,7 @@ export {
 } from './capabilities.js';
 
 export {
-  RedProjectSharingRule,
-  HighValueRedProjectRule,
   NewInquiryFieldOpsRule,
-  ContributorTaskSharingRule,
+  KeyAccountQualifiedContactRule,
   allSharingRules,
 } from './sharing-rules.js';

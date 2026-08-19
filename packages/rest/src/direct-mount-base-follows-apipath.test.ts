@@ -238,7 +238,15 @@ describe('#6306 — with `apiPath` set, the direct-mount routes follow it', () =
 
     const ext = resolveRoute(table, 'GET', `${discovery.routes.datasources}/pg_main/external/tables`);
     expect(ext, 'the advertised datasources base must be the base of the mounted family').toBeDefined();
-    expect((await drive(ext!)).statusCode).toBe(200);
+    // [#9686] The federation family now carries the same anonymous floor as the
+    // package route above, wired from the same composition and the same
+    // resolver — so this boot, which has no auth service in its ctx, answers
+    // 401 here for the same reason it does two lines up. Reading 200 here was
+    // the asymmetry #9686 closed: one composition, two registrars, one of them
+    // handed the caller's identity. The base-placement subject of this pin is
+    // unchanged — a routing miss still fails the `toBeDefined()` above. The
+    // gate itself is pinned in `external-datasource-routes-auth-guard.test.ts`.
+    expect((await drive(ext!)).statusCode).toBe(401);
   });
 });
 

@@ -117,10 +117,16 @@
 //   count(...)` on a locally-bound variable is pseudo-code and is never read.
 //   Anything whose type is `any`, or which carries an index signature, is not
 //   reported -- absence of a property there is not evidence.
+//
+//   That fence is a CHARACTER CLASS, and #9610 measured what happens when it is
+//   spelled as a consuming alternation instead of a zero-width assertion: the
+//   receiver in `kernel.use(SomePlugin.configure(…))` became unreachable, because
+//   the outer call had already eaten the `(` in front of it. See extractMemberCalls.
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, posix, resolve } from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
 // Anchored to the script, not to cwd: the verdict must not depend on where the
@@ -337,14 +343,31 @@ export function extractMemberCalls(markdown, localNames) {
     for (const { n, text } of fence.lines) {
       // Skip the import statements themselves and single-line comments.
       if (/^\s*(import\b|\/\/|\*|\/\*)/.test(text)) continue;
-      const rx = /(^|[^\w$.'"`])([A-Za-z_$][\w$]*)\s*\.\s*([A-Za-z_$][\w$]*)\s*\(/g;
+      // ⛔ The leading boundary is ASSERTED, never consumed (#9610). The obvious
+      // spelling -- `(^|[^\w$.'"`])` -- eats the character in front of the receiver,
+      // and `rx` is global, so a receiver beginning at the very next character after
+      // a previous match has no boundary left to match against. A match always ends
+      // at its own `(`, which makes the swallowed position exactly `outer(Inner.m(`
+      // -- and `kernel.use(SomePlugin.configure({…}))` is the house spelling of every
+      // README this gate was built for, so the blind spot was the NORMAL position,
+      // not a corner. Measured on the published regex, one space apart:
+      //
+      //   kernel.use(CacheServicePlugin.configure({…}))   -> extracted: kernel.use
+      //   kernel.use( CacheServicePlugin.configure({…}))  -> extracted: both
+      //
+      // A negative lookbehind is zero-width, so nothing is consumed and the `^` arm
+      // folds in (a negative lookbehind is satisfied at position 0). The character
+      // class is byte-for-byte the old one, so the fence is unchanged: `a.b.c(` and
+      // `'str'.trim(` stay out -- now in the nested position too, which is the only
+      // position this change newly reaches.
+      const rx = /(?<![\w$.'"`])([A-Za-z_$][\w$]*)\s*\.\s*([A-Za-z_$][\w$]*)\s*\(/g;
       let m;
       while ((m = rx.exec(text)) !== null) {
-        if (!wanted.has(m[2])) continue;
-        const key = `${m[2]}.${m[3]}`;
+        if (!wanted.has(m[1])) continue;
+        const key = `${m[1]}.${m[2]}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        out.push({ line: n, object: m[2], member: m[3] });
+        out.push({ line: n, object: m[1], member: m[2] });
       }
     }
   }
@@ -660,7 +683,20 @@ function freshRemedy() {
 // Run
 // ---------------------------------------------------------------------------
 
-function run() {
+/**
+ * THE published-markdown population, derived once for every gate that needs it.
+ *
+ * "Published" is `private` unset AND a non-empty `files` array AND the file
+ * matched by one of its patterns, minus `MARKDOWN_EXCLUDED`. That definition is
+ * load-bearing for more than one gate now, and two gates deriving it separately
+ * would disagree the first time a package's `files` array changed — silently,
+ * each still green. So it is computed HERE and imported, never re-derived.
+ *
+ * @param {string} [caller] gate name to attribute an empty-population error to
+ * @returns {{ members: {dir: string, manifest: any}[], byName: Map<string, any>,
+ *             docs: {pkg: string, file: string, text: string}[] }}
+ */
+export function publishedDocs(caller = SELF) {
   const members = workspaceDirs().map((dir) => ({
     dir,
     manifest: JSON.parse(readFileSync(join(ROOT, dir, 'package.json'), 'utf8')),
@@ -681,9 +717,16 @@ function run() {
       });
     }
   }
+  // A scan that read nothing is the #4690 failure: indistinguishable from a
+  // clean tree in the output, and green either way. Never a skip.
   if (docs.length === 0) {
-    throw new Error(`${SELF}: no published markdown found — the scan read nothing (#4690).`);
+    throw new Error(`${caller}: no published markdown found — the scan read nothing (#4690).`);
   }
+  return { members, byName, docs };
+}
+
+function run() {
+  const { byName, docs } = publishedDocs();
 
   // Pass 1: which workspace type entries do the READMEs actually reach?
   const targets = new Map(); // "<name><subpath>" -> { name, subpath, abs, declared, missing }
@@ -954,6 +997,44 @@ function selfTest() {
     [],
   );
 
+  // -- the adversarial position (#9610), which the fixture above cannot reach ----
+  // Every case above puts the wanted receiver where no earlier match on the line
+  // has consumed anything in front of it. That is why a gate written with
+  // self-tests in BOTH directions still shipped blind to the shape below: the
+  // receiver starts at the character immediately after a DISCARDED `X.y(` match,
+  // with nothing separating them. It is also the house spelling of the six READMEs
+  // this gate exists for, so it is the likeliest wrong rewrite of any of them.
+  const nestedReceiver = [
+    '```typescript',
+    "import { CacheServicePlugin } from '@objectstack/service-cache';",
+    'await kernel.use(CacheServicePlugin.configure({ adapter: "memory" }));',
+    '```',
+  ].join('\n');
+  eq(
+    'extractMemberCalls — a receiver directly inside a discarded call is still read',
+    extractMemberCalls(nestedReceiver, ['CacheServicePlugin']).map((c) => `${c.object}.${c.member}`),
+    ['CacheServicePlugin.configure'],
+  );
+
+  // The other direction, in that SAME position: reaching it must not widen the
+  // fence. Property access, all three quote styles, and the CORRECT `new X(`
+  // spelling stay silent when nested exactly as above.
+  const nestedRejected = [
+    '```typescript',
+    "import { CacheServicePlugin } from '@objectstack/service-cache';",
+    'await kernel.use(wrapper.CacheServicePlugin.configure({}));',
+    "console.log('CacheServicePlugin.configure(');",
+    'console.log("CacheServicePlugin.configure(");',
+    'console.log(`CacheServicePlugin.configure(`);',
+    'await kernel.use(new CacheServicePlugin({ adapter: "memory" }));',
+    '```',
+  ].join('\n');
+  eq(
+    'extractMemberCalls — the nested position does not widen the fence',
+    extractMemberCalls(nestedRejected, ['CacheServicePlugin']),
+    [],
+  );
+
   // -- specifier splitting ------------------------------------------------------
   eq('splitSpecifier — scoped root', splitSpecifier('@objectstack/spec'), {
     name: '@objectstack/spec',
@@ -1065,6 +1146,25 @@ function selfTest() {
     ['@objectstack/kernel|packages/kernel/README.md|member|@objectstack/kernel|Kernel.configure'],
   );
 
+  // ...and the same fabricated static written the way plugin registration is
+  // actually written: nested inside another call, no separator (#9610). This ran
+  // GREEN end to end on the real tree before the boundary became zero-width.
+  const fabricatedStaticNested = {
+    pkg: '@objectstack/kernel',
+    file: 'packages/kernel/README.md',
+    text: [
+      '```typescript',
+      "import { Kernel } from '@objectstack/kernel';",
+      'await app.use(Kernel.configure({}));',
+      '```',
+    ].join('\n'),
+  };
+  eq(
+    'analyzeDocument — a fabricated static nested inside another call is reported',
+    analyzeDocument(fabricatedStaticNested, resolveFake).map((f) => f.id),
+    ['@objectstack/kernel|packages/kernel/README.md|member|@objectstack/kernel|Kernel.configure'],
+  );
+
   // Undeclared subpath: the packaged surface says something the source does not.
   const badSubpath = {
     pkg: '@objectstack/service-analytics',
@@ -1108,14 +1208,18 @@ function selfTest() {
   );
 }
 
-if (process.argv.includes('--self-test')) {
-  selfTest();
-  process.exit(0);
-}
-
-try {
-  process.exit(run());
-} catch (err) {
-  console.error(`✗ check:published-readme-exports — ${err.message}`);
-  process.exit(1);
+/* Run only when invoked as a program — `publishedDocs` and the extractors are
+ * exported so a sibling gate can reuse this gate's population without the
+ * import itself building a TypeScript program and sweeping the workspace. */
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  if (process.argv.includes('--self-test')) {
+    selfTest();
+    process.exit(0);
+  }
+  try {
+    process.exit(run());
+  } catch (err) {
+    console.error(`✗ check:published-readme-exports — ${err.message}`);
+    process.exit(1);
+  }
 }

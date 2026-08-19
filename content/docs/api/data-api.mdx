@@ -222,6 +222,19 @@ Delete a record.
 
 **Response**: `{ object: "account", id: "1", success: true }`
 
+Every relation pointing at the deleted record honours its own `deleteBehavior`
+(`cascade` / `set_null` / `restrict`) — with one substitution: on a
+`required: true` lookup, `set_null` is escalated to `restrict` and the delete is
+refused with `409 DELETE_RESTRICTED`. That happens whether the `set_null` was
+defaulted or written out explicitly (see
+[Required foreign keys](/docs/protocol/objectql/types#lookup)). On a
+`multiple: true` reference where `set_null` does run, it
+removes just the deleted id from the array and keeps the rest, and a reference set
+emptied that way reads back as `[]` — never `null`, so a client that branches on
+`null` for "no link" misses the emptied case (the `multiple` doc block in
+`packages/spec/src/data/field.zod.ts`, rendered in the
+[Field reference](/docs/references/data/field)).
+
 ---
 
 ## Batch Operations

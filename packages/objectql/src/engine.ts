@@ -1329,6 +1329,31 @@ export interface HookEntry {
   priority: number;
   packageId?: string;
   /**
+   * [#9719] Opt-in: ALSO dispatch this handler ONCE with the whole-operation
+   * context when a predicate (`multi: true`) delete arrives with no caller
+   * predicate at all (`options.where` absent or `null`) — BEFORE any matched
+   * row is resolved.
+   *
+   * Why the extra dispatch exists: since #5038/#5574 the predicate path
+   * dispatches `beforeDelete` per matched row, with `input.id` bound — so a
+   * guard that refuses the OPERATION SHAPE (the #4757 unscoped-multi-delete
+   * refusal on `sys_attachment`) never saw the shape it guards: the by-id
+   * branch of the handler shadowed it on every dispatch, and a zero-match
+   * unscoped delete dispatched nothing at all. "Nothing to authorize" and
+   * "nothing was ever queried" are different verdicts, so the shape check
+   * cannot ride the per-row fan-out; it needs the one dispatch that happens
+   * regardless of what the predicate matches.
+   *
+   * Deliberately a REGISTRATION declaration, not an engine-wide rule: the
+   * engine stays neutral (no behaviour change for objects whose guards do not
+   * declare it — generalizing the refusal is a separate product decision), and
+   * the policy — who is refused, with what error — stays in the ONE handler
+   * that already declares and tests it. Valid on `beforeDelete` registrations
+   * only ({@link assertValidUnscopedMultiDeleteFlag}); dispatched by
+   * {@link ObjectQL.dispatchUnscopedMultiDeleteHooks}.
+   */
+  dispatchUnscopedMultiDelete?: boolean;
+  /**
    * Original metadata-form `Hook` definition this entry was bound from
    * (when registered via `bindHooksToEngine`). Pure code-paths that call
    * `engine.registerHook` directly leave this undefined.
@@ -1551,6 +1576,31 @@ function assertHookScopeNotSelfCancelling(
     + 'subtracts from a WIDER allow face — widen `object` (or drop it for a global hook) or '
     + 'remove the overlapping names from `excludeObjects`; if the hook really should not be '
     + 'registered, do not register it.',
+  );
+}
+
+/**
+ * [#9719] Registration-time refusal for {@link HookEntry.dispatchUnscopedMultiDelete}
+ * on any event other than `beforeDelete`.
+ *
+ * The flag is consumed by exactly one dispatch site — `ObjectQL.delete()`'s
+ * predicate branch — so on every other event it would register "successfully"
+ * and never fire: ADR-0078's silently inert declaration, the same shape the
+ * two scope asserts above refuse. Statically decidable, so refused at the
+ * door rather than warned about. (Extending the whole-operation dispatch to
+ * `beforeUpdate`'s predicate path would be a product-behaviour decision of its
+ * own, not a widening to make this assert quieter.)
+ */
+function assertValidUnscopedMultiDeleteFlag(
+  dispatchUnscopedMultiDelete: boolean | undefined,
+  event: string,
+): void {
+  if (!dispatchUnscopedMultiDelete || event === 'beforeDelete') return;
+  throw new Error(
+    `[ObjectQL] Hook '${event}' declares \`dispatchUnscopedMultiDelete\`, which only the `
+    + "'beforeDelete' dispatch reads — on this event the flag would register successfully and "
+    + 'then never fire (ADR-0078: no silently inert declaration). Register the guard on '
+    + "'beforeDelete', or drop the flag.",
   );
 }
 
@@ -2103,6 +2153,12 @@ export class ObjectQL implements IObjectQLEngine {
     excludeObjects?: string | string[];
     priority?: number;
     packageId?: string;
+    /**
+     * [#9719] Opt-in whole-operation dispatch for an UNSCOPED predicate
+     * delete (`multi: true`, no `where`) — see {@link HookEntry.dispatchUnscopedMultiDelete}.
+     * Valid on `beforeDelete` registrations only.
+     */
+    dispatchUnscopedMultiDelete?: boolean;
     /** Original metadata Hook definition (set by `bindHooksToEngine`). */
     meta?: any;
     /** Stable name from metadata (set by `bindHooksToEngine`). */
@@ -2117,6 +2173,8 @@ export class ObjectQL implements IObjectQLEngine {
     assertValidHookObject(options?.object, event);
     // [#6573] Two well-formed faces that cancel out (`'account'` minus `'account'`).
     assertHookScopeNotSelfCancelling(options?.object, options?.excludeObjects, event);
+    // [#9719] The unscoped-multi-delete flag on an event whose dispatch never reads it.
+    assertValidUnscopedMultiDeleteFlag(options?.dispatchUnscopedMultiDelete, event);
     // [#3195] Guard against enum-vs-dispatch drift: a hook on an event the
     // engine never triggers would register "successfully" and then silently
     // never fire. Warn loudly rather than swallow it. Not a hard reject — a
@@ -2139,6 +2197,7 @@ export class ObjectQL implements IObjectQLEngine {
       excludeObjects: options?.excludeObjects,
       priority: options?.priority ?? 100,
       packageId: options?.packageId,
+      dispatchUnscopedMultiDelete: options?.dispatchUnscopedMultiDelete,
       meta: options?.meta,
       hookName: options?.hookName,
     });
@@ -2595,6 +2654,94 @@ export class ObjectQL implements IObjectQLEngine {
           object, event, path: 'per-row', expectedId: rowId, observedId: observed,
         });
       }
+    }
+  }
+
+  /**
+   * [#9719] The whole-operation `beforeDelete` dispatch for an UNSCOPED
+   * predicate delete — `multi: true` with no caller predicate at all
+   * (`options.where` absent or `null`) — delivered ONLY to registrations that
+   * declared {@link HookEntry.dispatchUnscopedMultiDelete}.
+   *
+   * ## Why this dispatch exists
+   *
+   * The per-row contract (#5038 / #5574) made the operation's SHAPE invisible
+   * to `beforeDelete` handlers on the predicate path: every per-row context
+   * arrives with `input.id` bound, and a zero-match predicate dispatches
+   * nothing at all ([D1]). A guard whose rule is about the shape — #4757's
+   * "refuse a predicate-less multi-delete outright, regardless of what it
+   * matches" on `sys_attachment` — therefore could not fire through the wired
+   * engine: with rows matched its by-id branch shadowed the check, and with
+   * none matched it never ran. Both limbs need a dispatch that happens BEFORE
+   * the matched-row read, keyed on the operation's shape alone.
+   *
+   * ## What the handler receives
+   *
+   * The whole-operation context: `input.id` undefined, `input.options` the
+   * caller's raw options — the contractual upper-bound read `hook.zod.ts`
+   * blesses for `before*` handlers (`input.options.where` / `.multi`) — and
+   * `session` built by the engine, so the handler's own bypass rules (system
+   * context, no identity envelope) apply unchanged. It is a DERIVED context,
+   * not the batch-level one (`hook.zod.ts`: no handler is dispatched on that),
+   * carrying `dispatch: { mode: 'record', index: 0 }` — this call stands for
+   * the caller's whole write, not for one row of it — with the batch `scope`
+   * object kept identity-shared so a stash still reaches the after phase.
+   *
+   * ## Deliberately opt-in
+   *
+   * Undeclared registrations see NO new dispatch: generalizing an unscoped-
+   * multi-delete refusal to every guarded object is a product decision this
+   * mechanism does not take (objectstack#9719's ruling commissions the
+   * `sys_attachment` restoration only). The engine stays neutral; the policy —
+   * who is refused, with which error — lives in the declaring handler.
+   *
+   * ## The id slot is not a lever here either
+   *
+   * The old batch dispatch's `input.id` was present-but-`undefined`, and
+   * binding it rerouted the write onto the by-id branch. The ladder is now
+   * resolved before any handler runs, so a handler binding `input.id` on this
+   * context would retarget nothing — refused rather than ignored, the same
+   * rule as D4 and #6752 (`HookTargetRebindError`, path `'unscoped-multi'`).
+   */
+  private async dispatchUnscopedMultiDeleteHooks(
+    object: string,
+    batchCtx: HookContext,
+  ): Promise<void> {
+    const entries = this.hooks.get('beforeDelete');
+    if (!entries || entries.length === 0) return;
+    const flagged = entries.filter(
+      (entry) => entry.dispatchUnscopedMultiDelete && hookMatchesObject(entry, object),
+    );
+    if (flagged.length === 0) return;
+    // Mirrors `triggerHooks`' opt-out rule: `skipAutomations` suppresses only
+    // metadata-bound entries. No metadata binding can set the flag today, so
+    // this is parity with the dispatch loop rather than a reachable branch —
+    // kept so the two rules cannot drift if that ever changes.
+    const skipAutomations =
+      (batchCtx.session as { skipAutomations?: boolean } | undefined)?.skipAutomations === true;
+    const wholeOpCtx = {
+      ...batchCtx,
+      dispatch: {
+        mode: 'record',
+        index: 0,
+        scope: (batchCtx.dispatch as { scope: Record<string, unknown> }).scope,
+      },
+    } as unknown as HookContext;
+    for (const entry of flagged) {
+      if (skipAutomations && entry.meta) continue;
+      await entry.handler(wholeOpCtx);
+    }
+    // `input` is identity-shared with the batch context, so the observation
+    // covers everything the handlers touched.
+    const observed = (wholeOpCtx.input as { id?: unknown }).id;
+    if (observed !== undefined) {
+      throw new HookTargetRebindError({
+        object,
+        event: 'beforeDelete',
+        path: 'unscoped-multi',
+        expectedId: undefined,
+        observedId: observed,
+      });
     }
   }
 
@@ -4970,8 +5117,9 @@ export class ObjectQL implements IObjectQLEngine {
    * `readonlyWhen` reads, or `null` when this write cannot resolve one.
    *
    * `readonlyWhen: parent.status == 'paid'` is a documented **server**
-   * guarantee (ADR-0057 D10 puts enforcement here; the client grid is
-   * courtesy), but the strip is a pure function over the payload and the prior
+   * guarantee (the rule this repo cites as ADR-0057 D10 puts enforcement here;
+   * the client grid is courtesy — an attribution, not a resolvable anchor,
+   * #9628), but the strip is a pure function over the payload and the prior
    * row — it has no driver and cannot fetch a header. So the engine resolves it
    * and passes it in.
    *
@@ -10262,6 +10410,14 @@ export class ObjectQL implements IObjectQLEngine {
         // child FK is typically required, so set_null would be invalid). Only
         // an explicit `restrict` deviates. A plain lookup honors its
         // configured deleteBehavior (default set_null).
+        //
+        // [#9625] "Only an explicit `restrict` deviates" is the whole of it:
+        // every other value a master_detail can declare — including an
+        // explicit `deleteBehavior: 'set_null'`, which `FieldSchema` accepts
+        // on this type — resolves to `cascade` here, silently. Measured and
+        // pinned (`engine-cascade-delete.test.ts`); whether the spec should
+        // reject the combination at publish time instead of the engine
+        // dropping it at delete time is a judgement, carded separately.
         let behavior: string =
           fdef.type === 'master_detail'
             ? (fdef.deleteBehavior === 'restrict' ? 'restrict' : 'cascade')
@@ -10274,8 +10430,29 @@ export class ObjectQL implements IObjectQLEngine {
         // author's intent: a required FK means the child can't exist detached,
         // so deleting the parent must be RESTRICTed (SQL's default for a
         // NOT NULL FK). Authors who want the children gone set
-        // deleteBehavior:'cascade' explicitly. This only escalates the
-        // *defaulted* set_null; an explicit cascade/restrict is untouched.
+        // deleteBehavior:'cascade' explicitly.
+        //
+        // [#9625] The test reads the RESOLVED `behavior`, one statement above,
+        // which no longer records how the value got there. So it escalates
+        // BOTH the defaulted set_null and one the author wrote out as
+        // `deleteBehavior: 'set_null'` — the two are indistinguishable here by
+        // construction, and both are measured escalating
+        // (`engine-cascade-delete.test.ts`). Only `cascade` and `restrict` are
+        // untouched. The predecessor of this comment claimed the escalation
+        // applied to the *defaulted* set_null alone; that was true of
+        // `cascade`/`restrict` and false of an explicit `set_null`, which is
+        // the half-truth #9625 measured. Say it the way the code behaves: the
+        // escalation is a property of the RESOLVED behavior plus `required`,
+        // not of what the author typed.
+        //
+        // It also runs BEFORE the `multiValued` branch below and keys on
+        // `required` alone, so a `multiple: true` required lookup is refused
+        // even when the child's set holds other members and member removal
+        // would leave it non-empty — a state the #9447 ruling accepts.
+        // Measured, pinned as current behaviour, and carded separately rather
+        // than changed here: today `[]` still satisfies `required` in the
+        // record validator (#9476), so this blanket refusal is what keeps an
+        // emptied required set from landing silently.
         if (behavior === 'set_null' && fdef.required === true) {
           behavior = 'restrict';
         }
@@ -10755,6 +10932,20 @@ export class ObjectQL implements IObjectQLEngine {
             `[Security] Refusing bulk delete on '${object}': row-scoping AST was not seeded ` +
               `(the predicate branch was reached without the #2982 seed).`,
           );
+        }
+        // [#9719] The unscoped-multi shape check, BEFORE the matched-row read:
+        // a `multi: true` delete carrying no caller predicate at all dispatches
+        // ONCE, whole-operation-shaped, to the registrations that declared for
+        // it — so a shape-of-the-operation refusal (#4757) fires regardless of
+        // what the predicate would match, zero rows included. Read from the
+        // caller's RAW options — the same slot the handler contract reads
+        // (`input.options.where`, hook.zod.ts's upper-bound rule) — never from
+        // the AST, which middleware may have narrowed and only ever narrows.
+        // `where: {}` is a REAL (match-all) query and stays on the per-row
+        // authorize path; only an absent or `null` predicate is unscoped.
+        const rawWhere = (hookContext.input.options as { where?: unknown } | undefined)?.where;
+        if (rawWhere === undefined || rawWhere === null) {
+          await this.dispatchUnscopedMultiDeleteHooks(object, hookContext);
         }
         // [#5038/#5574] Read the doomed rows ONCE, before they are gone — the
         // only moment their pre-image exists — and serve BOTH phases from it

@@ -63,135 +63,25 @@ if (result.success) {
 
 ## MCP (Model Context Protocol) Integration
 
-Define MCP servers to connect AI agents to your ObjectStack data and tools:
+Declare the MCP servers your agents may reach. `MCPServerRefSchema` is a
+**reference** to a server — where it lives and how to authenticate — not a
+description of what it serves:
 
 ```typescript
-import { MCPServerConfigSchema } from '@objectstack/spec/ai';
+import { MCPServerRefSchema } from '@objectstack/spec/ai';
 
-// Define an MCP server exposing ObjectStack data
-export const objectStackMCP = MCPServerConfigSchema.parse({
+// A reference to an MCP server an agent may call
+export const objectStackMCP = MCPServerRefSchema.parse({
   name: 'objectstack_mcp',
   label: 'ObjectStack MCP Server',
-  description: 'Connects AI agents to ObjectStack data and workflows',
-  
-  serverInfo: {
-    name: 'ObjectStack MCP',
-    version: '1.0.0',
-    capabilities: {
-      resources: true,
-      resourceTemplates: true,
-      tools: true,
-      prompts: true,
-    },
-  },
-  
-  transport: {
-    type: 'http',
-    url: 'https://api.objectstack.ai/mcp',
-    auth: {
-      type: 'bearer',
-      secretRef: 'system:mcp_api_key',
-    },
-  },
-  
-  // Expose data as resources
-  resourceTemplates: [
-    {
-      uriPattern: 'objectstack://objects/{objectName}',
-      name: 'Object Data',
-      description: 'Access object records',
-      parameters: [
-        {
-          name: 'objectName',
-          type: 'string',
-          required: true,
-          description: 'Name of the object to access',
-        },
-      ],
-      handler: 'resources.getObjectData',
-    },
-  ],
-  
-  // Expose workflows as tools
-  tools: [
-    {
-      name: 'create_record',
-      description: 'Create a new record in any object',
-      parameters: [
-        {
-          name: 'object',
-          type: 'string',
-          description: 'Object name (e.g., "account", "contact")',
-          required: true,
-        },
-        {
-          name: 'data',
-          type: 'object',
-          description: 'Record data as key-value pairs',
-          required: true,
-        },
-      ],
-      handler: 'flows.create_record',
-      sideEffects: 'write',
-      // NOTE: an MCP capability-descriptor hint — surfaced to the client, but
-      // nothing server-side pauses on it. (The `ToolSchema` field of the same
-      // name was removed in 16.x — #3715, ADR-0033 §2.) A real human-in-the-loop
-      // gate is `ai.requiresConfirmation` on the underlying action (+ the
-      // approval queue), or `approval: 'always'` on an MCP binding.
-      requiresConfirmation: true,
-    },
-    {
-      name: 'search_records',
-      description: 'Search for records using natural language or filters',
-      parameters: [
-        {
-          name: 'object',
-          type: 'string',
-          description: 'Object to search in',
-          required: true,
-        },
-        {
-          name: 'query',
-          type: 'string',
-          description: 'Search query',
-          required: true,
-        },
-      ],
-      handler: 'data.search',
-      sideEffects: 'read',
-    },
-  ],
-  
-  // Provide prompt templates
-  prompts: [
-    {
-      name: 'analyze_customer_data',
-      description: 'Analyze customer data and generate insights',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a data analyst specializing in customer insights.',
-        },
-        {
-          role: 'user',
-          content: 'Analyze the following customer data and provide insights: {{customer_data}}',
-        },
-      ],
-      arguments: [
-        {
-          name: 'customer_data',
-          type: 'string',
-          required: true,
-          description: 'Customer data in JSON format',
-        },
-      ],
-    },
-  ],
-  
-  autoStart: true,
-  healthCheck: {
-    enabled: true,
-    interval: 60000,
-  },
+  transport: 'http',                      // 'stdio' | 'http' | 'websocket'
+  endpoint: 'https://api.objectstack.ai/mcp',
+  secretRef: 'system:mcp_api_key',        // optional
+  active: true,                           // defaults to true
 });
 ```
+
+The tools, resources and prompts an ObjectStack server exposes are **not
+authored here** — they are derived from your metadata at runtime by the
+`MCPServerPlugin` in `@objectstack/mcp`, which bridges the metadata and data
+engines to any connected MCP client.

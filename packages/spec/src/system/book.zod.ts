@@ -75,7 +75,8 @@ const BOOK_TRANSLATIONS_RETIRED =
   + 'book shipped its authoring-locale strings to every reader. Delete the key. NOTE the '
   + 'near neighbour that DOES work: `doc.translations` is live and read on every doc render '
   + 'path — localize the docs themselves, and the portal picks the reader\'s locale up from '
-  + 'there. Run `os migrate meta --from 16` to rewrite existing sources automatically.';
+  + 'there. '
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
 export const BookGroupSchema = lazySchema(() =>
   z.object({

@@ -1309,7 +1309,7 @@ const LIST_VIEW_EXPORT_PDF_RETIRED =
   + 'export: ObjectGrid dropped the declared format from the export menu with only a runtime '
   + "console.warn, so authoring it was a parse-clean no-op. Delete the value; the surviving "
   + "formats are 'csv', 'xlsx' and 'json'. "
-  + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.';
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
 /**
  * Export formats the platform actually delivers (#8010): `csv`/`json` on both
@@ -1631,13 +1631,13 @@ export const ListViewSchema = lazySchema(() => strictObject({
   responsive: retiredKey(
     '`view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
     'no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   performance: retiredKey(
     '`view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
     'no renderer or runtime read it; list-view performance tuning was never implemented. ' +
     'Delete the key. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
 
   // `striped` / `bordered` / `virtualScroll` REMOVED (#7176, ADR-0049
@@ -1651,19 +1651,19 @@ export const ListViewSchema = lazySchema(() => strictObject({
     '`view.striped` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — ' +
     'every measured reader only copied it forward and no renderer ever applied it, so authoring ' +
     'it was a parse-clean no-op. There is no authorable striped-rows switch; delete the key. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   bordered: retiredKey(
     '`view.bordered` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — ' +
     'every measured reader only copied it forward and no renderer ever applied it (the grid frame ' +
     "is the renderer's own constant, not authorable). Delete the key. " +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   virtualScroll: retiredKey(
     '`view.virtualScroll` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — ' +
     'every measured reader only copied it forward and no grid ever virtualized off it; authoring ' +
     'it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
 }));
 
@@ -2481,7 +2481,7 @@ export const FormViewSchema = lazySchema(() => strictObject({
     '`form.defaultSort` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
     'nothing read it: a related list inside a form sorts by its own list view\'s `sort`. ' +
     'Delete the key and set the sort on the related list view instead. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
 
   /** Public form sharing configuration */
@@ -2615,7 +2615,7 @@ export const FormViewSchema = lazySchema(() => strictObject({
     'renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. ' +
     'Delete the key. The form renderer emits its own semantic markup; report gaps as ' +
     'renderer issues rather than per-view attribute overrides. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
 }).superRefine((view, ctx) => {
   // `section.pane` is split-only vocabulary. On any other form type it would

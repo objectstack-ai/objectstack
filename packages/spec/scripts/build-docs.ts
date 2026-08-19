@@ -544,7 +544,12 @@ const SECTION_GROUPS: Record<string, Array<{ section: string; pages: string[] }>
     // #5697), and a reader who found the action declaration should find what a
     // body receives in the same section rather than under "More".
     { section: 'Apps & Navigation', pages: ['app', 'page', 'view', 'action', 'action-params'] },
-    { section: 'Visualization', pages: ['chart', 'dashboard', 'dataset', 'report', 'widget', 'component'] },
+    // `expression-bindable-text-keys` sits beside `component` deliberately: it
+    // is the SDUI rendering contract's evaluation vocabulary (objectui#4795
+    // Direction 1 — which top-level text keys the renderer's expression memo
+    // evaluates, per component type), and a reader who found the component
+    // prop schemas should find it in the same section rather than under "More".
+    { section: 'Visualization', pages: ['chart', 'dashboard', 'dataset', 'report', 'widget', 'component', 'expression-bindable-text-keys'] },
     // `animation` / `dnd` / `keyboard` / `touch` / `offline` left this section at
     // #4988: the five `ui/` interaction config modules were retired whole
     // (ADR-0049 — no carrier key, nothing parsed them), and their generated

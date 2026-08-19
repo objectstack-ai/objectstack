@@ -139,6 +139,63 @@ describe('[#9190] derived reference sites — the gaps are named, not hidden', (
     });
 });
 
+describe('[#9327] the TARGET-side gap is named too, and it is a sibling not a widening', () => {
+    it('THE PIN: exactly one declared type is unanswerable AS A TARGET, and it is named', () => {
+        // `field` items are addressed by the composite key `<object>.<field>`
+        // while every property that names a field holds the BARE name, so the
+        // two sides are disjoint and no site can ever match. That is not "no
+        // references" — it is "not computable", and it is refused at the
+        // protocol seam rather than rendered as "Safe to delete."
+        //
+        // ⚠️ GROWS → some other type stopped being addressable by its own name
+        // and its panel now refuses where it answered. SHRINKS → the refusal
+        // stopped firing and every field is being cleared for deletion again.
+        // Do not widen this expectation to make a red go away.
+        expect(REFERENCE_SITES.unanswerableTargetTypes).toEqual(['field']);
+    });
+
+    it('the two honest-gap sets are DISJOINT, because they record opposite causes', () => {
+        // `unwalkableSourceTypes` = the shape could not be READ.
+        // `unanswerableTargetTypes` = the shape read fine and still cannot MATCH.
+        // A type in both would mean one of the two is being used as a general
+        // "something is wrong here" bucket, which is how a discriminator stops
+        // discriminating.
+        const overlap = REFERENCE_SITES.unanswerableTargetTypes
+            .filter((t) => REFERENCE_SITES.unwalkableSourceTypes.includes(t));
+        expect(overlap).toEqual([]);
+    });
+
+    it('a refused TARGET is still walked as a SOURCE and still HAS sites naming it', () => {
+        // Both halves matter. `field` contributes its own sites (so it is not
+        // unwalkable), and it is named by many (so "refuse when there are no
+        // sites" would have been a different, wrong rule that also refused
+        // every genuinely-unreferenced type).
+        expect(REFERENCE_SITES.unwalkableSourceTypes).not.toContain('field');
+        expect(sitesFor('field').length).toBeGreaterThan(0);
+        expect(hasSite('field', 'dataset', 'field')).toBe(true);
+    });
+
+    it('every unanswerable target is a DECLARED type — the seed cannot name a ghost', () => {
+        // Same non-recurrence property as the source-side pin above: the set is
+        // filtered against `DEFAULT_METADATA_TYPE_REGISTRY`, so a seed member
+        // that is retired from the registry drops out instead of leaving a
+        // refusal wired to a type nobody can address.
+        const declared = DEFAULT_METADATA_TYPE_REGISTRY.map((e) => e.type);
+        for (const t of REFERENCE_SITES.unanswerableTargetTypes) expect(declared).toContain(t);
+    });
+
+    it('the seed is guarded by the schemas: a type whose NAME admits its own key is not refused', () => {
+        // The derived half. `email_template` and `capability` both declare
+        // dotted names — there the name IS the key, the question is answerable,
+        // and refusing them would be this card's harm inverted (a false fault
+        // in place of a false clearance). They must never appear here, and the
+        // guard that keeps them out is the same one that would drop `field` if
+        // `FieldSchema.name` were ever widened to admit a dot.
+        expect(REFERENCE_SITES.unanswerableTargetTypes).not.toContain('email_template');
+        expect(REFERENCE_SITES.unanswerableTargetTypes).not.toContain('capability');
+    });
+});
+
 describe('[#9190] derived reference sites — derivation is a pure function of the schemas', () => {
     it('two derivations of the same schemas agree exactly', () => {
         // The module-load singleton must not be doing anything a caller cannot

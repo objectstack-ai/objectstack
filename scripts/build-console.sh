@@ -43,11 +43,11 @@ fi
 
 REPO_URL="${OBJECTUI_REPO_URL:-https://github.com/objectstack-ai/objectui.git}"
 # The console app itself must NOT build through turbo: turbo v2 runs tasks in
-# strict env mode and strips undeclared vars, so OBJECTSTACK_CLIENT_DIST
-# (exported below) never reaches vite unless the pinned objectui SHA happens
-# to declare it in turbo.json. Build the workspace deps through turbo
-# (cacheable, env-independent), then invoke the console's own build script
-# directly so the env survives.
+# strict env mode and strips undeclared vars, so OBJECTSTACK_CLIENT_DIST and
+# OBJECTSTACK_SPEC_DIST (both exported below) never reach vite unless the pinned
+# objectui SHA happens to declare them in turbo.json. Build the workspace deps
+# through turbo (cacheable, env-independent), then invoke the console's own build
+# script directly so the env survives.
 DEPS_BUILD_CMD="${OBJECTUI_DEPS_BUILD_CMD:-pnpm exec turbo run build --filter=@object-ui/console^...}"
 BUILD_CMD="${OBJECTUI_BUILD_CMD:-pnpm --filter @object-ui/console run build}"
 # Post-build canary: a literal that only exists in an up-to-date bundled
@@ -161,6 +161,50 @@ fi
 export OBJECTSTACK_CLIENT_DIST="$CLIENT_PKG"
 echo "→ Console will bundle @objectstack/client from ${CLIENT_PKG}"
 
+# ── Bundle THIS framework's spec ─────────────────────────────────────
+# The same class of skew as the client above, one level quieter. The console SPA
+# inlines @objectstack/spec, and left to itself the objectui build resolves it
+# from objectui's own lockfile under --frozen-lockfile — the last PUBLISHED spec,
+# never this workspace. So an authorable key added to packages/spec after that
+# publish is accepted and round-tripped by the server while the Studio designer
+# rejects it as an unrecognized key and refuses to auto-save, and the
+# framework-side card closes green because packages/spec's own pins all pass.
+# Reaching the key took three ordered cross-repo steps: spec publishes, objectui
+# refreshes its lockfile, this pin moves. Injecting this tree's spec collapses
+# all three (objectstack#8134, hook added in objectui#4854).
+#
+# objectui honors OBJECTSTACK_SPEC_DIST in apps/console/vite.config.ts; fail hard
+# if the pinned SHA predates that hook rather than silently drift — an unguarded
+# injection would quietly rebuild the exact silent skew it exists to end.
+SPEC_PKG="${FRAMEWORK_ROOT}/packages/spec"
+if ! grep -q "OBJECTSTACK_SPEC_DIST" "${BUILD_ROOT}/apps/console/vite.config.ts"; then
+  echo "✗ objectui@${PINNED_SHA:0:12} has no OBJECTSTACK_SPEC_DIST hook in apps/console/vite.config.ts —"
+  echo "  the bundled spec would come from objectui's lockfile, not this framework, so"
+  echo "  any key this tree declares since the last spec publish would be unreachable"
+  echo "  in the Studio designer."
+  echo "  Bump .objectui-sha to a commit that includes the hook."
+  exit 1
+fi
+# The hook resolves EVERY entry of the spec's exports map and refuses any whose
+# target is missing, so the package must be built before it is injected. Two
+# sentinels, because two different generators produce those targets:
+# dist/index.mjs is tsup's, and json-schema/openapi.json is `gen:openapi`'s — the
+# one export entry that does not live under dist/, is not committed, and is wiped
+# by a later `gen:schema` run. A guard keyed on dist/ alone sails past a tree
+# where that happened, and the hook then throws in the middle of the console build.
+#
+# Unlike the client's guard this deliberately does NOT key on a declaration file:
+# the hook resolves the `import` condition only, so a spec whose DTS pass never
+# ran (OS_SKIP_DTS, or a DTS crash) is still complete for the injection.
+SPEC_ESM="${SPEC_PKG}/dist/index.mjs"
+SPEC_OPENAPI="${SPEC_PKG}/json-schema/openapi.json"
+if [[ ! -f "$SPEC_ESM" || ! -f "$SPEC_OPENAPI" ]]; then
+  echo "→ @objectstack/spec dist absent or incomplete — building it and its deps first..."
+  (cd "$FRAMEWORK_ROOT" && pnpm exec turbo run build --filter=@objectstack/spec)
+fi
+export OBJECTSTACK_SPEC_DIST="$SPEC_PKG"
+echo "→ Console will bundle @objectstack/spec from ${SPEC_PKG}"
+
 pushd "$BUILD_ROOT" > /dev/null
 
 # objectui's root package.json may pin packages that aren't available on
@@ -202,6 +246,20 @@ if ! grep -rq "$BUNDLE_CANARY" "${TARGET}/assets"; then
   exit 1
 fi
 echo "✓ Bundle canary '${BUNDLE_CANARY}' present — framework client is in the bundle."
+
+# Assert the injected SPEC landed too. Deliberately NOT a frozen literal like
+# BUNDLE_CANARY above: "does the bundle carry the surface the framework declares
+# now" is a moving target, and any string pinned here would be carried by the
+# published spec within one release — after which it passes forever while proving
+# nothing, which is the same silent pass this injection exists to remove. The
+# script derives its probes from the two specs on disk on every run, and tests
+# BOTH directions: the console bundle also holds a second, transitive copy of
+# this tree's spec (pulled in through the injected client above), which makes a
+# one-sided "is the new text present" probe pass even with no injection at all.
+node "${FRAMEWORK_ROOT}/scripts/assert-console-spec-injection.mjs" \
+  --injected "$SPEC_PKG" \
+  --vendored "${BUILD_ROOT}/node_modules/@objectstack/spec" \
+  --assets "${TARGET}/assets"
 
 BYTES="$(du -sk "$TARGET" 2>/dev/null | awk '{print $1}')"
 echo "✓ @objectstack/console dist ready (${BYTES} KB) from objectui@${PINNED_SHA:0:12}"

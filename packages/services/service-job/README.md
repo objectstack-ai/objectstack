@@ -1,17 +1,10 @@
 # @objectstack/service-job
 
-Job Service for ObjectStack — implements `IJobService` with setInterval and cron scheduling.
+The shipped provider for the kernel's **`job`** service slot — an `IJobService`
+implementation with a durable ObjectQL-backed adapter, an in-memory timer adapter, and
+a croner-backed cron adapter with cluster leader election.
 
-## Features
-
-- **Cron Scheduling**: Schedule jobs with cron expressions
-- **Interval Scheduling**: Run jobs at fixed intervals
-- **Job Queue**: Manage job execution queue
-- **Retry Logic**: Automatic retry on failure with exponential backoff
-- **Job History**: Track execution history and status
-- **Concurrency Control**: Limit concurrent job execution
-- **Timezone Support**: Schedule jobs in specific timezones
-- **Type-Safe**: Full TypeScript support
+Slot criticality: `core` (`ServiceRequirementDef` in `@objectstack/spec/system`).
 
 ## Installation
 
@@ -19,341 +12,168 @@ Job Service for ObjectStack — implements `IJobService` with setInterval and cr
 pnpm add @objectstack/service-job
 ```
 
-## Basic Usage
+## Usage
 
 ```typescript
-import { defineStack } from '@objectstack/spec';
-import { ServiceJob } from '@objectstack/service-job';
+import { ObjectKernel } from '@objectstack/core';
+import type { IJobService } from '@objectstack/spec/contracts';
+import { JobServicePlugin } from '@objectstack/service-job';
 
-const stack = defineStack({
-  services: [
-    ServiceJob.configure({
-      timezone: 'America/New_York',
-      maxConcurrent: 5,
-    }),
-  ],
-});
+const kernel = new ObjectKernel();
+await kernel.use(new JobServicePlugin());
+await kernel.bootstrap();
+
+const jobs = kernel.getService<IJobService>('job');
+
+await jobs.schedule(
+  'daily_report',
+  { type: 'cron', expression: '0 9 * * *', timezone: 'America/New_York' },
+  async ({ jobId }) => { await generateReport(jobId); },
+  { retryPolicy: { maxRetries: 2, backoffMs: 1000 }, timeout: 60_000 },
+);
 ```
 
-## Configuration
+⚠️ `schedule` takes **four positional arguments** — `(name, schedule, handler, options?)`
+— not a single options object. The schedule is a `JobSchedule` discriminated on `type`.
+
+## Adapter selection
+
+`JobServicePluginOptions` has exactly four fields, all optional.
+
+| Option | Type | Default | Purpose |
+|:---|:---|:---|:---|
+| `adapter` | `'auto' \| 'db' \| 'interval' \| 'cron'` | `'auto'` | See the table below. |
+| `interval` | `IntervalJobAdapterOptions` | `{}` | Forwarded to `IntervalJobAdapter`. |
+| `db` | `DbJobAdapterOptions` | `{}` | Forwarded to `DbJobAdapter`. |
+| `enableCron` | `boolean` | `true` | Route cron schedules to `CronJobAdapter` when available. |
+
+| `adapter` | Behaviour |
+|:---|:---|
+| `'auto'` | Registers `IntervalJobAdapter` synchronously, then upgrades to `DbJobAdapter` at `kernel:ready` if an ObjectQL engine is present. Stays on the interval adapter otherwise. |
+| `'db'` | Same upgrade path, but logs a warning when no engine turns up. |
+| `'interval'` | In-memory timer adapter only. **Cron registrations are stored but never fire** — the adapter warns about each one. |
+| `'cron'` | In-memory `CronJobAdapter` only (croner-backed, with cluster leader election). |
+
+The plugin registers the `sys_job` and `sys_job_run` platform objects through the
+`manifest` service so Studio can see scheduled jobs and their runs; it warns and
+continues when no manifest service is registered.
+
+## Schedules
+
+`JobSchedule` (from `@objectstack/spec/contracts`) is the runtime-value shape the
+schedulers consume:
+
+| `type` | Fields read |
+|:---|:---|
+| `'cron'` | `expression` (a bare cron string), `timezone` |
+| `'interval'` | `intervalMs` |
+| `'once'` | `at` (ISO 8601 datetime) |
 
 ```typescript
-interface JobServiceConfig {
-  /** Default timezone for cron jobs (default: 'UTC') */
-  timezone?: string;
-
-  /** Maximum concurrent job executions (default: 10) */
-  maxConcurrent?: number;
-
-  /** Enable job history tracking (default: true) */
-  enableHistory?: boolean;
-
-  /** Maximum history entries per job (default: 100) */
-  maxHistorySize?: number;
-}
+{ type: 'cron', expression: '*/5 * * * *', timezone: 'UTC' }
+{ type: 'interval', intervalMs: 30_000 }
+{ type: 'once', at: '2026-12-25T09:00:00Z' }
 ```
 
 ## Service API
 
-```typescript
-// Get job service
-const jobs = kernel.getService<IJobService>('job');
-```
-
-### Cron Jobs
+`IJobService` declares three required members and four optional ones:
 
 ```typescript
-// Schedule a job with cron expression
-const job = await jobs.schedule({
-  name: 'daily_report',
-  schedule: '0 9 * * *', // Every day at 9 AM
-  handler: async (context) => {
-    console.log('Generating daily report...');
-    // Your job logic here
-  },
-  timezone: 'America/New_York',
-});
+import type { IJobService } from '@objectstack/spec/contracts';
 
-// Common cron patterns:
-// '*/5 * * * *'      - Every 5 minutes
-// '0 */2 * * *'      - Every 2 hours
-// '0 9 * * 1-5'      - Weekdays at 9 AM
-// '0 0 1 * *'        - First day of every month at midnight
-// '0 0 * * 0'        - Every Sunday at midnight
+// required
+//   schedule(name, schedule, handler, options?) -> Promise<void>
+//   cancel(name)                                -> Promise<void>
+//   trigger(name, data?)                        -> Promise<void>
+// optional
+//   getExecutions?(name, limit?)                -> Promise<JobExecution[]>
+//   listJobs?()                                 -> Promise<string[]>
+//   replay?(name, data?)                        -> Promise<void>
+//   listExecutionsByStatus?(status, limit?)     -> Promise<JobExecution[]>
 ```
 
-### Interval Jobs
+`schedule` resolves `void` — it does not return a job handle. There is no `getJob`,
+`stopJob`, `resumeJob`, `deleteJob`, `runNow`, `scheduleInterval`, `scheduleOnce`,
+`getJobHistory` or `clearHistory`: cancelling is `cancel(name)`, running it now is
+`trigger(name)`, and history is `getExecutions(name, limit?)`.
+
+## Handlers
 
 ```typescript
-// Run every 30 seconds
-const job = await jobs.scheduleInterval({
-  name: 'health_check',
-  interval: 30000, // milliseconds
-  handler: async (context) => {
-    console.log('Running health check...');
-  },
-});
+import type { JobHandler } from '@objectstack/spec/contracts';
 
-// Run every 5 minutes
-const job = await jobs.scheduleInterval({
-  name: 'sync_data',
-  interval: 5 * 60 * 1000, // 5 minutes
-  handler: async (context) => {
-    // Sync data
-  },
-});
+const handler: JobHandler = async ({ jobId, data }) => {
+  // …
+};
 ```
 
-### One-Time Jobs
+The handler receives `{ jobId, data? }` — there is no kernel reference, no execution
+count and no scheduled-time field on it. Three outcomes:
+
+| The handler… | Means | Recorded as |
+|:---|:---|:---|
+| throws / rejects | the run **failed** | `failed` — the retry policy applies |
+| resolves `undefined` (or `{ outcome: 'completed' }`) | the run **succeeded** | `success` |
+| resolves `{ outcome: 'degraded', reason? }` | ran to completion, work did not happen | a status distinct from `success` |
+
+⚠️ `degraded` is **not** a failure and does **not** trigger a retry. Retry is driven
+exclusively by a rejected promise; a handler that wants a re-run must throw.
+
+## Retry and timeout
+
+`JobScheduleOptions` threads a per-job policy down to the executing adapter. Defaults
+mirror `RetryPolicySchema` in `@objectstack/spec` — the declared default *is* the
+enforced one:
+
+| Field | Default | Notes |
+|:---|:---|:---|
+| `retryPolicy.maxRetries` | `0` | Attempts **after** the initial run; `0` means no retry. |
+| `retryPolicy.backoffMs` | `1000` | Base delay before the first retry. |
+| `retryPolicy.backoffMultiplier` | `1` | A flat delay by default. |
+| `retryPolicy.maxRetryDelayMs` | `30000` | Ceiling for one backoff delay. |
+| `retryPolicy.jitter` | `false` | Randomise each delay within [50%, 100%]. |
+| `timeout` | none | Per-**attempt** limit in ms; an exceeded run is recorded `timeout` and rejects with `JobTimeoutError`. |
+
+JavaScript cannot forcibly cancel an in-flight handler: on timeout the attempt is
+abandoned, not killed.
+
+`runWithPolicy(jobId, run, options?, recorder?)` is exported so a host building its own
+adapter applies exactly these semantics instead of re-deriving them.
+
+## Adapter options
+
+| Adapter | Option | Default | Purpose |
+|:---|:---|:---|:---|
+| `IntervalJobAdapter` | `maxExecutions` | `100` | Execution records retained per job. |
+| | `logger` | none | Surfaces cron registrations this adapter cannot fire. |
+| `CronJobAdapter` | `timezone` | `'UTC'` | Timezone for cron expressions. |
+| | `maxExecutions` | `100` | Execution history per job. |
+| | `cluster` | none | Cluster service for scheduler leader election — with a remote driver only ONE node fires each job. |
+| | `leaseMs` | `60000` | Lease held while a scheduled fire runs. |
+| | `namespace` | none | Cosmetic label in croner's process-global name registry. |
+| | `logger` | none | Registry-level anomalies. |
+| `DbJobAdapter` | `maxExecutions` | `100` | Executions kept in memory per job (forwarded to the inner `IntervalJobAdapter`). |
+| | `recordRuns` | `true` | Whether each run writes a `sys_job_run` row. `false` keeps the in-memory history only. |
+
+## No HTTP surface
+
+This service is kernel-internal: it is consumed in-process via the service registry
+(`kernel.getService('job')`) and mounts **no** REST routes. Discovery advertises no
+route for the `job` slot and reports `handlerReady: false` — for this slot that is the
+fact itself, not a proxy for reduced capability (ADR-0076 D12).
+
+## Exports
 
 ```typescript
-// Schedule a one-time job
-const job = await jobs.scheduleOnce({
-  name: 'send_reminder',
-  runAt: new Date('2024-12-25T09:00:00Z'),
-  handler: async (context) => {
-    console.log('Sending holiday reminder...');
-  },
-});
-
-// Schedule to run after a delay
-const job = await jobs.scheduleOnce({
-  name: 'delayed_task',
-  delay: 3600000, // 1 hour from now
-  handler: async (context) => {
-    console.log('Executing delayed task...');
-  },
-});
+import {
+  JobServicePlugin, IntervalJobAdapter, CronJobAdapter, DbJobAdapter,
+  runWithPolicy, JobTimeoutError,
+} from '@objectstack/service-job';
 ```
 
-### Job Management
-
-```typescript
-// List all jobs
-const allJobs = await jobs.listJobs();
-
-// Get job details
-const job = await jobs.getJob('daily_report');
-
-// Stop a job
-await jobs.stopJob('daily_report');
-
-// Resume a stopped job
-await jobs.resumeJob('daily_report');
-
-// Delete a job
-await jobs.deleteJob('daily_report');
-
-// Run a job immediately (ignoring schedule)
-await jobs.runNow('daily_report');
-```
-
-## Advanced Features
-
-### Job Context
-
-```typescript
-const job = await jobs.schedule({
-  name: 'process_orders',
-  schedule: '*/10 * * * *',
-  handler: async (context) => {
-    console.log('Job name:', context.jobName);
-    console.log('Execution ID:', context.executionId);
-    console.log('Scheduled time:', context.scheduledTime);
-    console.log('Execution count:', context.executionCount);
-
-    // Access services
-    const db = context.kernel.getService('database');
-    const orders = await db.find({ object: 'order', status: 'pending' });
-
-    // Process orders...
-  },
-});
-```
-
-### Retry Configuration
-
-```typescript
-const job = await jobs.schedule({
-  name: 'api_sync',
-  schedule: '0 * * * *', // Every hour
-  retry: {
-    maxAttempts: 3,
-    backoff: 'exponential', // 'linear' or 'exponential'
-    initialDelay: 1000, // 1 second
-    maxDelay: 60000, // 1 minute
-  },
-  handler: async (context) => {
-    // May fail and retry
-    await syncWithExternalAPI();
-  },
-});
-```
-
-### Concurrency Control
-
-```typescript
-const job = await jobs.schedule({
-  name: 'heavy_processing',
-  schedule: '*/5 * * * *',
-  concurrency: 1, // Only one instance can run at a time
-  handler: async (context) => {
-    // Long-running process
-  },
-});
-```
-
-### Job History
-
-```typescript
-// Get execution history for a job
-const history = await jobs.getJobHistory('daily_report', {
-  limit: 50,
-  status: 'success', // 'success', 'failed', 'running'
-});
-
-// Example history entry:
-// {
-//   executionId: 'exec:abc123',
-//   jobName: 'daily_report',
-//   status: 'success',
-//   startedAt: '2024-01-15T09:00:00Z',
-//   completedAt: '2024-01-15T09:05:23Z',
-//   duration: 323000, // milliseconds
-//   error: null,
-//   result: { records: 1250 }
-// }
-
-// Clear history for a job
-await jobs.clearHistory('daily_report');
-```
-
-### Job Data & Results
-
-```typescript
-const job = await jobs.schedule({
-  name: 'data_export',
-  schedule: '0 0 * * *',
-  handler: async (context) => {
-    const records = await exportData();
-
-    // Return result data
-    return {
-      recordCount: records.length,
-      fileSize: calculateSize(records),
-      exportedAt: new Date(),
-    };
-  },
-});
-
-// Get last execution result
-const lastRun = await jobs.getLastExecution('data_export');
-console.log('Last export:', lastRun.result);
-```
-
-## Common Patterns
-
-### Database Cleanup Job
-
-```typescript
-jobs.schedule({
-  name: 'cleanup_old_records',
-  schedule: '0 2 * * *', // 2 AM daily
-  handler: async (context) => {
-    const db = context.kernel.getService('database');
-
-    // Delete records older than 90 days
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - 90);
-
-    await db.delete({
-      object: 'audit_log',
-      filters: [{ field: 'created_at', operator: 'lt', value: cutoff }],
-    });
-  },
-});
-```
-
-### Report Generation Job
-
-```typescript
-jobs.schedule({
-  name: 'weekly_sales_report',
-  schedule: '0 8 * * 1', // Mondays at 8 AM
-  handler: async (context) => {
-    const analytics = context.kernel.getService('analytics');
-
-    const data = await analytics.query({
-      object: 'order',
-      aggregations: [{ function: 'sum', field: 'amount' }],
-      groupBy: ['sales_rep'],
-      filters: [{ field: 'created_at', operator: 'last_week' }],
-    });
-
-    // Generate and email report
-    await sendReport(data);
-  },
-});
-```
-
-### Cache Warming Job
-
-```typescript
-jobs.scheduleInterval({
-  name: 'warm_cache',
-  interval: 15 * 60 * 1000, // Every 15 minutes
-  handler: async (context) => {
-    const cache = context.kernel.getService('cache');
-
-    // Pre-load frequently accessed data
-    const popularProducts = await getPopularProducts();
-    await cache.set('popular_products', popularProducts, { ttl: 900 });
-  },
-});
-```
-
-## No HTTP Surface
-
-This service is kernel-internal: it is consumed in-process via the service
-registry (`kernel.getService('job')`) and mounts **no** REST routes. Discovery
-advertises no route for the `job` slot and reports `handlerReady: false`
-(ADR-0076 D12, #4318).
-
-## Best Practices
-
-1. **Idempotent Handlers**: Job handlers should be idempotent (safe to run multiple times)
-2. **Error Handling**: Always handle errors gracefully and log failures
-3. **Timeout Limits**: Set reasonable timeout limits for long-running jobs
-4. **Resource Limits**: Limit concurrent executions to avoid overloading the system
-5. **Monitoring**: Monitor job execution times and failure rates
-6. **Timezone Awareness**: Always specify timezone for cron jobs to avoid ambiguity
-7. **Cleanup**: Periodically delete old job history to save storage
-
-## Performance Considerations
-
-- **Concurrency**: Limit concurrent jobs based on system resources
-- **Job Duration**: Keep job execution time reasonable (< 5 minutes ideal)
-- **History Size**: Limit history entries to prevent memory bloat
-- **Batch Processing**: Process records in batches for large datasets
-
-## Contract Implementation
-
-Implements `IJobService` from `@objectstack/spec/contracts`:
-
-```typescript
-interface IJobService {
-  schedule(options: ScheduleOptions): Promise<Job>;
-  scheduleInterval(options: IntervalOptions): Promise<Job>;
-  scheduleOnce(options: OnceOptions): Promise<Job>;
-  getJob(name: string): Promise<Job>;
-  listJobs(filter?: JobFilter): Promise<Job[]>;
-  stopJob(name: string): Promise<void>;
-  resumeJob(name: string): Promise<void>;
-  deleteJob(name: string): Promise<void>;
-  runNow(name: string): Promise<JobExecution>;
-  getJobHistory(name: string, options?: HistoryOptions): Promise<JobExecution[]>;
-}
-```
+Types: `JobServicePluginOptions`, `IntervalJobAdapterOptions`, `CronJobAdapterOptions`,
+`DbJobAdapterOptions`, `JobEngineLike`, `JobLoggerLike`.
 
 ## License
 
@@ -361,6 +181,6 @@ Apache-2.0. See [LICENSING.md](../../../LICENSING.md).
 
 ## See Also
 
-- [Cron Expression Generator](https://crontab.guru/)
 - [@objectstack/spec/contracts](../../spec/src/contracts/)
-- [Job Scheduling Guide](/content/docs/kernel/runtime-services/queue-service.mdx)
+- [Cron Expression Generator](https://crontab.guru/)
+- [Queue Service](https://docs.objectstack.ai/docs/kernel/runtime-services/queue-service)

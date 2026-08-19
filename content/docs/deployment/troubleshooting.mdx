@@ -204,19 +204,33 @@ client.data.find('project_task', { /* query */ });
 
 ### "Cannot delete record: delete restricted"
 
-**Cause:** The record has dependent child records via `lookup` or `master_detail` fields with `deleteBehavior: 'restrict'`.
+**Cause:** The record has dependent child records via a `lookup` or `master_detail` field, and that field resolves to `restrict`. Two routes get there:
+
+1. The field declares `deleteBehavior: 'restrict'`.
+2. The field is a `required: true` lookup whose behavior is `set_null`. A required foreign key cannot be cleared, so `set_null` is escalated to `restrict` — including when `set_null` is written out explicitly, and including a `required: true` lookup with `multiple: true`. Check the refusal's `developerMessage`: the escalated route says `(<field> is required, so it cannot be cleared)`.
 
 **Fix:**
-1. Delete the dependent records first
-2. Change `deleteBehavior` to `'cascade'` (deletes children) or `'set_null'` (clears reference)
+1. Delete or reassign the dependent records first
+2. Change `deleteBehavior` to `'cascade'` (deletes children), or make the child's reference optional and use `'set_null'` (clears reference)
 
 ```typescript
 // Option A: Cascade delete (children are deleted with parent)
 { name: 'project', type: 'master_detail', reference: 'project', deleteBehavior: 'cascade' }
 
-// Option B: Set null (children keep existing, reference cleared)
+// Option B: Set null (children keep existing, reference cleared).
+// The field must NOT be required — on a required lookup `set_null` is
+// escalated to `restrict` and writing it explicitly changes nothing.
 { name: 'project', type: 'lookup', reference: 'project', deleteBehavior: 'set_null' }
 ```
+
+<Callout type="info">
+On a `multiple: true` lookup, `set_null` clears only the **member** that was deleted —
+the child's other references survive — and a set emptied that way is stored as `[]`,
+never `null` (the `multiple` doc block in `packages/spec/src/data/field.zod.ts`,
+rendered in the [Field reference](/docs/references/data/field)). A cleanup query or
+client branch that looks for `null` to find cleared references will not match those
+rows; test for an empty array instead.
+</Callout>
 
 ---
 

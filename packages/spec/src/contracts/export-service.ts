@@ -11,7 +11,9 @@
  * Follows Dependency Inversion Principle - plugins depend on this interface,
  * not on concrete export service implementations.
  *
- * Aligned with CoreServiceName 'export' in core-services.zod.ts.
+ * Not a `CoreServiceName` member and not a registered runtime service
+ * slot — `IExportService` has no evidenced provider binding (see
+ * core-service-contracts.ts's evidence-bar note).
  */
 
 import type {

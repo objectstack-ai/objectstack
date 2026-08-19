@@ -126,7 +126,7 @@ describe('audit writers — organization_id stamping (#1532)', () => {
       object: 'crm_lead',
       input: { id: 'lead-1' },
       result: { id: 'lead-1', name: 'Acme', organization_id: 'org-9' },
-      session: { tenantId: 'org-9', userId: 'user-1' },
+      session: { organizationId: 'org-9', userId: 'user-1' },
     });
 
     const audit = created.find((c) => c.object === 'sys_audit_log');
@@ -919,7 +919,7 @@ describe('audit writers — localized activity summaries (framework#3039)', () =
     object,
     input: { id: 'q-1' },
     result: { id: 'q-1', name: 'OC-00001' },
-    session: { tenantId: 'org-1', userId: 'user-1' },
+    session: { organizationId: 'org-1', userId: 'user-1' },
   });
 
   it('localizes verb + object label to the workspace locale (zh-CN)', async () => {
@@ -1017,7 +1017,7 @@ describe('audit writers — localized activity summaries (framework#3039)', () =
         body: 'hello',
         mentions: '["user-2"]',
       },
-      session: { tenantId: 'org-1', userId: 'user-1' },
+      session: { organizationId: 'org-1', userId: 'user-1' },
     });
     const mention = emits.find((e) => e.topic === 'collab.mention');
     expect(mention).toBeDefined();
@@ -1039,7 +1039,7 @@ describe('audit writers — localized activity summaries (framework#3039)', () =
       object: 'crm_lead',
       input: { id: 'l-1' },
       result: { id: 'l-1', name: 'Acme', owner_id: 'user-2' },
-      session: { tenantId: 'org-1', userId: 'user-1' },
+      session: { organizationId: 'org-1', userId: 'user-1' },
     });
     expect(emits.find((e) => e.topic === 'collab.assignment')).toBeUndefined();
   });
@@ -1068,7 +1068,7 @@ describe('audit writers — a lost audit row is reported at error (#5226)', () =
   interface LogLine { level: string; message: string; meta?: any }
 
   /** Engine whose `sys_audit_log` insert always fails, capturing every log line. */
-  function makeFailingEngine(failWith = 'no such table: sys_audit_log') {
+  function makeFailingEngine(failWith = 'no such table: sys_audit_log', omitError = false) {
     const hooks = new Map<string, Array<(ctx: any) => any>>();
     const logs: LogLine[] = [];
     const sudoApi = {
@@ -1095,7 +1095,12 @@ describe('audit writers — a lost audit row is reported at error (#5226)', () =
       },
       unregisterHooksByPackage() { /* no-op */ },
       logger: {
-        error(message: string, _err?: unknown, meta?: any) { logs.push({ level: 'error', message, meta }); },
+        // `omitError` reproduces the sink a host may legitimately inject: the
+        // kernel `Logger` requires `error`, but this reporter reaches its sink
+        // through `(engine as any).logger`, so nothing checks. #9657.
+        ...(omitError
+          ? {}
+          : { error(message: string, _err?: unknown, meta?: any) { logs.push({ level: 'error', message, meta }); } }),
         warn(message: string, meta?: any) { logs.push({ level: 'warn', message, meta }); },
         debug(message: string, meta?: any) { logs.push({ level: 'debug', message, meta }); },
         info() { /* unused */ },
@@ -1111,7 +1116,7 @@ describe('audit writers — a lost audit row is reported at error (#5226)', () =
     object: 'crm_lead',
     input: { id },
     result: { id, name: 'Acme' },
-    session: { tenantId: 'org-1', userId: 'user-1' },
+    session: { organizationId: 'org-1', userId: 'user-1' },
   });
 
   it('logs at error — never warn — when the audit row cannot be written', async () => {
@@ -1125,6 +1130,24 @@ describe('audit writers — a lost audit row is reported at error (#5226)', () =
     const errors = logs.filter((l) => l.level === 'error');
     expect(errors).toHaveLength(1);
     expect(errors[0].meta).toMatchObject({ object: 'crm_lead', action: 'create' });
+  });
+
+  it('still reports the lost row when the sink has NO `error` — at warn, never in silence (#9657)', async () => {
+    // The regression this pins: the report used to be spelled
+    // `logger?.error?.(…)`, an optional call that emits NOTHING against a sink
+    // without `error`. The compliance trail was then incomplete AND unreported.
+    // ⛔ Asserting only "did not throw" would pass on the silent version too,
+    // so this asserts the MESSAGE lands, and that it is the same one.
+    const { engine, fire, logs } = makeFailingEngine('no such table: sys_audit_log', true);
+    installAuditWriters(engine as any);
+
+    await fire('afterInsert', aWrite('l-1'));
+
+    const warns = logs.filter((l) => l.level === 'warn');
+    expect(warns).toHaveLength(1);
+    expect(warns[0].message).toMatch(/compliance trail is now INCOMPLETE/);
+    expect(warns[0].message).toMatch(/OS_TELEMETRY_DB=0/);
+    expect(warns[0].meta).toMatchObject({ object: 'crm_lead', action: 'create' });
   });
 
   it('names both the CONSEQUENCE and the FIX in the first line it prints', async () => {
@@ -1176,7 +1199,7 @@ describe('audit writers — a lost audit row is reported at error (#5226)', () =
  * [#8707] Which organization an audit row is stamped with — the RECORD'S own,
  * honouring the maintainer's ruling on #8287.
  *
- * The precedence these cases pin is `recordOrgId ?? sess.tenantId`. Read the
+ * The precedence these cases pin is `recordOrgId ?? sess.organizationId`. Read the
  * pair together: the first four cases are the flip itself, the next three are
  * the RLS fallback the flip must not weaken (it is why the fallback exists at
  * all — an audit row with a NULL organization is hidden from everyone forever),
@@ -1211,7 +1234,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       object: 'crm_lead',
       input: { id: 'lead-1' },
       result: { id: 'lead-1', name: 'Acme', organization_id: 'org-A' },
-      session: { tenantId: 'org-B', userId: 'user-1' },
+      session: { organizationId: 'org-B', userId: 'user-1' },
     });
 
     const { audit, activity } = stampOf(created);
@@ -1233,7 +1256,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       input: { id: 'lead-1' },
       result: true,
       previous: { id: 'lead-1', name: 'Acme', organization_id: 'org-A' },
-      session: { tenantId: 'org-B', userId: 'user-1' },
+      session: { organizationId: 'org-B', userId: 'user-1' },
     });
 
     expect(stampOf(created).audit?.organization_id).toBe('org-A');
@@ -1249,7 +1272,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       input: { id: 'lead-1' },
       previous: { id: 'lead-1', name: 'Acme', organization_id: 'org-A' },
       result: { id: 'lead-1', name: 'Acme Corp', organization_id: 'org-A' },
-      session: { tenantId: 'org-B', userId: 'user-1' },
+      session: { organizationId: 'org-B', userId: 'user-1' },
     });
 
     expect(stampOf(created).audit?.organization_id).toBe('org-A');
@@ -1268,7 +1291,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       object: 'crm_lead',
       input: { id: 'lead-1' },
       result: { id: 'lead-1', name: 'Acme', organization_id: 'org-A' },
-      session: { tenantId: 'org-A', userId: 'user-1' },
+      session: { organizationId: 'org-A', userId: 'user-1' },
     });
 
     expect(stampOf(created).audit?.organization_id).toBe('org-A');
@@ -1287,7 +1310,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       object: 'crm_lead',
       input: { id: 'lead-1' },
       result: { id: 'lead-1', name: 'Acme', organization_id: null },
-      session: { tenantId: 'org-B', userId: 'user-1' },
+      session: { organizationId: 'org-B', userId: 'user-1' },
     });
 
     expect(stampOf(created).audit?.organization_id).toBe('org-B');
@@ -1302,7 +1325,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       object: 'crm_lead',
       input: { id: 'lead-1' },
       result: { id: 'lead-1', name: 'Acme' },
-      session: { tenantId: 'org-B', userId: 'user-1' },
+      session: { organizationId: 'org-B', userId: 'user-1' },
     });
 
     expect(stampOf(created).audit?.organization_id).toBe('org-B');
@@ -1314,7 +1337,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
     installAuditWriters(engine as any, 'test.audit');
 
     // The two cases the fallback was originally written for — a background job
-    // or sudo path with no `tenantId`, and better-auth's `activeOrganizationId`
+    // or sudo path with no active organization, and better-auth's `activeOrganizationId`
     // cache miss right after sign-in. Behaviour here is byte-identical to
     // before the flip: those sessions carry no tenant either way.
     await fire('afterInsert', {
@@ -1345,7 +1368,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       object: 'crm_lead',
       input: { id: 'lead-1' },
       result: { id: 'lead-1', name: 'Acme', organization_id: 'org-A' },
-      session: { tenantId: 'org-B', userId: 'user-1' },
+      session: { organizationId: 'org-B', userId: 'user-1' },
     });
 
     expect(stampOf(created).audit?.organization_id).toBe('org-B');
@@ -1362,7 +1385,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       object: 'crm_lead',
       input: { id: 'lead-1' },
       result: { id: 'lead-1', name: 'Acme', workspace_id: 'ws-1' },
-      session: { tenantId: 'org-B', userId: 'user-1' },
+      session: { organizationId: 'org-B', userId: 'user-1' },
     });
     expect(stampOf(created).audit?.organization_id).toBe('ws-1');
 
@@ -1378,7 +1401,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       object: 'crm_lead',
       input: { id: 'lead-1' },
       result: { id: 'lead-1', name: 'Acme', organization_id: 'org-A' },
-      session: { tenantId: 'org-B', userId: 'user-1' },
+      session: { organizationId: 'org-B', userId: 'user-1' },
     });
     expect(stampOf(missing.created).audit?.organization_id).toBe('org-A');
   });
@@ -1404,7 +1427,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       input: { id: 'org-self' },
       previous: { id: 'org-self', name: 'Sub', parent_organization_id: 'org-parent' },
       result: { id: 'org-self', name: 'Subsidiary', parent_organization_id: 'org-parent' },
-      session: { tenantId: 'org-self', userId: 'user-1' },
+      session: { organizationId: 'org-self', userId: 'user-1' },
     });
 
     expect(stampOf(created).audit?.organization_id).toBe('org-self');
@@ -1448,7 +1471,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       input: { id: 'key-1' },
       previous: { id: 'key-1', name: 'ci', active_organization_id: 'org-key', revoked: false },
       result: { id: 'key-1', name: 'ci', active_organization_id: 'org-key', revoked: true },
-      session: { tenantId: 'org-actor', userId: 'user-1' },
+      session: { organizationId: 'org-actor', userId: 'user-1' },
     });
 
     expect(stampOf(created).audit?.organization_id).toBe('org-key');
@@ -1473,7 +1496,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       input: { id: 'key-1' },
       previous: { id: 'key-1', name: 'ci', revoked: false },
       result: { id: 'key-1', name: 'ci', revoked: true },
-      session: { tenantId: 'org-actor', userId: 'user-1' },
+      session: { organizationId: 'org-actor', userId: 'user-1' },
     });
 
     expect(stampOf(created).audit?.organization_id).toBe('org-actor');
@@ -1497,7 +1520,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       object: 'crm_lead',
       input: { id: 'lead-1' },
       result: { id: 'lead-1', name: 'Acme', workspace_id: 'ws-1', about_org_id: 'org-about' },
-      session: { tenantId: 'org-actor', userId: 'user-1' },
+      session: { organizationId: 'org-actor', userId: 'user-1' },
     });
 
     expect(stampOf(created).audit?.organization_id).toBe('org-about');
@@ -1518,9 +1541,192 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       input: { id: 'key-1' },
       previous: { id: 'key-1', name: 'ci', active_organization_id: 'org-key', revoked: false },
       result: { id: 'key-1', name: 'ci', active_organization_id: 'org-key', revoked: true },
-      session: { tenantId: 'org-actor', userId: 'user-1' },
+      session: { organizationId: 'org-actor', userId: 'user-1' },
     });
 
     expect(stampOf(created).audit?.organization_id).toBe('org-actor');
+  });
+});
+
+/**
+ * [#9516] The detector this file was missing: the writer must read the session
+ * key the ENGINE ACTUALLY EMITS.
+ *
+ * `ObjectQL.buildSession` (`packages/objectql/src/engine.ts`) builds the hook
+ * session as an object literal with a fixed key set — `userId`,
+ * `organizationId`, `positions`, `accessToken`, plus the conditional
+ * `isSystem` / `actor` / `skipTriggers` / `skipAutomations` / `preserveAudit`.
+ * There is no spread, so no other key can arrive. `session.tenantId` was a
+ * deprecated alias (#3280) REMOVED repo-wide in the v11 major (#3290).
+ *
+ * The writer nevertheless read `sess.tenantId` for the RLS fallback, so the
+ * fallback could never fire: on an object with no organization column, or a
+ * row whose organization column is NULL, the audit row was stamped
+ * `organization_id: null` — and the SecurityPlugin's RLS predicate then hides
+ * it from everyone, permanently, while the write itself succeeds.
+ *
+ * Nothing went red for two reasons, and BOTH are closed here:
+ *   • every `sys_audit_log` field is `readonly: true`, so `validateRecord`
+ *     skips it and a null tenant is accepted silently; the write path is
+ *     additionally wrapped in swallow-and-report;
+ *   • every fixture in this file hand-built its session with `tenantId`, a
+ *     dialect the engine cannot produce. The fallback cases passed because the
+ *     TEST spoke the removed alias, not because the code worked. Those
+ *     fixtures now spell `organizationId`, so they exercise the real shape.
+ *
+ * Read the two halves together: the non-null pins are the guard the card is
+ * about, and the "alias is not resolved" pin is what goes red the day someone
+ * reintroduces `sess.tenantId` as a belt-and-braces fallback — a phantom read
+ * that would silently mask a genuinely broken caller.
+ */
+describe('audit writers — the writer reads the session key the engine emits (#9516, #3290)', () => {
+  const AUDITED = {
+    ...MULTI_TENANT,
+    // No organization column of its own: a single-tenant stack, or an
+    // ADR-0066 platform-global object. `resolveRecordOrganizationField`
+    // returns null for both, so `recordOrgId` is undefined and the SESSION
+    // arm is the only thing standing between this row and a null stamp.
+    crm_lead: ['id', 'name'],
+  };
+
+  it('stamps a non-null organization on an object with NO organization column', async () => {
+    const { engine, fire, created } = makeEngine(AUDITED);
+    installAuditWriters(engine as any, 'test.audit');
+
+    await fire('afterInsert', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      result: { id: 'lead-1', name: 'Acme' },
+      // Exactly what `buildSession` emits for an org-bearing caller.
+      session: { organizationId: 'org-B', userId: 'user-1' },
+    });
+
+    const audit = created.find((c) => c.object === 'sys_audit_log')?.row;
+    // The assertion the card is about, stated as the consequence rather than
+    // the mechanism: a null here is the permanently-invisible ledger row.
+    expect(audit?.organization_id).not.toBeNull();
+    expect(audit?.organization_id).toBe('org-B');
+    expect(audit?.tenant_id).toBe('org-B');
+    // The activity mirror is read through the same wall and must agree.
+    expect(created.find((c) => c.object === 'sys_activity')?.row.organization_id).toBe('org-B');
+  });
+
+  it('stamps a non-null organization when the record\'s organization column is NULL', async () => {
+    const { engine, fire, created } = makeEngine({
+      ...MULTI_TENANT,
+      crm_lead: ['id', 'name', 'organization_id'],
+    });
+    installAuditWriters(engine as any, 'test.audit');
+
+    await fire('afterInsert', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      result: { id: 'lead-1', name: 'Acme', organization_id: null },
+      session: { organizationId: 'org-B', userId: 'user-1' },
+    });
+
+    const audit = created.find((c) => c.object === 'sys_audit_log')?.row;
+    expect(audit?.organization_id).not.toBeNull();
+    expect(audit?.organization_id).toBe('org-B');
+  });
+
+  it('keeps #8707\'s precedence — the record\'s own organization still wins', async () => {
+    const { engine, fire, created } = makeEngine({
+      ...MULTI_TENANT,
+      crm_lead: ['id', 'name', 'organization_id'],
+    });
+    installAuditWriters(engine as any, 'test.audit');
+
+    // This case is GREEN before and after the #9516 fix on purpose: it pins
+    // that fixing WHICH KEY the fallback arm reads did not disturb the ORDER
+    // the #8707 ruling set (honouring the maintainer's ruling on #8287).
+    await fire('afterInsert', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      result: { id: 'lead-1', name: 'Acme', organization_id: 'org-A' },
+      session: { organizationId: 'org-B', userId: 'user-1' },
+    });
+
+    expect(created.find((c) => c.object === 'sys_audit_log')?.row.organization_id).toBe('org-A');
+  });
+
+  it('⛔ does not resolve the v11-removed `tenantId` alias', async () => {
+    const { engine, fire, created } = makeEngine(AUDITED);
+    installAuditWriters(engine as any, 'test.audit');
+
+    // A session in the REMOVED dialect. The engine cannot produce one, so the
+    // only way this shape reaches the writer is a caller that is itself broken
+    // — and honouring it here would hide that. This pin goes red the day
+    // `sess.tenantId` is reintroduced as a fallback arm; `pnpm check:org-identifier`
+    // cannot see that reintroduction when the receiver is spelled `sess`.
+    await fire('afterInsert', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      result: { id: 'lead-1', name: 'Acme' },
+      session: { tenantId: 'org-B', userId: 'user-1' } as any,
+    });
+
+    expect(created.find((c) => c.object === 'sys_audit_log')?.row.organization_id).toBeNull();
+  });
+
+  // ── the second site: the @mention notification scope ──────────────────
+  //
+  // Lower stakes than the audit stamp — it feeds `resolveWriteLocale` and the
+  // emitted envelope's `organizationId` rather than a row behind an RLS wall —
+  // but the same removed key, dead the same way. Note the ORDER here is
+  // session-first and stays that way: #8707's ruling reasons about an AUDIT
+  // ROW read through the record's own tenant wall, which is not what a mention
+  // notification is. Only the key changes at this site.
+  const setupMentions = (schemas: Record<string, string[] | Record<string, any>> = SINGLE_TENANT) => {
+    const { engine, fire } = makeEngine(schemas);
+    const emits: any[] = [];
+    installAuditWriters(engine as any, 'test.audit', {
+      getMessaging: () => ({
+        emit: async (e: any) => {
+          emits.push(e);
+          return {};
+        },
+      }),
+    });
+    return { fire, emits };
+  };
+
+  const aComment = (extra: Record<string, any> = {}) => ({
+    object: 'sys_comment',
+    input: {},
+    result: {
+      id: 'c-1',
+      thread_id: 'crm_lead:l-1',
+      author_id: 'user-1',
+      author_name: 'Alice',
+      body: 'hello',
+      mentions: '["user-2"]',
+      ...extra,
+    },
+  });
+
+  it('scopes the @mention notification to the session\'s organization', async () => {
+    const { fire, emits } = setupMentions();
+
+    await fire('afterInsert', {
+      ...aComment(),
+      session: { organizationId: 'org-1', userId: 'user-1' },
+    });
+
+    const mention = emits.find((e) => e.topic === 'collab.mention');
+    expect(mention).toBeDefined();
+    expect(mention.organizationId).toBe('org-1');
+  });
+
+  it('falls back to the comment row\'s organization when the session carries none', async () => {
+    const { fire, emits } = setupMentions();
+
+    // GREEN before and after — the fallback limb's order is unchanged.
+    await fire('afterInsert', {
+      ...aComment({ organization_id: 'org-2' }),
+      session: {},
+    });
+
+    expect(emits.find((e) => e.topic === 'collab.mention')?.organizationId).toBe('org-2');
   });
 });

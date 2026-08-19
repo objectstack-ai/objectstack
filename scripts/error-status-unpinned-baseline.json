@@ -1,8 +1,6 @@
 {
-  "note": "StandardErrorCode members documented with an HTTP status that NO producer this gate can read declares a status for — nothing pins the doc claim on either side. Shrink-only: a new entry is a gate failure, and a row that becomes pinned must be removed. Regenerate with `node scripts/check-error-status-conformance.mjs --update`.",
+  "note": "StandardErrorCode members documented with an HTTP status that NO producer this gate can read declares a status for \u2014 nothing pins the doc claim on either side. Shrink-only: a new entry is a gate failure, and a row that becomes pinned must be removed. Regenerate with `node scripts/check-error-status-conformance.mjs --update`.",
   "unpinned": [
-    "BATCH_COMPLETE_FAILURE",
-    "BATCH_PARTIAL_FAILURE",
     "CONCURRENT_LIMIT_EXCEEDED",
     "CONCURRENT_MODIFICATION",
     "DELETE_RESTRICTED",
@@ -33,7 +31,6 @@
     "RECORD_NOT_ACCESSIBLE",
     "SESSION_EXPIRED",
     "TIME_RESTRICTED",
-    "TRANSACTION_FAILED",
     "VALUE_OUT_OF_RANGE",
     "VALUE_TOO_LONG",
     "VALUE_TOO_SHORT",

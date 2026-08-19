@@ -500,6 +500,7 @@ export function resolveCheckToFiles(checkName, scriptsMap) {
  *
  * Re-exported because this tool's self-test drives the SAME masker the gates
  * run, not a copy of it.
+ */
 export { maskComments };
 
 /**
@@ -668,11 +669,59 @@ export function runnableInvocation({ check, filter, direct }) {
 
 /**
  * Does a watch hint cover an input path? Containment either way, compared on
- * PATH SEGMENT boundaries, with globs collapsed. A hint that collapses to a
- * bare top-level directory name (`packages`, `scripts` — no slash, not a dotted
- * dir) is rejected as too generic: it would match every file under the tree's
- * biggest directories and drown the signal the matched-via column exists to
- * carry.
+ * PATH SEGMENT boundaries, with globs collapsed. A hint that names a bare
+ * top-level directory (`packages`, `scripts` — a WORD, with no separator
+ * anywhere in it, and not a dotted dir) is rejected as too generic: it would
+ * match every file under the tree's biggest directories and drown the signal
+ * the matched-via column exists to carry.
+ *
+ * ## Why the refusal reads the hint AS WRITTEN, not the collapsed copy (#9626)
+ *
+ * That refusal used to be applied to `plain` — the hint AFTER globs were
+ * collapsed and trailing separators stripped. Collapsing is lossy in exactly
+ * the way the refusal is deciding on: `content/**` and `skills/**` collapse to
+ * `content` and `skills`, so a gate that declared a whole SUBTREE as its
+ * population was refused as though it had written a bare word. The two are not
+ * the same claim. A bare `packages` is a path component a script joins with
+ * something else; `packages/**` is an author stating what the gate reads, in
+ * the syntax the repo uses for exactly that everywhere else (`paths:` filters,
+ * turbo inputs, the `files` field).
+ *
+ * The blind spot was total for the class and it hid REQUIRED coverage. Measured
+ * on this tree, three live hints collapse to a bare root, and all three are
+ * genuine population declarations that reached nothing at all:
+ *
+ *   `scripts/**`, `content/**`  check-cross-package-test-inputs' declaration
+ *                               table, whose own header calls its entries "the
+ *                               repo-relative globs they really read"
+ *   `skills/**`                 check-governed-merges' GOVERNED_SURFACES row
+ *                               for the published skills catalog
+ *
+ * `check:doc-anchors` was the specimen that surfaced it: it spelled its root
+ * `'content'`, contributed no hint at all, and so scored `silent` for every
+ * card under `content/**` — while being the ONLY fragment coverage this repo
+ * has (`check-links.yml` sets `include_fragments = "none"`, and says so).
+ *
+ * Reading the hint as written closes the class without widening the scan.
+ * Measured over 107 discovered families against all 6181 tracked files:
+ *
+ *   watch-hint (gate, file) pairs   19024 -> 19834   (+810, and ZERO lost)
+ *   families gaining coverage       3, via those three hints and nothing else
+ *
+ * The alternative — teaching `extractWatchHints` to accept a bare single-segment
+ * literal that happens to name a real top-level directory — was measured on the
+ * same corpus and REFUSED: it takes those pairs to 158108 (+139084), because
+ * `packages`, `apps`, `examples` and `package.json` are path COMPONENTS in
+ * dozens of gates that never read the root. One card
+ * (`packages/spec/src/index.ts`) goes from 7 matched families to 34. That is
+ * the "22 leads is the same as none" failure in the header, bought wholesale.
+ *
+ * What stays out of reach, deliberately: a population that is a top-level FILE
+ * (`README.md`, `ARCHITECTURE.md` — the rest of `check-doc-anchors`' corpus).
+ * A bare filename carries no separator either, and accepting one would admit
+ * every `package.json` / `turbo.json` / `tsconfig.json` basename a gate joins
+ * with a package directory — the same explosion, one class over. A miss there
+ * costs one card one CI round; that is the side this file errs on.
  *
  * ## Why a segment boundary and not a raw string prefix (#8534)
  *
@@ -730,7 +779,9 @@ export function runnableInvocation({ check, filter, direct }) {
 export function hintCovers(hint, inputPath) {
   const plain = hint.replace(/\*\*?/g, '').replace(/\/+$/, '').replace(/\/$/, '');
   if (plain.length < 2) return false;
-  if (!plain.includes('/') && !plain.startsWith('.')) return false;
+  // `hint`, not `plain`: glob collapse destroys the separator this refusal is
+  // deciding on, and a declared subtree is not a bare word. See the docblock.
+  if (!hint.includes('/') && !plain.startsWith('.')) return false;
   return (
     inputPath === plain ||
     inputPath.startsWith(`${plain}/`) ||
@@ -1246,10 +1297,17 @@ export function reachesMetadataFormModule(path, modulePaths) {
  *   like any other literal — comment masking cannot reach it. The ratchet
  *   entry's remedy command therefore spells its `--filter` values unquoted (and
  *   says to quote them for the shell): measured, the shell-quoted spelling adds
- *   both of its glob filter values to THIS file's own hint set as hints, inert
- *   only because `hintCovers` rejects one that collapses to a bare top-level
- *   directory. A gate list that fabricates hints out of its own explanations is
- *   the failure this whole script is written against.
+ *   both of its glob filter values (the two `./packages` globs, one flat and
+ *   one nested) to THIS file's own hint set as hints. That spelling is now
+ *   LOAD-BEARING rather than
+ *   merely tidy: it used to be inert as well, because `hintCovers` refused a
+ *   hint that COLLAPSED to a bare top-level directory, and since #9626 that
+ *   refusal reads the hint as written — `packages/*` carries a separator, so
+ *   quoting it here would make this file's own prose match every card under
+ *   `packages/`. Leave the filter values unquoted. A gate list that fabricates
+ *   hints out of its own explanations is the failure this whole script is
+ *   written against, and this is the one place in the tree where the trade is
+ *   live rather than hypothetical.
  * - Every `name` here is checked against the LIVE workflows by the self-test,
  *   not only by the run that happens to print it. The STALE branch reports rot
  *   to whoever is looking at the output; the self-test case makes the same rot
@@ -1430,8 +1488,10 @@ export function residueLines({ discovered, matched, undetermined, silent, unfilt
     `Residue — all ${discovered} discovered famil(ies) placed, derived at runtime:`,
     `  ${matched} matched above · ${undetermined} undetermined (their sources name no path at all — NOT known irrelevant)` +
       ` · ${silent} silent (their sources name paths, none of which cover yours).`,
-    '  A `silent` verdict is this derivation\'s weakest claim, not a clearance: a gate that computes its own population and' +
-      ' names only its baseline artifact scores silent for every card in the tree.',
+    '  A `silent` verdict is this derivation\'s weakest claim, not a clearance, and there are two ways to earn it that have' +
+      ' nothing to do with your paths: a gate that computes its own population and names only its baseline artifact scores' +
+      ' silent for every card in the tree, and so does one whose population is a top-level FILE (`README.md`) — a literal' +
+      ' with no path separator is refused as too generic, so the gate reads your file while naming nothing that can match it.',
     `  ${unfiltered} of the ${discovered} sit only in workflows that declare no pull_request path filter — CI schedules those on` +
       ' EVERY pull request, so no path derivation can narrow them and their verdict above is about relevance, never schedule.',
     `  Convention-triggered gates cut ACROSS all three and are printed above when a kind hits (${kinds.map((k) => k.kind).join('; ')}).`,
@@ -2123,6 +2183,24 @@ function selfTest() {
   t('a quote inside a regex literal does not open a string', commentHints.includes('packages/client/src'));
   t('masking preserves every offset', maskComments(commented).length === commented.length);
 
+  // ...and the re-export of that masker is CODE, not comment text (#9640). The
+  // statement sits at the end of the longest docblock in this file, and a
+  // missing `*/` swallows it into prose that still parses: the module then has
+  // no `maskComments` export while its header says it has one, and nothing goes
+  // red — every gate stayed green over it until someone parsed for it. Asked of
+  // this file's own source with this file's own masker, which is what the
+  // docblock claims. Column 0 only, and a match the scan flags as literal is
+  // rejected, so no fixture spelling in this self-test can stand in for the
+  // statement.
+  const ownSource = readFileSync(new URL(import.meta.url), 'utf8');
+  const ownScan = scanSource(ownSource);
+  t(
+    'the maskComments re-export is code, not comment text',
+    [...ownSource.matchAll(/^export \{ maskComments \};$/gm)].some(
+      (m) => !ownScan.comment[m.index] && !ownScan.literal[m.index],
+    ),
+  );
+
   // The self-test boundary. The fixture puts a column-0 `}` inside a template
   // literal on purpose: that is the shape this tree really has (a check script
   // whose self-test embeds TS sources as fixtures), and a boundary that stopped
@@ -2208,6 +2286,44 @@ function selfTest() {
   t('a collapsed partial-segment glob does NOT reach the sibling it would match as a glob', !hintCovers('packages/client*', 'packages/client-react/src/index.ts'));
   t('the same glob still covers the package it names', hintCovers('packages/client*', 'packages/client/src/index.ts'));
   t('a segment-boundary glob is untouched by the trade', hintCovers('packages/client/**', 'packages/client/src/index.ts'));
+
+  // ── A declared SUBTREE is not a bare word (#9626) ─────────────────────────
+  //
+  // The genericity refusal reads the hint as the author wrote it. Both
+  // directions, because the whole value of the rule is the pair: the word is
+  // still refused, the declaration is now honoured. Collapsing `content/**`
+  // yields the same `content` the bare word yields, which is precisely why the
+  // refusal cannot be decided on the collapsed copy.
+  t('a single-segment root declared as a subtree covers the tree it names', hintCovers('content/**', 'content/docs/any-page.mdx'));
+  t('the same declaration covers the OTHER subtree under that root', hintCovers('content/**', 'content/blog/a-post.mdx'));
+  t('a bare top-level directory WORD is still refused as too generic', !hintCovers('packages', 'packages/spec/src/index.ts'));
+  t('a bare root that lost its separator to the trailing trim is still refused', !hintCovers(extractWatchHints("const D = 'examples/';")[0] ?? 'examples', 'examples/app-showcase/src/x.ts'));
+  t('a declared subtree does not reach a sibling root', !hintCovers('content/**', 'contentious/x.md'));
+  // A top-level FILE stays out of reach on purpose: accepting a bare filename
+  // would admit every `package.json` basename a gate joins with a package dir.
+  // Pinned so the loss reads as a decision, not an oversight — it is the rest
+  // of check-doc-anchors' corpus (README.md, ARCHITECTURE.md).
+  t('a bare top-level FILE name is refused, the decided loss', !hintCovers('README.md', 'README.md'));
+
+  // The three live declarations the refusal used to swallow, read from the real
+  // gates rather than fixtures — a fixture cannot show that the tree still has
+  // the shape. If one of these gates stops declaring its root, re-point the
+  // case at whatever gate then does; deleting one deletes the evidence.
+  const crossPkgHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-cross-package-test-inputs.mjs'), 'utf8'));
+  // NOT `scripts/check-nul-bytes.mjs`: that gate names that file explicitly
+  // too, so the case would pass with the declaration still refused — measured,
+  // it survived the ablation. Pick a scripts path reachable ONLY through the
+  // declared subtree, or the case pins nothing.
+  t('the cross-package gate reaches the root scripts dir it declares', crossPkgHints.some((h) => hintCovers(h, 'scripts/pm/dispatch-gates.mjs')));
+  t('and the content tree it declares', crossPkgHints.some((h) => hintCovers(h, 'content/docs/getting-started/index.mdx')));
+  const governedHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/pm/check-governed-merges.mjs'), 'utf8'));
+  t('the governed-merge gate reaches the published skills catalog it declares', governedHints.some((h) => hintCovers(h, 'skills/objectstack-upgrade/SKILL.md')));
+
+  // The card this landed for: the ONLY fragment coverage in the repo, which
+  // scored `silent` for every content card while being REQUIRED in lint.yml.
+  const anchorHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-doc-anchors.mjs'), 'utf8'));
+  t('the doc-anchors gate reaches the content page population it declares', anchorHints.some((h) => hintCovers(h, 'content/docs/deployment/cli.mdx')));
+  t('and does not thereby claim a path outside that population', !anchorHints.some((h) => hintCovers(h, 'packages/spec/src/index.ts')));
 
   // ── A trailing sentence period is not part of the path (#8534, half two) ──
   //

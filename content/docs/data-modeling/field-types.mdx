@@ -315,7 +315,7 @@ Reference to a record in another object (foreign key).
 |:---|:---|:---|:---|
 | `reference` | `string` | **required** | Target object name (snake_case) |
 | `referenceFilters` | `string[]` | — | **Removed** (#2377, ADR-0049) — no longer a recognized field property (unknown keys are stripped by the schema). Use structured `lookupFilters` + `dependsOn` instead; see [Relationships](/docs/data-modeling/relationships) |
-| `deleteBehavior` | `'restrict' \| 'cascade' \| 'set_null'` | `'set_null'` | Behavior when referenced record is deleted (a *required* lookup left at the default `set_null` is escalated to `restrict`, since a NOT NULL foreign key cannot be cleared) |
+| `deleteBehavior` | `'restrict' \| 'cascade' \| 'set_null'` | `'set_null'` | Behavior when referenced record is deleted. On a *required* lookup `set_null` is escalated to `restrict`, since a NOT NULL foreign key cannot be cleared — **whether the `set_null` was defaulted or written out explicitly**, and on a `multiple: true` required lookup too. `cascade` and `restrict` are the values honored as written. Where `set_null` does run, a `multiple: true` lookup loses only the deleted **member** — the other members are kept, and a set emptied that way is stored as `[]`, never `null` |
 
 ```typescript
 { name: 'company', label: 'Company', type: 'lookup', reference: 'account' }
@@ -337,7 +337,7 @@ Parent-child relationship (cascading delete by default).
 |:---|:---|:---|:---|
 | `reference` | `string` | **required** | Target (master) object name |
 | `referenceFilters` | `string[]` | — | **Removed** (#2377, ADR-0049) — no longer a recognized field property (unknown keys are stripped by the schema). Use structured `lookupFilters` + `dependsOn` instead; see [Relationships](/docs/data-modeling/relationships) |
-| `deleteBehavior` | `'restrict' \| 'cascade' \| 'set_null'` | `'cascade'` | Behavior when parent is deleted (master-detail cascades unless set to `restrict`) |
+| `deleteBehavior` | `'restrict' \| 'cascade' \| 'set_null'` | `'cascade'` | Behavior when parent is deleted. `restrict` is the only value that deviates: master-detail cascades on everything else, so an explicit `set_null` here is **not** honored — the child is deleted with the parent |
 | `inlineEdit` | `boolean \| 'grid' \| 'form'` | — | Edit child records inline on the parent create/edit form (`true` = auto-pick, `'grid'`, or `'form'`) |
 | `inlineColumns` | `array` | — | Optional explicit inline grid columns |
 | `inlineAmountField` | `string` | — | Numeric child field used for the inline running total |
@@ -655,7 +655,7 @@ These properties are available on **all** field types:
 | `type` | `FieldType` | **required** | One of the supported field types |
 | `required` | `boolean` | `false` | Whether the field is required |
 | `unique` | `boolean` | `false` | Enforce uniqueness |
-| `multiple` | `boolean` | `false` | Allow array of values |
+| `multiple` | `boolean` | `false` | Allow array of values (multi-record lookup, multi-select, multi-file). An emptied multi-value lookup reads back as `[]`, never `null` — the `multiple` doc block in [`FieldSchema`](/docs/references/data/field) |
 | `searchable` | `boolean` | `false` | Include in search index |
 | `sortable` | `boolean` | `true` | Allow sorting by this field |
 | `hidden` | `boolean` | `false` | Hide from default views |

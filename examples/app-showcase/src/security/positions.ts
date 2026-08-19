@@ -65,6 +65,18 @@ export const FieldOpsDelegatePosition = definePosition({
 });
 
 /**
+ * Client-facing coordinator (#9308 fixture 4). Reads projects to write the
+ * client briefs they publish by share link — and is the app's demonstration
+ * that a permission set can WITHHOLD a field's READ, not just its write: the
+ * bound set masks the three budget figures outright.
+ */
+export const ClientLiaisonPosition = definePosition({
+  name: 'client_liaison',
+  label: 'Client Liaison',
+  description: 'Prepares and publishes client-facing project briefs; cannot see internal budget figures.',
+});
+
+/**
  * External client audience — a position for external client principals.
  * External principals evaluate against each object's `externalSharingModel`
  * dial (ADR-0090 D11); this position is how the admin marks a user as
@@ -107,6 +119,7 @@ export const allPositions = [
   AuditorPosition,
   OpsPosition,
   FieldOpsDelegatePosition,
+  ClientLiaisonPosition,
   ClientPortalUserPosition,
   FinancePosition,
   LegalPosition,

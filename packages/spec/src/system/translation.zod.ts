@@ -342,7 +342,7 @@ const TRANSLATION_KEY_GUIDANCE: Record<LegacyObjectFirstKey | 'validationMessage
     + 'Validation messages are not translated through a translation group: author the '
     + 'message on the rule itself (`object.validations[].message`), which the engine '
     + 'evaluates and returns on every rejected write. Delete the key. Run '
-    + '`os migrate meta --from 16` to rewrite existing sources automatically.',
+    + '`os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   o: "`o` is the retired object-first dialect, which no resolver reads — use 'objects.<object_name>'",
   app: "`app` is the retired object-first dialect, which no resolver reads — use 'apps.<app_name>'",
   nav: "`nav` is the retired object-first dialect, which no resolver reads — use 'apps.<app_name>.navigation.<node_id>.label'",

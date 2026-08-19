@@ -6,7 +6,8 @@ import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { printHeader, printSuccess, printError, printStep, printKV, printInfo } from '../utils/format.js';
+import { printHeader, printSuccess, printError, printStep, printKV, printInfo, formatZodErrors } from '../utils/format.js';
+import { validateScaffold } from '../utils/scaffold-validate.js';
 
 // ─── Version resolution ──────────────────────────────────────────────
 //
@@ -101,7 +102,7 @@ export const TEMPLATES: Record<string, {
   srcFiles: Record<string, (name: string, namespace: string) => string>;
 }> = {
   app: {
-    description: 'Full application with objects, views, and actions',
+    description: 'Full application with objects',
     get dependencies() {
       const v = pkgVersion();
       // No driver is listed on purpose. `@objectstack/runtime` already depends
@@ -180,6 +181,12 @@ const ${toCamelCase(namespace)}Item: Data.Object = {
       defaultValue: 'draft',
     },
   },
+  // Org-wide default (OWD): who can see records they do NOT own. ADR-0090 D1
+  // requires this to be an authored decision rather than an accident — the
+  // \`security-owd-unset\` author-time rule refuses an object without it, so a
+  // scaffold that omitted it could not compile. 'private' is the rule's own
+  // recommended default: owner + explicit shares.
+  sharingModel: 'private',
 };
 
 export default ${toCamelCase(namespace)}Item;
@@ -188,7 +195,7 @@ export default ${toCamelCase(namespace)}Item;
   },
 
   plugin: {
-    description: 'Reusable plugin with objects and extensions',
+    description: 'Reusable plugin with objects',
     get dependencies() {
       return {
         '@objectstack/spec': pkgVersion(),
@@ -240,6 +247,12 @@ const ${toCamelCase(namespace)}Item: Data.Object = {
       required: true,
     },
   },
+  // Org-wide default (OWD): who can see records they do NOT own. ADR-0090 D1
+  // requires this to be an authored decision rather than an accident — the
+  // \`security-owd-unset\` author-time rule refuses an object without it, so a
+  // scaffold that omitted it could not compile. 'private' is the rule's own
+  // recommended default: owner + explicit shares.
+  sharingModel: 'private',
 };
 
 export default ${toCamelCase(namespace)}Item;
@@ -294,6 +307,41 @@ function toTitleCase(str: string): string {
 
 function printWarning(msg: string) {
   console.log(chalk.yellow(`  ⚠ ${msg}`));
+}
+
+/**
+ * Write a template's `srcFiles` into `targetDir` and return the relative paths
+ * written, in creation order.
+ *
+ * File paths use `__name__` as a placeholder for the NAMESPACE (not the npm
+ * name) so generated identifiers stay snake_case even when the project name
+ * contains hyphens (`my-app` → namespace `my_app` → `src/objects/my_app_item.ts`).
+ *
+ * Exported so the scaffold pin test generates projects through the real
+ * emitter instead of a copy of it. A test that re-implemented this loop could
+ * drift from it silently, and the drift would land in exactly the class the
+ * pin exists to catch: a shipped template the CLI's own rules refuse.
+ */
+export function writeTemplateSrcFiles(
+  srcFiles: Record<string, (name: string, namespace: string) => string>,
+  targetDir: string,
+  projectName: string,
+  namespace: string,
+): string[] {
+  const written: string[] = [];
+  for (const [filePath, contentFn] of Object.entries(srcFiles)) {
+    const resolvedPath = filePath.replace(/__name__/g, namespace);
+    const fullPath = path.join(targetDir, resolvedPath);
+    const dir = path.dirname(fullPath);
+
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    fs.writeFileSync(fullPath, contentFn(projectName, namespace));
+    written.push(resolvedPath);
+  }
+  return written;
 }
 
 /**
@@ -488,22 +536,9 @@ export default class Init extends Command {
         createdFiles.push('tsconfig.json');
       }
 
-      // 4. Create src files. File paths use `__name__` as a placeholder for
-      // the namespace (NOT the npm name) so generated identifiers stay snake
-      // _case even when the project name contains hyphens (e.g. `my-app` →
-      // namespace `my_app` → `src/objects/my_app_item.ts`).
-      for (const [filePath, contentFn] of Object.entries(template.srcFiles)) {
-        const resolvedPath = filePath.replace(/__name__/g, namespace);
-        const fullPath = path.join(targetDir, resolvedPath);
-        const dir = path.dirname(fullPath);
-
-        if (!fs.existsSync(dir)) {
-          fs.mkdirSync(dir, { recursive: true });
-        }
-
-        fs.writeFileSync(fullPath, contentFn(projectName, namespace));
-        createdFiles.push(resolvedPath);
-      }
+      // 4. Create src files (see `writeTemplateSrcFiles` for the `__name__`
+      //    placeholder rule and why the loop is exported).
+      createdFiles.push(...writeTemplateSrcFiles(template.srcFiles, targetDir, projectName, namespace));
 
       // 5. Create .gitignore if missing
       const gitignorePath = path.join(targetDir, '.gitignore');
@@ -533,25 +568,57 @@ export default class Init extends Command {
         }
       }
 
-      // Self-test the scaffold so we catch template regressions (e.g. an
-      // invalid namespace or object name) before the user discovers them by
-      // running `objectstack dev`. Only runs when deps are present —
-      // `defineStack()` validation lives in `@objectstack/spec`.
+      // Self-test the scaffold so we catch template regressions before the
+      // user discovers them by running `objectstack dev`. Only runs when deps
+      // are present — `defineStack()` validation lives in `@objectstack/spec`.
+      //
+      // This used to check only that the rendered config LOADED and carried a
+      // `manifest.namespace`, which is how the CLI shipped a `-t app` template
+      // its own author-time rules refused: `init` printed `✓ Scaffold
+      // validated`, and the documented next command — `npm run dev` — died on
+      // `security-owd-unset` before the dev server ever started. The self-test
+      // now runs the same rule set `dev` reaches through `os compile`
+      // (`SCAFFOLD_RULE_COMMAND`), so a template that cannot compile fails
+      // HERE, at generation time, in CI, instead of at a user's first `dev`.
+      // It is a shift-left, not a new bar: same registry, same command tier.
       if (installSucceeded) {
         printStep('Validating scaffold...');
+        let scaffoldRejected = false;
         try {
-          const { bundleRequire } = await import('bundle-require');
-          const { mod } = await bundleRequire({
-            filepath: path.join(targetDir, 'objectstack.config.ts'),
-            cwd: targetDir,
-          });
-          const stack = mod.default ?? mod;
-          if (!stack?.manifest?.namespace) {
-            throw new Error('Rendered config has no manifest.namespace');
+          const report = await validateScaffold(targetDir);
+
+          for (const f of report.advisories.slice(0, 50)) {
+            printWarning(`${f.where}: ${f.message}`);
+            if (f.hint) console.log(chalk.dim(`    ${f.hint}`));
+            console.log(chalk.dim(`    rule: ${f.rule}  at ${f.path}`));
           }
-          printSuccess(`Scaffold validated (namespace: ${stack.manifest.namespace})`);
+
+          if (report.schemaError) {
+            printError('Scaffold validation failed: rendered config does not satisfy the protocol schema');
+            formatZodErrors(report.schemaError);
+            scaffoldRejected = true;
+          } else if (report.errors.length > 0) {
+            // Report every failing rule at once, like `os validate` / `os build`.
+            printError(
+              `Scaffold validation failed: author-time rules rejected the generated project (${report.errors.length} issue${report.errors.length > 1 ? 's' : ''})`,
+            );
+            for (const f of report.errors.slice(0, 50)) {
+              console.log(`  • ${f.where}: ${f.message}`);
+              if (f.hint) console.log(chalk.dim(`      ${f.hint}`));
+              console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
+            }
+            scaffoldRejected = true;
+          } else {
+            printSuccess(
+              `Scaffold validated (namespace: ${report.namespace}; ${report.ruleCount} author-time rules passed)`,
+            );
+          }
         } catch (err: any) {
           printError(`Scaffold validation failed: ${err.message || err}`);
+          scaffoldRejected = true;
+        }
+
+        if (scaffoldRejected) {
           console.log(chalk.dim('  This is a CLI bug — please report it at https://github.com/objectstack-ai/objectstack/issues'));
           this.error('Scaffold validation failed');
         }

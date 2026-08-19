@@ -1,16 +1,17 @@
 # @objectstack/service-cache
 
-Cache Service for ObjectStack — implements `ICacheService` with in-memory and Redis adapters.
+The shipped provider for the kernel's **`cache`** service slot — an in-memory
+`ICacheService` implementation with metrics instrumentation.
 
-## Features
+Slot criticality: `core` (`ServiceRequirementDef` in `@objectstack/spec/system`): the
+kernel warns and degrades if the slot is empty, it does not fail to start.
 
-- **Multiple Adapters**: In-memory (development) and Redis (production) support
-- **Type-Safe**: Full TypeScript support with generic value types
-- **TTL Support**: Automatic expiration with time-to-live
-- **Namespace Support**: Organize cache keys by namespace
-- **Pattern Matching**: Delete keys by pattern (e.g., `user:*`)
-- **Statistics**: Track hit/miss rates and memory usage
-- **JSON Serialization**: Automatic serialization of complex objects
+> ⚠️ **The Redis adapter is a skeleton, not a shipped capability.**
+> `RedisCacheAdapter` throws `RedisCacheAdapter not yet implemented` from every method,
+> and `new CacheServicePlugin({ adapter: 'redis' })` throws during `init` rather than
+> falling back. The only working adapter today is `MemoryCacheAdapter`. For a shared
+> cache, register your own `ICacheService` implementation under the slot (see
+> [Custom implementations](#custom-implementations)).
 
 ## Installation
 
@@ -18,268 +19,127 @@ Cache Service for ObjectStack — implements `ICacheService` with in-memory and 
 pnpm add @objectstack/service-cache
 ```
 
-For Redis adapter:
-```bash
-pnpm add ioredis
-```
-
-## Basic Usage
+## Usage
 
 ```typescript
-import { defineStack } from '@objectstack/spec';
-import { ServiceCache } from '@objectstack/service-cache';
+import { ObjectKernel } from '@objectstack/core';
+import type { ICacheService } from '@objectstack/spec/contracts';
+import { CacheServicePlugin } from '@objectstack/service-cache';
 
-const stack = defineStack({
-  services: [
-    ServiceCache.configure({
-      adapter: 'memory', // or 'redis'
-      defaultTTL: 300, // 5 minutes
-    }),
-  ],
-});
+const kernel = new ObjectKernel();
+await kernel.use(new CacheServicePlugin({ memory: { maxSize: 1000, defaultTtl: 300 } }));
+await kernel.bootstrap();
+
+const cache = kernel.getService<ICacheService>('cache');
+await cache.set('user:123', { name: 'Alice' }, 60);   // ttl in SECONDS, positional
+const user = await cache.get<{ name: string }>('user:123');
 ```
 
-## Configuration
+## Plugin options
 
-### In-Memory Adapter (Development)
+`CacheServicePluginOptions` has exactly four fields, all optional.
 
-```typescript
-ServiceCache.configure({
-  adapter: 'memory',
-  defaultTTL: 300,
-  maxSize: 1000, // Maximum number of entries
-});
-```
+| Option | Type | Default | Purpose |
+|:---|:---|:---|:---|
+| `adapter` | `'memory' \| 'redis'` | `'memory'` | `'redis'` throws at `init` — see the warning above. |
+| `memory` | `MemoryCacheAdapterOptions` | `{}` | Forwarded to `MemoryCacheAdapter`. |
+| `redisUrl` | `string` | none | Read by nothing today; kept for the unimplemented Redis path. |
+| `metrics` | `MetricsRegistry` | resolved from the kernel | Explicit metrics backend; wins over the service-registry lookup. |
 
-### Redis Adapter (Production)
+`MemoryCacheAdapterOptions`:
 
-```typescript
-ServiceCache.configure({
-  adapter: 'redis',
-  redis: {
-    host: 'localhost',
-    port: 6379,
-    password: process.env.REDIS_PASSWORD,
-    db: 0,
-  },
-  defaultTTL: 600,
-});
-```
+| Option | Type | Default | Purpose |
+|:---|:---|:---|:---|
+| `maxSize` | `number` | `0` (unlimited) | Entry cap. At the cap a `set` of a NEW key evicts the oldest-inserted entry (Map insertion order — reads do not refresh position). |
+| `defaultTtl` | `number` | `0` (no expiry) | Default TTL in seconds. |
+| `metrics` | `MetricsRegistry` | `NoopMetricsRegistry` | Instrumentation sink. |
+
+Note the spelling: `defaultTtl`, not `defaultTTL`.
 
 ## Service API
 
+`ICacheService` (from `@objectstack/spec/contracts`) is deliberately small — six
+members, all required:
+
 ```typescript
-// Get cache service
-const cache = kernel.getService<ICacheService>('cache');
+import type { ICacheService, CacheStats } from '@objectstack/spec/contracts';
+
+// get<T>(key)              -> Promise<T | undefined>   (undefined, not null, on a miss)
+// set<T>(key, value, ttl?) -> Promise<void>            (ttl in seconds, positional)
+// delete(key)              -> Promise<boolean>         (true when the key existed)
+// has(key)                 -> Promise<boolean>
+// clear()                  -> Promise<void>
+// stats()                  -> Promise<CacheStats>
 ```
 
-### Set/Get Operations
+There is no `mget` / `mset`, no `del`, no pattern deletion, no `namespace()`, no
+`ttl()` / `expire()` / `persist()`, no `incr` / `decr`, no `getOrSet`, and no tagging.
+Compose those on top of the six members above if you need them.
 
 ```typescript
-// Set a value
-await cache.set('user:123', { name: 'John', email: 'john@example.com' });
-
-// Set with custom TTL (in seconds)
-await cache.set('session:abc', sessionData, { ttl: 3600 }); // 1 hour
-
-// Get a value
-const user = await cache.get('user:123');
-
-// Get with type safety
-const user = await cache.get<User>('user:123');
-
-// Get multiple keys
-const users = await cache.mget(['user:123', 'user:456']);
-```
-
-### Existence & Deletion
-
-```typescript
-// Check if key exists
-const exists = await cache.has('user:123');
-
-// Delete a key
-await cache.del('user:123');
-
-// Delete multiple keys
-await cache.del(['session:abc', 'session:def']);
-
-// Delete by pattern
-await cache.delPattern('user:*');
-```
-
-### Namespaced Operations
-
-```typescript
-// Create a namespaced cache instance
-const userCache = cache.namespace('user');
-
-// Set in namespace (key becomes 'user:123')
-await userCache.set('123', userData);
-
-// Get from namespace
-const user = await userCache.get('123');
-
-// Clear entire namespace
-await userCache.clear();
-```
-
-### TTL Management
-
-```typescript
-// Get remaining TTL (in seconds)
-const ttl = await cache.ttl('session:abc');
-
-// Update TTL
-await cache.expire('session:abc', 7200); // 2 hours
-
-// Make key permanent (remove expiration)
-await cache.persist('user:123');
-```
-
-### Atomic Operations
-
-```typescript
-// Increment (useful for counters)
-await cache.incr('page:views:123'); // Returns new value
-
-// Increment by amount
-await cache.incrby('score:user:123', 10);
-
-// Decrement
-await cache.decr('inventory:product:456');
-```
-
-### Batch Operations
-
-```typescript
-// Set multiple keys at once
-await cache.mset({
-  'user:123': user1Data,
-  'user:456': user2Data,
-  'user:789': user3Data,
-});
-
-// Get multiple keys
-const users = await cache.mget(['user:123', 'user:456', 'user:789']);
-```
-
-## Advanced Features
-
-### Cache Aside Pattern
-
-```typescript
+// cache-aside, written against the real surface
 async function getUser(id: string): Promise<User> {
-  // Try cache first
   const cached = await cache.get<User>(`user:${id}`);
-  if (cached) return cached;
+  if (cached !== undefined) return cached;
 
-  // Load from database
-  const user = await db.findUser(id);
-
-  // Store in cache
-  await cache.set(`user:${id}`, user, { ttl: 600 });
-
+  const user = await loadUser(id);
+  await cache.set(`user:${id}`, user, 600);
   return user;
 }
 ```
 
-### Cache-Through Pattern
+### Statistics
+
+`CacheStats` has four fields — note `keyCount`, and that there is no `hitRate`
+(compute it from `hits` and `misses`):
 
 ```typescript
-async function getUserCacheThrough(id: string): Promise<User> {
-  return cache.getOrSet(`user:${id}`, async () => {
-    return await db.findUser(id);
-  }, { ttl: 600 });
-}
+const s = await cache.stats();
+// { hits: number, misses: number, keyCount: number, memoryUsage?: number }
 ```
 
-### Invalidation on Write
+`MemoryCacheAdapter` returns `hits`, `misses` and `keyCount`; it does not report
+`memoryUsage` (the contract declares it optional).
+
+## Metrics
+
+`MemoryCacheAdapter` emits the `cache_lookups_total` and `cache_writes_total` counters
+(`SEMCONV` in `@objectstack/observability`). The registry is resolved in this order:
+
+1. `options.metrics` (explicit constructor wiring)
+2. `ctx.getService('observability:metrics')` — registered by `ObservabilityServicePlugin`
+3. `NoopMetricsRegistry` (silent)
+
+## No HTTP surface
+
+This service is kernel-internal: it is consumed in-process via the service registry
+(`kernel.getService('cache')`) and mounts **no** REST routes. Discovery advertises no
+route for the `cache` slot and reports `handlerReady: false` — for this slot that is
+the fact itself, not a proxy for reduced capability (ADR-0076 D12).
+
+## Custom implementations
+
+The slot is multi-provider. To back the cache with Redis, Memcached or anything else,
+register an object satisfying `ICacheService` under `'cache'` from your own plugin:
 
 ```typescript
-async function updateUser(id: string, data: Partial<User>) {
-  // Update database
-  await db.updateUser(id, data);
+import type { ICacheService } from '@objectstack/spec/contracts';
 
-  // Invalidate cache
-  await cache.del(`user:${id}`);
+class MyCache implements ICacheService { /* the six members above */ }
 
-  // Or update cache immediately
-  const updated = await db.findUser(id);
-  await cache.set(`user:${id}`, updated);
-}
+// inside your plugin's init(ctx):
+ctx.registerService('cache', new MyCache());
 ```
 
-### Tagging & Invalidation
+## Exports
 
 ```typescript
-// Tag cache entries
-await cache.set('product:123', productData, {
-  ttl: 600,
-  tags: ['products', 'category:electronics'],
-});
-
-// Invalidate by tag
-await cache.invalidateTag('category:electronics');
+import {
+  CacheServicePlugin, MemoryCacheAdapter, RedisCacheAdapter,
+} from '@objectstack/service-cache';
 ```
 
-## Statistics & Monitoring
-
-```typescript
-// Get cache statistics
-const stats = await cache.stats();
-// {
-//   hits: 1250,
-//   misses: 325,
-//   hitRate: 0.794,
-//   keys: 450,
-//   memoryUsage: 1024000 // bytes
-// }
-
-// Reset statistics
-await cache.resetStats();
-```
-
-## No HTTP Surface
-
-This service is kernel-internal: it is consumed in-process via the service
-registry (`kernel.getService('cache')`) and mounts **no** REST routes.
-Discovery advertises no route for the `cache` slot and reports
-`handlerReady: false` (ADR-0076 D12, #4318).
-
-## Best Practices
-
-1. **Use Namespaces**: Organize cache keys with namespaces
-2. **Set Appropriate TTLs**: Don't cache data longer than necessary
-3. **Handle Misses**: Always have fallback logic when cache misses
-4. **Invalidate on Write**: Clear stale cache after updates
-5. **Monitor Hit Rates**: Track cache effectiveness with statistics
-6. **Serialize Carefully**: Be mindful of what you serialize (avoid circular references)
-7. **Use Redis in Production**: In-memory adapter is for development only
-
-## Performance Considerations
-
-- **In-Memory Adapter**: Fast but limited by server memory, not shared across instances
-- **Redis Adapter**: Shared across instances, persistent, but network latency
-- **TTL Strategy**: Balance between freshness and cache hit rate
-- **Key Patterns**: Use consistent naming conventions for easier invalidation
-
-## Contract Implementation
-
-Implements `ICacheService` from `@objectstack/spec/contracts`:
-
-```typescript
-interface ICacheService {
-  get<T>(key: string): Promise<T | null>;
-  set<T>(key: string, value: T, options?: CacheOptions): Promise<void>;
-  del(key: string | string[]): Promise<void>;
-  has(key: string): Promise<boolean>;
-  ttl(key: string): Promise<number>;
-  expire(key: string, ttl: number): Promise<void>;
-  clear(): Promise<void>;
-  namespace(name: string): ICacheService;
-}
-```
+Types: `CacheServicePluginOptions`, `MemoryCacheAdapterOptions`, `RedisCacheAdapterOptions`.
 
 ## License
 
@@ -287,6 +147,5 @@ Apache-2.0. See [LICENSING.md](../../../LICENSING.md).
 
 ## See Also
 
-- [Redis Documentation](https://redis.io/documentation)
 - [@objectstack/spec/contracts](../../spec/src/contracts/)
-- [Caching Best Practices](/content/docs/kernel/contracts/cache-service.mdx)
+- [Cache Service](https://docs.objectstack.ai/docs/kernel/contracts/cache-service)

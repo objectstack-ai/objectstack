@@ -34,20 +34,34 @@
  * **The `os migrate meta` sentence is standardized — do not choose a verb.**
  * A prescription whose surface an ADR-0087 conversion covers closes with
  * exactly this sentence, whether the conversion STRIPS the key or REWRITES
- * its value (#6856, maintainer-ruled 2026-08-09):
+ * its value (#6856, maintainer-ruled 2026-08-09; reworded #9529,
+ * maintainer-ruled 2026-08-18):
  *
- *     Run `os migrate meta --from <N>` to rewrite existing sources automatically.
+ *     Run `os migrate meta --from <N>` to list the mechanical edits for
+ *     existing sources; apply them by hand.
  *
- * The sentence states a property of the TOOL — it rewrites your source
- * files — never the fate of the key. The retired "rewrite it" spelling was
- * misread over strip conversions because "it" has two antecedents (the key
- * vs your sources) and the wrong reading promises a value conversion that
- * never happens; "existing sources" has one antecedent. The KEY's fate
- * belongs in the body prose ("Delete the key…", "Rename the key to…"),
- * which every prescription already carries — the sentence never restates
- * it. ONE exception: a conversion that rewrites only PART of the value
- * keeps the two-clause form naming which part — "… to rewrite the <X> case
- * … automatically; <what the tool does with the rest>." (model:
+ * The sentence states a property of the TOOL — what running it gets you —
+ * never the fate of the key. Two rulings shaped it, and both still bind:
+ *
+ *   - **It must be TRUE of the tool.** The sentence used to promise
+ *     "rewrite existing sources automatically", and `os migrate meta` has
+ *     never written an authored source file: it replays the conversion
+ *     chain over the loaded stack in memory, prints the attributed
+ *     mechanical change list (`Applied N mechanical change(s)`, one line per
+ *     site), and writes exactly one file — the `--out` JSON snapshot, when
+ *     you ask for it. Porting the listed edits into the project's own `.ts`
+ *     sources is the author's work, which is why the sentence says so
+ *     (#9529; the in-place AST codemod is commissioned separately as #9591,
+ *     and the automatic-rewrite claim may return with it).
+ *   - **One antecedent.** The retired "rewrite it" spelling was misread over
+ *     strip conversions because "it" names either the key or your sources;
+ *     "existing sources" names one thing. The KEY's fate belongs in the body
+ *     prose ("Delete the key…", "Rename the key to…"), which every
+ *     prescription already carries — the sentence never restates it.
+ *
+ * ONE exception: a conversion that covers only PART of the value keeps the
+ * two-clause form naming which part — "… to list the mechanical edits for
+ * the <X> case; <what the tool does with the rest>." (model:
  * `ui/dashboard.zod.ts` `compareTo.offset`). Both shapes are pinned
  * class-wide by `retired-key-migrate-sentence.test.ts`; a new spelling
  * fails the pin, not code review.
@@ -77,7 +91,7 @@ import { z } from 'zod';
  * conditionalRequired: retiredKey(
  *   '`conditionalRequired` was removed in @objectstack/spec 17.0.0 (#3855). ' +
  *   'Rename the key to `requiredWhen` — the value (a CEL predicate) is unchanged. ' +
- *   'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+ *   'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
  * ),
  * ```
  */

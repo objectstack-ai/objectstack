@@ -15,8 +15,47 @@
  *     singleEnvironment: boolean,
  *     defaultOrgId?, defaultEnvironmentId?,   // multi-tenant, per-hostname
  *     features: { installLocal, marketplace, aiStudio, autoPublishAiBuilds, ... },
- *     branding: { productName, productShortName, logoUrl, faviconUrl, brandColor, pwaDescription, pwaThemeColor }
+ *     branding: { productName, productShortName, stage?, logoUrl, faviconUrl, brandColor, pwaDescription, pwaThemeColor }
  *   }
+ *
+ * ## `branding.stage` — a documented knob that this runtime never sent (#9252)
+ *
+ * The Console's `PreviewBadge` reads `branding.stage` to decide whether to show
+ * its "Preview" / "Beta" chip, and objectui's app-shell README states the
+ * operator interface in as many words: *"Operators set it with
+ * `OS_PRODUCT_STAGE` or `new RuntimeConfigPlugin({ stage })`"*. Neither half
+ * existed. Measured on `main` with a control before this change (the control is
+ * what makes the zeros a reading rather than a broken search):
+ *
+ *   OS_PRODUCT_STAGE, repo-wide                  0 hits
+ *   branding.stage / PlatformStage, cloud repo   0 hits
+ *   control: OS_PRODUCT_NAME, cloud repo         9 hits
+ *
+ * So `OS_PRODUCT_STAGE=ga objectstack dev` left the badge up, and the card's
+ * guess that "the knob is honored only by the cloud distribution" was wrong in
+ * the operator's favour: **no** distribution honoured it. Emitting the key is
+ * restoration of an already-declared contract, not a new surface.
+ *
+ * It is resolved HERE and not threaded in from the CLI, which is the one design
+ * choice in this fix worth stating. Both halves of the documented interface name
+ * this plugin, every sibling branding key already resolves `config.X ?? OS_X`
+ * in this constructor, and — decisively — the card's own repro
+ * (`examples/app-showcase`) constructs its **own** `RuntimeConfigPlugin` in
+ * `objectstack.config.ts`, which takes precedence over the CLI's by plugin name.
+ * A value threaded through `Serve.RUNTIME_CONFIG_OPTIONS` would therefore have
+ * left the reported repro still broken, and made every other host responsible
+ * for remembering one more passthrough — the every-host-must-remember failure
+ * `features.installLocal` above was already demoted for.
+ *
+ * The value space is CLOSED (`preview` | `beta` | `ga`), mirroring the
+ * `PlatformStage` union the Console branches on. An unrecognised value is
+ * refused and reported at mount time rather than forwarded: the SPA would
+ * discard it anyway (its own `isPlatformStage` guard keeps the current stage on
+ * a malformed payload), so a passthrough would recreate this bug's exact shape —
+ * an operator setting the knob, nothing happening, nothing said. Unset stays
+ * **absent**: no `stage` key at all, never an empty string or a guessed default,
+ * so the Console keeps applying its own documented `'preview'` default and
+ * nothing that works today changes.
  *
  * ## Feature seam (open-core boundary — cloud ADR-0012)
  *
@@ -254,6 +293,42 @@ function someRoutePattern(rawApp: unknown, matches: (pattern: string) => boolean
 
 
 /**
+ * Product lifecycle stage — drives the Console's top-bar preview/beta chip
+ * (#9252).
+ *
+ * A CLOSED set, not free text, because the consumer BRANCHES on the value:
+ * `PreviewBadge` renders "Preview" for `preview`, "Beta" for `beta`, and
+ * nothing at all for `ga`. This union is the server-side mirror of the
+ * `PlatformStage` union in objectui's `app-shell/src/runtime-config.ts`; the
+ * two are pinned together by the operator-facing documentation in its README
+ * rather than by an import, since neither repo depends on the other here.
+ *
+ * There is deliberately no `'preview'` default on this side — see
+ * {@link RuntimeConfigPluginConfig.stage}.
+ */
+export type PlatformStage = 'preview' | 'beta' | 'ga';
+
+/** The accepted spellings, in the order the diagnostic lists them. */
+const PLATFORM_STAGES: readonly PlatformStage[] = ['preview', 'beta', 'ga'];
+
+/**
+ * Narrow an operator-supplied string to the closed stage set.
+ *
+ * Exact match against the trimmed value — no case folding, no synonyms. A
+ * near-miss (`GA`, `general-availability`) is REFUSED and reported, not
+ * guessed: silently coercing it would fossilize a second spelling of a
+ * documented key, and this file's whole subject is a knob that appeared to work
+ * while doing nothing.
+ */
+function asPlatformStage(value: string | undefined): PlatformStage | undefined {
+    if (value === undefined) return undefined;
+    const trimmed = value.trim();
+    return (PLATFORM_STAGES as readonly string[]).includes(trimmed)
+        ? (trimmed as PlatformStage)
+        : undefined;
+}
+
+/**
  * Feature-flag overrides a host's distribution policy can derive per request.
  *
  * Open-ended on purpose: the framework's own flags (`aiStudio`,
@@ -326,6 +401,23 @@ export interface RuntimeConfigPluginConfig {
     productName?: string;
     /** Short product name (PWA shortName, compact spots). Defaults to productName. */
     productShortName?: string;
+    /**
+     * Product lifecycle stage driving the Console's preview/beta chip (#9252).
+     * Falls back to the `OS_PRODUCT_STAGE` env var; set `'ga'` to hide the
+     * badge. Both spellings are the ones objectui's app-shell README already
+     * documents to operators.
+     *
+     * ⛔ Unset means **unset**: the response then carries no `stage` key at all,
+     * rather than an empty string or a default invented here. The Console
+     * already owns the documented default (`'preview'` until a server says
+     * otherwise), so guessing one on this side would be this card's own defect
+     * pointing the other way — a consumer misreading a missing thing, except
+     * the server would be the one asserting it.
+     *
+     * An unrecognised value (env typo, or a JS host outside this type) is
+     * refused and warned about at mount time — never forwarded.
+     */
+    stage?: PlatformStage;
     /** Absolute or relative URL for the product logo. Falls back to OS_LOGO_URL env var. */
     logoUrl?: string;
     /** Absolute or relative URL for the favicon. Falls back to OS_FAVICON_URL env var. */
@@ -369,6 +461,16 @@ export class RuntimeConfigPlugin implements Plugin {
     private readonly singleEnvironment: boolean;
     private readonly productName: string;
     private readonly productShortName: string;
+    /** Resolved stage, or `undefined` for "send no key" (unset or refused). */
+    private readonly stage: PlatformStage | undefined;
+    /**
+     * The rejected spelling, kept only so `start()` can name it once. Holding
+     * it — rather than warning from the constructor — is what the route-ledger
+     * diagnostic below already does: the constructor has no logger, and a
+     * silently dropped operator knob is exactly the thing that must not be
+     * invisible from the SPA end.
+     */
+    private readonly refusedStage: string | undefined;
     private readonly logoUrl: string | undefined;
     private readonly faviconUrl: string | undefined;
     private readonly brandColor: string | undefined;
@@ -393,6 +495,15 @@ export class RuntimeConfigPlugin implements Plugin {
         const envShort = (typeof process !== 'undefined' ? process.env?.OS_PRODUCT_SHORT_NAME : undefined)?.trim();
         this.productName = (config.productName ?? envName ?? 'ObjectOS').trim() || 'ObjectOS';
         this.productShortName = (config.productShortName ?? envShort ?? this.productName).trim() || this.productName;
+        // Same precedence as every branding key above — the HOST's explicit
+        // option wins, the env var is the operator's fallback — but resolved
+        // through the closed set, so an unrecognised spelling from either door
+        // becomes "no key" plus one diagnostic rather than an out-of-contract
+        // value the Console would silently discard.
+        const envStage = (typeof process !== 'undefined' ? process.env?.OS_PRODUCT_STAGE : undefined)?.trim();
+        const requestedStage = config.stage ?? (envStage || undefined);
+        this.stage = asPlatformStage(requestedStage);
+        this.refusedStage = this.stage === undefined ? requestedStage : undefined;
         const envLogoUrl = (typeof process !== 'undefined' ? process.env?.OS_LOGO_URL : undefined)?.trim();
         const envFaviconUrl = (typeof process !== 'undefined' ? process.env?.OS_FAVICON_URL : undefined)?.trim();
         const envBrandColor = (typeof process !== 'undefined' ? process.env?.OS_BRAND_COLOR : undefined)?.trim();
@@ -438,6 +549,20 @@ export class RuntimeConfigPlugin implements Plugin {
                     '[RuntimeConfigPlugin] raw app exposes no route table — features.marketplace and '
                     + 'features.installLocal will report false (a mounted browse or install-local surface cannot '
                     + 'be observed here). Declare them via resolveFeatures if this runtime does serve them.',
+                );
+            }
+
+            // An operator who set OS_PRODUCT_STAGE (or a JS host that passed
+            // `stage`) to something outside the closed set gets told here,
+            // naming what was refused and what is accepted. `warn`, not
+            // `error`: this is a FUNCTIONAL degradation — the badge visibly
+            // stays up and the next person to look finds out — with nothing
+            // claimed-persisted going missing behind it.
+            if (this.refusedStage !== undefined) {
+                ctx.logger?.warn?.(
+                    `[RuntimeConfigPlugin] ignoring unrecognised product stage ${JSON.stringify(this.refusedStage)} `
+                    + `(OS_PRODUCT_STAGE / the \`stage\` option) — branding.stage will be omitted and the Console `
+                    + `keeps its default preview badge. Accepted values: ${PLATFORM_STAGES.join(', ')}.`,
                 );
             }
 
@@ -541,6 +666,13 @@ export class RuntimeConfigPlugin implements Plugin {
                     branding: {
                         productName: this.productName,
                         productShortName: this.productShortName,
+                        // Spread, not `stage: this.stage` — the sibling keys
+                        // below may serialize as `undefined` (JSON.stringify
+                        // drops them) but this one is asserted on by KEY
+                        // PRESENCE, so it must never exist as a
+                        // present-and-undefined property on the object handed
+                        // to a non-JSON consumer or a test.
+                        ...(this.stage !== undefined ? { stage: this.stage } : {}),
                         logoUrl: this.logoUrl,
                         faviconUrl: this.faviconUrl,
                         brandColor: this.brandColor,

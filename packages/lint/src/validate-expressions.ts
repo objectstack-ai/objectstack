@@ -699,8 +699,10 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
    *    — and `stripReadonlyWhenFields` then DELETES the field from the incoming
    *    payload and lets the rest of the write through. Client:
    *    `resolveFieldRuleState` passes `fallback: false`, so the form renders the
-   *    field editable. ADR-0057 D10 ("server enforces, client is courtesy")
-   *    resolves the disagreement: the author edits the field, the save reports
+   *    field editable. The standing "server enforces, client is courtesy" rule
+   *    — cited in this repo as ADR-0057 D10, an attribution rather than a
+   *    resolvable anchor (#9628) — resolves the disagreement: the author edits
+   *    the field, the save reports
    *    success, and the value silently never lands. The old sentence told this
    *    author the field would be VISIBLE TO EVERYONE — the opposite failure, and
    *    the opposite troubleshooting direction.
@@ -763,7 +765,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       'the predicate faults — and the two ends fault in OPPOSITE directions. The server treats ' +
       'the field as LOCKED (`isReadonlyWhenLocked` will not waive a declared lock it could not ' +
       'evaluate, #4889) and drops your value from the payload, while the form still renders the ' +
-      'field editable (`fallback: false`). Per ADR-0057 D10 the server is the one that decides: ' +
+      'field editable (`fallback: false`). The server is the one that decides: ' +
       'the field looks writable, the save reports success, and the value silently never lands',
     requiredWhen:
       'the predicate faults and the requirement is never enforced anywhere — the server logs it ' +
@@ -910,14 +912,16 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
                   ? `\`actionType: '${action}'\` named a registered function — move it to \`function: '${action}'\`. `
                   : `Use a \`notify\` node for mail, a \`connector_action\` (Slack connector) or \`http\` node ` +
                     `for Slack, and a registered function for logic. `) +
-                // #6856 route D (maintainer-ruled): the house sentence names the TOOL's
-                // behaviour, never the retired key's fate — "rewrite it" reads two ways
-                // over a branch that DELETES the key (template/recipients/variables/script),
-                // "rewrite existing sources" only one. Plain-quoted (not a template literal)
+                // #6856 route D (maintainer-ruled), reworded under #9529: the house
+                // sentence names the TOOL's behaviour, never the retired key's fate —
+                // "rewrite it" read two ways over a branch that DELETES the key
+                // (template/recipients/variables/script), and the tool never rewrote a
+                // source file at all. Plain-quoted (not a template literal)
                 // so this site is a member of `retired-key-migrate-sentence.test.ts`'s
                 // widened scan (#7030) on the same textual shape as the spec corpus — no
                 // interpolation lives in this clause, so nothing is lost switching quote style.
-                'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+                'Run `os migrate meta --from 16` to list the mechanical edits for existing '
+                  + 'sources; apply them by hand.',
               source: JSON.stringify({ id: node.id, type: node.type, config: cfg }),
             });
           } else if (!fn) {

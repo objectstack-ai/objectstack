@@ -112,7 +112,11 @@
  * line, recorded as an addendum on that ADR alongside the same narrowing #4649
  * and #4775 made at the two neighbouring write gates. Do not widen it back on
  * the grounds that it reads inconsistent with D5's table — the table is what
- * was amended, and ADR-0057 D10 (server enforces, client is courtesy) is why.
+ * was amended, and the standing "server enforces, client is courtesy" rule is
+ * why. This repo cites that rule as ADR-0057 D10 — an ATTRIBUTION, not a
+ * resolvable anchor: D10 decides Setup-nav capability surfacing, and no ADR
+ * records the general rule yet (#9628). The rule stands on its own; what is
+ * missing is the decision record, not the discipline.
  *
  * ## `requiredWhen`: the SCOPE is bound, the SEMANTICS are not changed (#4977)
  *
@@ -657,9 +661,10 @@ export function stripReadonlyWhenFields(
  *    is unlocked — we simply could not ask. Waving it through inverts the
  *    guarantee: a field the author declared locked is written, the API answers
  *    200, and the client grid still draws the cell as read-only, so the UI and
- *    the database disagree with nobody told. ADR-0057 D10 puts enforcement on
- *    the server; a lock that fails open leaves enforcement in the courtesy
- *    layer. So an unbound root resolves to LOCKED — conservative toward the
+ *    the database disagree with nobody told. The rule this repo cites as
+ *    ADR-0057 D10 puts enforcement on the server; a lock that fails open leaves
+ *    enforcement in the courtesy layer. (Attribution, not a resolvable anchor —
+ *    see the module header and #9628.) So an unbound root resolves to LOCKED — conservative toward the
  *    author's declared intent, and the direction #4649 (validation predicates)
  *    and #4775 (hook conditions) already took for their own unevaluable case.
  *

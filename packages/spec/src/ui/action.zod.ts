@@ -502,7 +502,7 @@ const TARGET_REQUIRED_TYPES: ReadonlySet<string> = new Set(
  * The `execute` alias was **removed in protocol 17** (#3855). `target` is the
  * only handler slot, so no consumer has a second slot to disagree about. An
  * authored `execute` is rejected with the rename prescription rather than
- * silently stripped; `os migrate meta --from 16` rewrites it for you.
+ * silently stripped; `os migrate meta --from 16` lists the edit for you to apply.
  * 
  * @example Good action names
  * - 'on_close_deal'
@@ -536,7 +536,7 @@ const GLOBAL_NAV_RETIRED =
   + '`record_related`, `record_section`), or — for an action that deliberately has no UI home, '
   + 'such as an object-less one invoked over REST/MCP/AI — declare it headless with '
   + '`locations: []`, which keeps its capability gate, param contract and audit trail. '
-  + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.';
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
 /**
  * Action Location — where an action is allowed to surface in the UI.
@@ -811,6 +811,25 @@ const actionObject = () => strictObject({
     requiresConfirmation:
       'the AI human-in-the-loop override lives under `ai` — write '
       + '`ai: { requiresConfirmation: true }`. `confirmText` is the separate UI confirm prompt.',
+    // The three spellings #9474 measured authors probing for post-success
+    // navigation before `onSuccess` existed. Each is a top-level string where
+    // the declared shape is a nested object, so an alias rename would produce
+    // a second, worse error (`invalid_type` at `onSuccess`) — a guidance
+    // pointer carries the whole rewrite instead.
+    redirect:
+      "post-success navigation is declared under `onSuccess` — write `onSuccess: { navigate: "
+      + "'<route/URL template>' }` (interpolates ${param.*}, ${ctx.*} and ${result.*}, the server "
+      + "response). Read for `type: 'api'` and `type: 'script'` actions; `openIn: 'self' | 'newTab'` "
+      + "picks the tab (default 'self').",
+    navigate:
+      '`navigate` is not a top-level key — it lives inside `onSuccess`: write '
+      + "`onSuccess: { navigate: '<route/URL template>' }`. The template interpolates ${param.*}, "
+      + '${ctx.*} and ${result.*} (the server response payload, e.g. ${result.id}).',
+    redirectUrl:
+      '`redirectUrl` is the HANDLER-RETURN convention (a server handler returns '
+      + '`{ redirectUrl, openIn? }`), not an authorable action key. To declare the destination in '
+      + "metadata, write `onSuccess: { navigate: '<route/URL template>' }` — ${result.*} "
+      + 'interpolates the server response.',
   },
 }, {
   /** Machine name of the action */
@@ -961,7 +980,7 @@ const actionObject = () => strictObject({
   execute: retiredKey(
     '`execute` was removed in @objectstack/spec 17 (#3855) — use `target`. ' +
     'Rename the key; the value (a handler / flow / URL ref) is unchanged. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   
   /**
@@ -1181,14 +1200,14 @@ const actionObject = () => strictObject({
     "objectui's keyboard stack (useKeyboardShortcuts) is hand-registered and never consults " +
     'action metadata. Delete the key. For a real shortcut, register the key in the Console ' +
     'keyboard stack and have its handler invoke the action by name. ' +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   bulkEnabled: retiredKey(
     '`action.bulkEnabled` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
     'the multi-select toolbar is driven by the LIST VIEW\'s `bulkActions` / `bulkActionDefs`, ' +
     'never by this flag, so setting it changed nothing. Delete the key and declare the action ' +
     "in the view's `bulkActions` instead. " +
-    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
 
   /**
@@ -1280,6 +1299,86 @@ const actionObject = () => strictObject({
    * `{recordId}` placeholder, URL-encoded on substitution.
    */
   newTabUrl: z.string().optional().describe('Direct new-tab URL template ({recordId} placeholder). When set with opensInNewTab, the renderer navigates the pre-opened tab here immediately — no action POST. The endpoint must enforce auth itself.'),
+
+  /**
+   * Post-success navigation (#9566 / #9474, maintainer ruling 2026-08-18) —
+   * where to take the user after a server-executing action succeeds. Read for
+   * `type: 'api'` and `type: 'script'` only (the refinement below refuses it on
+   * other types: a `type:'url'` action already navigates via `target` +
+   * `openIn`, and `modal`/`flow`/`form` dispatch on `target` with no success
+   * event this key could ride — a declared key those paths never read is the
+   * ADR-0078 silently-inert shape).
+   *
+   * **`navigate`** is a route/URL template. Its interpolation scope is the
+   * CONTRACT recorded here; the interpolation ENGINE is the renderer's
+   * (objectui `interpolateTarget`) and the scope members are measured from it:
+   *
+   * - `${param.X}` — value collected by the action's params dialog.
+   * - `${ctx.X}` — the action context: `ctx.origin`, `ctx.apiBase`,
+   *   `ctx.user.*`, `ctx.org.*`, `ctx.recordId`, `ctx.selection` (the same
+   *   scope `target` interpolates today).
+   * - `${result.X}` — **NEW with this key**: the action's server response
+   *   payload. For a `type:'api'` action, the response body of the `target`
+   *   call; for a `type:'script'` action, the handler's return value. This is
+   *   what makes "server clones a record → jump to the new record" declarable:
+   *   `navigate: '/apps/crm/tasks/${result.id}'`.
+   *
+   * Renderers MUST `encodeURIComponent` interpolated values in URL query
+   * positions (same rule as `target`). A relative template is an SPA route
+   * hop (no full page load, immune to popup blocking); an absolute URL is a
+   * document navigation.
+   *
+   * **`openIn`** is a CLOSED two-member enum — `'self'` (default: navigate in
+   * place) or `'newTab'` — deliberately not a general navigation DSL.
+   * The default is MATERIALIZED (`.default('self')`, the file's convention —
+   * `type`, `refreshAfter`, `ai.exposed`): declared navigation is an explicit
+   * author choice, so parse output always carries the resolved member and no
+   * consumer needs its own fallback. Note the spelling: `'newTab'` here
+   * (matching the handler-return convention below), while the top-level
+   * `openIn` for `type:'url'` spells it `'new-tab'` — the enum's error map
+   * catches the crossover.
+   *
+   * **Relation to the handler-return convention** (objectui
+   * `consoleServerAction.ts`, the `{ redirectUrl, openIn? }` shape fixed by
+   * objectui#2967/#2904): that runtime surface keeps its shipped 17.0.0
+   * semantics — a handler returning `{ redirectUrl }` WITHOUT `openIn` still
+   * opens a NEW TAB (no silent behavior flip for existing handlers); a handler
+   * may return `openIn: 'self'` explicitly to opt into the same-tab jump. The
+   * defaults are deliberately split by surface: this schema key is a NEW
+   * surface and defaults `'self'`; the handler convention is a shipped surface
+   * and keeps new-tab.
+   *
+   * The console consumer is not wired yet — the SPA navigation branch,
+   * `executeAPI` navigation handling and `${result.*}` interpolation are the
+   * downstream objectui half (Blocked-by #9566/#9474; tracked in the liveness
+   * ledger at `planned` strength with the amend-on-landing instruction).
+   */
+  onSuccess: strictObject({
+    surface: "this action's onSuccess block",
+    history: ACTION_HISTORY,
+    aliases: {
+      // The handler-return convention's spelling, and the generic reaches.
+      redirectUrl: 'navigate', url: 'navigate', to: 'navigate', route: 'navigate',
+      path: 'navigate', target: 'navigate', navigateTo: 'navigate', href: 'navigate',
+      open: 'openIn', tab: 'openIn',
+    },
+    guidance: {
+      opensInNewTab:
+        '`opensInNewTab` is the top-level pre-opened-tab flag for ASYNC redirect handlers, not an '
+        + "`onSuccess` key — here the tab choice is `openIn: 'newTab'` (or `'self'`, the default).",
+      newTab:
+        "the tab choice is the closed enum `openIn: 'self' | 'newTab'` — write `openIn: 'newTab'`.",
+    },
+  }, {
+    navigate: z.string().describe("Route/URL template navigated to after the action succeeds. Interpolates ${param.*} (params-dialog values), ${ctx.*} (origin/apiBase/user/org/recordId/selection) and ${result.*} (the action's server response payload — NEW with this key, e.g. ${result.id}). Relative = SPA route hop; renderers MUST encodeURIComponent values in query positions."),
+    openIn: z.enum(['self', 'newTab'], {
+      error: (issue) => (issue.input === 'new-tab'
+        ? "`onSuccess.openIn` spells the new-tab member `'newTab'` (matching the handler-return "
+          + "convention `{ redirectUrl, openIn }`), not `'new-tab'` — that kebab spelling belongs "
+          + "to the top-level `openIn` key for `type:'url'` actions. Write `openIn: 'newTab'`."
+        : undefined),
+    }).default('self').describe("Where to perform the post-success navigation: 'self' (default — in-place SPA navigation, immune to popup blocking) or 'newTab'. Closed enum — no general navigation DSL."),
+  }).optional().describe("Post-success navigation for type:'api' and type:'script' actions (#9566/#9474). `navigate` is a route/URL template interpolating ${param.*}, ${ctx.*} and ${result.*} (the server response); `openIn` defaults 'self'. The handler-return convention ({ redirectUrl } without openIn) keeps its 17.0.0 new-tab behavior."),
 
   /** ARIA accessibility attributes */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
@@ -1400,6 +1499,27 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
     + 'correct for a param-LESS action, where the confirm IS the only dialog, and for a view\'s '
     + '`bulkActionDefs`, where the pair renders one dialog by that schema\'s own contract.',
   path: ['confirmText'],
+}).refine((data) => {
+  // #9566/#9474 — `onSuccess` is scoped to the two action types that HAVE a
+  // success event carrying a server response for `${result.*}` to read:
+  // `api` (the `target` call's response body) and `script` (the handler's
+  // return value). Same enforcement shape as the `body`-on-non-script
+  // refinement above (#4352): a declared key the dispatch path never reads is
+  // the invisible-failure class this file rejects at author time.
+  if (data.onSuccess && data.type !== 'api' && data.type !== 'script') {
+    return false;
+  }
+  return true;
+}, {
+  message:
+    "`onSuccess` declares POST-SUCCESS navigation for a server-executing action, and only "
+    + "`type: 'api'` and `type: 'script'` have a success event (a server response) it can ride — "
+    + "on any other type the key would parse clean and never run (ADR-0078). For a `type:'url'` "
+    + "action the navigation IS the action: put the destination in `target` and pick the tab with "
+    + "the top-level `openIn`. For `modal`/`flow`/`form`, the action dispatches on `target` and no "
+    + 'renderer reads a post-success hop today — if that capability is needed, it is a spec '
+    + 'proposal, not a silent key.',
+  path: ['onSuccess'],
 }).transform((data, ctx) => lowerRequiresFeature(data, ctx)));
 
 export type Action = z.input<typeof ActionSchema>;
