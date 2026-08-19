@@ -9,15 +9,24 @@
 `createDispatcherPlugin` automatically instruments every route it mounts with:
 
 - **Request id** propagation: honors incoming `X-Request-Id` (or mints `req_<uuid>`); echoes on the response.
-- **`http_request_duration_ms{method,route}`** histogram (handler latency).
 - **`http_request_errors_total{method,route}`** counter (incremented on thrown errors).
 - **Error reporting** for 5xx (handler-thrown or via `errorResponseBase` side channel).
 
-**`http_requests_total{method,route,status}`** (1 per request) is emitted at the
-**transport**, through the `IHttpServer.afterResponse` observation seam — so it
-counts *every* inbound request on the server (auth, REST data API, raw-app
-mounts, requests a middleware refused with 429), not only the routes the
-dispatcher registers. The `route` label is always the registered **pattern**
+**`http_requests_total{method,route,status}`** (1 per request) and
+**`http_request_duration_ms{method,route}`** are emitted at the **transport**,
+through the `IHttpServer.afterResponse` observation seam — so they cover
+*every* inbound request on the server (auth, REST data API, raw-app mounts,
+requests a middleware refused with 429), not only the routes the dispatcher
+registers. That is what keeps the two derived signals below consistent with
+each other: a 5xx-rate panel and a p95-latency panel drawn over the same
+traffic.
+
+> **⚠️ `http_request_duration_ms` measures the REQUEST, not the handler.** It
+> used to be emitted by the dispatcher's per-route wrapper and timed
+> `await handler(req, res)`; it is now the transport's `elapsedMs` — from the
+> transport first seeing the request to the response existing, so the
+> middleware chain and body parse are included. Samples can only move UP.
+> Compare p95 across that boundary deliberately. The `route` label is always the registered **pattern**
 (`/api/v1/data/:id`), never the concrete path; requests no route matched are
 labelled `unmatched`. Exactly one counter is armed per server (first wiring
 wins), so handing one registry to both the transport plugin and the dispatcher

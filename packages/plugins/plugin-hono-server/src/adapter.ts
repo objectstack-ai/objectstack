@@ -16,7 +16,12 @@ import type {
 } from '@objectstack/core';
 import type { Logger } from '@objectstack/spec/contracts';
 import type { Context } from 'hono';
-import { currentPerfTiming, armHttpRequestCounter, type MetricsRegistry } from '@objectstack/observability';
+import {
+    currentPerfTiming,
+    armHttpRequestCounter,
+    armHttpRequestDurationHistogram,
+    type MetricsRegistry,
+} from '@objectstack/observability';
 import { Hono } from 'hono';
 import { routePath } from 'hono/route';
 import { serve } from '@hono/node-server';
@@ -1054,6 +1059,12 @@ export class HonoHttpServer implements IHttpServer {
         // this plugin, in Phase 1, which is what makes the transport the
         // counter's owner in fact and not only in documentation.
         armHttpRequestCounter(this, metrics);
+        // #9834: the duration histogram arms here too, so the transport owns
+        // BOTH transport-observable HTTP families in the shipped composition
+        // rather than splitting ownership across layers — a host that wires a
+        // registry only to this plugin gets the latency series, not just the
+        // counter.
+        armHttpRequestDurationHistogram(this, metrics);
     }
 
     /**

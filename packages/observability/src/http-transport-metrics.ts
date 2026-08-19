@@ -5,18 +5,26 @@ import type { MetricsRegistry } from './contracts.js';
 import { RUNTIME_METRICS } from './semconv.js';
 
 /**
- * What {@link armHttpRequestCounter} did:
+ * What an `arm*` call in this module did:
  *
- *  - `'armed'` — the counter-emitting observer was registered on this call.
- *  - `'already-armed'` — some earlier caller already armed this server; the
- *    seam counts, and this call registered nothing (first-wins).
+ *  - `'armed'` — the emitting observer was registered on this call.
+ *  - `'already-armed'` — some earlier caller already armed this server for
+ *    THIS metric family; the seam emits it, and this call registered nothing
+ *    (first-wins).
  *  - `'unsupported'` — the transport does not implement the
  *    `IHttpServer.afterResponse` seam; it reports NO HTTP metrics (#9835:
  *    zero there means "not instrumented", never "no traffic"), and the
  *    caller must decide how to degrade — the runtime dispatcher falls back
- *    to counting its own routes.
+ *    to instrumenting its own routes.
  */
-export type ArmHttpRequestCounterResult = 'armed' | 'already-armed' | 'unsupported';
+export type ArmHttpMetricResult = 'armed' | 'already-armed' | 'unsupported';
+
+/**
+ * The name {@link armHttpRequestCounter} shipped with. Kept as an alias
+ * rather than renamed: the export is already in the pending release, and the
+ * two families arm through separate entry points anyway.
+ */
+export type ArmHttpRequestCounterResult = ArmHttpMetricResult;
 
 /**
  * The per-server latch behind the contract's ownership rule. A registered
@@ -66,7 +74,7 @@ const HTTP_REQUEST_COUNTER_ARMED = Symbol.for(
 export function armHttpRequestCounter(
     server: IHttpServer,
     metrics: MetricsRegistry,
-): ArmHttpRequestCounterResult {
+): ArmHttpMetricResult {
     if (typeof server.afterResponse !== 'function') return 'unsupported';
     const latched = server as IHttpServer & { [HTTP_REQUEST_COUNTER_ARMED]?: boolean };
     if (latched[HTTP_REQUEST_COUNTER_ARMED]) return 'already-armed';
@@ -77,6 +85,72 @@ export function armHttpRequestCounter(
             route: observation.routePattern,
             status: String(observation.status),
         });
+    });
+    return 'armed';
+}
+
+/**
+ * The duration family's own latch. A SEPARATE registered symbol from the
+ * counter's, deliberately: the two families are armed through separate entry
+ * points and gated separately on the dispatcher's per-route wrapper, so a
+ * host that arms one must not silently latch the other away.
+ */
+const HTTP_REQUEST_DURATION_ARMED = Symbol.for(
+    'objectstack.observability.httpRequestDurationArmed',
+);
+
+/**
+ * Arm `http_request_duration_ms{method,route}` on a transport through the
+ * `IHttpServer.afterResponse` observation seam — AT MOST ONCE per server,
+ * whoever calls first. The duration half of #9834, built on the mechanism
+ * #9835 proved out for `http_requests_total`.
+ *
+ * ## Why the histogram has to move too
+ *
+ * #9835 moved only the counter, which left the docs' two derived signals
+ * inconsistent with each other: 5xx rate saw every inbound surface while p95
+ * latency still saw the dispatcher's own routes. An operator reading one
+ * dashboard got request volume for `/api/v1/*` beside a latency panel with no
+ * series for it — and the worse reading is the p95 that IS drawn, computed
+ * from dispatcher routes only and presented as the server's.
+ *
+ * ## ⚠️ The observation WINDOW changes with the emitter
+ *
+ * The dispatcher's per-route wrapper timed `await handler(req, res)` — handler
+ * latency. This seam times the transport's own `use('*')` around
+ * `await next()`, which is what {@link HttpResponseObservation.elapsedMs}
+ * means: "from the transport first seeing the request to the response
+ * existing". That includes the middleware chain and body parse, so the series
+ * can only move UP, never down. It is the number an operator's latency panel
+ * should have been showing — the request's latency rather than one layer's
+ * share of it — but it is a visible change in an existing series, so it is
+ * stated here, in the changeset, and in `docs/OBSERVABILITY.md` rather than
+ * left for a dashboard to discover.
+ *
+ * The label set is unchanged and stays the SEMCONV-declared `{method,route}`:
+ * `route` is the transport's `routePattern` (the registered PATTERN, never the
+ * concrete path), and no `status` label is added — a histogram split by status
+ * is a different series shape than the one the docs tell operators to graph.
+ *
+ * @param server - The transport. Pass the RAW registered `http.server`
+ *   instance, not a wrapper — the latch is per object identity, and (per
+ *   #5122) a wrapper risks erasing the optional member this feature-detects.
+ * @param metrics - The registry the histogram lands in. First caller wins.
+ */
+export function armHttpRequestDurationHistogram(
+    server: IHttpServer,
+    metrics: MetricsRegistry,
+): ArmHttpMetricResult {
+    if (typeof server.afterResponse !== 'function') return 'unsupported';
+    const latched = server as IHttpServer & { [HTTP_REQUEST_DURATION_ARMED]?: boolean };
+    if (latched[HTTP_REQUEST_DURATION_ARMED]) return 'already-armed';
+    latched[HTTP_REQUEST_DURATION_ARMED] = true;
+    server.afterResponse((observation) => {
+        metrics.histogram(
+            RUNTIME_METRICS.httpRequestDurationMs,
+            observation.elapsedMs,
+            { method: observation.method, route: observation.routePattern },
+        );
     });
     return 'armed';
 }

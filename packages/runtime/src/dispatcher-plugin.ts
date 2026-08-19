@@ -25,6 +25,7 @@ import {
     NoopErrorReporter,
     instrumentRouteHandler,
     armHttpRequestCounter,
+    armHttpRequestDurationHistogram,
     type MetricsRegistry,
     type ErrorReporter,
 } from './observability/index.js';
@@ -795,6 +796,14 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 typeof (rawServer as IHttpServer).afterResponse === 'function';
             if (transportCountsRequests && config.observability?.metrics) {
                 armHttpRequestCounter(rawServer as IHttpServer, config.observability.metrics);
+                // #9834: the duration histogram takes the same route, on its
+                // own first-wins latch. Without it the docs' two derived
+                // signals disagreed — 5xx rate saw every inbound surface
+                // while p95 latency saw the dispatcher's own routes only.
+                armHttpRequestDurationHistogram(
+                    rawServer as IHttpServer,
+                    config.observability.metrics,
+                );
             }
             server = new Proxy(rawServer, {
                 get(target, prop, receiver) {
@@ -812,6 +821,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                                     generateRequestId,
                                     requestIdHeader,
                                     emitHttpRequestsTotal: !transportCountsRequests,
+                                    emitHttpRequestDurationMs: !transportCountsRequests,
                                 }),
                             );
                         };
