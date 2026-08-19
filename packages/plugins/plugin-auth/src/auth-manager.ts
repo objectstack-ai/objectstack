@@ -2761,10 +2761,11 @@ export class AuthManager {
       // AUTH_SSO_PROVIDER_SCHEMA).
       //
       // That bridge dates from 1.6.20, where @better-auth/sso hardcoded the
-      // model and read no `schema` option. Re-checked against the pinned
-      // 1.7.0-rc.2 (`node_modules/@better-auth/sso/dist`) on 2026-08-12: that is
-      // no longer true — `SSOOptions.schema.ssoProvider` now exists
-      // (index-D1yk91me.d.mts) and the runtime honours `modelName` plus a
+      // model and read no `schema` option. Re-measured against the installed
+      // 1.7.1 (`node_modules/@better-auth/sso/dist`) on 2026-08-19 — the pin
+      // moved off 1.7.0-rc.2, so the previous stamp here had itself expired
+      // (#8224): still no longer true — `SSOOptions.schema.ssoProvider` exists
+      // (index-CZytzKv6.d.mts) and the runtime honours `modelName` plus a
       // per-field `fieldName` map (index.mjs, the plugin's `schema:` block). The
       // adapter-level bridge is kept as-is here because it is what the rest of
       // the auth stack is wired to; whether to move it onto the plugin option is
@@ -2797,9 +2798,14 @@ export class AuthManager {
     // Provider; endpoints mount under /api/v1/auth/scim/v2/{Users,…} (SCIM 2.0)
     // and /api/v1/auth/scim/{generate-token,…} (management). `active:false` →
     // ban + session revoke (needs the admin plugin, forced on above); org-scoped
-    // tokens need the organization plugin. Like @better-auth/sso it hardcodes
-    // its `scimProvider` model (no schema option) — bridged to `sys_scim_provider`
-    // via AUTH_MODEL_TO_PROTOCOL. Toggle with `OS_SCIM_ENABLED`.
+    // tokens need the organization plugin. This plugin hardcodes its
+    // `scimProvider` model and accepts no `schema` option — still true of the
+    // installed 1.7.0-rc.1 (`SCIMOptions` declares no `schema` / `modelName` /
+    // `fields` member; measured 2026-08-19). NOT "like @better-auth/sso", as
+    // this line used to say: sso accepts one as of 1.7.1 (#8224), so scim is now
+    // the only one of the pair for which the adapter bridge is forced. Bridged
+    // to `sys_scim_provider` via AUTH_MODEL_TO_PROTOCOL. Toggle with
+    // `OS_SCIM_ENABLED`.
     //
     // storeSCIMToken: 'hashed' — never persist the bearer in cleartext; the
     // plaintext is returned exactly once from generate-token (for the IdP admin).
