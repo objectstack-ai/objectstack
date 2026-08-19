@@ -31,7 +31,8 @@ describe('CoreServiceName → contract map (#4127)', () => {
         // failing test and not only as a type error in an unrelated package.
         // ('workflow' left both lists with its slot, #4451 v17.)
         const mapped: Array<keyof CoreServiceContracts> = [
-            'metadata', 'data', 'auth', 'file-storage', 'search', 'cache', 'queue',
+            'metadata', 'data', 'auth', 'storage', 'file-storage', 'search',
+            'cache', 'queue',
             'automation', 'analytics', 'realtime', 'job', 'notification', 'ai',
             'i18n',
         ];
@@ -43,7 +44,8 @@ describe('CoreServiceName → contract map (#4127)', () => {
 
     it('leaves exactly the slots with no written contract unmapped', () => {
         const mapped = new Set<string>([
-            'metadata', 'data', 'auth', 'file-storage', 'search', 'cache', 'queue',
+            'metadata', 'data', 'auth', 'storage', 'file-storage', 'search',
+            'cache', 'queue',
             'automation', 'analytics', 'realtime', 'job', 'notification', 'ai',
             'i18n',
         ]);

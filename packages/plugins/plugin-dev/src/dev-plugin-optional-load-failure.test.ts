@@ -204,7 +204,7 @@ describe('DevPlugin — an optional service that is installed and fails to const
     expect(line).not.toContain('not installed');
     expect(line).toContain('code: STORAGE_ADAPTER_MISCONFIGURED');
     expect(line).toContain('OS_STORAGE_ROOT is not writable');
-    expect(line).toContain('the file-storage slot stays empty');
+    expect(line).toContain('the storage slot stays empty');
   });
 
   it('leaves the slot empty and still boots — this card changes the diagnosis, not the outcome', async () => {

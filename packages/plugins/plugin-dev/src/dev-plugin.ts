@@ -47,7 +47,9 @@ export interface DevPluginOptions {
    * this plugin can wire is enabled. Set a name to `false` to skip it.
    *
    * Available toggles: 'objectql', 'driver', 'auth', 'server', 'rest',
-   * 'dispatcher', 'security', 'i18n', 'file-storage', 'realtime'.
+   * 'dispatcher', 'security', 'i18n', 'storage', 'realtime'. The storage
+   * toggle also accepts its deprecated v17 alias spelling 'file-storage'
+   * (#9683) — setting either to `false` skips the storage service.
    *
    * Toggles for the retired dev stubs (ADR-0115 — 'cache', 'queue', 'ai',
    * 'automation', …) are accepted and ignored: those slots are no longer
@@ -351,7 +353,7 @@ function reportOptionalLoadFailure(ctx: PluginContext, err: unknown, spec: Optio
  * | REST API     | `@objectstack/rest`               | Auto-generated CRUD + metadata endpoints  |
  * | Dispatcher   | `@objectstack/runtime`            | Auth, GraphQL, packages, storage, etc.    |
  * | App/Metadata | `@objectstack/runtime`            | Project metadata (objects, views, apps)   |
- * | Storage      | `@objectstack/service-storage`    | file-storage service (local-disk adapter) |
+ * | Storage      | `@objectstack/service-storage`    | storage service (local-disk adapter) |
  * | Realtime     | `@objectstack/service-realtime`   | realtime service (in-memory adapter)      |
  * | I18n         | `@objectstack/service-i18n`       | When the stack declares translations      |
  *
@@ -553,11 +555,12 @@ export class DevPlugin implements Plugin {
     // 3d. Optional capability services (ADR-0115 D4) — the slots the retired
     //     dev stubs used to fake are filled by the REAL service packages when
     //     they are installed, following the same auto-detect pattern as 3b:
-    //     `service-storage` registers `file-storage` (local-disk adapter, real
+    //     `service-storage` registers `storage` (canonical since #9683) plus
+    //     its deprecated `file-storage` alias (local-disk adapter, real
     //     files under ./storage), `service-realtime` registers `realtime`
     //     (its default in-memory adapter). Not installed → the slot stays
-    //     empty, exactly as in production.
-    if (enabled('file-storage')) {
+    //     empty, exactly as in production. Either toggle spelling skips it.
+    if (enabled('storage') && enabled('file-storage')) {
       try {
         const { StorageServicePlugin } = await import('@objectstack/service-storage') as any;
         this.childPlugins.push(new StorageServicePlugin());
@@ -565,9 +568,9 @@ export class DevPlugin implements Plugin {
       } catch (err) {
         reportOptionalLoadFailure(ctx, err, {
           packages: ['@objectstack/service-storage'],
-          absent: '  ℹ @objectstack/service-storage not installed — the file-storage slot stays empty',
+          absent: '  ℹ @objectstack/service-storage not installed — the storage slot stays empty',
           absentLevel: 'info',
-          outcome: 'the file-storage slot stays empty',
+          outcome: 'the storage slot stays empty',
         });
       }
     }

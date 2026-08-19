@@ -1,0 +1,5 @@
+{
+  "file": "packages/objectql/src/search-companion.ts",
+  "adrs": ["ADR-0015", "ADR-0045", "ADR-0061"],
+  "invariant": "The `__search` companion is a REAL column the platform promises to create: this module declares it and the driver's `syncSchema` materializes it as an additive migration (ADR-0045). ADR-0015 gives the remote database ownership of a federated object's schema, so DDL is forbidden there and the schema-sync seam skips those objects — which is why provisioning withholds the declaration on any object carrying an `external` binding, using that same presence test rather than a second question about the same fact. Declaring a column that can never be built made every ADR-0061 `$search` against a federated object refuse with INVALID_FILTER/400, because the expansion ORs the companion clause in on the strength of the DECLARED field."
+}

@@ -411,13 +411,17 @@ describe('authoring-rule registry wiring (#4409)', () => {
           `here rebuilds, on a fourth surface, the exact drift #3583 → #4409 took five repairs to end.`,
       ).toEqual([]);
 
-      // And it must not reach past the kernel-safe entry: `@objectstack/lint`'s
-      // root barrel pulls the react/jsx rules' module graph, which is the one
-      // thing the boot path may not name (`lazy-deps.test.ts`).
+      // And it must not reach past the narrow entry. What that pins is the
+      // EXPORT surface, not the module graph: measured, `./runtime` reaches 70
+      // of the root's 72 modules, so BOTH entries name the react/jsx rules'
+      // modules (`runtime-lazy-deps.test.ts` says so from the other side). What
+      // the root barrel adds is the 258 further NAMES, every CLI-only rule
+      // among them — and a kernel-path consumer that can name one can
+      // hand-call one, which is the drift #4463 closed.
       expect(
         source,
         `${RUNTIME_GATE_FILE} must import from '@objectstack/lint/runtime', not the root barrel — ` +
-          `the root entry reaches the typescript/sucrase rules the kernel boot path must not name.`,
+          `the root entry exports the CLI-only rules the kernel gate must never call directly.`,
       ).not.toMatch(/from\s*['"]@objectstack\/lint['"]/);
     });
 

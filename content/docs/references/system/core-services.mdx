@@ -36,6 +36,7 @@ const result = CoreServiceName.parse(data);
 * `metadata`
 * `data`
 * `auth`
+* `storage`
 * `file-storage`
 * `search`
 * `cache`
@@ -65,7 +66,7 @@ const result = CoreServiceName.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `Enum<'metadata' \| 'data' \| 'auth' \| 'file-storage' \| 'search' \| 'cache' \| 'queue' \| 'automation' \| 'analytics' \| 'realtime' \| 'job' \| 'notification' \| 'ai' \| 'i18n' \| 'ui'>` | ✅ |  |
+| **name** | `Enum<'metadata' \| 'data' \| 'auth' \| 'storage' \| 'file-storage' \| 'search' \| 'cache' \| 'queue' \| 'automation' \| 'analytics' \| 'realtime' \| 'job' \| 'notification' \| 'ai' \| 'i18n' \| 'ui'>` | ✅ |  |
 | **enabled** | `boolean` | ✅ |  |
 | **status** | `Enum<'running' \| 'stopped' \| 'degraded' \| 'initializing'>` | ✅ |  |
 | **version** | `string` | optional |  |
@@ -82,7 +83,7 @@ const result = CoreServiceName.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ |  |
-| **name** | `Enum<'metadata' \| 'data' \| 'auth' \| 'file-storage' \| 'search' \| 'cache' \| 'queue' \| 'automation' \| 'analytics' \| 'realtime' \| 'job' \| 'notification' \| 'ai' \| 'i18n' \| 'ui'>` | ✅ |  |
+| **name** | `Enum<'metadata' \| 'data' \| 'auth' \| 'storage' \| 'file-storage' \| 'search' \| 'cache' \| 'queue' \| 'automation' \| 'analytics' \| 'realtime' \| 'job' \| 'notification' \| 'ai' \| 'i18n' \| 'ui'>` | ✅ |  |
 | **options** | `Record<string, any>` | optional |  |
 
 

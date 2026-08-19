@@ -104,7 +104,7 @@ export interface DeliverAttemptOptions {
 
 /**
  * Reconstructing a `sys_email` row into a sendable message needs the
- * `file-storage` capability once a row's attachments live out of it (#5172),
+ * `storage` capability once a row's attachments live out of it (#5172),
  * and that is asynchronous — hence this async twin of {@link rowToNormalized}.
  *
  * `fetchContent` absent ⇒ a row that needs storage fails, loudly, exactly as
@@ -459,7 +459,7 @@ export interface EmailServiceOptions {
    */
   queueDelivery?: EmailQueueDelivery;
   /**
-   * Out-of-row attachment content through the `file-storage` capability
+   * Out-of-row attachment content through the `storage` capability
    * (#5172). Set ⇒ a message whose attachments exceed
    * {@link SYS_EMAIL_ATTACHMENT_LIMIT_BYTES} can still be queued, with its
    * content in storage and a reference on the row. Unset (or unresolvable) ⇒
@@ -635,7 +635,7 @@ export class EmailService implements IEmailService {
     const id = newId();
 
     // ── OUT-OF-ROW ATTACHMENT CONTENT (#5172) ──────────────────────────────
-    // Over the in-row budget, in queue mode, with the file-storage capability
+    // Over the in-row budget, in queue mode, with the storage capability
     // mounted: the content goes to storage and the row carries a reference, so
     // this message gets the same durability as every other. Anything missing
     // here leaves `over-limit` standing — inline delivery, whole, with the
@@ -788,9 +788,9 @@ export class EmailService implements IEmailService {
         `EmailService: queue delivery skipped for one message — its attachments total `
         + `${encodedAttachments.totalBytes} bytes, over the ${SYS_EMAIL_ATTACHMENT_LIMIT_BYTES}-byte limit a `
         + 'sys_email row carries, so the message was delivered inline (in-process retries only) rather than '
-        + 'queued without them. Content that large is queueable through the file-storage capability (#5172), '
+        + 'queued without them. Content that large is queueable through the storage capability (#5172), '
         + `but ${encodedAttachments.storageDetail ?? 'that path was not attempted for this message'}. `
-        + 'Fix: mount the file-storage capability (@objectstack/service-storage) so large attachments are '
+        + 'Fix: mount the storage capability (@objectstack/service-storage) so large attachments are '
         + 'stored out of the row and the message can be delivered durably.',
       );
       return undefined;
@@ -820,7 +820,7 @@ export class EmailService implements IEmailService {
 
   /**
    * Try to move an over-budget message's attachment content out of the row and
-   * into the `file-storage` capability (#5172).
+   * into the `storage` capability (#5172).
    *
    * Returns a `storage` verdict on success, and the ORIGINAL `over-limit`
    * verdict — annotated with why — on every failure. That asymmetry is the
@@ -845,7 +845,7 @@ export class EmailService implements IEmailService {
     if (!storage) {
       return {
         ...overLimit,
-        storageDetail: 'no file-storage capability is mounted, so there is nowhere to put the content',
+        storageDetail: 'no storage capability is mounted, so there is nowhere to put the content',
       };
     }
 
@@ -883,7 +883,7 @@ export class EmailService implements IEmailService {
       + 'not be deleted again: '
       + failed.map((f) => `'${f.key}' (${f.error})`).join('; ')
       + '. Nothing references those bytes and nothing will ever reclaim them. Fix: delete them by hand under '
-      + 'the sys_email/attachments/ prefix, and check why the file-storage backend is refusing deletes.',
+      + 'the sys_email/attachments/ prefix, and check why the storage backend is refusing deletes.',
     );
   }
 
@@ -894,7 +894,7 @@ export class EmailService implements IEmailService {
     this.options.logger?.error?.(
       `EmailService: a message's attachments could not be stored out of row — ${detail}. The message was `
       + 'still SENT, inline and whole, but it did not get durable queue delivery: a failure would be retried '
-      + 'only in this process and lost if it dies. Fix: check the file-storage capability '
+      + 'only in this process and lost if it dies. Fix: check the storage capability '
       + '(@objectstack/service-storage — credentials, bucket, disk), or accept inline delivery for messages '
       + `with attachments over ${SYS_EMAIL_ATTACHMENT_LIMIT_BYTES} bytes.`,
     );
@@ -1043,7 +1043,7 @@ export class EmailService implements IEmailService {
       this.options.logger?.error?.(
         `EmailService: ${keys.length} attachment storage object(s) for sys_email row '${rowId}' cannot be `
         + 'scheduled for reclamation — no durable queue service is available now, although one was when the '
-        + 'content was stored. Those bytes will stay in the file-storage backend until they are deleted by '
+        + 'content was stored. Those bytes will stay in the storage backend until they are deleted by '
         + 'hand. Fix: keep @objectstack/service-queue (over an ObjectQL engine) mounted for the life of the '
         + 'process, then delete leftovers under the sys_email/attachments/ prefix.',
       );
@@ -1119,7 +1119,7 @@ export class EmailService implements IEmailService {
     const reclaimKeys = storageKeysInColumn(source.attachments_json);
     let normalized: NormalizedEmailMessage;
     try {
-      // Async because a row's attachments may live in the file-storage
+      // Async because a row's attachments may live in the storage
       // capability (#5172). A fetch that fails — outage, deleted object, no
       // capability mounted at all — throws and lands the row at `failed` with
       // the reason, which is the whole point: an unfetchable attachment must

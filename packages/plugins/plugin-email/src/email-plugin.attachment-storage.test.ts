@@ -100,7 +100,7 @@ function fakeEngine() {
   return engine;
 }
 
-/** In-memory `file-storage` capability, shaped like `IStorageService`. */
+/** In-memory `storage` capability, shaped like `IStorageService`. */
 function fakeStorage(opts: { failUpload?: boolean } = {}) {
   const objects = new Map<string, Buffer>();
   return {
@@ -165,7 +165,7 @@ async function boot(opts: BootOpts = {}) {
     objectql: engine,
     queue: adapter,
   };
-  if (storage) services['file-storage'] = storage;
+  if (storage) services['storage'] = storage;
 
   const ctx = fakeCtx(services);
   const plugin = new EmailServicePlugin({
@@ -317,7 +317,7 @@ describe('a 300 KB attachment now gets the durability guarantee', () => {
 
 // ── the deployments that cannot store out of row ───────────────────────────
 
-describe('a deployment without the file-storage capability', () => {
+describe('a deployment without the storage capability', () => {
   it('still delivers the message WHOLE, inline, and says what to mount', async () => {
     const h = await boot({ storage: null });
 
@@ -337,7 +337,7 @@ describe('a deployment without the file-storage capability', () => {
     expect(h.sysEmail()[0].attachments_json).toBeUndefined();
     // Loud, with the obstacle and the fix.
     const info = h.infoLines();
-    expect(info).toContain('no file-storage capability is mounted');
+    expect(info).toContain('no storage capability is mounted');
     expect(info).toContain('@objectstack/service-storage');
   });
 

@@ -230,7 +230,7 @@ waiting one more round.
 - **Maintainer confirm (`needs-user-decision`)** — design cards, feature or
   contract-shape proposals, multi-week programs needing appetite and
   sequencing, anything touching stored-data migration shape or removing a
-  shipped capability. The label alone is the inbox entry; the deep three-axis
+  shipped capability. The label alone is the inbox entry; the deep four-axis
   analysis is written when the card is actually taken up.
 - **Repair first** — a body truncated by GitHub's sanitizer cannot be
   dispatched. Comment the repair instruction and move on.
@@ -641,14 +641,14 @@ When something *does* pass the bar:
    no issue of its own.
 3. Write the analysis with: background, the precise question, the options, your
    recommendation, and the related issues / PRs / branches — **and analyze
-   every option on the three fixed axes below.**
+   every option on the four fixed axes below.**
 4. If the session is interactive, additionally ask the maintainer directly; the
    labeled issue remains the durable record either way. **Never** answer a
    product or architecture question on the maintainer's behalf.
 
-#### The three-axis decision frame (binding)
+#### The four-axis decision frame (binding)
 
-Every option in an escalation is analyzed on **all three** axes. This framing is
+Every option in an escalation is analyzed on **all four** axes. This framing is
 the core of the escalation, not decoration.
 
 **Axis ① — real business need.** Does this option serve a business scenario that
@@ -657,19 +657,10 @@ the core of the escalation, not decoration.
 instead of answering it. The evidence must be **measured, not inferred**: who
 writes this key, who reads this capability, how the project's example apps and
 real deployments use it today. "It reads like it would be useful" does not
-count — and neither does "we already shipped it": a **shipped-but-unconsumed
-capability gets no sunk-cost exemption**. A declared surface with no pull is
-handled **implementation-first** — narrow the declaration until
-`declared = enforced` (retire it, or park the vocabulary and let it return with
-the implementation) rather than building implementation to justify a declaration
-nobody asked for. **How tight that default should be is your project's call, not
-this skill's:** declare the capability-expansion stance in your conventions file —
-tight while the core surface is still forming, more permissive once it is
-stable — and this axis reads it from there, like every other project-specific
-rule. This axis **changes verdicts** rather than decorating them: two findings
+count. This axis **changes verdicts** rather than decorating them: two findings
 of identical technical shape can be ruled opposite ways on it alone — one
 declared surface retired for lack of pull, another kept and made to *reject
-loudly* because a real app proved the direction. On the other two axes they
+loudly* because a real app proved the direction. On the other three axes they
 would read the same, and that would be the wrong answer.
 
 **Axis ② — long-term architectural soundness for *this* project.** Which option
@@ -688,7 +679,19 @@ reader turns a whole generation of wrong metadata into something that "works"
 until it does not. Never let an agent declare a capability the runtime does not
 honour.
 
-Your recommendation must be justified on **all three** axes. If they conflict,
+**Axis ④ — startup scope discipline.** Do not grow the declared surface while
+the core is still forming. "We already shipped it" earns nothing: a
+**shipped-but-unconsumed capability gets no sunk-cost exemption**. A declared
+surface with no pull is handled **implementation-first** — narrow the
+declaration until `declared = enforced` (retire it, or park the vocabulary and
+let it return with the implementation) rather than building implementation to
+justify a declaration nobody asked for. **How tight that default should be is
+your project's call, not this skill's:** declare the capability-expansion
+stance in your conventions file — tight while the core surface is still
+forming, more permissive once it is stable — and this axis reads it from there,
+like every other project-specific rule.
+
+Your recommendation must be justified on **all four** axes. If they conflict,
 present the trade-off honestly and let the maintainer decide.
 
 ### 9. Round report, then next round
@@ -798,17 +801,12 @@ or two readings of the issue lead to different architectures: make no guess,
 write no speculative code. Return status "needs_decision" with each question,
 the options, their costs, and your recommendation in open_questions. A wrong
 guess shipped is far more expensive than a round-trip to the maintainer.
-Analyze every option on three fixed axes:
+Analyze every option on four fixed axes:
 - Real business need — does the option serve a business scenario that ACTUALLY
   EXISTS, or a speculative capability surface? Ask this first. The evidence must
   be MEASURED, not inferred: who writes this key, who reads this capability, how
   the project's example apps and real deployments use it today. "It reads like it
-  would be useful" does not count, and a shipped-but-unconsumed capability gets
-  no sunk-cost exemption. A declared surface with no pull is handled
-  implementation-first — narrow the declaration until declared = enforced
-  (retire it, or park the vocabulary until the implementation arrives) rather
-  than building implementation to justify the declaration. How tight the default
-  is comes from the project's conventions file, not from this template.
+  would be useful" does not count.
 - Long-term architectural soundness for THIS project — which option matches a
   sustainable architecture (no workarounds, contract-first), not which is
   cheapest today. Name the long-term cost of any patch-style option.
@@ -817,7 +815,14 @@ Analyze every option on three fixed axes:
   publish-time validation that rejects loudly, declared = enforced) over
   consumer-side tolerance. Lenient consumers are where AI-generated errors hide
   and multiply.
-Justify your recommendation on all three axes; if they conflict, present the
+- Startup scope discipline — do not grow the declared surface: a
+  shipped-but-unconsumed capability gets no sunk-cost exemption. A declared
+  surface with no pull is handled implementation-first — narrow the declaration
+  until declared = enforced (retire it, or park the vocabulary until the
+  implementation arrives) rather than building implementation to justify the
+  declaration. How tight the default is comes from the project's conventions
+  file, not from this template.
+Justify your recommendation on all four axes; if they conflict, present the
 trade-off and let the maintainer decide.
 
 Return "blocked" (with evidence) when the default branch is broken under you, a
