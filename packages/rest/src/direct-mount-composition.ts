@@ -61,9 +61,18 @@ export interface DirectMountComposition {
     /** The `protocol` slice the package routes read registry packages through. */
     protocol?: PackageRoutesOptions['protocol'];
     /**
-     * [#7033 / #7023] Resolves the caller's execution context for the package
-     * routes' authorization gate — the `RestServer`'s own resolver, so the
-     * capability check reads the same identity the rest of the surface does.
+     * [#7033 / #7023] Resolves the caller's execution context for the direct-
+     * mount gates — the `RestServer`'s own resolver, so the checks read the
+     * same identity the rest of the surface does.
+     *
+     * [#9686] Handed to BOTH registrars this step mounts. It used to reach only
+     * `registerPackageRoutes`, and that asymmetry was the whole of the
+     * federation family's exposure: one registrar got the identity and applied
+     * the shared anonymous floor while the other got nothing and checked
+     * nothing — including on the two routes that write. There is no reading of
+     * this composition under which one direct mount needs the caller's identity
+     * and its neighbour does not, so the resolver is passed to every registrar
+     * mounted here, and a registrar added later inherits the same wiring.
      */
     resolveExecutionContext?: PackageRoutesOptions['resolveExecutionContext'];
     /** ADR-0006 project scoping — mirrors the package routes under the scoped base. */
@@ -134,7 +143,11 @@ export function mountAndRecordDirectRoutes(composition: DirectMountComposition):
     // `@objectstack/datasource-admin` package, which registers its own.
     try {
         recorder.recordDirectMountedRoutes(
-            registerExternalDatasourceRoutes(server, ctx, versionedBase),
+            // [#9686] The resolver is the SAME one the package registrar above
+            // receives — this family's anonymous floor reads the identity the
+            // rest of the surface reads, and a deployment that wires no
+            // resolver refuses rather than serves (the registrar fails closed).
+            registerExternalDatasourceRoutes(server, ctx, versionedBase, { resolveExecutionContext }),
         );
         ctx.logger.info('Datasource federation routes registered');
     } catch (e: any) {

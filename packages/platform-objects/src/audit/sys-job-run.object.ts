@@ -29,7 +29,7 @@ export const SysJobRun = ObjectSchema.create({
     class: 'telemetry',
     retention: { maxAge: '30d' },
   },
-  description: 'Background job execution audit trail',
+  description: 'Background job execution history',
   displayNameField: 'job_name',
   nameField: 'job_name', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{job_name} @ {started_at}',

@@ -44,7 +44,28 @@ interface Captured {
   body: any;
 }
 
-function mount(svc: unknown) {
+/**
+ * [#9686] The family requires an authenticated caller, so every case in this
+ * file — whose subject is the ENVELOPE of the success / 400 / 503 arms — mounts
+ * with a resolver standing in for a credentialed one. Without it each case
+ * would read the 401 body instead of the arm it names, and this file would
+ * silently stop measuring what it exists to measure.
+ *
+ * The guard itself is pinned in `external-datasource-routes-auth-guard.test.ts`;
+ * the 401's own envelope is the last case below, which is this file's business.
+ */
+const CREDENTIALED = async () => ({ userId: 'u_env_conformance' });
+
+/**
+ * A resolver that RESOLVES, and resolves to no identity — the anonymous case as
+ * the production resolver expresses it. Spelled as its own constant because
+ * passing `undefined` for the parameter below would take the default above:
+ * "no argument" and "no identity" are different facts, and only one of them is
+ * what the 401 case means to drive.
+ */
+const ANONYMOUS = async () => undefined;
+
+function mount(svc: unknown, resolveExecutionContext: any = CREDENTIALED) {
   const routes = new Map<string, RouteHandler>();
   const server = {
     get: (p: string, h: RouteHandler) => { routes.set(`GET:${p}`, h); },
@@ -57,7 +78,7 @@ function mount(svc: unknown) {
     close: async () => {},
   } as unknown as IHttpServer;
   const ctx = { getService: vi.fn().mockReturnValue(svc) } as any;
-  registerExternalDatasourceRoutes(server, ctx, '/api/v1');
+  registerExternalDatasourceRoutes(server, ctx, '/api/v1', { resolveExecutionContext });
   return routes;
 }
 
@@ -299,5 +320,22 @@ describe('external-datasource envelope (#3843) — error bodies', () => {
       expect(body.success, `${method} ${path}`).toBe(false);
       expect(body.error.code, `${method} ${path}`).toBe('SERVICE_UNAVAILABLE');
     }
+  });
+});
+
+describe('[#9686] the anonymous refusal is written in the same declared envelope', () => {
+  it('an unauthenticated caller gets 401 { success: false, error: { code } }, not a hand-written body', async () => {
+    // The guard added a body to this surface, and a new body is exactly where
+    // an envelope drifts. Same assertions the arms above make, on the arm the
+    // authentication floor produces.
+    const routes = mount({ listRemoteTables: async () => [{ name: 'customers' }] }, ANONYMOUS);
+    const { status, body } = await drive(routes, 'GET', `${EXT}/tables`);
+
+    expect(status).toBe(401);
+    expect(BaseResponseSchema.safeParse(body).success, `body is not a BaseResponse: ${JSON.stringify(body)}`).toBe(true);
+    expect(envelopeViolations(body), `not the declared envelope: ${JSON.stringify(body)}`).toEqual([]);
+    expect(body.success).toBe(false);
+    expect(body.error?.code).toBe('UNAUTHENTICATED');
+    expect(body.data).toBeUndefined();
   });
 });
