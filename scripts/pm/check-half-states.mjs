@@ -8,6 +8,31 @@
  *   node scripts/pm/check-half-states.mjs               # sweep the live repo
  *   node scripts/pm/check-half-states.mjs --probe       # can live mode run HERE? (no sweep)
  *   node scripts/pm/check-half-states.mjs --self-test   # verify the predicates offline
+ *   node scripts/pm/check-half-states.mjs --format=markdown [--provenance='…']
+ *                                                       # the same sweep, rendered for an issue body
+ *
+ * ## The standing caller (#9844)
+ *
+ * For most of this file's life its consumer was "a PM seat's patrol round" —
+ * which is to say, nobody's calendar. A shift covering two lanes declared a
+ * queue empty from memory while eight malformed claims (H2) and an unenumerated
+ * backlog sat on the board; not one predicate here had fired, because nothing
+ * standing ever called them. An alarm added to a script nobody runs is still
+ * silence, and the transport note below explains why "some seat should run it"
+ * kept not happening: the live sweep cannot run inside a PM session container
+ * at all.
+ *
+ * So the caller is now `.github/workflows/half-state-patrol.yml` — a scheduled
+ * workflow, on a runner where the transport prerequisite is met, landing the
+ * result by rewriting ONE pinned anchor issue in place (edit history is the
+ * archive; never a comment per run). `--format=markdown` exists for exactly
+ * that consumer, and `--provenance` lets the caller stamp its own run identity
+ * into a body this script otherwise renders repo-agnostically.
+ *
+ * What did NOT change, and must not: this stays report-only. The workflow never
+ * fails a build over findings and never writes a label. The one thing it DOES
+ * treat as a failure is its own non-delivery — a patrol that cannot land its
+ * report is the disease, not a finding.
  *
  * ## Why report-only, and why the exit code is ALWAYS 0 on a completed sweep
  *
@@ -741,6 +766,16 @@ export const H13_EXEMPT_LABELS = ['tracking', 'status:parked', 'qa-run'];
 export const DOMAIN_HALF_STATE_STALE_HOURS = 2;
 
 /**
+ * The prefix H13 stamps on a self-declared-P0 row. Exported because a SECOND
+ * reader now depends on it: the markdown renderer sorts loud rows to the top
+ * of the anchor body (see `renderMarkdown`). A shared constant, not a string
+ * literal in two files — the loudness and the thing that reads the loudness
+ * must never be able to drift apart, which is the whole failure family this
+ * script belongs to.
+ */
+export const P0_SUSPECT_MARKER = '🚨 P0-SUSPECT:';
+
+/**
  * Whether the card's own title/body self-declares P0 / data-integrity — the
  * incident card carried its emergency-triage trigger in its body while the
  * seat that saw it "waited for triage" in session memory. Read through
@@ -778,10 +813,202 @@ export function h13DomainWithoutPmState(issue, nowMs = Date.now()) {
     `inventory: pair the domain label with its pm-state in one write, oldest first.`;
   if (!h13SelfDeclaredP0(issue)) return base;
   return (
-    `🚨 P0-SUSPECT: the card's own title/body self-declares P0/data-integrity, and for that ` +
+    `${P0_SUSPECT_MARKER} the card's own title/body self-declares P0/data-integrity, and for that ` +
     `class the emergency-triage channel (immediate triage subagent) is the mandated move, ` +
     `never the hourly Routine. ${base}`
   );
+}
+
+// ---------------------------------------------------------------------------
+// Report rendering — pure over (findings, counts), so `--self-test` pins both
+// media offline. The live sweep below picks a renderer and prints it; nothing
+// about WHAT is swept or WHICH predicates fire depends on the format.
+//
+// Two media exist because this script gained a second consumer. The first is a
+// terminal: a patrol round reads the plain lines and scrolls. The second is a
+// pinned anchor ISSUE BODY, rewritten in place by the scheduled workflow that
+// gave this sweeper a standing caller (`.github/workflows/half-state-patrol.yml`)
+// — a surface with a fold, a hard size cap, and readers who will not scroll.
+// That difference, and only that, is why the two renderers order rows
+// differently; see `renderMarkdown`.
+// ---------------------------------------------------------------------------
+
+/** Accepted `--format` values. An unrecognized one is a usage error (exit 2). */
+export const OUTPUT_FORMATS = ['plain', 'markdown'];
+
+/**
+ * GitHub's hard cap on an issue body, and the budget the markdown renderer
+ * keeps under it. A body that exceeds the cap is REJECTED by the API — the
+ * whole run's report would vanish over one long row — so the renderer trims
+ * and SAYS it trimmed. Silent truncation is the #4690 shape (an unreadable
+ * result must not read as a clean one), so the omission notice is part of the
+ * rendered body, never a log line the anchor's reader never sees.
+ */
+export const ISSUE_BODY_LIMIT = 65536;
+export const MARKDOWN_BODY_BUDGET = 60000;
+
+/** Is this finding one of H13's louder self-declared-P0 rows? */
+export function isLoudFinding(message) {
+  return String(message ?? '').startsWith(P0_SUSPECT_MARKER);
+}
+
+/**
+ * The summary sentence both media end on — the one line that says what was
+ * READ, not just what was found. It is the difference between "the board is
+ * clean" and "nothing was swept", and it carries the report-only contract so
+ * a reader who sees only this line cannot mistake it for a gate verdict.
+ *
+ * @param {{ repo: string, issues: number, unscoped: number, prs: number, merged: number }} counts
+ * @param {number} findingCount
+ */
+export function summaryLine(counts, findingCount) {
+  return (
+    `check-half-states: swept ${counts.issues} open pm-/p0-labeled issue(s), ${counts.unscoped} open ` +
+    `issue(s) in H13's unscoped pass, ${counts.prs} open PR(s) ` +
+    `and ${counts.merged} recently-merged PR(s) in ${counts.repo} — ${findingCount} half-state(s) found. ` +
+    `Report-only: findings are patrol input, not a gate verdict.`
+  );
+}
+
+/**
+ * The terminal report — byte-identical to what this script printed before the
+ * format switch existed. Findings arrive already sorted by issue number and
+ * that order is kept: a terminal has no fold, so there is nothing for a
+ * priority sort to buy here, and changing it would churn every seat's habit.
+ */
+export function renderPlain(findings, counts) {
+  const lines = findings.map(
+    ([issue, code, msg]) => `  ${code} #${issue.number} ${msg}\n     ${issue.html_url}`,
+  );
+  lines.push(summaryLine(counts, findings.length));
+  return lines.join('\n');
+}
+
+/**
+ * Provenance is a one-line string the CALLER supplies (`--provenance=…`): the
+ * script knows it swept, it does not know it was a GitHub Actions run #123 at
+ * commit abc1234, and teaching it would couple a repo-agnostic sweeper to one
+ * caller. Collapsed to a single line and length-capped here rather than
+ * trusted: it is interpolated into a markdown italic line, and a newline in it
+ * would silently break the header apart.
+ */
+export function normalizeProvenance(text) {
+  return String(text ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 300);
+}
+
+/**
+ * The anchor-body report.
+ *
+ * Row order differs from `renderPlain` on purpose, and the reason is the
+ * medium: this body is READ AT A FOLD and TRIMMED AT A CAP. A P0-SUSPECT row
+ * sitting at position 38 of 40 — or trimmed off the end entirely — is exactly
+ * the silence this sweeper's standing caller exists to end, so loud rows sort
+ * first and are therefore the last things truncation could ever reach. Within
+ * each band the issue-number order is preserved, so the list is still stable
+ * run to run and diffable in the anchor's edit history.
+ *
+ * The header is deliberately restated every run rather than left as a
+ * hand-written preamble the workflow must not clobber: the body is owned by
+ * this generator, end to end, so there is no half of it that a run can leave
+ * stale. First line is a bare literal marker with no angle brackets — the
+ * board's markers are grepped as literal text, never as comment syntax,
+ * because GitHub's body sanitizer eats short `<…>` fragments on write.
+ */
+export function renderMarkdown(findings, counts, options = {}) {
+  const provenance = normalizeProvenance(options.provenance);
+  const sweptAt = options.sweptAt instanceof Date ? options.sweptAt : new Date();
+  const rows = [...findings].sort(
+    (a, b) => Number(isLoudFinding(b[2])) - Number(isLoudFinding(a[2])) || a[0].number - b[0].number,
+  );
+  const loudCount = rows.filter(([, , msg]) => isLoudFinding(msg)).length;
+
+  const head = [
+    'os-half-state-sweep — machine-findable marker for this generated view.',
+    '',
+    '**Generated view — not a second tracker.** Authority lives on each card and PR (one-board rule);' +
+      ' this body is rewritten IN PLACE by the scheduled patrol workflow' +
+      ' (`.github/workflows/half-state-patrol.yml`) on every run, and the edit history is the archive.' +
+      ' **Report-only**: every row is patrol input, never a gate verdict, and this sweep never fixes a' +
+      ' state. Each predicate and the protocol clause it enforces are documented in' +
+      ' `scripts/pm/check-half-states.mjs`.',
+    '',
+    `_Swept ${sweptAt.toISOString()}${provenance ? ` · ${provenance}` : ''}_`,
+    '',
+    'The timestamp above is the patrol\'s own heartbeat: a `Swept` line that stops advancing means the' +
+      ' standing caller died, which is the failure this anchor was created to make visible. Read it' +
+      ' before you read the rows.',
+    '',
+  ];
+
+  if (loudCount > 0) {
+    head.push(
+      `🚨 **${loudCount} P0-SUSPECT row(s) in this sweep** — for that class the mandated move is the` +
+        ' emergency-triage channel (an immediate triage subagent), never waiting for the next hourly' +
+        ' Routine fire. They are sorted to the top of the list below.',
+      '',
+    );
+  }
+
+  head.push(`**${summaryLine(counts, rows.length)}**`, '');
+
+  if (rows.length === 0) {
+    head.push(
+      '✅ No half-states found in this sweep. This line means the board was READ and is clean — a sweep' +
+        ' that could not RUN replaces this whole body with a prerequisite/failure report instead, so a' +
+        ' green anchor is never the sound of a broken sweeper.',
+    );
+    return head.join('\n');
+  }
+
+  head.push('### Findings', '', '');
+  const body = head.join('\n');
+  const rendered = [];
+  let used = body.length;
+  for (let i = 0; i < rows.length; i++) {
+    const [issue, code, msg] = rows[i];
+    const line = `- **${code}** [#${issue.number}](${issue.html_url}) — ${msg}`;
+    // Reserve room for the omission notice itself, so the trim can always
+    // announce itself even when it fires on the very last row.
+    const notice = `\n- _… ${rows.length - i} further row(s) omitted to fit GitHub's issue-body limit; the full list is in the workflow run log._`;
+    if (used + line.length + 1 + notice.length > MARKDOWN_BODY_BUDGET) {
+      rendered.push(notice.slice(1));
+      break;
+    }
+    rendered.push(line);
+    used += line.length + 1;
+  }
+  return `${body}${rendered.join('\n')}`;
+}
+
+/**
+ * Output options off argv. Pure, so `--self-test` pins the usage errors too:
+ * a mistyped `--format` must be a LOUD non-zero exit, never a silent fallback
+ * to plain text that would leave the anchor updated with an unreadable body.
+ *
+ * @param {string[]} argv
+ * @returns {{ format: string, provenance: string, error?: string }}
+ */
+export function parseOutputOptions(argv) {
+  const out = { format: 'plain', provenance: '' };
+  for (const arg of argv ?? []) {
+    const fmt = /^--format=([\s\S]*)$/.exec(arg);
+    if (fmt) {
+      if (!OUTPUT_FORMATS.includes(fmt[1])) {
+        return {
+          ...out,
+          error: `unknown --format=${fmt[1]} — expected one of: ${OUTPUT_FORMATS.join(', ')}`,
+        };
+      }
+      out.format = fmt[1];
+      continue;
+    }
+    const prov = /^--provenance=([\s\S]*)$/.exec(arg);
+    if (prov) out.provenance = normalizeProvenance(prov[1]);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -1136,7 +1363,7 @@ async function listIssues(label) {
   return out;
 }
 
-async function sweep() {
+async function sweep(options = {}) {
   // Answered once, before any listing — so an unusable transport costs ONE
   // classified verdict instead of a raw HTTP status from whichever label page
   // happened to go first (`pm:dispatched`, in the failure #7412 recorded).
@@ -1156,14 +1383,17 @@ async function sweep() {
   }
 
   findings.sort((a, b) => a[0].number - b[0].number);
-  for (const [issue, code, msg] of findings) {
-    console.log(`  ${code} #${issue.number} ${msg}\n     ${issue.html_url}`);
-  }
+  const counts = {
+    repo: OWNER_REPO,
+    issues: seen.size,
+    unscoped: seenUnscoped.size,
+    prs: seenPrs.size,
+    merged: seenMerged.size,
+  };
   console.log(
-    `check-half-states: swept ${seen.size} open pm-/p0-labeled issue(s), ${seenUnscoped.size} open ` +
-      `issue(s) in H13's unscoped pass, ${seenPrs.size} open PR(s) ` +
-      `and ${seenMerged.size} recently-merged PR(s) in ${OWNER_REPO} — ${findings.length} half-state(s) found. ` +
-      `Report-only: findings are patrol input, not a gate verdict.`,
+    options.format === 'markdown'
+      ? renderMarkdown(findings, counts, { provenance: options.provenance })
+      : renderPlain(findings, counts),
   );
 }
 
@@ -1648,6 +1878,82 @@ function selfTest() {
   t('H13: P0 inside a word does not fire', h13SelfDeclaredP0({ title: '', body: 'the HTTP0 protocol note' }), false);
   t('H13: a quiet body stays on the base line', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26), { body: 'ordinary defect' }), NOW).includes('P0-SUSPECT'), false);
 
+  // -- report rendering, both media (#9844) ---------------------------------
+  // The standing caller writes the markdown into a pinned issue body, so the
+  // properties pinned here are the ones a broken body would cost: the plain
+  // output must not have moved, the loud rows must outrank truncation, the
+  // trim must announce itself, and a mistyped --format must be loud.
+  const finding = (number, code, msg) => [{ number, html_url: `https://example.test/${number}` }, code, msg];
+  const counts = { repo: 'o/r', issues: 3, unscoped: 4, prs: 5, merged: 6 };
+  const quietRow = finding(200, 'H2', 'assignee set but no claim comment on the thread');
+  const loudRow = finding(900, 'H13', `${P0_SUSPECT_MARKER} the card self-declares P0. base sentence.`);
+
+  // The plain renderer is the pre-#9844 output, unchanged: two lines per
+  // finding (code/number/message, then the URL indented), summary last.
+  t(
+    'plain: a finding renders as the pre-existing two-line shape',
+    renderPlain([quietRow], counts).split('\n').slice(0, 2).join('|'),
+    '  H2 #200 assignee set but no claim comment on the thread|     https://example.test/200',
+  );
+  t('plain: the summary sentence ends the report', renderPlain([quietRow], counts).endsWith('not a gate verdict.'), true);
+  // renderPlain does NOT reorder: the live sweep hands it findings already
+  // sorted by issue number, and a terminal has no fold for a priority sort to
+  // buy anything at. Pinned in the direction that would actually regress —
+  // someone "helpfully" giving the plain path the markdown sort — by feeding
+  // it loud-first input and requiring the loud row to stay where it was put.
+  t('plain: preserves the caller\'s order, applying no priority sort', renderPlain([loudRow, quietRow], counts).indexOf('#900') < renderPlain([loudRow, quietRow], counts).indexOf('#200'), true);
+  t('plain: …and the markdown renderer on the same input DOES sort loud first', renderMarkdown([quietRow, loudRow], counts).indexOf('#900') < renderMarkdown([quietRow, loudRow], counts).indexOf('#200'), true);
+  t('summaryLine: names what was READ, not only what was found', summaryLine(counts, 0).includes('swept 3 open pm-/p0-labeled issue(s)'), true);
+
+  // The loudness contract between H13 and the renderer — one constant, two
+  // readers. If the prefix ever drifts, this pair fails rather than the alarm
+  // going quietly unsorted.
+  t('loudness: H13\'s P0 line is recognised by the renderer', isLoudFinding(h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26), p0Body), NOW)), true);
+  t('loudness: H13\'s base line is not', isLoudFinding(h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26)), NOW)), false);
+
+  // Fold discipline: loud first, issue-number order within each band.
+  const mixed = renderMarkdown([quietRow, loudRow, finding(100, 'H1', '`pm:dispatched` with no assignee')], counts);
+  t('markdown: loud rows sort above quiet ones', mixed.indexOf('#900') < mixed.indexOf('#100'), true);
+  t('markdown: quiet rows keep issue-number order', mixed.indexOf('#100') < mixed.indexOf('#200'), true);
+  t('markdown: the alarm line counts the loud rows', mixed.includes('**1 P0-SUSPECT row(s) in this sweep**'), true);
+  t('markdown: no alarm line when nothing is loud', renderMarkdown([quietRow], counts).includes('P0-SUSPECT row(s) in this sweep'), false);
+  t('markdown: rows are links, not bare numbers', mixed.includes('[#200](https://example.test/200)'), true);
+  t('markdown: the literal marker leads the body (no angle brackets to sanitize)', mixed.startsWith('os-half-state-sweep'), true);
+  t('markdown: the body carries no HTML-comment marker the sanitizer could eat', mixed.includes('<!--'), false);
+
+  // A clean board says it was READ. The #4690 direction, restated in the one
+  // surface where "no rows" could otherwise be mistaken for "no sweep".
+  const clean = renderMarkdown([], counts);
+  t('markdown: an empty sweep states the board was read', clean.includes('the board was READ and is clean'), true);
+  t('markdown: …and disclaims the could-not-run reading', clean.includes('could not RUN'), true);
+  t('markdown: an empty sweep still carries the summary counts', clean.includes('0 half-state(s) found'), true);
+
+  // Truncation. 400 rows of ~120 chars overrun the budget; the trim must fire,
+  // announce itself, keep the body under the cap, and never reach a loud row.
+  const many = [loudRow, ...Array.from({ length: 400 }, (_, i) => finding(1000 + i, 'H2', 'assignee set but no claim comment on the thread — '.repeat(6)))];
+  const trimmed = renderMarkdown(many, counts);
+  t('markdown: an oversized report stays under GitHub\'s body cap', trimmed.length <= ISSUE_BODY_LIMIT, true);
+  t('markdown: …and under the renderer\'s own budget', trimmed.length <= MARKDOWN_BODY_BUDGET, true);
+  t('markdown: the trim announces itself in the body', trimmed.includes('further row(s) omitted'), true);
+  t('markdown: truncation can never reach a loud row', trimmed.includes('#900'), true);
+
+  // Provenance is caller-supplied text interpolated into one italic line: a
+  // newline in it would break the header apart, so it is flattened, not trusted.
+  t('provenance: newlines are collapsed to one line', normalizeProvenance('run 7\nsha abc'), 'run 7 sha abc');
+  t('provenance: length-capped', normalizeProvenance('x'.repeat(500)).length, 300);
+  t('provenance: absent leaves the swept line alone', renderMarkdown([], counts).includes('_Swept ') && !renderMarkdown([], counts).includes(' · undefined'), true);
+  t('provenance: present is stamped after the timestamp', renderMarkdown([], counts, { provenance: 'run 7' }).includes(' · run 7_'), true);
+  t('markdown: the sweep timestamp is the patrol heartbeat', renderMarkdown([], counts, { sweptAt: new Date('2026-08-19T06:00:00Z') }).includes('_Swept 2026-08-19T06:00:00.000Z'), true);
+
+  // Usage. A mistyped --format must be a loud non-zero exit, never a silent
+  // fallback that lands terminal lines in an issue body looking like a report.
+  t('options: default format is plain', parseOutputOptions([]).format, 'plain');
+  t('options: --format=markdown is accepted', parseOutputOptions(['--format=markdown']).format, 'markdown');
+  t('options: an unknown format is a usage error', typeof parseOutputOptions(['--format=html']).error, 'string');
+  t('options: …and does NOT silently fall back', parseOutputOptions(['--format=html']).error.includes('expected one of: plain, markdown'), true);
+  t('options: --provenance is normalized on the way in', parseOutputOptions(['--provenance=a\n b']).provenance, 'a b');
+  t('options: unrelated flags are ignored', parseOutputOptions(['--probe']).format, 'plain');
+
   // -- transport prerequisite (#7412) ---------------------------------------
   // The three container classes are REAL measurements, not invented fixtures;
   // each names where it was taken, so a future transport change can be checked
@@ -1788,7 +2094,16 @@ if (isMain) {
       console.log(`✓ check-half-states: transport prerequisite met — ${v.headline}.`);
     });
   } else {
-    sweep().catch((err) => {
+    const options = parseOutputOptions(process.argv.slice(2));
+    if (options.error) {
+      // Bad usage is one of the three non-zero exits the header names. It must
+      // never degrade to the default format: the caller that passes --format is
+      // a workflow writing the result into a pinned issue body, and a silent
+      // fallback would land plain terminal lines there and look like a report.
+      console.error(`check-half-states: ${options.error}`);
+      process.exit(2);
+    }
+    sweep(options).catch((err) => {
       // The in-loop net. The pre-sweep probe answers the common case, but the
       // transport can also fail mid-run (a quota exhausted by this very sweep,
       // a credential revoked between pages), and those must report as the

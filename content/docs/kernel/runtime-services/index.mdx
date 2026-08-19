@@ -46,7 +46,6 @@ This chapter documents the runtime `services.*` APIs used in hook/action/flow/pl
 Each page links the canonical TypeScript source used to derive signatures.
 
 - Data: `packages/client/src/index.ts`
-- Security: `packages/spec/src/contracts/security-service.ts`
 - Sharing: `packages/spec/src/contracts/sharing-service.ts`
 - Queue: `packages/spec/src/contracts/queue-service.ts`
 - Email: `packages/spec/src/contracts/email-service.ts`
@@ -54,6 +53,14 @@ Each page links the canonical TypeScript source used to derive signatures.
 - Storage: `packages/spec/src/contracts/storage-service.ts`
 - Settings: `packages/services/service-settings/src/settings-service.ts`
 - Audit: `packages/plugins/plugin-audit/src/auth-event-audit.ts`
+
+`services.security` is **not** on this list. The kernel registers a `security` service,
+but it is an internal accessor rather than a documented runtime service, so this chapter
+has no page for it. For access decisions read the
+[permissions guide](/docs/permissions) — the one in-process call most readers need is
+shown in [Explain Access](/docs/permissions/explain) — and the interface an
+implementation must provide, `ISecurityService`, is listed with the other
+[kernel contracts](/docs/kernel/contracts).
 
 <Callout type="warn" title="Not this: the settings audit sink">
 A second audit shape shares the word and is easy to reach for by mistake.

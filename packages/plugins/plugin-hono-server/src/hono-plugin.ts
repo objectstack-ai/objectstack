@@ -106,9 +106,11 @@ export interface HonoPluginOptions {
      *   1. this option — explicit wiring, and the escape hatch tests use;
      *   2. the `observability:metrics` service, when the host registered one
      *      BEFORE this plugin;
-     *   3. neither — then **no middleware is installed at all**, so an
-     *      unconfigured deployment pays no per-request cost. Not a disabled
-     *      counter; no counter.
+     *   3. neither — then **no counter-emitting observer is registered**, so
+     *      an unconfigured deployment pays no per-request metrics cost (the
+     *      `afterResponse` delivery seam is still mounted, disarmed at one
+     *      array-length check per request — #9835). Not a disabled counter;
+     *      no counter.
      */
     observability?: {
         metrics?: MetricsRegistry;
@@ -441,6 +443,14 @@ export class HonoServerPlugin implements Plugin {
         //    order. A middleware Hono learns about after a route runs after
         //    that route's handler — which is why installing this from a later
         //    phase (or from `kernel:bootstrapped`) observes nothing at all.
+        // The DELIVERY middleware is mounted unconditionally (#9835): the
+        // `IHttpServer.afterResponse` contract lets any consumer register an
+        // observer at any later moment (the seam reads the observer list per
+        // request, like the middleware seam reads its chain), and Phase 1 is
+        // the last moment a middleware can still precede every route. With no
+        // observers registered the per-request cost is one array-length
+        // check. The COUNTER below stays conditional: no backend, no counter.
+        this.server.installResponseObservationSeam();
         const metrics = this.resolveMetrics(ctx);
         if (metrics) {
             this.server.installHttpMetricsSeam(metrics);

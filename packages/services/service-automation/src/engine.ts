@@ -3077,38 +3077,19 @@ export class AutomationEngine implements IAutomationService {
         // runaway it exists to stop.
         let reentryHeld = false;
 
-        // Initialize variable context
-        const variables = this.seedDeclaredVariables(flow, context);
-        // Inject trigger record. `$record` is the canonical handle; `record` is a
-        // friendlier alias so templates/conditions can write `{record.title}` and
-        // `record.status`. We also flatten the record's own fields to top-level
-        // variables (so bare references like `status`/`budget` resolve in start
-        // conditions and edge predicates) WITHOUT clobbering flow inputs already
-        // seeded above. `previous` exposes the pre-update row for transition gates.
-        if (context?.record) {
-            variables.set('$record', context.record);
-            variables.set('record', context.record);
-            for (const [k, v] of Object.entries(context.record)) {
-                if (!variables.has(k)) variables.set(k, v);
-            }
-        }
-        // Always bind `previous` — to `null` on the create/insert leg (there is no
-        // prior row) — so a start condition can DISCRIMINATE create vs update on a
-        // `record-after-write` flow: `previous == null` is the create leg (#3427).
-        // Binding only-when-truthy left `previous` an unknown CEL variable on
-        // insert, so ANY reference to it (even `previous == null`) threw
-        // "Unknown variable: previous" and failed the whole condition.
-        variables.set('previous', context?.previous ?? null);
-
+        // Initialize the run's variable environment. Every binding a run is
+        // entitled to — the flow's declared variables, the trigger record and
+        // its flattened fields, `previous`, and the engine-owned `$runId` /
+        // `$flowName` / `$flowLabel` — is seeded by `seedRunVariables`, the one
+        // chokepoint `executeWithoutRetry` shares (#9704). See that helper for
+        // why the seeding is not written out here any more.
+        //
+        // The run id is minted BEFORE the seeding because `$runId` is part of
+        // that environment. Order-safe: `nextRunId()` is a stateless random id
+        // (no counter to advance), and nothing between the old call site and
+        // this one reads or mints one.
         const runId = this.nextRunId();
-        // Expose the run id to executors (ADR-0019): a pausing node (e.g. Approval)
-        // reads `$runId` to map its external state back to this run for resume.
-        variables.set('$runId', runId);
-        // Expose flow identity to executors so externalized state (e.g. an
-        // approval request row) can carry a human-readable origin. Captured in
-        // the variable snapshot, so still present after a suspend/resume.
-        variables.set('$flowName', flowName);
-        variables.set('$flowLabel', flow.label ?? flowName);
+        const variables = this.seedRunVariables(flow, flowName, context, runId);
         const startedAt = new Date().toISOString();
         const steps: StepLogEntry[] = [];
 
@@ -6316,6 +6297,78 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * Seed a run's COMPLETE variable environment — the one chokepoint every
+     * attempt of every run goes through (#9704).
+     *
+     * `seedDeclaredVariables` above turns the flow's own DECLARATIONS into
+     * bindings; this adds everything the ENGINE owns on top of them, in the
+     * order the precedence rules require:
+     *
+     *  1. declared variables (params, then `defaultValue`) — seeded first, so
+     *     the record flattening below cannot shadow a flow input;
+     *  2. the trigger record: `$record` is the canonical handle, `record` a
+     *     friendlier alias so templates and conditions can write
+     *     `{record.title}` / `record.status`, plus the record's own fields
+     *     flattened to top-level names so bare references (`status`, `budget`)
+     *     resolve in start conditions and edge predicates — WITHOUT clobbering
+     *     anything already bound;
+     *  3. `previous`, bound ALWAYS — to `null` on the create/insert leg, since
+     *     there is no prior row — so a start condition can DISCRIMINATE create
+     *     from update on a `record-after-write` flow: `previous == null` is the
+     *     create leg (#3427). Binding it only when truthy left `previous` an
+     *     unknown CEL variable on insert, so ANY reference to it (even
+     *     `previous == null`) threw "Unknown variable: previous" and failed the
+     *     whole condition;
+     *  4. `$runId`, so a pausing node (e.g. Approval) can map its external
+     *     state back to this run for resume (ADR-0019), and `$flowName` /
+     *     `$flowLabel`, so externalized state carries a human-readable origin.
+     *     All three are captured in the variable snapshot, so they survive a
+     *     suspend/resume.
+     *
+     * ⚠️ It is ONE method because the two callers drifting apart is the defect
+     * it repairs, not a tidiness preference. `execute()` seeded all of the
+     * above and `executeWithoutRetry()` — the method `retryExecution` re-runs
+     * the flow through on EVERY retry attempt — seeded only (1) and `$record`,
+     * so a retry attempt ran in a strictly smaller environment than the first
+     * one: conditions are strict CEL, where reading an unbound name ABORTS the
+     * predicate instead of yielding `false` (#4697), so the retry failed for a
+     * reason attempt 1 never hit, which reads as a flaky flow rather than a
+     * defect. The two methods had already drifted once per card on four
+     * separate exits (#9378, #9415, #9414, #9510) before this one, always in
+     * the same direction — the copy that is not `execute()` is the one a repair
+     * forgets. `buildRunTrigger` is the same chokepoint pattern, for the same
+     * reason. ⛔ So a change here belongs here: re-inlining either caller's copy
+     * re-opens the drift, and `retry-attempt-pause.test.ts` pins the two
+     * snapshots against EACH OTHER precisely so it cannot happen silently.
+     *
+     * The caller mints `runId` and passes it in rather than this helper minting
+     * one, because the run id is the caller's own bookkeeping: it keys the log
+     * row, the continuation and the returned envelope, and a helper that
+     * produced a second one would put a `$runId` in the snapshot that names no
+     * run anybody can resume.
+     */
+    private seedRunVariables(
+        flow: FlowParsed,
+        flowName: string,
+        context: AutomationContext | undefined,
+        runId: string,
+    ): Map<string, unknown> {
+        const variables = this.seedDeclaredVariables(flow, context);
+        if (context?.record) {
+            variables.set('$record', context.record);
+            variables.set('record', context.record);
+            for (const [k, v] of Object.entries(context.record)) {
+                if (!variables.has(k)) variables.set(k, v);
+            }
+        }
+        variables.set('previous', context?.previous ?? null);
+        variables.set('$runId', runId);
+        variables.set('$flowName', flowName);
+        variables.set('$flowLabel', flow.label ?? flowName);
+        return variables;
+    }
+
+    /**
      * Execute a flow without triggering retry logic (used by retryExecution to prevent recursion).
      *
      * [#9510] It exits the way `execute()` exits, and that parity is the
@@ -6351,12 +6404,19 @@ export class AutomationEngine implements IAutomationService {
             return { success: false, code: 'FLOW_DISABLED', error: `Flow '${flowName}' is disabled` };
         }
 
-        const variables = this.seedDeclaredVariables(flow, context);
-        if (context?.record) {
-            variables.set('$record', context.record);
-        }
-
+        // [#9704] The SAME environment attempt 1 runs in — seeded through the
+        // same chokepoint `execute()` uses. This method used to seed only the
+        // declared variables and `$record`, so every retry attempt ran in a
+        // strictly smaller environment than the first: `record` and its
+        // flattened fields, `previous`, `$runId`, `$flowName` and `$flowLabel`
+        // were all absent. Under strict CEL an unbound name ABORTS the
+        // predicate rather than yielding false (#4697), so a start condition or
+        // edge predicate reading `previous` (#3427) or a bare record field
+        // failed on the retry for a reason attempt 1 never hit — a flaky flow,
+        // to its author — and a pausing node on a retry attempt had no `$runId`
+        // to map its external state back to this run with (ADR-0019).
         const runId = this.nextRunId();
+        const variables = this.seedRunVariables(flow, flowName, context, runId);
         const startedAt = new Date().toISOString();
         const steps: StepLogEntry[] = [];
 

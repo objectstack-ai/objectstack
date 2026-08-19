@@ -780,14 +780,22 @@ jobs:
       #      `rerun_failed_jobs` after labelling converges to green. Removing the
       #      permanent red is the whole of what #5620 records.
       #
-      # DORMANT TODAY, and the dormancy is deliberately not load-bearing.
-      # `check-changeset-no-major.mjs` stands aside for the whole pre-release
-      # window (its RC EXEMPTION note) and `.changeset/pre.json` currently says
-      # `"mode": "pre"`, so the guard below cannot fail and the label is never
-      # needed. It re-arms by itself at `changeset pre exit` -- precisely the day
-      # whole-stack majors are under discussion and `allow-major` is most likely to
-      # be applied by hand, seconds after `gh pr create`. Nothing here leans on the
-      # dormancy, and it must not become a reason to weaken the read.
+      # WHETHER THE GUARD BELOW CAN FAIL AT ALL IS PHASE-DEPENDENT, and nothing
+      # in this read may lean on the phase either way. `check-changeset-no-major.mjs`
+      # stands aside for a diff that introduces a `major` for exactly as long as
+      # `.changeset/pre.json` parses with `"mode": "pre"` (its RC EXEMPTION note);
+      # in every other state -- absent, `"exit"`, unreadable -- it enforces, and
+      # the label read below is the only way past it. That flips with no edit
+      # here: `changeset pre enter` stands the guard down, `changeset pre exit`
+      # re-arms it. Read the phase from `.changeset/pre.json` or from the guard
+      # step's own output, never from this comment -- a comment that named
+      # today's phase is what this paragraph replaces.
+      #
+      # The re-arming edge is the one this read is built for: it is precisely the
+      # day whole-stack majors are under discussion and `allow-major` is most
+      # likely to be applied by hand, seconds after `gh pr create`. So a phase in
+      # which the guard cannot fail must never become a reason to weaken the read
+      # -- the exemption ends on the day the read matters most.
       - name: Re-read this PR's allow-major label live (the event payload can predate it)
         id: allow_major
         # Both skip-changeset reads, for the same reason the guard below names

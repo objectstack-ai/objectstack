@@ -29,9 +29,15 @@
 //     database-per-tenant kernels) do not trip it. For the rare genuine
 //     driver-layer `session.tenantId`, add an `os-allow-tenant-id` comment on
 //     the same line.
-//   • Test/spec files are EXCLUDED: they legitimately reference the removed
-//     token to assert its ABSENCE (`expect(session.tenantId).toBeUndefined()`),
-//     and are not reference bodies an author copies a hook from.
+//   • Test/spec files are EXCLUDED, and the exclusion is WHOLESALE: it drops
+//     the FILE, not a shape inside it. The population it is written for is
+//     real -- a body naming the removed token to assert its ABSENCE
+//     (`expect(session.tenantId).toBeUndefined()`) is not a reference body an
+//     author copies a hook from. But "asserts its absence" is narrower than
+//     the exclusion, which also drops fixtures that CONSTRUCT the removed
+//     dialect as INPUT. That second population is not a reference body either,
+//     and it is invisible to the DETECTOR as well -- so this filter is not what
+//     hides it. Measured under "What the test exclusion covers" below (#9809).
 //   • Comments are SKIPPED -- a migration note that NAMES the removed alias to
 //     explain its removal is documentation, not an executable read. Which spans
 //     ARE comments is decided by the ONE shared string-, template- and regex-
@@ -152,8 +158,74 @@
 //   • The BINDING rule reads code, not strings: an aliased read taught inside a
 //     template literal is seen by neither rule (the TEXT rule catches only the
 //     literal spelling there).
+//   • A `session` OBJECT LITERAL is not a read, so no rule scores it. Both
+//     rules resolve a session-valued RECEIVER and grade a `.tenantId` READ off
+//     it; `session: { tenantId: … }` CONSTRUCTS the removed dialect instead and
+//     scores zero in test and non-test files alike (#9809, below).
 // These are the shapes to widen to if one ever goes live. They are named here
 // so a future green is read as "clean where this gate can see", never as proof.
+//
+// ## What the test exclusion covers, and what it does not (#9809)
+//
+// The bullet above used to justify the exclusion as "tests assert the alias is
+// GONE". That is true of one population and silent about a second: a fixture
+// can also CONSTRUCT the removed dialect, handing the code under test a
+// `session: { …, tenantId: … }` literal that `HookContextSchema` strips and
+// `ObjectQLEngine.buildSession` never emits. The second shape is the one that
+// can hold a production defect green, because the fixture supplies the very key
+// production cannot -- which is how the pre-#9691 attachment fixture kept
+// `callerContext()` reading a dead name for two majors.
+//
+// ⚠️ But the exclusion is NOT what hides that shape, and this is the correction
+// worth carrying. Both rules grade a `.tenantId` READ off a receiver shown to
+// be a session. An object literal whose KEY is `tenantId` under a `session:`
+// property is a CONSTRUCTION, not a read, so no rule scores it -- and it scores
+// zero in the scanned population too. Measured by running `findOffenders` over
+// each shape under a NON-test filename, i.e. with the exclusion bypassed:
+//
+//   `expect(session.tenantId).toBeUndefined()`  (assertion side) ........ 1
+//   `session: { userId, tenantId, positions }`  (input side) ............ 0
+//   the verbatim pre-#9691 phantom-green, input + echoed expectation .... 0
+//
+// So deleting the test exclusion would not surface a single construction site.
+// Reaching them is a NEW recognizer on a new axis (literal construction), not a
+// loosening of this filter -- which is what makes it a judgement call rather
+// than a repair, and the census says it is not earned yet.
+//
+// CENSUS on 83f8267f5 (2026-08-19), over the 2449 test/spec files the exclusion
+// drops -- 2058 files remain scanned. Reproduce with:
+//
+//   rg -l --multiline --multiline-dotall 'session\s*:\s*\{[^{}]*\btenantId\b' \
+//     -g '*.test.ts' -g '*.spec.ts' examples apps packages
+//
+//   `session: { … tenantId … }` literals in EXCLUDED test files ......... 4
+//   ... of them wrong today ............................................ 0
+//   the same literal in the SCANNED (non-test) population ............... 0
+//
+//     packages/spec/src/data/hook.test.ts:619                   #3290 absence pin
+//     packages/plugins/plugin-audit/src/audit-writers.test.ts:1666  absence pin
+//     packages/plugins/plugin-audit/src/comment-access-hooks.test.ts:529  #9691
+//     packages/services/service-storage/src/attachment-access-hooks.test.ts:750
+//
+// (The recipe reports 5 matches across those 4 files: `hook.test.ts` carries a
+// second one whose `tenantId` sits inside a COMMENT in the literal's body.)
+//
+// ⛔ The distinguishing signal is NOT "input side vs assertion side". All four
+// deliberate pins put the removed key on the INPUT side -- constructing the
+// dialect on purpose is HOW you pin that it gets stripped. What separates them
+// from a phantom-green is whether the fixture asserts the key's FATE (absent,
+// or inert downstream) or echoes its VALUE back as expected output. Even that
+// does not reduce to a text rule: `attachment-access-hooks.test.ts` legitimately
+// asserts `toEqual({ …, tenantId: 'org_1', … })` one test earlier, because
+// `tenantId` on the way OUT is `ExecutionContext`'s driver-layer name for the
+// same value -- byte-identical to what a phantom-green would write. A recognizer
+// on this axis has to tell those two apart, and today it would ship catching
+// nothing: 4 sites, 0 wrong.
+//
+// Both shapes are pinned in `--self-test`, so this stays executable rather than
+// remembered. An author who later builds the construction-axis recognizer will
+// see the input-shape cases flip from 0 to 1: that is the contract moving on
+// purpose, not a regression.
 //
 // ## The population invariant -- zero is a broken scan, not a clean repo
 //
@@ -201,7 +273,10 @@ import { maskComments } from './js-comment-mask.mjs';
 const ROOTS = ['examples', 'apps', 'packages'];
 const EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.cts', '.mts'];
 const EXCLUDED = /(^|\/)(node_modules|dist|build|\.next|\.turbo)\//;
-// Tests assert the alias is GONE, so they reference the token on purpose.
+// Dropped WHOLESALE: absence pins and fixtures that CONSTRUCT the removed
+// dialect alike. Neither is a reference body an author copies -- and the
+// construction shape is invisible to both rules anyway, so this filter is not
+// what hides it (#9809, header).
 const TEST_FILE = /(\.(test|spec)\.[cm]?[jt]sx?$)|((^|\/)__tests__\/)/;
 
 // `ctx.session.tenantId`, `session?.tenantId`, `this.session . tenantId`, … --
@@ -566,6 +641,18 @@ function selfTest() {
       'a comment naming an ALIASED read is documentation -- the tree never sees it'],
     ['function h(ctx) {\n  const execCtx = ctx.input.options.context;\n  return execCtx.tenantId;\n}', 0,
       'NO FALSE RED: the driver-layer envelope is not reached through `.session`'],
+
+    // ── #9809: what the test exclusion covers, and what it does not ─────
+    // These run through the DETECTOR under a non-test filename, so they state
+    // what the RULES do independently of the TEST_FILE filter. An author who
+    // builds the construction-axis recognizer flips the two 0s to 1s: that is
+    // the contract moving on purpose, not a regression.
+    ['expect(session.tenantId).toBeUndefined();', 1,
+      'ABSENCE PIN: the shape the test exclusion is written for -- a finding but for the filter'],
+    ["await hook({\n  object: 'sys_attachment',\n  session: { userId: 'u1', tenantId: 'stale_org', positions: ['p1'] },\n});", 0,
+      'CONSTRUCTION: a `session:` literal spelling the removed key is not a READ, so no rule scores it -- deleting the exclusion would not reach it'],
+    ["await hook({\n  session: { userId: 'u1', tenantId: 'org_1' },\n});\nexpect(canEdit.mock.calls[0][2]).toEqual({ userId: 'u1', tenantId: 'org_1' });", 0,
+      'CONSTRUCTION: the verbatim pre-#9691 phantom-green -- input literal plus echoed expectation, invisible to both rules'],
   ];
 
   let failed = 0;

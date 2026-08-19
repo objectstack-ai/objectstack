@@ -149,15 +149,14 @@ Field-level security controls visibility and editability of individual fields pe
 
 ## 4. Sharing Rule Types
 
-Sharing rules extend access beyond ownership and the depth axis. The declarative `SharingRule` schema is a discriminated union with two `type` values — `owner` and `criteria`. Manual and territory sharing are separate mechanisms (see notes below the table).
+Sharing rules extend access beyond ownership and the depth axis. The declarative `SharingRule` schema carries a single enforced `type` value — `criteria`. (`SharingRuleType` in `packages/spec/src/security/sharing.zod.ts` is a one-member enum, and `SharingRuleSchema` *is* `CriteriaSharingRuleSchema`; it is kept discriminated so a future enforced rule type can rejoin as a union member.) Manual and territory sharing are separate mechanisms (see notes below the table).
 
 | Mechanism | `type` | Description | Example |
 |:---|:---|:---|:---|
-| **Owner-Based** | `owner` | Share records owned by a specific group/position with another recipient — **[experimental — not enforced]**: owner rules are skipped at seed time and materialize no shares yet | All accounts owned by "West Region" team are shared with "Sales Directors" |
 | **Criteria-Based** | `criteria` | Share records matching a CEL predicate over field values | All opportunities where `record.amount > 100000` are shared with "VP Sales" |
 
 <Callout type="warn">
-**Enforcement status:** every authorable rule and recipient type is enforced. v17 reconciled the surface with the runtime (#1878): `owner`-type rules and `group` / `guest` recipients — previously declared but skipped at seed time — no longer parse; `group` became the enforced `team` and `business_unit` joined the enum. See [Sharing Rules](/docs/permissions/sharing-rules#recipient-types).
+**Enforcement status:** every authorable rule and recipient type is enforced. v17 reconciled the surface with the runtime (#1878): `owner`-type rules (`type: 'owner'`, `ownedBy`) and `group` / `guest` recipients — previously declared but skipped at seed time — **no longer parse**; `group` became the enforced `team` and `business_unit` joined the enum. That is a stronger statement than "declared but not enforced": a skipped rule is still authorable and is ignored, whereas a removed one is rejected by `SharingRuleSchema`, so a stale definition fails loudly at authoring time instead of silently doing nothing (ADR-0078). See [Sharing Rules](/docs/permissions/sharing-rules#recipient-types).
 </Callout>
 
 <Callout type="info">
@@ -171,7 +170,7 @@ Sharing rules extend access beyond ownership and the depth axis. The declarative
   sharingRules: [
     {
       name: 'high_value_opps_to_vp',
-      object: 'opportunity',
+      object: 'opportunity',          // sharingModel: 'private'
       type: 'criteria',
       // condition is a CEL predicate over the record
       condition: 'record.amount > 100000',
@@ -180,16 +179,30 @@ Sharing rules extend access beyond ownership and the depth axis. The declarative
     },
     {
       name: 'west_accounts_to_directors',
-      object: 'account',
-      type: 'owner',
-      // records owned by this group/position are the source set
-      ownedBy: { type: 'position', value: 'west_region_rep' },
+      object: 'account',              // sharingModel: 'public_read'
+      type: 'criteria',
+      // the source set is a field predicate — record ownership is not an
+      // authorable rule input; see the enforcement callout above
+      condition: 'record.region == "west"',
       sharedWith: { type: 'position', value: 'sales_director' },
       accessLevel: 'edit',
     },
   ],
 }
 ```
+
+<Callout type="warn">
+**Parsing is not granting — check the target object's OWD.** A sharing rule only
+widens what the baseline still withholds, so both rules above grant because of
+their objects' postures: `opportunity` is `private`, so both gates apply and the
+`read` rule widens the read filter; `account` is `public_read`, which is
+*read-open but write-owned*, so read is already universal there and it is the
+`edit` level that opens the write gate to non-owners. On a `public_read_write`
+or `controlled_by_parent` object both gates are already open, and a rule parses,
+materializes, and grants **nothing** — `effectiveSharingModel(schema) === 'public'`
+short-circuits `buildReadFilter` and `buildWriteFilter` to `null`
+(`packages/plugins/plugin-sharing/src/sharing-service.ts`).
+</Callout>
 
 ---
 

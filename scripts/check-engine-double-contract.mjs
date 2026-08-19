@@ -678,6 +678,183 @@ function scanSource(fileName, text, slice = SLICES[0]) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// THE UNRECOGNISED CENSUS (#9747) -- the third verdict, printed and never fatal
+// ════════════════════════════════════════════════════════════════════════════
+//
+// The four invariants above answer "is the discovered population guarded".
+// DISCOVERED answers "is the population non-empty". Neither can answer the
+// question #9747 measured across nine instances in this repo:
+//
+//   > how many constructs did this gate SEE and fail to understand?
+//
+// A construct the recognizer cannot read is in NEITHER half of the ledger. It
+// is not pinned, it is not baselined, it is not exempt -- it is absent, and
+// absence reads to every consumer of this script's output as "clean". That is
+// #8639's shape exactly (a `vi.fn(fn)` initializer the unwrap did not read),
+// and #8639 was found by luck rather than by this gate saying anything.
+//
+// ## What this section is NOT
+//
+// ⛔ It does not widen discovery by one construct. `scanSource` is untouched
+// and this census cannot reach it: the two walks share no state, so no count
+// here can move a double into or out of the pinned population. Widening the
+// matcher has been separately priced and separately DECLINED (#8845, #9165's
+// 2b), and this card's own scoping says so. Counting is the whole act.
+//
+// ⛔ It never fails a run. Per the 2026-08-18 ruling on #9747 the third state
+// is VISIBILITY ONLY: no new required context, no new merge-blocking failure.
+//
+// ## Why not `exit 2`, when the in-tree prior art uses `exit 2`
+//
+// Four places in this repo already spell a third state -- `check-where-matcher-
+// conformance` (missing baseline => `exit 2`, explicitly distinct from a
+// finding's `exit 1`), `check-published-readme-exports` (hard refusal),
+// `check-governed-merges`' header ("non-zero exits classify the ENVIRONMENT,
+// not the tree"), and the drift guard added by #9700. Every one of them exits
+// non-zero because the gate is REFUSING TO RUN: the environment is broken and
+// no verdict about the tree is available.
+//
+// This verdict is the opposite. The run completed, every invariant was
+// evaluated, and the count is an observation ABOUT the run. Spelling it
+// `exit 2` would make it a failing CI job, which is precisely what the ruling
+// forbids. So it matches the convention where the convention is about
+// SEMANTICS -- a named third state, distinct from both "clean" and "finding",
+// printed rather than inferred -- and deliberately not where the convention is
+// about the exit code. The line carries a stable, greppable prefix
+// (`UNRECOGNISED [<gate>]:`) so a round report can pick it up without a new
+// merge-blocking context existing anywhere.
+//
+// ## SCOPED-OUT is not UNRECOGNISED, and the difference is the whole point
+//
+// #8662 is the instance that sharpens this: `check-where-matcher-conformance`
+// drops inverted survivor filters as OUT_OF_SCOPE **correctly, by its own
+// definition**, and that correct verdict still reads as "nothing to see". A
+// census that folded those into "unrecognised" would report noise on day one
+// and discredit the direction. So the two are counted apart:
+//
+//   SCOPED OUT    the gate has a STATED criterion that excludes this construct
+//                 and the criterion is right. `delete: vi.fn()` carries no
+//                 implementation at all, so there is no behaviour that could be
+//                 looser than `ObjectQL.delete` -- `unwrapCallImpl`'s own
+//                 census argues exactly this. Reported as a number only.
+//
+//   UNRECOGNISED  an implementation demonstrably EXISTS and this gate cannot
+//                 reach it: the initializer carries a function the unwrap
+//                 declined, or it roots at a binding this file declares. Each
+//                 one is a double that could be looser than the producer and
+//                 is in no ledger. Reported by file, line and spelling.
+//
+// The discriminator is structural, never an allowlist of callee names -- the
+// same choice `unwrapCallImpl` documents, and for the same reason: an
+// allowlist goes silently blind the day someone writes a new wrapper.
+
+/** Short, single-line echo of a construct, for the census rows. */
+function censusSnippet(node, sf) {
+  return node.getText(sf).replace(/\s+/g, ' ').slice(0, 96);
+}
+
+/** Every identifier this file itself declares (functions, consts, lets). */
+function declaredBindings(sf) {
+  const names = new Set();
+  const visit = (n) => {
+    if (ts.isFunctionDeclaration(n) && n.name) names.add(n.name.text);
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name)) names.add(n.name.text);
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return names;
+}
+
+/**
+ * One file's unrecognised / scoped-out constructs for one slice.
+ *
+ * The population it walks is the same structural evidence discovery uses -- a
+ * construct declaring the slice's verb alongside at least two engine siblings
+ * -- so a row here is never something the gate had no business reading. What
+ * separates it from `scanSource` is the single step where discovery stops:
+ * `implOf` answered null, so `isEngineVerbShape` was never asked and the
+ * construct left the population without any verdict being recorded.
+ */
+function censusSource(fileName, text, slice) {
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const declared = declaredBindings(sf);
+  const unrecognised = [];
+  const scopedOut = [];
+
+  const consider = (members, node) => {
+    const names = new Set();
+    let member = null;
+    for (const m of members) {
+      const n = memberName(m);
+      if (n) names.add(n);
+      // `memberName` reads a shorthand's identifier too, so `{ update }` lands
+      // here as a declaration of the verb -- which is what we want.
+      if (n === slice.verb) member = m;
+    }
+    if (!member) return;
+    const siblings = [...names].filter((n) => ENGINE_SIBLINGS.has(n) && n !== slice.verb);
+    if (siblings.length < 2) return;
+    if (implOf(member)) return;                 // discovery read it -- in the population
+    const line = sf.getLineAndCharacterOfPosition(member.getStart(sf)).line + 1;
+    const row = { line, text: censusSnippet(member, sf) };
+
+    if (ts.isShorthandPropertyAssignment(member)) {
+      unrecognised.push({ ...row, why: 'shorthand -- the implementation is a binding elsewhere in scope' });
+      return;
+    }
+    const init = (ts.isPropertyAssignment(member) || ts.isPropertyDeclaration(member))
+      ? member.initializer : null;
+    if (!init) {
+      scopedOut.push({ ...row, why: 'declaration only (a signature or an abstract member): no body exists' });
+      return;
+    }
+    let carriesFn = false;
+    const scan = (n) => {
+      if (ts.isFunctionExpression(n) || ts.isArrowFunction(n)) carriesFn = true;
+      ts.forEachChild(n, scan);
+    };
+    scan(init);
+    if (carriesFn) {
+      unrecognised.push({ ...row, why: 'the initializer carries a function this gate declined to unwrap' });
+      return;
+    }
+    let root = init;
+    while (ts.isCallExpression(root) || ts.isPropertyAccessExpression(root)) root = root.expression;
+    if (ts.isIdentifier(root) && declared.has(root.text)) {
+      unrecognised.push({ ...row, why: `the initializer roots at \`${root.text}\`, which this file declares` });
+      return;
+    }
+    scopedOut.push({ ...row, why: 'no implementation anywhere (a bare mock or a value), so nothing can be looser than the producer' });
+  };
+
+  const visit = (n) => {
+    if (ts.isObjectLiteralExpression(n)) consider(n.properties, n);
+    else if (ts.isClassDeclaration(n) || ts.isClassExpression(n)) consider(n.members, n);
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return { unrecognised, scopedOut };
+}
+
+/** The census across every scanned file and every slice. */
+function censusUnrecognised() {
+  const rows = [];
+  let scopedOut = 0;
+  for (const abs of testFiles()) {
+    const rel = relative(ROOT, abs).split(sep).join('/');
+    const text = readFileSync(abs, 'utf8');
+    for (const slice of SLICES) {
+      if (!new RegExp(`\\b${slice.verb}\\s*[(:,}]`).test(text)) continue;
+      const c = censusSource(abs, text, slice);
+      scopedOut += c.scopedOut.length;
+      for (const u of c.unrecognised) rows.push({ verb: slice.verb, file: rel, ...u });
+    }
+  }
+  rows.sort((a, b) => (a.file === b.file ? a.line - b.line : a.file < b.file ? -1 : 1));
+  return { rows, scopedOut };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // THE CONSUMER SEAMS (#8194, from #8058's audited sweep)
 // ════════════════════════════════════════════════════════════════════════════
 //
@@ -1439,6 +1616,25 @@ function report() {
       + `recordNotFoundError, ${local} through a locally minted error, `
       + `${seamCount - shared - local} not refusing at all.`,
   );
+  console.log('');
+
+  // ── The UNRECOGNISED verdict (#9747) ──────────────────────────────────────
+  // Printed on EVERY run, green or red, and before the failure branch below:
+  // a count that only appears on a clean run would be invisible exactly when a
+  // reader is looking hardest. It is a verdict, never a finding -- nothing
+  // here can change this script's exit code.
+  const census = censusUnrecognised();
+  console.log(
+    `UNRECOGNISED [engine-double-contract]: ${census.rows.length} construct(s) in ${SCAN_ROOTS.join(", ")} `
+      + `declare a scanned verb (${[...SCANNED_VERBS].join(', ')}) alongside engine siblings, and this gate `
+      + 'could not read the implementation -- so they are in NEITHER the pinned population nor the ledger. '
+      + `${census.scopedOut} further construct(s) are SCOPED OUT by a stated criterion and are not counted here. `
+      + 'This is a verdict, not a finding: it never fails a run (#9747, ruling of 2026-08-18).',
+  );
+  for (const r of census.rows) {
+    console.log(`  unrecognised [${r.verb}]  ${r.file}:${r.line}  ${r.why}`);
+    console.log(`      ${r.text}`);
+  }
   console.log('');
 
   if (errors.length) {
@@ -2224,6 +2420,75 @@ class Svc {
     + 'predicate discriminates rather than approving everything)',
     !ratchetRemedyCarriesAuthority(unmarkedOffer));
 
+  // ── The UNRECOGNISED census (#9747) ────────────────────────────────────────
+  //
+  // Both directions on every limb, and the third direction this card exists for:
+  // a construct that is CORRECTLY out of scope must count as SCOPED OUT, never
+  // as unrecognised. #8662 is why -- a correct OUT_OF_SCOPE verdict that reads
+  // as noise discredits the whole direction on day one.
+  const D = SLICES.find((s) => s.verb === 'delete');
+  const censusFake = (deleteMember, header = '') => `${header}
+function makeEngine() {
+  return {
+    async find(o: string, opts?: any) { return []; },
+    async insert(o: string, data: any) { return data; },
+    ${deleteMember}
+  };
+}
+`;
+
+  let c = censusSource('c.test.ts', censusFake('async delete(o: string, opts?: any) { return true; },'), D);
+  expect('#9747 — a construct the gate CAN read is not in the census (it is in the population)',
+    c.unrecognised.length === 0 && c.scopedOut.length === 0);
+
+  c = censusSource('c.test.ts', censusFake('delete: overrides.delete ?? vi.fn(async (o: string, opts?: any) => true),'), D);
+  expect('#9747 — an initializer carrying a function the unwrap declined is UNRECOGNISED',
+    c.unrecognised.length === 1 && c.unrecognised[0].why.includes('declined to unwrap'));
+
+  c = censusSource('c.test.ts', censusFake('delete: del,',
+    'const del = async (o: string, opts?: any) => true;\n'), D);
+  expect('#9747 — an initializer rooting at a binding this file declares is UNRECOGNISED',
+    c.unrecognised.length === 1 && c.unrecognised[0].why.includes('`del`'));
+
+  // The shorthand limb is driven on the UPDATE slice, not delete: `{ delete }`
+  // is not valid shorthand (a reserved word), so the delete spelling could
+  // never occur in the tree and a fixture using it would assert nothing. Every
+  // shorthand row the real corpus carries is an `update`.
+  c = censusSource('c.test.ts', `
+const update = async (o: string, data: any, opts?: any) => data;
+const engine: any = { registry: {}, insert: async (o: string, d: any) => d, findOne: async (o: string) => null, update };
+`, SLICES.find((s) => s.verb === 'update'));
+  expect('#9747 — a shorthand member is UNRECOGNISED',
+    c.unrecognised.length === 1 && c.unrecognised[0].why.includes('shorthand'));
+
+  // ⛔ The H4 trap, pinned in both spellings: a bare mock and a mock returning a
+  // VALUE carry no implementation at all, so nothing about them could be looser
+  // than the producer. `unwrapCallImpl`'s own census argues this. They must be
+  // SCOPED OUT -- counting them would put 117 correct rows in the report today.
+  c = censusSource('c.test.ts', censusFake('delete: vi.fn(),'), D);
+  expect('#9747 — `vi.fn()` is SCOPED OUT, not unrecognised',
+    c.unrecognised.length === 0 && c.scopedOut.length === 1);
+
+  c = censusSource('c.test.ts', censusFake('delete: vi.fn().mockResolvedValue(true),'), D);
+  expect('#9747 — a mock returning a VALUE is SCOPED OUT, not unrecognised',
+    c.unrecognised.length === 0 && c.scopedOut.length === 1);
+
+  // The census reads the SAME structural evidence discovery does: a construct
+  // with fewer than two engine siblings was never this gate's business, and
+  // reporting it would be the noise the ruling's pilot is meant to avoid.
+  c = censusSource('c.test.ts', `const notAnEngine = { delete: del };\nconst del = async (o: string) => true;\n`, D);
+  expect('#9747 — a construct with fewer than two engine siblings is in NEITHER census bucket',
+    c.unrecognised.length === 0 && c.scopedOut.length === 0);
+
+  // ⛔ Visibility only: the census must not be able to move discovery. Same
+  // source, both walks -- the double count is what it was before this section
+  // existed. Without this limb "it only counts" is a claim, not a property.
+  const visSrc = censusFake('delete: del,', 'const del = async (o: string, opts?: any) => true;\n');
+  expect('#9747 — a construct in the UNRECOGNISED census is still absent from the population '
+    + '(the census cannot widen discovery)',
+    censusSource('c.test.ts', visSrc, D).unrecognised.length === 1
+      && scanSource('c.test.ts', visSrc, D).length === 0);
+
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\ncheck-engine-double-contract --self-test: ${failures.length} failure(s).\n`);
@@ -2244,7 +2509,12 @@ class Svc {
       + 'inline / const-bound / one-wrapper options forms, refuses to read a $in predicate as '
       + 'by-id, accepts a probe, a driver boolean and a one-method-hop helper as refusals alike, '
       + 'separates the shared envelope from a local mint, discounts a refusal that lands after '
-      + 'the receipt, and REPORTS the seam that answers without refusing at all.',
+      + 'the receipt, and REPORTS the seam that answers without refusing at all; and, on the '
+      + 'UNRECOGNISED CENSUS (#9747), counts a construct whose implementation exists but cannot '
+      + 'be reached (a defaulted mock, a local binding, a shorthand), SCOPES OUT the two '
+      + 'spellings that carry no implementation at all rather than reporting them as noise, '
+      + 'ignores constructs with too few engine siblings to be in scope, and cannot move one '
+      + 'double into or out of the population it counts.',
   );
 }
 

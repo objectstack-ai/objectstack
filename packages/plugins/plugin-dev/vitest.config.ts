@@ -15,7 +15,18 @@ export default defineConfig({
   },
   resolve: {
     alias: [
+      // Subpath BEFORE the bare package: `@objectstack/core` is a PREFIX match with a
+      // FILE replacement, so without this entry it swallows the published `./logger`
+      // subpath and resolves it to `…/core/src/index.ts/logger` — ENOTDIR at run time.
+      // Pinned by the published-subpath rule in `scripts/check-test-source-alias.mjs`,
+      // which derives the population from `@objectstack/core`'s own `exports` map.
+      { find: /^@objectstack\/core\/logger$/, replacement: path.resolve(__dirname, '../../core/src/logger.ts') },
       { find: '@objectstack/core', replacement: path.resolve(__dirname, '../../core/src/index.ts') },
+      // Subpath BEFORE the bare package, same prefix-match reason: `./node` is a
+      // published subpath served by a FILE (`types/src/node.ts` — the node-only slice
+      // the root export deliberately excludes), so the bare entry would resolve it to
+      // `…/types/src/index.ts/node`. Same published-subpath rule pins it.
+      { find: /^@objectstack\/types\/node$/, replacement: path.resolve(__dirname, '../../types/src/node.ts') },
       { find: '@objectstack/types', replacement: path.resolve(__dirname, '../../types/src/index.ts') },
       // #9457: ONE anchored rule for every `@objectstack/spec` namespace, in place
       // of the hand-maintained list of the subpaths this package's tests happened

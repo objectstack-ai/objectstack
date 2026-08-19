@@ -295,8 +295,32 @@ details: **[Explain Engine](/docs/permissions/explain)**.
 
 Every user-grant row (`sys_user_position`, `sys_user_permission_set`) carries
 optional **effective-dating columns** — `valid_from` / `valid_until` (half-open
-`[from, until)`, UTC; null = unbounded) — plus the lifecycle-audit columns
-`reason`, `delegated_from`, `last_certified_at` / `certified_by`.
+`[from, until)`, UTC; null = unbounded).
+
+ADR-0091 D1 declares four further nullable columns on both grant tables:
+`reason`, `delegated_from`, `last_certified_at`, `certified_by`. They are
+declared together and **enforced separately**, so they are listed here one by
+one rather than as one set of audit columns — what a value in any of them is
+worth depends on the column *and* on which grant table it sits on. Access
+recertification is a compliance surface (SOX / ISO 27001 access review), where
+"the platform maintains this column" and "the platform stores what you write
+here" are very different statements:
+
+| Column | On `sys_user_position` | On `sys_user_permission_set` |
+|---|---|---|
+| `reason` | **Enforced at runtime.** The D3 delegation gate rejects a delegation insert whose row carries no non-empty `reason` — the dual-audit half described below. | **Written by the platform, read by nothing.** The org-admin grant auto-derived from a membership grade stamps its own provenance here; no gate, resolver or lint reads the value back. |
+| `delegated_from` | **Enforced at runtime, and load-bearing.** Stamping it is what *makes* a write a delegation: the gate requires it to name the writer and refuses to re-delegate a row that itself arrived by delegation, and the explain engine attributes the position "via delegation from X, until Y". | **Authoring lint only — no runtime reader.** Both readers opposite are guarded on `sys_user_position` (the gate's delegation branch, and explain's delegation attribution alike). A seed row that sets it must still carry a `reason` (below), but at runtime the column is provenance you record, not provenance the platform checks or acts on. |
+| `last_certified_at` / `certified_by` | **Inert** — the ADR-0091 D5 recertification *substrate*, storage and nothing more. | **Inert** — identically. |
+
+The D5 pair is worth spelling out, because it is the pair a compliance reader
+is likeliest to over-read: no framework code writes either column and none
+reads either one, on either table — no resolution path, gate or lint consults
+them, and nothing derives "never certified" or "certification stale" from
+them. A null therefore means *the recertification workflow does not exist
+here*, not that the grant went unreviewed; a value means some client wrote one,
+and the platform checked nothing about it. Their field descriptions on both
+objects say the same in the same words, and ADR-0091 D5 is where that split
+was decided: framework ships the substrate, cloud ships the campaign.
 
 Correctness lives in **resolution-time filtering, fail-closed** (ADR-0091 D2):
 a row outside its window simply stops resolving — in `resolveAuthzContext`,
@@ -307,10 +331,12 @@ unscoped `admin_full_access` grant no longer derives `platform_admin`.
 
 The explain engine reports an expired-but-present row as a dedicated
 contributor state ("held until 2026-08-01 — expired"), so "why did access
-disappear" is self-answering. Two authoring lint rules mirror the runtime
-behavior: a seed grant whose `valid_until` is already past (or unparseable)
-is dead on arrival (error), and a delegation row (`delegated_from`) without
-`reason` breaks the dual audit (error).
+disappear" is self-answering. Two authoring lint rules cover seed grants: one
+mirrors D2 — a seed grant whose `valid_until` is already past (or unparseable)
+is dead on arrival (error) — and one mirrors the D3 dual audit: a delegation
+row (`delegated_from`) without `reason` is an error. The second runs on **both**
+grant tables, so on `sys_user_permission_set`, where no runtime gate reads
+`delegated_from`, it is the only enforcement that column has.
 
 **Delegation of duty (职务代理, ADR-0091 D3)** builds on this substrate and is
 enforced today. A position opts in with `delegatable: true`; a holder may then
