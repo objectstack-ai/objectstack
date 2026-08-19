@@ -114,6 +114,50 @@ export const CEILINGS = new Map([
   ['AGENTS.md', 958],
 ]);
 
+/**
+ * The repo-ROOT files of the map above, spelled so `scripts/pm/dispatch-gates.mjs`
+ * can derive this gate from a card that touches one.
+ *
+ * ## The gap this closes
+ *
+ * That tool reads a gate's population out of the path literals in the gate's own
+ * source, and "looks like a path" there means "carries a separator" (plus a short
+ * allowlist of dotted top-level dirs). Every key above satisfies that except
+ * `AGENTS.md` — a repo-root FILE has no separator to be found by. So the map's
+ * eighteen entries yielded seventeen watch hints, an AGENTS.md card derived ZERO
+ * gates, and the dev met this ratchet as red CI instead of as a local command.
+ * That lands on the largest ceiling in the map at headroom 0, where one added
+ * paragraph crosses it. CI still enforces either way (lint.yml carries no path
+ * filter) — what was missing was discoverability, and this restores it.
+ *
+ * ## Why the subtree spelling, and why it covers exactly one file
+ *
+ * `<file>/**` is the only form that reaches a repo-root file: the extractor
+ * requires the separator, and dispatch-gates collapses a hint's globs before
+ * comparing, which reduces this back to `AGENTS.md` and matches that path alone.
+ * Nothing in the tree lives under `AGENTS.md/`, so it claims no directory —
+ * measured at exactly one (gate, file) pair added, one family gaining coverage.
+ *
+ * The alternative was widening the extractor to accept bare top-level `*.md`
+ * literals. Measured over 114 families x 6326 tracked files it is cheap by
+ * VOLUME (+17 pairs) and fails on PROVENANCE: 8 of those 17 are fabricated,
+ * because gates spell `README.md` and `CHANGELOG.md` as BASENAMES they join with
+ * a package directory (a manifest `files` entry, a per-package exclusion, a
+ * remote directory listing). A README.md card would come back with six leads of
+ * which five name a gate that never reads that file — the false-lead class
+ * dispatch-gates' own header errs against, one extension over from the
+ * `package.json` basenames it already refuses.
+ *
+ * ## This is provenance, NOT a lookup key
+ *
+ * `run` opens files through CEILINGS. This list is read by nothing in this
+ * script, and deliberately does not live in that map: a key rewritten into the
+ * glob form would send the ratchet looking for a file that does not exist. The
+ * self-test pins both halves — every separator-less ceiling is declared here,
+ * and nothing declared here is a CEILINGS key.
+ */
+export const ROOT_FILE_WATCH_HINTS = ['AGENTS.md/**'];
+
 export function verdict(rel, lineCount, maxLines) {
   if (lineCount === 0) return { ok: false, msg: `${rel} read as empty — refusing to treat a missing/empty input as a pass (#4690).` };
   if (lineCount > maxLines) {
@@ -175,6 +219,17 @@ function selfTest() {
     ['all six lane job descriptions are covered', ['engine', 'services', 'cli', 'devx', 'skills', 'spec'].every((n) => CEILINGS.has(`.claude/skills/pm-dispatch/references/lanes/${n}.md`)), true],
     ['the other four skills are covered (#9473)', ['checklist-test', 'checklist-author', 'dogfood-verification', 'spec-property-retirement'].every((n) => CEILINGS.has(`.claude/skills/${n}/SKILL.md`)), true],
     ['root AGENTS.md is covered (#9792)', CEILINGS.has('AGENTS.md'), true],
+    // The dispatch-gates declaration (#9964). Enforcement cannot hold any of
+    // these: the declaration is read by another tool entirely, so a wrong or
+    // missing entry runs perfectly green here and only shows up as a dev
+    // dispatched on a root-file card with an empty gate brief.
+    ['every separator-less ceiling declares a root-file watch hint', [...CEILINGS.keys()].filter((k) => !k.includes('/')).every((k) => ROOT_FILE_WATCH_HINTS.includes(`${k}/**`)), true],
+    ['and the declaration names no file the map does not cover', ROOT_FILE_WATCH_HINTS.every((h) => CEILINGS.has(h.replace(/\/\*+$/, ''))), true],
+    ['AGENTS.md is the root file it declares', ROOT_FILE_WATCH_HINTS.includes('AGENTS.md/**'), true],
+    // Provenance, never a lookup key: `run` opens every CEILINGS key, so the
+    // glob form appearing there would make the ratchet read a path that does
+    // not exist — red under #4690's cannot-read rule, for a file that is fine.
+    ['the declared form is NOT a CEILINGS key', [...CEILINGS.keys()].some((k) => ROOT_FILE_WATCH_HINTS.includes(k)), false],
     // The boundary the header states, pinned (#9923). Enforcement cannot hold
     // it: a ceiling on a real published SKILL.md runs green like any other row,
     // so without this case the header paragraph could drift from the map

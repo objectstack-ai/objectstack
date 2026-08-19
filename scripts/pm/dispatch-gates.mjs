@@ -736,6 +736,22 @@ export function runnableInvocation({ check, filter, direct }) {
  * with a package directory — the same explosion, one class over. A miss there
  * costs one card one CI round; that is the side this file errs on.
  *
+ * Re-measured (#9964) on 114 families x 6326 tracked files, narrowing that
+ * admission to bare `*.md` literals naming a real tracked root file makes the
+ * VOLUME trivial — 26060 pairs to 26077 — and it still fails, on PROVENANCE:
+ * 8 of those 17 new pairs are fabricated, because `README.md` / `CHANGELOG.md`
+ * are exactly the basenames gates join with a package directory (a manifest
+ * `files` entry, a per-package markdown exclusion, a remote directory listing).
+ * A README.md card would come back with six leads of which five name a gate
+ * that never reads that file. Volume was never the whole criterion; the header
+ * above prices a fabricated lead, not a big number.
+ *
+ * So the class stays out, and a gate whose population genuinely IS a repo-root
+ * file reaches it by DECLARING the subtree spelling — `AGENTS.md/**`, which the
+ * collapse above reduces to that one path and to nothing else. One gate pays
+ * for its own precision instead of every gate paying for one gate's. The pm
+ * line ratchet is the worked instance; its own header carries the reasoning.
+ *
  * ## Why a segment boundary and not a raw string prefix (#8534)
  *
  * A path prefix is not a string prefix. Compared raw, a hint naming one entry
@@ -2642,6 +2658,27 @@ function selfTest() {
   t('and claims nothing under apps/', !slotHints.some((h) => hintCovers(h, 'apps/console/src/main.tsx')));
   t('nor under examples/', !slotHints.some((h) => hintCovers(h, 'examples/crm/objects/account.object.ts')));
   t('nor a content page', !slotHints.some((h) => hintCovers(h, 'content/docs/deployment/cli.mdx')));
+
+  // The third gate of that class (#9964), and the one nothing above could
+  // reach: the pm line ratchet's population includes the repo-ROOT AGENTS.md,
+  // and a root file carries no separator for `looksPathy` to find — so its
+  // eighteen ceilings produced seventeen hints and an AGENTS.md card derived
+  // zero gates, on the largest ceiling in that map at headroom 0. It declares
+  // the subtree spelling instead. Read from the real gate, not a fixture: what
+  // is pinned is that the tree still HAS the declaration.
+  const lineRatchetHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/pm/check-skill-line-ratchet.mjs'), 'utf8'));
+  t('the pm line ratchet reaches the repo-root instruction file it declares', lineRatchetHints.some((h) => hintCovers(h, 'AGENTS.md')));
+  // The negative half, and the reason this is a DECLARATION rather than an
+  // extractor change. Widening the extractor to admit bare top-level `*.md`
+  // literals was measured on the same corpus as the refusal above — 114
+  // families x 6326 tracked files — and costs only 17 pairs, but 8 of them are
+  // fabricated: gates spell `README.md` and `CHANGELOG.md` as basenames they
+  // join with a package directory, so a README.md card gains six leads of which
+  // five name a gate that never reads it. The class stays refused; these pin
+  // that this declaration bought no part of it.
+  t('and claims no other repo-root file', !lineRatchetHints.some((h) => hintCovers(h, 'README.md')));
+  t('nor a same-named file inside a directory', !lineRatchetHints.some((h) => hintCovers(h, 'examples/AGENTS.md')));
+  t('a bare top-level file literal is still no hint at all', extractWatchHints("const F = 'README.md';").length === 0);
 
   // ── A trailing sentence period is not part of the path (#8534, half two) ──
   //
