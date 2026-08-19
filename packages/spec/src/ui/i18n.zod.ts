@@ -108,6 +108,49 @@ import { strictObject } from '../shared/strict-object';
 const INLINE_LOCALE_KEY = /^(default|[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*)$/;
 
 /**
+ * The emitted type of an inline locale map — hand-tied, because the key regex
+ * above is a Zod runtime refinement that does NOT survive into a derived type:
+ * `z.input` of a bare `z.record(z.string().regex(…), z.string())` erases to
+ * `Record<string, string>`, on which **every** string key type-checks. The
+ * retired `{ key, defaultValue }` key-reference form therefore stayed
+ * structurally assignable to every `I18nLabel` surface even though
+ * `I18nLabelSchema` refuses it at parse time — declared ≠ enforced on the type
+ * axis, and it shipped a full release of measured harm: objectui#5264 declared
+ * the retired form on a widget prop, the wrong shape compiled, and the raw
+ * dotted i18n key rendered as the visible KPI label (#9925).
+ *
+ * The two `never` limbs are the fix (#9925, maintainer ruling 2026-08-19,
+ * option B): a property named `key` or `defaultValue`, if present, must be
+ * `never` — no string satisfies that, so writing either key in an object
+ * literal is a compile error, in both property orders, on every surface that
+ * embeds `I18nLabelSchema`. Everything else about the type is unchanged:
+ *
+ *  - every valid inline map still assigns (`{ en: 'Members', 'zh-CN': '成员' }`
+ *    — the limbs are optional, so their absence satisfies them);
+ *  - computed-key sites still assign (`{ [locale]: text }` and a plain
+ *    `Record<string, string>` both carry an index signature, not a declared
+ *    `key`/`defaultValue` property, so no escape hatch is needed — measured,
+ *    see `i18n.label-type-assertions.ts`);
+ *  - reads are unaffected (`map[tag]`, `Object.keys`, `Object.values`).
+ *
+ * Why this shape and not a template-literal / branded locale-tag key (the
+ * ruling offered both and asked for a measured pick): a template-literal key
+ * cannot express "2–3 letters", so its letter-union approximation both ADMITS
+ * the lone `key` (three lowercase letters parse as a language subtag pattern —
+ * the same boundary the runtime doc below records) and explodes tsc (the
+ * 26-letter probe did not finish; a 12-letter scale took 16s where this shape
+ * takes 2s), while a branded key breaks every existing object literal. The
+ * narrowing is deliberately exactly the measured harm class, not BCP-47
+ * fidelity — the full key grammar remains the runtime refinement's job.
+ */
+export type InlineLocaleMap = Record<string, string> & {
+  /** Never writable — the retired key-reference form's `key` (#5055, #9925). */
+  key?: never;
+  /** Never writable — the retired key-reference form's `defaultValue` (#5055, #9925). */
+  defaultValue?: never;
+};
+
+/**
  * Inline locale map — the second authorized form of a display label.
  *
  * `{ en: 'Members', 'zh-CN': '成员', 'ja-JP': 'メンバー' }`: the author writes
@@ -115,8 +158,15 @@ const INLINE_LOCALE_KEY = /^(default|[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*)$/;
  * (objectui's `pickLocalized`, which the CLI's `i18n-extract` also recognises —
  * a label already in map form is multilingual, so no bundle key is scaffolded
  * for it).
+ *
+ * The annotation is what carries the {@link InlineLocaleMap} narrowing into
+ * every `z.input`/`z.infer` derivation that embeds this schema — without it the
+ * derived type is `Record<string, string>` and the retired form compiles
+ * everywhere (#9925). Input and output are annotated identically because the
+ * record neither transforms nor defaults (the Iso759 pin in
+ * `type-alias-convention.pin.test.ts` holds them equal).
  */
-export const InlineLocaleMapSchema = lazySchema(() => z.record(
+export const InlineLocaleMapSchema: z.ZodType<InlineLocaleMap, InlineLocaleMap> = lazySchema(() => z.record(
   z.string().regex(
     INLINE_LOCALE_KEY,
     'an inline label map is keyed by BCP-47 locale tags (`en`, `zh-CN`, …) or `default` — '
@@ -124,8 +174,6 @@ export const InlineLocaleMapSchema = lazySchema(() => z.record(
   ),
   z.string(),
 ).describe('Inline locale map: BCP-47 tag → translated string'));
-
-export type InlineLocaleMap = z.input<typeof InlineLocaleMapSchema>;
 
 /**
  * I18n Label Schema

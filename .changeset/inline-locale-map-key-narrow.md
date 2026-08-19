@@ -1,0 +1,9 @@
+---
+"@objectstack/spec": minor
+---
+
+Narrow `InlineLocaleMap`'s emitted key type so the retired `{ key, defaultValue }` key-reference label form is a compile error on every `I18nLabel` surface (#9925, maintainer ruling option B).
+
+The BCP-47 key constraint on `InlineLocaleMapSchema` is a Zod runtime refinement that never survived into the emitted type: `I18nLabel`'s object half erased to `Record<string, string>`, so the retired form type-checked everywhere even though the schema has always refused it at parse time (objectui#5264 shipped a release rendering a raw dotted i18n key as a visible KPI label because the wrong shape compiled). `InlineLocaleMap` is now `Record<string, string> & { key?: never; defaultValue?: never }`, carried through every `z.input`/`z.infer` derivation by an explicit `z.ZodType<InlineLocaleMap, InlineLocaleMap>` annotation.
+
+Runtime acceptance is unchanged in both directions — every label the schema accepted still parses, and everything now refused at compile time was already refused at parse time. Versioned as **minor**, not patch, because previously-compiling (always-runtime-invalid) code can stop compiling; not major because no runtime contract moved. If your code stops compiling on a `{ key: '...', defaultValue: '...' }` label: that shape has resolved to nothing since the key-reference dialect was retired (#5055) — write the label as a plain default-language string, or as an inline locale map `{ en: '...', 'zh-CN': '...' }`. Valid inline maps, computed-key sites (`{ [locale]: text }`), and plain `Record<string, string>` sources are unaffected (measured; no escape hatch is needed or provided).
