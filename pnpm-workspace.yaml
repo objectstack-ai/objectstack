@@ -40,9 +40,12 @@ onlyBuiltDependencies:
 # because that is where semver's compatibility break actually falls.
 # `scripts/check-override-consistency.mjs` reports (never fails on) any entry
 # that drifts back into the old shape. Two carve-outs deliberately keep it:
-# the better-auth pre-release family (a compat pin, not an OSV floor — it is
-# retired wholesale when 1.7.0 stable ships) and the three zero-consumer pins
-# awaiting a #5835-style ruling (@tootallnate/once, react-router, @sveltejs/kit).
+# `@better-auth/scim` alone — the rest of the better-auth family was retired to
+# the stable `^1.7.1` line with major-boundary bounds when 1.7.0 shipped (#3002),
+# and scim's bound MUST stay at the pinned rc, because a `<2.0.0` bound would
+# rewrite the stable release DOWN onto the rc it is deliberately held at (#3653)
+# — and the three zero-consumer pins awaiting a #5835-style ruling
+# (@tootallnate/once, react-router, @sveltejs/kit).
 #   - esbuild: GHSA-gv7w-rqvm-qjhr (high). tsup/tsx/vite pulled 0.27.7 / 0.28.0
 #     (< 0.28.1); force the patched line everywhere.
 #   - form-data: GHSA-hmw2-7cc7-3qxx (high) — CRLF injection via unescaped
@@ -77,36 +80,52 @@ onlyBuiltDependencies:
 #     8.9.0 is a different major and stays outside, unaffected. Kept as
 #     defense-in-depth on the same reasoning as form-data above.
 #   - @better-auth/scim: GHSA-j8v8-g9cx-5qf4 (high) — account/provider
-#     takeover. The advisory is patched only in >=1.7.0-beta.4 — there is NO
-#     stable patched release yet (npm `latest` is still on the 1.6.x line), so
-#     a pre-release pin is what clears the CI audit gate; revert to a stable
-#     `^1.7.x` line the moment one ships.
-#     Held at 1.7.0-rc.1 while the rest of the family moves to rc.2: rc.2 is a
-#     ground-up rewrite of this plugin — the `scimProvider` model and its
-#     generate-token endpoint are gone, replaced by code-defined connections
-#     plus six new models (scimUser, scimGroup, scimGroupMember, scimSubject,
-#     scimConnectionBinding, scimIdentityTombstone). Adopting it means new
-#     platform objects, retiring `sys_scim_provider`, and a new way for a
-#     tenant to register a connection — a feature migration (ADR-0071), not a
-#     version bump. rc.1's peer range accepts rc.2 core, and it still carries
-#     the advisory fix.
+#     takeover, patched only in >=1.7.0-beta.4. THE ONLY MEMBER OF THE FAMILY
+#     STILL ON A PRE-RELEASE, and deliberately so.
+#     Stable 1.7.0/1.7.1 have now shipped, and measured against the published
+#     1.7.1 tarball they ship the rc.2 REWRITE, not the rc.1 shape: no
+#     `scimProvider` model and no generate-token endpoint (0 occurrences in
+#     `dist/index.mjs`), replaced by code-defined connections plus six new
+#     models (scimUser, scimGroup, scimGroupMember, scimSubject,
+#     scimConnectionBinding, scimIdentityTombstone — all six present). So
+#     moving this pin is still the ADR-0071 feature migration tracked by #3653
+#     (new platform objects, retiring `sys_scim_provider`, a new way for a
+#     tenant to register a connection) — NOT the version bump #3002 did for the
+#     rest of the family. Holding here stays security-clean: rc.1 is above the
+#     >=1.7.0-beta.4 fix floor, and rc.1's peer ranges (`better-auth` and
+#     `@better-auth/core` at `^1.7.0-rc.1`) are satisfied by the stable 1.7.1
+#     the family now resolves to.
+#     KNOWN SKEW while this hold lasts: scim rc.1 peers `better-call@1.3.7`
+#     while better-auth 1.7.1 depends on `better-call@1.4.0`, so the tree
+#     carries two copies. Measured green on the plugin-auth suite; it retires
+#     with #3653.
+#     `scripts/check-prerelease-pin-watch.mjs` keeps watching this pin (it is
+#     now the only entry on its watch list) so #3653 has a producer.
 #   - @better-auth/oauth-provider: GHSA-p2fr-6hmx-4528 — same better-auth
 #     monorepo and same situation as @better-auth/scim above. The fix first
-#     ships in the 1.7.0 pre-release line. Pin to 1.7.0-rc.2. The 1.7
-#     oauth-provider is exercised on the sign-in path and imports symbols
-#     (e.g. CLIENT_ASSERTION_TYPE) that only exist in @better-auth/core 1.7.x,
-#     so the ENTIRE better-auth family must move to 1.7.0-rc.2 together —
-#     mixing a 1.7 plugin with 1.6.x core throws "Cannot set properties of
-#     undefined (setting 'modelName')" during better-auth init and 500s every
-#     auth endpoint at runtime, and mixing rc.2 with rc.1 is the same class of
-#     hazard. The full family is pinned below; revert all of them to a stable
-#     `^1.7.x` line the moment one ships.
+#     shipped in the 1.7.0 pre-release line; it is now in stable 1.7.x, and
+#     #3002 moved this pin (and the whole family bar scim) off `1.7.0-rc.2`
+#     onto `^1.7.1` — npm `latest` for every family member is 1.7.1, verified
+#     by `npm view <pkg> dist-tags`. The 1.7 oauth-provider is exercised on the
+#     sign-in path and imports symbols (e.g. CLIENT_ASSERTION_TYPE) that only
+#     exist in @better-auth/core 1.7.x, so the ENTIRE family must stay on ONE
+#     line — mixing a 1.7 plugin with 1.6.x core throws "Cannot set properties
+#     of undefined (setting 'modelName')" during better-auth init and 500s
+#     every auth endpoint at runtime. That is now cheap to hold: `better-auth`
+#     itself declares EXACT dependencies on the rest of the family
+#     (`@better-auth/core`, the five adapters, telemetry all at 1.7.1), so one
+#     stable range on the root drags the family with it.
+#     The pins are kept rather than dropped because two of them
+#     (oauth-provider, scim) are OSV floors: a transitive reintroduction must
+#     land on the patched line, and dropping a security pin is its own
+#     decision, not a rider on a version bump (same reasoning as form-data /
+#     undici above).
 #     IMPORTANT: these overrides do NOT ship with published packages — a
 #     downstream `npx create-objectstack` install resolves plugin-auth's own
-#     declared ranges. plugin-auth therefore pins the same exact 1.7.0-rc.2 in
-#     its dependencies (a `^1.6.23` range there resolved to the broken 1.6.23
-#     mix and 500'd every fresh 15.1.0 project). Keep both in sync — CI
-#     enforces this via scripts/check-override-consistency.mjs.
+#     declared ranges. plugin-auth therefore declares the same `^1.7.1` in its
+#     dependencies (a `^1.6.23` range there resolved to the broken 1.6.23 mix
+#     and 500'd every fresh 15.1.0 project). Keep both in sync — CI enforces
+#     this via scripts/check-override-consistency.mjs.
 #   - uuid: GHSA-w5hq-g745-h8pq (high) — pulled 8.3.2 transitively; the fix
 #     first lands in 11.1.1. Pin to the ^11.1.1 LTS line (uuid `legacy-11`
 #     dist-tag) rather than the latest major to keep the jump conservative.
@@ -132,20 +151,24 @@ overrides:
   'form-data@<5.0.0': '>=4.0.6'
   'undici@>=7.23.0 <8.0.0': '^7.29.0'
   # better-auth family — kept on one line (see @better-auth/oauth-provider note).
-  'better-auth@<1.7.0-rc.2': '1.7.0-rc.2'
-  '@better-auth/core@<1.7.0-rc.2': '1.7.0-rc.2'
-  # scim is deliberately held one pre-release BEHIND the rest of the family —
-  # see the @better-auth/scim note above. Do not "align" it without doing the
-  # connection/credential migration first.
+  # Off the 1.7.0-rc.2 prerelease and onto the stable line (#3002). Bounds sit
+  # at the MAJOR boundary, so a future advisory lift moves only the target.
+  'better-auth@<2.0.0': '^1.7.1'
+  '@better-auth/core@<2.0.0': '^1.7.1'
+  # scim is deliberately held on the 1.7.0-rc.1 PRE-RELEASE, one line behind the
+  # rest of the family — see the @better-auth/scim note above. Stable 1.7.x
+  # ships the rc.2 rewrite, so adopting it is the ADR-0071 migration (#3653),
+  # not this bump. Its bound stays AT the rc on purpose: a major-boundary bound
+  # here would rewrite the stable release down onto the rc.
   '@better-auth/scim@<1.7.0-rc.1': '1.7.0-rc.1'
-  '@better-auth/oauth-provider@<1.7.0-rc.2': '1.7.0-rc.2'
-  '@better-auth/sso@<1.7.0-rc.2': '1.7.0-rc.2'
-  '@better-auth/drizzle-adapter@<1.7.0-rc.2': '1.7.0-rc.2'
-  '@better-auth/kysely-adapter@<1.7.0-rc.2': '1.7.0-rc.2'
-  '@better-auth/memory-adapter@<1.7.0-rc.2': '1.7.0-rc.2'
-  '@better-auth/mongo-adapter@<1.7.0-rc.2': '1.7.0-rc.2'
-  '@better-auth/prisma-adapter@<1.7.0-rc.2': '1.7.0-rc.2'
-  '@better-auth/telemetry@<1.7.0-rc.2': '1.7.0-rc.2'
+  '@better-auth/oauth-provider@<2.0.0': '^1.7.1'
+  '@better-auth/sso@<2.0.0': '^1.7.1'
+  '@better-auth/drizzle-adapter@<2.0.0': '^1.7.1'
+  '@better-auth/kysely-adapter@<2.0.0': '^1.7.1'
+  '@better-auth/memory-adapter@<2.0.0': '^1.7.1'
+  '@better-auth/mongo-adapter@<2.0.0': '^1.7.1'
+  '@better-auth/prisma-adapter@<2.0.0': '^1.7.1'
+  '@better-auth/telemetry@<2.0.0': '^1.7.1'
   'uuid@<12.0.0': '^11.1.1'
   'postcss@<9.0.0': '^8.5.10'
   'cookie@<0.8.0': '^0.7.0'
