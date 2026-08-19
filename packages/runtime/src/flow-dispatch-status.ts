@@ -10,6 +10,25 @@
  * | flow disabled          | never dispatched | `409` `FLOW_DISABLED`      |
  * | flow has no start node | never dispatched | `422` `FLOW_NO_START_NODE` |
  * | ran and failed         | ran, rejected    | `400` `FLOW_FAILED`        |
+ * | ran and PAUSED         | ran, suspended   | not a refusal — see below  |
+ *
+ * ## The fifth row is NON-TERMINAL, and it is written down on purpose (#9510)
+ *
+ * A run that reaches a pausing node suspends: its continuation is persisted
+ * (ADR-0019), it answers `{ success: true, status: 'paused', runId }`, and it
+ * finishes later through `resume()`. It is neither a refusal nor a completed
+ * run, and it is served as it always has been — the engine result on a `200`,
+ * carrying the `runId` (and `screen`) a caller continues it with.
+ *
+ * It earns a row because it stopped being a single-producer answer. Until #9510
+ * only `execute()`'s own catch could pause a triggered run; `executeWithoutRetry`
+ * had no suspend arm, so a pause on a RETRY attempt was reported as a failed run
+ * with its continuation silently dropped. With that arm restored the same
+ * `paused` result now also arrives through `retryExecution` — same shape, second
+ * producer. A third state reaching a reader that knows two is how one defect
+ * becomes another, so every reader of this table is TOLD the state exists
+ * instead of discovering it by falling off the end of
+ * {@link classifyFlowRefusal}.
  *
  * ## Why the table is a module and not a mapper inside one route
  *
@@ -119,9 +138,31 @@ export async function flowIsUnknown(automation: unknown, flowName: string): Prom
 }
 
 /**
- * The three result-borne rows: which HTTP answer this engine result declares,
- * or `undefined` when the producer classified nothing (see the module note on
- * why that is deliberately not a row).
+ * The table's NON-TERMINAL row: a run that dispatched and then SUSPENDED at a
+ * pausing node (ADR-0019 durable pause) — `{ success: true, status: 'paused',
+ * runId }`, with the continuation persisted under that `runId` (#9510).
+ *
+ * Read by a door that wants to answer the third state deliberately instead of
+ * letting it fall through a terminal-shaped branch. It reads the producer's own
+ * lifecycle verdict — the same field {@link classifyFlowRefusal} reads and the
+ * same one the engine writes to the run log — never `runId` / `screen` / the
+ * message, which are incidental to the state.
+ *
+ * ⚠️ The ANSWER for a paused run stays each door's own, exactly as the envelope
+ * is: both trigger doors serve it as today's `200` plus the engine result. What
+ * is shared, and what this predicate is for, is the QUESTION — so no door can
+ * read a live pause as a terminal outcome while believing it implements this
+ * table.
+ */
+export function isPausedRun(result: AutomationResult | null | undefined): boolean {
+    return !!result && typeof result === 'object' && result.status === 'paused';
+}
+
+/**
+ * The three result-borne REFUSAL rows: which HTTP answer this engine result
+ * declares, or `undefined` when the producer classified nothing (see the module
+ * note on why that is deliberately not a row) — and `undefined` for a PAUSED
+ * run too, which is not a refusal at all (#9510).
  *
  * `flowName` is used ONLY to fill a row's default message when the producer
  * wrote none; it never affects the classification.
@@ -130,7 +171,16 @@ export function classifyFlowRefusal(
     flowName: string,
     result: AutomationResult | null | undefined,
 ): FlowRefusal | undefined {
-    if (!result || typeof result !== 'object' || result.success !== false) return undefined;
+    if (!result || typeof result !== 'object') return undefined;
+    // [#9510] A live suspended run is never a refusal, said by naming the state
+    // rather than by relying on a paused result also being `success: true`.
+    // ⚠️ Honest about its own weight: this changes no answer today — the
+    // `success` line below already returns `undefined` for it. What it buys is
+    // that the non-terminal state is NAMED in the one function every door reads
+    // the table through, so a future row for unclassified `success: false`
+    // refusals cannot capture a paused run on its way past.
+    if (isPausedRun(result)) return undefined;
+    if (result.success !== false) return undefined;
     const message = typeof result.error === 'string' && result.error ? result.error : undefined;
 
     // ── never dispatched: the producer says WHICH refusal (#9415) ──────────

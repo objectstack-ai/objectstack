@@ -530,6 +530,14 @@ jobs:
       # order) to them. It lives in this job with the other docs guards: the edit
       # that breaks it is a docs edit, so a packages/** paths filter would blind
       # it to its own failure mode.
+      #
+      # #9630 added a fourth claim: each page names the registry slot
+      # ctx.getService() really resolves it by. #9684 added a FIFTH enumeration
+      # of the same chapter -- versioning.mdx's "Current Matrix" shipped seven
+      # rows for eight pages -- so the gate now holds that matrix to the pages
+      # too, and holds every stability LABEL it and the kernel/index.mdx table
+      # publish to the page's own Stability bullet. That second half catches a
+      # WRONG row, which membership checking passes silently.
       - name: Runtime-services indexes enumerate the chapter's real pages
         run: pnpm check:runtime-services-index
 

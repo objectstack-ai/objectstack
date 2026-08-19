@@ -307,6 +307,13 @@ jobs:
             // already stated the requirement; only the code was missing.
             const failures = [];
 
+            // Targets that are not issues AT ALL. Kept apart from `failures`
+            // above because the two need opposite remedies: a failure is an API
+            // refusal a re-run can clear, this one is a defect in the merged
+            // PR's own body that no re-run will ever change. Fusing them would
+            // send the reader off to re-run a job that is going to refuse again.
+            const malformed = [];
+
             // The backlink this PR leaves, identified so a SECOND run can see
             // it. The marker is scoped to one pull request and is therefore
             // STABLE across runs — one PR leaves one backlink, however many
@@ -333,6 +340,47 @@ jobs:
                 const { data: issue } = await github.rest.issues.get({
                   owner: t.owner, repo: t.repo, issue_number: t.number,
                 });
+
+                // A pull request is ALSO an issue to this endpoint. Every PR
+                // answers `GET /repos/{owner}/{repo}/issues/{N}` with `state`,
+                // `state_reason` and the rest, plus a `pull_request` key that
+                // nothing here used to read (#9711) — the key is ABSENT on a
+                // real issue, present as an object on a PR, so its truthiness
+                // is the whole test. The target regex takes any `owner/repo#N`
+                // and PR and issue numbers share one sequence, so a body saying
+                // `Fixes owner/repo#4500` where 4500 is a pull request would
+                // have made this loop comment on that PR and CLOSE it.
+                //
+                // GitHub's own closing-keyword parser — the behaviour this
+                // workflow exists to carry across repository boundaries — never
+                // closes a pull request; `Fixes #N` aimed at a PR leaves a
+                // reference and nothing else. So the keyword is a MALFORMED
+                // instruction, and it is refused OUT LOUD rather than skipped:
+                // this file's ten exit paths were arrived at by fixing one
+                // quiet one after another, and a quiet `continue` would have
+                // been the eleventh. The refusal is also the conservative half
+                // of an asymmetry — closing a pull request drops its
+                // merge-queue membership and any armed auto-merge in the same
+                // step, and neither comes back by itself.
+                //
+                // Placed BEFORE the `state === 'closed'` branch on purpose: a
+                // merged pull request reads `state: 'closed'` with
+                // `state_reason: null` from this very endpoint (measured on
+                // objectstack-ai/objectstack#9143), which that branch reads as
+                // "no objection recorded" and answers with a backlink comment.
+                // A guard sitting after it would still write on somebody else's
+                // pull request.
+                if (issue.pull_request) {
+                  malformed.push({ key, url: issue.pull_request.html_url });
+                  core.warning(
+                    `${key} is a PULL REQUEST, not an issue — ${prUrl} declares it FIXED, but GitHub's own `
+                    + `closing-keyword parser never closes a pull request, so this workflow does not either. `
+                    + `Nothing was commented on and nothing was closed. Re-running cannot fix a keyword that `
+                    + `can never fire: point the reference at the issue it meant.`,
+                    { title: 'Cross-repo closing keyword names a pull request' },
+                  );
+                  continue;
+                }
 
                 // "Already closed" is NOT one situation, and the three causes
                 // that reach here do not deserve the same treatment (#9643).
@@ -433,7 +481,7 @@ jobs:
               }
             }
 
-            if (failures.length === 0) {
+            if (failures.length === 0 && malformed.length === 0) {
               core.info(`All ${targets.size} cross-repo target(s) handled: closed, or already closed and linked.`);
               return;
             }
@@ -442,10 +490,23 @@ jobs:
             // notice branch uses, for the same reasons: the summary carries the
             // full list a human needs, `setFailed` carries the conclusion that
             // makes anyone open the run at all.
+            //
+            // Both classes are red, and each says what to do about ITSELF: a
+            // refusal is retried, a malformed reference is rewritten. Green
+            // with an annotation was the alternative for the malformed class,
+            // and this file's own history rejects it — 2334 runs, every one of
+            // them `run_attempt` 1 and 99 of the last 100 green, so a green run
+            // of this job has never been opened by anybody. An annotation on a
+            // green post-merge run is the silent path with extra steps, and a
+            // declared close that can never happen is exactly what #9595 made
+            // red for.
             const failedKeys = failures.map((f) => f.key).join(', ');
             const failedList = failures.map((f) => `- \`${f.key}\` —— ${f.lost} 未完成：${f.reason}`).join('\n');
-            try {
-              await core.summary.addRaw([
+            const malformedKeys = malformed.map((m) => m.key).join(', ');
+            const malformedList = malformed.map((m) => `- \`${m.key}\` —— 这个编号是一个 pull request：${m.url}`).join('\n');
+            const summaryLines = [];
+            if (failures.length > 0) {
+              summaryLines.push(
                 '## ⚠️ 跨仓库 issue 没能收口',
                 '',
                 `本次合并声明了 ${targets.size} 个跨仓库关闭目标，其中 ${failures.length} 个没有完成：`,
@@ -456,16 +517,45 @@ jobs:
                 '- 原因排除后可以直接 re-run 本 job：已经关闭的目标不会被重复关闭，已经留下过本 PR 反链的目标也不会被重复评论。',
                 '- 401/404 通常意味着 `CROSS_REPO_ISSUE_TOKEN` 对目标仓库没有 `issues: write`，而不是目标不存在 —— GitHub 对无权访问的仓库回 404。',
                 '',
-              ].join('\n')).write();
+              );
+            }
+            if (malformed.length > 0) {
+              summaryLines.push(
+                '## ⛔ 关闭关键字指向的是 pull request，不是 issue',
+                '',
+                `本次合并声明的 ${targets.size} 个跨仓库关闭目标里，有 ${malformed.length} 个的编号是 pull request：`,
+                '',
+                malformedList,
+                '',
+                '- 它们没有被评论，也没有被关闭。GitHub 自己的关闭关键字解析器从不关闭 pull request，本工作流也不会 —— 关掉一个 PR 会在同一步里丢掉它的 merge queue 成员资格和已经武装的 auto-merge，两者都不会自己回来。',
+                `- 这不是 re-run 能解决的故障：写错的是 ${prUrl} 的正文。把引用改成它真正想关的那个 issue 编号，或者手工关掉那个 issue。`,
+                '',
+              );
+            }
+            try {
+              await core.summary.addRaw(summaryLines.join('\n')).write();
             } catch (summaryError) {
               // Same asymmetry as the notice branch: the summary is the richer
               // channel, the conclusion the reliable one. Losing the richer one
               // must not restore the silence.
               core.info(`Could not write the job summary: ${summaryError.message}`);
             }
-            core.setFailed(
-              `${failures.length} of ${targets.size} cross-repo target(s) were NOT finished by this merge: `
-              + `${failedKeys}. Finish them by hand (fixed by ${prUrl}) — an open one needs closing, an `
-              + `already-closed one needs this PR's link on it — or re-run this job once the cause is `
-              + `cleared. The full list, with what each one is missing, is in this run's job summary.`,
-            );
+            const verdict = [];
+            if (failures.length > 0) {
+              verdict.push(
+                `${failures.length} of ${targets.size} cross-repo target(s) were NOT finished by this merge: `
+                + `${failedKeys}. Finish them by hand (fixed by ${prUrl}) — an open one needs closing, an `
+                + `already-closed one needs this PR's link on it — or re-run this job once the cause is `
+                + `cleared. The full list, with what each one is missing, is in this run's job summary.`,
+              );
+            }
+            if (malformed.length > 0) {
+              verdict.push(
+                `${malformed.length} of ${targets.size} cross-repo closing keyword(s) in this merged pull `
+                + `request name a PULL REQUEST rather than an issue: ${malformedKeys}. GitHub's own keyword `
+                + `parser never closes a pull request and this workflow does not either, so nothing was `
+                + `commented on and nothing was closed. Re-running this job will refuse them again — what `
+                + `has to change is the reference in ${prUrl}'s body.`,
+              );
+            }
+            core.setFailed(verdict.join(' '));
