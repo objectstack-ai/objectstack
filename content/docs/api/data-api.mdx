@@ -228,6 +228,10 @@ Every relation pointing at the deleted record honours its own `deleteBehavior`
 refused with `409 DELETE_RESTRICTED`. That happens whether the `set_null` was
 defaulted or written out explicitly (see
 [Required foreign keys](/docs/protocol/objectql/types#lookup)). On a
+`multiple: true` required lookup the substitution is judged per referencing
+ROW: the delete is refused only over rows whose set the member removal would
+empty, and `dependentCount` counts just those rows — a row that keeps another
+member is updated and does not block the delete. On a
 `multiple: true` reference where `set_null` does run, it
 removes just the deleted id from the array and keeps the rest, and a reference set
 emptied that way reads back as `[]` — never `null`, so a client that branches on
