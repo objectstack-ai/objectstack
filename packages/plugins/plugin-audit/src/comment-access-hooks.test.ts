@@ -655,8 +655,12 @@ async function bootWired(opts: {
     driver.stores.get('crm_opportunity')!.set(String(r.id), { ...r });
   }
   const remaining = () => driver.stores.get('sys_comment')?.size ?? 0;
-  const bodies = () =>
-    Array.from(driver.stores.get('sys_comment')?.values() ?? []).map((r) => r.body);
+  const bodies = (): unknown[] => {
+    const rows = driver.stores.get('sys_comment') as
+      | Map<string, Record<string, unknown>>
+      | undefined;
+    return Array.from(rows?.values() ?? []).map((r) => r.body);
+  };
   return { ql, driver, remaining, bodies };
 }
 
