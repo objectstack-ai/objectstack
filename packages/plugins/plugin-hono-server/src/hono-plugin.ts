@@ -21,7 +21,9 @@ import {
     runWithPerfDisclosure,
     allowPerfDisclosure,
     isPerfDisclosurePrincipal,
+    OBSERVABILITY_METRICS_SERVICE,
     type PerfDisclosureGate,
+    type MetricsRegistry,
 } from '@objectstack/observability';
 
 export interface StaticMount {
@@ -90,6 +92,27 @@ export interface HonoPluginOptions {
      * @default undefined
      */
     serverTiming?: boolean;
+
+    /**
+     * Observability backends for the transport's own signals.
+     *
+     * `metrics` receives `http_requests_total{method,route,status}` for every
+     * inbound request on this server — see
+     * {@link HonoHttpServer.installHttpMetricsSeam} for why the counter is
+     * emitted at the transport rather than one layer up (#9650).
+     *
+     * Resolution chain, the canonical one (`ObservabilityServicePlugin`):
+     *
+     *   1. this option — explicit wiring, and the escape hatch tests use;
+     *   2. the `observability:metrics` service, when the host registered one
+     *      BEFORE this plugin;
+     *   3. neither — then **no middleware is installed at all**, so an
+     *      unconfigured deployment pays no per-request cost. Not a disabled
+     *      counter; no counter.
+     */
+    observability?: {
+        metrics?: MetricsRegistry;
+    };
 }
 
 /**
@@ -402,7 +425,54 @@ export class HonoServerPlugin implements Plugin {
         // moment at which a gate can still precede all of them — and placing it
         // here means a consumer's `use()` no longer has to win a race with route
         // registration. It can register whenever it has the facts.
+
+        // ─── `http_requests_total` seam (#9650) ───────────────────────────────
+        // Mounted immediately BEFORE the middleware seam, and that order is
+        // load-bearing in both directions:
+        //
+        //  - before it, so a request the `use()` chain short-circuits (the
+        //    dispatcher's inbound rate limiter answering 429) is still counted.
+        //    A refused request is precisely the one an operator alerts on;
+        //    counting only what got through would rebuild, one layer in, the
+        //    blind spot this seam exists to close.
+        //  - still at the END of `init()`, i.e. before any route exists, since
+        //    every route in the platform is mounted in some plugin's `start()`
+        //    and Hono composes the handlers that MATCHED in registration
+        //    order. A middleware Hono learns about after a route runs after
+        //    that route's handler — which is why installing this from a later
+        //    phase (or from `kernel:bootstrapped`) observes nothing at all.
+        const metrics = this.resolveMetrics(ctx);
+        if (metrics) {
+            this.server.installHttpMetricsSeam(metrics);
+            ctx.logger.debug('HTTP request counter armed', {
+                metric: 'http_requests_total',
+                labels: 'method, route (pattern), status',
+            });
+        }
+
         this.server.installMiddlewareSeam();
+    }
+
+    /**
+     * The canonical metrics-resolution chain, as documented on
+     * `ObservabilityServicePlugin`: explicit option, then the
+     * `observability:metrics` service, then nothing.
+     *
+     * Returns `undefined` rather than a no-op registry so the caller can skip
+     * installing the middleware entirely when no backend is configured.
+     */
+    private resolveMetrics(ctx: PluginContext): MetricsRegistry | undefined {
+        const explicit = this.options.observability?.metrics;
+        if (explicit) return explicit;
+        try {
+            const fromService = ctx.getService<MetricsRegistry | undefined>(
+                OBSERVABILITY_METRICS_SERVICE,
+            );
+            if (fromService) return fromService;
+        } catch {
+            // No host registry registered — the counter is simply absent.
+        }
+        return undefined;
     }
 
     /**

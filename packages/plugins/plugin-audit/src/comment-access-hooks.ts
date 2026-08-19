@@ -252,7 +252,13 @@ function callerContext(ctx: any): ExecutionContext {
     return withoutOperationPrivateKeys(exec as Record<string, unknown>);
   }
   const s = ctx?.session ?? {};
-  return { userId: s.userId, tenantId: s.tenantId ?? s.organizationId, positions: s.positions };
+  // [#9691] The `s.tenantId` arm was DEAD, not a fallback: `HookContextSchema`
+  // strips a `tenantId` key from the session (#3290) and the engine's
+  // `buildSession` only ever emits `organizationId`, so the first arm answered
+  // `undefined` on every call and the second one carried the value. Dropping it
+  // is byte-for-byte the same envelope; it is removed because a dead read of a
+  // removed alias is what an author copies out of a reference body.
+  return { userId: s.userId, tenantId: s.organizationId, positions: s.positions };
 }
 
 /** Can the CALLER read `(object, recordId)`? A caller-scoped `findOne` through
