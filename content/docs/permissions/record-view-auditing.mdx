@@ -1,0 +1,201 @@
+---
+title: Record-View Auditing
+description: "Who viewed this record, and when — the `read` action in sys_audit_log: its per-object opt-in, the four edges of its scope, and what a view row deliberately does not carry."
+---
+
+# Record-View Auditing
+
+Every other layer in this module answers *who is allowed to see this record*.
+This page answers the question that comes after it, and that every regulated
+industry review opens with: **who actually opened it, and when?**
+
+ObjectStack records that as a `read` row in `sys_audit_log`, written by
+`@objectstack/plugin-audit`. The capability is **off until a deployment names
+the objects it wants recorded** — there is no global switch — and its scope has
+real edges. This page states them, because a compliance evaluation that reads
+"audited" and gets something narrower than it assumed is worse than one that
+finds nothing at all.
+
+<Callout type="info">
+**Scope of this page.** Record *views*. The `create` / `update` / `delete` rows
+the same plugin writes from ObjectQL lifecycle hooks are the write side of the
+same ledger and are not described here; `login` / `logout` rows arrive through a
+different surface entirely, the
+[`services.audit` slot](/docs/kernel/runtime-services/audit-service).
+</Callout>
+
+## Turning it on
+
+The audited set is a **constructor argument**, given once where the plugin is
+installed:
+
+```typescript
+import { AuditPlugin } from '@objectstack/plugin-audit';
+
+await kernel.use(
+  new AuditPlugin({
+    readAudit: {
+      objects: ['contact', 'account'],
+      // maxBatchSize: 50,       // flush once this many views are buffered
+      // flushIntervalMs: 2000,  // flush this long after a batch's first view
+    },
+  }),
+);
+```
+
+`readAudit` is the only key `AuditPluginOptions` declares, and it accepts
+exactly those three:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `readAudit.objects` | `[]` | The closed per-object opt-in. Empty registers no hook at all |
+| `readAudit.maxBatchSize` | `50` | Flush once this many views are buffered |
+| `readAudit.flushIntervalMs` | `2000` | Flush this long after the first view of a batch |
+
+The writer filters the list before it registers anything: duplicates and blanks
+are dropped, and names on the plugin's audit exclusion list (the ledger's own
+tables, auth/session objects, and ADR-0057 telemetry plumbing such as `sys_job`
+/ `sys_job_run` / `sys_job_queue`) are refused **with a warning naming the
+object** rather than silently accepted. An empty — or fully excluded — set
+registers no hook, so a deployment that opts nothing in pays nothing on its read
+path.
+
+<Callout type="warn">
+**There is no object-metadata key and no environment variable.** `enable.auditReads`
+does not exist, and neither does a global "audit all reads" flag. The shape is
+deliberate: a declarable metadata key can be set on an object in a deployment
+that never installs this plugin, producing metadata that *reads* as audited and
+records nothing — and on a compliance surface, a declaration a reviewer mistakes
+for coverage is worse than an absent feature.
+
+The practical consequence is that this is configured **where you compose the
+kernel**. The CLI's `os serve` registers `AuditPlugin` with no options, so a
+stack served that way has record-view auditing off and no knob to turn it on.
+</Callout>
+
+## What counts as a record view
+
+A read is recorded when **both** hold:
+
+1. **It materialized exactly one record** — a `findOne` that returned a record.
+   An array, `null` or `undefined` result is never a detail view, so `find`
+   never qualifies.
+2. **Its predicate pinned the primary key.** `GET /data/:object/:id` reaches the
+   engine as `findOne(object, { where: { id } })`, which is the record-detail
+   surface. A `findOne` carrying any other predicate is "give me *a* matching
+   record" — an internal lookup, not a person opening a record.
+
+The predicate walk tolerates what the security middleware leaves behind: an `id`
+equality AND-composed with a tenant or RLS clause still counts, and the explicit
+`{ id: { $eq: ... } }` spelling is accepted. **`$or` or `$not` anywhere on the
+path disqualifies the read** — the row may have matched through the other arm,
+so the id equality no longer proves the read was *for* that record. Nesting is
+walked to a fixed depth of 8.
+
+<Callout type="warn">
+**List and search reads are never recorded** — including a list read that
+happened to return exactly one record. List auditing is a deferred follow-up,
+and a deferral that leaked rows anyway would not be one. A coverage matrix
+should read this as "record-detail views", not "reads".
+</Callout>
+
+## What a view row records
+
+| Column | Value on a `read` row |
+| --- | --- |
+| `action` | `read` |
+| `created_at` | The instant the record was **viewed**, not the instant its batch drained |
+| `user_id` | The `sys_user` subject that opened it |
+| `actor` | The principal label, falling back to `user_id` (stamped only where the column exists) |
+| `object_name` | The object whose record was opened |
+| `record_id` | The record's id |
+| `tenant_id` / `organization_id` | The **viewed record's** own organization, falling back to the viewer's session organization |
+| `old_value` / `new_value` | Always `null` — see below |
+
+The tenant stamp comes from the record rather than the viewer deliberately: a
+row about an org-A record stamped with the viewer's active org B would land
+behind org B's tenant wall, invisible to the one tenant administrator the row
+concerns.
+
+### What it deliberately does not record
+
+- **No field values, ever.** `old_value` and `new_value` stay `null`. The
+  `afterFind` hook runs *inside* the security middleware, **ahead of its field
+  masking**, so the record it sees is pre-mask plaintext. Copying values in
+  would mint a plaintext copy of exactly what
+  [field-level security](/docs/permissions/field-level-security) withholds,
+  inside the one table compliance staff are granted broad access to.
+- **Not what the viewer actually saw.** It follows from the above: a `read` row
+  says someone opened a record, never which fields were visible to them after
+  masking.
+- **No IP address and no user agent.** Those are stamped on `login` / `logout`
+  rows, not on view rows.
+- **Nothing about refused or failed reads.** The `afterFind` hook is reached
+  only by a read that succeeded, so a denied read leaves no trace here.
+
+### Two boundaries, declared rather than discovered
+
+- **A system-elevated read writes no row.** Anything carrying
+  [`session.isSystem`](/docs/permissions/system-context) — an `api.sudo()` path,
+  a formula recompute, a roll-up, a trigger — is the platform reading for its
+  own bookkeeping, not a person opening a record. Note that `sudo()` **keeps the
+  caller's user id**, so this flag is the only thing separating the two.
+- **A read with no principal writes no row.** With neither a user id nor an
+  actor there is no answer to "who", and a row naming nobody only adds noise to
+  the one query this capability exists to serve.
+
+## Reading the trail
+
+`sys_audit_log` ships a **Record Views** list view — filtered to `action: read`,
+newest first — reachable in the Setup app under Diagnostics, via the
+[Audit Logs entry](/docs/ui/setup-app) the plugin contributes.
+
+The object is append-only and exposes only `get` and `list` on the data API;
+every field is `readonly`, so the ledger is never written through a form.
+Programmatic queries go through `services.data` against `sys_audit_log` like any
+other object. Rows carry the ADR-0057 `audit` lifecycle class: retained hot for
+90 days, then archived for seven years where an `archive` datasource is
+registered.
+
+## Failure posture
+
+The hook **enqueues and returns** — it awaits nothing, and an audit failure never
+turns a valid read into an error. Rows are persisted on a later tick, flushed
+whichever comes first: `maxBatchSize` views buffered, or `flushIntervalMs` since
+the batch's first view. The plugin's `destroy()` drains the tail, so a clean
+shutdown does not take the last batch with it.
+
+Both degradations are reported **once per process** and never retried — a retry
+storm against an unreachable table turns a degradation into an outage:
+
+- **Buffer overflow.** Past a fixed ceiling of 10,000 buffered views the
+  **oldest** are dropped and a `warn` is logged once.
+- **A failed ledger write.** The batch is lost and the failure is reported once,
+  at `error` where the host's logger provides one and at `warn` where it does
+  not — never dropped into silence.
+
+<Callout type="warn">
+**Both failures are invisible from everywhere else.** The reads themselves
+succeeded and returned 200, so the API, the screens and every counter read
+clean; only the rows recording who opened those records never landed. The
+resulting query returns a confident, wrong, **short** answer. The usual cause of
+a failing write is a datasource split rather than a broken table:
+`sys_audit_log`'s `audit` lifecycle class routes it to a dedicated `telemetry`
+datasource whenever one is registered, and `os dev` provisions one by default as
+a sibling SQLite file.
+</Callout>
+
+## Not this
+
+- **[`services.audit`](/docs/kernel/runtime-services/audit-service)** is the
+  write ingress for audit events the CRUD lifecycle cannot see — `login` and
+  `logout` today. Record views do **not** travel through it; they are written by
+  an `afterFind` hook, with no service call involved, and there is no
+  `services.recordViewAudit` slot to resolve.
+- **The write side of the ledger** — `create` / `update` / `delete` rows, with
+  before-and-after field values — is written by the same plugin from ObjectQL
+  lifecycle hooks and is on by default, subject to the same exclusion list.
+
+Canonical source: `packages/plugins/plugin-audit/src/read-audit.ts`. The
+plugin's [README](https://github.com/objectstack-ai/objectstack/blob/main/packages/plugins/plugin-audit/README.md)
+carries the same surface for readers working from the package.

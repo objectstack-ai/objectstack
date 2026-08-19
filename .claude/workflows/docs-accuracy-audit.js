@@ -154,6 +154,7 @@ const ALL_HANDWRITTEN = [
   "content/docs/permissions/permissions-matrix.mdx",
   "content/docs/permissions/positions.mdx",
   "content/docs/permissions/profiles.mdx",
+  "content/docs/permissions/record-view-auditing.mdx",
   "content/docs/permissions/rls.mdx",
   "content/docs/permissions/sharing-rules.mdx",
   "content/docs/permissions/sso.mdx",

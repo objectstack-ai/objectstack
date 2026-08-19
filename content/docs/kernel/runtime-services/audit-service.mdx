@@ -17,6 +17,11 @@ Record-level `create` / `update` / `delete` rows do **not** travel through this 
 same plugin writes those from ObjectQL lifecycle hooks, with no service call involved, so
 resolving this service is only ever necessary for events the CRUD lifecycle cannot see.
 
+Record **views** do not travel through it either. `@objectstack/plugin-audit` records those
+as `read` rows from an `afterFind` hook, under a per-object opt-in given at construction —
+there is no service slot to resolve for them. See
+[Record-View Auditing](/docs/permissions/record-view-auditing) for that surface.
+
 ## Method
 
 The slot's entire surface is one method:

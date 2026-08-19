@@ -20,7 +20,7 @@ People sit in a **business-unit tree** and hold **positions**; reporting lines d
 ## Safe by default, explainable always
 
 - Every object must declare its sharing posture explicitly — "forgot to configure, so everyone can see it" cannot happen.
-- **Audit** records who changed what, when, with old and new values; tracked objects expose a history timeline on the record.
+- **Audit** records who changed what, when, with old and new values; tracked objects expose a history timeline on the record. Record *views* can be recorded too, opt-in per object, so "who opened this customer record, and when?" has an answer ([Record-View Auditing](/docs/permissions/record-view-auditing)).
 - **Explain** answers "why can this person see this record?" layer by layer — permission questions get diagnosed, not guessed at.
 - Sign-in hardening for the enterprise tier: SSO, enforced MFA, password policy and breach checks, lockout throttling.
 
