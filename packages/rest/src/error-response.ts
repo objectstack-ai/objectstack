@@ -573,15 +573,41 @@ export function mapDataError(error: any, object?: string): { status: number; bod
         // [#7543] …but only when the body REPORTED something. A body that
         // CRASHED arrives here too, and its `TypeError: not a function` is an
         // internal fault, not a business message — see
-        // {@link isScriptFaultMessage}.
+        // {@link isScriptFaultMessage}. Deliberately FIRST: a crash outranks
+        // everything else about the error, including a stray declared
+        // `status` — a `TypeError` carrying one stays the sanitised 500.
         if (isScriptFaultMessage(error.innerMessage)) return UNCLASSIFIED_FAULT();
-        return {
-            status: 400,
-            body: {
-                error: error.innerMessage,
-                ...(object ? { object } : {}),
-            },
-        };
+        // [#9967] A body that NAMES its own HTTP status is asking to be served
+        // with it — the same #7867 rule `domains/actions.ts` applies on the
+        // custom-action route. The QuickJS side-channel carries a body-thrown
+        // error's declared `status` out of the VM onto `SandboxError.status`,
+        // and this branch used to answer 400 unconditionally, so a deliberate
+        // `e.status = 403` was dead on arrival at this door while the actions
+        // door honoured it — the #7525/#8016 door-disagreement shape, one
+        // branch earlier. The read is {@link declaredHttpStatus}: the same
+        // both-spellings 400-599 band as the passthrough below, so a nonsense
+        // or out-of-band status is not a declaration and the undeclared
+        // default stays exactly the 400-with-verbatim-message the dogfood
+        // pins (`hook-error-format.dogfood.test.ts`) require.
+        const declared = declaredHttpStatus(error);
+        if (declared === undefined || declared < 500) {
+            return {
+                status: declared ?? 400,
+                body: {
+                    error: error.innerMessage,
+                    ...(object ? { object } : {}),
+                },
+            };
+        }
+        // A declared SERVER-band status is not a business refusal addressed to
+        // the caller in its own words — it is a producer-declared server
+        // fault, and this file already has exactly one arm for that: the
+        // declared-status passthrough below, whose 5xx half keeps the status
+        // and withholds the prose unconditionally (#5582). Fall through to it
+        // rather than duplicating the arm here — one condition, one wire
+        // answer. (The structured `code` branches in between keep outranking
+        // the passthrough for this producer exactly as they do for every
+        // other — the #7525 §5 pins.)
     }
     // [#3770] Object does not exist — thrown by the protocol's registry gate
     // (`assertObjectRegistered`, which covers every data entry point) and by
