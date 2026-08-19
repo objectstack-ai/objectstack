@@ -9,8 +9,8 @@
  *   node scripts/check-required-contexts.mjs --self-test   # verify the checker itself
  *   node scripts/check-required-contexts.mjs --verify-required-set
  *                                       # report-only live ruleset diff (#9642)
- *   NODE_OPTIONS=--use-env-proxy node scripts/check-required-contexts.mjs --verify-required-set
- *                                       # the same, from an agent container
+ *                                       # ⛔ NOT runnable from a dev seat — see
+ *                                       #    "Where the live half can run" below
  *
  * ## The defect
  *
@@ -97,7 +97,10 @@
  *     the same path plus /{id}, answer HTTP 200 to an ordinary agent seat.
  *     Their price is `X-Accepted-GitHub-Permissions: metadata=read` — the
  *     baseline every token carries, and not one of the 17 a workflow can toggle
- *     because it cannot be given up. The required SET is readable.
+ *     because it cannot be given up. The required SET is readable — by a token
+ *     that reaches api.github.com at all, which a DEV SEAT does not (see
+ *     "Where the live half can run" at `--verify-required-set` below; that is a
+ *     transport fact about the container, not a permission this repo grants).
  *
  * Measured 2026-08-18 (#9642): one ruleset, `main`, id 12119582, enforcement
  * `active`, repository-sourced — `includes_parents=true` returns that one and
@@ -173,7 +176,7 @@
  * below, with the decision in judgeInstructionSurfaces.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -975,6 +978,33 @@ export async function scanInstructionSurfaces(
  * non-zero exit classifies the ENVIRONMENT, not the tree. Unreachable prints
  * NOT VERIFIED and exits 2; it is never a pass (#4690).
  *
+ * ## Where the live half can run — NOT from a dev seat (#9678)
+ *
+ * ⛔ A `NOT VERIFIED` here on an agent session container is the ENVIRONMENT,
+ * never the tree and never this registry. Do not chase it, do not "fix" it, and
+ * do not conclude from it that the ruleset is unreadable — that inference, from
+ * a different cause, is exactly what #9642 had to retire. Re-measured
+ * 2026-08-19 from a dev seat, both documented spellings:
+ *
+ *   node scripts/check-required-contexts.mjs --verify-required-set
+ *       -> NOT VERIFIED — GET /repos/objectstack-ai/objectstack answered 401
+ *   NODE_OPTIONS=--use-env-proxy node ... --verify-required-set
+ *       -> NOT VERIFIED — GET /repos/objectstack-ai/objectstack answered 403
+ *
+ * The 401 is the #7412 proxy trap (Node's global fetch does not read
+ * HTTPS_PROXY on its own), and `renderRequiredSetUnverified` says so. The 403
+ * is the finding: with the documented remedy applied, the seat's own egress
+ * policy refuses api.github.com. The proxy hint correctly goes SILENT once the
+ * flag is set, so what a dev actually sees is a bare 403 with no explanation of
+ * its seat class — hence this paragraph. Two seat classes, both dead ends;
+ * there is no third spelling that works from here.
+ *
+ * The standing caller is therefore `.github/workflows/required-set-patrol.yml`
+ * (#9678), where a runner reaches the API directly with the workflow's own
+ * GITHUB_TOKEN — no proxy env and no `--use-env-proxy` needed. It is scheduled,
+ * report-only and ⛔ never a required context; the "live mode stays OFF the
+ * required path" block in `--self-test` pins that from this side.
+ *
  * ## Both directions are reported, because they are different defects
  *
  *   A. a REGISTRY ROW whose context is absent from the live required set — the
@@ -1124,7 +1154,7 @@ export function renderRequiredSetReport(verdict) {
   }
 
   if (verdict.advisory.length === 0 && verdict.unpinned.length === 0 && !verdict.noEnforcingRuleset && !verdict.noRequiredChecksRule) {
-    lines.push('', '  ✅  the live required set and this registry agree in both directions.');
+    lines.push('', `  ${REQUIRED_SET_CLEAN_MARK}  the live required set and this registry agree in both directions.`);
   }
   return lines.join('\n');
 }
@@ -1161,6 +1191,25 @@ export function renderRequiredSetUnverified(reason, env = process.env) {
 export const EXIT_SWEPT = 0;
 /** Could not read the live set — classifies the environment, never the tree. */
 export const EXIT_ENVIRONMENT = 2;
+
+/**
+ * The standing caller for the live mode (#9678) — scheduled, report-only, and
+ * ⛔ never a required context. Named here rather than only in a comment so the
+ * self-test can assert the caller EXISTS and that nothing else runs the flag.
+ * Repo-root-relative to `.github/workflows/`.
+ */
+export const PATROL_WORKFLOW = 'required-set-patrol.yml';
+
+/**
+ * The clean mark a COMPLETED sweep renders when the two lists agree in both
+ * directions, and the exact character the patrol keys its drift annotation on.
+ * One constant rather than two copies: the workflow reads this out of the
+ * rendered report, so a silent divergence between "what the report prints" and
+ * "what the caller looks for" would turn every drift finding into a green tick.
+ * Every non-agreeing reading withholds it, so the patrol annotates on ABSENCE —
+ * which fails toward a false alarm, never a false all-clear.
+ */
+export const REQUIRED_SET_CLEAN_MARK = '✅';
 
 function requiredSetApiContext(env) {
   return {
@@ -2028,6 +2077,53 @@ async function selfTest() {
     assert(
       !Object.values(pkgJson.scripts ?? {}).some((s) => typeof s === 'string' && s.includes('--verify-required-set')),
       'wiring: no package script runs the live read — a `check:*` script is how a thing reaches the required job (#9642)',
+    );
+
+    // ── …and the standing caller it DOES have (#9678) ─────────────────────
+    //
+    // The two assertions above are absences, and an absence cannot tell "kept
+    // deliberately off the required path" apart from "wired nowhere at all" —
+    // which is what this mode actually was for its whole first life: a sweep
+    // whose only scheduled caller was its own offline self-test. So the caller
+    // is pinned as a PRESENCE too, in the same block, and the whole
+    // .github/workflows tree is swept rather than the two files `sources`
+    // carries: a second caller appearing in some third workflow is exactly the
+    // thing the absences above are guarding against, and they cannot see it.
+    const workflowDir = join(root, '.github', 'workflows');
+    const callers = readdirSync(workflowDir)
+      .filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'))
+      .filter((f) => /--verify-required-set/.test(uncommentedYaml(readFileSync(join(workflowDir, f), 'utf8'))));
+    assert(
+      callers.join(',') === PATROL_WORKFLOW,
+      `wiring: exactly one workflow runs the live read and it is ${PATROL_WORKFLOW} — found [${callers.join(', ')}] (#9678)`,
+    );
+
+    const patrol = readFileSync(join(workflowDir, PATROL_WORKFLOW), 'utf8');
+    const patrolYaml = uncommentedYaml(patrol);
+    // The mechanical proxy for "never required". Assertion 6 of this pin is
+    // that every required context's workflow carries `merge_group:` — without
+    // one, the queue build never produces the context and the whole queue
+    // stalls waiting for it. A patrol that declares no merge_group trigger
+    // therefore CANNOT be validly required-ized, and required-izing it anyway
+    // wedges the queue rather than deadlocking a rename two-step quietly.
+    assert(
+      !/^\s{0,4}merge_group\s*:/m.test(patrolYaml),
+      `wiring: ${PATROL_WORKFLOW} must declare no merge_group trigger — a workflow without one deadlocks the queue if it is ever required-ized (#9678)`,
+    );
+    assert(
+      !REQUIRED_CONTEXTS.some((entry) => entry.workflow === PATROL_WORKFLOW),
+      `wiring: no REQUIRED_CONTEXTS row may name ${PATROL_WORKFLOW} — the patrol is report-only by construction (#9678)`,
+    );
+    // The patrol reads its drift signal out of the CLEAN MARK this file
+    // renders, so the coupling is pinned from the side that owns the string.
+    // The rendering itself is pinned in both directions above ('agreement in
+    // both directions renders as the clean case' / 'the unprotected reading
+    // never renders as the clean case'); this asserts the caller still reads
+    // the same character. A rendering change costs the patrol a FALSE ALARM,
+    // never a false all-clear — it annotates on the mark's ABSENCE.
+    assert(
+      patrolYaml.includes(REQUIRED_SET_CLEAN_MARK),
+      `wiring: ${PATROL_WORKFLOW} must key its drift annotation on the clean mark ${REQUIRED_SET_CLEAN_MARK} this file renders (#9678)`,
     );
   }
 
