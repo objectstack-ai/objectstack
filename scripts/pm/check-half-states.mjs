@@ -184,6 +184,26 @@
  *       now says so on the anchor, by name. Deliberately not an alarm and
  *       deliberately unconditional — see the rationale on the predicate for
  *       why this one carries no threshold constant.
+ *   H16 an OPEN, non-draft PR sitting in a MERGE CONFLICT
+ *       (`mergeable_state` = `dirty`) past the threshold — the one board state
+ *       no instrument here could express before it (devx incident,
+ *       maintainer-approved 2026-08-19, verbatim: 「同意你的建议」). A conflict
+ *       is not a red check: it starts no CI run, raises no event, and turns no
+ *       check-run red, so every signal a patrol reads by proxy keeps reporting
+ *       health — and when auto-merge is ARMED the PR additionally reads as
+ *       "the queue is handling it" (H12's own reading, correct there and
+ *       exactly wrong here). The measured specimen hung ~4h with nobody aware.
+ *       The incident's lesson, verbatim: 「一个无法表达某状态的仪器,会把它报成
+ *       它能表达的最近状态。」 — which is what H1–H15 were doing to this state.
+ *       Two consequences shape the item. It is the only one needing a per-PR
+ *       GET (`mergeable_state` is absent from the `/pulls` LIST payload and
+ *       lives on the single-PR endpoint alone), taken for CANDIDATES only and
+ *       never fatal to the sweep. And it deliberately does NOT read
+ *       `auto_merge` in the finding-reducing direction H12 does: auto-merge
+ *       does not resolve conflicts, so an armed dirty PR is the disease, not a
+ *       handler. `unknown`/null readings are SKIPPED and never vouched for —
+ *       GitHub computes mergeability asynchronously, so that reading is the
+ *       platform saying "ask again later", not a state to name.
  *
  * ## The close mechanism, measured (#8293)
  *
@@ -1137,6 +1157,194 @@ export function h15OldestUnclaimedBlocking(issues, nowMs = Date.now()) {
 }
 
 // ---------------------------------------------------------------------------
+// H16 — an open, non-draft PR stuck in a merge conflict (devx incident,
+// maintainer-approved 2026-08-19: 「同意你的建议」).
+//
+// The first item whose input the sweep cannot get from a listing: everything
+// above reads rows the label/PR/merged passes already fetched, while
+// `mergeable_state` exists only on the single-PR endpoint. The gathering
+// policy that keeps that affordable is `h16NeedsDetail`, below, and it is
+// pinned in the self-test for the same reason `needsRepoProbe` is — a policy
+// that decides what gets READ AT ALL is where a silent hole would live.
+// ---------------------------------------------------------------------------
+
+/**
+ * H16 threshold — the window a normal conflict resolution gets before the
+ * conflict counts as STUCK.
+ *
+ * ## Which timestamp this ages, and why (the honest part)
+ *
+ * A merge conflict has NO timestamp of its own. `mergeable_state` is a verdict
+ * about the PR as it stands at the moment of the read; neither the PR row nor
+ * any listing this sweep makes records WHEN the PR became `dirty`. So the age
+ * read here is the PR's `updated_at` — the last time anything touched the PR —
+ * used as a PROXY, on the reading the incident supports: a freshly-pushed
+ * dirty PR is being worked (its author is mid-resolution), while a dirty PR
+ * nothing has touched for hours is one nobody has noticed.
+ *
+ * The proxy's error direction, stated here rather than discovered later: a
+ * conflict created MINUTES ago on a PR last touched hours ago flags at once,
+ * because `updated_at` measures silence on the PR and not the age of the
+ * conflict — and the usual cause (`main` advancing under an open PR) does not
+ * touch the PR row at all, so it does not bump the clock. That over-reports in
+ * exactly one shape and under-reports in none, which is the direction this
+ * file keeps everywhere: a report-only row whose remedy is identical either
+ * way (merge base, resolve) costs its reader one glance, while the opposite
+ * bias is the silence the incident is made of.
+ *
+ * ⛔ It must not be "fixed" by dating the conflict from a per-PR timeline
+ * fetch. That is an extra request per candidate to sharpen a report-only row,
+ * and this sweep declines that trade everywhere else it arises — H15 declines
+ * it by name for the age of a label. The proxy is named in the finding text so
+ * the reader knows which quantity they are being shown.
+ *
+ * ## Why 2h
+ *
+ * Conflicts on this board are overwhelmingly created by `main` advancing under
+ * an open PR (~18 merges on a working day), not by authors writing
+ * incompatible code, so resolution is mechanical — merge `main`, fix the
+ * overlap, push — and a lane PM's landing window turns over far faster than
+ * that. 2h leaves a normal resolution a full window while catching the
+ * measured incident (~4h unnoticed) at roughly half its life. It matches
+ * `DOMAIN_HALF_STATE_STALE_HOURS` for the same underlying reason rather than
+ * by coincidence: both measure a loop that should already have turned over,
+ * not intake latency.
+ */
+export const MERGE_CONFLICT_STALE_HOURS = 2;
+
+/**
+ * The card(s) a stuck PR is holding up, so the row names the delivery and not
+ * only the branch. Read with H7's code-stripped extractors, exactly as H8
+ * reads delivery: `Fixes #N` (any closing keyword bound to `#N`) or
+ * `Part of #N` — both mean "this card is waiting on this PR", which is the
+ * question a reader of a stuck-conflict row is actually asking. A body that
+ * merely QUOTES either spelling in backticks names nothing (#8293 reading 4).
+ *
+ * Returns numbers in ascending order; an empty array when the body declares no
+ * card, which is a normal shape (not every PR carries one) and is why the
+ * finding text appends the clause only when it is non-empty.
+ */
+export function h16HeldCards(body) {
+  const out = new Set();
+  for (const n of closingKeywordTargets(body).keys()) out.add(Number(n));
+  for (const n of partOfTargets(body)) out.add(Number(n));
+  return [...out].sort((a, b) => a - b);
+}
+
+/**
+ * Whether this PR is worth spending a per-PR GET on — the gathering policy,
+ * separate from the verdict and exported so the self-test can pin the one
+ * property that matters: it must never be NARROWER than the predicate, or the
+ * sweep would silently stop being able to find rows H16 would have flagged.
+ *
+ * It answers from the LIST row alone, using the halves of the predicate that
+ * do not need `mergeable_state`: non-draft, not merged, and either aged past
+ * the threshold or carrying a timestamp that cannot be read. So the request
+ * count is bounded by the STUCK population rather than the open one — the same
+ * candidate-gating idiom as H2's comment fetch, which is confined to the cards
+ * H2 can actually judge.
+ *
+ * An unreadable `updated_at` is a candidate deliberately: the predicate treats
+ * it as a finding rather than as fresh (#4690), so a gate that skipped it here
+ * would drop exactly the row the predicate promises to surface.
+ *
+ * `changeset-release/*` is deliberately NOT excluded, unlike in H12. There the
+ * Version Packages PR would flag on every sweep BY DESIGN (born ready, never
+ * armed, the maintainer's alone to merge). A dirty one is nothing of the kind:
+ * it is regenerated from `main` on every push, so it has no normal state in
+ * which it sits conflicted for hours — if it ever does, that is a real finding
+ * about the release bot, not a false positive to suppress.
+ */
+export function h16NeedsDetail(pr, nowMs = Date.now()) {
+  if (!pr || pr.draft !== false || pr.merged_at) return false;
+  const updated = Date.parse(pr.updated_at ?? '');
+  if (!Number.isFinite(updated)) return true;
+  return (nowMs - updated) / 3_600_000 > MERGE_CONFLICT_STALE_HOURS;
+}
+
+/**
+ * Whether the H16 detail pass failed as a TRANSPORT rather than leaving a
+ * bounded gap — the #4690 judgement at row granularity, pure so the self-test
+ * pins it (the sweep loop that consumes it is a thin `for`, deliberately).
+ *
+ * The distinction it draws is the whole posture. "Some candidates unread" is a
+ * gap the report states out loud (the summary line's `read X of Y`) and the
+ * rest of the sweep is still worth printing — every other item's findings are
+ * already gathered. "No candidate readable at all" is not a bounded gap: it is
+ * a sweep whose H16 pass examined nothing while printing as though it had, and
+ * a quiet H16 section is then indistinguishable from a board with no
+ * conflicts. That one must surface as the prerequisite failure it is.
+ *
+ * Zero candidates is NOT a failure: a board where nothing was stale enough to
+ * be worth a request is a real, clean reading, and treating it as a transport
+ * fault would fail the sweep on the healthiest possible board.
+ */
+export function h16DetailPassUnreadable(candidates, probed) {
+  return (candidates ?? 0) > 0 && (probed ?? 0) === 0;
+}
+
+/**
+ * H16 — null when clean, else the finding sentence. Takes the SINGLE-PR
+ * payload (the listing row carries no `mergeable_state`).
+ *
+ * ## The readings that are skips, not findings
+ *
+ * GitHub computes mergeability ASYNCHRONOUSLY. A read taken while that
+ * background job is still running answers `unknown` (with `mergeable` null),
+ * which is neither "clean" nor "dirty" — it is no reading at all. Only the
+ * literal `dirty` fires: an unknown is skipped in SILENCE, never vouched for
+ * and never guessed, which is this file's standing narrowness discipline (the
+ * transport classifier's refusal to name what it cannot name, same posture).
+ *
+ * That is the one place H16 departs from the #4690 direction the aged items
+ * take, and the asymmetry is deliberate rather than an inconsistency: an
+ * unreadable `updated_at` is a value that SHOULD have been readable and whose
+ * absence hides a real card, while `unknown` is the platform correctly saying
+ * "ask again later" — firing on it would put a row on the anchor for every PR
+ * whose mergeability happened to be cold at sweep time, which is noise that
+ * would bury the real rows. The timestamp half keeps the #4690 direction
+ * unchanged (an unreadable `updated_at` still flags).
+ *
+ * Drafts are out of scope (parked deliberately, H12's reading), and a row
+ * without a real `draft` field is out of scope too — this predicate must not
+ * flag a shape it cannot read.
+ *
+ * ## Why `auto_merge` is NOT read here, unlike H12
+ *
+ * H12 treats armed auto-merge as finding-REDUCING: the queue machinery holds
+ * the PR, so someone is handling it. H16 must not, and that is the whole
+ * incident — the measured specimen sat dirty with auto-merge ARMED, and the
+ * arming is precisely what made every proxy signal read healthy while nothing
+ * at all was happening. Auto-merge does not resolve conflicts: a PR armed
+ * while dirty simply never lands. Here the armed state is evidence OF the
+ * disease, never of a handler, and the self-test pins that in both directions.
+ */
+export function h16StuckMergeConflict(pr, nowMs = Date.now()) {
+  if (!pr || pr.draft !== false || pr.merged_at) return null;
+  if (pr.mergeable_state !== 'dirty') return null;
+  const updated = Date.parse(pr.updated_at ?? '');
+  const ageHours = Number.isFinite(updated) ? (nowMs - updated) / 3_600_000 : null;
+  if (ageHours !== null && ageHours <= MERGE_CONFLICT_STALE_HOURS) return null;
+  const reading =
+    ageHours === null
+      ? 'an unreadable `updated_at` (which must not read as fresh)'
+      : `untouched for ~${Math.round(ageHours)}h (threshold ${MERGE_CONFLICT_STALE_HOURS}h)`;
+  const held = h16HeldCards(pr.body);
+  const holding =
+    held.length === 0
+      ? ''
+      : `, holding ${held.length === 1 ? 'card' : 'cards'} ${held.map((n) => `#${n}`).join(', ')}`;
+  return (
+    `open, non-draft and in MERGE CONFLICT (\`mergeable_state: dirty\`), ${reading}${holding} — a ` +
+    'conflict starts no CI run, raises no event and turns no check red, so every proxy signal ' +
+    'keeps reading healthy (armed auto-merge included: it does NOT resolve conflicts, and a PR ' +
+    'armed while dirty simply never lands). The owning lane PM merges `main` into the branch, ' +
+    'resolves it, and re-arms afterwards. Age is the PR\'s `updated_at`, not the conflict\'s: a ' +
+    'conflict carries no timestamp of its own, and base advancing does not touch the PR row.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -1175,13 +1383,26 @@ export function isLoudFinding(message) {
  * clean" and "nothing was swept", and it carries the report-only contract so
  * a reader who sees only this line cannot mistake it for a gate verdict.
  *
- * @param {{ repo: string, issues: number, unscoped: number, prs: number, merged: number }} counts
+ * H16's two numbers are here for a reason the other counts do not have: it is
+ * the only item whose input can fail PER ROW. A detail GET that fails leaves
+ * that PR unjudged and the sweep still prints — correctly, since every other
+ * item's findings are already gathered — so without these numbers a pass that
+ * read nothing would be indistinguishable from a board with no conflicts. That
+ * is the #4690 shape at row granularity, and the pair (`read X of Y`) is what
+ * makes it visible. `??  0` rather than required: a caller assembling counts
+ * without them still renders a sentence, never the string `undefined`.
+ *
+ * @param {{ repo: string, issues: number, unscoped: number, prs: number,
+ *   merged: number, conflictProbed?: number, conflictCandidates?: number }} counts
  * @param {number} findingCount
  */
 export function summaryLine(counts, findingCount) {
+  const probed = counts.conflictProbed ?? 0;
+  const candidates = counts.conflictCandidates ?? 0;
   return (
     `check-half-states: swept ${counts.issues} open pm-/p0-labeled issue(s), ${counts.unscoped} open ` +
     `issue(s) in the unscoped pass (H13–H15), ${counts.prs} open PR(s) ` +
+    `(merge state read on ${probed} of ${candidates} H16 candidate(s)) ` +
     `and ${counts.merged} recently-merged PR(s) in ${counts.repo} — ${findingCount} half-state(s) found. ` +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
@@ -1785,7 +2006,7 @@ function reportPrerequisiteNotMet(v, options = {}) {
   const nothing =
     swept === 0
       ? [
-          `  Nothing was swept: no issue was listed and no predicate (H1–H15) ran, so this`,
+          `  Nothing was swept: no issue was listed and no predicate (H1–H16) ran, so this`,
           `  result says NOTHING about whether the board carries half-states. It is not a`,
           `  clean board and it is not a dirty one — it is no reading at all.`,
         ]
@@ -1853,8 +2074,11 @@ async function sweep(options = {}) {
   const seenPrs = new Map();
   const seenMerged = new Map();
   const seenUnscoped = new Map();
+  // H16's per-row fetch is the one input that can fail partially, so its
+  // tally rides out of the sweep and into the summary line (see `summaryLine`).
+  const stats = { conflictCandidates: 0, conflictProbed: 0 };
   try {
-    await sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped);
+    await sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, stats);
   } catch (err) {
     err.sweptSoFar = seen.size + seenPrs.size + seenMerged.size + seenUnscoped.size;
     throw err;
@@ -1867,6 +2091,8 @@ async function sweep(options = {}) {
     unscoped: seenUnscoped.size,
     prs: seenPrs.size,
     merged: seenMerged.size,
+    conflictCandidates: stats.conflictCandidates,
+    conflictProbed: stats.conflictProbed,
   };
   console.log(
     options.format === 'markdown'
@@ -1924,7 +2150,7 @@ async function listAllOpenIssues() {
   return out;
 }
 
-async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped) {
+async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, stats = {}) {
   for (const label of ['pm:dispatched', 'pm:queue', 'pm:blocked', 'pm:seat', 'pm:on-hold', 'priority:p0']) {
     for (const issue of await listIssues(label)) seen.set(issue.number, issue);
   }
@@ -1978,6 +2204,42 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped) {
     if (contradiction) findings.push([pr, 'H7', contradiction]);
     const orphan = h12OrphanLanding(pr);
     if (orphan) findings.push([pr, 'H12', orphan]);
+  }
+
+  // H16 — the only predicate here whose input no listing carries:
+  // `mergeable_state` lives on the single-PR endpoint alone. One GET per
+  // CANDIDATE (the gathering policy is `h16NeedsDetail`, which answers from
+  // the list row already in hand), so the cost is bounded by the stuck
+  // population rather than the open one, and only PRs this sweep already
+  // listed are ever fetched.
+  //
+  // A failed detail GET must NOT fail the sweep: every other item's findings
+  // are already gathered and are worth printing, and one unreadable PR is an
+  // unclassified row like any other unreadable reading here — it drops out of
+  // H16 and the summary line's `read X of Y` is what says so.
+  //
+  // But if NOTHING could be read, that is the transport rather than a clean
+  // board (#4690), so the last error is rethrown for the outer net to re-probe
+  // and classify. The distinction is the whole posture: "some rows unread" is
+  // a bounded gap the report states, while "no row readable" is a sweep whose
+  // H16 pass silently examined nothing and would otherwise print as quiet.
+  let lastDetailError = null;
+  for (const pr of seenPrs.values()) {
+    if (!h16NeedsDetail(pr)) continue;
+    stats.conflictCandidates = (stats.conflictCandidates ?? 0) + 1;
+    let detail;
+    try {
+      detail = await rest(`/repos/${OWNER_REPO}/pulls/${pr.number}`);
+    } catch (err) {
+      lastDetailError = err;
+      continue;
+    }
+    stats.conflictProbed = (stats.conflictProbed ?? 0) + 1;
+    const stuck = h16StuckMergeConflict(detail);
+    if (stuck) findings.push([pr, 'H16', stuck]);
+  }
+  if (h16DetailPassUnreadable(stats.conflictCandidates, stats.conflictProbed)) {
+    throw lastDetailError;
   }
 
   // H8 — one bounded merged-PR listing (window note at the helper), matched
@@ -2607,13 +2869,153 @@ function selfTest() {
   t('H15 reverse-verify: …the same card unassigned DOES produce the row', h15OldestUnclaimedBlocking([live7276([])], Date.parse('2026-08-19T09:00:00Z')).issue.number, 7276);
   t('H15 reverse-verify: …and its measured age', h15OldestUnclaimedBlocking([live7276([])], Date.parse('2026-08-19T09:00:00Z')).message.includes('open ~220h'), true);
 
+  // -- H16: open non-draft PR stuck in a merge conflict (2026-08-19 incident) --
+  // The single-PR payload shape, since `mergeable_state` is absent from the
+  // listing rows this sweep otherwise runs on.
+  const conflictPr = ({
+    draft = false,
+    mergeable_state = 'dirty',
+    auto_merge = null,
+    updated = hoursAgo(4),
+    body = '',
+    head = { ref: 'claude/issue-1-x' },
+    merged_at = null,
+  } = {}) => ({ draft, mergeable_state, auto_merge, head, body, updated_at: updated, merged_at });
+
+  t('H16: dirty beyond the threshold -> finding', typeof h16StuckMergeConflict(conflictPr(), NOW), 'string');
+  t('H16: …and the finding names the threshold', h16StuckMergeConflict(conflictPr(), NOW).includes(`${MERGE_CONFLICT_STALE_HOURS}h`), true);
+  t('H16: …and names the platform state it read', h16StuckMergeConflict(conflictPr(), NOW).includes('mergeable_state: dirty'), true);
+  t('H16: …and prescribes the merge-and-resolve remedy', h16StuckMergeConflict(conflictPr(), NOW).includes('merges `main` into the branch'), true);
+  // The proxy must be DECLARED in the row, not silently substituted: a reader
+  // shown "~4h" has to know it is silence on the PR, not the conflict's age.
+  t('H16: …and declares the age is the PR\'s updated_at, not the conflict\'s', h16StuckMergeConflict(conflictPr(), NOW).includes("Age is the PR's `updated_at`, not the conflict's"), true);
+  t('H16: dirty within the threshold -> clean (a fresh push is mid-resolution)', h16StuckMergeConflict(conflictPr({ updated: hoursAgo(1) }), NOW), null);
+  t('H16: exactly at the threshold -> clean (strictly beyond fires)', h16StuckMergeConflict(conflictPr({ updated: hoursAgo(MERGE_CONFLICT_STALE_HOURS) }), NOW), null);
+  t('H16: draft is out of scope however old (parked deliberately)', h16StuckMergeConflict(conflictPr({ draft: true, updated: hoursAgo(200) }), NOW), null);
+  t('H16: a clean PR is silent', h16StuckMergeConflict(conflictPr({ mergeable_state: 'clean', updated: hoursAgo(200) }), NOW), null);
+  // GitHub computes mergeability asynchronously: `unknown` is the platform
+  // saying "ask again later", so it is SKIPPED rather than vouched for or
+  // guessed — the one place H16 departs from the #4690 direction, on purpose.
+  t('H16: unknown is skipped, never reported', h16StuckMergeConflict(conflictPr({ mergeable_state: 'unknown', updated: hoursAgo(200) }), NOW), null);
+  t('H16: a null mergeable_state is skipped too', h16StuckMergeConflict(conflictPr({ mergeable_state: null, updated: hoursAgo(200) }), NOW), null);
+  // The wiring hazard this pins: a LIST row carries no `mergeable_state` at
+  // all, and feeding one here must skip rather than throw or flag. The summary
+  // line's `read X of Y` is what would expose that mistake in the live sweep.
+  t('H16: a listing row (no mergeable_state key) is skipped', h16StuckMergeConflict({ draft: false, merged_at: null, updated_at: hoursAgo(200) }, NOW), null);
+  // Every other non-dirty verdict is someone else's business: `behind` is the
+  // queue's to rebuild and `blocked` is a required check or a review, both of
+  // which DO produce a signal a patrol can already see.
+  t('H16: behind is not a conflict', h16StuckMergeConflict(conflictPr({ mergeable_state: 'behind', updated: hoursAgo(200) }), NOW), null);
+  t('H16: blocked is not a conflict', h16StuckMergeConflict(conflictPr({ mergeable_state: 'blocked', updated: hoursAgo(200) }), NOW), null);
+  t('H16: missing draft field is out of scope', h16StuckMergeConflict({ mergeable_state: 'dirty', updated_at: hoursAgo(50) }, NOW), null);
+  t('H16: merged row is out of scope', h16StuckMergeConflict(conflictPr({ merged_at: '2026-08-15T10:00:00Z', updated: hoursAgo(50) }), NOW), null);
+  // #4690 direction, same as H10/H11/H12/H13: unreadable must not read as fresh.
+  t('H16: unreadable updated_at -> finding, not fresh', typeof h16StuckMergeConflict(conflictPr({ updated: 'not-a-date' }), NOW), 'string');
+  t('H16: absent updated_at -> finding, not fresh', typeof h16StuckMergeConflict(conflictPr({ updated: undefined }), NOW), 'string');
+
+  // THE incident property: armed auto-merge must not quiet this row. H12 reads
+  // `auto_merge` as finding-reducing and is right to; here the arming is what
+  // made every proxy signal read healthy while the PR went nowhere.
+  t('H16: armed auto-merge does NOT suppress the row', typeof h16StuckMergeConflict(conflictPr({ auto_merge: { merge_method: 'squash' } }), NOW), 'string');
+  t('H16: …and the row says auto-merge does not resolve conflicts', h16StuckMergeConflict(conflictPr({ auto_merge: { merge_method: 'squash' } }), NOW).includes('does NOT resolve conflicts'), true);
+  // The contrast that makes the divergence deliberate rather than an oversight:
+  // one PR row, two predicates, opposite readings of the same armed field.
+  t('H16: …while H12 stays clean on that same armed PR (the divergence is by design)', h12OrphanLanding(conflictPr({ auto_merge: { merge_method: 'squash' }, updated: hoursAgo(50) }), NOW), null);
+
+  // The held-card clause — the row names the delivery, not only the branch.
+  t('H16: a `Fixes #N` body names the card it is holding', h16StuckMergeConflict(conflictPr({ body: 'Fixes #9763\n\nsome prose' }), NOW).includes('holding card #9763'), true);
+  t('H16: `Part of #N` counts as held too (H8\'s reading of delivery)', h16StuckMergeConflict(conflictPr({ body: 'Part of #9652' }), NOW).includes('holding card #9652'), true);
+  t('H16: two cards are pluralised and listed in order', h16StuckMergeConflict(conflictPr({ body: 'Fixes #9961\nFixes #9936' }), NOW).includes('holding cards #9936, #9961'), true);
+  t('H16: a body with no card carries no holding clause', h16StuckMergeConflict(conflictPr({ body: 'no card here' }), NOW).includes('holding'), false);
+  // #8293 reading 4 carries over: a body QUOTING the spelling names nothing.
+  t('H16: a backticked `Fixes #N` is not a held card', h16HeldCards('the dispatch asked for `Fixes #8284`').length, 0);
+  t('H16: h16HeldCards de-duplicates and sorts', h16HeldCards('Fixes #30\nPart of #12\nFixes #30').join(','), '12,30');
+  t('H16: h16HeldCards on an absent body does not crash', h16HeldCards(undefined).length, 0);
+
+  // -- H16 gathering policy: `h16NeedsDetail` --------------------------------
+  // Pinned for the reason `needsRepoProbe` is: a policy deciding what gets READ
+  // AT ALL is where a silent hole would live. THE property is that it can never
+  // be narrower than the predicate — anything H16 could flag must be fetched.
+  t('H16 gate: an aged non-draft PR is a candidate', h16NeedsDetail(conflictPr({ updated: hoursAgo(4) }), NOW), true);
+  t('H16 gate: a fresh PR is not worth a request', h16NeedsDetail(conflictPr({ updated: hoursAgo(1) }), NOW), false);
+  t('H16 gate: exactly at the threshold is not a candidate (matches the predicate)', h16NeedsDetail(conflictPr({ updated: hoursAgo(MERGE_CONFLICT_STALE_HOURS) }), NOW), false);
+  t('H16 gate: a draft is never fetched', h16NeedsDetail(conflictPr({ draft: true, updated: hoursAgo(200) }), NOW), false);
+  t('H16 gate: a merged row is never fetched', h16NeedsDetail(conflictPr({ merged_at: '2026-08-15T10:00:00Z', updated: hoursAgo(200) }), NOW), false);
+  t('H16 gate: missing draft field is never fetched', h16NeedsDetail({ updated_at: hoursAgo(200), merged_at: null }, NOW), false);
+  // The unreadable timestamp MUST be fetched: the predicate promises to surface
+  // it, so a gate that skipped it would drop the row it promises.
+  t('H16 gate: an unreadable updated_at IS a candidate (the predicate flags it)', h16NeedsDetail(conflictPr({ updated: 'not-a-date' }), NOW), true);
+  t('H16 gate: an absent updated_at IS a candidate', h16NeedsDetail(conflictPr({ updated: undefined }), NOW), true);
+  t('H16 gate: an absent row is not a candidate', h16NeedsDetail(undefined, NOW), false);
+  // The Version Packages PR is NOT excluded here, unlike in H12: it is
+  // regenerated from `main` on every push, so a dirty one is a real finding
+  // about the release bot rather than a by-design false positive.
+  t('H16 gate: a changeset-release head is still a candidate (unlike H12)', h16NeedsDetail(conflictPr({ head: { ref: 'changeset-release/main' }, updated: hoursAgo(200) }), NOW), true);
+  t('H16: …and a dirty Version Packages PR really does flag', typeof h16StuckMergeConflict(conflictPr({ head: { ref: 'changeset-release/main' }, updated: hoursAgo(200) }), NOW), 'string');
+  // The never-narrower invariant, asserted over the whole fixture table rather
+  // than case by case: for every row the predicate flags, the gate must fetch.
+  const h16Rows = [
+    conflictPr(),
+    conflictPr({ updated: 'not-a-date' }),
+    conflictPr({ updated: undefined }),
+    conflictPr({ auto_merge: { merge_method: 'squash' } }),
+    conflictPr({ head: { ref: 'changeset-release/main' }, updated: hoursAgo(200) }),
+    conflictPr({ body: 'Fixes #1' }),
+    conflictPr({ updated: hoursAgo(1) }),
+    conflictPr({ draft: true }),
+    conflictPr({ mergeable_state: 'clean' }),
+    conflictPr({ merged_at: '2026-08-15T10:00:00Z' }),
+  ];
+  t(
+    'H16 gate: never narrower than the predicate (every flagged row is fetched)',
+    h16Rows.every((row) => h16StuckMergeConflict(row, NOW) === null || h16NeedsDetail(row, NOW)),
+    true,
+  );
+
+  // -- H16 detail-pass failure posture (#4690 at row granularity) ------------
+  // A partial read is a bounded gap the summary line states; a total one is a
+  // transport failure wearing a quiet H16 section, and must surface as such.
+  t('H16 pass: some candidates unread is a bounded gap, not a transport failure', h16DetailPassUnreadable(5, 3), false);
+  t('H16 pass: exactly one read out of many is still a real reading', h16DetailPassUnreadable(9, 1), false);
+  t('H16 pass: NO candidate readable is a transport failure', h16DetailPassUnreadable(4, 0), true);
+  // The healthiest possible board — nothing stale enough to be worth a request
+  // — must not fail the sweep.
+  t('H16 pass: zero candidates is a clean reading, never a failure', h16DetailPassUnreadable(0, 0), false);
+  t('H16 pass: absent counters degrade to a clean reading', h16DetailPassUnreadable(undefined, undefined), false);
+
+  // -- H16 incident fixture: PR #9826, the measured specimen -----------------
+  // The devx incident this item exists for: a conflict that hung ~4h while
+  // auto-merge was armed, and not one of H1–H15 could express the state.
+  //
+  // ⚠️ The `dirty` reading is the INCIDENT's, recorded on the card — not a
+  // live reading. Measured again here on 2026-08-19 while implementing H16,
+  // that PR answered `mergeable_state: "blocked"`: the conflict had since been
+  // resolved. Pinned as a historical shape deliberately, and said so here so
+  // nobody "verifies" this fixture against a live PR that no longer carries
+  // it. Body `Fixes #9763` is from the same live read.
+  const pr9826 = conflictPr({
+    body: 'Fixes #9763. Sub-issue of #9747 (the meta-card), in its **fails toward FALSE GREEN** half.',
+    auto_merge: { merge_method: 'squash' },
+    updated: hoursAgo(4),
+    head: { ref: 'claude/issue-9763-literal-collector-spellings' },
+  });
+  t('H16 incident: the #9826 shape is a finding', typeof h16StuckMergeConflict(pr9826, NOW), 'string');
+  t('H16 incident: …fires despite auto-merge being armed', h16StuckMergeConflict(pr9826, NOW).includes('MERGE CONFLICT'), true);
+  t('H16 incident: …and names the card it was holding', h16StuckMergeConflict(pr9826, NOW).includes('holding card #9763'), true);
+  t('H16 incident: …at its measured ~4h age', h16StuckMergeConflict(pr9826, NOW).includes('untouched for ~4h'), true);
+  t('H16 incident: …and the sweep would have spent a request on it', h16NeedsDetail(pr9826, NOW), true);
+  // The counterfactual that makes the fixture mean something: at the moment
+  // the conflict appeared, the same PR was silent — the threshold is what
+  // separates "being worked" from "stuck", and 4h is well past it.
+  t('H16 incident: …while one hour in, the same PR was correctly silent', h16StuckMergeConflict({ ...pr9826, updated_at: hoursAgo(1) }, NOW), null);
+
   // -- report rendering, both media (#9844) ---------------------------------
   // The standing caller writes the markdown into a pinned issue body, so the
   // properties pinned here are the ones a broken body would cost: the plain
   // output must not have moved, the loud rows must outrank truncation, the
   // trim must announce itself, and a mistyped --format must be loud.
   const finding = (number, code, msg) => [{ number, html_url: `https://example.test/${number}` }, code, msg];
-  const counts = { repo: 'o/r', issues: 3, unscoped: 4, prs: 5, merged: 6 };
+  const counts = { repo: 'o/r', issues: 3, unscoped: 4, prs: 5, merged: 6, conflictCandidates: 2, conflictProbed: 2 };
   const quietRow = finding(200, 'H2', 'assignee set but no claim comment on the thread');
   const loudRow = finding(900, 'H13', `${P0_SUSPECT_MARKER} the card self-declares P0. base sentence.`);
 
@@ -2633,6 +3035,14 @@ function selfTest() {
   t('plain: preserves the caller\'s order, applying no priority sort', renderPlain([loudRow, quietRow], counts).indexOf('#900') < renderPlain([loudRow, quietRow], counts).indexOf('#200'), true);
   t('plain: …and the markdown renderer on the same input DOES sort loud first', renderMarkdown([quietRow, loudRow], counts).indexOf('#900') < renderMarkdown([quietRow, loudRow], counts).indexOf('#200'), true);
   t('summaryLine: names what was READ, not only what was found', summaryLine(counts, 0).includes('swept 3 open pm-/p0-labeled issue(s)'), true);
+  // H16's pair is the row-granular half of the same #4690 property: a detail
+  // pass that read NOTHING must not be indistinguishable from a board with no
+  // conflicts, so the sentence carries `read X of Y` rather than only findings.
+  t('summaryLine: reports the H16 detail reads, not only the H16 findings', summaryLine(counts, 0).includes('merge state read on 2 of 2 H16 candidate(s)'), true);
+  t('summaryLine: …and a partial read says so', summaryLine({ ...counts, conflictProbed: 1 }, 0).includes('read on 1 of 2'), true);
+  // Counts assembled without the pair still render a sentence, never `undefined`.
+  t('summaryLine: absent H16 counts degrade to 0, never to undefined', summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 1 }, 0).includes('read on 0 of 0'), true);
+  t('summaryLine: …and never prints the string undefined', summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 1 }, 0).includes('undefined'), false);
 
   // The loudness contract between H13 and the renderer — one constant, two
   // readers. If the prefix ever drifts, this pair fails rather than the alarm
@@ -2664,6 +3074,16 @@ function selfTest() {
   // class, and a coherence or visibility row must never outrank it at the fold.
   t('loudness: an H14 row is not loud', isLoudFinding(h14Row[2]), false);
   t('loudness: an H15 row is not loud', isLoudFinding(h15Row[2]), false);
+
+  // H16 is an ordinary row in BOTH media too — report-only and NOT loud, as
+  // the card requires: the P0-SUSPECT band stays H13's self-declared-emergency
+  // class, which must keep outranking a conflict row at the fold.
+  const h16Row = finding(9826, 'H16', h16StuckMergeConflict(pr9826, NOW));
+  t('plain: an H16 row renders in the standard two-line shape', renderPlain([h16Row], counts).startsWith('  H16 #9826 open, non-draft and in MERGE CONFLICT'), true);
+  t('plain: …and carries the PR URL on the second line', renderPlain([h16Row], counts).includes('\n     https://example.test/9826'), true);
+  t('markdown: an H16 row renders as a link row like every other', renderMarkdown([h16Row], counts).includes('- **H16** [#9826](https://example.test/9826) — '), true);
+  t('loudness: an H16 row is not loud', isLoudFinding(h16Row[2]), false);
+  t('markdown: a loud H13 row still sorts above an H16 row', renderMarkdown([h16Row, loudRow], counts).indexOf('#900') < renderMarkdown([h16Row, loudRow], counts).indexOf('#9826'), true);
   t('markdown: a loud H13 row still sorts above an H14 row', renderMarkdown([h14Row, loudRow], counts).indexOf('#900') < renderMarkdown([h14Row, loudRow], counts).indexOf('#7276'), true);
 
   // A clean board says it was READ. The #4690 direction, restated in the one
