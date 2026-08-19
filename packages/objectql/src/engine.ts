@@ -10450,9 +10450,17 @@ export class ObjectQL implements IObjectQLEngine {
         // even when the child's set holds other members and member removal
         // would leave it non-empty — a state the #9447 ruling accepts.
         // Measured, pinned as current behaviour, and carded separately rather
-        // than changed here: today `[]` still satisfies `required` in the
-        // record validator (#9476), so this blanket refusal is what keeps an
-        // emptied required set from landing silently.
+        // than changed here. What justifies refusing is the paragraph above,
+        // not the validator's tolerance: the escalation refuses THIS relation
+        // before its own set_null write runs, so the caller is told
+        // `DELETE_RESTRICTED` about the record it asked to delete, instead of
+        // the child's own `required` 400 — which names a field that is not on
+        // that record's object at all. The predecessor of this comment rested
+        // it on `[]` still satisfying `required` in the record validator,
+        // which made this refusal the only thing between an emptied required
+        // set and a silent write; #9476 landed and `[]` is rejected there now
+        // too, so the refusal is no longer that last guard. It is the one that
+        // fires early, against the right record.
         if (behavior === 'set_null' && fdef.required === true) {
           behavior = 'restrict';
         }

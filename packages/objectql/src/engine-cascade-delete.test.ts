@@ -282,10 +282,16 @@ describe('cascadeDeleteRelations — required FK escalates set_null → restrict
     it('[#9625] refuses a required MULTI-VALUE lookup even when member removal would leave the set non-empty', async () => {
         // The escalation runs before the multi-value branch and keys on
         // `required` alone, so the other live member does not save the delete.
-        // Pinned as CURRENT behaviour, deliberately not changed here: `[]`
-        // still satisfies `required` in the record validator (#9476), so the
-        // blanket refusal is what stops an emptied required set landing
-        // silently.
+        // Pinned as CURRENT behaviour, deliberately not changed here: the
+        // refusal lands before the member-removal write runs, so what reaches
+        // the caller is `DELETE_RESTRICTED` about the `acct` it asked to
+        // delete, not a `required` error naming a field on `roster`. This
+        // comment used to add that `[]` still satisfied `required` in the
+        // record validator, making the refusal the only thing stopping an
+        // emptied required set from landing silently — #9476 has landed and
+        // `[]` is rejected there now, so that clause is gone. The assertions
+        // below never rested on it: they pin the 409 envelope and the
+        // untouched set.
         const a = await engine.insert('acct', { name: 'Acme' });
         const b = await engine.insert('acct', { name: 'Beta' });
         const r = await engine.insert('roster', { accounts: [a.id, b.id] });
