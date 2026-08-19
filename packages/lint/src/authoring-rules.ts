@@ -1306,16 +1306,26 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateOrgAxisRedLines(stack),
   },
-  // #4698 — the "declared but never read" gate, for the one surface where the
-  // predicate is EXACT rather than inferred. A sharing rule's `condition` has a
-  // single runtime consumer (`bootstrapDeclaredSharingRules`) whose only use of
-  // the key is `compileCelToFilter(condition, { variables: {} })`; a condition
-  // that does not lower means the rule is SKIPPED at boot, so the grant is
-  // declared and does not exist. The lint calls that same compiler, from the
-  // same package, with the same options — the verdict cannot drift from the
-  // consumer's. Gating for the ADR-0078 reason `SharingRuleSchema`'s own
-  // docblock states: the whole authorable surface is enforced, and this was the
-  // one field where that sentence was not yet true.
+  // #4698 / #9698 — the "declared but never read" gate, for the two fields of a
+  // sharing rule where the predicate is EXACT rather than inferred.
+  //
+  //  - `condition` has a single runtime consumer
+  //    (`bootstrapDeclaredSharingRules`) whose only use of the key is
+  //    `compileCelToFilter(condition, { variables: {} })`; a condition that
+  //    does not lower means the rule is SKIPPED at boot.
+  //  - `object` decides whether the grant is refused outright: reconcile hands
+  //    each row to `SharingService.grant`, whose ADR-0111 D7 pre-flight THROWS
+  //    `SHARING_NOT_ENABLED` when the anchor's effective sharing model is
+  //    `public` or it is a `controlled_by_parent` detail. Both are decidable
+  //    from authored metadata; the other arms of that verdict (`owner_id`, the
+  //    bypass set, federated anchors) are not, and are excluded by name.
+  //
+  // Either way the grant is declared and does not exist. The lint calls the
+  // same compiler and mirrors the same verdict function, from the same inputs
+  // — the verdict cannot drift from the consumers'. Gating for the ADR-0078
+  // reason `SharingRuleSchema`'s own docblock states: the whole authorable
+  // surface is enforced, and these were the fields where that sentence was not
+  // yet true.
   {
     name: 'validateSharingRuleEnforceability',
     tier: 'gating',
@@ -1324,11 +1334,16 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     source: 'packages/lint/src/validate-sharing-rule-enforceability.ts',
     surfaces: CLI_ONLY,
     surfaceReason:
-      'P2 (#4463): a sharing rule is not a `flow`, and P1 gates `flow` alone. The rule itself is '
-      + 'snapshot-safe — it reads ONLY `stack.sharingRules[].condition` and needs no other collection — '
-      + 'so widening it here is a `runtimeTypes: [\'sharing_rule\']` edit once the gate accepts that type, '
-      + 'not new wiring. Recorded as pending rather than done, because a rule that has never run at a '
-      + 'door should not claim it.',
+      'P2 (#4463): a sharing rule is not a `flow`, and P1 gates `flow` alone. This entry used to add '
+      + 'that the rule reads ONLY `stack.sharingRules[].condition` and needs no other collection, so '
+      + 'crossing was a lone `runtimeTypes` edit. #9698 FALSIFIED that: the anchor arm resolves '
+      + '`sharingRules[].object` against `stack.objects` to read the anchor\'s OWD, so the rule is now '
+      + 'cross-collection. `objects` IS carried by the per-write snapshot (`CONTEXT_STACK_KEYS`, #8309), '
+      + 'so the remaining gap is unchanged in SHAPE — the gate must accept a `sharing_rule` type and the '
+      + 'snapshot must carry `sharingRules`, which it does not — but it is now TWO collections, not one. '
+      + 'Crossing with `sharingRules` uncarried would enforce this id for zero of its inputs while the '
+      + 'entry claimed the door (#7220). Recorded as pending rather than done, because a rule that has '
+      + 'never run at a door should not claim it.',
     run: (stack) => validateSharingRuleEnforceability(stack),
   },
   // #4983 — the sibling surface of the rule above, and ADR-0056 D4's gate,

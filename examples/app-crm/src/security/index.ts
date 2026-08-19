@@ -8,9 +8,3 @@ export {
   GuestPortalProfile,
 } from './sales-positions.js';
 
-export {
-  HighValueOpportunitySharingRule,
-  RepLeadSharingRule,
-  WonDealActivitySharingRule,
-} from './sharing-rules.js';
-

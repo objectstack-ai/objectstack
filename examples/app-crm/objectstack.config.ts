@@ -17,9 +17,6 @@ import {
   FinanceApproverPosition,
   SalesUserPermissionSet,
   GuestPortalProfile,
-  HighValueOpportunitySharingRule,
-  RepLeadSharingRule,
-  WonDealActivitySharingRule,
 } from './src/security/index.js';
 import { registerCrmPositionBindings } from './src/security/bind-position-sets.js';
 import { CrmSeedData } from './src/data/index.js';
@@ -102,11 +99,21 @@ export default defineStack({
   // Security
   positions: [SalesRepPosition, SalesManagerPosition, FinanceApproverPosition],
   permissions: [SalesUserPermissionSet, GuestPortalProfile],
-  sharingRules: [
-    HighValueOpportunitySharingRule,
-    RepLeadSharingRule,
-    WonDealActivitySharingRule,
-  ],
+  // No `sharingRules`. The three this app used to declare
+  // (`share_high_value_opps_with_managers`, `share_active_leads_with_manager`,
+  // `share_won_deal_activities`) were anchored on `crm_opportunity`,
+  // `crm_lead` and `crm_activity` — all three `sharingModel:
+  // 'public_read_write'`. Sharing only ever WIDENS an OWD baseline, so on the
+  // widest baseline there is nothing to widen: `assertNotInertGrant` refused
+  // every grant with SHARING_NOT_ENABLED and the boot backfill failed for each
+  // rule, on every boot, since they were written. They granted nothing and
+  // were removed under ADR-0049 enforce-or-remove (#9698), the same call
+  // #9237 made for app-showcase's two.
+  //
+  // ⛔ Do not re-add one on a public object — `sharing-rule-object-not-shareable`
+  // now fails the build, and its message states the two honest fixes. Giving
+  // this app a LIVE sharing demonstration means giving it a `private` object
+  // first; that is an access-matrix change (ADR-0090 D6 review), not a rider.
 
   // Seed data
   data: CrmSeedData,

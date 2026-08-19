@@ -7,6 +7,8 @@ import {
   validateSharingRuleEnforceability,
   SHARING_RULE_UNLOWERABLE_CONDITION,
   SHARING_RULE_RUNTIME_VARIABLE_CONDITION,
+  SHARING_RULE_OBJECT_NOT_SHAREABLE,
+  SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT,
 } from './validate-sharing-rule-enforceability.js';
 import { AUTHORING_RULES, runAuthoringRules } from './authoring-rules.js';
 
@@ -236,5 +238,158 @@ describe('validateSharingRuleEnforceability — the verdict IS the seeder\'s ver
       if (!result.ok) continue;
       expect(Object.keys(result.filter as Record<string, unknown>).length).toBeGreaterThan(0);
     }
+  });
+});
+
+// ── The ANCHOR arm: would a share row on this object ever be consulted? ──
+//
+// The `condition` arm above judges one field of the rule; this one judges the
+// other field that can decide the same question. Every fixture below carries a
+// LOWERABLE condition, so any finding here is the anchor arm's alone.
+
+/** A stack with one object at `owd` and one rule anchored on it. */
+const anchoredOn = (owd: unknown, extra: Record<string, unknown> = {}) => ({
+  objects: [
+    {
+      name: 'crm_opportunity',
+      label: 'Opportunity',
+      ...(owd === undefined ? {} : { sharingModel: owd }),
+      fields: { name: { type: 'text', label: 'Name' }, amount: { type: 'number', label: 'Amount' } },
+      ...extra,
+    },
+  ],
+  sharingRules: [
+    {
+      name: 'high_value_opps',
+      type: 'criteria',
+      object: 'crm_opportunity',
+      accessLevel: 'read',
+      sharedWith: { type: 'position', value: 'sales_manager' },
+      condition: 'record.amount > 100000',
+    },
+  ],
+});
+
+describe('validateSharingRuleEnforceability — an anchor no gate would consult goes RED', () => {
+  it('flags `public_read_write` — nothing left to widen', () => {
+    const findings = validateSharingRuleEnforceability(anchoredOn('public_read_write'));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'error',
+      rule: SHARING_RULE_OBJECT_NOT_SHAREABLE,
+      // The defect is on `object`, not on `condition` — a different field with
+      // a different fix, so it gets its own path.
+      path: 'sharingRules[0].object',
+      where: 'sharing rule "high_value_opps" on object "crm_opportunity"',
+    });
+    // An author must be able to act on this: it has to name the object, the
+    // rule, and WHY the rule cannot take effect.
+    expect(findings[0].message).toMatch(/high_value_opps/);
+    expect(findings[0].message).toMatch(/crm_opportunity/);
+    expect(findings[0].message).toMatch(/sharingModel 'public_read_write'/);
+    expect(findings[0].message).toMatch(/SHARING_NOT_ENABLED/);
+    // …and both honest fixes, because which one is right is the author's call.
+    expect(findings[0].hint).toMatch(/delete it/);
+    expect(findings[0].hint).toMatch(/sharingModel: 'private'/);
+  });
+
+  it('flags `controlled_by_parent` with its OWN reason and its OWN id', () => {
+    const findings = validateSharingRuleEnforceability(
+      anchoredOn('controlled_by_parent', {
+        fields: {
+          name: { type: 'text', label: 'Name' },
+          opportunity: { type: 'master_detail', reference: 'crm_account', required: true },
+        },
+      }),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'error',
+      rule: SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT,
+      path: 'sharingRules[0].object',
+    });
+    // `effectiveSharingModel` maps this value to 'public' too, so a single-id
+    // implementation would hand the author the WRONG fix. The runtime tests
+    // `controlled_by_parent` first and answers "share the master record
+    // instead"; this arm mirrors that order, and names the master it resolved.
+    expect(findings[0].message).toMatch(/derived from its master/i);
+    expect(findings[0].message).toMatch(/share the master record instead/);
+    expect(findings[0].hint).toMatch(/crm_account/);
+  });
+
+  it('flags a SYSTEM object with no OWD — absent resolves to public there (ADR-0090 D1)', () => {
+    // The one arm that is not readable off `sharingModel` alone: for `sys_*` /
+    // `isSystem` the ABSENCE of an OWD is the public fall-through, and
+    // `security-owd-unset` deliberately exempts system objects, so nothing
+    // else reports it either.
+    const stack = anchoredOn(undefined);
+    (stack.objects[0] as Record<string, unknown>).name = 'sys_audit_entry';
+    (stack.sharingRules[0] as Record<string, unknown>).object = 'sys_audit_entry';
+    const findings = validateSharingRuleEnforceability(stack);
+    expect(findings.map((f) => f.rule)).toEqual([SHARING_RULE_OBJECT_NOT_SHAREABLE]);
+    expect(findings[0].message).toMatch(/declares no sharingModel and is a system object/);
+  });
+
+  it('reports the anchor and the condition INDEPENDENTLY — two fields, two fixes', () => {
+    const stack = anchoredOn('public_read_write');
+    (stack.sharingRules[0] as Record<string, unknown>).condition = 'has(record.amount)';
+    const findings = validateSharingRuleEnforceability(stack);
+    expect(findings.map((f) => f.rule).sort()).toEqual(
+      [SHARING_RULE_OBJECT_NOT_SHAREABLE, SHARING_RULE_UNLOWERABLE_CONDITION].sort(),
+    );
+    // Fixing the condition would not make this rule grant anything, and fixing
+    // the anchor would not make the condition lower. Suppressing either would
+    // hide a defect the author still has to fix.
+    expect(new Set(findings.map((f) => f.path))).toEqual(
+      new Set(['sharingRules[0].object', 'sharingRules[0].condition']),
+    );
+  });
+});
+
+// ── The direction that matters more: it must NOT fire on correct metadata ──
+
+describe('validateSharingRuleEnforceability — an anchor a gate WOULD consult stays SILENT', () => {
+  it.each([
+    ['private — the posture sharing exists for', 'private'],
+    ['public_read — owner writes, so a share row still widens WRITE', 'public_read'],
+  ])('is silent on %s', (_label, owd) => {
+    expect(validateSharingRuleEnforceability(anchoredOn(owd))).toEqual([]);
+  });
+
+  it('is silent on a CUSTOM object with no OWD — absence fails CLOSED to private', () => {
+    // The asymmetry that makes the system-object case above a real arm and
+    // this one a false positive if the mirror were sloppy: ADR-0090 D1 sends
+    // an unset custom OWD to `private`, where sharing IS enforced.
+    expect(validateSharingRuleEnforceability(anchoredOn(undefined))).toEqual([]);
+  });
+
+  it('is silent on a retired OWD alias — the runtime fails CLOSED, so the rule is LIVE', () => {
+    // `sharingModel: 'read'` is not canonical (ADR-0090 D4). The runtime's
+    // fall-through sends an unrecognised value to `private`, NOT to public, so
+    // reporting inertness here would be a false positive on top of the
+    // `security-owd-alias` error the value already earns.
+    expect(validateSharingRuleEnforceability(anchoredOn('read'))).toEqual([]);
+  });
+
+  it('is silent when the anchor object is not declared by this stack', () => {
+    // Absence of a schema is absence of EVIDENCE of inertness, not evidence of
+    // liveness — the object may come from a plugin or an upstream stack. The
+    // runtime draws the same line: `assertSharingEnforced` keeps existence a
+    // SEPARATE verdict from inertness.
+    const stack = anchoredOn('public_read_write');
+    (stack.sharingRules[0] as Record<string, unknown>).object = 'not_in_this_stack';
+    expect(validateSharingRuleEnforceability(stack)).toEqual([]);
+  });
+
+  it('is silent on an owner-less object — `owner_id` is REGISTRY-INJECTED, not authored', () => {
+    // `inertGrantReason`'s third arm refuses a grant on an object with no
+    // owner field, and it is deliberately NOT mirrored: `owner_id` is injected
+    // by the schema registry, so it is absent from authored metadata and
+    // present on the runtime schema. Judging it here would fail every object
+    // that correctly does not declare it by hand — which is every object in
+    // the fixture above, none of which declares `owner_id`.
+    const stack = anchoredOn('private');
+    expect(Object.keys((stack.objects[0] as { fields: object }).fields)).not.toContain('owner_id');
+    expect(validateSharingRuleEnforceability(stack)).toEqual([]);
   });
 });

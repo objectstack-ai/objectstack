@@ -30,6 +30,24 @@
  * verdict is bit-identical to the seeder's by construction — there is no
  * heuristic to drift and no false positive that is not also a real skip.
  *
+ * ## The second consumer: the rule's ANCHOR object (#9698)
+ *
+ * `condition` is not the only field of a declared sharing rule with an exact
+ * predicate. `object` has one too, and a different consumer:
+ * `SharingRuleService.reconcile` hands each resolved row to
+ * `SharingService.grant`, whose `assertNotInertGrant` pre-flight (ADR-0111 D7)
+ * REFUSES a grant whose `sys_record_share` row no gate could ever consult. Two
+ * of `inertGrantReason`'s arms are decidable before anything boots — the
+ * anchor object's effective sharing model being `public`, and its being a
+ * `controlled_by_parent` detail — and {@link anchorFindings} reports exactly
+ * those two, mirroring the runtime's own function rather than modelling it.
+ *
+ * The two halves of this file are therefore the two halves of one question,
+ * "will this declared grant ever exist?", answered over the two fields that
+ * can decide it. They are reported independently: an inert anchor and an
+ * unlowerable condition are different defects on different fields with
+ * different fixes, and fixing one does not reveal the other any earlier.
+ *
  * ## Why `error`
  *
  * `SharingRuleSchema`'s own docblock makes the claim this rule enforces: "The
@@ -45,6 +63,17 @@
  * Measured before shipping: every sharing-rule condition and RLS predicate
  * declared anywhere in this repo (examples, platform permission sets) lowers
  * cleanly, so the gate turns nothing red that works today.
+ *
+ * The anchor arm's severity is the same verdict on a stronger runtime fact —
+ * `assertNotInertGrant` does not skip and log, it THROWS — but its blast
+ * radius was NOT zero, and that is recorded rather than smoothed over.
+ * Measured across every sharing rule declared in this repo at the time it
+ * landed: 5 declarations, of which 3 fire, ALL of them in `examples/app-crm`,
+ * whose three rules are anchored on `public_read_write` objects and have
+ * therefore been failing their boot backfill on every boot of that app. Those
+ * three are repaired in the same change (see the changeset). The remaining 2
+ * — `examples/app-showcase`'s, both on `private` objects — stay silent, which
+ * is the direction that had to be proven and not merely hoped for.
  *
  * ## The two ids, and why not one
  *
@@ -105,6 +134,10 @@ import { compileCelToFilter } from '@objectstack/formula';
 export const SHARING_RULE_UNLOWERABLE_CONDITION = 'sharing-rule-unlowerable-condition';
 /** A `condition` reading `current_user.*` — unresolvable when grants are materialized. */
 export const SHARING_RULE_RUNTIME_VARIABLE_CONDITION = 'sharing-rule-runtime-variable-condition';
+/** The anchor object's OWD is already the widest — sharing has nothing to widen. */
+export const SHARING_RULE_OBJECT_NOT_SHAREABLE = 'sharing-rule-object-not-shareable';
+/** The anchor object is a master-detail DETAIL — its shares belong to its master. */
+export const SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT = 'sharing-rule-object-controlled-by-parent';
 
 export type SharingRuleEnforceabilitySeverity = 'error' | 'warning';
 
@@ -173,8 +206,212 @@ const PUSHDOWN_SUBSET =
   'paths (ADR-0058 D2).';
 
 /**
- * Gate stack-declared sharing rules on the ONE thing their runtime consumer
- * does with `condition`: lower it to a `criteria_json` filter.
+ * The object's effective sharing model, as `SharingService` computes it.
+ *
+ * A point-for-point mirror of `effectiveSharingModel` in
+ * `packages/plugins/plugin-sharing/src/sharing-service.ts` — same four
+ * recognised values, same `null` fall-through, same fail-CLOSED default. It is
+ * copied rather than imported for the reason stated at the head of this file:
+ * `@objectstack/lint` never depends on a runtime. The same discipline (and the
+ * same justification) already governs `resolveCbpRelation` in
+ * `validate-security-posture.ts`, which mirrors plugin-security's copy.
+ *
+ * ## Why the mirror cannot drift into a false positive
+ *
+ * Every input this function reads is AUTHORED metadata, and none of it is
+ * resolved, defaulted or injected between the authoring tier and the runtime:
+ *
+ *  - `sharingModel` is `z.enum([...]).optional()` on `ObjectSchema` with **no
+ *    `.default()`**, so "authored `private`" and "absent" stay distinguishable
+ *    after parsing. (This is exactly the distinction a `.default()` erases —
+ *    the trap that made a neighbouring one-line tightening reject 96
+ *    declarations instead of 1.)
+ *  - The runtime's `schema?.security?.sharingModel` fallback is unreachable
+ *    for any stack an author can ship: `ObjectSchema` is strict and declares no
+ *    `security` key, so a stack nesting the OWD there is REFUSED, not stripped.
+ *    `owdOf` in `validate-security-posture.ts` records the same finding.
+ *  - `isSystem` / the `sys_` name prefix are authored too. `isSystem` carries
+ *    `.default(false)`, which is why this reads `=== true` exactly as the
+ *    runtime does — the default and the explicit `false` are the same verdict.
+ *
+ * So the linter and the service answer from the same bytes. What this function
+ * deliberately does NOT model is the part of the runtime verdict that is not in
+ * the metadata — see the `## What this rule deliberately does NOT do` section.
+ */
+function effectiveSharingModelOf(obj: AnyRec): 'private' | 'read' | 'public' {
+  const m = obj.sharingModel;
+  if (m === 'private') return 'private';
+  if (m === 'public_read') return 'read';
+  if (m === 'public_read_write' || m === 'controlled_by_parent') return 'public';
+  if (m == null) {
+    const isSystem = obj.isSystem === true || str(obj.name).startsWith('sys_');
+    return isSystem ? 'public' : 'private';
+  }
+  // Fails CLOSED, like the runtime: an unrecognised value (a retired ADR-0090
+  // D4 alias such as `read`/`full`) resolves to `private`, which means sharing
+  // IS enforced there and the rule is live. Reporting it would be a false
+  // positive — and the value itself is already `security-owd-alias`' finding.
+  return 'private';
+}
+
+/** The master a `controlled_by_parent` detail derives its access from, if named. */
+function masterOf(obj: AnyRec): string | undefined {
+  for (const f of asArray(obj.fields)) {
+    if (f.type === 'master_detail') {
+      const ref = f.reference;
+      if (typeof ref === 'string' && ref) return ref;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The rule's ANCHOR arm: would a `sys_record_share` row on `rule.object` ever
+ * be consulted?
+ *
+ * This is the second runtime consumer of a declared sharing rule, and it
+ * refuses for reasons the `condition` arm above cannot see.
+ * `SharingRuleService.reconcile` calls `SharingService.grant` per resolved
+ * row; `grant` runs `assertNotInertGrant`, which THROWS
+ * `SHARING_NOT_ENABLED` when `inertGrantReason` names one (ADR-0111 D7). Two
+ * of that function's arms are decidable from authored metadata alone, and they
+ * are the two this arm reports.
+ *
+ * ## Why the boot WARN is not the diagnostic
+ *
+ * The refusal surfaces as one WARN per rule inside the boot diagnostics block
+ * — but only for a rule whose criteria matched at least one seeded row.
+ * Measured on the stock showcase: THREE rules were in this state and only TWO
+ * warned. The third's compound condition matched nothing, so `reconcile` built
+ * an empty desired set, never reached `grant`, and never threw. It was exactly
+ * as dead as the other two and produced no diagnostic at all. The WARN is a
+ * function of the DATA; the defect is a property of the DECLARATION, which is
+ * why it belongs here.
+ *
+ * ## Two ids, because the two arms are not the same failure
+ *
+ * Measured against a real `SharingService` over an in-memory engine (grant +
+ * `buildReadFilter`, all three postures), the arms differ in the direction
+ * that decides the wording:
+ *
+ *  - **`public` OWD** → grant refused, `buildReadFilter` returns `null`, zero
+ *    share rows. Nothing is filtered, so the intended audience already reads
+ *    every row — and so does everyone else. Nobody UNDER-sees; the harm is
+ *    that the declaration advertises a restriction that does not exist.
+ *  - **`controlled_by_parent`** → grant refused with a DIFFERENT reason
+ *    ("share the master record instead"), and the detail's visibility comes
+ *    from its master's path (ADR-0055), not from this rule. Here the author
+ *    genuinely believes a grant exists when it does not, and the intended
+ *    recipient may see nothing.
+ *
+ * Different cause, different fix, different thing to tell the author — so two
+ * ids, the same reasoning that split the two `condition` ids above.
+ *
+ * ## What this arm deliberately does NOT do
+ *
+ *  - **It does not judge the `owner_id` arm.** `inertGrantReason` also refuses
+ *    an object with no owner field, but `owner_id` is INJECTED by the schema
+ *    registry (`packages/objectql/src/registry.ts`) — absent from authored
+ *    metadata by design, present on the runtime schema. Asserting it here
+ *    would fail every object that correctly does not declare it by hand. The
+ *    same exclusion, for the same reason, is written into the showcase's own
+ *    guard.
+ *  - **It does not judge the `bypassObjects` or federated-anchor arms.** The
+ *    bypass set is plugin CONFIGURATION (`SharingPluginOptions.bypassObjects`
+ *    plus a built-in list), not stack metadata, so it is not in this door's
+ *    input at all; the federated phantom-anchor arm is a provenance test over
+ *    an injected column, i.e. the `owner_id` exclusion one layer in.
+ *  - **It does not report an unresolvable `rule.object`.** A name this stack
+ *    does not declare is absence of EVIDENCE, not evidence of inertness — the
+ *    object may be contributed by a plugin or an upstream stack. The runtime
+ *    draws the same line: `assertSharingEnforced` treats existence as a
+ *    SEPARATE verdict from inertness, and deliberately does not hard-fail the
+ *    rule evaluator's system-context pass on an unregistered name.
+ */
+function anchorFindings(
+  rule: AnyRec,
+  index: number,
+  objectsByName: Map<string, AnyRec>,
+): SharingRuleEnforceabilityFinding[] {
+  const object = str(rule.object);
+  if (!object) return [];
+  const target = objectsByName.get(object);
+  if (!target) return [];
+
+  const name = str(rule.name) || String(index);
+  const where = `sharing rule "${name}" on object "${object}"`;
+  const path = `sharingRules[${index}].object`;
+  const owd = target.sharingModel;
+
+  // Mirrors `inertGrantReason`'s own order: the `controlled_by_parent` test
+  // runs FIRST and returns its own reason, before the `effectiveSharingModel`
+  // test that also maps that value to `public`. Same order here, so the author
+  // gets the specific fix-it rather than the generic one.
+  if (owd === 'controlled_by_parent') {
+    const master = masterOf(target);
+    return [{
+      severity: 'error',
+      rule: SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT,
+      where,
+      path,
+      message:
+        `Sharing rule "${name}" is anchored on object "${object}", which declares ` +
+        `sharingModel 'controlled_by_parent'. A detail record has no record-level access of its own — ` +
+        `its visibility is DERIVED from its master (ADR-0055), so it holds no shares to widen. ` +
+        `\`SharingService.assertNotInertGrant\` refuses the grant with ` +
+        `SHARING_NOT_ENABLED ("'${object}' is controlled by its parent (master-detail); share the ` +
+        `master record instead"), so the rule's boot backfill fails, no \`sys_record_share\` row is ` +
+        `ever written, and the recipients this rule names get whatever the MASTER grants them — ` +
+        `which may be nothing. The grant is declared and does not exist.`,
+      hint:
+        `Move the rule onto the MASTER object` +
+        (master ? ` — "${object}" derives from "${master}" through its master_detail field, so share ` +
+          `"${master}" and the detail rows follow` : `, and share that instead; the detail rows follow`) +
+        `. If "${object}" is meant to carry a record-level baseline of its own, that is a different ` +
+        `decision: change its sharingModel to 'private' (owner + shares) or 'public_read', and this ` +
+        `rule becomes enforceable where it stands.`,
+    }];
+  }
+
+  if (effectiveSharingModelOf(target) !== 'public') return [];
+
+  // The remaining way to reach `public`: an explicit `public_read_write`, or an
+  // absent OWD on a SYSTEM object (ADR-0090 D1 keeps the pre-existing public
+  // fall-through for `isSystem` / `sys_*`; a CUSTOM object with no OWD fails
+  // closed to `private`, so it is NOT reported here).
+  const declared =
+    owd === 'public_read_write'
+      ? `declares sharingModel 'public_read_write'`
+      : `declares no sharingModel and is a system object (\`isSystem: true\` or a \`sys_\` name), ` +
+        `which ADR-0090 D1 resolves to public`;
+
+  return [{
+    severity: 'error',
+    rule: SHARING_RULE_OBJECT_NOT_SHAREABLE,
+    where,
+    path,
+    message:
+      `Sharing rule "${name}" is anchored on object "${object}", which ${declared}. Its effective ` +
+      `sharing model is therefore \`public\`, and sharing only ever WIDENS an OWD baseline — on the ` +
+      `widest baseline there is nothing left to widen. \`SharingService.assertNotInertGrant\` refuses ` +
+      `the grant with SHARING_NOT_ENABLED ("'${object}' is not under record-sharing enforcement"), so ` +
+      `the rule's boot backfill fails and no \`sys_record_share\` row is ever written. Measured: ` +
+      `\`buildReadFilter\` returns \`null\` for this object, i.e. NO record-level filter at all — every ` +
+      `principal already reads every row, so this rule advertises a restriction that does not exist.`,
+    hint:
+      `Decide which half is wrong. If the ACCESS is right — everyone should read and write these ` +
+      `records — the rule is dead metadata: delete it (ADR-0049 enforce-or-remove). If the RULE is ` +
+      `right — only the named audience should reach these records — then "${object}"'s OWD is the ` +
+      `defect: set sharingModel: 'private' (owner + shares) or 'public_read', and this rule starts ` +
+      `enforcing. Do NOT re-home the rule onto another public object; that moves the inertness ` +
+      `instead of removing it.`,
+  }];
+}
+
+/**
+ * Gate stack-declared sharing rules on the two things their runtime consumers
+ * do with them: lower the `condition` to a `criteria_json` filter, and write a
+ * `sys_record_share` row on the `object` the rule is anchored to.
  *
  * Pure `(stack) => Finding[]`; tolerates the normalized and the parsed tier.
  */
@@ -182,7 +419,15 @@ export function validateSharingRuleEnforceability(stack: unknown): SharingRuleEn
   const findings: SharingRuleEnforceabilityFinding[] = [];
   const cfg = (stack ?? {}) as AnyRec;
 
+  const objectsByName = new Map<string, AnyRec>();
+  for (const obj of asArray(cfg.objects)) {
+    const name = str(obj.name);
+    if (name) objectsByName.set(name, obj);
+  }
+
   asArray(cfg.sharingRules).forEach((rule, index) => {
+    anchorFindings(rule, index, objectsByName).forEach((f) => findings.push(f));
+
     const input = toCompilerInput(rule.condition);
     if (input === null) return;
 
