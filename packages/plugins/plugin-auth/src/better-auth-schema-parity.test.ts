@@ -46,8 +46,10 @@
  * `@better-auth/sso` / `@better-auth/scim` are excluded from the call above
  * for a narrower reason than this header used to give. The previous wording —
  * "accept no `schema` option, so `getAuthTables()` cannot see them" — was
- * measured false and is corrected here (#8224). Re-measured 2026-08-18 against
- * the pinned `@better-auth/sso@1.7.0-rc.2` / `@better-auth/scim@1.7.0-rc.1`:
+ * measured false and is corrected here (#8224). Re-measured 2026-08-19 against
+ * the installed `@better-auth/sso@1.7.1` / `@better-auth/scim@1.7.0-rc.1` (the
+ * 2026-08-18 stamp this block carried named `sso@1.7.0-rc.2`, a pin that has
+ * since moved — the very drift this card is about):
  *
  *  - Both DECLARE a schema `getAuthTables()` reads. Passing `sso()` yields the
  *    `ssoProvider` model; `scim({})` yields `scimProvider` plus the four
@@ -244,8 +246,8 @@ const AUTH_MANAGER_PLUGINS: Record<string, { construct: () => unknown } | { skip
       'the auth manager passes it no `schema` option, so getAuthTables() would report its model as '
       + '`ssoProvider` with camelCase columns while the adapter bridge writes `sys_sso_provider` in '
       + 'snake_case — covered by the dedicated sso/scim block below, which reproduces the adapter '
-      + 'rule that governs its writes. NOT because it accepts no schema option: it does, on '
-      + '1.7.0-rc.2 (#8224). See the file header.',
+      + 'rule that governs its writes. NOT because it accepts no schema option: it does, on the '
+      + 'installed 1.7.1 (measured 2026-08-19, #8224). See the file header.',
   },
   scim: {
     skip:
