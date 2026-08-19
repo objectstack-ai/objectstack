@@ -67,7 +67,10 @@ function harness(options: { protocol?: boolean } = {}) {
         protocol: {
           deletePackage: async () => {
             spy.protocolCalls += 1;
-            return { success: true, deletedCount: 3, failedCount: 0, failed: [], cleanups: [] };
+            // [#9960] `deleted` is part of the verb's declared response —
+            // the option's own type says so now, so a double that omits it no
+            // longer compiles. Empty here: these cases count CALLS, not rows.
+            return { success: true, deletedCount: 3, failedCount: 0, deleted: [], failed: [], cleanups: [] };
           },
         },
       }
