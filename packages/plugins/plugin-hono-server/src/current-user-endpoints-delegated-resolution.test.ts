@@ -267,10 +267,18 @@ describe('[#7616] the third state — SecurityPlugin present, start() bailed', (
     //
     // Measured before/after on this branch: this state used to answer with a
     // restrictive map and 1 of 3 apps, computed against enforcement that does
-    // not exist — the console hiding what the API serves, which is the
-    // fail-direction #7608 names as the worse one. It now degrades, which is
-    // what the degraded branch's own premise ("matches server behaviour when
-    // SecurityPlugin isn't registered") asks for.
+    // not exist — so the access it reported as withheld was not being withheld
+    // by anything, and the console described a policy no layer applied. It now
+    // degrades, which is what the degraded branch's own premise ("matches
+    // server behaviour when SecurityPlugin isn't registered") asks for.
+    //
+    // That is the argument on its own merits, and it is deliberately NOT
+    // sourced to a ruling: no card here grades one fail-direction as worse
+    // than the other, and an earlier draft of this comment mis-cited #7608 as
+    // doing so. #7608 says the opposite of what it was cited for — it calls
+    // the UI under-reporting direction the MILDER reading of its own defect
+    // ("so it presents as ... rather than as an exposure"). Widening this
+    // state is a judgement, reviewed as one.
     it('degrades on both surfaces, and never calls the internal handle', async () => {
         // The `security.permissions` double THROWS if called, so a resolution
         // routed back through the internal handle fails here rather than
