@@ -119,25 +119,55 @@
 // checking would have accepted `services.sms` appended at the end, next to a
 // list whose order encodes the nav -- so the gate keeps the answer mechanical.
 //
-// ## Deliberately NOT checked: the "Source of Truth" list
+// ## The sixth claim: the "Source of Truth" canonical-source list (#9629)
 //
-// `index.mdx` carries a fourth list -- `- <Label>: \`<path>\`` canonical-source
-// rows. This gate does not compare it with the pages, for two reasons:
+// `index.mdx` carries a fourth list -- `- <Accessor>: \`<path>\`` rows under
+// "## Source of Truth", introduced by the sentence "Each page links the canonical
+// TypeScript source used to derive signatures."
 //
-//   - It is a superset by exactly one row on purpose-of-record: `Security:
-//     packages/spec/src/contracts/security-service.ts` names a real, registered
-//     slot (`security-plugin.ts:1157`) that this chapter has no page for, and
-//     `services.security` is documented NOWHERE under `content/docs/`. Whether
-//     that row should become a page, move, or be dropped is a product-surface
-//     question for the maintainer (#9604 explicitly declines to guess). Encoding
-//     any of the three answers here -- including as an allowlist entry -- would
-//     pre-judge it.
-//   - Its row labels are prose, not accessors (`Audit bridge`, `Data`), and that
-//     line is under active edit.
+// This gate deliberately did NOT read that list until now, and the reason is
+// worth keeping: it was a superset by exactly one row on purpose-of-record.
+// `Security: packages/spec/src/contracts/security-service.ts` named a real,
+// registered slot (`security-plugin.ts:1157`) for a service this chapter has no
+// page for, while `services.security` was documented NOWHERE under
+// `content/docs/`. Whether that row should become a page, move to another
+// chapter, or be dropped was a product-surface question, and encoding ANY of the
+// three answers here -- an allowlist entry included -- would have decided it
+// silently, in a gate, by a docs agent. So the limb was left unbuilt while the
+// question was open, and #9684 pinned that restraint on the parser itself.
 //
-// When the Security question is settled, extending this gate to that list is the
-// natural follow-up; until then a green here means "the three enumerations agree
-// with the tree", which is exactly what the summary line says.
+// The 2026-08-18 maintainer ruling closed the question: `services.security` is
+// an INTERNAL accessor, not a publicly documented runtime accessor. The row is
+// dropped, no page is created, the accessor is not relocated -- so the list is
+// now exactly one row per page, and its own sentence is decidable. Held here:
+//
+//   - every page on disk has a canonical-source row, and every row names a page
+//     -- the row's LABEL is the accessor, matched case-insensitively, so `SMS`
+//     answers for `sms-service.mdx`;
+//   - no accessor gets two rows: two canonical sources for one surface is a
+//     contradiction a reader cannot resolve, and membership checking alone
+//     passes it;
+//   - every row's path exists in the tree. A canonical-source pointer to a file
+//     that moved is the same broken map as a row with no page -- the reader
+//     following it lands nowhere either way.
+//
+// Deliberately NOT checked here, each for a measured reason:
+//
+//   - ORDER. Checks 3 and 6 hold the chapter list and the stability matrix to
+//     meta.json's nav order because both demonstrably follow it today, which
+//     makes the convention the only thing telling the next author WHERE a new
+//     entry goes. This list does not follow it -- `Data, Sharing, Queue, Email,
+//     SMS, Storage, Settings, Audit` against a nav order of `data, sharing,
+//     audit, queue, email, sms, settings, storage` -- and has never claimed to.
+//     Enforcing order would mean re-sorting a published list to a convention it
+//     never had: a docs edit dressed up as a gate, and not what was ruled.
+//   - Whether a path is the RIGHT canonical source. Three of the eight rows
+//     point outside `packages/spec/src/contracts/` on purpose (`Data` at
+//     `packages/client/src/index.ts`, `Settings` at `service-settings`, `Audit`
+//     at `plugin-audit` -- the last one deliberately, see #9605), so a rule like
+//     "canonical sources live under contracts/" would be false on the day it
+//     landed. Which file is canonical for a surface is a judgement no scan can
+//     make. That the file EXISTS is not.
 
 import { readFileSync, readdirSync, statSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join, dirname, relative, sep } from 'node:path';
@@ -238,15 +268,37 @@ export function readKernelTable(kernelText) {
 //   kernel/index.mdx | [`services.data`](/docs/kernel/runtime-services/data-service) | stable | ... |
 //
 // It is anchored to `^|` on purpose. The chapter index's other lists are PROSE
-// -- `- \`services.sms\`` bullets and `- Security: \`packages/...\`` canonical-source
-// rows -- so none of them can be read as a stability claim. That is what keeps
-// the deliberately-unchecked Source-of-Truth list (and its extra `Security` row,
-// #9629) out of reach of this limb.
+// -- `- \`services.sms\`` bullets and `- Data: \`packages/...\`` canonical-source
+// rows -- so none of them can be read as a stability claim. The canonical-source
+// rows ARE checked now (check 8, #9629), but as canonical-source rows: a prose
+// row must never reach this limb and be reported as a stability disagreement,
+// which is a separate finding against a different file.
 const STABILITY_ROW_RE = /^\|\s*\[?`services\.([A-Za-z0-9_]+)`\]?(?:\([^)]*\))?\s*\|\s*`?([A-Za-z0-9_-]+)`?\s*\|/gm;
 
 /** Table rows that publish a stability label for an accessor, in table order. */
 export function readStabilityRows(text) {
   return [...text.matchAll(STABILITY_ROW_RE)].map((m) => ({ accessor: m[1], stability: m[2] }));
+}
+
+// `- <Accessor>: \`<path>\`` rows, read ONLY inside the "## Source of Truth"
+// section. Scoping to the section rather than the whole page is deliberate: the
+// chapter list a few lines above is also `- ` bullets, and reading the page
+// whole would make every accessor bullet look like a malformed canonical-source
+// row. The section runs to the next `##` heading (or the end of the file), so a
+// callout that trails the list is inside it -- its prose lines do not start with
+// `- `, and the `^-` anchor is what keeps them out. Pinned in the self-test.
+const SOURCE_HEADING_RE = /^##\s+Source of Truth\s*$/m;
+const SOURCE_ROW_RE = /^-\s+(.+?):\s*`([^`]+)`\s*$/gm;
+
+/** Canonical-source rows from the chapter index, in list order.
+ *  `null` when the section is absent -- a caller must not read that as "no rows". */
+export function readSourceRows(indexText) {
+  const at = indexText.search(SOURCE_HEADING_RE);
+  if (at === -1) return null;
+  const rest = indexText.slice(at);
+  const next = rest.slice(1).search(/^##\s/m);
+  const section = next === -1 ? rest : rest.slice(0, next + 1);
+  return [...section.matchAll(SOURCE_ROW_RE)].map((m) => ({ label: m[1].trim(), path: m[2].trim() }));
 }
 
 // ---------------------------------------------------------------------------
@@ -255,7 +307,7 @@ export function readStabilityRows(text) {
 const missing = (expected, actual) => expected.filter((n) => !actual.includes(n));
 const extra = (expected, actual) => actual.filter((n) => !expected.includes(n));
 
-export function check({ pages, metaOrder, chapterList, kernelTable, registeredSlots, stabilityMatrix, kernelStability }) {
+export function check({ pages, metaOrder, chapterList, kernelTable, registeredSlots, stabilityMatrix, kernelStability, sourceRows }) {
   const findings = [];
   const add = (where, msg) => findings.push({ where, msg });
 
@@ -372,15 +424,55 @@ export function check({ pages, metaOrder, chapterList, kernelTable, registeredSl
     }
   }
 
+  // 8. The "Source of Truth" canonical-source list <-> the pages on disk (#9629).
+  //    A SIXTH enumeration of the same chapter, and the last one left unheld.
+  //    It stayed out of scope while `services.security` was an open product
+  //    question, because any rule written over it would have answered that
+  //    question in a gate; the 2026-08-18 ruling made the accessor internal, the
+  //    row is gone, and "one row per page" is now simply true. See the header.
+  //
+  //    Membership runs BOTH ways, like checks 1-2: a missing row leaves a page
+  //    with no canonical source, and a row with no page is the drift this card
+  //    was filed for -- the list advertising a canonical source for a service
+  //    the chapter never introduces. The path check is the third failure the
+  //    same reader hits: a row that resolves to nothing is a broken map even
+  //    when both sets agree.
+  if (sourceRows) {
+    const where = `${CHAPTER_DIR}/index.mdx`;
+    const rowNames = sourceRows.map((r) => r.label.toLowerCase());
+    for (const n of missing(onDisk, rowNames)) {
+      add(where, `"Source of Truth" has no canonical-source row for \`services.${n}\` (${n}${PAGE_SUFFIX} exists)`);
+    }
+    const seen = new Set();
+    for (const r of sourceRows) {
+      const name = r.label.toLowerCase();
+      if (seen.has(name)) {
+        add(where, `"Source of Truth" has more than one row for \`services.${name}\` -- two canonical sources for one surface is a contradiction, not a superset`);
+      }
+      seen.add(name);
+      if (!onDisk.includes(name)) {
+        add(
+          where,
+          `"Source of Truth" row "${r.label}" names no page in this chapter -- label each row with the accessor it documents, one of ${onDisk.map((n) => `\`${n}\``).join(', ')}`,
+        );
+        continue;
+      }
+      if (r.exists === false) {
+        add(where, `"Source of Truth" row "${r.label}" links \`${r.path}\`, which does not exist -- the row's whole job is to be a source a reader can open`);
+      }
+    }
+  }
+
   return findings;
 }
 
-export function summarise({ pages, chapterList, kernelTable, registeredSlots, stabilityMatrix }) {
+export function summarise({ pages, chapterList, kernelTable, registeredSlots, stabilityMatrix, sourceRows }) {
   const slots = registeredSlots
     ? `, and ${pages.filter((p) => p.slot).length} declared registry slot(s) vs ${registeredSlots.size} registered key(s)`
     : '';
   const matrix = stabilityMatrix ? `, ${stabilityMatrix.length} stability-matrix row(s)` : '';
-  return `${pages.length} chapter page(s) vs meta.json "pages", ${chapterList.length} chapter-list bullet(s) and ${kernelTable.length} kernel/index.mdx table row(s)${matrix}${slots}`;
+  const sources = sourceRows ? `, ${sourceRows.length} canonical-source row(s)` : '';
+  return `${pages.length} chapter page(s) vs meta.json "pages", ${chapterList.length} chapter-list bullet(s) and ${kernelTable.length} kernel/index.mdx table row(s)${matrix}${sources}${slots}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -389,7 +481,8 @@ function run(root) {
   const chapterDir = join(root, CHAPTER_DIR);
   const pages = readPages(chapterDir);
   const metaOrder = readMetaOrder(chapterDir);
-  const chapterList = readChapterList(readFileSync(join(chapterDir, 'index.mdx'), 'utf8'));
+  const indexText = readFileSync(join(chapterDir, 'index.mdx'), 'utf8');
+  const chapterList = readChapterList(indexText);
   const kernelText = readFileSync(join(root, KERNEL_INDEX), 'utf8');
   const kernelTable = readKernelTable(kernelText);
   const registeredSlots = readRegisteredSlots(root);
@@ -400,7 +493,18 @@ function run(root) {
   }
   const stabilityMatrix = readStabilityRows(readFileSync(versioningPath, 'utf8'));
   const kernelStability = readStabilityRows(kernelText);
-  const input = { pages, metaOrder, chapterList, kernelTable, registeredSlots, stabilityMatrix, kernelStability };
+  const rawSourceRows = readSourceRows(indexText);
+  // Same refusal as the empty chapter and the missing versioning.mdx: the
+  // Source-of-Truth list is one of the enumerations this gate holds, and a green
+  // over a section that is not there would be the exact shape of the drift it
+  // exists to catch.
+  if (rawSourceRows === null || rawSourceRows.length === 0) {
+    throw new Error(
+      `${CHAPTER_DIR}/index.mdx has no "Source of Truth" canonical-source rows -- that list is one of the enumerations this gate holds; refusing to report OK without it`,
+    );
+  }
+  const sourceRows = rawSourceRows.map((r) => ({ ...r, exists: existsSync(join(root, r.path)) }));
+  const input = { pages, metaOrder, chapterList, kernelTable, registeredSlots, stabilityMatrix, kernelStability, sourceRows };
   return { findings: check(input), summary: summarise(input) };
 }
 
@@ -420,10 +524,13 @@ function main() {
   console.error('  resolves it by. Fix the PAGE, never the slot -- the registered key is the contract (#9630).');
     console.error('  A "Current Matrix" / stability finding is the other way round: the page\'s own Stability');
     console.error('  bullet is the source of truth, so fix the TABLE that repeats it (#9684).');
-  console.error('  The "Source of Truth" canonical-source list is deliberately not checked -- see the header.');
+  console.error('  A "Source of Truth" finding is the canonical-source list (#9629): one row per page, the row');
+  console.error('  labelled with the accessor, and its path a file that exists. A row for a service this chapter');
+  console.error('  has no page for is the drift that card was filed for -- drop the row, or add the page and its');
+  console.error('  five other enumerations. Row ORDER is deliberately not held; the header says why.');
     process.exit(1);
   }
-  console.log(`✓ check-runtime-services-index: ${summary} -- all enumerations agree, every declared slot is really registered, and every published stability label matches its page (Source-of-Truth list not in scope).`);
+  console.log(`✓ check-runtime-services-index: ${summary} -- all enumerations agree, every declared slot is really registered, every published stability label matches its page, and every canonical-source row names a page whose file exists.`);
 }
 
 // ---------------------------------------------------------------------------
@@ -462,6 +569,14 @@ function selfTest() {
     writeFileSync(join(dir, PACKAGES_DIR, 'svc/src/__tests__/fake.ts'), "ctx.registerService('testonly', {});");
 
     const slotFor = (n) => n;
+    // The chapter index's Source-of-Truth rows. `SMS` is spelled in caps on
+    // purpose: the real list writes it that way, and the label-to-accessor match
+    // is case-insensitive. Every default path is the synthetic plugin file that
+    // really exists in the fixture tree, so the path limb is silent unless a
+    // case asks for it.
+    const SOURCE_LABEL = { data: 'Data', email: 'Email', sms: 'SMS' };
+    const REAL_PATH = 'packages/svc/src/plugin.ts';
+    const defaultSourceRows = names.map((n) => ({ label: SOURCE_LABEL[n] ?? n, path: REAL_PATH }));
     const writeTree = ({
       pages = names, meta = names, list = names, table = names,
       titleFor = (n) => `services.${n}`, hrefFor = (n) => `${n}-service`, slot = slotFor,
@@ -471,6 +586,8 @@ function selfTest() {
       stability = () => 'stable',
       matrix = names, matrixLabel = (n) => stability(n) ?? 'stable', kernelLabel = (n) => stability(n) ?? 'stable',
       versioning = true,
+      // #9629: the Source-of-Truth canonical-source rows.
+      sourceRows = defaultSourceRows,
     } = {}) => {
       for (const f of readdirSync(chapter)) rmSync(join(chapter, f), { force: true });
       for (const n of pages) {
@@ -487,7 +604,17 @@ function selfTest() {
         );
       }
       writeFileSync(join(chapter, 'meta.json'), JSON.stringify({ pages: ['index', ...meta.map((n) => `${n}${META_SUFFIX}`), 'examples'] }));
-      writeFileSync(join(chapter, 'index.mdx'), `# x\n\n${list.map((n) => `- \`services.${n}\``).join('\n')}\n\n## Source of Truth\n\n- Security: \`packages/spec/src/contracts/security-service.ts\`\n`);
+      // The index carries FOUR things this gate reads: the chapter-list bullets,
+      // the Source-of-Truth rows, and (never) a stability claim. The trailing
+      // callout is written on purpose -- it sits inside the Source-of-Truth
+      // section, and its prose must not be read as a canonical-source row.
+      writeFileSync(
+        join(chapter, 'index.mdx'),
+        `# x\n\n${list.map((n) => `- \`services.${n}\``).join('\n')}\n\n`
+          + `## Source of Truth\n\nEach page links the canonical TypeScript source used to derive signatures.\n\n`
+          + `${sourceRows.map((r) => `- ${r.label}: \`${r.path}\``).join('\n')}\n\n`
+          + `<Callout type="warn" title="Not this">\nA second shape shares the word: \`SettingsAuditSink\` — canonical source\n\`${REAL_PATH}\` — is constructor-injected, never registered. See \`services.audit\`: the full contrast.\n</Callout>\n`,
+      );
       writeFileSync(join(dir, KERNEL_INDEX), `# k\n\n${table.map((n) => `| [\`services.${n}\`](/docs/kernel/runtime-services/${hrefFor(n)}) | ${kernelLabel(n)} | d |`).join('\n')}\n`);
     };
     const findingsFor = (opts) => { writeTree(opts); return run(dir).findings; };
@@ -585,18 +712,74 @@ function selfTest() {
       'a page with no Stability bullet is caught',
     );
 
-    // ── #9629 stays the maintainer's call ──────────────────────────────────
-    // The chapter index's Source-of-Truth list carries a `Security` row for a
-    // service this chapter has no page for. It is PROSE, so no stability limb
-    // can see it -- pinned directly on the parser, and again on a failing tree.
+    // ── Check 8: the Source-of-Truth canonical-source list (#9629) ─────────
+    // Until the 2026-08-18 ruling this list was deliberately unread, and the two
+    // assertions here pinned that restraint: a `Security` row for a page-less
+    // service reached no limb. The ruling made the accessor internal and the row
+    // is gone, so the same two facts are re-pinned around the answer -- the row
+    // is now CAUGHT, and caught as a canonical-source row, never as a stability
+    // claim (that half of the old pin is the one with lasting value).
+
+    // The defect this card was filed for: the list advertising a canonical
+    // source for a service the chapter never introduces.
+    const pageless = findingsFor({ sourceRows: [...defaultSourceRows, { label: 'Security', path: REAL_PATH }] });
+    assert(
+      pageless.some((f) => f.where.endsWith('runtime-services/index.mdx') && f.msg.includes('"Security" names no page')),
+      `a Source-of-Truth row for a service with no page is caught -- got ${JSON.stringify(pageless)}`,
+    );
+    // ...and caught HERE. The row is prose, so no stability limb may see it: a
+    // finding against versioning.mdx or kernel/index.mdx would send the author
+    // to the wrong file for a row that is not in either of them.
+    assert(
+      pageless.every((f) => !f.where.endsWith(VERSIONING_FILE) && f.where !== KERNEL_INDEX),
+      `a canonical-source row is never reported against a stability table -- got ${JSON.stringify(pageless.map((f) => f.where))}`,
+    );
     assert(
       readStabilityRows(readFileSync(join(chapter, 'index.mdx'), 'utf8')).length === 0,
-      'the chapter index\'s prose lists (incl. the Source-of-Truth `Security` row) are never read as stability rows',
+      'the chapter index\'s prose lists (chapter bullets and canonical-source rows alike) are never read as stability rows',
     );
+    // The trailing callout lives inside the section; its prose is not a row.
     assert(
-      shortMatrix.every((f) => !/[Ss]ecurity/.test(f.msg)),
-      'no finding drags the Source-of-Truth list\'s Security row in (#9629 is not decided here)',
+      readSourceRows(readFileSync(join(chapter, 'index.mdx'), 'utf8')).length === defaultSourceRows.length + 1,
+      'only the `- Accessor: `path`` bullets are read as rows -- the callout that trails the list is not',
     );
+
+    // A page with no canonical source: the other direction of the same list.
+    assert(
+      findingsFor({ sourceRows: defaultSourceRows.filter((r) => r.label !== 'SMS') })
+        .some((f) => f.msg.includes('no canonical-source row for `services.sms`')),
+      'a page with no canonical-source row is caught',
+    );
+    // `SMS` answers for `sms-service.mdx`: the label match is case-insensitive,
+    // so the list's real spelling is silent. Measured in two halves, because a
+    // silent run alone would also be explained by the row never being parsed.
+    const cleanRows = (findingsFor(), readSourceRows(readFileSync(join(chapter, 'index.mdx'), 'utf8')));
+    assert(cleanRows.some((r) => r.label === 'SMS'), 'the caps label is really parsed as a row (not skipped into silence)');
+    assert(findingsFor().length === 0, 'a row labelled `SMS` matches `sms-service.mdx` -- the accessor match ignores case');
+    // A prose label is not an accessor. This is the `Audit bridge` shape the
+    // list really carried before #9605 renamed it.
+    assert(
+      findingsFor({ sourceRows: defaultSourceRows.map((r) => (r.label === 'SMS' ? { ...r, label: 'SMS bridge' } : r)) })
+        .some((f) => f.msg.includes('"SMS bridge" names no page')),
+      'a descriptive row label that is not an accessor is caught',
+    );
+    // Two canonical sources for one surface. Membership alone passes this.
+    assert(
+      findingsFor({ sourceRows: [...defaultSourceRows, { label: 'Data', path: REAL_PATH }] })
+        .some((f) => f.msg.includes('more than one row for `services.data`')),
+      'a duplicated canonical-source row is caught (membership checking passes it)',
+    );
+    // A row whose path moved: both sets agree and the map is still broken.
+    const gonePath = findingsFor({ sourceRows: defaultSourceRows.map((r) => (r.label === 'Data' ? { ...r, path: 'packages/svc/src/moved.ts' } : r)) });
+    assert(
+      gonePath.some((f) => f.msg.includes('packages/svc/src/moved.ts') && f.msg.includes('does not exist')),
+      `a canonical-source row pointing at a file that is not there is caught -- got ${JSON.stringify(gonePath)}`,
+    );
+    // Silence is not a pass: a section with no rows is refused, like the empty
+    // chapter and the missing versioning.mdx.
+    let threwSources = false;
+    try { findingsFor({ sourceRows: [] }); } catch { threwSources = true; }
+    assert(threwSources, 'a chapter index with no Source-of-Truth rows is rejected, never reported OK over a list that is not there');
 
     // ── Refuses to report OK over nothing ───────────────────────────────────
     let threwVersioning = false;
@@ -615,7 +798,7 @@ function selfTest() {
     for (const f of failures) console.error(`  • ${f}`);
     process.exit(1);
   }
-  console.log(`✓ check-runtime-services-index --self-test: ${checked} assertions over a temp fixture (real run() path); every limb -- chapter list, kernel table, meta.json, order, href, title premise, registry slot (incl. the split-line registration), stability matrix (missing row, stale row, order) and stability LABEL on both tables, empty tree, missing versioning.mdx -- observed FAILING and observed silent.`);
+  console.log(`✓ check-runtime-services-index --self-test: ${checked} assertions over a temp fixture (real run() path); every limb -- chapter list, kernel table, meta.json, order, href, title premise, registry slot (incl. the split-line registration), stability matrix (missing row, stale row, order) and stability LABEL on both tables, canonical-source rows (page-less row, page with no row, prose label, duplicate, missing path, and never read as a stability claim), empty tree, missing versioning.mdx, empty Source-of-Truth list -- observed FAILING and observed silent.`);
 }
 
 if (process.argv.includes('--self-test')) selfTest();

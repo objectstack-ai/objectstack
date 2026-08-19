@@ -557,6 +557,17 @@ jobs:
       # too, and holds every stability LABEL it and the kernel/index.mdx table
       # publish to the page's own Stability bullet. That second half catches a
       # WRONG row, which membership checking passes silently.
+      #
+      # #9629 closed the last gap. The chapter's "Source of Truth" canonical-source
+      # list -- a SIXTH enumeration -- was deliberately left unheld while
+      # `services.security` was an open product question: it carried a row for a
+      # service with no page, and any rule written over the list would have
+      # answered that question in a gate rather than by ruling. The 2026-08-18
+      # maintainer ruling made the accessor internal, the row is dropped, and the
+      # list is now held to the pages too -- one row per page, labelled with the
+      # accessor, each path a file that exists. Row ORDER is deliberately still
+      # not held: unlike the chapter list and the matrix, this list has never
+      # followed meta.json nav order.
       - name: Runtime-services indexes enumerate the chapter's real pages
         run: pnpm check:runtime-services-index
 
