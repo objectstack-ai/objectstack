@@ -28,7 +28,15 @@
  *      public-model parents are editable by design) — the attachment kit's
  *      uploader-or-parent-editor rule. A multi-row write requires EVERY
  *      matched row to pass, and an update that re-points `thread_id` must
- *      additionally satisfy the insert rule on the NEW thread.
+ *      additionally satisfy the insert rule on the NEW thread. A write
+ *      carrying NEITHER an id NOR a `where` is refused outright rather than
+ *      authorizing the whole table by resolving zero rows — on DELETE that
+ *      refusal reaches this handler through the `dispatchUnscopedMultiDelete`
+ *      whole-operation dispatch the registration declares (#9719/#9798); on
+ *      UPDATE the engine has no such dispatch yet, so the shape check is
+ *      declared but unreachable through the wire — only the per-row gate
+ *      catches an unscoped update, and only by accident (decision card #9974;
+ *      see the note on `resolveTargetRows`).
  *  - {@link installCommentReadVisibility} — the read side: a
  *    `find`/`findOne`/`count`/`aggregate` middleware that intersects the query
  *    with the threads whose parent record the caller can actually read.
@@ -66,7 +74,17 @@ export interface CommentAccessEngine {
   registerHook(
     event: string,
     handler: (ctx: any) => void | Promise<void>,
-    options?: { object?: string; packageId?: string },
+    options?: {
+      object?: string;
+      packageId?: string;
+      /** [#9798] Opt-in whole-operation `beforeDelete` dispatch for an UNSCOPED
+       * predicate delete (`multi: true`, no `where`) — the engine declaration
+       * added by #9719. Declared here because this file's registration passes
+       * it; the mechanism, its `beforeDelete`-only validity and its rebind
+       * refusal are owned by `HookEntry.dispatchUnscopedMultiDelete` in
+       * `@objectstack/objectql`, not restated. */
+      dispatchUnscopedMultiDelete?: boolean;
+    },
   ): void;
   /** Onion-model data middleware (runs for find/findOne/count/aggregate AND
    * writes) — the only seam that filters `count()` (→ list `total`) identically
@@ -352,6 +370,27 @@ export function installCommentAccessHooks(
       // No id and no predicate: a bulk write over the WHOLE table. Nothing to
       // authorize row-by-row, and "nothing to authorize" must never read as
       // "allowed" (the engine would hand an unscoped AST to deleteMany).
+      //
+      // [#9798] Which dispatch can actually deliver this shape differs BY VERB,
+      // and the difference is load-bearing — the branch reads as verb-neutral
+      // but is not:
+      //  - `delete`: reachable, and only through the
+      //    `dispatchUnscopedMultiDelete` whole-operation dispatch this module's
+      //    `beforeDelete` registration declares (see below). The per-row
+      //    contract (#5038/#5574) binds `input.id` on every predicate dispatch,
+      //    which routes into the by-id branch above, and a zero-match predicate
+      //    dispatches nothing at all.
+      //  - `update`: NOT reachable through the wired engine today. The engine
+      //    has no whole-operation dispatch on `beforeUpdate`'s predicate path
+      //    and refuses the flag on that event by design, because extending it
+      //    is a product-behaviour decision rather than drift (#9719's
+      //    `assertValidUnscopedMultiDeleteFlag`). Measured: an unscoped
+      //    `multi: true` UPDATE is refused only when it happens to sweep a row
+      //    the caller may not touch — the PER-ROW gate catching it by accident
+      //    — and resolves when the caller is entitled to every row, zero-match
+      //    included. Split out as the decision card #9974; the wired-path pins
+      //    in the test suite measure all three limbs. Do not "fix" it by
+      //    widening this branch: the missing half is a dispatch, not a policy.
       forbid(`Refusing an unscoped multi-${verb} of comments — scope the write to the rows you mean`);
     }
     const rows = await engine.find('sys_comment', {
@@ -446,7 +485,14 @@ export function installCommentAccessHooks(
       if (!rows.length) return; // nothing matched — nothing to authorize
       await authorizeRows(ctx, rows, 'delete');
     },
-    { object: 'sys_comment', packageId: PACKAGE_ID },
+    // [#9798] `dispatchUnscopedMultiDelete` is what makes the #4630 unscoped
+    // refusal in `resolveTargetRows` REACHABLE through the wired engine: the
+    // predicate path dispatches per row with `input.id` bound (so the by-id
+    // branch shadows the check), and a zero-match predicate dispatches nothing
+    // at all — the engine's opt-in whole-operation dispatch is the one call
+    // that arrives with no id and the caller's raw `options`, before any row is
+    // resolved. Same declaration `sys_attachment` carries (#9719).
+    { object: 'sys_comment', packageId: PACKAGE_ID, dispatchUnscopedMultiDelete: true },
   );
 }
 
