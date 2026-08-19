@@ -37,7 +37,9 @@
         "$TURBO_ROOT$/packages/runtime/src/**",
         "$TURBO_ROOT$/packages/objectql/src/validation/**",
         "$TURBO_ROOT$/packages/metadata-protocol/src/**",
-        "$TURBO_ROOT$/packages/plugins/plugin-audit/src/**"
+        "$TURBO_ROOT$/packages/plugins/plugin-audit/src/**",
+        "$TURBO_ROOT$/content/docs/api/error-catalog.mdx",
+        "$TURBO_ROOT$/docs/audits/2026-07-unknown-key-strictness-ledger.md"
       ]
     },
     "@objectstack/core#test": {

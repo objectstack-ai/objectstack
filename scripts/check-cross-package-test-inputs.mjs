@@ -61,6 +61,48 @@
 // them, which is the affected-subset optimisation the 3-way shard exists for
 // (ci.yml `test`) traded away to fix eight packages.
 //
+// ── What holds a radius, and the day it turned out to be prose (#9763) ──────
+//
+// A narrow glob is only safe while the gate can check it against the paths the
+// tests really read, so `verify()` builds a ROSTER per package and fails naming
+// any path outside the declared globs. That roster used to come from one flat
+// regex over the source, which sees a path only when the WHOLE repo-relative
+// path sits inside ONE quoted string and starts at a known top-level directory.
+//
+// Three live spellings do not, and the shortfall read as "covered" rather than
+// as "unrecognised" -- silently, exit 0. Measured on 06f9848f9: for
+// `create-objectstack`, dropping the declared glob AND unquoting two header
+// COMMENTS made this gate pass, while the two tests that genuinely load
+// `scripts/sync-template-versions.mjs` went right on loading it. Prose was
+// holding the radius; an innocent reword would have unforced it.
+//
+// So the roster now has two halves, and the fix is a reconstruction rather than
+// a wider regex:
+//
+//   FLAT      -- `repoRelativeLiterals()`, unchanged in kind, sees quoted whole
+//                paths. Its one data defect was a missing top-level directory:
+//                `skills/` was absent from the alternation, so formula's read of
+//                its own published skill was invisible twice over.
+//   RESOLVED  -- `scanPathExpressions()` walks the SAME recognised expressions
+//                the escape detector already walks, and keeps the segment NAMES
+//                alongside the depth (`walkLiteral`). A path split across
+//                `join('scripts', 'x.mjs')` arguments and an ascent-relative
+//                `new URL('../../../scripts/x.mjs', import.meta.url)` both come
+//                out as the repo-relative string an author would have quoted.
+//
+// This needed no parser: the resolver was already there, computing depths for
+// the escape verdict, and a name is that same walk in another coordinate. The
+// gate stays dependency-free, which is what keeps it un-mutable in CI.
+//
+// What it still does not see, stated rather than discovered later: a path built
+// by template literal (`${repoRoot}/scripts/x.mjs`), one whose segments come
+// from a variable or an array the scan cannot fold, and a directory read whose
+// path is only a loop variable. Each yields NO name -- never a wrong one; an
+// unreadable argument costs the name and keeps the depth, so the escape verdict
+// is unaffected and the roster never gains an entry pointing at a file nobody
+// reads. Reads that reach another package through Node's RESOLVER rather than
+// through `fs` are outside this gate entirely.
+//
 // Usage:
 //   node scripts/check-cross-package-test-inputs.mjs --verify
 //   node scripts/check-cross-package-test-inputs.mjs --union-into <turbo-ls.json> --changed <file>
@@ -102,6 +144,20 @@ const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/objectql/src/validation/**',
       'packages/metadata-protocol/src/**',
       'packages/plugins/plugin-audit/src/**',
+      // Both of these were read all along and declared by nobody -- they are
+      // what #9763's reconstruction found the first time it ran, not radii this
+      // package grew. Each is spelled ascent-relative, which is exactly the
+      // spelling the flat literal regex below cannot start a match on:
+      //   src/api/error-catalog-docs.test.ts reads the error-catalog page as
+      //     `resolve(__dirname, '../../../../content/docs/api/error-catalog.mdx')`
+      //     and asserts it documents every `StandardErrorCode`. Per-page rather
+      //     than `content/docs/**` for the reason the @objectstack/cli entry
+      //     gives: docs are edited far more often than any package here.
+      //   scripts/strictness-ledger.test.ts reads the audit ledger as
+      //     `resolve(SPEC, '../../docs/audits/...')` and ratchets it against the
+      //     schema files it inventories, so the ledger IS an input to the ratchet.
+      'content/docs/api/error-catalog.mdx',
+      'docs/audits/2026-07-unknown-key-strictness-ledger.md',
     ],
   },
   '@objectstack/core': {
@@ -161,9 +217,12 @@ const CROSS_PACKAGE_TEST_INPUTS = {
     // `connector-mcp-plugin.ts` is read by test/serve-capability-identity.test.ts,
     // which pins that the connector still registers the name the #7652 repro uses
     // rather than importing the class. It surfaced with the three above and has the
-    // same shape of blind spot, but the gate could not have named it: the test
-    // spells the path RELATIVE (`resolve(HERE, '../../connectors/...')`), and the
-    // literal-coverage check below only collects repo-relative literals.
+    // same shape of blind spot. The gate could not name it until #9763: the test
+    // spells the path ASCENT-RELATIVE (`resolve(HERE, '../../connectors/...')`),
+    // which the flat literal regex cannot start a match on. The collector now
+    // reconstructs it, so this glob is held by the read rather than by this
+    // comment — it was the one entry that already documented the hole, as a fact
+    // about itself rather than as the general gap it turned out to be.
     //
     // `check-nul-bytes.mjs` is the one entry no test READS -- it is named in a
     // comment in login-json-noninteractive.e2e.test.ts. The literal collector takes
@@ -302,15 +361,16 @@ const CROSS_PACKAGE_TEST_INPUTS = {
     // `specVersion`) that template-consistency.test.ts ratchets, so a change to
     // the stamper is exactly the change those ratchets exist to catch (#9264).
     //
-    // What FORCES the glob, though, is neither read. Both tests spell the path
-    // as `join(repoRoot, 'scripts', 'sync-template-versions.mjs')`, and the
-    // literal collector below only sees a whole repo-relative path inside ONE
-    // quoted string — so what it actually picks up is the quoted mention in
-    // each test's header comment. Measured: dropping the glob fails this gate
-    // naming the file; dropping the glob AND unquoting both mentions passes.
-    // So do not reword those mentions into unquoted prose on the theory that
-    // the read has the radius covered — it does not, until the collector
-    // learns this spelling (#9763).
+    // What FORCES the glob is now the read itself. Both tests spell the path as
+    // `join(repoRoot, 'scripts', 'sync-template-versions.mjs')`, which the flat
+    // literal collector below cannot see — it only matches a whole repo-relative
+    // path inside ONE quoted string — so until #9763 what actually held this
+    // declaration was the quoted MENTION in each test's header comment, and
+    // rewording either one into unquoted prose unforced a live radius.
+    // Measured on 06f9848f9, before the fix: drop the glob and unquote both
+    // mentions and the gate printed `OK ... exit 0`. Measured after: the same
+    // ablation fails naming template-version-stamps.test.ts, the file that
+    // really reads. The mentions are ordinary prose again — free to reword.
     globs: ['content/**', 'scripts/sync-template-versions.mjs'],
   },
 };
@@ -348,6 +408,32 @@ export function globToRegExp(glob) {
 
 export function matchesAny(path, globs) {
   return globs.some((g) => globToRegExp(g).test(path));
+}
+
+/**
+ * Whether the declared globs cover a DIRECTORY a test lists with `readdirSync`.
+ *
+ * Not the same question as `matchesAny`, and the difference is not a detail: a
+ * subtree glob is written to match FILES, so `packages/lint/src/**` does not
+ * match the bare string `packages/lint/src`, while turbo hashing that glob does
+ * re-run the test when the listing changes. What a directory read needs is that
+ * the glob covers what is INSIDE the directory.
+ *
+ * Answered against the real entries rather than inferred from the glob's shape,
+ * because shape cannot tell the two apart: `packages/lint/src/**` and
+ * `packages/lint/src/**\/*.object.ts` both look like subtree globs and only the
+ * first re-runs when an ordinary `.ts` file appears. An empty directory is not
+ * covered by anything — there is nothing to have matched.
+ */
+export function coversDirectory(dir, globs, root = REPO_ROOT) {
+  let entries;
+  try {
+    entries = readdirSync(join(root, dir), { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  const files = entries.filter((e) => e.isFile()).map((e) => `${dir}/${e.name}`);
+  return files.length > 0 && files.every((f) => matchesAny(f, globs));
 }
 
 // ── the escape detector ──────────────────────────────────────────────────────
@@ -420,15 +506,29 @@ function packageRootOf(file) {
  * the final depth. Final depth is only sound for a binding that STOPS at the top
  * of its ascent, which is what a `REPO_ROOT` const happens to be and what the
  * other spellings are not.
+ *
+ * `segs` is the SAME walk carried in repo-relative NAMES rather than in depths,
+ * and it is what lets the roster below name a file the source never spells as
+ * one whole string (#9763). It is `null` whenever the name stops being knowable
+ * — an unresolved base, an argument this scan cannot read, or an ascent past the
+ * repo root — because a path with a segment missing from its middle is a
+ * fabricated roster entry, and a coverage check that fabricates entries is worse
+ * than one that misses them. Depth decides the ESCAPE verdict either way; segs
+ * only ever adds a name to the radius roster.
  */
-function walkLiteral(base, literal) {
+function walkLiteral(base, literal, segs) {
   let end = base;
   let min = base;
   let vendored = false;
+  let out = segs ? [...segs] : null;
   for (const seg of literal.split('/').filter(Boolean)) {
-    if (seg === '..') end -= 1;
-    else if (seg !== '.') {
+    if (seg === '..') {
+      end -= 1;
+      // Above the repo root there is no repo-relative name to report.
+      if (out) out = out.length ? out.slice(0, -1) : null;
+    } else if (seg !== '.') {
       end += 1;
+      if (out) out = [...out, seg];
       // An installed dependency is not a repo source input: turbo cannot hash
       // `node_modules/**` as a source glob, and the walk above skips it anyway.
       // A read that lands there escapes the package but declares nothing.
@@ -436,7 +536,7 @@ function walkLiteral(base, literal) {
     }
     if (end < min) min = end;
   }
-  return { end, min, vendored };
+  return { end, min, vendored, segs: out };
 }
 
 /** Split an argument list on its TOP-LEVEL commas — `new URL(x, import.meta.url)` has one of its own. */
@@ -468,29 +568,40 @@ const PATH_LITERAL = /^(['"`])([^'"`]*)\1$/;
 const NEW_URL_LITERAL = /^new\s+URL\(\s*(['"`])([^'"`]*)\1\s*,\s*import\.meta\.url\s*\)$/;
 
 /**
- * Resolve one path expression to `{ end, min, vendored }`, or `undefined` when
- * the spelling is not one of RECOGNISED_PATH_SPELLINGS. Recursive so that every
- * recognised form composes with every other: a `new URL` seed may sit under a
- * `fileURLToPath`, inside a `resolve()`, in a read's argument — each layer is
- * peeled by the same function rather than by a separate special case.
+ * Resolve one path expression to `{ end, min, vendored, segs }`, or `undefined`
+ * when the spelling is not one of RECOGNISED_PATH_SPELLINGS. Recursive so that
+ * every recognised form composes with every other: a `new URL` seed may sit
+ * under a `fileURLToPath`, inside a `resolve()`, in a read's argument — each
+ * layer is peeled by the same function rather than by a separate special case.
+ *
+ * `fileSegs` is the repo-relative segments of the file being scanned, or `null`
+ * when the caller has no repo context (the `--self-test` shapes, which assert on
+ * depth alone). It is what turns the depth walk into a NAME: with it, the three
+ * spellings of #9763 — a path split across `join`/`resolve` arguments, an
+ * ascent-relative literal, and a descent into a top-level directory the flat
+ * literal regex does not list — resolve to the same repo-relative string an
+ * author would have written in one quoted piece.
  */
-function pathExpression(expr, hereDepth, known) {
+function pathExpression(expr, hereDepth, known, fileSegs = null) {
   expr = expr.trim();
+  // The two seeds NAME the directory; `fileSegs` names the FILE inside it.
+  const dirSegs = fileSegs ? fileSegs.slice(0, -1) : null;
+  const at = (depth, segs) => ({ end: depth, min: depth, vendored: false, segs });
 
   // `fileURLToPath(x)` does not move the path, only its spelling.
   const unwrapped = expr.match(/^(?:url\.)?fileURLToPath\(([\s\S]*)\)$/);
-  if (unwrapped) return pathExpression(unwrapped[1], hereDepth, known);
+  if (unwrapped) return pathExpression(unwrapped[1], hereDepth, known, fileSegs);
 
   if (/^(?:path\.)?dirname\(\s*(?:url\.)?fileURLToPath\(\s*import\.meta\.url\s*\)\s*\)$/.test(expr)) {
-    return { end: hereDepth, min: hereDepth, vendored: false };
+    return at(hereDepth, dirSegs);
   }
-  if (expr === '__dirname') return { end: hereDepth, min: hereDepth, vendored: false };
+  if (expr === '__dirname') return at(hereDepth, dirSegs);
   // `import.meta.dirname` / `.filename` (Node >= 20.11) are the modern spelling of
   // the two seeds above. No test uses them TODAY — which is the reason to accept
   // them now: the first author who reaches for them would otherwise get silence.
-  if (expr === 'import.meta.dirname') return { end: hereDepth, min: hereDepth, vendored: false };
+  if (expr === 'import.meta.dirname') return at(hereDepth, dirSegs);
   if (/^(?:path\.)?dirname\(\s*import\.meta\.filename\s*\)$/.test(expr)) {
-    return { end: hereDepth, min: hereDepth, vendored: false };
+    return at(hereDepth, dirSegs);
   }
   // The two seeds above NAME the directory. `import.meta.url` and
   // `import.meta.filename` name the FILE, which sits one level below it, and an
@@ -504,36 +615,63 @@ function pathExpression(expr, hereDepth, known) {
   // and went undeclared — the silence this list exists to prevent, and it cost a
   // merge-queue dequeue (PR #8983) before anyone saw it.
   if (expr === 'import.meta.url' || expr === 'import.meta.filename') {
-    return { end: hereDepth + 1, min: hereDepth + 1, vendored: false };
+    return at(hereDepth + 1, fileSegs);
   }
 
   // A `new URL(rel, import.meta.url)` resolves against the importing FILE, so
   // its base is the file's directory — the same base as the two seeds above.
+  // This is the ASCENT-RELATIVE spelling of #9763: one string, but it starts at
+  // `..`, so the flat literal regex below never saw it while the walk here has
+  // always resolved it — the name was thrown away, not the path.
   const url = expr.match(NEW_URL_LITERAL);
-  if (url) return walkLiteral(hereDepth, url[2]);
+  if (url) return walkLiteral(hereDepth, url[2], dirSegs);
 
   if (/^[A-Za-z_$][\w$]*$/.test(expr)) return known.get(expr);
 
   const call = expr.match(/^(?:path\.)?(?:resolve|join)\(([\s\S]*)\)$/);
   if (!call) return undefined;
   const args = splitTopLevel(call[1]);
-  const base = pathExpression(args[0], hereDepth, known);
+  const base = pathExpression(args[0], hereDepth, known, fileSegs);
   if (!base) return undefined;
-  let { end, min, vendored } = base;
+  let { end, min, vendored, segs } = base;
   for (const a of args.slice(1)) {
     const lit = a.match(PATH_LITERAL);
-    if (!lit) continue;
-    const step = walkLiteral(end, lit[2]);
+    if (!lit) {
+      // An argument this scan cannot read leaves the DEPTH walk where it was —
+      // deliberately, since the escape verdict is a lower bound and has always
+      // been computed this way — but the NAME is gone: a reconstructed path
+      // missing a segment out of its middle would be a roster entry pointing at
+      // a file nobody reads. Losing the name is the safe half of that trade.
+      segs = null;
+      continue;
+    }
+    const step = walkLiteral(end, lit[2], segs);
     end = step.end;
     min = Math.min(min, step.min);
     vendored = vendored || step.vendored;
+    segs = step.segs;
   }
-  return { end, min, vendored };
+  return { end, min, vendored, segs };
 }
 
-/** The argument list of every fs read whose first argument is a path, paren-balanced. */
+/**
+ * The reads whose path argument is a DIRECTORY rather than a file. A directory
+ * handed to one of these is a real input — `readdirSync(LINT_SRC)` re-reads
+ * whatever `packages/lint/src` contains — so the roster must be allowed to name
+ * it, which the file-only filter in `findEscapingPackages()` otherwise forbids.
+ * Kept to the two calls whose argument can only be a directory: `statSync` and
+ * `existsSync` take either, and admitting them would let any directory PREFIX
+ * used to build a path force a declaration. `globSync` is out for the opposite
+ * reason — its first argument is a pattern, not a directory.
+ */
+const DIR_ARG_READS = new Set(['readdirSync', 'opendirSync']);
+
+/**
+ * The name and argument list of every fs read whose first argument is a path,
+ * paren-balanced.
+ */
 function* readArgumentLists(src) {
-  const re = new RegExp(String.raw`\b(?:${PATH_ARG_READS.join('|')})\s*\(`, 'g');
+  const re = new RegExp(String.raw`\b(${PATH_ARG_READS.join('|')})\s*\(`, 'g');
   for (const m of src.matchAll(re)) {
     const from = m.index + m[0].length;
     let depth = 1;
@@ -550,13 +688,24 @@ function* readArgumentLists(src) {
       else if (c === '(') depth += 1;
       else if (c === ')' && --depth === 0) break;
     }
-    if (depth === 0) yield src.slice(from, i);
+    if (depth === 0) yield { fn: m[1], args: src.slice(from, i) };
   }
 }
 
 /**
- * Every path in `src` that addresses something outside the package — which, in a
- * file that also reads the filesystem, is precisely the #7802 shape.
+ * One pass over `src`, answering the gate's two separate questions at once:
+ *
+ *   `escapes` — every path that addresses something outside the package, which
+ *               in a file that also reads the filesystem is the #7802 shape.
+ *   `files` / `dirs` — the repo-relative paths those same expressions RESOLVE
+ *               to, which is the radius roster `verify()` measures declarations
+ *               against. Split by what the read wants, because the filter in
+ *               `findEscapingPackages()` differs: a directory counts only when a
+ *               directory-listing read is what consumed it.
+ *
+ * The two answers come from one walk because they come from one resolution: the
+ * depth that decides `escapes` and the name that fills the roster are the same
+ * traversal seen in two coordinates (see `walkLiteral`).
  *
  * Deliberately a source scan and not a real parse: a detector with no
  * dependencies cannot itself fail to resolve in CI, which is what keeps this
@@ -574,34 +723,54 @@ function* readArgumentLists(src) {
  * `--self-test` pins the shapes that must keep flagging AND the shapes that must
  * not; an added spelling without an added case is the next silent regression.
  */
-export function escapingBindings(src, hereDepth) {
+function scanPathExpressions(src, hereDepth, fileSegs = null) {
   const known = new Map();
-  const found = [];
+  const escapes = [];
+  const files = new Set();
+  const dirs = new Set();
   const report = (name, info) => {
     // `vendored`: the read escapes the package but lands in an installed
     // dependency, which no declaration can name. Not a cross-package input.
     if (!info || info.vendored || info.min >= 0) return;
-    found.push({ name, depth: info.min });
+    escapes.push({ name, depth: info.min });
+  };
+  // A resolved name goes on the roster regardless of depth: `findEscapingPackages`
+  // drops the package's own paths itself, using the same own-prefix rule it
+  // already applies to the flat literals, so this stays one rule rather than two.
+  const collect = (into, info) => {
+    if (info?.segs?.length && !info.vendored) into.add(info.segs.join('/'));
   };
 
   const DECL = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([^;\n]+(?:\n\s*[^;\n]*)??)\s*;/g;
   for (const m of src.matchAll(DECL)) {
-    const info = pathExpression(m[2].trim(), hereDepth, known);
+    const info = pathExpression(m[2].trim(), hereDepth, known, fileSegs);
     if (!info) continue;
     known.set(m[1], info);
+    collect(files, info);
     report(m[1], info);
   }
 
   let n = 0;
-  for (const args of readArgumentLists(src)) {
+  for (const { fn, args } of readArgumentLists(src)) {
     n += 1;
     const first = splitTopLevel(args)[0];
+    const info = known.get(first) ?? pathExpression(first, hereDepth, known, fileSegs);
+    collect(DIR_ARG_READS.has(fn) ? dirs : files, info);
     // A bare binding here was already judged at its declaration; reporting it a
     // second time would only duplicate the finding under a less useful name.
     if (known.has(first)) continue;
-    report(`read #${n} argument`, pathExpression(first, hereDepth, known));
+    report(`read #${n} argument`, info);
   }
-  return found;
+  return { escapes, files, dirs };
+}
+
+/**
+ * Every path in `src` that addresses something outside the package. Kept as the
+ * exported name the `--self-test` shapes and any future reader reach for; the
+ * roster half of the same walk is internal to `findEscapingPackages()`.
+ */
+export function escapingBindings(src, hereDepth, fileSegs = null) {
+  return scanPathExpressions(src, hereDepth, fileSegs).escapes;
 }
 
 /**
@@ -612,10 +781,18 @@ export function escapingBindings(src, hereDepth) {
  * declared radius the gate fails naming the file. Over-collection (a path in a
  * comment or an assertion message) is harmless — it can only force a WIDER
  * declaration, never a narrower one.
+ *
+ * This half sees a path only when the WHOLE repo-relative path sits inside ONE
+ * quoted string and starts at a top-level directory. That is the third spelling
+ * of #9763 and the only one that is a DATA defect rather than a collector one:
+ * `skills/` was simply missing from the alternation, so `@objectstack/formula`'s
+ * read of the published formula skill was invisible twice over — once here and
+ * once in the reconstruction. The list below is every top-level directory a
+ * declared glob can name; a new one added to the tree belongs here too.
  */
 export function repoRelativeLiterals(src) {
   const out = new Set();
-  for (const m of src.matchAll(/(['"`])((?:packages|apps|examples|content|scripts)\/[A-Za-z0-9._/-]+)\1/g)) {
+  for (const m of src.matchAll(/(['"`])((?:packages|apps|examples|content|scripts|skills)\/[A-Za-z0-9._/-]+)\1/g)) {
     out.add(m[2]);
   }
   return out;
@@ -641,30 +818,48 @@ export function findEscapingPackages() {
       const pkgRoot = packageRootOf(file);
       if (!pkgRoot) continue;
       const hereDepth = relative(pkgRoot, dirname(file)).split(sep).filter(Boolean).length;
-      if (!escapingBindings(src, hereDepth).length) continue;
+      // The file's OWN repo-relative segments are the seed that turns the depth
+      // walk into a name (#9763). Only this call site has them — `--self-test`
+      // asserts on synthetic sources with no place in the tree, so it passes
+      // none and gets depth-only answers, exactly as before.
+      const fileSegs = relative(REPO_ROOT, file).split(sep).filter(Boolean);
+      const scan = scanPathExpressions(src, hereDepth, fileSegs);
+      if (!scan.escapes.length) continue;
       const name = packageNameOf(pkgRoot);
       if (!name) continue;
-      if (!found.has(name)) found.set(name, { dir: relative(REPO_ROOT, pkgRoot), tests: [], literals: new Map() });
+      if (!found.has(name))
+        found.set(name, { dir: relative(REPO_ROOT, pkgRoot), tests: [], literals: new Map(), dirEntries: new Set() });
       const entry = found.get(name);
       const rel = relative(REPO_ROOT, file);
       entry.tests.push(rel);
       const own = relative(REPO_ROOT, pkgRoot);
-      for (const lit of repoRelativeLiterals(src)) {
+      // Two rosters, one filter. The flat literals are what an author WROTE in
+      // one quoted piece; the reconstructed ones are what the recognised path
+      // expressions RESOLVE to — the reads that hold a radius without ever
+      // spelling it (#9763). A reconstructed directory counts only when a
+      // directory-listing read consumed it; everything else must name a file.
+      const roster = [
+        ...[...repoRelativeLiterals(src), ...scan.files].map((p) => [p, 'file']),
+        ...[...scan.dirs].map((p) => [p, 'dir']),
+      ];
+      for (const [lit, kind] of roster) {
         // Paths inside the package's own directory are already covered by
         // `$TURBO_DEFAULT$` and by the package's own affected-set membership.
         if (lit === own || lit.startsWith(`${own}/`)) continue;
-        // Only literals naming a real FILE count. Test sources are full of
-        // synthetic fixture paths (`packages/a/src/x.ts`) and of directory
-        // prefixes used to build a path or phrase a message; neither is an
-        // input, and requiring a glob to cover them would force declarations
-        // wider than the truth.
-        let isFile = false;
+        // Only paths naming a real file — or a real directory a directory-read
+        // consumed — count. Test sources are full of synthetic fixture paths
+        // (`packages/a/src/x.ts`) and of directory prefixes used to build a path
+        // or phrase a message; neither is an input, and requiring a glob to
+        // cover them would force declarations wider than the truth.
+        let real = false;
         try {
-          isFile = statSync(join(REPO_ROOT, lit)).isFile();
+          const st = statSync(join(REPO_ROOT, lit));
+          real = kind === 'dir' ? st.isDirectory() : st.isFile();
         } catch {
-          isFile = false;
+          real = false;
         }
-        if (!isFile) continue;
+        if (!real) continue;
+        if (kind === 'dir') entry.dirEntries.add(lit);
         if (!entry.literals.has(lit)) entry.literals.set(lit, rel);
       }
     }
@@ -705,12 +900,16 @@ function verify() {
   for (const [name, { globs }] of Object.entries(CROSS_PACKAGE_TEST_INPUTS)) {
     const info = escaping.get(name);
     if (!info) continue;
-    const uncovered = [...info.literals].filter(([lit]) => !matchesAny(lit, globs));
+    const uncovered = [...info.literals].filter(([lit]) =>
+      info.dirEntries.has(lit) ? !coversDirectory(lit, globs) : !matchesAny(lit, globs),
+    );
     if (uncovered.length) {
       problems.push(
         `${name} names path(s) no declared glob covers, so a change to them would not\n` +
           `    re-run its tests:\n` +
-          uncovered.map(([lit, test]) => `      ${lit}   (named in ${test})`).join('\n') +
+          uncovered
+            .map(([lit, test]) => `      ${lit}${info.dirEntries.has(lit) ? '/   (listed in ' : '   (named in '}${test})`)
+            .join('\n') +
           `\n    Widen the package's globs to cover them.`,
       );
     }
@@ -982,6 +1181,159 @@ function selfTest() {
     'does NOT flag the bare file expression itself (it names its own file)',
     !at("const SELF = fileURLToPath(import.meta.url);\nconst C = readFileSync(SELF, 'utf8');", 2),
   );
+
+  // ── The radius roster, reconstructed rather than quoted (#9763) ────────────
+  //
+  // Everything above asks "does this escape?"; everything below asks "WHICH
+  // FILE?" — the question the flat literal regex could only answer when an
+  // author happened to write the whole repo-relative path inside one pair of
+  // quotes. Where it could not, the roster fell back to whatever prose in the
+  // same file HAPPENED to be quoted, so an innocent comment edit could unforce
+  // a live declaration and a following narrowing would pass in silence.
+  //
+  // Each case below pins one spelling by the repo-relative name it must
+  // produce, because a case asserting only "some path came out" would pass just
+  // as happily on a wrong one, and a wrong name is a roster entry pointing at a
+  // file nobody reads.
+  const named = (src, depth, fileSegs) => [...scanPathExpressions(src, depth, fileSegs).files];
+  const listed = (src, depth, fileSegs) => [...scanPathExpressions(src, depth, fileSegs).dirs];
+  // `packages/create-objectstack/src/x.test.ts` — depth 1 below its package root.
+  const CO = ['packages', 'create-objectstack', 'src', 'x.test.ts'];
+
+  ok(
+    'reconstructs a path split across join() arguments (create-objectstack -> the stamper)',
+    named(
+      "const pkgRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');\n" +
+        "const repoRoot = path.resolve(pkgRoot, '..', '..');\n" +
+        "const SYNC = path.join(repoRoot, 'scripts', 'sync-template-versions.mjs');",
+      1,
+      CO,
+    ).includes('scripts/sync-template-versions.mjs'),
+  );
+  ok(
+    'reconstructs an ascent-relative literal (metadata-protocol -> the durability gate)',
+    named(
+      "const S = readFileSync(new URL('../../../scripts/check-durability-degradation-log-level.mjs', import.meta.url), 'utf8');",
+      1,
+      ['packages', 'metadata-protocol', 'src', 'x.test.ts'],
+    ).includes('scripts/check-durability-degradation-log-level.mjs'),
+  );
+  ok(
+    'reconstructs an ascent-relative literal off an __dirname seed (spec -> the error catalog)',
+    named("const P = resolve(__dirname, '../../../../content/docs/api/error-catalog.mdx');", 3, [
+      'packages',
+      'spec',
+      'src',
+      'api',
+      'x.test.ts',
+    ]).includes('content/docs/api/error-catalog.mdx'),
+  );
+  ok(
+    'reconstructs a path under a top-level dir the flat regex does not list (formula -> skills/)',
+    named(
+      "const here = dirname(fileURLToPath(import.meta.url));\n" +
+        "const SKILL = resolve(here, '../../../skills/objectstack-formula/SKILL.md');",
+      1,
+      ['packages', 'formula', 'src', 'x.test.ts'],
+    ).includes('skills/objectstack-formula/SKILL.md'),
+  );
+  ok(
+    'a directory handed to readdirSync is rostered as a DIRECTORY (spec -> packages/lint/src)',
+    listed(
+      "const HERE = dirname(fileURLToPath(import.meta.url));\n" +
+        "const REPO_ROOT = resolve(HERE, '../../../..');\n" +
+        "const LINT_SRC = join(REPO_ROOT, 'packages', 'lint', 'src');\n" +
+        'const names = readdirSync(LINT_SRC);',
+      2,
+      ['packages', 'spec', 'src', 'identity', 'x.test.ts'],
+    ).includes('packages/lint/src'),
+  );
+  // The other half of the same rule, and the one that keeps the file-only
+  // filter honest: a directory reached but never LISTED is a prefix used to
+  // build a path, not an input. `@objectstack/downstream-contract` spells
+  // exactly this — `resolve(PACKAGE_DIR, '..', '..', 'spec', 'src')` feeds a
+  // `relative()` comparison and a `resolve(SPEC_SRC, '..', 'package.json')`, so
+  // what the roster must take is the package.json, never the directory.
+  ok(
+    'a directory reached but never listed is NOT rostered as a directory',
+    listed(
+      "const HERE = dirname(fileURLToPath(import.meta.url));\n" +
+        "const PACKAGE_DIR = resolve(HERE, '..');\n" +
+        "const SPEC_SRC = resolve(PACKAGE_DIR, '..', '..', 'spec', 'src');\n" +
+        "const PKG = readFileSync(resolve(SPEC_SRC, '..', 'package.json'), 'utf8');",
+      1,
+      ['packages', 'qa', 'downstream-contract', 'test', 'x.test.ts'],
+    ).length === 0,
+  );
+  ok(
+    'and the file that prefix BUILDS is rostered',
+    named(
+      "const HERE = dirname(fileURLToPath(import.meta.url));\n" +
+        "const PACKAGE_DIR = resolve(HERE, '..');\n" +
+        "const SPEC_SRC = resolve(PACKAGE_DIR, '..', '..', 'spec', 'src');\n" +
+        "const PKG = readFileSync(resolve(SPEC_SRC, '..', 'package.json'), 'utf8');",
+      1,
+      ['packages', 'qa', 'downstream-contract', 'test', 'x.test.ts'],
+    ).includes('packages/spec/package.json'),
+  );
+  // The trade in `walkLiteral`: an argument the scan cannot read must cost the
+  // NAME, never invent one. Both directions pinned, because dropping either
+  // half is a silent regression -- inventing a name puts a file nobody reads on
+  // the roster, and keeping the depth is what preserves the escape verdict.
+  // (Intermediate bindings that DO resolve still yield their own names; what
+  // must not appear is a name for the expression the unreadable argument sits
+  // in, which is the only one that would be a fabrication.)
+  ok(
+    'an unreadable join() argument yields no name for the path it builds',
+    !named(
+      "const HERE = dirname(fileURLToPath(import.meta.url));\n" +
+        "const ROOT = resolve(HERE, '../../..');\n" +
+        "const P = join(ROOT, someVariable, 'x.ts');",
+      1,
+      CO,
+    ).some((p) => p.endsWith('x.ts')),
+  );
+  ok(
+    'but it still flags the escape (the depth walk is unchanged)',
+    at(
+      "const HERE = dirname(fileURLToPath(import.meta.url));\n" +
+        "const ROOT = resolve(HERE, '../../..');\n" +
+        "const P = join(ROOT, someVariable, 'x.ts');",
+      1,
+    ),
+  );
+  ok(
+    'a climb ABOVE the repo root yields no name (there is no repo-relative one)',
+    named("const OUT = resolve(__dirname, '../../../../../../elsewhere/x.ts');", 1, CO).length === 0,
+  );
+  ok(
+    'a vendored path is never rostered (no glob can declare an installed dep)',
+    !named(
+      "const HERE = dirname(fileURLToPath(import.meta.url));\nconst L = resolve(HERE, '../../../node_modules/tsx/dist/loader.mjs');",
+      1,
+      CO,
+    ).some((p) => p.includes('node_modules')),
+  );
+  ok(
+    'without a file seed the walk still answers on depth alone (--self-test above)',
+    named("const P = resolve(__dirname, '../../scripts/x.mjs');", 1, null).length === 0 &&
+      at("const P = resolve(__dirname, '../../scripts/x.mjs');", 1),
+  );
+
+  // The `skills/` prefix -- the one spelling of #9763 that is a DATA fix in the
+  // flat collector rather than a reconstruction, kept pinned on both sides so a
+  // future trim of the alternation cannot pass.
+  ok('the flat collector sees a quoted skills/ path', repoRelativeLiterals("const S = 'skills/objectstack-formula/SKILL.md';").has('skills/objectstack-formula/SKILL.md'));
+  ok('and still sees the prefixes it always did', repoRelativeLiterals("const S = 'packages/lint/src/x.ts';").has('packages/lint/src/x.ts'));
+  ok('a path under an undeclared top-level dir is still not collected flat', !repoRelativeLiterals("const S = 'node_modules/x/y.ts';").size);
+
+  // Directory coverage. `**` globs are written to match FILES, so the bare
+  // directory string does not match its own subtree glob -- which is why a
+  // rostered directory needs `coversDirectory` and not `matchesAny`.
+  ok('a subtree glob does NOT match the bare directory it covers', !matchesAny('packages/lint/src', ['packages/lint/src/**']));
+  ok('but it DOES cover that directory as a listing', coversDirectory('packages/lint/src', ['packages/lint/src/**']));
+  ok('a single-file glob does not cover the directory it sits in', !coversDirectory('scripts', ['scripts/check-nul-bytes.mjs']));
+  ok('a directory that does not exist is covered by nothing', !coversDirectory('scripts/no-such-dir-9763', ['**']));
 
   const failed = cases.filter((c) => !c.cond);
   for (const c of cases) console.log(`${c.cond ? 'ok  ' : 'FAIL'} ${c.label}`);
