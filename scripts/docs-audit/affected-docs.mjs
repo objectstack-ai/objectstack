@@ -289,6 +289,23 @@ const REGISTRAR_FILE_RE = /(?:^|\/)(?:[\w.-]*route[\w.-]*|[\w.-]*-server)\.ts$/;
 /** Route LEDGERS — the declared `route` ⟷ `client` tables the `sdk` anchor rides on. */
 const LEDGER_FILE_RE = /(?:^|\/)[\w.-]*route-ledger\.ts$/;
 
+/**
+ * THE selection rule of the `sdk` bridge, defined once: a registrar tail selects a ledger
+ * row when the row's wire path ends with it (the `GET ` prefix is stripped first, which
+ * a suffix test does not need but a reader does). PHASE 2 bridges with this exact test.
+ *
+ * ⛔ Never restate it at a call site. `bridgeCoverageFrom` counts the unreachable rows and
+ * `--bridge-coverage --json` enumerates them, and a second copy of the rule lets the list
+ * disagree with the count it is supposed to be the detail of — the machine-readable half
+ * of this report is the source a ratchet would read, so a silent disagreement there is the
+ * same class of defect the report exists to end. Same reasoning that split `scanRouteSurface`
+ * out rather than walking `packages/**` twice (#4851).
+ */
+const selectsFrom = (tails) => {
+  const tailList = [...tails];
+  return (route) => tailList.some((t) => route.replace(/^[A-Z*]+\s+/, '').endsWith(t));
+};
+
 /** How far past a `path:` line a registrar's handler body is scanned for identifiers. */
 const REGISTRAR_HANDLER_WINDOW = 150;
 
@@ -506,8 +523,7 @@ if (args.includes('--self-test')) {
 if (args.includes('--bridge-coverage')) {
   const { registrarFiles, ledgers, registrarByTail } = scanRouteSurface();
   const coverage = bridgeCoverageFrom(ledgers, registrarByTail.keys());
-  const tails = [...registrarByTail.keys()];
-  const selects = (route) => tails.some((t) => route.replace(/^[A-Z*]+\s+/, '').endsWith(t));
+  const selects = selectsFrom(registrarByTail.keys());
   if (asJson) {
     process.stdout.write(JSON.stringify({
       ...coverage,
@@ -1105,9 +1121,10 @@ function parseRegistrarSource(text) {
  */
 function bridgeCoverageFrom(ledgers, tails) {
   const tailList = [...tails];
-  // The same suffix test PHASE 2 bridges with, so this cannot drift from what it measures:
-  // a tail selects a row when the row's wire path ends with it (`GET ` prefix stripped).
-  const selects = (route) => tailList.some((t) => route.replace(/^[A-Z*]+\s+/, '').endsWith(t));
+  // The same suffix test PHASE 2 bridges with and the same one `--bridge-coverage --json`
+  // enumerates with, taken from the single definition beside `LEDGER_FILE_RE` so this
+  // cannot drift from either what it measures or the row list it is the count of.
+  const selects = selectsFrom(tailList);
   const byLedger = [];
   let clientRows = 0;
   let reachable = 0;
@@ -1126,7 +1143,7 @@ function bridgeCoverageFrom(ledgers, tails) {
   //
   // ⛔ NOT here, deliberately: "a ledger with zero CLIENT-bound rows". Two of today's
   // seven ledgers (`datasource-route-ledger.ts`, `settings-route-ledger.ts`) are wholly
-  // `server-only` by design — 15 rows, no client binding — so that shape is a correct
+  // `server-only` by design — 16 rows, no client binding — so that shape is a correct
   // answer, and pinning it would be a false red on an accurate ledger.
   const brokenScan = [];
   if (!ledgers.length) brokenScan.push('no route-ledger file was found at all — the ledger walk selected nothing, so every `sdk` anchor is silently unavailable');
@@ -2096,6 +2113,18 @@ function selfTest() {
   const serverOnly = bridgeCoverageFrom([{ file: 'c-route-ledger.ts', rows: [{ route: 'GET /api/v1/datasources', client: null }] }], ['/x/:y']);
   check('bridgeCoverageFrom', 'an all-server-only ledger is accurate, not broken', 'brokenScan', 0, serverOnly.brokenScan.length);
 
+  // The selection rule itself, pinned once — both the count and the row list read it, so a
+  // change here moves them together or fails here.
+  const selects1 = selectsFrom(['/:type/:name/audit', '/:type/:name/history']);
+  const selectCases = [
+    ['a tail the row ends with selects it', true, selects1('GET /api/v1/meta/:type/:name/audit')],
+    ['the method prefix does not defeat the suffix test', true, selects1('DELETE /api/v1/meta/:type/:name/history')],
+    ['a row no tail ends is not selected', false, selects1('POST /api/v1/auth/sign-in/email')],
+    ['a PREFIX match is not a selection — the rule is a suffix test', false, selects1('GET /:type/:name/audit/entries')],
+    ['no tails at all selects nothing', false, selectsFrom([])('GET /api/v1/meta/:type/:name/audit')],
+  ];
+  for (const [label, want, got] of selectCases) check('selectsFrom', label, 'route', want, got);
+
   // PRESENCE, not merely shape. The field is worth nothing unless it reaches the JSON
   // the workflow renders, and a rename or a dropped line there returns the comment to
   // the unnamed-tree state this field exists to end — with every pin above still green.
@@ -2114,6 +2143,13 @@ function selfTest() {
   })();
   check('emit', 'the drift comment RENDERS `bridgeCoverage` — an unrendered key is half-wired (#9433)', 'docs-drift-check.yml',
     true, driftWorkflow === null || /data\.bridgeCoverage/.test(driftWorkflow));
+  // `unreachableRows` is the detail of `unreachable`, and the only way it can contradict
+  // that count is by deriving selection a second time. Pinned at the source, because the
+  // two agreeing today is what a re-statement costs nothing to break tomorrow.
+  check('emit', 'the --json row list selects through `selectsFrom`, not a second copy of the rule', 'affected-docs.mjs',
+    true, /const selects = selectsFrom\(registrarByTail\.keys\(\)\);/.test(ownSource));
+  check('emit', 'and nothing else restates the suffix test inline', 'affected-docs.mjs',
+    1, (ownSource.match(/\.some\(\(t\) => route\.replace\(/g) || []).length);
 
   if (failed) {
     console.error(`\n✗ affected-docs self-test failed (${failed} case(s)).`);
