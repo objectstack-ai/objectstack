@@ -607,6 +607,22 @@ describe('validateSecurityPosture · book audience (ADR-0046 §6.7 / ADR-0090)',
     });
   });
 
+  it('the D3 reason rule is scoped to sys_user_position — `delegated_from` is retired from sys_user_permission_set (#9730)', () => {
+    // Maintainer ruling 2026-08-18 (ADR-0049 enforce-or-remove, REMOVE): the
+    // runtime delegation gate never read `delegated_from` on
+    // `sys_user_permission_set`, so this rule was that column's ONLY
+    // enforcement — authoring-advisory security. The column no longer exists
+    // on that object; a seed row still carrying the key is refused by the
+    // engine's schema preflight (400 INVALID_FIELD), not re-linted here as if
+    // the column were still declared. D2 (valid_until) still covers this
+    // object — asserted by the unparseable-valid_until case above.
+    const findings = validateSecurityPosture(
+      { data: [{ object: 'sys_user_permission_set', records: [{ user_id: 'u1', permission_set_id: 'ps1', delegated_from: 'u2' }] }] },
+      { nowMs: NOW },
+    );
+    expect(findings.filter((f) => f.rule === SECURITY_DELEGATION_MISSING_REASON)).toEqual([]);
+  });
+
   it('stays silent on unbounded grants and non-grant seed objects', () => {
     expect(
       validateSecurityPosture(
@@ -998,7 +1014,11 @@ const REACHABILITY_CORPUS: Array<{ label: string; stack: Record<string, unknown>
   },
   {
     label: 'delegation-missing-reason',
-    stack: { data: [{ object: 'sys_user_permission_set', records: [{ user_id: 'u1', permission_set: 'ps', delegated_from: 'u2' }] }] },
+    // sys_user_position, NOT sys_user_permission_set: `delegated_from` was
+    // retired from the permission-set table (#9730), and the D3 branch is
+    // scoped to the position table with it — a permission-set fixture can no
+    // longer reach this push site at all.
+    stack: { data: [{ object: 'sys_user_position', records: [{ user_id: 'u1', position: 'approver', delegated_from: 'u2' }] }] },
   },
 ];
 

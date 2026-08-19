@@ -583,7 +583,19 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
   // Both rules mirror runtime enforcement (D2 resolution-time filtering; the
   // D3 delegation gate), per the ADR-0049 "no advisory security" discipline:
   // the lint moves the failure from silent-dead-grant to author-time fix-it.
+  // The two rules deliberately do NOT share one object scope: D2 covers both
+  // grant tables (`valid_until` is declared and resolution-enforced on both),
+  // while D3 is scoped to `sys_user_position` only — `delegated_from` was
+  // RETIRED from `sys_user_permission_set` (#9730, maintainer ruling
+  // 2026-08-18, ADR-0049 enforce-or-remove: the runtime delegation gate is
+  // structurally scoped to the position table, so on the permission-set table
+  // this rule was the column's ONLY enforcement — authoring-advisory security
+  // on a column no runtime consumer read). A seed row that still carries the
+  // key there is refused by the engine's schema preflight (400 INVALID_FIELD)
+  // as an undeclared field, which is louder and located; linting the retired
+  // key here again would imply the column still exists.
   const GRANT_SEED_OBJECTS = new Set(['sys_user_position', 'sys_user_permission_set']);
+  const DELEGATION_SEED_OBJECTS = new Set(['sys_user_position']);
   const nowMs = opts?.nowMs ?? Date.now();
   for (const [i, seed] of asArray(stack.data).entries()) {
     const seedObject = typeof seed.object === 'string' ? seed.object : '';
@@ -624,9 +636,10 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
       }
 
       // D3: delegation rows (delegated_from set) MUST carry a reason — the
-      // dual-audit half the runtime gate also rejects.
+      // dual-audit half the runtime gate also rejects. Position table only:
+      // `delegated_from` is not declared on `sys_user_permission_set` (#9730).
       const delegatedFrom = rec.delegated_from;
-      if (delegatedFrom != null && delegatedFrom !== '') {
+      if (DELEGATION_SEED_OBJECTS.has(seedObject) && delegatedFrom != null && delegatedFrom !== '') {
         const reason = rec.reason;
         if (typeof reason !== 'string' || reason.trim().length === 0) {
           findings.push({

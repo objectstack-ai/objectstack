@@ -323,10 +323,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Reason",
         help: "[ADR-0091 D1] Why this grant exists. Free text; REQUIRED on delegation (D3) and break-glass (D4) rows. Agent grants carry the task/run attribution here (D6)."
       },
-      delegated_from: {
-        label: "Delegated From",
-        help: "[ADR-0091 D3] The delegator whose authority this row carries. A row with delegated_from set is not itself delegatable and not self-renewable."
-      },
       last_certified_at: {
         label: "Last Certified At",
         help: "[ADR-0091 D5] Reserved for a future access-recertification workflow, which would stamp here when this grant was last attested. Inert today: no platform code writes this column and none reads it — no resolution path, gate or lint consults it, and nothing derives \"never certified\" or \"certification stale\" from it. Null therefore means the workflow does not exist, not that this grant went unreviewed."
