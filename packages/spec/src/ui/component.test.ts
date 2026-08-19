@@ -269,6 +269,58 @@ describe('PageAccordionProps variant (#6776)', () => {
   });
 });
 
+// #9881 — the accept-pin for `page:accordion` items[].icon, a key a liveness
+// sweep once read as declared-but-unenforced. It has a live cross-repo consumer:
+// objectui's `PageAccordionRenderer` renders `{item.icon && <LazyIcon
+// name={item.icon} …/>}` inside the `AccordionTrigger`
+// (`packages/components/src/renderers/layout/containers.tsx:851-853`), and the
+// same file's `ComponentRegistry.register('accordion', …)` publishes the key to
+// the Studio block designer at `:898` (the `items` input, documented as
+// `[{ label, icon?, collapsed?, children }]`). Measured at the pin this repo
+// builds against — `.objectui-sha` = 82a94170c.
+//
+// #9397 spent a full dispatch cycle re-deriving that read point from scratch
+// after the sweep proposed retiring the key. This block plus the `.describe()`
+// it pins are what stop the next sweep repeating it: the liveness verdict is
+// now readable from the spec side alone, with no cross-repo hunt.
+describe('PageAccordionProps items[].icon liveness (#9881)', () => {
+  const accordion = ComponentPropsMap['page:accordion'];
+
+  it('accepts an icon on a panel item — the value objectui LazyIcon renders in the trigger', () => {
+    const result = accordion.safeParse({
+      items: [{ label: 'Details', icon: 'circle-alert', children: [] }],
+    });
+    expect(result.success).toBe(true);
+    const items = (result.success ? result.data : undefined) as
+      | { items: { icon?: string }[] }
+      | undefined;
+    // Carried through to the parsed output, not stripped: what the renderer
+    // reads is what an author writes.
+    expect(items?.items[0]?.icon).toBe('circle-alert');
+  });
+
+  it('still refuses an undeclared sibling on the same item — the accept above is not vacuous', () => {
+    // Without this the green above would also be green on a schema that had
+    // stopped being strict, which is the failure mode an accept-pin exists to
+    // exclude.
+    const result = accordion.safeParse({
+      items: [{ label: 'Details', iconName: 'circle-alert', children: [] }],
+    });
+    expect(result.success).toBe(false);
+    expect(JSON.stringify(result.error?.issues)).toContain('unrecognized_keys');
+  });
+
+  it('keeps a `.describe()` that names the consumer, so the read point survives a rename', () => {
+    // The describe is the artifact an auditor reads instead of hunting across
+    // repos; deleting it is what re-opens the false candidate, so it is pinned
+    // rather than left to review.
+    const itemShape = (PageAccordionProps as unknown as {
+      def: { shape: { items: { def: { element: { def: { shape: Record<string, { description?: string }> } } } } } };
+    }).def.shape.items.def.element.def.shape;
+    expect(itemShape.icon?.description).toContain('LazyIcon');
+  });
+});
+
 // #5775 — the two tab-item keys the renderer honours and the schema did not
 // declare. `value` is the load-bearing one: it is the `?tab=` token, and the
 // index-derived fallback (`tab-<i>`) silently points at a different tab as soon
