@@ -41,6 +41,13 @@ This chapter documents the runtime `services.*` APIs used in hook/action/flow/pl
 | `stable` | Backward-compatible within a major version |
 | `experimental` | API is available but may change in minor releases |
 
+These two labels are the whole vocabulary. The same list is written out again as
+[Stability Labels](/docs/kernel/runtime-services/versioning), and
+`scripts/check-runtime-services-index.mjs` holds both legends — and every page's
+**Stability** bullet — to one definition, so a page cannot publish a label neither legend
+defines. Adding a label means extending that definition in the same change that says what
+it promises, in both places.
+
 ## Source of Truth
 
 Each page links the canonical TypeScript source used to derive signatures.
