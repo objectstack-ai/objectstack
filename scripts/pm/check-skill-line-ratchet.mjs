@@ -65,6 +65,11 @@ export const CEILINGS = new Map([
   ['.claude/skills/checklist-author/SKILL.md', 61],
   ['.claude/skills/dogfood-verification/SKILL.md', 155],
   ['.claude/skills/spec-property-retirement/SKILL.md', 328],
+  // #9792: root AGENTS.md is the largest, most-read, most binding instruction
+  // file in the repo and had no ceiling — the hole the oversized 39-line
+  // read-layer clause (compacted by #9715) entered through. Set at its line
+  // count on `origin/main` after #9715 landed (headroom 0, same convention).
+  ['AGENTS.md', 958],
 ]);
 
 export function verdict(rel, lineCount, maxLines) {
@@ -126,6 +131,7 @@ function selfTest() {
     ['the dev-agent definition is covered', CEILINGS.has('.claude/agents/os-dev.md'), true],
     ['all five compressed references are covered', ['dispatch-runbook', 'platform-readings', 'review-checklist', 'landing-operations', 'seat-post-protocol'].every((n) => CEILINGS.has(`.claude/skills/pm-dispatch/references/${n}.md`)), true],
     ['the other four skills are covered (#9473)', ['checklist-test', 'checklist-author', 'dogfood-verification', 'spec-property-retirement'].every((n) => CEILINGS.has(`.claude/skills/${n}/SKILL.md`)), true],
+    ['root AGENTS.md is covered (#9792)', CEILINGS.has('AGENTS.md'), true],
   ];
   let failed = 0;
   for (const [name, actual, expected] of cases) {
