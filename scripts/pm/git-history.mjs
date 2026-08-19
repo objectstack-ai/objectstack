@@ -228,6 +228,19 @@ function windowArgs({ since, until }) {
   return args;
 }
 
+/**
+ * The date of the newest commit on `ref`. Depth is only half the question: a ref
+ * that is merely STALE answers "commits in the last month" just as wrongly and
+ * just as silently. Measured while building this: a depth-63 fixture whose
+ * origin/main stopped at 2026-08-16 answered 2902 for the month to 2026-08-19,
+ * and 2902 is the exactly correct answer for that ref. Nothing about the number
+ * says the ref stopped three days early, so the tip travels in the receipt.
+ */
+export function refTip(cwd, ref) {
+  const out = git(['log', '-1', '--format=%cI', ref], { cwd, allowFail: true });
+  return out === null ? 'unknown' : out.trim().slice(0, 10);
+}
+
 export function describeFloor(boundaries) {
   if (!boundaries || boundaries.length === 0) return 'unknown';
   return new Date(Math.max(...boundaries)).toISOString().slice(0, 10);
@@ -327,7 +340,7 @@ function main(argv) {
     `${opts.firstParent ? ' --first-parent' : ''} ${opts.ref} since ${String(since).slice(0, 10)}` +
     `${opts.until ? ` until ${opts.until}` : ''}` +
     `${opts.paths.length ? ` -- ${opts.paths.join(' ')}` : ''}` +
-    ` · floor ${describeFloor(ensured.boundaries)} · ${ensured.steps.join(' · ')}`;
+    ` · floor ${describeFloor(ensured.boundaries)} · tip ${refTip(cwd, opts.ref)} · ${ensured.steps.join(' · ')}`;
 
   if (cmd === 'ensure') {
     process.stderr.write(`✓ history covers the window — ${receipt}\n`);
@@ -449,6 +462,9 @@ function selfTest() {
       `got ${JSON.stringify(deepened.stdout)}`);
     t('and the receipt states the method beside the number',
       /method: git rev-list --count --first-parent/.test(deepened.stderr || ''), deepened.stderr);
+    t('and the receipt carries the ref TIP as well as the floor, so a stale ref is legible '
+      + 'in the pasted method line (depth is only half the question)',
+      /floor \d{4}-\d{2}-\d{2} · tip \d{4}-\d{2}-\d{2}/.test(deepened.stderr || ''), deepened.stderr);
 
     // A shallow clone deep enough for the asked window answers with NO fetch.
     const shallowDeep = join(root, 'shallow-deep');
