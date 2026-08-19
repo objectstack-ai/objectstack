@@ -315,6 +315,15 @@ export const SysOauthApplication = ObjectSchema.create({
       group: 'Credentials',
     }),
 
+    // Added with the stable `@better-auth/oauth-provider` 1.7 line (#3002).
+    client_discovery_id: Field.text({
+      label: 'Client Discovery ID',
+      required: false,
+      maxLength: 255,
+      description: 'Opaque identifier the provider uses to look this client up on the discovery path, kept apart from the public `client_id`',
+      group: 'Credentials',
+    }),
+
     client_secret: Field.text({
       label: 'Client Secret',
       required: false,
@@ -342,6 +351,11 @@ export const SysOauthApplication = ObjectSchema.create({
       group: 'Credentials',
     }),
 
+    // Upstream's `applicationType` (OIDC `application_type`) maps onto this
+    // column — `1.7.0-rc.2` called the field `type`, stable 1.7 renamed it
+    // (#3002). The column keeps its name and its data; the rename is absorbed
+    // by the `applicationType: 'type'` mapping in plugin-auth's
+    // `auth-schema-config.ts`.
     type: Field.select(['web', 'native', 'user-agent-based', 'public'], {
       label: 'Client Type',
       required: false,
@@ -388,6 +402,18 @@ export const SysOauthApplication = ObjectSchema.create({
       label: 'Allowed Scopes',
       required: false,
       description: 'JSON-serialized list of scopes the client may request',
+      group: 'Credentials',
+    }),
+
+    // Added with the stable `@better-auth/oauth-provider` 1.7 line (#3002).
+    // The plugin writes these two through the adapter, so without the
+    // declarations a client registration answers 500 at the driver — the
+    // failure mode `oauth-provider-schema-parity.test.ts` exists to catch.
+    client_credentials_scopes: Field.textarea({
+      label: 'Client-Credentials Scopes',
+      required: false,
+      description:
+        'JSON-serialized list of scopes the client may request on the client_credentials grant, where there is no user to consent — kept apart from `scopes`, which governs user-delegated grants',
       group: 'Credentials',
     }),
 

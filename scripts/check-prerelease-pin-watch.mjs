@@ -18,9 +18,12 @@
 //
 //     revert to a stable `^1.7.x` line the moment one ships.
 //
-// Two issues are gated on exactly that event — #3002 (revert the family to a
-// stable `^1.7.x`) and #3653 (the SCIM migration, which #3653 explicitly defers
-// until `@better-auth/scim` ships a non-rc release). Neither had a PRODUCER:
+// Two issues were gated on exactly that event — #3002 (revert the family to a
+// stable `^1.7.x`, done: the family is on `^1.7.1` and only `@better-auth/scim`
+// is still pinned to a prerelease) and #3653 (the SCIM migration, which #3653
+// explicitly defers until `@better-auth/scim` ships a non-rc release — it has,
+// and it ships the rc.2 rewrite, so #3653 is now the live card). Neither had a
+// PRODUCER:
 // nothing anywhere watched npm, so redeeming the promise depended on somebody
 // remembering to look. That is the repo's standard `declared != enforced` shape,
 // applied to a promise in a comment — and every extra day on a prerelease is
@@ -28,7 +31,7 @@
 // commitment.
 //
 // This is the producer. It is a WATCHER, not a fixer: it never edits a pin. Its
-// entire job is to make the trigger condition of #3002 / #3653 arrive as an
+// entire job is to make the trigger condition of those cards arrive as an
 // automatic signal within a day of the release, instead of as a memory.
 //
 // THE WATCH LIST IS DERIVED, NOT DECLARED
@@ -60,7 +63,7 @@
 // Two shapes of hit are reported apart, because the remedy differs:
 //
 //   in-line   a stable release inside the pinned line (`1.7.x`) — the exact
-//             trigger #3002 / #3653 wrote down. Mechanical: move the pin.
+//             trigger those cards wrote down. Mechanical: move the pin.
 //   later     a stable release only in a HIGHER line (`1.8.0`+) while the
 //             pinned line never stabilized. Also gets us off the prerelease,
 //             but crossing a minor is a decision, not a bump. Reported as its
@@ -75,7 +78,7 @@
 // thing it was built to replace:
 //
 //   0  WAITING    every watched pin was read; no stable release yet. Quiet.
-//   1  AVAILABLE  a stable release exists. Loud; names #3002 / #3653.
+//   1  AVAILABLE  a stable release exists. Loud; names the follow-up card.
 //   2  UNKNOWN    at least one registry read failed; no hit among the rest.
 //
 // Exit 2 is deliberately NOT exit 1. Unlike `check:objectui-pin-fresh` — a
@@ -137,19 +140,24 @@ const FOLLOW_UPS = [
     // stable release triggers a migration rather than a bump — rc.2 replaced the
     // whole SCIM model set, so #3653 defers the work to the stable release.
     match: /^@better-auth\/scim$/,
-    issues: ['#3002', '#3653'],
+    issues: ['#3653'],
     note:
       'SCIM is a MIGRATION, not a bump (#3653): rc.2 replaced the model set and moved ' +
-      'connections from runtime rows to boot config. Do the migration against the STABLE ' +
-      'models — do not "align" this pin with the family first.',
+      'connections from runtime rows to boot config, and the STABLE 1.7 releases ship that ' +
+      'same rewrite (measured on the 1.7.1 tarball: no scimProvider model, no generate-token ' +
+      'endpoint, all six new models present). Do the migration against the stable models — ' +
+      'do not "align" this pin with the family first. #3002 moved the REST of the family to ' +
+      'stable ^1.7.1 and left this pin behind deliberately, so #3653 is the only card left.',
   },
   {
     match: /^(better-auth|@better-auth\/.+)$/,
-    issues: ['#3002'],
+    issues: ['#3653'],
     note:
       'The family moves together (mixing a 1.7 plugin with 1.6 core throws during init and ' +
-      "500s every auth endpoint). #3002 carries the action list; plugin-auth's own exact " +
-      'declarations must move in the same PR — `check:override-consistency` holds them to it.',
+      "500s every auth endpoint). plugin-auth's own declarations must move in the SAME PR — " +
+      '`check:override-consistency` holds them to it. The family is on stable `^1.7.1` since ' +
+      '#3002, so a family member showing up here again means a NEW prerelease pin was added; ' +
+      'read the pin\'s own comment in pnpm-workspace.yaml for why, and file a card for it.',
   },
 ];
 
@@ -606,14 +614,13 @@ function selfTest() {
       watch.find((w) => w.name === 'better-auth')?.base === '1.7.0',
   );
   check(
-    'scim carries BOTH follow-up issues (#3002 and #3653)',
-    ['#3002', '#3653'].every((i) =>
-      watch.find((w) => w.name === '@better-auth/scim').followUp.issues.includes(i),
-    ),
+    'scim carries the migration card (#3653) and names it a MIGRATION',
+    watch.find((w) => w.name === '@better-auth/scim').followUp.issues.join() === '#3653' &&
+      watch.find((w) => w.name === '@better-auth/scim').followUp.note.includes('MIGRATION'),
   );
   check(
-    'the rest of the family carries #3002',
-    watch.find((w) => w.name === 'better-auth').followUp.issues.join() === '#3002',
+    'the rest of the family carries a follow-up card too',
+    watch.find((w) => w.name === 'better-auth').followUp.issues.join() === '#3653',
   );
   check(
     'a prerelease pin with no declared follow-up is watched anyway (unmapped is legal)',
@@ -686,7 +693,7 @@ function selfTest() {
 
   // --- 5. the reports say what they must ----------------------------------
   const hitText = render(evaluate([judge(entry, { versions: ['1.7.0'], distTags: {} })]));
-  check('the AVAILABLE report names #3002', hitText.includes('#3002'), hitText);
+  check('the AVAILABLE report names its follow-up card', hitText.includes('#3653'), hitText);
   check(
     'the AVAILABLE report names the remedy (revert to ^1.7.x)',
     hitText.includes('^1.7.x'),
@@ -792,7 +799,7 @@ function selfTest() {
     check('CLI exits 1 when a stable release exists', hitRun.code === 1, `code ${hitRun.code}`);
     check(
       'the hit run emits ::error:: naming the follow-up issue',
-      hitRun.out.includes('::error::') && hitRun.out.includes('#3002'),
+      hitRun.out.includes('::error::') && hitRun.out.includes('#3653'),
       hitRun.out,
     );
 
@@ -843,7 +850,7 @@ function selfTest() {
       'JSON carries the verdict, the per-package rows and the issue list',
       parsed.verdict === 'available' &&
         parsed.packages.length === 3 &&
-        parsed.issues.join(',') === '#3002,#3653',
+        parsed.issues.join(',') === '#3653',
       jsonRun.stdout,
     );
     check(

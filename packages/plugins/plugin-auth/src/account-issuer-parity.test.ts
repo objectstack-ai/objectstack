@@ -10,7 +10,7 @@ import { backfillAccountIssuer, oauthIssuerFor } from './backfill-account-issuer
 /**
  * Account-issuer parity gate.
  *
- * better-auth 1.7 keys every account on `(issuer, providerAccountId)`, and the
+ * better-auth 1.7 keys every account on `(issuer, accountId)`, and the
  * issuer is the PROVIDER's to declare: `resolveOAuthAccountKey` takes
  * `provider.accountIssuer` when there is one and synthesizes
  * `local:oauth:<id>` only when there is not. A boot-time backfill that stamps a

@@ -314,6 +314,13 @@ export const BETTER_AUTH_MOUNTED_SURFACE: readonly string[] = [
   'POST /api/v1/auth/oauth2/create-client',
   'POST /api/v1/auth/oauth2/delete-client',
   'POST /api/v1/auth/oauth2/delete-consent',
+  // RP-initiated logout, POST form (OIDC RP-Initiated Logout §3). Added by the
+  // stable 1.7 line (#3002) as the POST counterpart of the already-mounted
+  // `GET /api/v1/auth/oauth2/end-session`, plus its confirmation step. Same
+  // handler and same gating as the GET — the confirm step is what stops a
+  // cross-site GET from silently ending a session.
+  'POST /api/v1/auth/oauth2/end-session',
+  'POST /api/v1/auth/oauth2/end-session/confirm',
   'POST /api/v1/auth/oauth2/introspect',
   'POST /api/v1/auth/oauth2/public-client-prelogin',
   'POST /api/v1/auth/oauth2/register',

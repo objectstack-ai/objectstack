@@ -843,7 +843,7 @@ export class AuthPlugin implements Plugin {
       await this.maybeSeedDevAdmin(ctx);
     });
 
-    // better-auth 1.7 resolves every account by (issuer, providerAccountId).
+    // better-auth 1.7 resolves every account by (issuer, accountId).
     // Rows written before the upgrade have no issuer and are therefore
     // invisible to sign-in, so stamp them once at boot. Idempotent: a database
     // whose rows already carry the right issuer costs one empty query.

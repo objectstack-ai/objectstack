@@ -2788,10 +2788,14 @@ export class ObjectStackClient {
         return { accounts: accounts as Array<{
           id: string;
           providerId: string;
-          /** Authority that vouched for `providerAccountId` — an OIDC issuer, or `local:…`. */
+          /** Authority that vouched for `accountId` — an OIDC issuer, or `local:…`. */
           issuer: string;
-          /** The user's id at the provider — better-auth 1.7 renamed this from `accountId`. */
-          providerAccountId: string;
+          /**
+           * The user's id at the provider. `1.7.0-rc.2` briefly published this
+           * as `providerAccountId`; stable 1.7 answers with `accountId` again
+           * (#3002), which is what this route returns today.
+           */
+          accountId: string;
           createdAt?: string;
           updatedAt?: string;
         }> };

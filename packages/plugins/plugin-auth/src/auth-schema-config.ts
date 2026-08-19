@@ -88,7 +88,7 @@ export const AUTH_SESSION_CONFIG = {
  * | userId                    | user_id                        |
  * | providerId                | provider_id                    |
  * | issuer                    | issuer                         |
- * | providerAccountId         | account_id                     |
+ * | accountId                 | account_id                     |
  * | accessToken               | access_token                   |
  * | refreshToken              | refresh_token                  |
  * | idToken                   | id_token                       |
@@ -97,19 +97,30 @@ export const AUTH_SESSION_CONFIG = {
  * | createdAt                 | created_at                     |
  * | updatedAt                 | updated_at                     |
  *
- * better-auth 1.7.0-rc.2 restructured account identity: the field formerly
- * called `accountId` is now `providerAccountId`, and a new REQUIRED `issuer`
- * names the authority that vouched for that id. Every account lookup keys on
- * (issuer, providerAccountId) — `findAccountByKey` / `findAccountOwnerByKey`
+ * better-auth 1.7 restructured account identity by adding a REQUIRED `issuer`
+ * naming the authority that vouched for the account id. Every account lookup
+ * keys on (issuer, accountId) — `findAccountByKey` / `findAccountOwnerByKey`
  * filter on `issuer` — so an unmapped or unstamped `issuer` means sign-in
  * finds no account at all.
  *
- * `providerAccountId` keeps the existing `account_id` column: same value,
- * renamed upstream, so no data moves. `issuer` is a new column, stamped on
- * legacy rows by backfillAccountIssuer() at boot (see backfill-account-issuer.ts)
- * with the synthetic issuers better-auth mints itself: `local:credential` for
- * password accounts and `local:oauth:<providerId>` for OAuth providers that
- * carry no issuer of their own.
+ * ⚠️ THE FIELD NAME FLIP-FLOPPED ACROSS THE 1.7 PRE-RELEASES, so read it off
+ * the installed version, never off memory. `1.7.0-rc.2` renamed `accountId` →
+ * `providerAccountId`; **stable `1.7.0`/`1.7.1` renamed it BACK to
+ * `accountId`** while keeping `issuer`. Measured on the installed 1.7.1:
+ * `getAuthTables({}).account.fields` is
+ * `issuer, accountId, providerId, userId, …` — no `providerAccountId` at all.
+ * Carrying the rc.2 spelling into the stable line left `accountId` unmapped,
+ * so the adapter asked for a column named `accountId` and every sign-up
+ * answered 500 `Unknown field 'accountId' on object 'sys_account'` (#3002).
+ * `better-auth-schema-parity.test.ts` is the gate that catches exactly this.
+ *
+ * `accountId` keeps the existing `account_id` column: same value throughout
+ * the rename round-trip, so no data ever moved. `issuer` is a new column,
+ * stamped on legacy rows by backfillAccountIssuer() at boot (see
+ * backfill-account-issuer.ts) with the synthetic issuers better-auth mints
+ * itself: `local:credential` for password accounts and
+ * `local:oauth:<providerId>` for OAuth providers that carry no issuer of
+ * their own.
  */
 export const AUTH_ACCOUNT_CONFIG = {
   modelName: SystemObjectName.ACCOUNT, // 'sys_account'
@@ -117,7 +128,7 @@ export const AUTH_ACCOUNT_CONFIG = {
     userId: 'user_id',
     providerId: 'provider_id',
     issuer: 'issuer',
-    providerAccountId: 'account_id',
+    accountId: 'account_id',
     accessToken: 'access_token',
     refreshToken: 'refresh_token',
     idToken: 'id_token',
@@ -430,6 +441,9 @@ export const AUTH_PHONE_NUMBER_USER_FIELDS = {
  * |:---------------------------|:--------------------------------|
  * | clientId                   | client_id                       |
  * | clientSecret               | client_secret                   |
+ * | clientDiscoveryId          | client_discovery_id             |
+ * | clientCredentialsScopes    | client_credentials_scopes       |
+ * | applicationType            | type                            |
  * | skipConsent                | skip_consent                    |
  * | enableEndSession           | enable_end_session              |
  * | subjectType                | subject_type                    |
@@ -450,12 +464,31 @@ export const AUTH_PHONE_NUMBER_USER_FIELDS = {
  * | backchannelLogoutUri       | backchannel_logout_uri          |
  * | backchannelLogoutSessionRequired | backchannel_logout_session_required |
  * | dpopBoundAccessTokens      | dpop_bound_access_tokens        |
+ *
+ * The last three rows arrived with the stable 1.7 line (#3002), and two of
+ * them are new columns rather than renames:
+ *
+ *   - `applicationType` is the OIDC `application_type` and is the stable
+ *     spelling of the field `1.7.0-rc.2` called `type` — it maps onto the
+ *     EXISTING `type` column, so no data moves and the column keeps its
+ *     meaning. Left unmapped it resolves to a column named `applicationType`,
+ *     which `sys_oauth_application` does not have.
+ *   - `clientDiscoveryId` and `clientCredentialsScopes` are genuinely new
+ *     upstream fields; both are declared on `sys_oauth_application`.
+ *
+ * `oauth-provider-schema-parity.test.ts` is the gate: it resolves every model
+ * field the way the adapter does (`field.fieldName ?? key`) and fails when the
+ * resolved column is not declared. A camelCase name in its failure output
+ * means the mapping is missing, not just the column.
  */
 export const AUTH_OAUTH_CLIENT_SCHEMA = {
   modelName: SystemObjectName.OAUTH_APPLICATION, // 'sys_oauth_application'
   fields: {
     clientId: 'client_id',
     clientSecret: 'client_secret',
+    clientDiscoveryId: 'client_discovery_id',
+    clientCredentialsScopes: 'client_credentials_scopes',
+    applicationType: 'type',
     skipConsent: 'skip_consent',
     enableEndSession: 'enable_end_session',
     subjectType: 'subject_type',

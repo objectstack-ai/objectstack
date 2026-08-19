@@ -62,13 +62,17 @@ export interface AuthContextLike {
       userId: string;
       providerId: string;
       /**
-       * better-auth 1.7 keys accounts on (issuer, providerAccountId) and
-       * requires both. A local password account carries the synthetic issuer
+       * better-auth 1.7 keys accounts on (issuer, accountId) and requires
+       * both. A local password account carries the synthetic issuer
        * better-auth mints for itself, `local:credential` — write anything else
        * and the row exists but no sign-in ever finds it.
+       *
+       * `accountId` is the STABLE 1.7 spelling. `1.7.0-rc.2` briefly called it
+       * `providerAccountId` and stable 1.7.0 renamed it back (#3002); the
+       * rc.2 spelling here would have created accounts with no account id.
        */
       issuer: string;
-      providerAccountId: string;
+      accountId: string;
       password: string;
     }): Promise<unknown>;
   };
@@ -579,7 +583,7 @@ export async function runAdminSetUserPassword(
         userId,
         providerId: 'credential',
         issuer: CREDENTIAL_ISSUER,
-        providerAccountId: userId,
+        accountId: userId,
         password: hashed,
       });
     }

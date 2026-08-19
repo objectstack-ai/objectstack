@@ -23,7 +23,7 @@
 // ## The non-obvious half this file pins
 //
 // A password hash is not enough. better-auth 1.7 keys account identity on
-// `(issuer, providerAccountId)`, so a credential row whose `issuer` is not the
+// `(issuer, accountId)`, so a credential row whose `issuer` is not the
 // local credential issuer is invisible to `findAccountByKey` — sign-in then
 // fails `INVALID_EMAIL_OR_PASSWORD` behind a "User not found" warn that points
 // at the `sys_user` row, which is fine, instead of at the account, which is not.
