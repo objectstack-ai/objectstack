@@ -879,6 +879,7 @@ describe('ApprovalService (node era)', () => {
       },
     };
     const req = await svc.openNodeRequest(input, CTX);
+    if ('autoApproved' in req) throw new Error('expected a pending request, not an auto-approve outcome');
     expect(req.pending_approvers).toEqual(['u1']);
   });
 
