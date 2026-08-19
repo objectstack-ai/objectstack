@@ -94,14 +94,88 @@ const REMOTE: IntrospectedSchema = {
   },
 };
 
-/** The credential the admin spelling's authentication floor admits (#9391). */
+/**
+ * The credential every request-shape case presents: authenticated (#9391) AND
+ * holding `manage_platform_settings`, which the admin spelling requires as of
+ * #9593.
+ *
+ * The entitlement is not decoration. Before #9593 the admin spelling admitted
+ * any authenticated caller, so a bare session was enough to compare the two
+ * answers; now an unentitled session makes the admin spelling answer 403 and
+ * every case below would be comparing a 200 against a refusal — reading an
+ * ADMISSION difference as a request-shape divergence, the one thing this file
+ * exists not to confuse (the same reason #9391 made it wire `auth` at all).
+ */
 const SESSION = 'Bearer twin-session';
+
+/**
+ * [#9593] A second credential: authenticated, holding nothing. This is the
+ * posture on which the two spellings now genuinely DIVERGE, and the divergence
+ * gets its own pinned case at the bottom of this file rather than being
+ * papered over here.
+ */
+const UNENTITLED_SESSION = 'Bearer twin-session-unentitled';
+
+const USERS: Record<string, string> = {
+  [SESSION]: 'u_twin',
+  [UNENTITLED_SESSION]: 'u_twin_plain',
+};
+
 const authService = {
   api: {
-    getSession: async ({ headers }: { headers: Headers }) =>
-      headers?.get?.('authorization') === SESSION ? { user: { id: 'u_twin' } } : null,
+    getSession: async ({ headers }: { headers: Headers }) => {
+      const id = USERS[headers?.get?.('authorization') ?? ''];
+      return id ? { user: { id } } : null;
+    },
   },
 };
+
+/** The permission set carrying the grant `u_twin` holds and `u_twin_plain` does not. */
+const GRANT_SET_ID = 'ps_twin_datasource_operator';
+
+/**
+ * The RBAC tables `resolveAuthzContext` reads, as a fake data engine — the
+ * same idiom this package's other authz fixtures use
+ * (`rest-exec-ctx-principal-kind.test.ts`), and the same four-table shape the
+ * admin family's own pin builds in `@objectstack/service-datasource`.
+ *
+ * ONE engine serves BOTH spellings: it is wired into the plugin context the
+ * admin registrar resolves `objectql` from, and handed to the
+ * `resolveAuthzContext` call behind the federation registrar's
+ * `resolveExecutionContext`. That is deliberate and load-bearing — the two
+ * spellings must read one identity AND one grant aggregation, or this file
+ * could manufacture agreement (or disagreement) out of two different notions of
+ * who the caller is.
+ *
+ * The set is deliberately not `admin_full_access`: that platform set carries
+ * `manage_platform_settings` among six other capabilities, so a gate keyed on
+ * platform-admin posture rather than on the capability would pass unnoticed.
+ */
+const makeQl = () => ({
+  find: async (object: string, opts: any) => {
+    const where = opts?.where ?? {};
+    if (object === 'sys_user_permission_set') {
+      return where.user_id === 'u_twin'
+        ? [{ id: 'ups_twin', user_id: 'u_twin', permission_set_id: GRANT_SET_ID, organization_id: null }]
+        : [];
+    }
+    if (object === 'sys_permission_set') {
+      const ids: string[] = where.id?.$in ?? [];
+      return ids.includes(GRANT_SET_ID)
+        ? [{
+            id: GRANT_SET_ID,
+            name: 'twin_datasource_operator',
+            // JSON string — the spelling SQLite hands back, which the resolver
+            // parses. Pinning the stored shape keeps the fixture on the real
+            // read path.
+            system_permissions: JSON.stringify(['manage_platform_settings']),
+            object_permissions: '{}',
+          }]
+        : [];
+    }
+    return [];
+  },
+});
 
 /**
  * One server, one service, both registrars — the point of the fixture.
@@ -119,6 +193,7 @@ function mountBoth() {
     listObjects: async () => [],
   });
   const server = new HonoHttpServer(0);
+  const ql = makeQl();
   const ctx = {
     getService: (name: string) => {
       if (name === 'external-datasource') return service;
@@ -128,6 +203,12 @@ function mountBoth() {
       // compare a 200 against a 401 and read the difference as a request-shape
       // divergence — which is the one thing it exists NOT to confuse.
       if (name === 'auth') return authService;
+      // [#9593] …and the admin spelling now also requires a CAPABILITY, which
+      // the same resolver aggregates off the data engine. Same reasoning one
+      // step further: without a grant to read, the comparison would be a 200
+      // against a 403. `objectql` and `data` are one registration under two
+      // names, and the registrar tries them in that order.
+      if (name === 'objectql' || name === 'data') return ql;
       throw new Error(`no service: ${name}`);
     },
   } as any;
@@ -153,15 +234,24 @@ function mountBoth() {
       }
     }
     const authz = await resolveAuthzContext({
-      // No data engine here, stated rather than omitted: `ql` is a required
-      // member, and it is what the api-key admission path reads. This fixture
-      // wires only a session, so that path resolves nothing and the session
-      // path is the one under comparison.
-      ql: undefined,
+      // [#9593] The SAME engine the admin spelling resolves `objectql` to,
+      // stated rather than omitted. It used to be `undefined` here, which was
+      // right while only a session mattered; now that one spelling reads
+      // GRANTS, handing this side a different (or absent) engine would let the
+      // two spellings disagree about the caller for a reason that is the
+      // fixture's, not the code's. One identity function, and now one grant
+      // aggregation.
+      ql,
       headers,
       getSession: async (h: any) => authService.api.getSession({ headers: h }),
     });
-    return authz.userId ? { userId: authz.userId } : undefined;
+    // `systemPermissions` is carried through even though no route in this
+    // package reads it today: the federation spelling gates on authentication
+    // only (see the divergence case at the bottom of this file), and the day
+    // that changes, this resolver already supplies what such a gate would read.
+    return authz.userId
+      ? { userId: authz.userId, systemPermissions: authz.systemPermissions }
+      : undefined;
   };
 
   registerExternalDatasourceRoutes(server, ctx, '/api/v1', { resolveExecutionContext });
@@ -294,8 +384,30 @@ describe('listRemoteTables twins agree on the request shape (#7955)', () => {
  * answers, exactly as the request-shape cases compare table sets. A guard added
  * to one spelling and not the other now fails here, whichever side it is added
  * to — which is the property the equivalence is for.
+ *
+ * ## [#9593] The axis is no longer a single line, and this block says so
+ *
+ * #9593 raised the ADMIN spelling from "any authenticated caller" to
+ * `manage_platform_settings`; the federation spelling still gates on
+ * authentication alone, by its own registrar's stated decision (#9686 ruled
+ * the capability question out of its scope and pointed it here). So the
+ * spellings now agree at the two ends of the axis and diverge in the middle:
+ *
+ *  - anonymous — both refuse `401 UNAUTHENTICATED` (unchanged);
+ *  - unrecognised credential — both refuse `401 UNAUTHENTICATED` (unchanged);
+ *  - authenticated AND entitled — both serve, identically (unchanged);
+ *  - authenticated but UNENTITLED — the admin spelling refuses `403`, the
+ *    federation spelling serves.
+ *
+ * The last row is a real governance asymmetry — one operation, two doors, one
+ * gate — and it is FILED, not accepted: #9901. It is pinned here rather than left unasserted for the reason this
+ * whole block exists: an axis nothing drives is an axis that goes silently
+ * false, which is exactly how the pre-#9686 gap survived. ⚠️ When the
+ * federation spelling grows its own capability gate, that case is EXPECTED to
+ * fail — it is a record of a known gap, not a defence of it, and the correct
+ * response is to fold the row back into the agreement above.
  */
-describe('listRemoteTables twins agree on WHO may ask (#9686)', () => {
+describe('listRemoteTables twins agree on WHO may ask (#9686, #9593)', () => {
   it('an anonymous caller is refused identically on both spellings', async () => {
     const { federation, admin } = await readBoth('', {});
 
@@ -319,13 +431,44 @@ describe('listRemoteTables twins agree on WHO may ask (#9686)', () => {
     expect(admin.code).toBe(federation.code);
   });
 
-  it('the credential that clears one spelling clears the other — same identity, same answer', async () => {
+  it('an ENTITLED credential clears both spellings — same identity, same answer', async () => {
     // The other direction, and the one that makes the refusal cases mean
     // something: the two spellings do not agree merely by refusing everyone.
+    // "Entitled" is now two facts (authenticated, and holding
+    // `manage_platform_settings`), and the default credential carries both.
     const { federation, admin } = await readBoth('?schema=public');
 
     expect(federation.status).toBe(200);
     expect(admin.status).toBe(200);
     expect(qualified(admin)).toEqual(qualified(federation));
+  });
+
+  it('[#9593] an authenticated but UNENTITLED caller diverges: admin refuses 403, federation serves', async () => {
+    // ⚠️ A pinned RECORD OF A KNOWN GAP, not a contract worth keeping — see
+    // this block's header and the finding card #9901. The two
+    // halves are asserted separately and in full so that closing the gap
+    // fails this case loudly instead of drifting past it.
+    const { federation, admin } = await readBoth('', { authorization: UNENTITLED_SESSION });
+
+    // The admin spelling: the #9593 refusal, asserted by status AND
+    // machine-readable code (ADR-0112 envelope) — "not 200" would be satisfied
+    // by the 401 the anonymous case already covers, which would mean the
+    // credential was never read.
+    expect(admin.status).toBe(403);
+    expect(admin.code).toBe('PERMISSION_DENIED');
+    // …and it refused before serving anything.
+    expect(admin.tables).toEqual([]);
+
+    // The federation spelling: authentication was the whole gate here, so the
+    // same caller is served. This is the asymmetry, stated rather than implied.
+    expect(federation.status).toBe(200);
+    expect(qualified(federation)).toEqual([
+      'analytics.events',
+      'public.customers',
+      'public.orders',
+    ]);
+
+    // And it is genuinely a divergence — the point the equivalence axis makes.
+    expect(admin.status).not.toBe(federation.status);
   });
 });
