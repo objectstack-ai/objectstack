@@ -84,7 +84,18 @@
 // rewrites — and an export that answered the narrower question while being
 // named for the wider one would seed the next restatement.
 
-import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import {
+  readFileSync,
+  writeFileSync,
+  readdirSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  utimesSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 
@@ -360,10 +371,358 @@ function main() {
 
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// ## `--self-test` (#9348) — THE RED PATHS, WHICH NOTHING ELSE EXECUTES
+//
+// The card behind this flag argued that the rewriter's LOGIC is executed by no
+// gate, ever: the ratchets in `template-consistency.test.ts` judge the committed
+// OUTPUT, and on a green corpus a working rewriter and a broken one produce
+// identical (empty) results. #9648 answered half of that by adding
+// `packages/create-objectstack/src/template-version-stamps.test.ts`, which runs
+// this CLI over a STALE two-template fixture and asserts the rewrites. Two
+// measured gaps survive it, and this flag is scoped to exactly those two —
+// re-asserting what that vitest file already owns would be worse than one
+// harness, not better.
+//
+// GAP 1 — SCHEDULING. `create-objectstack#test` is reached only from ci.yml's
+// `test` job, and that job is `if: ... needs.filter.outputs.core != 'false'`.
+// The `core` paths-filter is `packages/**`, `examples/**`, `apps/!(docs)/**`,
+// `package.json`, `pnpm-lock.yaml`, `tsconfig.json`, `.github/workflows/ci.yml`
+// — `scripts/**` matches NONE of them. Measured on this tree (picomatch 4.0.5,
+// the matcher dorny/paths-filter uses): a diff confined to this file yields
+// `core=false`, so Test Core is skipped in full and the vitest never runs, on
+// precisely the PR that changes the rewriter. Two further layers were measured
+// and neither rescues it: `turbo ls --affected` returns ZERO packages for that
+// diff (a package-local edit returns 1, so the probe is live) — the
+// `$TURBO_ROOT$` entry in `turbo.json` moves the task HASH, which is a
+// different thing — and the `--union-into` step that does pull
+// `create-objectstack` back in lives INSIDE the skipped job. lint.yml carries
+// no paths filter and no filter job, so a step there runs on every pull
+// request, push and merge-queue build. That is the whole of this flag's job.
+//
+// GAP 2 — THE RED PATHS. Every failure contract this script's header argues for
+// is unexecuted. The vitest fixture is deliberately STALE and asserts the
+// rewrite; nothing anywhere observes a CLEAN corpus left byte-identical and
+// UNWRITTEN (#9064's lint.yml comment calls that "the control that matters just
+// as much", because an over-eager rewriter corrupts silently), and nothing
+// reaches the `problems` collection at all — the missing stamp, the missing
+// file, the unparseable package.json, the zero-@objectstack/* template, or
+// `main()`'s own vacuous-green guard. `stampedPaths()`'s empty-set THROW is
+// covered by #9648; `main()`'s guard is a separate code path and was not.
+//
+// ⛔ Deliberately NOT re-asserted here, because #9648 owns them: the STALE ->
+// rewritten direction, the two-template discovery walk, `stampedPaths()` being
+// derived rather than restated, the entry-point guard, and
+// `loadScaffolderVersion()` throwing instead of exiting.
+//
+// The cases run the REAL CLI in a child process, because every one of them is
+// an EXIT-CODE case and `main()` exits. The fixture is a copy of this file two
+// levels above a template tree: `root` is resolved from the script's own
+// location, deliberately, so cwd cannot redirect it and a copy is the only way
+// to point it at a fixture.
+
+/** The scaffolder version every fixture declares — never a live one, so a stamp that ran is unmistakable. */
+const SELF_TEST_VERSION = '42.0.0';
+
+/**
+ * Fixture file bodies, keyed by `TEXT_STAMPS[].key` rather than by file name.
+ *
+ * Keyed that way so the coverage assertion below can be exhaustive: a fourth
+ * stamp row added to `TEXT_STAMPS` with no body here fails the self-test
+ * loudly, instead of silently sitting outside every fixture — which is the
+ * one-key-one-file blind spot (#9264) reappearing in the test harness.
+ */
+const SELF_TEST_BODIES = {
+  'engines.protocol': (major) =>
+    `export default defineStack({ manifest: { engines: { protocol: '^${major}' } } });\n`,
+  specVersion: (major) => `{\n  "specVersion": "^${major}.0.0",\n  "scaffold": { "variables": [] }\n}\n`,
+};
+
+function writeFixtureFile(file, contents) {
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, contents);
+}
+
+/**
+ * A throwaway checkout shaped like this repo, IN LOCKSTEP unless `major` says
+ * otherwise. Returns the path of the copied script to run.
+ */
+function buildFixture(dir, { templates = ['blank', 'second'], major = '42' } = {}) {
+  const script = join(dir, 'scripts', 'sync-template-versions.mjs');
+  writeFixtureFile(script, readFileSync(fileURLToPath(import.meta.url), 'utf8'));
+  writeFixtureFile(
+    join(dir, VERSION_SOURCE),
+    JSON.stringify({ name: 'create-objectstack', version: SELF_TEST_VERSION }, null, 2) + '\n',
+  );
+  // Created even when `templates` is empty: the vacuous-green guard is about an
+  // EMPTY templates directory, not a missing one.
+  mkdirSync(join(dir, TEMPLATE_DIR), { recursive: true });
+  for (const template of templates) {
+    const templateDir = join(dir, TEMPLATE_DIR, template);
+    writeFixtureFile(
+      join(templateDir, TEMPLATE_PKG_FILE),
+      JSON.stringify(
+        {
+          name: `template-${template}`,
+          dependencies: { '@objectstack/spec': `^${major}.0.0`, chalk: '^6.0.0' },
+          devDependencies: { '@objectstack/cli': `^${major}.0.0` },
+        },
+        null,
+        2,
+      ) + '\n',
+    );
+    for (const stamp of TEXT_STAMPS) {
+      writeFixtureFile(join(templateDir, stamp.file), SELF_TEST_BODIES[stamp.key](major));
+    }
+  }
+  return script;
+}
+
+/** Every surface of a fixture, absolute. */
+function fixtureSurfaces(dir, templates = ['blank', 'second']) {
+  return templates.flatMap((template) =>
+    [TEMPLATE_PKG_FILE, ...TEXT_STAMPS.map((s) => s.file)].map((file) =>
+      join(dir, TEMPLATE_DIR, template, file),
+    ),
+  );
+}
+
+function runFixture(script) {
+  const result = spawnSync(process.execPath, [script], { encoding: 'utf8' });
+  return { status: result.status, output: `${result.stdout ?? ''}${result.stderr ?? ''}` };
+}
+
+function selfTest() {
+  const failures = [];
+  let checked = 0;
+  const assert = (condition, message) => {
+    checked++;
+    if (!condition) failures.push(message);
+  };
+
+  const scratch = mkdtempSync(join(tmpdir(), 'sync-template-versions-selftest-'));
+  const fixtureDir = (name) => {
+    const dir = join(scratch, name);
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  };
+
+  try {
+    // ── Control G: the fixture table covers every declared stamp ────────────
+    assert(
+      TEXT_STAMPS.length > 0 && TEXT_STAMPS.every((stamp) => typeof SELF_TEST_BODIES[stamp.key] === 'function'),
+      'every TEXT_STAMPS row has a fixture body, so a newly declared stamp cannot sit outside every case here — ' +
+        `missing: ${JSON.stringify(TEXT_STAMPS.filter((s) => !SELF_TEST_BODIES[s.key]).map((s) => s.key))}`,
+    );
+
+    // ── Control A: a CLEAN corpus is REACHED, and left byte-identical and UNWRITTEN ──
+    //
+    // The over-eagerness control, and the one direction a live run can never
+    // demonstrate. Byte-identity alone would be satisfied by a script that
+    // never opened the files, so the log is asserted too: an in-lockstep run
+    // must REPORT every surface it judged. mtimes are backdated first, because
+    // rewriting a file with identical bytes is still a write — and a version
+    // pass that rewrites clean files churns the release diff.
+    {
+      const dir = fixtureDir('clean');
+      const script = buildFixture(dir);
+
+      assert(
+        readFileSync(script, 'utf8') === readFileSync(fileURLToPath(import.meta.url), 'utf8'),
+        'the fixture runs a byte-identical copy of THIS file, not a truncated one',
+      );
+
+      const surfaces = fixtureSurfaces(dir);
+      const backdated = new Date(Date.now() - 60_000);
+      for (const file of surfaces) utimesSync(file, backdated, backdated);
+      const before = surfaces.map((file) => ({
+        file,
+        text: readFileSync(file, 'utf8'),
+        mtimeMs: statSync(file).mtimeMs,
+      }));
+
+      const { status, output } = runFixture(script);
+      assert(status === 0, `an in-lockstep corpus exits 0 — got ${status}\n${output}`);
+
+      for (const template of ['blank', 'second']) {
+        assert(
+          output.includes(`${template}/${TEMPLATE_PKG_FILE} already pins`),
+          `the run REACHED ${template}/${TEMPLATE_PKG_FILE} and judged it already in lockstep`,
+        );
+        for (const stamp of TEXT_STAMPS) {
+          assert(
+            output.includes(`${template}/${stamp.file} already stamps ${stamp.key}`),
+            `the run REACHED ${template}/${stamp.file} and judged ${stamp.key} already correct`,
+          );
+        }
+      }
+
+      for (const snapshot of before) {
+        const rel = relative(dir, snapshot.file);
+        assert(
+          readFileSync(snapshot.file, 'utf8') === snapshot.text,
+          `${rel} is byte-identical after a clean run`,
+        );
+        assert(
+          statSync(snapshot.file).mtimeMs === snapshot.mtimeMs,
+          `${rel} was not WRITTEN at all on a clean run (an over-eager rewriter churns every release diff)`,
+        );
+      }
+    }
+
+    // ── Control B: a MISSING stamp is a hard failure naming the path ────────
+    //
+    // The #9264 contract, executed. `pattern.test()` runs BEFORE the replace so
+    // that "key absent" and "value already correct" stay distinct — both leave
+    // the string unchanged and only one of them is fine. This is the assertion
+    // that tells a rewriter which has STOPPED REWRITING from one with nothing
+    // to do, which is the observation the card was filed about.
+    {
+      const dir = fixtureDir('missing-stamp');
+      const script = buildFixture(dir);
+      const stamp = TEXT_STAMPS.find((s) => s.key === 'specVersion');
+      writeFixtureFile(
+        join(dir, TEMPLATE_DIR, 'second', stamp.file),
+        '{\n  "scaffold": { "variables": [] }\n}\n',
+      );
+
+      const { status, output } = runFixture(script);
+      assert(status === 1, `a template with no ${stamp.key} stamp exits 1 — got ${status}\n${output}`);
+      assert(
+        output.includes(`${TEMPLATE_DIR}/second/${stamp.file}`),
+        `the failure names the offending path\n${output}`,
+      );
+      assert(output.includes(stamp.key), `the failure names the missing key\n${output}`);
+      assert(
+        output.includes(`blank/${stamp.file} already stamps`),
+        `one bad template does not abort the walk — blank is still judged\n${output}`,
+      );
+    }
+
+    // ── Control C: ONE run names EVERY unstamped surface ────────────────────
+    //
+    // Problems are COLLECTED, not thrown at the first hit. A run that named
+    // only the first would send a release engineer round the loop once per
+    // broken surface, and this is the only place that contract is observed.
+    {
+      const dir = fixtureDir('all-problems');
+      const script = buildFixture(dir);
+      const broken = [];
+      for (const template of ['blank', 'second']) {
+        for (const stamp of TEXT_STAMPS) {
+          writeFixtureFile(join(dir, TEMPLATE_DIR, template, stamp.file), 'nothing to stamp here\n');
+          broken.push(`${TEMPLATE_DIR}/${template}/${stamp.file}`);
+        }
+      }
+
+      const { status, output } = runFixture(script);
+      assert(status === 1, `four unstamped surfaces exit 1 — got ${status}\n${output}`);
+      assert(
+        output.includes(`${broken.length} unstamped surface(s)`),
+        `the run counts all ${broken.length} problems in one pass\n${output}`,
+      );
+      for (const path of broken) {
+        assert(output.includes(path), `the failure names ${path}\n${output}`);
+      }
+    }
+
+    // ── Control D: a template with no @objectstack/* dependency exits 1 ─────
+    //
+    // Zero matches is the silent-skip shape: it reads exactly like "already in
+    // lockstep" and means the opposite.
+    {
+      const dir = fixtureDir('no-stack-deps');
+      const script = buildFixture(dir);
+      writeFixtureFile(
+        join(dir, TEMPLATE_DIR, 'blank', TEMPLATE_PKG_FILE),
+        JSON.stringify({ name: 'template-blank', dependencies: { chalk: '^6.0.0' } }, null, 2) + '\n',
+      );
+
+      const { status, output } = runFixture(script);
+      assert(status === 1, `a template declaring no @objectstack/* dependency exits 1 — got ${status}\n${output}`);
+      assert(
+        output.includes(`${TEMPLATE_DIR}/blank/${TEMPLATE_PKG_FILE}`) &&
+          output.includes('declares no @objectstack/* dependency'),
+        `the failure names the path and the reason\n${output}`,
+      );
+    }
+
+    // ── Control E: a stamp FILE that does not exist exits 1 naming it ───────
+    {
+      const dir = fixtureDir('missing-file');
+      const script = buildFixture(dir);
+      const stamp = TEXT_STAMPS.find((s) => s.key === 'engines.protocol');
+      rmSync(join(dir, TEMPLATE_DIR, 'second', stamp.file));
+
+      const { status, output } = runFixture(script);
+      assert(status === 1, `a missing ${stamp.file} exits 1 — got ${status}\n${output}`);
+      assert(
+        output.includes(`${TEMPLATE_DIR}/second/${stamp.file}`) && output.includes(stamp.key),
+        `the failure names the unreadable file and the key it carries\n${output}`,
+      );
+    }
+
+    // ── Control F: an unparseable template package.json exits 1 naming it ───
+    {
+      const dir = fixtureDir('bad-json');
+      const script = buildFixture(dir);
+      writeFixtureFile(join(dir, TEMPLATE_DIR, 'blank', TEMPLATE_PKG_FILE), '{ not json\n');
+
+      const { status, output } = runFixture(script);
+      assert(status === 1, `an unparseable template package.json exits 1 — got ${status}\n${output}`);
+      assert(
+        output.includes(`${TEMPLATE_DIR}/blank/${TEMPLATE_PKG_FILE}`) && output.includes('could not be read as JSON'),
+        `the failure names the unreadable package.json\n${output}`,
+      );
+    }
+
+    // ── Control H: zero templates refuses a vacuous green ───────────────────
+    //
+    // `main()`'s own guard, which is a DIFFERENT code path from the throw in
+    // `stampedPaths()` that #9648 covers: this one is the run refusing to
+    // report success after rewriting nothing.
+    {
+      const dir = fixtureDir('no-templates');
+      const script = buildFixture(dir, { templates: [] });
+
+      const { status, output } = runFixture(script);
+      assert(status === 1, `an empty templates directory exits 1 — got ${status}\n${output}`);
+      assert(
+        output.includes('no template directories'),
+        `the failure says the directory is empty rather than reporting a sync\n${output}`,
+      );
+      assert(
+        !output.includes('in lockstep with create-objectstack@'),
+        `a run that stamped nothing must not print the success line\n${output}`,
+      );
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+
+  if (failures.length > 0) {
+    console.error(`\n✗ sync-template-versions --self-test — ${failures.length} failure(s)\n`);
+    for (const failure of failures) console.error(`  • ${failure}`);
+    process.exit(1);
+  }
+  console.log(
+    `✓ sync-template-versions --self-test: ${checked} assertions over temp fixtures, running the real CLI. ` +
+      'A CLEAN corpus is observed REACHED, byte-identical and UNWRITTEN; a missing stamp, a missing file, an ' +
+      'unparseable package.json, a template with no @objectstack/* dependency and an empty templates directory ' +
+      'are each observed exiting 1 and naming the path; and one run is observed naming EVERY unstamped surface. ' +
+      'The STALE -> rewritten direction and the discovery walk belong to ' +
+      'packages/create-objectstack/src/template-version-stamps.test.ts and are deliberately not restated here.',
+  );
+}
+
 // Entry-point guard (#9554), the same one #9064 added to check-docs-image-tag.mjs
 // and for the same reason: this file is importable, and an import that rewrote
 // every bundled template as a side effect is strictly worse than the missing
 // export it was working around.
 if (resolve(process.argv[1] ?? '') === resolve(fileURLToPath(import.meta.url))) {
-  main();
+  if (process.argv.includes('--self-test')) {
+    selfTest();
+  } else {
+    main();
+  }
 }

@@ -482,6 +482,42 @@ jobs:
       - name: Docs image-tag version-time rewriter self-test
         run: pnpm check:docs-image-tag-sync
 
+      # #9348 — the same treatment for the OTHER version-time rewriter, and the
+      # scheduling gap that made it necessary after #9648 already added a vitest
+      # file which runs the CLI. `create-objectstack#test` is reachable only from
+      # ci.yml's `test` job, which is gated on the `core` paths-filter; `core` is
+      # `packages/**`, `examples/**`, `apps/!(docs)/**`, `package.json`,
+      # `pnpm-lock.yaml`, `tsconfig.json`, `.github/workflows/ci.yml` and matches
+      # no path under `scripts/`. Measured with picomatch 4.0.5 (the matcher
+      # dorny/paths-filter uses): a diff confined to
+      # scripts/sync-template-versions.mjs yields core=false, so Test Core is
+      # skipped ENTIRELY on the PR that changes the rewriter, and with it the
+      # vitest. The two layers that look like they cover it do not: `turbo ls
+      # --affected` returns ZERO packages for that diff (a package-local edit
+      # returns 1, so the probe is live) — turbo.json's `$TURBO_ROOT$` entry
+      # moves the task HASH, which is what stops a cached green on the merge
+      # queue, not what schedules the job — and the `--union-into` step that DOES
+      # pull create-objectstack back in is a step inside the skipped job. The
+      # queue build catches it, one merge late, as batch collateral; that is the
+      # failure shape check-cross-package-test-inputs.mjs's own ledger records
+      # twice.
+      #
+      # This workflow carries no paths filter and no filter job, so this step
+      # runs on every pull request, push and merge-queue build. That is the whole
+      # reason the flag exists rather than more cases in the vitest file.
+      #
+      # Only the --self-test runs here, for the same reason as the step above:
+      # the rewriter has nothing to do on a green corpus. The cases are scoped to
+      # what the vitest does NOT assert — a CLEAN corpus left byte-identical and
+      # UNWRITTEN, and every red path (missing stamp, missing file, unparseable
+      # package.json, a template with no @objectstack/* dependency, the empty
+      # templates directory) observed exiting 1 and naming the file. The STALE ->
+      # rewritten direction and the discovery walk stay in
+      # packages/create-objectstack/src/template-version-stamps.test.ts; two
+      # harnesses asserting the same thing would be worse than one.
+      - name: Template version-time rewriter self-test
+        run: pnpm check:template-version-sync
+
       # #4851: the docs-accuracy-audit workflow carries its default scope inline
       # (a workflow script runs in a vm with no filesystem, so it cannot enumerate
       # content/docs/ itself). Hand-kept, that list rotted in BOTH directions —
