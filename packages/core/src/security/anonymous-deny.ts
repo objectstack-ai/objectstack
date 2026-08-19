@@ -40,8 +40,9 @@ export const ANONYMOUS_DENY_CODE = 'UNAUTHENTICATED' as const;
 /** Human-facing message. */
 export const ANONYMOUS_DENY_MESSAGE = 'Authentication is required to access this endpoint.';
 /**
- * The **REST seam's** 401 body — flat `{ error, message }`. NOT the platform's
- * only one; see the two-envelope table below before you reuse this shape.
+ * The **REST seam's** 401 body — flat `{ error, code, message }`. NOT the
+ * platform's only one; see the two-envelope table below before you reuse this
+ * shape.
  *
  * Exactly one consumer writes it: `@objectstack/rest`'s `enforceAuth`
  * (`rest-server.ts` — `res.status(ANONYMOUS_DENY_STATUS).json(ANONYMOUS_DENY_BODY)`),
@@ -54,8 +55,11 @@ export const ANONYMOUS_DENY_MESSAGE = 'Authentication is required to access this
  * {@link ANONYMOUS_DENY_MESSAGE}). What differs is the **wrapper**:
  *
  *  - **REST seam** — `@objectstack/rest` `enforceAuth`, this constant, verbatim:
- *    `{ error: 'UNAUTHENTICATED', message: '…' }`. The code is the value of the
- *    top-level `error` key; there is no `success` key and no nesting.
+ *    `{ error: 'UNAUTHENTICATED', code: 'UNAUTHENTICATED', message: '…' }`.
+ *    The machine code lives in the top-level `code` key — the same documented
+ *    key every other REST error family answers (#9487, maintainer-ruled
+ *    ADDITIVE: `error` keeps carrying the code value it always has, so no
+ *    existing reader breaks). There is no `success` key and no nesting.
  *  - **Dispatcher seams** — the five runtime domains `domains/ai.ts`,
  *    `domains/meta.ts`, `domains/security.ts`, `domains/actions.ts` and
  *    `domains/automation.ts` do NOT use this constant. Each calls
@@ -67,7 +71,10 @@ export const ANONYMOUS_DENY_MESSAGE = 'Authentication is required to access this
  * (#4007) records the flat and wrapped envelopes as the two live ones, and
  * assigns retiring one of them to the envelope-convergence line (#3843 family).
  * Converging them is a breaking wire change; it is not this module's to make,
- * and this constant must not be read as if it had already happened.
+ * and this constant must not be read as if it had already happened. The #9487
+ * `code` key does NOT settle that question either way (ADR-0112 D5 stays
+ * open): it aligns the flat family to the `{ error, code }` shape the other
+ * flat REST error families already answer, without moving or removing a key.
  *
  * ## Reading this from a consumer (human or AI author)
  *
@@ -84,6 +91,7 @@ export const ANONYMOUS_DENY_MESSAGE = 'Authentication is required to access this
  */
 export const ANONYMOUS_DENY_BODY = {
   error: ANONYMOUS_DENY_CODE,
+  code: ANONYMOUS_DENY_CODE,
   message: ANONYMOUS_DENY_MESSAGE,
 } as const;
 
