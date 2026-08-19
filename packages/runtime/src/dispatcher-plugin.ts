@@ -261,12 +261,30 @@ function mountRouteOnServer(
                     }
                     res.end();
                 } else {
-                    // Fallback: collect events into array
-                    const events = [];
+                    // [#9936] Buffered fallback — the IHttpResponse contract's
+                    // own prescription (#3607, ADR-0076 OQ#10; the JSDoc on
+                    // `write` in packages/spec/src/contracts/http-server.ts):
+                    // a transport that omits the OPTIONAL `write`/`end`
+                    // streaming surface receives the SAME SSE bytes, buffered
+                    // and delivered through `send()` under the streaming
+                    // headers already set above. A caller that asked for a
+                    // stream parses this body with the same `data:`-line
+                    // reader, frame for frame — the encoding ternary below is
+                    // deliberately identical to the streamed branch's.
+                    //
+                    // This used to answer a bare `res.json({ events })`: a
+                    // JSON dialect of the same frames that no SSE reader could
+                    // decode (both shipped readers split raw bytes on
+                    // newlines, and a JSON body contains none), off
+                    // BaseResponseSchema besides. No shipped transport lacks
+                    // `write`/`end`, so this branch is live only for an
+                    // external `Runtime({ server })` transport — exactly the
+                    // composition the contract note anticipates.
+                    let buffered = '';
                     for await (const event of result.events) {
-                        events.push(event);
+                        buffered += typeof event === 'string' ? event : `data: ${JSON.stringify(event)}\n\n`;
                     }
-                    res.json({ events });
+                    res.send(buffered);
                 }
             } else {
                 res.status(result.status);

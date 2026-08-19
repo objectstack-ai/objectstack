@@ -704,7 +704,7 @@ const EXPRESS_RESPONSE_RECEIVERS = new Set(['res']);
  * receiver dialects.
  */
 const IHTTP_ROUTE_MODULES = {
-  // Ten bodies. The two discovery bodies (`/.well-known/objectstack`,
+  // Nine bodies. The two discovery bodies (`/.well-known/objectstack`,
   // unconditional, and the REST-less `${prefix}/discovery` fallback) were
   // enveloped by #9813 under the #9436 maintainer ruling (2026-08-18, option
   // A, inherited with its reason intact: machine-read discovery bodies are
@@ -713,11 +713,19 @@ const IHTTP_ROUTE_MODULES = {
   // these sites are not on). The two `{ success: false, error: buildApiError(…) }`
   // exits are conformant, and five relayed bodies (`result.body`,
   // `ANONYMOUS_DENY_BODY`, …) are deliberately invisible, as everywhere.
-  'packages/runtime/src/dispatcher-plugin.ts': {
-    unenveloped: 1,
-    ratchet: '#9936 (envelope or rule on the SSE-fallback `{ events }` body)',
-    note: 'the streaming branch\'s JSON fallback — a transport whose `res` cannot stream gets the collected events as a bare `{ events }`, no `success` flag and the payload beside the envelope rather than under `data`. A different consumer population from the discovery bodies (callers that asked for an SSE stream), so #9813\'s inherited ruling does not reach it; #9936 carries the fork',
-  },
+  //
+  // The tenth body — the SSE-fallback `res.json({ events })` this entry
+  // ratcheted at `unenveloped: 1` — was resolved by #9936 (2026-08-19, option
+  // B): the count goes to 0 because the JSON literal CEASED TO EXIST, not
+  // because it moved to a spelling this scanner cannot count. The fallback
+  // now implements the IHttpResponse contract's own prescription (#3607,
+  // ADR-0076 OQ#10): the same SSE frames, buffered and delivered through
+  // `send()` under the streaming headers — a body outside JSON entirely,
+  // pinned byte-identical to the streamed branch by
+  // `dispatcher-plugin.streaming-fallback.test.ts`. The sibling dispatch-
+  // result writer's write-less fallback (#9961) took the same shape; its old
+  // body was a RELAYED `res.json(result.result)` and thus never counted here.
+  'packages/runtime/src/dispatcher-plugin.ts': {},
 };
 
 /**
