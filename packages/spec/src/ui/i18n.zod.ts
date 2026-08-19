@@ -163,8 +163,10 @@ export type InlineLocaleMap = Record<string, string> & {
  * every `z.input`/`z.infer` derivation that embeds this schema — without it the
  * derived type is `Record<string, string>` and the retired form compiles
  * everywhere (#9925). Input and output are annotated identically because the
- * record neither transforms nor defaults (the Iso759 pin in
- * `type-alias-convention.pin.test.ts` holds them equal).
+ * record neither transforms nor defaults — the annotation itself is what holds
+ * them equal now, both halves naming the same type; the former `Iso759`
+ * isomorphism pin was deleted as no-longer-load-bearing per the receipt in
+ * `type-alias-convention.pin.test.ts` (#9925).
  */
 export const InlineLocaleMapSchema: z.ZodType<InlineLocaleMap, InlineLocaleMap> = lazySchema(() => z.record(
   z.string().regex(
