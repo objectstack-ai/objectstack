@@ -495,4 +495,40 @@ describe('#7141 — caller envelope forwarded to the sharing gate', () => {
     ).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403 });
     expect((canEdit.mock.calls[0]![2] as any).__writeScope).toBeUndefined();
   });
+
+  // ── The session fallback, and the org name it reads (#9691) ───────────
+  //
+  // The kit had no coverage of the no-execution-context path at all, so the
+  // dead `s.tenantId ?? s.organizationId` first arm was invisible in both
+  // directions: nothing proved the blessed name was read, and nothing would
+  // have noticed if the fallback had been dropped. Both directions are pinned
+  // here, on the session shape `ObjectQLEngine.buildSession` actually emits.
+  it('falls back to the session snapshot and reads the caller org under the BLESSED name (#9691)', async () => {
+    const canEdit = vi.fn(async (_o: string, _r: string, _c: any) => true);
+    const { beforeDelete } = install({ comments: [row], sharing: { canEdit } });
+    await beforeDelete({
+      object: 'sys_comment',
+      event: 'beforeDelete',
+      input: { id: 'c1' },
+      session: { userId: 'u1', organizationId: 'org_1', positions: ['p1'] },
+      api: apiFor(['crm_opportunity/opp1']),
+    });
+    // `tenantId` on the way OUT is `ExecutionContext`'s driver-layer name for
+    // the same value — the separate axis #3290 deliberately left alone.
+    expect(canEdit.mock.calls[0]![2]).toEqual({ userId: 'u1', tenantId: 'org_1', positions: ['p1'] });
+  });
+
+  it('does not resurrect the removed `session.tenantId` alias if one ever reaches a hook (#9691)', async () => {
+    const canEdit = vi.fn(async (_o: string, _r: string, _c: any) => true);
+    const { beforeDelete } = install({ comments: [row], sharing: { canEdit } });
+    await beforeDelete({
+      object: 'sys_comment',
+      event: 'beforeDelete',
+      input: { id: 'c1' },
+      // A key `HookContextSchema` strips (#3290). It is not the caller's org.
+      session: { userId: 'u1', tenantId: 'stale_org', positions: ['p1'] } as any,
+      api: apiFor(['crm_opportunity/opp1']),
+    });
+    expect((canEdit.mock.calls[0]![2] as any).tenantId).toBeUndefined();
+  });
 });

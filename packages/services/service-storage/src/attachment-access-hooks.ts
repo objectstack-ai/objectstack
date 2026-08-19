@@ -131,7 +131,17 @@ function callerContext(ctx: any): ExecutionContext {
     return withoutOperationPrivateKeys(exec as Record<string, unknown>);
   }
   const s = ctx?.session ?? {};
-  return { userId: s.userId, tenantId: s.tenantId, positions: s.positions };
+  // [#9691] `s.organizationId`, NOT `s.tenantId`. The hook session's org key is
+  // `organizationId` (engine `buildSession`; `HookContextSchema` STRIPS a
+  // `tenantId` key outright, pinned in `packages/spec/src/data/hook.test.ts`),
+  // so the removed alias read here answered `undefined` on every call and this
+  // fallback handed `ISharingService.canEdit` an envelope with no org at all.
+  // The target field keeps its `tenantId` spelling: that is `ExecutionContext`'s
+  // driver-layer name for the same value, a separate axis #3290 deliberately
+  // left alone. The comment kit's `callerContext` already read the blessed name
+  // (`s.tenantId ?? s.organizationId`), so this is the #7145 parity that kit's
+  // card asked for, completed.
+  return { userId: s.userId, tenantId: s.organizationId, positions: s.positions };
 }
 
 export function installAttachmentAccessHooks(
