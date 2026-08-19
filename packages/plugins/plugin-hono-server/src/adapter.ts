@@ -11,8 +11,9 @@ import {
 } from '@objectstack/core';
 import type { Logger } from '@objectstack/spec/contracts';
 import type { Context } from 'hono';
-import { currentPerfTiming } from '@objectstack/observability';
+import { currentPerfTiming, RUNTIME_METRICS, type MetricsRegistry } from '@objectstack/observability';
 import { Hono } from 'hono';
+import { routePath } from 'hono/route';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { matchesRoutePattern } from './route-pattern';
@@ -227,6 +228,8 @@ export class HonoHttpServer implements IHttpServer {
     private middlewares: Array<{ path?: string; handler: Middleware }> = [];
     /** Whether the Hono middleware that runs {@link middlewares} is mounted. */
     private middlewareSeamInstalled = false;
+    /** Whether the `http_requests_total` middleware is mounted. See {@link installHttpMetricsSeam}. */
+    private httpMetricsSeamInstalled = false;
     /**
      * The LAST-RESORT handler installed by {@link setFallbackHandler}, or
      * `undefined` when no consumer installed one. Exactly one — installing
@@ -941,6 +944,91 @@ export class HonoHttpServer implements IHttpServer {
                 return new Response((bodyRaw ?? '') as any, { status, headers: outHeaders });
             }
             return next();
+        });
+    }
+
+    /**
+     * Mount the single Hono middleware that emits
+     * `http_requests_total{method,route,status}` for EVERY inbound request on
+     * this transport. Idempotent.
+     *
+     * ## Why the counter lives here and not one layer up (#9650)
+     *
+     * The counter used to be emitted by a wrapper the runtime dispatcher built
+     * over its own `IHttpServer` handle, so it saw only the routes the
+     * dispatcher itself registered. Everything else on the same server was
+     * invisible to it — measured, at least 14 inbound surfaces in two classes:
+     *
+     *  - plugins that mount through {@link getRawApp} (auth, metadata HMR,
+     *    cloud-connection, marketplace, runtime-config, trigger-api, webhooks,
+     *    approvals, the console SPA). These bypass `IHttpServer` entirely, so
+     *    NO wrapper at that level can ever reach them.
+     *  - plugins that resolve `http.server` themselves and mount through the
+     *    verb methods (the REST data API via `RouteManager`, storage, i18n,
+     *    settings, datasource admin).
+     *
+     * An operator following the documented guidance ("alert on the 5xx rate
+     * from `http_requests_total`") was therefore watching a counter that could
+     * stay flat while `/api/v1/*` melted down. The transport is the one layer
+     * every inbound request already converges on, whatever registered the
+     * handler, which is why the counter is emitted from here.
+     *
+     * ## Route label is the PATTERN, never the concrete path
+     *
+     * `/api/v1/auth/*`, not `/api/v1/auth/sign-in/email`; `/api/v1/:object/:id`,
+     * not one series per record id. Cardinality has to stay bounded or the
+     * counter is unusable for exactly the alerting it exists for — and the
+     * label is unfixable in place once dashboards are wired against the first
+     * shipped one.
+     *
+     * ## Two consequences, stated so they are not discovered
+     *
+     *  - **A transport that does not install this seam reports no HTTP
+     *    metrics.** The seam is Hono's; another `IHttpServer` implementation
+     *    emits nothing until it grows its own. Zero is "not instrumented",
+     *    never "no traffic".
+     *  - **WHERE it is mounted decides what is counted.** `HonoServerPlugin`
+     *    installs it immediately BEFORE {@link installMiddlewareSeam}, so a
+     *    request a `use()` middleware short-circuits (the inbound rate
+     *    limiter's 429) is still counted — a refused request is exactly the
+     *    one an operator is alerting on. It sits AFTER the transport's own
+     *    CORS built-in, so a preflight `OPTIONS` that CORS answers itself
+     *    never reaches a route and is not counted.
+     *
+     * @param metrics the host's registry. Resolve it with the canonical chain
+     *   (explicit option → `observability:metrics` service → none); pass
+     *   nothing at all rather than a no-op, so an unconfigured deployment pays
+     *   no per-request cost.
+     */
+    installHttpMetricsSeam(metrics: MetricsRegistry): void {
+        if (this.httpMetricsSeamInstalled) return;
+        this.httpMetricsSeamInstalled = true;
+
+        this.app.use('*', async (c, next) => {
+            // Default 500: if `next()` rejects, Hono's error path renders the
+            // 500 and `c.res` is not yet set — reading it would synthesize a
+            // response and change what the caller receives.
+            let status = 500;
+            try {
+                await next();
+                status = c.res.status;
+            } finally {
+                try {
+                    metrics.counter(RUNTIME_METRICS.httpRequestsTotal, {
+                        method: c.req.method,
+                        // `routePath(c)` is the non-deprecated spelling of
+                        // `c.req.routePath` and returns the same matched
+                        // PATTERN — read after `next()`, so it is the route
+                        // that actually answered rather than this middleware's
+                        // own `*`. Empty only when nothing matched at all.
+                        route: routePath(c) || 'unmatched',
+                        status: String(status),
+                    });
+                } catch {
+                    // A metrics backend must never be able to break a
+                    // response. Same discipline as the error reporter.
+                }
+            }
         });
     }
 

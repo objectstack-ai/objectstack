@@ -49,6 +49,13 @@ describe('shouldDenyAnonymous — the shared HTTP anonymous-deny decision (#2567
 
   it('exposes a stable 401 body + status for seams to return', () => {
     expect(ANONYMOUS_DENY_STATUS).toBe(401);
-    expect(ANONYMOUS_DENY_BODY).toEqual({ error: 'UNAUTHENTICATED', message: expect.any(String) });
+    // [#9487] `code` carries the machine code — the documented key every other
+    // REST error family answers. ADDITIVE by maintainer ruling: `error` keeps
+    // holding the same code value it always has, so no existing reader breaks.
+    expect(ANONYMOUS_DENY_BODY).toEqual({
+      error: 'UNAUTHENTICATED',
+      code: 'UNAUTHENTICATED',
+      message: expect.any(String),
+    });
   });
 });

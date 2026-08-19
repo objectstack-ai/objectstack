@@ -1349,10 +1349,17 @@ jobs:
   # under `packages/**`, and watching it here would rebuild the console on a large
   # fraction of every PR. release.yml stays the only check for that direction.
   #
-  # The NAME is the required-check contract — the same trap the dogfood shards
-  # note above: renaming it silently drops the gate wherever branch protection
-  # lists it, with every PR still green. Pinned by `check:required-contexts`
-  # since #6865.
+  # ⚠️ This gate is ADVISORY, and its name is no longer pinned. It was enrolled
+  # in `check:required-contexts` in #6865 on the strength of the 2026-08-09
+  # ruling approving it for the required set; the live ruleset read of
+  # 2026-08-18 (#9533) found it had never landed there, and the row was dropped
+  # rather than left claiming otherwise — see that file's TOMBSTONE for the full
+  # provenance. So a red here does NOT block a merge, and renaming this job no
+  # longer turns anything red. The name is still load-bearing PROSE in four
+  # places that tell it apart from `Console Pin Freshness`
+  # (docs/releases-maintenance.md, packages/console/README.md,
+  # scripts/check-objectui-pin-fresh.mjs, .github/workflows/objectui-pin-freshness.yml);
+  # renaming it silently falsifies all four.
   console-pin:
     name: Console Pin Gate
     needs: filter

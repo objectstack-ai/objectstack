@@ -96,6 +96,17 @@ const CROSS_PACKAGE_TEST_INPUTS = {
       'content/docs/references/**',
       // scripts/dist-freshness.test.ts stages a fixture around the root scripts dir
       'scripts/**',
+      // `serve.ts` is named in a comment rather than read, the same shape as
+      // `check-nul-bytes.mjs` / `sync-template-versions.mjs` / the realtime
+      // protocol page below, and settled the same way: the literal collector
+      // takes quoted paths without parsing, so a mention forces a declaration,
+      // and declaring the file is cheaper than rewording prose to dodge the
+      // scanner. scripts/publish-smoke-port-collision.test.ts cites it for the
+      // measurement that justifies its whole existence — `serve.ts` auto-shifts
+      // off a busy port whenever `flags.dev` is set, which is the only reason
+      // publish-smoke.sh cannot trust the port it asked for. One file, not the
+      // commands tree: the test reads publish-smoke.sh and nothing else.
+      'packages/cli/src/commands/serve.ts',
       // scripts/liveness/evidence.test.ts resolves the evidence paths the
       // liveness ledgers cite, so those files' existence is a spec input.
       'packages/runtime/src/**',
@@ -311,7 +322,33 @@ const CROSS_PACKAGE_TEST_INPUTS = {
     // So do not reword those mentions into unquoted prose on the theory that
     // the read has the radius covered — it does not, until the collector
     // learns this spelling (#9763).
-    globs: ['content/**', 'scripts/sync-template-versions.mjs'],
+    //
+    // `.github/workflows/scaffold-e2e.yml` is READ, not merely mentioned:
+    // src/scaffold-e2e-boot-probe.test.ts extracts the three boot-and-probe
+    // `run:` scripts out of that file and EXECUTES them, so the workflow is
+    // literally the code under test. It is the workflow that gates this package
+    // (its `paths:` filter is `packages/create-objectstack/**`), which is why
+    // the test lives here rather than beside a shell script in spec (#9779).
+    //
+    // The last three are NAMED in that test's header rather than read, the same
+    // shape as `check-nul-bytes.mjs` and `sync-template-versions.mjs` above and
+    // settled the same way: the literal collector takes quoted paths without
+    // parsing, so a mention forces a declaration, and declaring three
+    // rarely-touched files is cheaper than rewording prose to dodge a scanner.
+    // `serve.ts` earns it on the merits too — its `flags.dev || NODE_ENV ===
+    // 'development'` port-shift gate is the single fact that decides which fix
+    // those workflow blocks need, so a change to that branch is exactly the
+    // change the test's premise would need re-measuring against. The two sibling
+    // scripts are cited for the contrast that keeps the fixes from being copied
+    // between them.
+    globs: [
+      'content/**',
+      'scripts/sync-template-versions.mjs',
+      '.github/workflows/scaffold-e2e.yml',
+      'packages/cli/src/commands/serve.ts',
+      'scripts/gen-sdui-manifest.sh',
+      'scripts/publish-smoke.sh',
+    ],
   },
 };
 
