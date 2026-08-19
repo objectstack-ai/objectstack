@@ -15,7 +15,9 @@
 //   HALF A — `honoApp.routes`, the ObjectStack raw mounts. `auth-plugin.ts`
 //     registers these directly on the Hono app AHEAD of better-auth's catch-all
 //     (`rawApp.all(`${basePath}/*`)`), so they shadow the vendor's handler and
-//     never appear in `auth.api`. Measured here: 9 routes.
+//     may or may not also appear in `auth.api` — `ban-user` / `unban-user`
+//     (#9652) shadow a vendor route of the same name and so appear in BOTH
+//     halves, which the union deduplicates. Measured here: 11 routes.
 //
 //   HALF B — `auth.api`, the better-auth endpoint table. The catch-all publishes
 //     whatever the vendor registers, so there are no per-route registration
@@ -23,7 +25,7 @@
 //     `.options.method`, which is why `auth-route-ledger.conformance.test.ts`
 //     uses the same seam. Measured here: 24 routes.
 //
-// Union: 31 routes at the configuration this file boots (5 + 11 + 2 + 4 + 9). Both halves are
+// Union: 31 routes at the configuration this file boots (7 + 9 + 2 + 4 + 9). Both halves are
 // asserted non-empty, and the union is cross-checked against a small ANCHOR set,
 // so a derivation that silently returns nothing cannot make the sweep vacuous.
 //
@@ -63,14 +65,14 @@
 // A refusal-only suite stays green if a route starts refusing EVERYONE, so each
 // bucket that can carry an allowed side does:
 //
-//   `objectstack-gate` (5 routes) — the full contrast. A plain member is refused
+//   `objectstack-gate` (7 routes) — the full contrast. A plain member is refused
 //     403 PERMISSION_DENIED, an anonymous caller 401 UNAUTHENTICATED, and the
 //     platform admin is NOT refused: the same request reaches the handler and
 //     comes back 2xx (unlock-user) or a SEMANTIC error (404 RESOURCE_NOT_FOUND
 //     for a missing OAuth client). That is what proves the member's 403 is a
 //     gate verdict and not a payload the server rejects for everyone.
 //
-//   `better-auth-gate` (11 routes) — refusal side only, DELIBERATELY. On this
+//   `better-auth-gate` (9 routes) — refusal side only, DELIBERATELY. On this
 //     stack the platform admin is refused these routes too, with the same
 //     `YOU_ARE_NOT_ALLOWED_TO_*` code as the member. That is not a harness
 //     artifact: better-auth's admin plugin authorizes on the legacy
@@ -90,6 +92,17 @@
 //     ALLOWED half is not asserted here, in either direction: pinning today's
 //     admin-is-also-refused behaviour would turn the fix red, and pinning the
 //     fixed behaviour would be red today. #9482's report carries the finding.
+//
+//     #9652 measured the vendor's option surface at the installed 1.7.1 and
+//     found nothing that can express ObjectStack's predicate — `adminUserIds`
+//     is frozen at plugin construction, `adminRoles` matches only the
+//     persisted scalar, and `adminMiddleware` re-reads the session from the DB
+//     (`getAuthoritativeSessionFromCtx` nulls `ctx.context.session` first), so
+//     a session-scoped synthesis is discarded before the check runs. It moved
+//     the two routes `sys_user` actions call — `ban-user` / `unban-user` —
+//     onto ObjectStack mounts, where the allowed side IS pinned above. The
+//     nine below still answer the platform admin with the vendor's own
+//     `YOU_ARE_NOT_ALLOWED_*`; that is a known, filed gap, not drift.
 //
 //   `self-scoped` (2 routes) — `has-permission` and `stop-impersonating` answer
 //     a non-admin without a refusal BY DESIGN, and the invariant is asserted in
@@ -231,9 +244,37 @@ function expectationsFor(targetUserId: string): Record<string, RouteExpectation>
       body: { providerId: 'refusal-probe-oidc' },
     },
 
+    // ── #9652: ban / unban moved from the vendor to an ObjectStack mount ────
+    //
+    // These two carried the `better-auth-gate` bucket — refusal side only,
+    // because the platform admin was refused too and pinning EITHER side would
+    // have been wrong. #9652 mounts them as ObjectStack raw routes with the
+    // ADR-0068 gate, so the allowed side now exists and IS pinned: this is the
+    // assertion that goes red if the gate ever stops admitting a platform
+    // admin whose `sys_user.role` is `'user'` — the identity a real deployment
+    // produces and the one the vendor plugin refuses.
+    //
+    // ORDER MATTERS and is load-bearing: the bucket loop walks its routes
+    // sorted, so `ban-user` fires before `unban-user` and the admin-side probe
+    // leaves the target unbanned again. The target holds a local credential
+    // and is not the only holder (the seeded admin and the probe member hold
+    // one each), so the break-glass guard permits the ban.
+    'POST /api/v1/auth/admin/ban-user': {
+      bucket: 'objectstack-gate',
+      body: { userId: targetUserId, banReason: 'probe' },
+    },
+    'POST /api/v1/auth/admin/unban-user': {
+      bucket: 'objectstack-gate',
+      body: { userId: targetUserId },
+    },
+
     // ── better-auth admin plugin (legacy `role` scalar gate) ────────────────
-    'POST /api/v1/auth/admin/ban-user': { bucket: 'better-auth-gate', body: { userId: targetUserId, banReason: 'probe' } },
-    'POST /api/v1/auth/admin/unban-user': { bucket: 'better-auth-gate', body: { userId: targetUserId } },
+    //
+    // Still refusal-side only, and still for the reason in the header: the
+    // platform admin is refused these too. #9652 fixed the two routes above
+    // (the ones `sys_user` actions call and whose handlers are faithfully
+    // re-implementable); the rest stay on the vendor's gate pending the
+    // maintainer's call on the remaining surface.
     'POST /api/v1/auth/admin/set-role': { bucket: 'better-auth-gate', body: { userId: targetUserId, role: 'admin' } },
     'POST /api/v1/auth/admin/remove-user': { bucket: 'better-auth-gate', body: { userId: targetUserId } },
     'POST /api/v1/auth/admin/impersonate-user': { bucket: 'better-auth-gate', body: { userId: targetUserId } },
