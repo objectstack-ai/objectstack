@@ -69,8 +69,13 @@ const APPS = [
     { name: 'open', requiredPermissions: [] },
 ];
 
+/** `where` matcher: scalar equality plus the `$in` form the resolver sends. */
 function matches(row: Row, where: Row | undefined): boolean {
     return Object.entries(where ?? {}).every(([key, cond]) => {
+        // REFUSE an unsupported combinator rather than reading it as a field
+        // name — a silent `false` here would look exactly like a row that did
+        // not match, and the case above it would pass for the wrong reason.
+        if (key.startsWith('$')) throw new Error(`fake driver: unsupported operator ${key}`);
         const value = row[key] ?? null;
         if (cond && typeof cond === 'object' && Array.isArray((cond as any).$in)) {
             return (cond as any).$in.includes(value);
