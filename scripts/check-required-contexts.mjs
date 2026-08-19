@@ -2147,8 +2147,18 @@ async function selfTest() {
       `wiring: exactly one workflow runs the live read and it is ${PATROL_WORKFLOW} — found [${callers.join(', ')}] (#9678)`,
     );
 
-    const patrol = readFileSync(join(workflowDir, PATROL_WORKFLOW), 'utf8');
-    const patrolYaml = uncommentedYaml(patrol);
+    // Read defensively and turn "missing" into a NAMED assertion rather than an
+    // uncaught ENOENT. Measured under reverse verification: deleting the patrol
+    // made this block throw mid-self-test, so the `callers` failure above was
+    // recorded and never printed and every later assertion never ran — a stack
+    // trace where the gate's own authored verdict belongs (#4690's family). The
+    // downstream cases each carry `patrolPresent` for the same reason: on an
+    // absent file `!/merge_group/` is vacuously true, which is a false green
+    // about a workflow that does not exist.
+    const patrolPath = join(workflowDir, PATROL_WORKFLOW);
+    const patrolPresent = existsSync(patrolPath);
+    assert(patrolPresent, `wiring: the standing caller .github/workflows/${PATROL_WORKFLOW} is missing — the live mode is wired nowhere again (#9678)`);
+    const patrolYaml = patrolPresent ? uncommentedYaml(readFileSync(patrolPath, 'utf8')) : '';
     // The mechanical proxy for "never required". Assertion 6 of this pin is
     // that every required context's workflow carries `merge_group:` — without
     // one, the queue build never produces the context and the whole queue
@@ -2156,7 +2166,7 @@ async function selfTest() {
     // therefore CANNOT be validly required-ized, and required-izing it anyway
     // wedges the queue rather than deadlocking a rename two-step quietly.
     assert(
-      !/^\s{0,4}merge_group\s*:/m.test(patrolYaml),
+      patrolPresent && !/^\s{0,4}merge_group\s*:/m.test(patrolYaml),
       `wiring: ${PATROL_WORKFLOW} must declare no merge_group trigger — a workflow without one deadlocks the queue if it is ever required-ized (#9678)`,
     );
     assert(
@@ -2171,7 +2181,7 @@ async function selfTest() {
     // the same character. A rendering change costs the patrol a FALSE ALARM,
     // never a false all-clear — it annotates on the mark's ABSENCE.
     assert(
-      patrolYaml.includes(REQUIRED_SET_CLEAN_MARK),
+      patrolPresent && patrolYaml.includes(REQUIRED_SET_CLEAN_MARK),
       `wiring: ${PATROL_WORKFLOW} must key its drift annotation on the clean mark ${REQUIRED_SET_CLEAN_MARK} this file renders (#9678)`,
     );
   }
