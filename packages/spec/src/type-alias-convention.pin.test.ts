@@ -264,7 +264,7 @@ import type * as M167 from './ui/view.zod.js';
 import type * as M170 from './ui/component.zod.js';
 
 // ---------------------------------------------------------------------------
-// 840 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 839 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1309,12 +1309,14 @@ export type Iso684 = Assert<Eq< z.input< typeof M160.DatasetSchema >, z.infer< t
 // ui/i18n.zod.ts
 export type Iso686 = Assert<Eq< z.input< typeof M161.I18nLabelSchema >, z.infer< typeof M161.I18nLabelSchema > >>;
 export type Iso687 = Assert<Eq< z.input< typeof M161.AriaPropsSchema >, z.infer< typeof M161.AriaPropsSchema > >>;
-// #5728 — the second arm of the widened `I18nLabelSchema`. A record of plain
-// strings under a key-format constraint: the regex narrows which keys PARSE, it
-// does not transform one, so the two shapes coincide and an `InlineLocaleMapParsed`
-// would be a permanent synonym. Give any entry a `.default()` and this line goes
-// red with the alias named — which is the point.
-export type Iso759 = Assert<Eq< z.input< typeof M161.InlineLocaleMapSchema >, z.infer< typeof M161.InlineLocaleMapSchema > >>;
+// `InlineLocaleMapSchema` carried an isomorphism pin here (`Iso759`, #5728)
+// while its alias was a bare `z.input<…>` derivation. #9925 hand-tied the
+// alias (`Record<string, string> & { key?: never; defaultValue?: never }`,
+// carried by an explicit `z.ZodType<InlineLocaleMap, InlineLocaleMap>`
+// annotation), so no bare alias relies on the exemption any more and the
+// ADR-0122 gate itself ordered the pin line deleted as no longer load-bearing.
+// Input and output remain identical by construction — both halves of the
+// annotation name the same type.
 
 // ui/notification.zod.ts
 export type Iso690 = Assert<Eq< z.input< typeof M162.NotificationTypeSchema >, z.infer< typeof M162.NotificationTypeSchema > >>;
@@ -1657,7 +1659,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 840 isomorphic pins', () => {
+  it('still declares all 839 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -1913,9 +1915,19 @@ describe('ADR-0122 type-alias convention', () => {
     // (two optional), no `.default()`, `.transform()`, `.catch()` or `.pipe()`,
     // mirroring metadata-protocol's inline parameter type member for member.
     // Pinned as `Iso853`, the next free id.
+    //
+    // 840 -> 839 is #9925 — `Iso759` (`InlineLocaleMapSchema`) DELETED, on the
+    // ADR-0122 gate's own order: the alias is no longer a bare `z.input<…>`
+    // derivation but a hand-tied narrowing carried by a
+    // `z.ZodType<InlineLocaleMap, InlineLocaleMap>` annotation, so the
+    // isomorphism exemption stopped being load-bearing. The first MINUS taken
+    // by deletion of a pin whose schema SURVIVES — the earlier minuses retired
+    // schemas or converted aliases to `Parsed` pairs; this one moved the
+    // input/output identity into the annotation itself, where both halves name
+    // the same type.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(840);
+    expect(pins).toHaveLength(839);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either
