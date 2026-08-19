@@ -50,6 +50,11 @@ import {
 } from './remove-member-permission-guard.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
 import {
+  REVOKE_SESSION_NOT_FOUND_CODE,
+  REVOKE_SESSION_NOT_FOUND_MESSAGE,
+  revokeTargetsCallerSession,
+} from './revoke-session-match-guard.js';
+import {
   reconcileMembership,
   type MembershipPolicy,
   type ReconcileOutcome,
@@ -1464,6 +1469,22 @@ export class AuthManager {
           if (ctx?.path === '/organization/remove-member') {
             await this.assertRemoveMemberPermitted(ctx);
             // fall through — the vendor still re-decides everything it owns
+          }
+
+          // ── #9714: a revoke that identifies NO record must not report ──
+          // success. better-auth 1.7.1's `revoke-session` handler skips the
+          // delete when the token matches zero rows (or another user's row)
+          // and still answers `200 { status: true }` — its success line is
+          // unconditional. Refuse those requests HERE, with the vendor's own
+          // admission predicate asked through the vendor's own adapter call,
+          // so the handler only ever runs on requests whose success answer is
+          // true. Before-hook on purpose: an after-hook cannot change the
+          // status. `revoke-session-match-guard.ts` carries the full reading,
+          // including the 404-over-`{status:false}` decision and the
+          // no-existence-oracle property.
+          if (ctx?.path === '/revoke-session') {
+            await this.assertRevokeSessionIdentifiesRecord(ctx);
+            // fall through — the vendor still performs the revoke itself
           }
 
           // ── ADR-0024: admin-gate self-service SSO provider registration ──
@@ -4438,6 +4459,50 @@ export class AuthManager {
       // back to better-auth unchanged.
       const { isAPIError } = await import('better-auth/api');
       if (isAPIError(error)) throw error;
+    }
+  }
+
+  /**
+   * [#9714] `/revoke-session` admission gate — refuse (404, standard
+   * `RESOURCE_NOT_FOUND`) when the supplied token identifies no session
+   * belonging to the caller, instead of letting the vendor's unconditional
+   * success line answer `{ status: true }` over a skipped delete.
+   *
+   * The predicate is the vendor's own (`findSession(token)?.session.userId ===
+   * <caller>`), asked through the same `internalAdapter.findSession` the
+   * handler calls — never a second spelling of it. Everything the guard cannot
+   * decide falls through to the vendor: unauthenticated callers (its session
+   * middleware answers 401), a non-string token (its zod body schema answers
+   * 400), an adapter read failure (never convert "could not look" into "does
+   * not exist"). Zero-match and foreign-token answers are byte-identical — no
+   * existence oracle. Full reading: `revoke-session-match-guard.ts`.
+   */
+  private async assertRevokeSessionIdentifiesRecord(ctx: any): Promise<void> {
+    const token = ctx?.body?.token;
+    if (typeof token !== 'string') return; // vendor's body schema answers 400
+
+    let admitted: boolean;
+    try {
+      const actor = await this.resolveActor(ctx);
+      // No resolvable caller → the vendor's sensitiveSessionMiddleware issues
+      // the 401. Not ours to pre-empt (and answering 404 here would grade an
+      // anonymous probe's question before its authentication).
+      if (!actor?.userId) return;
+
+      const found = await ctx.context.internalAdapter.findSession(token);
+      admitted = revokeTargetsCallerSession(found, actor.userId);
+    } catch {
+      // A lookup that did not complete hands the request back to the vendor
+      // unchanged — an engine hiccup must not invent a "not found".
+      return;
+    }
+
+    if (!admitted) {
+      const { APIError } = await import('better-auth/api');
+      throw new APIError('NOT_FOUND', {
+        message: REVOKE_SESSION_NOT_FOUND_MESSAGE,
+        code: REVOKE_SESSION_NOT_FOUND_CODE,
+      });
     }
   }
 
