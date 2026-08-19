@@ -24,8 +24,9 @@
  * to make `tsc --noEmit` fail when the narrowing regresses.
  *
  * The `@ts-expect-error` probes assert the NEGATIVE direction — if the type
- * ever widens back to `Record<string, string>` (e.g. someone drops the
- * `z.ZodType<InlineLocaleMap, InlineLocaleMap>` annotation as "redundant"),
+ * ever widens back to `Record<string, string>` (e.g. someone drops
+ * `InlineLocaleMapSchema`'s explicit `z.ZodType<…>` annotation as "redundant",
+ * or re-widens the shape that annotation spells),
  * every one of them becomes an "Unused '@ts-expect-error' directive" compile
  * error naming this file. The positive probes are the other half: the
  * narrowing must NOT cost any valid authoring shape — the measured pick over

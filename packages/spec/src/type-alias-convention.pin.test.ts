@@ -1312,11 +1312,13 @@ export type Iso687 = Assert<Eq< z.input< typeof M161.AriaPropsSchema >, z.infer<
 // `InlineLocaleMapSchema` carried an isomorphism pin here (`Iso759`, #5728)
 // while its alias was a bare `z.input<…>` derivation. #9925 hand-tied the
 // alias (`Record<string, string> & { key?: never; defaultValue?: never }`,
-// carried by an explicit `z.ZodType<InlineLocaleMap, InlineLocaleMap>`
-// annotation), so no bare alias relies on the exemption any more and the
+// carried by an explicit `z.ZodType<…>` annotation that spells that same
+// shape STRUCTURALLY rather than naming the alias — naming it made every
+// emitted embed carry an unaddressable alias reference, TS2883 in
+// metadata-core), so no bare alias relies on the exemption any more and the
 // ADR-0122 gate itself ordered the pin line deleted as no longer load-bearing.
 // Input and output remain identical by construction — both halves of the
-// annotation name the same type.
+// annotation spell the same type.
 
 // ui/notification.zod.ts
 export type Iso690 = Assert<Eq< z.input< typeof M162.NotificationTypeSchema >, z.infer< typeof M162.NotificationTypeSchema > >>;
@@ -1918,13 +1920,14 @@ describe('ADR-0122 type-alias convention', () => {
     //
     // 840 -> 839 is #9925 — `Iso759` (`InlineLocaleMapSchema`) DELETED, on the
     // ADR-0122 gate's own order: the alias is no longer a bare `z.input<…>`
-    // derivation but a hand-tied narrowing carried by a
-    // `z.ZodType<InlineLocaleMap, InlineLocaleMap>` annotation, so the
+    // derivation but a hand-tied narrowing carried by an explicit
+    // `z.ZodType<…>` annotation (which spells the shape structurally, not by
+    // the alias name — see the receipt at the pin's former line), so the
     // isomorphism exemption stopped being load-bearing. The first MINUS taken
     // by deletion of a pin whose schema SURVIVES — the earlier minuses retired
     // schemas or converted aliases to `Parsed` pairs; this one moved the
-    // input/output identity into the annotation itself, where both halves name
-    // the same type.
+    // input/output identity into the annotation itself, where both halves
+    // spell the same type.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
     expect(pins).toHaveLength(839);

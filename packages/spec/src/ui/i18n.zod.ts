@@ -164,11 +164,28 @@ export type InlineLocaleMap = Record<string, string> & {
  * derived type is `Record<string, string>` and the retired form compiles
  * everywhere (#9925). Input and output are annotated identically because the
  * record neither transforms nor defaults — the annotation itself is what holds
- * them equal now, both halves naming the same type; the former `Iso759`
+ * them equal now, both halves spelling the same type; the former `Iso759`
  * isomorphism pin was deleted as no-longer-load-bearing per the receipt in
  * `type-alias-convention.pin.test.ts` (#9925).
+ *
+ * ⚠️ The annotation spells the shape STRUCTURALLY instead of naming
+ * {@link InlineLocaleMap}, deliberately. Naming the alias here writes an alias
+ * REFERENCE into every emitted embed of this schema, and tsup's dts bundling
+ * hoists this module into a hashed chunk (`dist/i18n.zod-*.d.ts`) that no
+ * package-exports subpath can address — so any consumer whose INFERRED export
+ * type embeds a label (five `ObjectSchema.create` objects in metadata-core
+ * were the measured instances) fails declaration emit with TS2883 "cannot be
+ * named without a reference to … not portable". The structural spelling makes
+ * every emitted embed anonymous and self-contained; the alias above stays the
+ * documented public name. The two spellings cannot drift silently: the
+ * compile pins in `i18n.label-type-assertions.ts` cover both — the direct
+ * alias pins catch a widened alias, the embedded-surface pins catch a widened
+ * annotation.
  */
-export const InlineLocaleMapSchema: z.ZodType<InlineLocaleMap, InlineLocaleMap> = lazySchema(() => z.record(
+export const InlineLocaleMapSchema: z.ZodType<
+  Record<string, string> & { key?: never; defaultValue?: never },
+  Record<string, string> & { key?: never; defaultValue?: never }
+> = lazySchema(() => z.record(
   z.string().regex(
     INLINE_LOCALE_KEY,
     'an inline label map is keyed by BCP-47 locale tags (`en`, `zh-CN`, …) or `default` — '
