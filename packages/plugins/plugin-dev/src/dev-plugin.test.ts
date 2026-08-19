@@ -98,7 +98,7 @@ describe('DevPlugin', () => {
       'security.permissions', 'security.rls', 'security.fieldMasker',
       'ai', 'automation', 'notification', 'analytics',
       'cache', 'queue', 'job', 'i18n', 'metadata',
-      'file-storage', 'search', 'realtime', 'workflow',
+      'storage', 'file-storage', 'search', 'realtime', 'workflow',
     ]) {
       expect(registeredServices.has(name), `${name} slot must stay empty`).toBe(false);
     }
@@ -262,6 +262,7 @@ describe('DevPlugin', () => {
       .filter((line: any) => typeof line === 'string');
     expect(logLines.some((l: string) => l.includes('service-storage not installed'))).toBe(true);
     expect(logLines.some((l: string) => l.includes('service-realtime not installed'))).toBe(true);
+    expect(registeredServices.has('storage')).toBe(false);
     expect(registeredServices.has('file-storage')).toBe(false);
     expect(registeredServices.has('realtime')).toBe(false);
   });
@@ -281,6 +282,8 @@ describe('DevPlugin', () => {
         dispatcher: false,
         security: false,
         i18n: false,
+        // Deliberately the deprecated alias spelling — pins that a v17
+        // config written before the #9683 rename still skips the service.
         'file-storage': false,
         realtime: false,
       },

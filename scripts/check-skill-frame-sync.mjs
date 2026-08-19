@@ -172,6 +172,11 @@ export const AXIS_MAP = [
     zh: /防 ?AI ?写(?:代码|元数据)/,
     en: /making AI-(?:written|authored) code/i,
   },
+  {
+    id: 'startup-scope-discipline',
+    zh: /创业阶段不扩散/,
+    en: /startup(?:-phase)? scope discipline/i,
+  },
 ];
 
 /** Numerals the count sentences are allowed to be written in. */
@@ -631,22 +636,22 @@ function selfTest() {
         '  **Long-term soundness for THIS project**',
       ),
       expect: 'red',
-      wants: [/internal-dev/, /declares 3 axes but 2 axis entries/],
+      wants: [/internal-dev/, /declares 4 axes but 3 axis entries/],
     },
     {
-      // The #5130 shape, coherent: one side becomes a consistent two-axis frame.
-      label: 'one copy coherently rewritten to two axes → red (cross-copy count)',
+      // The #5130 shape, coherent: one side becomes a consistent three-axis frame.
+      label: 'one copy coherently rewritten to three axes → red (cross-copy count)',
       copies: () => {
         let c = mutate(
           base, 'internal-dev',
           '- **Long-term soundness for THIS project**',
           '  **Long-term soundness for THIS project**',
         );
-        c = mutate(c, 'internal-dev', 'on three fixed axes', 'on two fixed axes');
-        return mutate(c, 'internal-dev', 'on all three axes', 'on all two axes');
+        c = mutate(c, 'internal-dev', 'on four fixed axes', 'on three fixed axes');
+        return mutate(c, 'internal-dev', 'on all four axes', 'on all three axes');
       },
       expect: 'red',
-      wants: [/do not agree on the NUMBER of axes/, /#5130/, /2 axes {2}internal-dev/],
+      wants: [/do not agree on the NUMBER of axes/, /#5130/, /3 axes {2}internal-dev/],
     },
     {
       // Regression pin for the draft defect described in soft(): the two-axis form
@@ -659,8 +664,13 @@ function selfTest() {
           '- Making AI-authored code — especially AI-authored metadata — structurally hard',
           '  Making AI-authored code — especially AI-authored metadata — structurally hard',
         );
-        c = mutate(c, 'published-dev', 'Analyze every option on three fixed axes:', 'Analyze every option on two fixed axes:');
-        return mutate(c, 'published-dev', 'Justify your recommendation on all three axes', 'Justify your recommendation on both axes');
+        c = mutate(
+          c, 'published-dev',
+          '- Startup scope discipline — do not grow the declared surface',
+          '  Startup scope discipline — do not grow the declared surface',
+        );
+        c = mutate(c, 'published-dev', 'Analyze every option on four fixed axes:', 'Analyze every option on two fixed axes:');
+        return mutate(c, 'published-dev', 'Justify your recommendation on all four axes', 'Justify your recommendation on both axes');
       },
       expect: 'red',
       wants: [/do not agree on the NUMBER of axes/, /2 axes {2}published-dev/],
@@ -698,7 +708,7 @@ function selfTest() {
       label: 'the binding sentence is removed → red (extraction failure, not a skip)',
       copies: () => mutate(
         base, 'published-pm',
-        'Your recommendation must be justified on **all three** axes.',
+        'Your recommendation must be justified on **all four** axes.',
         'Your recommendation should be sensible.',
       ),
       expect: 'red',
@@ -708,7 +718,7 @@ function selfTest() {
       label: 'the declaring sentence is removed → red (extraction failure, not a skip)',
       copies: () => mutate(
         base, 'internal-dev',
-        '**Analyze every option on three fixed axes',
+        '**Analyze every option on four fixed axes',
         '**Weigh the options sensibly',
       ),
       expect: 'red',
@@ -718,11 +728,11 @@ function selfTest() {
       label: 'a frame count mention drifts from the frame → red',
       copies: () => mutate(
         base, 'published-pm',
+        '#### The four-axis decision frame (binding)',
         '#### The three-axis decision frame (binding)',
-        '#### The two-axis decision frame (binding)',
       ),
       expect: 'red',
-      wants: [/a mention of the frame states 2 axes while the frame itself has 3/],
+      wants: [/a mention of the frame states 3 axes while the frame itself has 4/],
     },
     {
       label: 'AXIS_MAP misaligned (zh patterns swapped) → red, proving the map is load-bearing',
@@ -731,6 +741,7 @@ function selfTest() {
         { id: 'business-need', zh: AXIS_MAP[1].zh, en: AXIS_MAP[0].en },
         { id: 'long-term-soundness', zh: AXIS_MAP[0].zh, en: AXIS_MAP[1].en },
         AXIS_MAP[2],
+        AXIS_MAP[3],
       ],
       expect: 'red',
       wants: [/do not agree on the axis NAME SEQUENCE/],

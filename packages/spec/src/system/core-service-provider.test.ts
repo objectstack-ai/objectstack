@@ -81,6 +81,8 @@ describe('CORE_SERVICE_PROVIDER', () => {
 describe('serviceUnavailableMessage', () => {
     it('names the package to install when one exists', () => {
         expect(serviceUnavailableMessage('auth')).toBe('Install @objectstack/plugin-auth to enable');
+        expect(serviceUnavailableMessage('storage')).toBe('Install @objectstack/service-storage to enable');
+        // Deprecated v17 alias of `storage` (#9683) — same provider, same remedy.
         expect(serviceUnavailableMessage('file-storage')).toBe('Install @objectstack/service-storage to enable');
     });
 

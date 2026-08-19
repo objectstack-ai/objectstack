@@ -16,11 +16,11 @@ framework today. Managed runtimes provide the `services.*` binding directly.
 **`services.*` is the accessor spelling, not necessarily the registry slot.** The name
 after `services.` is what this chapter documents each surface under; the string you pass
 to `ctx.getService(...)` is the slot the implementation is registered by. They are the
-same word for every service below **except storage**, whose slot is `file-storage`
-(there is no `storage` alias — see
-[`services.storage`](/docs/kernel/runtime-services/storage-service)). Each page states
-its own slot in a **Registry slot** bullet; `scripts/check-runtime-services-index.mjs`
-holds those to a real `registerService` call.
+same word for every service below — storage included, since the #9683 rename made
+`storage` the canonical slot (its pre-rename spelling `file-storage` stays a deprecated
+v17 alias — see [`services.storage`](/docs/kernel/runtime-services/storage-service)).
+Each page states its own slot in a **Registry slot** bullet;
+`scripts/check-runtime-services-index.mjs` holds those to a real `registerService` call.
 </Callout>
 
 This chapter documents the runtime `services.*` APIs used in hook/action/flow/plugin code:

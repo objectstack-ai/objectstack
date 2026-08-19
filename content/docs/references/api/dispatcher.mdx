@@ -43,7 +43,7 @@ const result = DispatcherConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **routes** | `{ prefix: string; service: Enum<'metadata' \| 'data' \| 'auth' \| 'file-storage' \| 'search' \| 'cache' \| 'queue' \| …>; authRequired: boolean; criticality: Enum<'required' \| 'core' \| 'optional'>; … }[]` | ✅ | Route-to-service mappings |
+| **routes** | `{ prefix: string; service: Enum<'metadata' \| 'data' \| 'auth' \| 'storage' \| 'file-storage' \| 'search' \| 'cache' \| …>; authRequired: boolean; criticality: Enum<'required' \| 'core' \| 'optional'>; … }[]` | ✅ | Route-to-service mappings |
 | **fallback** | `Enum<'404' \| 'proxy' \| 'custom'>` | optional (default: `"404"`) | Behavior when no route matches |
 | **proxyTarget** | `string` | optional | Proxy target URL when fallback is "proxy" |
 
@@ -83,7 +83,7 @@ Route-resolution failure mode emitted in `error.code`
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **prefix** | `string` | ✅ | URL path prefix for routing (e.g. /api/v1/data) |
-| **service** | `Enum<'metadata' \| 'data' \| 'auth' \| 'file-storage' \| 'search' \| 'cache' \| 'queue' \| 'automation' \| 'analytics' \| 'realtime' \| 'job' \| 'notification' \| 'ai' \| 'i18n' \| 'ui'>` | ✅ | Target core service name |
+| **service** | `Enum<'metadata' \| 'data' \| 'auth' \| 'storage' \| 'file-storage' \| 'search' \| 'cache' \| 'queue' \| 'automation' \| 'analytics' \| 'realtime' \| 'job' \| 'notification' \| 'ai' \| 'i18n' \| 'ui'>` | ✅ | Target core service name |
 | **authRequired** | `boolean` | optional (default: `true`) | Whether authentication is required |
 | **criticality** | `Enum<'required' \| 'core' \| 'optional'>` | optional (default: `"optional"`) | Service criticality level for unavailability handling |
 | **permissions** | `string[]` | optional | Required permissions for this route namespace |

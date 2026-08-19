@@ -753,6 +753,8 @@ Enable package response
 | **name** | `string` | ✅ | Item name (snake_case identifier) |
 | **packageId** | `string` | optional | Optional package ID to filter items by |
 | **organizationId** | `string` | optional | Organization (tenant) scope for the read. Selects the org partition in the ADR-0005 overlay read order — org overlay wins over env-wide overlay wins over packaged artifact — so it decides which tenant's customization row is served as the item. Absent = environment-wide read: only env-level overlays apply and no org partition is consulted. |
+| **state** | `Enum<'active' \| 'draft'>` | optional | Draft-visibility switch — which lifecycle row to read (strict mode): `'draft'` opens the pending draft buffer (Studio's editor read) and fails when no draft exists; absent or `'active'` reads the live published row. Distinct from `previewDrafts`, which FALLS BACK to the active row when no draft exists. Declaration ≠ authorization: this member only selects which stored row is read — ADR-0106 masking is unaffected, and draft access is gated upstream, not by this schema. |
+| **previewDrafts** | `boolean` | optional | Draft-visibility switch (ADR-0033 draft-overlay preview, non-strict): when true and `state` is not `'draft'`, a pending draft row is preferred if one exists, else the read falls back to the active row — the render path degrades to the published value instead of erroring. A served draft is tagged `_draft: true` so UIs can badge it. Declaration ≠ authorization: this member only switches which row is read, and ADR-0106 masking is unaffected — draft preview is admin-gated upstream, not by this schema. |
 
 
 ---
@@ -789,6 +791,7 @@ Enable package response
 | **type** | `string` | ✅ | Metadata type name (e.g., "object", "plugin") |
 | **packageId** | `string` | optional | Optional package ID to filter items by |
 | **organizationId** | `string` | optional | Organization (tenant) scope for the read. Selects the org partition in the ADR-0005 overlay read order — org overlay wins over env-wide overlay wins over packaged artifact — so it decides which tenant's customization rows are merged into the list. Absent = environment-wide read: only env-level overlays apply and no org partition is consulted. |
+| **previewDrafts** | `boolean` | optional | Draft-visibility switch (ADR-0033 draft-overlay preview): when true, pending `state='draft'` rows are overlaid on the active list — draft wins on name collision, draft-only items appear, and each overlaid item is tagged `_draft: true` so UIs can badge the preview. Absent/false = published world only. Declaration ≠ authorization: this member only switches which rows are read, and ADR-0106 masking is unaffected — callers without draft-preview authorization are refused upstream (admin-gated), not by this schema. |
 
 
 ---

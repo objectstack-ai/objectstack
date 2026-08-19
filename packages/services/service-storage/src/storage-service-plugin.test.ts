@@ -68,7 +68,7 @@ function makeFakeSettings(initialValues: Record<string, any>) {
 }
 
 describe('StorageServicePlugin: settings live-wire', () => {
-  it('registers a SwappableStorageService as file-storage', async () => {
+  it('registers a SwappableStorageService as storage', async () => {
     const plugin = new StorageServicePlugin({
       adapter: 'local',
       local: { rootDir: await fs.mkdtemp(join(tmpdir(), 'oss-')) },
@@ -76,8 +76,29 @@ describe('StorageServicePlugin: settings live-wire', () => {
     });
     const ctx = makeCtx();
     await plugin.init(ctx);
-    const svc = ctx.getService<IStorageService>('file-storage');
+    const svc = ctx.getService<IStorageService>('storage');
     expect(svc).toBeInstanceOf(SwappableStorageService);
+  });
+
+  // The alias-equivalence pin for the #9683 rename (maintainer ruling
+  // 2026-08-18): `storage` is canonical, `file-storage` stays accepted as a
+  // deprecated alias within v17, and both spellings MUST resolve the same
+  // instance — anything else would fork the slot into two services.
+  it('registers the deprecated file-storage alias as the SAME instance (#9683)', async () => {
+    const plugin = new StorageServicePlugin({
+      adapter: 'local',
+      local: { rootDir: await fs.mkdtemp(join(tmpdir(), 'oss-')) },
+      registerRoutes: false,
+    });
+    const ctx = makeCtx();
+    await plugin.init(ctx);
+    // Plain calls with casts, not `getService<T>(...)` — the fake ctx's
+    // getService is untyped, and each type-argument call adds a frozen-debt
+    // TS2347 to this package's shrink-only type-check ledger.
+    const canonical = ctx.getService('storage') as IStorageService;
+    const alias = ctx.getService('file-storage') as IStorageService;
+    expect(alias).toBeInstanceOf(SwappableStorageService);
+    expect(alias).toBe(canonical);
   });
 
   it('swaps the inner adapter when storage settings change', async () => {
@@ -95,7 +116,7 @@ describe('StorageServicePlugin: settings live-wire', () => {
 
     await plugin.init(ctx);
     await plugin.start(ctx);
-    const proxy = ctx.getService<SwappableStorageService>('file-storage');
+    const proxy = ctx.getService<SwappableStorageService>('storage');
     const innerBefore = proxy.getInner();
 
     await ctx._flushReady();
@@ -123,7 +144,7 @@ describe('StorageServicePlugin: settings live-wire', () => {
 
     await plugin.init(ctx);
     await plugin.start(ctx);
-    const proxy = ctx.getService<SwappableStorageService>('file-storage');
+    const proxy = ctx.getService<SwappableStorageService>('storage');
     const before = proxy.getInner();
     await ctx._flushReady();
     expect(proxy.getInner()).toBe(before);
@@ -150,7 +171,7 @@ describe('StorageServicePlugin: settings live-wire', () => {
 
     await plugin.init(ctx);
     await plugin.start(ctx);
-    const proxy = ctx.getService('file-storage') as SwappableStorageService;
+    const proxy = ctx.getService('storage') as SwappableStorageService;
     const before = proxy.getInner();
 
     await ctx._flushReady();
@@ -169,7 +190,7 @@ describe('StorageServicePlugin: settings live-wire', () => {
 
     await plugin.init(ctx);
     await plugin.start(ctx);
-    const proxy = ctx.getService('file-storage') as SwappableStorageService;
+    const proxy = ctx.getService('storage') as SwappableStorageService;
     const before = proxy.getInner();
 
     await ctx._flushReady();
@@ -288,7 +309,7 @@ describe('StorageServicePlugin: settings live-wire', () => {
 
     await plugin.init(ctx);
     await plugin.start(ctx);
-    const proxy = ctx.getService<SwappableStorageService>('file-storage');
+    const proxy = ctx.getService<SwappableStorageService>('storage');
     const before = proxy.getInner();
     await ctx._flushReady();
     expect(proxy.getInner()).toBe(before); // no swap

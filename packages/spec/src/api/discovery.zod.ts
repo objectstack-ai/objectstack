@@ -598,8 +598,8 @@ export const WellKnownCapabilitiesSchema = lazySchema(() => z.object({
   ),
   /**
    * Whether a file-storage surface is served at all (upload / download /
-   * attachment handling), i.e. the `file-storage` slot is filled by something
-   * that really serves HTTP.
+   * attachment handling), i.e. the `storage` slot (deprecated v17 alias:
+   * `file-storage` — #9683) is filled by something that really serves HTTP.
    *
    * Related to but distinct from {@link WellKnownCapabilitiesSchema} `chunkedUpload`:
    * this one says "files work"; that one says "large files can be uploaded in

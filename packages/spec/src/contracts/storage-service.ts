@@ -10,7 +10,10 @@
  * Follows Dependency Inversion Principle - plugins depend on this interface,
  * not on concrete storage implementations.
  * 
- * Aligned with CoreServiceName 'file-storage' in core-services.zod.ts.
+ * Aligned with CoreServiceName 'storage' in core-services.zod.ts — the
+ * canonical slot since the 2026-08-18 maintainer ruling on issue #9683
+ * (「9683 file-storage 可以叫 storage」). 'file-storage' stays accepted as a
+ * deprecated alias within v17; service-storage registers both names.
  */
 
 import type { StandardErrorCode } from '../api/errors.zod';

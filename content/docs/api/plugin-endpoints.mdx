@@ -179,7 +179,8 @@ the protocol above and never touched them.
 
 Both routes are retired. `/storage` is service-storage's surface — install that
 package to get it. Discovery advertises the route only when the occupant of the
-`file-storage` slot actually mounts HTTP handlers, so an in-memory dev
+`storage` slot (spelled `file-storage` before #9683; that spelling stays a
+deprecated v17 alias) actually mounts HTTP handlers, so an in-memory dev
 implementation now reports `handlerReady: false` and no `routes.storage`
 instead of pointing at a path with nothing behind it.
 </Callout>
