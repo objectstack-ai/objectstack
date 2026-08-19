@@ -126,7 +126,8 @@ const makeSsoVendor = () =>
     baseURL: ORIGIN,
     basePath: BASE,
     secret: 'admin-sso-bridge-gate-test-secret-0123456789',
-    database: memoryAdapter({}),
+    // The memory adapter reads only the tables the DB object declares.
+    database: memoryAdapter({ user: [], session: [], account: [], verification: [], ssoProvider: [] }),
     emailAndPassword: { enabled: true },
     plugins: [sso({ domainVerification: { enabled: true } })],
   });
@@ -196,12 +197,16 @@ describe('#9653 the /admin/sso/* bridges run the ADR-0068 platform-admin gate be
       // judgment of the INNER request (here 401/unauthenticated, because the
       // fabricated platform-admin session has no real better-auth cookie for
       // the re-dispatch to carry). The pin is on delegation surviving the
-      // gate: hooks keyed on the inner paths still run (see header).
+      // gate: hooks keyed on the inner paths still run (see header). The
+      // register bridges also probe `/get-session` for the caller's active
+      // org before dispatching, so count the non-probe dispatches.
       expect(body.error?.code).not.toBe('UNAUTHENTICATED');
       expect(body.error?.code).not.toBe('PERMISSION_DENIED');
-      expect(delegated).toHaveBeenCalledTimes(1);
-      const inner = delegated.mock.calls[0][0] as Request;
-      expect(new URL(inner.url).pathname.startsWith(`${BASE}/sso/`)).toBe(true);
+      const dispatches = delegated.mock.calls
+        .map((call) => new URL((call[0] as Request).url).pathname)
+        .filter((p) => !p.endsWith('/get-session'));
+      expect(dispatches).toHaveLength(1);
+      expect(dispatches[0].startsWith(`${BASE}/sso/`)).toBe(true);
     });
   }
 });
