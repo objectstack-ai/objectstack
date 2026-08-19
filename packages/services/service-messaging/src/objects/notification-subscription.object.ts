@@ -72,13 +72,24 @@ export const NotificationSubscription = ObjectSchema.create({
         // org_yi (billing.invoice, user:u1) 201 / org_yi's own GET on the
         // colliding pair 0 rows.
         //
-        // ⚠️ `principal` names are per-organization: `role:x` and `team:x`
-        // resolve against `sys_permission_set` / `sys_position` rows that
-        // #8461 and #8556 already scoped per organization, so `role:sales_manager`
-        // denoted a DIFFERENT principal in each organization while colliding on
-        // one installation-wide key. And a user who belongs to two
-        // organizations could not subscribe to the same topic in both — the
-        // symptom #8323 measured on `sys_user_preference`.
+        // ⚠️ [#9722, correcting this note] `principal` names are per-organization:
+        // `role:x` resolves against `sys_member` (tenant-scoped org-membership
+        // rows — the org-administration tier that is the sole ADR-0090 D3
+        // "role" exception) and `team:x` against `sys_team_member` (tenant-scoped
+        // via its `team_id` lookup into `sys_team`, itself per-organization) —
+        // per `RecipientResolver.resolveRole` / `.resolveTeam`
+        // (`recipient-resolver.ts`, the sole reader of this selector). NOT
+        // `sys_permission_set` / `sys_position` as an earlier version of this
+        // note claimed — this selector has no `permission_set:` or
+        // `position:` spelling at all; `sys_position` names business roles
+        // like `sales_manager` elsewhere on the platform, unrelated to
+        // `role:`/`team:` here. So `role:admin` denotes a DIFFERENT set of
+        // members in each organization (`sys_member.role` is the closed
+        // owner/admin/delegated_admin/member vocabulary — see
+        // `BUILTIN_MEMBERSHIP_ROLE_OPTIONS`) while colliding on one
+        // installation-wide key. And a user who belongs to two organizations
+        // could not subscribe to the same topic in both — the symptom #8323
+        // measured on `sys_user_preference`.
         //
         // ⚠️ `managedBy: 'system-data'` is NOT a reason to exempt this object;
         // the already-ruled `sys_user_preference` is `system-data` too. The
