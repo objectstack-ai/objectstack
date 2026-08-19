@@ -54,6 +54,19 @@
  * styles, seed replay safety, seed state machines, seed/security posture) stay
  * out — they answer a different question and have their own call sites.
  *
+ * ## The runtime-publish axis (#9313)
+ *
+ * The suite is one `AUTHORING_RULES` entry, and the runtime publish gate
+ * dispatches that entry by the written item's type (`runtimeTypes` on the
+ * entry: `flow` since #4463 P1, `view` since #9313). Which MEMBERS judge a
+ * given per-write snapshot is the suite's own, finer axis —
+ * `ReferenceIntegrityRule.runtimeTypes`, default `['flow']` — because the
+ * snapshot deliberately carries only the measured context collections
+ * (objects / permissions / books / datasets), and a member resolving against
+ * any other collection would read every reference into it as dead. The CLI
+ * commands ignore the axis entirely: a whole-stack run is always the full
+ * suite.
+ *
  * ## Known remaining asymmetry
  *
  * `os doctor` runs only `validateWidgetBindings` and is NOT converted here: it
@@ -108,25 +121,66 @@ export interface ReferenceIntegrityFinding {
 /** One member of the suite. `name` is the exported function's name — the id a wiring test can assert on. */
 export interface ReferenceIntegrityRule {
   name: string;
+  /**
+   * [#9313] The runtime-publish per-write snapshot types this member judges.
+   *
+   * The suite is ONE entry in `AUTHORING_RULES`, and that entry's
+   * `runtimeTypes` says which WRITES dispatch the suite at the runtime publish
+   * gate. This field is the finer axis the entry cannot express: which MEMBERS
+   * are safe to judge that per-write snapshot. The two axes differ because the
+   * snapshot is partial by design (`RuntimeStackContext` carries objects /
+   * permissions / books / datasets and nothing else): a member that resolves
+   * against a collection the snapshot does not carry would not go quiet — it
+   * would report every reference into that collection as dead. Measured on the
+   * `view` widening: `validateActionNameRefs` resolves a list view's
+   * `rowActions[]` / `bulkActions[]` against `stack.actions`, which no
+   * per-write snapshot carries, so crossing it with the suite would refuse a
+   * legitimate view write for every stack-level action it names — a false 422
+   * on the only door a Studio tenant has.
+   *
+   * ABSENT = `['flow']`, the surface the whole suite has run on since #4463 P1.
+   * The default is deliberately the frozen historical surface, never "all":
+   * widening a member onto another type is an explicit declaration here plus
+   * its own false-positive measurement (#4716's budget), exactly the
+   * discipline `runtimeTypes` gives registry entries. CLI commands ignore this
+   * field entirely — all members always run there (see
+   * {@link validateReferenceIntegrity}).
+   */
+  runtimeTypes?: readonly string[];
   run: (stack: Record<string, unknown>) => ReferenceIntegrityFinding[];
 }
+
+/** The runtime snapshot types a member judges when it declares none. */
+const DEFAULT_MEMBER_RUNTIME_TYPES: readonly string[] = ['flow'];
 
 /**
  * Every reference-integrity rule, in the order their findings are reported.
  *
  * ADDING A RULE: append it here and it runs on `validate`, `lint` and
- * `compile` at once. Do not re-wire the commands.
+ * `compile` at once. Do not re-wire the commands. It joins the runtime
+ * publish gate on the DEFAULT member surface (`flow` snapshots only, #9313) —
+ * widening it to another write type is a `runtimeTypes` declaration on the
+ * member plus that type's own false-positive measurement, never automatic.
  */
 export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   { name: 'validateObjectReferences', run: validateObjectReferences },
-  { name: 'validateSearchableFields', run: validateSearchableFields },
+  // [#9313] `runtimeTypes` gains `view` on this member and its sort sibling:
+  // both judge a LIST VIEW's field references, and a standalone list view is
+  // written through `PUT /api/v1/meta/view` — the only door a Studio tenant or
+  // an MCP/AI author has. Their walks read the flattened overlay shape that
+  // door carries (see each rule's `views[]` self rung), and they resolve only
+  // against `stack.objects`, which the per-write snapshot DOES carry — so the
+  // crossing has no missing-collection false-positive channel. Measured over
+  // the shipped view corpus before crossing (0 refusals; population in the
+  // #9313 PR).
+  { name: 'validateSearchableFields', runtimeTypes: ['flow', 'view'], run: validateSearchableFields },
   // [#9257] The same reading, one axis over: a list view's `sort` is a field
   // name written in metadata, resolved against the object's declared fields. It
   // gates (`error`) because the runtime does not tolerate a bad one at all —
   // `assertSortFieldsExist` (#6994) and `assertOrderByIsMaterializable` (#7095)
   // both answer `400 INVALID_SORT` — and a view's sort is its FIRST fetch, so
   // the refusal is the whole view, on every load, traced to nothing.
-  { name: 'validateSortableFields', run: validateSortableFields },
+  { name: 'validateSortableFields', runtimeTypes: ['flow', 'view'], run: validateSortableFields },
   { name: 'validateActionNameRefs', run: validateActionNameRefs },
   { name: 'validatePageFieldBindings', run: validatePageFieldBindings },
   { name: 'validateChartBindings', run: validateChartBindings },
@@ -234,13 +288,43 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
 ];
 
 /**
+ * Options for {@link validateReferenceIntegrity}.
+ *
+ * Declared as the suite's own type rather than importing
+ * `AuthoringRuleContext` from `authoring-rules.ts` — the suite predates the
+ * registry and the registry imports the suite, so the dependency must keep
+ * pointing that way. The registry's context is assignable to this shape by
+ * construction (`runtimeWriteType` spells the same key on both).
+ */
+export interface ReferenceIntegrityRunOptions {
+  /**
+   * [#9313] The singular metadata type of the per-write snapshot being judged,
+   * when the caller is the runtime publish gate. Set by `runtime-gate.ts` for
+   * every gated write; ABSENT on the three CLI commands and every whole-stack
+   * caller, which run all members unconditionally.
+   */
+  runtimeWriteType?: string;
+}
+
+/**
  * Run every reference-integrity rule over a stack. Returns the concatenated
  * findings (empty = clean). Pure: no I/O, safe on both the schema-parsed stack
  * and the raw/normalized config the `lint` path carries.
+ *
+ * [#9313] When `options.runtimeWriteType` is set — the runtime publish gate
+ * judging one write's snapshot — only the members declaring that type run
+ * (see {@link ReferenceIntegrityRule.runtimeTypes}). Whole-stack callers pass
+ * no options and keep the full suite, byte-identically.
  */
-export function validateReferenceIntegrity(stack: Record<string, unknown>): ReferenceIntegrityFinding[] {
+export function validateReferenceIntegrity(
+  stack: Record<string, unknown>,
+  options?: ReferenceIntegrityRunOptions,
+): ReferenceIntegrityFinding[] {
   const findings: ReferenceIntegrityFinding[] = [];
+  const writeType = options?.runtimeWriteType;
   for (const rule of REFERENCE_INTEGRITY_RULES) {
+    if (writeType !== undefined
+      && !(rule.runtimeTypes ?? DEFAULT_MEMBER_RUNTIME_TYPES).includes(writeType)) continue;
     findings.push(...rule.run(stack));
   }
   return findings;

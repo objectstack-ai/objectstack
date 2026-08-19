@@ -268,6 +268,19 @@ export type AuthoringRuleInputTier = 'normalized' | 'parsed';
 export interface AuthoringRuleContext {
   /** ADR-0080 SDUI component manifest, when the project ships one. */
   sduiManifest?: unknown;
+  /**
+   * [#9313] The singular metadata type of the per-write snapshot being judged
+   * — set by the runtime publish gate (`runtime-gate.ts`) on every gated
+   * write, ABSENT on the three CLI commands (`runAuthoringRules` never sets
+   * it). Exists for the one entry that is itself a registry: the
+   * reference-integrity suite dispatches its MEMBERS by this
+   * (`ReferenceIntegrityRule.runtimeTypes`), because the entry-level
+   * `runtimeTypes` can only say which writes reach the suite, not which
+   * members can judge a partial per-write snapshot without inventing
+   * findings. No other rule reads it, and none should without the same
+   * argument.
+   */
+  runtimeWriteType?: string;
 }
 
 export interface AuthoringRule {
@@ -640,9 +653,26 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // collection in the snapshot and return nothing, and the two that would
     // load `typescript` need a hook/action/react body the snapshot never
     // carries — which is what `runtime-lazy-deps.test.ts` pins.
+    //
+    // [#9313] `view` joins, and the granularity decision #4463 P2 reserved is
+    // taken HERE, in writing: the entry-level `runtimeTypes` says which WRITES
+    // dispatch the suite, and the suite's own per-member `runtimeTypes`
+    // (`ReferenceIntegrityRule`, default `['flow']`) says which MEMBERS judge
+    // that snapshot — the gate passes the written type through
+    // `ctx.runtimeWriteType`. A `view` write therefore reaches exactly the two
+    // members that judge a list view's field references and resolve only
+    // against the `objects` collection the snapshot carries
+    // (`validateSearchableFields`, `validateSortableFields`). The whole suite
+    // is NOT the right granularity for this door, measured not assumed:
+    // `validateActionNameRefs` (error-tier) resolves a view's `rowActions[]` /
+    // `bulkActions[]` against `stack.actions`, a collection no per-write
+    // snapshot carries, so crossing it would refuse legitimate view writes for
+    // every stack-level action they name — RUNTIME_NEEDS_FULL_SNAPSHOT's exact
+    // sentence, on the hottest write type the gate has. Flow snapshots are
+    // unchanged: every member keeps the default `flow` declaration.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['flow'],
-    run: (stack) => validateReferenceIntegrity(stack),
+    runtimeTypes: ['flow', 'view'],
+    run: (stack, ctx) => validateReferenceIntegrity(stack, ctx),
   },
   // ADR-0078 / #5068 — the SDUI component-props gate. `PageComponent.properties`
   // is `z.record(z.string(), z.unknown())` and ADR-0089 D3a strictness does not
