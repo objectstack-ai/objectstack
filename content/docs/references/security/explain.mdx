@@ -123,7 +123,7 @@ ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object
 | **kernelTier** | `Enum<'layer_0_tenant' \| 'layer_1_business'>` | optional | ADR-0095 kernel layer: layer_0_tenant = the always-first org wall; layer_1_business = business RLS/sharing/ownership. |
 | **verdict** | `Enum<'grants' \| 'denies' \| 'narrows' \| 'widens' \| 'neutral' \| 'not_applicable'>` | ✅ |  |
 | **detail** | `string` | ✅ |  |
-| **contributors** | `{ kind: Enum<'permission_set' \| 'position' \| 'system'>; name: string; via?: string; state?: Enum<'active' \| 'expired'> }[]` | optional (default: `[]`) |  |
+| **contributors** | `{ kind: Enum<'permission_set' \| 'position' \| 'system'>; name: string; via?: string; state?: Enum<'active' \| 'expired' \| 'deactivated'> }[]` | optional (default: `[]`) |  |
 | **record** | `{ outcome: Enum<'admitted' \| 'excluded' \| 'not_evaluated'>; rowFilter?: any; matchesRecord?: boolean; rules: object[]; … }` | optional | Row-level determination for the specific record under explanation; set only for record-grained requests. |
 
 
