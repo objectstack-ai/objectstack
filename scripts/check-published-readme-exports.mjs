@@ -569,8 +569,15 @@ function typeSurface(absEntries) {
  * @param resolve  `(specifier) => null` when the target is not a workspace
  *                 package (skip it), or
  *                 `{ declared, entryMissing, exports, hasMember }`.
+ * @param measured optional accumulator, mutated in place, recording how much
+ *                 each half READ rather than what it found. Findings alone
+ *                 cannot answer "did it look?" -- zero is the same number for a
+ *                 clean tree and for a scan that matched nothing (#4690), and
+ *                 the call-site half is the half most likely to quietly stop
+ *                 matching, being a text scan over prose. Passed in rather than
+ *                 returned so the return type stays a plain array of findings.
  */
-export function analyzeDocument(doc, resolveTarget) {
+export function analyzeDocument(doc, resolveTarget, measured = null) {
   const findings = [];
   const bound = new Map(); // local name -> { symbol, hasMember, specifier, imported }
   for (const imp of extractImports(doc.text)) {
@@ -600,6 +607,7 @@ export function analyzeDocument(doc, resolveTarget) {
     const names = [...imp.named];
     if (imp.defaultLocal) names.push({ imported: 'default', local: imp.defaultLocal });
     for (const { imported, local } of names) {
+      if (measured) measured.symbolChecks++;
       const symbol = target.exports.get(imported);
       if (!symbol) {
         findings.push({
@@ -627,9 +635,11 @@ export function analyzeDocument(doc, resolveTarget) {
       }
     }
   }
+  if (measured) measured.receivers += bound.size;
   for (const call of extractMemberCalls(doc.text, [...bound.keys()])) {
     const b = bound.get(call.object);
     if (!b) continue;
+    if (measured) measured.callChecks++;
     if (b.hasMember(b.symbol, call.member)) continue;
     findings.push({
       id: `${doc.pkg}|${doc.file}|member|${b.specifier}|${b.imported}.${call.member}`,
@@ -676,6 +686,53 @@ function freshRemedy() {
     `symbol it documents. ${RATCHET_AUTHORITY_MARKER}: ${BASELINE_REL} is a shrink-only\n` +
     'record of the instances #9532 measured. It is not an author remedy and this gate does\n' +
     'not offer it as one — a new entry would mute exactly what the gate exists to report.\n'
+  );
+}
+
+/**
+ * The GREEN line's body -- what a PASSING run tells the reader.
+ *
+ * Rendered by a function, next to `freshRemedy()` and for the same reason: the
+ * counts are interpolated, so reading the SOURCE proves nothing about the
+ * sentence an author gets. The self-test asserts on the returned text.
+ *
+ * ## Why it reports what was READ, not a ratio over what was found (#9767)
+ *
+ * This clause used to end `${memberChecks} of the findings are call sites`.
+ * With the ledger populated that was informative -- it said how much of the
+ * baseline the call-site half accounted for. With `entries: []` (the success
+ * state, #9649) it is structurally always `0 of the findings are call sites`:
+ * a ratio over an EMPTY SET, printed by the one clause whose whole job is to
+ * say "clean" rather than "unmeasured". A zero there is the #4690 ambiguity in
+ * output rather than in a verdict -- "I scanned 60 documents and found nothing"
+ * and "I scanned nothing" render identically -- and the call-site half is the
+ * half most likely to quietly stop matching, being a text scan over prose.
+ *
+ * So each half states its INPUT VOLUME, which no clean tree can make vacuous:
+ * a zero in `283 documented symbol(s) checked` or `8 documented call(s)
+ * checked` says the half read nothing, which is the alarm, whereas a zero in
+ * `0 of the findings are call sites` said nothing at all. The counts come from
+ * the accumulator `analyzeDocument` fills as it works -- the same pass, not a
+ * second one; this gate's verdict, population and exit codes are unchanged.
+ *
+ * The ledger clause is kept as it was: `N known instance(s) STILL in <file>`
+ * carries the shrink-only direction in the word "still", and the header above
+ * it already names the population that was read, so zero reads as "none left
+ * to repair". Non-empty, it also carries the call-site split the old clause
+ * had -- WITH its denominator, which `N of the findings` never printed.
+ */
+function successSummary({ measured, baselineCount, memberChecks }) {
+  const ledger =
+    baselineCount === 0
+      ? `${baselineCount} known instance(s) still in ${BASELINE_REL}.`
+      : `${baselineCount} known instance(s) still in ${BASELINE_REL} ` +
+        `(${memberChecks} of the ${baselineCount} at a call site).`;
+  return (
+    `  ${ledger}\n` +
+    `  Import half: ${measured.symbolChecks} documented symbol(s) checked against the exports ` +
+    `their package publishes.\n` +
+    `  Call-site half: ${measured.callChecks} documented \`X.y(…)\` call(s) checked, on ` +
+    `${measured.receivers} import-bound name(s).`
   );
 }
 
@@ -788,7 +845,8 @@ function run() {
   };
 
   const findings = [];
-  for (const doc of docs) findings.push(...analyzeDocument(doc, resolveTarget));
+  const measured = { symbolChecks: 0, receivers: 0, callChecks: 0 };
+  for (const doc of docs) findings.push(...analyzeDocument(doc, resolveTarget, measured));
 
   // Reconcile against the shrink-only baseline, BOTH directions.
   const baseline = loadBaseline();
@@ -822,8 +880,7 @@ function run() {
   if (fresh.length === 0 && stale.length === 0) {
     console.log(`✓ check:published-readme-exports — ${header}`);
     console.log(
-      `  ${baseline.length} known instance(s) still in ${BASELINE_REL}; ` +
-        `${memberChecks} of the findings are call sites.`,
+      successSummary({ measured, baselineCount: baseline.length, memberChecks }),
     );
     return 0;
   }
@@ -1179,6 +1236,53 @@ function selfTest() {
     ['subpath'],
   );
 
+  // The GREEN line (#9767). Its counts are interpolated too, so — exactly like
+  // the remedy below — reading the SOURCE is not evidence about the sentence a
+  // reader gets. Driven here instead, in the three states a passing run has.
+  const measuredReal = { symbolChecks: 283, receivers: 225, callChecks: 8 };
+  const scanned = successSummary({ measured: measuredReal, baselineCount: 0, memberChecks: 0 });
+  eq(
+    'successSummary — with the ledger EMPTY the line says what each half read',
+    scanned.split('\n'),
+    [
+      '  0 known instance(s) still in scripts/published-readme-exports.baseline.json.',
+      '  Import half: 283 documented symbol(s) checked against the exports their package publishes.',
+      '  Call-site half: 8 documented `X.y(…)` call(s) checked, on 225 import-bound name(s).',
+    ],
+  );
+  eq(
+    'successSummary — a NON-EMPTY ledger keeps the call-site split, WITH its denominator',
+    successSummary({ measured: measuredReal, baselineCount: 2, memberChecks: 1 }).split('\n')[0],
+    '  2 known instance(s) still in scripts/published-readme-exports.baseline.json (1 of the 2 at a call site).',
+  );
+
+  // THE regression this card exists for. A tree where both halves read hundreds
+  // of claims and a tree where they read NOTHING must not print the same green
+  // body — that is #4690 moved out of the verdict and into the output. The
+  // clause these pins replaced ("N of the findings are call sites") was
+  // byte-identical in both, because with an empty ledger it is a ratio over an
+  // empty set.
+  const unscanned = successSummary({
+    measured: { symbolChecks: 0, receivers: 0, callChecks: 0 },
+    baselineCount: 0,
+    memberChecks: 0,
+  });
+  if (scanned === unscanned) {
+    failures.push(
+      'the GREEN body renders IDENTICALLY for a tree that was scanned and one that was not.\n' +
+        '      A reader cannot tell "60 documents read, nothing wrong" from "nothing was read",\n' +
+        '      which is exactly the ambiguity this gate is emphatic about everywhere else.',
+    );
+  }
+  if (/of the findings/.test(scanned)) {
+    failures.push(
+      'the GREEN body must state each half\'s INPUT VOLUME, never a ratio over the findings.\n' +
+        '      A zero in "0 documented call(s) checked" is an alarm a reader can act on; a zero\n' +
+        '      in "0 of the findings are call sites" is a ratio over an empty set and says\n' +
+        '      nothing at all.',
+    );
+  }
+
   // The authority convention (#8435): the baseline path must never be offered
   // as a co-equal author remedy.
   const remedy = freshRemedy();
@@ -1204,7 +1308,9 @@ function selfTest() {
   console.log(
     '✓ check:published-readme-exports --self-test — extraction, scoping, resolution and both\n' +
       '  analysis directions pinned (fabricated import reported, fabricated static reported,\n' +
-      '  honest README clean, and every measured prose/bash/diff false positive silent).',
+      '  honest README clean, and every measured prose/bash/diff false positive silent), plus\n' +
+      '  the author-facing text: the remedy refuses the baseline, and the green line reports\n' +
+      '  what each half READ, so a scanned tree and an unread one cannot print the same body.',
   );
 }
 
