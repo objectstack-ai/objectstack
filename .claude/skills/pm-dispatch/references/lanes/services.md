@@ -8,13 +8,13 @@
 - `packages/services/*`、`packages/connectors/*`、`packages/triggers/*`、
   `plugin-approvals`、`plugin-webhooks`、`plugin-email`、`plugin-reports`、
   `embedder-openai`、`knowledge-*`。
-- 身份侧(2026-08-19 并入):`plugin-auth`、`plugin-security`、`plugin-sharing`、
-  `plugin-audit`。
+- 身份侧:`plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit`。
 - 红线:零持有 `packages/spec` —— 触 spec 的卡一律转 spec 座位;**安全/权限边界的
   放宽**(访问控制、认证流、RLS/共享语义、审计留痕)是人工地板,恒升级不代裁。
 
 ## 常设承诺
 
+- **每轮巡检第一判据**:先读半状态巡查锚(`half-state-patrol.yml` 置顶 issue)点名本道卡/PR/座位贴的 H 行,逐行认领或处置,再做其余判据;锚行未处置 ⛔ 不开新派发。
 - **每条否定性 pin 都要消融验证**(被禁行为放回 → 测试转红 → 报失败输出 → 恢复)
   —— 单独的绿不是证据。
 - **安全族卡的披露纪律**:复现配方不落任何公开面(卡、PR、评论);证据以抽象描述
