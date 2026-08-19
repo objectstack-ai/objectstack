@@ -2680,6 +2680,45 @@ function selfTest() {
   t('nor a same-named file inside a directory', !lineRatchetHints.some((h) => hintCovers(h, 'examples/AGENTS.md')));
   t('a bare top-level file literal is still no hint at all', extractWatchHints("const F = 'README.md';").length === 0);
 
+  // The rest of that class (#9979). The ratchet above was one of SIX families
+  // whose population genuinely includes a repo-root instruction file; the other
+  // five were measured still invisible, so an AGENTS.md card derived ONE gate
+  // out of six and a README.md / ARCHITECTURE.md card derived NONE at all —
+  // while `check:doc-anchors` is REQUIRED in lint.yml and is this repo's only
+  // fragment coverage. Each declares the subtree spelling in its own source.
+  //
+  // Read from the real gates, not fixtures: what is pinned is that the tree
+  // still HAS the declarations. If one of these gates stops reading its root
+  // file, delete its case with the declaration — never keep a case green by
+  // re-pointing it at a gate that never read the file.
+  const rootFileDeclarations = [
+    ['the pm skill-id lint', 'scripts/pm/check-skill-id-lint.mjs', 'AGENTS.md'],
+    ['the governed-merge register', 'scripts/pm/check-governed-merges.mjs', 'AGENTS.md'],
+    ['the governed-merge register (CLAUDE.md half)', 'scripts/pm/check-governed-merges.mjs', 'CLAUDE.md'],
+    ['the governed-prose gate', 'scripts/pm/check-governed-prose.mjs', 'AGENTS.md'],
+    ['the docs-audit scope gate', 'scripts/docs-audit/check-audit-scope.mjs', 'AGENTS.md'],
+    ['the required-context pin', 'scripts/check-required-contexts.mjs', 'AGENTS.md'],
+    ['the doc-anchors gate', 'scripts/check-doc-anchors.mjs', 'README.md'],
+    ['the doc-anchors gate (ARCHITECTURE.md half)', 'scripts/check-doc-anchors.mjs', 'ARCHITECTURE.md'],
+  ];
+  for (const [what, gate, rootFile] of rootFileDeclarations) {
+    const gateHints = extractWatchHints(readFileSync(join(ROOT, gate), 'utf8'));
+    t(`${what} reaches the repo-root file it declares (${rootFile})`, gateHints.some((h) => hintCovers(h, rootFile)));
+    // The negative half, and the reason each of these is a DECLARATION rather
+    // than an extractor change: a declaration must buy its own file and NOT the
+    // bare-`*.md` class the extractor still refuses. `examples/AGENTS.md` is
+    // the live specimen — a real tracked file, same basename, not read by any
+    // of these gates (check-governed-merges' own near-miss case names it).
+    t(`${what} claims no same-named file inside a directory`, !gateHints.some((h) => hintCovers(h, `examples/${rootFile}`)));
+  }
+  // …and the root files stay separated from each other: the governed-merge
+  // register is the only one of the six that declares two, and nothing here may
+  // reach a root file its gate does not read.
+  const proseHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/pm/check-governed-prose.mjs'), 'utf8'));
+  t('a one-root declaration does not reach the other root file', !proseHints.some((h) => hintCovers(h, 'CLAUDE.md')));
+  const anchorRootHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-doc-anchors.mjs'), 'utf8'));
+  t('and the doc-anchors pair claims neither instruction file', !anchorRootHints.some((h) => hintCovers(h, 'AGENTS.md') || hintCovers(h, 'CLAUDE.md')));
+
   // ── A trailing sentence period is not part of the path (#8534, half two) ──
   //
   // Coupled to the rule above: the raw-prefix comparison reached the real file

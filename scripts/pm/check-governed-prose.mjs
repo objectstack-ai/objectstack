@@ -113,6 +113,29 @@ export const PROSE_SURFACES = Object.freeze([
 ]);
 
 /**
+ * The repo-ROOT surface above, declared for `scripts/pm/dispatch-gates.mjs`
+ * (#9979, applying #9964's pattern).
+ *
+ * That tool derives a card's gate list from the path literals in each gate's
+ * own source, and "looks like a path" there means "carries a separator". The
+ * skill surface has one; `AGENTS.md` does not, so this gate's two regions
+ * yielded one hint and an AGENTS.md card derived it not at all — on a file
+ * where this gate is one of the strictest things that can go red, and where the
+ * remedy is famously NOT the obvious edit (the enumeration sits inside a
+ * verbatim, untranslated maintainer quotation that must never be rewritten to
+ * satisfy a gate).
+ *
+ * `<file>/**` is the form that reaches a root file: the extractor accepts it
+ * and `collapseHint` reduces it back to that one path.
+ *
+ * ⚠️ Provenance, NOT a lookup key. Every `path` in `PROSE_SURFACES` is opened
+ * by the run; the glob spelling appearing there would send this gate looking
+ * for a file that does not exist — red on a missing input, which this file
+ * treats as a hard failure by design. The self-test pins both halves.
+ */
+export const ROOT_FILE_WATCH_HINTS = ['AGENTS.md/**'];
+
+/**
  * The region between two anchors. Pure. Returns `{ ok: false, reason }` rather
  * than throwing, so the caller decides the exit code and the self-test can
  * assert the refusal shapes without a filesystem.
@@ -285,6 +308,20 @@ function selfTest() {
     assert(`${surface.path}: region resolves`, region.ok, true);
     if (region.ok) assert(`${surface.path}: region is clean`, verdict(region.text, globs), { missing: [], unknown: [] });
   }
+
+  // --- the dispatch-gates declaration (#9979) ----------------------------
+  //
+  // Enforcement cannot hold any of these: the declaration is read by another
+  // tool entirely, so a wrong or missing entry runs perfectly green here and
+  // shows up only as a dev dispatched on an AGENTS.md card with this gate
+  // absent from the brief.
+  const rootSurfaces = PROSE_SURFACES.map((s) => s.path).filter((p) => !p.includes('/'));
+  assert('every separator-less prose surface declares a root-file watch hint', rootSurfaces.every((p) => ROOT_FILE_WATCH_HINTS.includes(`${p}/**`)), true);
+  assert('the declaration names no file this gate does not read', ROOT_FILE_WATCH_HINTS.every((h) => PROSE_SURFACES.some((s) => s.path === h.replace(/\/\*+$/, ''))), true);
+  assert('AGENTS.md is the root surface it declares', ROOT_FILE_WATCH_HINTS, ['AGENTS.md/**']);
+  // Provenance, never a lookup key: the run opens every `path`, so the glob
+  // form appearing there would make this gate read a path that does not exist.
+  assert('the declared form is NOT a PROSE_SURFACES path', PROSE_SURFACES.some((s) => ROOT_FILE_WATCH_HINTS.includes(s.path)), false);
 
   const failed = cases.filter((c) => !c.ok);
   for (const c of failed) {

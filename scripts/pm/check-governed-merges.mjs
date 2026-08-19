@@ -280,6 +280,34 @@ export const GOVERNED_SURFACES = Object.freeze([
 ]);
 
 /**
+ * The register's repo-ROOT rows, declared for `scripts/pm/dispatch-gates.mjs`
+ * (#9979, applying #9964's pattern).
+ *
+ * That tool derives a card's gate list from the path literals in each gate's
+ * own source, and "looks like a path" there means "carries a separator". The
+ * three `prefix` rows above have one and reach dispatch-gates already — the
+ * `skills/**` row is one of the three specimens that motivated reading a hint
+ * AS WRITTEN. The two `exact` rows do not: a repo-root FILE carries no
+ * separator, so an `AGENTS.md` or `CLAUDE.md` card derived this gate not at all
+ * while the same card is GOVERNED by it (draft-only PR, maintainer merge) —
+ * the loudest possible thing to learn late.
+ *
+ * `<file>/**` is the form that reaches one: the extractor accepts it, and
+ * `collapseHint` reduces it back to that single path. `examples/AGENTS.md` and
+ * the `create-objectstack` template copy stay out, exactly as the `exact` rows
+ * intend.
+ *
+ * ⚠️ Provenance, NOT a matcher. `governedSlice` compares against `exact`, and
+ * `glob` is the spelling the instruction files must carry verbatim
+ * (`check-governed-prose.mjs` asserts prose containment against it, and both
+ * files spell these two as bare filenames). Rewriting either field into the
+ * glob form would silently change what this register GOVERNS and what the
+ * prose gate demands; this list is read by neither. The self-test pins both
+ * halves.
+ */
+export const ROOT_FILE_WATCH_HINTS = ['AGENTS.md/**', 'CLAUDE.md/**'];
+
+/**
  * The four repos the 2026-08-18 cross-repo extension governs. `id` doubles as
  * the sibling directory name beside this checkout — the layout every session
  * container uses — and `--repo-root <id>=<path>` overrides it for any other
@@ -848,6 +876,22 @@ function selfTest() {
   // exact entries are the repo-root files only (see header).
   assert('near-misses-stay-out', ids(['docs/adrs/z.md', '.claude-x/y.md', 'skillsx/a.md', 'examples/AGENTS.md', 'packages/create-objectstack/src/templates/AGENTS.md', 'apps/CLAUDE.md.bak']).length === 0, JSON.stringify(ids(['examples/AGENTS.md'])));
   assert('a-mixed-diff-groups-by-surface', ids(['docs/adr/0001.md', 'AGENTS.md', 'package.json']).join() === 'adr,agents-md');
+
+  // ── the dispatch-gates declaration (#9979) ───────────────────────────────
+  //
+  // Enforcement cannot hold any of these: the declaration is read by another
+  // tool entirely, so a wrong or missing entry runs perfectly green here and
+  // shows up only as a dev dispatched on a root-file card who is not told that
+  // the card is GOVERNED.
+  const rootExacts = GOVERNED_SURFACES.filter((s) => s.exact).map((s) => s.exact);
+  assert('every-exact-root-row-declares-a-watch-hint', rootExacts.every((f) => ROOT_FILE_WATCH_HINTS.includes(`${f}/**`)), JSON.stringify(rootExacts));
+  assert('the-declaration-names-no-file-this-register-does-not-govern', ROOT_FILE_WATCH_HINTS.every((h) => rootExacts.includes(h.replace(/\/\*+$/, ''))), JSON.stringify(ROOT_FILE_WATCH_HINTS));
+  assert('both-root-instruction-files-are-declared', ROOT_FILE_WATCH_HINTS.join(',') === 'AGENTS.md/**,CLAUDE.md/**', ROOT_FILE_WATCH_HINTS.join(','));
+  // Provenance, never a matcher: `governedSlice` compares against `exact` and
+  // `check-governed-prose.mjs` demands `glob` verbatim in the instruction
+  // files. The glob spelling appearing in either field would change what this
+  // register governs, and what that gate requires the prose to say.
+  assert('the-declared-form-is-neither-an-exact-nor-a-glob-value', !GOVERNED_SURFACES.some((s) => ROOT_FILE_WATCH_HINTS.includes(s.exact) || ROOT_FILE_WATCH_HINTS.includes(s.glob)));
 
   // ── subject → PR (both GitHub spellings; the trailing parenthetical wins) ─
   assert('squash-subject', pullNumberFromSubject('fix(api): envelope the error paths (#9456)') === 9456);

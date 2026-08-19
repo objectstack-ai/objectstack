@@ -464,6 +464,29 @@ export const INSTRUCTION_SURFACES = [
 ];
 
 /**
+ * The repo-ROOT surface above, declared for `scripts/pm/dispatch-gates.mjs`
+ * (#9979, applying #9964's pattern).
+ *
+ * That tool derives a card's gate list from the path literals in each gate's
+ * own source, and "looks like a path" there means "carries a separator". Four
+ * of the five surfaces have one; `AGENTS.md` does not, because a repo-root FILE
+ * has no separator to be found by — so an AGENTS.md card derived this gate not
+ * at all, while that surface is the one carrying `mustName` for all six
+ * required contexts (widened 2→6 by the #9677 ruling). Editing the merge-queue
+ * paragraph there is precisely how this gate goes red, and it was reachable
+ * only by judgment.
+ *
+ * `<file>/**` is the form that reaches a root file: the extractor accepts it,
+ * and `collapseHint` reduces it back to that one path and to nothing else.
+ *
+ * ⚠️ Provenance, NOT a lookup key. `scanInstructionSurfaces` opens every
+ * surface `file`; the glob spelling appearing there would send this gate
+ * reading a path that does not exist — and a surface it cannot read is a hard
+ * failure here by design (#4690). The self-test pins both halves.
+ */
+export const ROOT_FILE_WATCH_HINTS = ['AGENTS.md/**'];
+
+/**
  * Former required-context names — permanent history, append-only. A row is
  * added BY the rename PR (the scan is red on the old literal until it is) and
  * never deleted: once its budgets are trimmed away, the row is a standing ban
@@ -1869,6 +1892,32 @@ async function selfTest() {
   assert(
     judgeSurfaces({ surfaces: [] }).problems.some((p) => p.includes('scan set is empty')),
     'an empty scan set ⇒ red, never a silent tick (#4690)',
+  );
+
+  // ── the dispatch-gates declaration (#9979) ───────────────────────────────
+  //
+  // Enforcement cannot hold any of these: the declaration is read by another
+  // tool entirely, so a wrong or missing entry runs perfectly green here and
+  // shows up only as a dev dispatched on an AGENTS.md card with this gate
+  // absent from the brief — on the surface that carries `mustName` for all six
+  // required contexts.
+  assert(
+    INSTRUCTION_SURFACES.map((s) => s.file)
+      .filter((f) => !f.includes('/'))
+      .every((f) => ROOT_FILE_WATCH_HINTS.includes(`${f}/**`)),
+    'every separator-less instruction surface declares a root-file watch hint (#9979)',
+  );
+  assert(
+    ROOT_FILE_WATCH_HINTS.every((h) => INSTRUCTION_SURFACES.some((s) => s.file === h.replace(/\/\*+$/, ''))),
+    'and the declaration names no file this gate does not scan (#9979)',
+  );
+  assert(ROOT_FILE_WATCH_HINTS.join(',') === 'AGENTS.md/**', 'AGENTS.md is the root surface it declares (#9979)');
+  // Provenance, never a lookup key: `scanInstructionSurfaces` opens every
+  // surface `file`, so the glob form appearing there would read a missing file
+  // — a hard failure here by design.
+  assert(
+    !INSTRUCTION_SURFACES.some((s) => ROOT_FILE_WATCH_HINTS.includes(s.file)),
+    'the declared form is NOT an INSTRUCTION_SURFACES file (#9979)',
   );
   assert(
     judgeSurfaces({ files: new Map() }).problems.filter((p) => p.includes('was never read')).length ===
