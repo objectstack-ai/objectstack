@@ -44,9 +44,12 @@ export const ANONYMOUS_DENY_MESSAGE = 'Authentication is required to access this
  * platform's only one; see the two-envelope table below before you reuse this
  * shape.
  *
- * Exactly one consumer writes it: `@objectstack/rest`'s `enforceAuth`
- * (`rest-server.ts` — `res.status(ANONYMOUS_DENY_STATUS).json(ANONYMOUS_DENY_BODY)`),
- * which owns the `/data/*` and `/meta` surfaces.
+ * Two consumers write it verbatim, both flat-family seams: `@objectstack/rest`'s
+ * `enforceAuth` (`rest-server.ts` —
+ * `res.status(ANONYMOUS_DENY_STATUS).json(ANONYMOUS_DENY_BODY)`), which owns the
+ * `/data/*` and `/meta` surfaces, and `@objectstack/runtime`'s
+ * `mountRouteOnServer` (`dispatcher-plugin.ts` — the endpoint-route 401 arm,
+ * #9823), which answers declared routes mounted on the HTTP server.
  *
  * ## Two live envelopes, one denial (#5632)
  *

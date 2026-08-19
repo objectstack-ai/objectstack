@@ -58,6 +58,11 @@ import type { TenancyService } from './tenancy-service.js';
 import { OtpSendGuard, assertOtpCooldownSeconds } from './otp-send-guard.js';
 import type { CounterStore } from './rate-limit-storage.js';
 import {
+  isLastLocalCredentialHolder,
+  LAST_LOCAL_CREDENTIAL_CODE,
+  LAST_LOCAL_CREDENTIAL_MESSAGE,
+} from './last-local-credential.js';
+import {
   PHONE_SMS_TOPICS,
   builtinPhoneSmsBody,
   interpolatePhoneSms,
@@ -1550,9 +1555,15 @@ export class AuthManager {
             ctx?.path === '/admin/remove-user' ||
             ctx?.path === '/admin/ban-user'
           ) {
+            // ⚠️ `/admin/ban-user` no longer reaches this hook — #9652 mounts an
+            // ObjectStack raw route on that path ahead of the catch-all (the
+            // ADR-0068 gate better-auth cannot express), so the request never
+            // enters better-auth's router. The path stays listed here because
+            // the mount is conditional on the admin plugin, and because the
+            // guard itself now lives in ONE module both call sites share —
+            // `last-local-credential.ts`, whose header records this trap.
             let isLastLocalCredential = false;
             try {
-              const adapter = ctx.context.adapter;
               let targetId: string | undefined = ctx?.body?.userId ?? ctx?.body?.user_id;
               if (!targetId && ctx.path === '/delete-user') {
                 const { getSessionFromCtx } = await import('better-auth/api');
@@ -1560,27 +1571,10 @@ export class AuthManager {
                 targetId = s?.user?.id ?? s?.session?.userId;
               }
               if (targetId) {
-                // Only guard when the target actually holds a local credential —
-                // removing a credential-less (managed) user can't cause lockout.
-                const targetCred = await adapter.findOne({
-                  model: 'account',
-                  where: [
-                    { field: 'userId', value: targetId },
-                    { field: 'providerId', value: 'credential' },
-                  ],
-                });
-                if (targetCred) {
-                  const creds: any[] = await adapter.findMany({
-                    model: 'account',
-                    where: [{ field: 'providerId', value: 'credential' }],
-                  });
-                  const otherHolders = new Set(
-                    (creds ?? [])
-                      .map((a: any) => a?.userId ?? a?.user_id)
-                      .filter((id: any) => id && id !== targetId),
-                  );
-                  isLastLocalCredential = otherHolders.size === 0;
-                }
+                isLastLocalCredential = await isLastLocalCredentialHolder(
+                  ctx.context.adapter,
+                  targetId,
+                );
               }
             } catch {
               // Fail-open — never block a legitimate op on a lookup error.
@@ -1588,12 +1582,8 @@ export class AuthManager {
             if (isLastLocalCredential) {
               const { APIError } = await import('better-auth/api');
               throw new APIError('CONFLICT', {
-                message:
-                  'Cannot remove the last local password login. At least one ' +
-                  'break-glass account with a password must remain so an identity-' +
-                  'provider outage can never lock the organization out. Add another ' +
-                  'local password first, then retry.',
-                code: 'LAST_LOCAL_CREDENTIAL',
+                message: LAST_LOCAL_CREDENTIAL_MESSAGE,
+                code: LAST_LOCAL_CREDENTIAL_CODE,
               });
             }
             // fall through to better-auth's own handler

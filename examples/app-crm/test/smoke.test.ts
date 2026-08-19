@@ -93,11 +93,34 @@ describe('app-crm minimal metadata bundle', () => {
     expect(stack.i18n!.supportedLocales).toContain('zh-CN');
   });
 
-  it('has criteria sharing rules (the enforced form — owner-type was retired)', () => {
-    const rules = stack.sharingRules ?? [];
-    expect(rules.length).toBeGreaterThanOrEqual(2);
-    // `type: 'owner'` no longer parses (never enforced; ADR-0078): every
-    // declared rule is the enforced criteria form.
+  // #9698 — this used to assert `rules.length >= 2` and `every(type ===
+  // 'criteria')`. Both passed, and neither was the property that mattered:
+  // all three declared rules were anchored on `public_read_write` objects, so
+  // `assertNotInertGrant` refused every grant and the boot backfill failed for
+  // each one, on every boot. A test can assert the enforced FORM and stay
+  // green while the rule enforces nothing. The three were removed (ADR-0049
+  // enforce-or-remove); what replaces the assertion is the property their
+  // greenness hid, so re-adding one on a public object goes red HERE as well
+  // as at `objectstack build`.
+  it('no declared sharing rule is anchored where sharing has nothing to widen (#9698)', () => {
+    const rules = (stack.sharingRules ?? []) as Array<{ name?: string; object?: string; type?: string }>;
+    const owdOf = new Map(
+      ((stack.objects ?? []) as Array<{ name?: string; sharingModel?: string }>)
+        .map((o) => [String(o.name), o.sharingModel]),
+    );
+    // `effectiveSharingModel` maps BOTH to 'public'; `controlled_by_parent`
+    // earns its own runtime refusal ("share the master record instead").
+    const INERT_OWD = new Set(['public_read_write', 'controlled_by_parent']);
+    const offenders = rules
+      .filter((r) => INERT_OWD.has(String(owdOf.get(String(r.object)))))
+      .map((r) => `${r.name} → ${r.object} (sharingModel '${owdOf.get(String(r.object))}')`);
+    expect(
+      offenders,
+      `sharing rule(s) whose grant no gate would consult — the boot backfill refuses these with `
+        + `SHARING_NOT_ENABLED: ${offenders.join(', ')}`,
+    ).toEqual([]);
+    // `type: 'owner'` no longer parses (never enforced; ADR-0078): whatever is
+    // declared is the enforced criteria form.
     expect(rules.every((r) => r.type === 'criteria')).toBe(true);
   });
 

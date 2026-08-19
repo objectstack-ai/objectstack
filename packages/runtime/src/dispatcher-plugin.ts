@@ -261,12 +261,30 @@ function mountRouteOnServer(
                     }
                     res.end();
                 } else {
-                    // Fallback: collect events into array
-                    const events = [];
+                    // [#9936] Buffered fallback — the IHttpResponse contract's
+                    // own prescription (#3607, ADR-0076 OQ#10; the JSDoc on
+                    // `write` in packages/spec/src/contracts/http-server.ts):
+                    // a transport that omits the OPTIONAL `write`/`end`
+                    // streaming surface receives the SAME SSE bytes, buffered
+                    // and delivered through `send()` under the streaming
+                    // headers already set above. A caller that asked for a
+                    // stream parses this body with the same `data:`-line
+                    // reader, frame for frame — the encoding ternary below is
+                    // deliberately identical to the streamed branch's.
+                    //
+                    // This used to answer a bare `res.json({ events })`: a
+                    // JSON dialect of the same frames that no SSE reader could
+                    // decode (both shipped readers split raw bytes on
+                    // newlines, and a JSON body contains none), off
+                    // BaseResponseSchema besides. No shipped transport lacks
+                    // `write`/`end`, so this branch is live only for an
+                    // external `Runtime({ server })` transport — exactly the
+                    // composition the contract note anticipates.
+                    let buffered = '';
                     for await (const event of result.events) {
-                        events.push(event);
+                        buffered += typeof event === 'string' ? event : `data: ${JSON.stringify(event)}\n\n`;
                     }
-                    res.json({ events });
+                    res.send(buffered);
                 }
             } else {
                 res.status(result.status);
@@ -381,6 +399,51 @@ function sendResultBase(
                         } catch { /* connection already gone */ }
                     } finally {
                         try { res.end(); } catch { /* idem */ }
+                    }
+                })();
+                return;
+            }
+            if (isStream) {
+                // [#9961] Buffered fallback for a transport whose `res` cannot
+                // stream — the same #3607 / ADR-0076 OQ#10 contract
+                // prescription the route-wrapper branch applies (see
+                // `mountRouteOnServer`): drain the descriptor's AsyncIterable
+                // and deliver the identical SSE bytes through `send()` under
+                // the streaming headers. Frame encoding, the `null` skip and
+                // the trailing `event: error` frame all mirror the streamed
+                // branch above so the buffered body is byte-identical to what
+                // a streaming transport would have received.
+                //
+                // This used to fall through to `res.json(result.result)`,
+                // which serialized the descriptor itself: `JSON.stringify`
+                // collapses the `events` AsyncIterable to `{}`, so the caller
+                // got HTTP 200 with the payload gone and the iterable was
+                // never drained — silent total event loss.
+                res.status(typeof r.status === 'number' ? r.status : 200);
+                applySecurityHeaders();
+                if (r.headers && typeof r.headers === 'object') {
+                    for (const [k, v] of Object.entries(r.headers)) {
+                        res.header(k, String(v));
+                    }
+                } else {
+                    res.header('Content-Type', r.contentType || 'text/event-stream');
+                    res.header('Cache-Control', 'no-cache');
+                    res.header('Connection', 'keep-alive');
+                }
+                // Drained in the same detached shape as the streaming path —
+                // this function is synchronous by signature, and the response
+                // is delivered when the iterable settles.
+                (async () => {
+                    let buffered = '';
+                    try {
+                        for await (const event of r.events as AsyncIterable<unknown>) {
+                            if (event == null) continue;
+                            buffered += typeof event === 'string' ? event : `data: ${JSON.stringify(event)}\n\n`;
+                        }
+                    } catch (streamErr) {
+                        buffered += `event: error\ndata: ${JSON.stringify({ message: streamErr instanceof Error ? streamErr.message : String(streamErr) })}\n\n`;
+                    } finally {
+                        try { res.send(buffered); } catch { /* connection already gone */ }
                     }
                 })();
                 return;

@@ -25,21 +25,27 @@ is reserved (D3) — if you knew the v1 model, start at
 [Positions](/docs/permissions/positions).
 
 Access rules are metadata like everything else — this is a real sharing rule from
-the CRM example app:
+the showcase example app:
 
 ```typescript
-export const HighValueOpportunitySharingRule = defineSharingRule({
+export const KeyAccountQualifiedContactRule = defineSharingRule({
   type: 'criteria',
-  name: 'share_high_value_opps_with_managers',
-  label: 'High-Value Deals → Sales Managers',
-  description: 'Automatically share opportunities over $100,000 with all Sales Managers.',
-  object: 'crm_opportunity',
-  condition: 'record.amount > 100000',
-  accessLevel: 'edit',
-  sharedWith: { type: 'position', value: 'sales_manager' },
+  name: 'share_key_account_qualified_contacts_with_managers',
+  label: 'Key-Account Qualified Contacts → Managers',
+  description: 'Share qualified contacts at the key account with managers.',
+  object: 'showcase_contact',
+  condition: "record.stage == 'qualified' && record.company == 'Northwind'",
+  accessLevel: 'read',
+  sharedWith: { type: 'position', value: 'manager' },
   active: true,
 });
 ```
+
+Note the object it is anchored on. `showcase_contact` is OWD `private`, which is
+what makes this grant one a read gate actually consults — sharing only ever
+WIDENS a baseline, so a rule on an object that is already `public_read_write`
+grants nothing and is refused at boot. That is an authoring-time build error
+(`sharing-rule-object-not-shareable`), not a runtime surprise.
 
 Because AI agents act through the same permission-aware surface, these rules bound
 agent access exactly as they bound users ([Actions as Tools](/docs/ai/actions-as-tools)).
@@ -59,6 +65,7 @@ agent access exactly as they bound users ([Actions as Tools](/docs/ai/actions-as
 - [Field-Level Security](/docs/permissions/field-level-security)
 - [Permission Metadata](/docs/permissions/permission-metadata)
 - [Security Permissions Matrix](/docs/permissions/permissions-matrix)
+- [Record-View Auditing](/docs/permissions/record-view-auditing) - who opened which record, and when
 - [Access Recipes](/docs/permissions/access-recipes)
 
 Spec: [Security & Access Control](/docs/protocol/objectql/security) ·

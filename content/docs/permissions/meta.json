@@ -19,6 +19,7 @@
     "permissions-matrix",
     "access-matrix",
     "explain",
+    "record-view-auditing",
     "access-recipes"
   ]
 }
