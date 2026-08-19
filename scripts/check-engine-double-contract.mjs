@@ -177,14 +177,43 @@
 //     ratchet itself.
 //
 // The maintenance objection to an enumeration is real but was measured and is
-// small. Over the 269 commits on `main` in the month to 2026-08-18, membership
-// of the pinned set changed in 7 commits (2.6%): 8 files entered per verb, and
-// **zero left**. So the nuisance case an identity ledger is accused of -- a
-// correct change reddened by a legitimate decrease -- fired 0 times in a month,
-// while the additions it does redden on are already in conversation with this
-// gate (they are new fakes that had to write `assert…Dispatch` because PINNED
-// demanded it). 308 entries today against the 135 the DEBT ledger already
-// carries: same file format, same order of magnitude, same reconciliation shape.
+// small. Measured over the FULL population: 3,103 first-parent commits on
+// `main` in the month to 2026-08-18 (`git log --first-parent
+// --since=2026-07-18 --until=2026-08-18 origin/main`). Membership of the pinned
+// set changed in 111 of them for `delete` (3.6%) and 103 for `update` (3.3%);
+// 162 and 160 files ENTERED, and exactly ONE left per verb.
+//
+// ⛔ An earlier revision of this comment read "the 269 commits ... changed in 7
+// commits (2.6%) ... zero left". 269 was the depth of the shallow clone the
+// measuring agent ran in, not the month's traffic, and the 7 and the "zero"
+// were themselves computed over only those 269 commits -- so every number in
+// the sentence, numerator included, described a ~9% sample. It is re-measured
+// here rather than rescaled: the true rate is HIGHER than the sample reported,
+// which is the direction that swapping only the denominator would have hidden.
+//
+// The single departure per verb is the case worth stating precisely, because it
+// is the nuisance an identity ledger is accused of and it did not behave like
+// one: f16e54e1d deleted `protocol-delete-object-package-binding-guard.test.ts`
+// and added a replacement carrying both pins in the SAME commit, so repo-wide
+// coverage never dropped. It lands in the "file gone from disk" world below,
+// whose remedy is mechanical and carries no judgement call. Across the whole
+// month there were ZERO instances of the shape this ratchet exists to catch --
+// file present, verb gone -- and zero per-file counts that shrank without
+// reaching zero.
+//
+// Method, stated so this can be redone rather than trusted: membership is
+// proxied by `assertEngine…Dispatch(` call sites in test files under the scan
+// roots, calibrated against this gate's own ledger at HEAD -- 0 false negatives
+// on the file sets, and 309 of 310 (file, verb) rows agreeing on the exact
+// count. Anyone re-running it must first prove their clone actually covers the
+// window; a shallow one silently answers for its own depth, which is the whole
+// reason this paragraph had to be rewritten.
+//
+// So the additions the ratchet does redden on are already in conversation with
+// this gate (they are new fakes that had to write `assert…Dispatch` because
+// PINNED demanded it). 310 entries today against the 135 the DEBT ledger
+// already carries: same file format, same order of magnitude, same
+// reconciliation shape.
 //
 // ## How a LEGITIMATE decrease is expressed (the anti-nuisance half)
 //
