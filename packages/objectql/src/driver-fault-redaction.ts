@@ -190,7 +190,7 @@
  * that spells a known head makes the cut land inside the statement, at that
  * head — and ONE property, not several, makes what follows unleakable rather
  * than exposed: only a template whose value runs to END OF MESSAGE may declare
- * a `head` (the invariant on {@link ValueBearingTemplate.head}). Whatever the
+ * a `head` (the invariant on {@link EndOfMessageTemplate.head}). Whatever the
  * head-anchored cut leaves — the rest of the statement it cut into included —
  * is consumed whole by that template's own `whole` pattern.
  *
@@ -223,6 +223,14 @@
  * whatever follows the template's right anchor, which is statement, which is
  * values. That is the one way this amendment could leak, and the invariant
  * above is what forecloses it.
+ *
+ * [#9359] ⭐ And since the ablation recorded just above proves that a claim in
+ * this very note about this very mechanism can read as true for weeks, the
+ * invariant is no longer left to the note. It is held in two places that a
+ * future author cannot write past: the TYPE ({@link AnchoredTemplate.head} is
+ * `never`, so no row can carry a `head` and a `tail` at once) and
+ * {@link assertHeadBearingTemplatesAreEndAnchored}, which throws at module load
+ * on a head-bearing row whose `whole` is not end-anchored.
  *
  * A driver dump with no separator carries no statement to cut (`UNIQUE
  * constraint failed: sys_user.email`, `SQLITE_CONSTRAINT_NOTNULL: …`) and is
@@ -444,13 +452,38 @@ const MYSQL_TRUNCATED_INCORRECT_VALUE_HEAD = /truncated incorrect \w+ value:\s+'
  * drops everything before the anchor, because an anchor is evidence about the
  * value, not licence to assert which template printed it.
  */
-interface ValueBearingTemplate {
+interface ValueBearingTemplateBase {
   /** Dialect and the server's own error code, as the probe raises it. */
   readonly id: string;
-  /** Head + value + anchor. */
+  /**
+   * Head + value + anchor. Group 1 is kept before the value, group 2 after —
+   * {@link redactDiagnosticValues} reads both by index, so every row needs
+   * exactly two.
+   */
   readonly whole: RegExp;
-  /** The head-gone residue, when the template has a right anchor to recover it. */
+}
+
+/**
+ * A family whose diagnostic continues PAST the value, through a right anchor.
+ *
+ * ⛔ Such a family may NOT declare a `head`, and `head?: never` is what makes
+ * that unrepresentable instead of merely forbidden: the head-anchored cut can
+ * land inside the STATEMENT (a hostile value may spell a head), and a right
+ * anchor would then keep whatever follows it — which on such a cut is
+ * statement, which is caller values. It takes {@link tail} instead, which
+ * recovers the same residue with no cut change at all.
+ */
+interface AnchoredTemplate extends ValueBearingTemplateBase {
+  /** The head-gone residue, recovered through the family's right anchor. */
   readonly tail?: RegExp;
+  readonly head?: never;
+}
+
+/**
+ * A family whose value runs to END OF MESSAGE, so it has no right anchor and no
+ * residue to recover — it takes a {@link head} instead.
+ */
+interface EndOfMessageTemplate extends ValueBearingTemplateBase {
   /**
    * [#9275] The template's head through the value's OPENING QUOTE — what the
    * statement cut looks for so a value containing ` - ` cannot eat it.
@@ -464,20 +497,126 @@ interface ValueBearingTemplate {
    * template with a right anchor would instead keep whatever follows that
    * anchor, which on such a cut is statement, which is caller values.
    *
-   * Families that DO have a right anchor take {@link tail} instead; it recovers
-   * the same residue with no cut change at all. Both are asserted structurally
-   * by `driver-fault-redaction.test.ts` rather than trusted from this note.
+   * [#9359] That invariant is no longer carried by this note. The `tail` half is
+   * held by the type ({@link AnchoredTemplate.head} is `never`); the anchoring
+   * half is held by
+   * {@link assertHeadBearingTemplatesAreEndAnchored}, which runs at module load
+   * over the table below. A doc comment is not a guard — a claim this very note
+   * once made about this very mechanism (that last-match was a second line of
+   * defence) read as true for weeks and fell only to an ablation.
    */
-  readonly head?: RegExp;
+  readonly head: RegExp;
+  readonly tail?: never;
 }
 
-const VALUE_BEARING_TEMPLATES: readonly ValueBearingTemplate[] = [
+type ValueBearingTemplate = AnchoredTemplate | EndOfMessageTemplate;
+
+export const VALUE_BEARING_TEMPLATES: readonly ValueBearingTemplate[] = [
   { id: 'mysql/1062 ER_DUP_ENTRY', whole: DUPLICATE_ENTRY, tail: DUPLICATE_ENTRY_TAIL },
   { id: 'mysql/1366 ER_TRUNCATED_WRONG_VALUE_FOR_FIELD', whole: MYSQL_INCORRECT_VALUE, tail: MYSQL_INCORRECT_VALUE_TAIL },
   { id: 'mysql/1292 ER_TRUNCATED_WRONG_VALUE', whole: MYSQL_TRUNCATED_INCORRECT_VALUE, head: MYSQL_TRUNCATED_INCORRECT_VALUE_HEAD },
   { id: 'pg/22P02 invalid_text_representation', whole: PG_INVALID_INPUT_SYNTAX, head: PG_INVALID_INPUT_SYNTAX_HEAD },
   { id: 'pg/22003 numeric_value_out_of_range', whole: PG_VALUE_OUT_OF_RANGE, tail: PG_VALUE_OUT_OF_RANGE_TAIL },
 ];
+
+/**
+ * [#9359] What a head-bearing `whole` must END with: `$` — end of INPUT, since
+ * JavaScript's `$` means end-of-line only under `m`, which is why the guard
+ * rejects that flag — immediately followed by the EMPTY group 2 that
+ * {@link redactDiagnosticValues} reads as "nothing is kept after the value".
+ */
+const END_OF_MESSAGE_ANCHOR = '$()';
+
+/**
+ * [#9359] The head invariant, ENFORCED at module load rather than described.
+ *
+ * ## What it forecloses
+ *
+ * Only an end-of-message template may declare a `head`. That single property is
+ * what bounds a hostile value's influence over the statement cut to
+ * OVER-REDACTION: a value that spells a known head makes the cut land inside
+ * the statement, and `whole` then swallows the remainder whole. Give a `head`
+ * to a family with a RIGHT ANCHOR and the same cut keeps everything after that
+ * anchor — statement, which is caller values. That is the one way #9275's
+ * amendment can leak, and this function is what stops it being written.
+ *
+ * ## Why a load-time throw is the right shape here
+ *
+ * The precedent is `assertMetaUrlSpellingsAgree()` in `packages/spec`, and the
+ * property that makes a boot-path throw safe is the same in both: this reads
+ * NOTHING but literals declared in this file. It cannot depend on install
+ * state, environment or import order, so it is deterministic per build — it
+ * fires on the author's first import, never at a deployment that imported the
+ * same bytes successfully yesterday. ⛔ If a future row is ever computed from
+ * anything outside this module, that reasoning lapses and this belongs in a
+ * gate script instead.
+ *
+ * ## The checks, and why each is the invariant rather than a proxy for it
+ *
+ * 1. **No `m` flag.** Under `m`, `$` is end-of-LINE, so an end-anchored
+ *    template would stop at the first newline of a multi-line dump and leave
+ *    the rest standing. Then `whole` is spelled end-anchored while not being
+ *    end-anchored — the exact silent shape this card exists to end.
+ * 2. **`whole.source` ends with {@link END_OF_MESSAGE_ANCHOR}.** This is the
+ *    invariant's own wording ("`$`-anchored and group 2 empty") in one token.
+ * 3. **Exactly two capture groups.** {@link redactDiagnosticValues} reads
+ *    `whole[1]` and `whole[2]` by index; a third group would silently reassign
+ *    what is kept after the value.
+ *
+ * Checks 2 and 3 are SYNTACTIC — they read the pattern, not its behaviour — and
+ * so they reject spellings they cannot prove end-anchored even where a human
+ * can see the pattern is fine. That is the safe direction: a novel spelling
+ * gets a loud, named throw and its author amends this guard deliberately,
+ * rather than the invariant quietly acquiring an exception.
+ *
+ * Exported for `driver-fault-redaction.test.ts`, which calls it with synthetic
+ * rows to prove it FIRES — a guard nobody has watched fail is the same prose
+ * this replaced.
+ *
+ * @param templates - the table to check; the shipped one is checked at load.
+ * @throws when a row declares a `head` whose `whole` is not end-anchored.
+ */
+export function assertHeadBearingTemplatesAreEndAnchored(
+  templates: readonly ValueBearingTemplate[],
+): void {
+  for (const template of templates) {
+    if (template.head === undefined) continue;
+    const { source, flags } = template.whole;
+
+    if (flags.includes('m')) {
+      throw new Error(
+        "[driver-fault-redaction] Template '" + template.id + "' declares a head, but its 'whole' carries the "
+        + "'m' flag, under which '$' matches end of LINE rather than end of MESSAGE. Only a template whose "
+        + 'value runs to end of message may declare a head.',
+      );
+    }
+
+    if (!source.endsWith(END_OF_MESSAGE_ANCHOR)) {
+      throw new Error(
+        "[driver-fault-redaction] Template '" + template.id + "' declares a head, but its 'whole' does not end "
+        + "with '" + END_OF_MESSAGE_ANCHOR + "', so its value does not run to end of message. Only an "
+        + 'end-of-message template may declare a head: the head-anchored statement cut can land inside the '
+        + "statement, and what bounds that to over-redaction is that 'whole' then swallows the remainder. A "
+        + 'template with a right anchor keeps whatever follows that anchor, which on such a cut is statement, '
+        + "which is caller values. Give this row a 'tail' instead.",
+      );
+    }
+
+    // `new RegExp(source + '|')` always matches the empty string through its
+    // empty alternative, so the result is the group count without needing an
+    // input the pattern accepts.
+    const probe = new RegExp(source + '|').exec('');
+    const groupCount = probe === null ? 0 : probe.length - 1;
+    if (groupCount !== 2) {
+      throw new Error(
+        "[driver-fault-redaction] Template '" + template.id + "' has " + groupCount + " capture group(s); "
+        + "exactly 2 are required, because redactDiagnosticValues reads 'whole[1]' and 'whole[2]' by index.",
+      );
+    }
+  }
+}
+
+assertHeadBearingTemplatesAreEndAnchored(VALUE_BEARING_TEMPLATES);
 
 /**
  * [#9275] Every known diagnostic head, as the separator that stands before it.
@@ -488,7 +627,7 @@ const VALUE_BEARING_TEMPLATES: readonly ValueBearingTemplate[] = [
  * hand.
  */
 const HEAD_ANCHORED_CUTS: readonly RegExp[] = VALUE_BEARING_TEMPLATES
-  .filter((template): template is ValueBearingTemplate & { head: RegExp } => template.head !== undefined)
+  .filter((template): template is EndOfMessageTemplate => template.head !== undefined)
   .map((template) => new RegExp(`${STATEMENT_SEPARATOR}(?=${template.head.source})`, 'gi'));
 
 /**
