@@ -157,6 +157,33 @@
  *       when the card's own title/body self-declares P0/data-integrity: for
  *       that class the emergency-triage channel (immediate triage subagent)
  *       is the mandated move, never the hourly Routine.
+ *   H14 `pm:blocking` cache incoherence, in BOTH directions, read off the
+ *       `Blocked-by:` reverse index this sweep already has the bodies for.
+ *       `pm:blocking` is not a state a seat sets: the state model makes it a
+ *       CACHE the triage sweep derives from that index (「分诊 sweep 自
+ *       `Blocked-by:` 索引推导的缓存,⛔ 不手工挂」), and the lane selection
+ *       order ranks it second only to `priority:p0`. A cache with a ranking
+ *       consumer and no coherence check drifts in two different ways, and
+ *       each lies differently: a card carrying the label that NOTHING targets
+ *       is boosted past fresher work on the authority of a dependency that
+ *       does not exist (worse than an absent label — it lies with authority),
+ *       while a card that IS targeted and does NOT carry it is a real
+ *       unblocker the selection order cannot see. Report-only, and pointedly
+ *       so: the producer is the triage sweep's derivation pass, so the remedy
+ *       is always a derivation that runs, never a label written from here.
+ *       Both directions were non-empty at the reading this item landed on
+ *       (2026-08-19, 234 open cards, 17 `Blocked-by:` body lines): ONE stale
+ *       card and FIVE missing ones, with not a single coherent pairing on the
+ *       board — the cache had no reader checking it and had drifted to 0%
+ *       agreement with the index it is derived from.
+ *   H15 the oldest UNCLAIMED `pm:blocking` card and its age — one row, no
+ *       threshold, selection-order compliance made visible (maintainer,
+ *       2026-08-19: 「然后车道项目经理应该优先处理 blocking」). Where H14 asks
+ *       whether the cache is TRUE, H15 asks whether anyone acted on it: a
+ *       lane that keeps taking fresher picks past an unclaimed blocking card
+ *       now says so on the anchor, by name. Deliberately not an alarm and
+ *       deliberately unconditional — see the rationale on the predicate for
+ *       why this one carries no threshold constant.
  *
  * ## The close mechanism, measured (#8293)
  *
@@ -828,6 +855,219 @@ export function h13DomainWithoutPmState(issue, nowMs = Date.now()) {
 }
 
 // ---------------------------------------------------------------------------
+// H14 + H15 — the `pm:blocking` cache and the order that consumes it
+// (maintainer-approved 2026-08-19, verbatim: 「同意」).
+//
+// Both items read ONE structure, built once per sweep from bodies the unscoped
+// pass already fetched: the `Blocked-by:` reverse index. Everything above is a
+// predicate over a single card; these two are the first that need the whole
+// open set, because incoherence is a relation between two cards and "oldest"
+// is a relation among many. That is a shape difference, not a contract change
+// — they stay pure functions over listings the caller supplies, so the
+// self-test drives them offline exactly like H1–H13.
+// ---------------------------------------------------------------------------
+
+/**
+ * The `Blocked-by:` line's refs, in the order written.
+ *
+ * ## Why this is the file's FIRST parser for a line H4 already reads
+ *
+ * H4 asks only "is there such a line", so its regex is a presence test and
+ * extracts nothing; no other script in the repo parses these lines at all
+ * (the unlock scan is a seat procedure over a grep, not code). So there is no
+ * second parser to converge on here — this is the first, and H4 keeps its own
+ * cheaper question rather than being rewritten around this one.
+ *
+ * ## Two decisions that change what gets reported
+ *
+ * 1. **Code is NOT stripped**, unlike H7/H8/H13. Those predicates read PROSE
+ *    and must protect the careful author who quotes a spelling in backticks.
+ *    This one models a MACHINE READER: the state model calls the line
+ *    「机器可 grep 的反向索引」, and the unlock scan that consumes it greps the
+ *    literal — so a fenced `Blocked-by:` line really does fire the live
+ *    machinery, whatever the author meant. Stripping here would report
+ *    coherence against an index nothing uses; H4 (the same line's other
+ *    reader) does not strip either.
+ * 2. **Only the LEADING ref run is taken.** Real lines carry trailing prose —
+ *    「Blocked-by: #9689 (the relocation it needs is the same edit)」 — and
+ *    prose can name a second card that is context, not a blocker. Scanning
+ *    the whole value would manufacture a dependent for it, and the cost lands
+ *    on a THIRD card (a phantom "missing cache" row against someone who did
+ *    nothing wrong). So the scan walks refs and separators from the start of
+ *    the value and stops at the first token that is neither.
+ *
+ * The key is matched case-sensitively and line-anchored, byte-stable like H4
+ * and H9: a lowercase or mid-sentence spelling is a line the real scan cannot
+ * see, and reading it here would report an index the machinery does not have.
+ *
+ * @param {string} body
+ * @returns {{ repo: string|null, number: number }[]}
+ */
+export function blockedByTargets(body) {
+  const out = [];
+  // `[ \t]*`, not `\s*`: `\s` matches newlines, so with the /g/m extractor a
+  // run of blank lines could let one match begin a line early. H4's presence
+  // test cannot tell the difference; an extractor can.
+  for (const line of String(body ?? '').matchAll(/^[ \t]*Blocked-by:[ \t]*(\S.*)$/gm)) {
+    let rest = line[1];
+    for (;;) {
+      const ref = /^[\s,;+、]*(?:and[ \t]+)?([A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)?)?#(\d+)/u.exec(rest);
+      if (!ref) break;
+      out.push({ repo: ref[1] ?? null, number: Number(ref[2]) });
+      rest = rest.slice(ref[0].length);
+    }
+  }
+  return out;
+}
+
+/**
+ * target issue number -> the open issue numbers whose bodies declare it a
+ * blocker, built from ONE listing (the unscoped open-issue pass).
+ *
+ * Cross-repo refs are dropped, and that is load-bearing rather than tidy:
+ * 「Blocked-by: objectstack-ai/objectui#4356」 is a real line on this board, and
+ * reading its number as a LOCAL target would invent a dependent for whatever
+ * this repo's #4356 happens to be — a phantom finding against an unrelated
+ * card. A ref qualified with this repo (either `owner/repo#N` or the bare
+ * repo name) is kept; a bare `#N` is local by definition.
+ *
+ * Self-references are dropped too: a card cannot be its own unblocker, and
+ * counting one would make it permanently `pm:blocking`-worthy on its own say-so.
+ *
+ * @param {{ number: number, body?: string }[]} issues — OPEN issues only. The
+ *   index's whole meaning is "open cards that are waiting", so the caller's
+ *   listing is what bounds it; a closed dependent must not hold a label alive.
+ * @param {{ repo?: string }} [options] — `owner/repo`, defaulting to the swept one.
+ */
+export function buildBlockingIndex(issues, options = {}) {
+  const ownerRepo = options.repo ?? OWNER_REPO;
+  const bareRepo = ownerRepo.split('/').pop();
+  const index = new Map();
+  for (const issue of issues ?? []) {
+    for (const { repo, number } of blockedByTargets(issue.body)) {
+      if (repo !== null && repo !== ownerRepo && repo !== bareRepo) continue;
+      if (number === issue.number) continue;
+      const deps = index.get(number) ?? [];
+      if (!deps.includes(issue.number)) deps.push(issue.number);
+      index.set(number, deps);
+    }
+  }
+  return index;
+}
+
+/**
+ * How many dependent card numbers a missing-cache row names before it counts
+ * the rest. The row exists to be ACTED on — a reader wants to see who is
+ * waiting — but the markdown renderer writes into a body with a hard cap and
+ * a fold, and an unbounded fan-out list is the one row that could push others
+ * off the end. Five names the whole set for every fan-out measured on this
+ * board (the largest was one) while bounding the pathological case.
+ */
+export const BLOCKING_DEPENDENT_LIST_CAP = 5;
+
+/**
+ * H14 — null when the cache agrees with the index, else the finding sentence.
+ *
+ * @param {object} issue — an OPEN issue.
+ * @param {Map<number, number[]>} index — from `buildBlockingIndex`.
+ */
+export function h14BlockingCacheIncoherent(issue, index) {
+  const carries = labelNames(issue).includes('pm:blocking');
+  const dependents = index?.get?.(issue.number) ?? [];
+  if (carries && dependents.length === 0) {
+    return (
+      '`pm:blocking` carried while NO open card\'s `Blocked-by:` body line targets it — a stale ' +
+      'derived cache. The label is not a state a seat sets: the triage sweep derives it from the ' +
+      '`Blocked-by:` reverse index, and the lane selection order ranks it second only to ' +
+      '`priority:p0`. So a stale one is worse than an absent one — it boosts a card nothing depends ' +
+      'on, with authority. Report-only: the remedy is the triage sweep\'s derivation pass dropping ' +
+      'the label (or the missing `Blocked-by:` line landing on the card that really is waiting), ' +
+      'never a label written from this script.'
+    );
+  }
+  if (!carries && dependents.length > 0) {
+    const shown = dependents.slice(0, BLOCKING_DEPENDENT_LIST_CAP);
+    const named = shown.map((n) => `#${n}`).join(', ');
+    const more = dependents.length > shown.length ? ` +${dependents.length - shown.length} more` : '';
+    return (
+      `targeted by ${dependents.length} open card(s)' \`Blocked-by:\` body line (${named}${more}) but ` +
+      'NOT carrying `pm:blocking` — a real unblocker the selection order cannot see. The label is ' +
+      'the derived cache that makes a card outrank everything but `priority:p0`; without it this ' +
+      'card competes on age alone while the cards waiting on it cannot start. Report-only: the ' +
+      'remedy is the triage sweep\'s derivation pass applying the label, never a hand-applied one.'
+    );
+  }
+  return null;
+}
+
+/**
+ * H15 — the oldest open, UNASSIGNED `pm:blocking` card, or null.
+ *
+ * ## No threshold constant, deliberately
+ *
+ * Every other aged item here (H10/H11/H12/H13) answers "has this been
+ * abandoned?", and a threshold is what turns silence into an alarm. This row
+ * answers a different question — "is the lane taking blocking cards first?" —
+ * and the honest answer is a NUMBER, every run, for the reader to judge. A
+ * threshold would re-introduce exactly the judgement call the row exists to
+ * hand over, and would go quiet on the days the board is worst behaved but
+ * still under it. So: unconditional, one row, no constant. Nothing reddens
+ * (nothing in this file ever does).
+ *
+ * ## The age is the CARD's, not the label's, and says so
+ *
+ * `created_at`, the same quantity the selection order's own within-rank
+ * tie-break reads (同级按卡龄). The label's age would be the sharper number
+ * and is not available: it lives in a per-card timeline fetch this sweep
+ * deliberately never makes (the H2 comment fetch is the one exception, and it
+ * is confined to candidates). Reporting card age and NAMING it as card age
+ * beats reporting a number whose meaning the reader has to guess.
+ *
+ * An unreadable `created_at` sorts as maximally old rather than being skipped
+ * — the #4690 direction the whole file keeps: a value that cannot be read must
+ * surface, never quietly drop out of a "the oldest is…" claim.
+ *
+ * @param {object[]} issues — the open listing.
+ * @returns {{ issue: object, message: string } | null}
+ */
+export function h15OldestUnclaimedBlocking(issues, nowMs = Date.now()) {
+  const candidates = [];
+  let blockingTotal = 0;
+  for (const issue of issues ?? []) {
+    if (!labelNames(issue).includes('pm:blocking')) continue;
+    blockingTotal++;
+    if ((issue.assignees ?? []).length > 0) continue;
+    const created = Date.parse(issue.created_at ?? '');
+    candidates.push({
+      issue,
+      ageHours: Number.isFinite(created) ? (nowMs - created) / 3_600_000 : null,
+    });
+  }
+  if (candidates.length === 0) return null;
+  candidates.sort(
+    (a, b) =>
+      (b.ageHours ?? Infinity) - (a.ageHours ?? Infinity) || a.issue.number - b.issue.number,
+  );
+  const [oldest] = candidates;
+  const age =
+    oldest.ageHours === null
+      ? 'an unreadable `created_at` (sorted as maximally old — a timestamp that cannot be read must ' +
+        'surface, never drop out of an "oldest is…" claim)'
+      : `open ~${Math.round(oldest.ageHours)}h`;
+  return {
+    issue: oldest.issue,
+    message:
+      `oldest UNCLAIMED \`pm:blocking\` card: ${age}, ${candidates.length} of ${blockingTotal} open ` +
+      '`pm:blocking` card(s) unassigned. The lane selection order puts `pm:blocking` second only to ' +
+      '`priority:p0`, so an unclaimed one aging while fresher cards are picked is selection-order ' +
+      'drift — visible here by name instead of only in a seat\'s memory. Age is the CARD\'s ' +
+      '(`created_at`, the same quantity the order\'s within-rank tie-break reads), not the label\'s: ' +
+      'that would need a per-card timeline fetch this sweep never makes. Visibility row — no ' +
+      'threshold, it reports unconditionally, and like everything here it is patrol input, not a verdict.',
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -872,7 +1112,7 @@ export function isLoudFinding(message) {
 export function summaryLine(counts, findingCount) {
   return (
     `check-half-states: swept ${counts.issues} open pm-/p0-labeled issue(s), ${counts.unscoped} open ` +
-    `issue(s) in H13's unscoped pass, ${counts.prs} open PR(s) ` +
+    `issue(s) in the unscoped pass (H13–H15), ${counts.prs} open PR(s) ` +
     `and ${counts.merged} recently-merged PR(s) in ${counts.repo} — ${findingCount} half-state(s) found. ` +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
@@ -1315,7 +1555,7 @@ function reportPrerequisiteNotMet(v, options = {}) {
   const nothing =
     swept === 0
       ? [
-          `  Nothing was swept: no issue was listed and no predicate (H1–H13) ran, so this`,
+          `  Nothing was swept: no issue was listed and no predicate (H1–H15) ran, so this`,
           `  result says NOTHING about whether the board carries half-states. It is not a`,
           `  clean board and it is not a dirty one — it is no reading at all.`,
         ]
@@ -1524,11 +1764,30 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped) {
   // inputs and the summary line stays honest about what each pass covered;
   // the overlap with the label listings costs nothing (the predicate is
   // label-gated and pure).
-  for (const issue of await listAllOpenIssues()) {
+  const unscoped = await listAllOpenIssues();
+  for (const issue of unscoped) {
     seenUnscoped.set(issue.number, issue);
     const halfState = h13DomainWithoutPmState(issue);
     if (halfState) findings.push([issue, 'H13', halfState]);
   }
+
+  // H14 + H15 — the same unscoped listing, read a second way. It is the right
+  // population for BOTH halves and neither label page could substitute: a
+  // `pm:blocking` card need carry no other label (so the label pages above can
+  // miss the subject), and the `Blocked-by:` lines that judge it are written by
+  // cards of any label at all (so they can miss the evidence). No extra fetch:
+  // the bodies are already in hand, which is exactly the "derived from the same
+  // body reads the sweep already performs" this pair was specified as.
+  const blockingIndex = buildBlockingIndex(unscoped);
+  for (const issue of unscoped) {
+    const incoherent = h14BlockingCacheIncoherent(issue, blockingIndex);
+    if (incoherent) findings.push([issue, 'H14', incoherent]);
+  }
+
+  // One row, attached to the card it names — so it links, sorts and truncates
+  // exactly like every other row and neither renderer needs a special case.
+  const oldestBlocking = h15OldestUnclaimedBlocking(unscoped);
+  if (oldestBlocking) findings.push([oldestBlocking.issue, 'H15', oldestBlocking.message]);
 }
 
 // ---------------------------------------------------------------------------
@@ -1940,6 +2199,184 @@ function selfTest() {
   t('H13: P0 inside a word does not fire', h13SelfDeclaredP0({ title: '', body: 'the HTTP0 protocol note' }), false);
   t('H13: a quiet body stays on the base line', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26), { body: 'ordinary defect' }), NOW).includes('P0-SUSPECT'), false);
 
+  // -- H14: `pm:blocking` cache coherence, both directions (2026-08-19) ------
+  // The fixtures below are REAL lines from the 2026-08-19 census of this board
+  // (234 open cards, 17 `Blocked-by:` body lines), so the parser is pinned
+  // against the shapes seats actually write rather than against invented ones.
+  const carded = (number, labels, body = '', extra = {}) => ({
+    ...issue(labels, [], body),
+    number,
+    ...extra,
+  });
+  const numbersOf = (refs) => refs.map((r) => r.number).join(',');
+
+  // The parser. Line-anchored and case-sensitive like H4/H9's readings of the
+  // same body channel.
+  t('blockedByTargets: the plain live shape', numbersOf(blockedByTargets('Blocked-by: #9823')), '9823');
+  t('blockedByTargets: a bare local ref carries no repo', blockedByTargets('Blocked-by: #9823')[0].repo, null);
+  t('blockedByTargets: mid-body line is found', numbersOf(blockedByTargets('Context first.\nBlocked-by: #7220\nMore prose.')), '7220');
+  // Live line from #9784 — trailing prose after the ref is normal.
+  t(
+    'blockedByTargets: trailing prose after the ref is ignored',
+    numbersOf(blockedByTargets('Blocked-by: #9689 (the relocation it needs is the same edit; doing them in the other order means touching the line twice).')),
+    '9689',
+  );
+  // The reason only the LEADING run is taken: a `#N` inside the trailing prose
+  // is context, not a blocker, and indexing it would file a phantom
+  // missing-cache row against a third card that did nothing wrong.
+  t(
+    'blockedByTargets: a ref inside the trailing prose is NOT a blocker',
+    numbersOf(blockedByTargets('Blocked-by: #123 (see #456 for the background)')),
+    '123',
+  );
+  t('blockedByTargets: a comma-separated run is all blockers', numbersOf(blockedByTargets('Blocked-by: #6234, #6245')), '6234,6245');
+  t('blockedByTargets: the `and` connector is a separator', numbersOf(blockedByTargets('Blocked-by: #1 and #2')), '1,2');
+  t('blockedByTargets: two lines on one card both count', numbersOf(blockedByTargets('Blocked-by: #6234\nBlocked-by: #6245')), '6234,6245');
+  // Live line from #7917 — the cross-repo shape whose number must never be
+  // read as local (see `buildBlockingIndex`).
+  t('blockedByTargets: a cross-repo qualifier is captured, not dropped', blockedByTargets('Blocked-by: objectstack-ai/objectui#4356')[0].repo, 'objectstack-ai/objectui');
+  t('blockedByTargets: …and its number is still parsed', numbersOf(blockedByTargets('Blocked-by: objectstack-ai/objectui#4356')), '4356');
+  // Byte-stable key, same discipline as H4/H9: a spelling the real grep cannot
+  // see must not become an index entry here.
+  t('blockedByTargets: lowercase key is invisible to the scan', numbersOf(blockedByTargets('blocked-by: #123')), '');
+  t('blockedByTargets: mid-sentence mention is not a line', numbersOf(blockedByTargets('seats park the Blocked-by: #123 line in comments instead')), '');
+  t('blockedByTargets: an empty-valued line yields nothing', numbersOf(blockedByTargets('Blocked-by:')), '');
+  t('blockedByTargets: missing body', numbersOf(blockedByTargets(undefined)), '');
+  // The self-reference trap: this sweeper's OWN rendered rows land in an issue
+  // body (the anchor the patrol rewrites), and those rows quote the literal.
+  // They are bullets, so the key never starts a line — pinned, because the day
+  // it does the sweeper starts indexing its own report.
+  t(
+    'blockedByTargets: a rendered finding row does not parse as a Blocked-by line',
+    numbersOf(blockedByTargets('- **H14** [#5](https://example.test/5) — targeted by 1 open card(s)\' `Blocked-by:` body line (#7)')),
+    '',
+  );
+  // Deliberately NOT stripped, unlike H7/H8/H13: this models a machine reader
+  // (the unlock scan greps the literal), so a fenced line really does fire the
+  // live machinery and must be reported as part of the index it feeds.
+  t('blockedByTargets: a fenced line still counts (this reader greps, it does not read prose)', numbersOf(blockedByTargets('```\nBlocked-by: #42\n```')), '42');
+
+  // The index.
+  const idx = (issues) => buildBlockingIndex(issues, { repo: 'objectstack-ai/objectstack' });
+  t('index: a local ref creates an entry', idx([carded(9849, [], 'Blocked-by: #9823')]).get(9823).join(','), '9849');
+  t('index: a cross-repo ref creates NO local entry', idx([carded(7917, [], 'Blocked-by: objectstack-ai/objectui#4356')]).has(4356), false);
+  t('index: the bare repo name is still local', idx([carded(10, [], 'Blocked-by: objectstack#5')]).get(5).join(','), '10');
+  t('index: the full owner/repo qualifier is local', idx([carded(10, [], 'Blocked-by: objectstack-ai/objectstack#5')]).get(5).join(','), '10');
+  t('index: a self-reference is dropped (a card cannot unblock itself)', idx([carded(5, [], 'Blocked-by: #5')]).has(5), false);
+  t('index: two dependents on one target', idx([carded(10, [], 'Blocked-by: #5'), carded(11, [], 'Blocked-by: #5')]).get(5).join(','), '10,11');
+  t('index: one dependent naming the target twice is listed once', idx([carded(10, [], 'Blocked-by: #5\nBlocked-by: #5')]).get(5).join(','), '10');
+  t('index: a card with no line contributes nothing', idx([carded(10, [], 'no dependency here')]).size, 0);
+  t('index: an empty listing is an empty index', idx([]).size, 0);
+  t('index: a missing listing does not crash', buildBlockingIndex(undefined).size, 0);
+
+  // Direction A — the label carried with nothing targeting it.
+  t('H14-A: pm:blocking with nothing targeting it -> finding', typeof h14BlockingCacheIncoherent(carded(7276, ['pm:queue', 'pm:blocking']), idx([])), 'string');
+  t('H14-A: …and it names the stale-cache reading', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])).includes('stale derived cache'), true);
+  t('H14-A: …and prescribes the derivation pass, never a label from here', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])).includes('derivation pass'), true);
+  t('H14-A: …and says why stale is worse than absent', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])).includes('with authority'), true);
+  // The negative for direction A: the label is EARNED, so nothing to report.
+  t(
+    'H14-A: pm:blocking with a real dependent -> clean',
+    h14BlockingCacheIncoherent(carded(5, ['pm:blocking']), idx([carded(10, [], 'Blocked-by: #5')])),
+    null,
+  );
+
+  // Direction B — targeted, but the cache never landed.
+  const missingIdx = idx([carded(9650, ['pm:queue'], 'Blocked-by: #9832')]);
+  t('H14-B: targeted without pm:blocking -> finding', typeof h14BlockingCacheIncoherent(carded(9832, ['bug', 'pm:dispatched', 'domain:cli']), missingIdx), 'string');
+  t('H14-B: …and it names the waiting card', h14BlockingCacheIncoherent(carded(9832, ['pm:dispatched']), missingIdx).includes('#9650'), true);
+  t('H14-B: …and calls it an invisible unblocker', h14BlockingCacheIncoherent(carded(9832, ['pm:dispatched']), missingIdx).includes('selection order cannot see'), true);
+  // The negative for direction B: no label and nobody waiting is the ordinary
+  // shape of ~230 of this board's ~234 open cards. It must be silent, or the
+  // row means nothing.
+  t('H14-B: no label and nothing targeting it -> clean', h14BlockingCacheIncoherent(carded(4321, ['pm:queue', 'domain:cli']), idx([])), null);
+  // The cross-repo consequence, end to end: #7917's objectui blocker must not
+  // manufacture a direction-B row against this repo's #4356.
+  t(
+    'H14-B: a cross-repo blocker does not flag the local card of that number',
+    h14BlockingCacheIncoherent(carded(4356, ['pm:queue']), idx([carded(7917, [], 'Blocked-by: objectstack-ai/objectui#4356')])),
+    null,
+  );
+  // Fan-out cap: named, then counted.
+  const manyDeps = idx(Array.from({ length: 7 }, (_, i) => carded(100 + i, [], 'Blocked-by: #5')));
+  t('H14-B: a large fan-out names the cap and counts the rest', h14BlockingCacheIncoherent(carded(5, ['pm:queue']), manyDeps).includes(`+${7 - BLOCKING_DEPENDENT_LIST_CAP} more`), true);
+  t('H14-B: …and reports the true total, not the capped one', h14BlockingCacheIncoherent(carded(5, ['pm:queue']), manyDeps).includes('targeted by 7 open card(s)'), true);
+  t('H14: a missing index does not crash and reads as untargeted', h14BlockingCacheIncoherent(carded(5, ['pm:blocking']), undefined) !== null, true);
+
+  // Reverse verification against the LIVE board, 2026-08-19 (234 open cards).
+  // Predicted before running: direction A fires on #7276 (the board's only
+  // `pm:blocking` card, targeted by nothing), direction B fires on the five
+  // targeted-but-unlabeled cards. Both held. Not one coherent pairing existed
+  // at that reading — the cache had drifted to 0% agreement with its index.
+  const liveBodies = [
+    carded(9849, ['pm:queue'], 'Blocked-by: #9823'),
+    carded(9784, ['pm:queue'], 'Blocked-by: #9689 (the relocation it needs is the same edit).'),
+    carded(9650, ['pm:queue'], 'Blocked-by: #9832'),
+    carded(9592, ['pm:queue'], 'Blocked-by: #9255'),
+    carded(9482, ['pm:queue'], 'Blocked-by: #9652'),
+    carded(9249, ['pm:queue'], 'Blocked-by: #9919'),
+    carded(7917, ['pm:queue'], 'Blocked-by: objectstack-ai/objectui#4356'),
+    carded(2657, ['pm:blocked'], 'Blocked-by: #6234\nBlocked-by: #6245'),
+  ];
+  const liveIdx = idx(liveBodies);
+  t('H14 reverse-verify: #7276 (the board\'s only pm:blocking card) -> stale finding', typeof h14BlockingCacheIncoherent(carded(7276, ['pm:queue', 'domain:devx', 'pm:blocking']), liveIdx), 'string');
+  t('H14 reverse-verify: #9832 (targeted by #9650, unlabeled) -> missing finding naming #9650', h14BlockingCacheIncoherent(carded(9832, ['bug', 'pm:dispatched', 'domain:cli']), liveIdx).includes('#9650'), true);
+  t('H14 reverse-verify: #9919 (targeted by #9249, unlabeled) -> missing finding', typeof h14BlockingCacheIncoherent(carded(9919, ['pm:queue', 'repo:cloud']), liveIdx), 'string');
+  // …and the four measured NON-findings from the same reading, which is what
+  // makes the six above readable as signal rather than as a predicate that
+  // flags everything: a dependent card, a closed target's dependent, the
+  // cross-repo number, and an ordinary untouched card.
+  t('H14 reverse-verify: #9650 (a waiting card, not an unblocker) -> clean', h14BlockingCacheIncoherent(carded(9650, ['pm:queue']), liveIdx), null);
+  t('H14 reverse-verify: local #4356 (the objectui blocker\'s number) -> clean', h14BlockingCacheIncoherent(carded(4356, ['pm:queue']), liveIdx), null);
+  t('H14 reverse-verify: #2657 (blocked on two CLOSED cards) -> clean', h14BlockingCacheIncoherent(carded(2657, ['pm:blocked']), liveIdx), null);
+  t('H14 reverse-verify: an ordinary open card -> clean', h14BlockingCacheIncoherent(carded(9913, ['pm:queue', 'repo:cloud']), liveIdx), null);
+
+  // -- H15: oldest unclaimed `pm:blocking` (selection-order visibility) -------
+  const blockingCard = (number, { assignees = [], created = daysAgo(3) } = {}) => ({
+    ...issue(['pm:blocking', 'pm:queue'], assignees),
+    number,
+    created_at: created,
+  });
+
+  t('H15: the oldest unclaimed card is the one reported', h15OldestUnclaimedBlocking([blockingCard(10, { created: daysAgo(2) }), blockingCard(20, { created: daysAgo(9) }), blockingCard(30, { created: daysAgo(5) })], NOW).issue.number, 20);
+  t('H15: …and the row states the age in hours', h15OldestUnclaimedBlocking([blockingCard(20, { created: hoursAgo(220) })], NOW).message.includes('open ~220h'), true);
+  t('H15: …and names the selection-order rank it exists to police', h15OldestUnclaimedBlocking([blockingCard(20)], NOW).message.includes('second only to'), true);
+  t('H15: …and declares the age is the CARD\'s, not the label\'s', h15OldestUnclaimedBlocking([blockingCard(20)], NOW).message.includes("Age is the CARD's"), true);
+  t('H15: …and declares itself thresholdless visibility, not an alarm', h15OldestUnclaimedBlocking([blockingCard(20)], NOW).message.includes('no threshold'), true);
+  t('H15: the count separates unclaimed from the total', h15OldestUnclaimedBlocking([blockingCard(10), blockingCard(20, { assignees: ['os-help'] }), blockingCard(30, { assignees: ['os-help'] })], NOW).message.includes('1 of 3 open'), true);
+  // The two "no row" shapes the card names.
+  t('H15: every pm:blocking card assigned -> no row', h15OldestUnclaimedBlocking([blockingCard(10, { assignees: ['os-help'] }), blockingCard(20, { assignees: ['os-warren'] })], NOW), null);
+  t('H15: no pm:blocking card at all -> no row', h15OldestUnclaimedBlocking([{ ...issue(['pm:queue']), number: 10, created_at: daysAgo(30) }], NOW), null);
+  t('H15: an empty listing -> no row', h15OldestUnclaimedBlocking([], NOW), null);
+  t('H15: a missing listing -> no row', h15OldestUnclaimedBlocking(undefined, NOW), null);
+  // #4690 direction, restated for an ORDERING rather than a threshold: a
+  // timestamp that cannot be read must not quietly drop out of a claim about
+  // which card is oldest.
+  t('H15: unreadable created_at sorts as maximally old', h15OldestUnclaimedBlocking([blockingCard(10, { created: daysAgo(9) }), blockingCard(20, { created: 'not-a-date' })], NOW).issue.number, 20);
+  t('H15: …and the row says so rather than printing a number', h15OldestUnclaimedBlocking([blockingCard(20, { created: 'not-a-date' })], NOW).message.includes('unreadable `created_at`'), true);
+  // Built without the fixture helper on purpose: its `created = daysAgo(3)`
+  // default fills an `undefined`, so passing one through it tests the default
+  // rather than the absent field (measured — this case was green against a
+  // 3-day-old card before the fixture was written out longhand).
+  t('H15: absent created_at is unreadable too', h15OldestUnclaimedBlocking([{ ...issue(['pm:blocking']), number: 20 }], NOW).message.includes('unreadable `created_at`'), true);
+  // Stable output run to run: equal ages break by issue number, so the anchor
+  // body does not churn between two equally-old cards.
+  t('H15: equal ages break by issue number', h15OldestUnclaimedBlocking([blockingCard(30, { created: daysAgo(4) }), blockingCard(12, { created: daysAgo(4) })], NOW).issue.number, 12);
+
+  // Reverse verification against the LIVE board, 2026-08-19. Predicted before
+  // running: NULL — the board's only `pm:blocking` card (#7276) is assigned to
+  // `os-project-manager`, which is the card's own "all-assigned -> no row"
+  // shape, measured rather than invented. Then the same card with the assignee
+  // removed, to prove the null is the board's state and not a dead predicate.
+  const live7276 = (assignees) => ({
+    ...issue(['pm:queue', 'domain:devx', 'pm:blocking'], assignees),
+    number: 7276,
+    created_at: '2026-08-10T04:30:43Z',
+  });
+  t('H15 reverse-verify: the live board (only blocking card assigned) -> no row', h15OldestUnclaimedBlocking([live7276(['os-project-manager'])], Date.parse('2026-08-19T09:00:00Z')), null);
+  t('H15 reverse-verify: …the same card unassigned DOES produce the row', h15OldestUnclaimedBlocking([live7276([])], Date.parse('2026-08-19T09:00:00Z')).issue.number, 7276);
+  t('H15 reverse-verify: …and its measured age', h15OldestUnclaimedBlocking([live7276([])], Date.parse('2026-08-19T09:00:00Z')).message.includes('open ~220h'), true);
+
   // -- report rendering, both media (#9844) ---------------------------------
   // The standing caller writes the markdown into a pinned issue body, so the
   // properties pinned here are the ones a broken body would cost: the plain
@@ -1982,6 +2419,22 @@ function selfTest() {
   t('markdown: rows are links, not bare numbers', mixed.includes('[#200](https://example.test/200)'), true);
   t('markdown: the literal marker leads the body (no angle brackets to sanitize)', mixed.startsWith('os-half-state-sweep'), true);
   t('markdown: the body carries no HTML-comment marker the sanitizer could eat', mixed.includes('<!--'), false);
+
+  // H14/H15 rows are ordinary rows in BOTH media — the property the card asked
+  // for, and the reason H15 attaches its one summary row to the card it names
+  // instead of inventing a rowless shape neither renderer knows how to place.
+  const h14Row = finding(7276, 'H14', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])));
+  const h15Row = finding(7276, 'H15', h15OldestUnclaimedBlocking([blockingCard(7276)], NOW).message);
+  t('plain: an H14 row renders in the standard two-line shape', renderPlain([h14Row], counts).startsWith('  H14 #7276 `pm:blocking` carried while'), true);
+  t('plain: …and carries the card URL on the second line', renderPlain([h14Row], counts).includes('\n     https://example.test/7276'), true);
+  t('plain: an H15 row renders the same way', renderPlain([h15Row], counts).startsWith('  H15 #7276 oldest UNCLAIMED'), true);
+  t('markdown: an H14 row renders as a link row like every other', renderMarkdown([h14Row], counts).includes('- **H14** [#7276](https://example.test/7276) — '), true);
+  t('markdown: an H15 row renders as a link row like every other', renderMarkdown([h15Row], counts).includes('- **H15** [#7276](https://example.test/7276) — '), true);
+  // Neither is loud: the P0-SUSPECT band is H13's self-declared-emergency
+  // class, and a coherence or visibility row must never outrank it at the fold.
+  t('loudness: an H14 row is not loud', isLoudFinding(h14Row[2]), false);
+  t('loudness: an H15 row is not loud', isLoudFinding(h15Row[2]), false);
+  t('markdown: a loud H13 row still sorts above an H14 row', renderMarkdown([h14Row, loudRow], counts).indexOf('#900') < renderMarkdown([h14Row, loudRow], counts).indexOf('#7276'), true);
 
   // A clean board says it was READ. The #4690 direction, restated in the one
   // surface where "no rows" could otherwise be mistaken for "no sweep".
