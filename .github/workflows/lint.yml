@@ -1079,6 +1079,26 @@ jobs:
       - name: Cross-package test inputs
         run: pnpm check:cross-package-test-inputs
 
+      # The READING half of the gate above (#10046). `--union-into` appends the
+      # cross-package scans to the `turbo ls` document ci.yml is about to shard,
+      # and `scripts/partition-test-shards.mjs` is the only thing that reads it.
+      # That script asserts the payload shape loudly on purpose — an
+      # experimental-command upgrade should become a red step naming the cause
+      # rather than a silently empty shard — but it had carried a `--self-test`
+      # that NOTHING ran since it was written, so every assertion in it, the
+      # partitioner's determinism and coverage pins included, evaluated never.
+      # A pin nobody runs is not a weaker pin, it is no pin: `--union-into` wrote
+      # a `count: 0` document alongside two items for as long as nobody looked,
+      # and the reader-side refusal that now catches that needs a live pin of its
+      # own or it rots the same way.
+      # Invoked as `node` rather than through a `pnpm check:*` alias for the same
+      # reason as the release-rehearsal self-test above: that alias belongs in
+      # root package.json, declared territory of the @changesets/cli v3 lane
+      # (#9465) while it runs. dispatch-gates.mjs derives gate families from
+      # either spelling. Pure functions, no IO, milliseconds.
+      - name: Shard partitioner self-test
+        run: node scripts/partition-test-shards.mjs --self-test
+
       # The inventory of `packages/**` tests coupled to `examples/**` (#8754).
       # Sibling of the gate above, on the axis it cannot see: that one detects
       # tests whose FILESYSTEM READS escape their package, this one detects
