@@ -2949,7 +2949,10 @@ const SERVICE_CONFIG: Record<string, {
     // removed — GraphQL is not in the product plan", #2462 follow-on). A
     // route nobody serves, for a slot that does not exist, in the table SDKs
     // and AI clients read.
-    'file-storage': { route: '/api/v1/storage' },
+    // Canonical slot since #9683 (was `file-storage`; that spelling stays a
+    // deprecated v17 registry alias, mirrored verbatim into the services map
+    // after the loop below — never a SERVICE_CONFIG row of its own).
+    storage:      { route: '/api/v1/storage' },
     search:       { route: '/api/v1/search' },
 };
 
@@ -4236,7 +4239,7 @@ export class ObjectStackProtocolImplementation implements
         // registers the service (service-storage's own `/api/v1/storage`
         // routes, plugin-search, plugin-graphql, …) rather than to a dispatcher
         // domain, so `handlerReady` there says nothing about whether THAT route
-        // is mounted, and suppressing it would be a guess. `file-storage` stays
+        // is mounted, and suppressing it would be a guess. `storage` stays
         // listed as the one entry with no dispatcher domain behind it — #4087
         // retired the `/storage` bridge — because for that slot `handlerReady`
         // is not a proxy for anything, it is the fact itself: an occupant that
@@ -4244,7 +4247,7 @@ export class ObjectStackProtocolImplementation implements
         // its behalf. When service-storage is installed it registers a real
         // (unmarked) service and mounts the routes, so the entry never fires.
         const DISPATCHER_GATED_SERVICES = new Set([
-            'analytics', 'automation', 'notification', 'ai', 'i18n', 'file-storage',
+            'analytics', 'automation', 'notification', 'ai', 'i18n', 'storage',
         ]);
         const unserveable = (serviceName: string) =>
             DISPATCHER_GATED_SERVICES.has(serviceName)
@@ -4287,6 +4290,16 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
+        // [#9683] `file-storage` is the deprecated v17 alias of the `storage`
+        // slot, and it is a key existing consumers really read off this
+        // document (objectui's console endpoint catalog is keyed by it). The
+        // registry resolves both names to the same instance, so discovery
+        // mirrors the canonical row VERBATIM under the alias key until the
+        // alias retires at the next major — dropping the key would be the
+        // silent inside-a-major break the ruling forbids. Deliberately a
+        // byte-equal copy, not a second opinion: one slot, two spellings.
+        services['file-storage'] = { ...services['storage'] };
+
         // Build routes from services — a flat convenience map for client routing
         const serviceToRouteKey: Record<string, keyof ApiRoutes> = {
             analytics: 'analytics',
@@ -4297,7 +4310,7 @@ export class ObjectStackProtocolImplementation implements
             notification: 'notifications',
             ai: 'ai',
             i18n: 'i18n',
-            'file-storage': 'storage',
+            storage: 'storage',
             // [#6633] The package-management surface. `package` is NOT a
             // CoreServiceName slot, so it must not enter SERVICE_CONFIG — a
             // non-slot row there is the shape of the retired `graphql` defect,
@@ -4415,7 +4428,7 @@ export class ObjectStackProtocolImplementation implements
             export: registeredServices.has('automation') || registeredServices.has('queue'),
             // [#5672] Serveability-gated, was presence-only. Two reasons, and
             // the second is the binding one:
-            //   1. `declared === enforced` — a self-declared stub file-storage
+            //   1. `declared === enforced` — a self-declared stub storage service
             //      mounts no HTTP surface, so this builder already withholds
             //      `routes.storage` from it; advertising chunked upload anyway
             //      promised an upload endpoint that cannot exist.
@@ -4424,7 +4437,7 @@ export class ObjectStackProtocolImplementation implements
             //      would make the two producers give the SAME host opposite
             //      answers for the SAME key — a new dialect inside the
             //      vocabulary this issue exists to unify.
-            chunkedUpload: capabilityServed('file-storage'),
+            chunkedUpload: capabilityServed('storage'),
             // Atomic cross-object batch (#3298 / #1604 / ADR-0034 item 4): the
             // REST /batch endpoint runs its ops inside `engine.transaction()`,
             // which only opens a real (all-or-nothing) transaction when the
@@ -4450,10 +4463,10 @@ export class ObjectStackProtocolImplementation implements
             // answer here, not a stand-in for one — and it matches the runtime
             // dispatcher's answer for the same reason, in the same words.
             websockets: false,
-            // Storage: the `file-storage` slot, gated on serveability rather
+            // Storage: the `storage` slot (#9683), gated on serveability rather
             // than presence — a self-declared stub mounts nothing, and this
             // builder already withholds `routes.storage` from it.
-            files: capabilityServed('file-storage'),
+            files: capabilityServed('storage'),
             analytics: capabilityServed('analytics'),
             ai: capabilityServed('ai'),
             // Slot is `notification` (singular, CoreServiceName); the capability

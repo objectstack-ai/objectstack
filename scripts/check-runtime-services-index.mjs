@@ -45,11 +45,11 @@
 //   * the chapter's own binding note tells the reader that no literal
 //     `services.*` object is injected and that plugin code goes through
 //     `ctx.getService(...)`;
-//   * the registered slot is `file-storage` (`storage-service-plugin.ts:237`),
-//     and NOTHING registers `storage`.
+//   * the registered slot was `file-storage` (`storage-service-plugin.ts`),
+//     and at the time NOTHING registered `storage`.
 //
 // Following both instructions together produced `ctx.getService('storage')`,
-// which throws `[Kernel] Service 'storage' not found`. Seven of the eight pages
+// which threw `[Kernel] Service 'storage' not found`. Seven of the eight pages
 // were fine only because their accessor and their slot happened to be the same
 // word, so the chapter had exactly one unannounced exception and no way to
 // notice a second one.
@@ -57,11 +57,13 @@
 // So each page now declares `- **Registry slot:** \`<key>\``, and this gate holds
 // that declaration to a production `registerService`/`registerServiceFactory`
 // call under `packages/`. Note what is deliberately NOT required: the slot does
-// not have to equal the accessor. `file-storage` is canonical -- it is the
-// `CoreServiceName` member, `CORE_SERVICE_PROVIDER` maps it, and the CLI, email
-// plugin and HTTP dispatcher all resolve it -- so a docs defect must never be
-// "fixed" by renaming the slot or adding a `registerService('storage', ...)`
-// alias. The rule is only: say which key you mean, and be right.
+// not have to equal the accessor -- the rule is only: say which key you mean,
+// and be right. (History: at #9630 time `file-storage` was the canonical slot
+// and this header warned against "fixing" the docs by renaming it; the
+// 2026-08-18 maintainer ruling on #9683 then renamed the slot deliberately --
+// `storage` is canonical, `file-storage` stays registered as a deprecated v17
+// alias of the same instance -- so today BOTH keys are really registered and
+// the storage page declares `storage`.)
 //
 // Test files are excluded from the sweep on purpose: a slot only a fixture
 // registers is not a platform surface a reader can resolve. The sweep is also
@@ -245,16 +247,15 @@ export function check({ pages, metaOrder, chapterList, kernelTable, registeredSl
   //    above hold page EXISTENCE and ORDER to each other; none of them reads a
   //    single line of `packages/`, so a page could document a slot nothing has
   //    ever registered and stay green -- which is exactly what shipped:
-  //    `services.storage` was resolvable only as `file-storage`, the accessor
-  //    and the slot differed on that one page alone, and the page never said
-  //    so. A reader following the chapter's own binding note wrote
-  //    `ctx.getService('storage')` and got a throw.
+  //    `services.storage` was resolvable only as `file-storage` at the time,
+  //    the accessor and the slot differed on that one page alone, and the page
+  //    never said so. A reader following the chapter's own binding note wrote
+  //    `ctx.getService('storage')` and got a throw. (#9683 later renamed the
+  //    slot to `storage` by maintainer ruling, keeping `file-storage` as a
+  //    deprecated v17 alias registration.)
   //
-  //    The accessor is NOT required to equal the slot -- `file-storage` is
-  //    canonical (`CoreServiceName`, `CORE_SERVICE_PROVIDER`, three internal
-  //    consumers) and renaming it to satisfy a docs page would be backwards.
-  //    What is required is that the page SAYS which one it is, and that what it
-  //    says is true.
+  //    The accessor is NOT required to equal the slot. What is required is
+  //    that the page SAYS which one it is, and that what it says is true.
   if (registeredSlots) {
     for (const p of pages) {
       if (!p.slot) {

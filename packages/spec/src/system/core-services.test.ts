@@ -10,10 +10,12 @@ import {
 
 describe('CoreServiceName', () => {
   it('should accept all valid service names', () => {
-    // ('workflow' retired with its slot, #4451 v17.)
+    // ('workflow' retired with its slot, #4451 v17. 'storage' is canonical
+    // since the 2026-08-18 ruling on #9683; 'file-storage' stays accepted as
+    // its deprecated v17 alias.)
     const services = [
       'metadata', 'data', 'auth',
-      'file-storage', 'search', 'cache', 'queue',
+      'storage', 'file-storage', 'search', 'cache', 'queue',
       'automation', 'analytics', 'realtime',
       'job', 'notification', 'ai', 'i18n', 'ui',
     ];
@@ -60,6 +62,8 @@ describe('ServiceRequirementDef', () => {
   });
 
   it('should define optional services', () => {
+    expect(ServiceRequirementDef.storage).toBe('optional');
+    // Deprecated v17 alias of `storage` (#9683) — same criticality on purpose.
     expect(ServiceRequirementDef['file-storage']).toBe('optional');
     expect(ServiceRequirementDef.search).toBe('optional');
     expect(ServiceRequirementDef.automation).toBe('optional');

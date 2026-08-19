@@ -1227,7 +1227,7 @@ describe('HttpDispatcher', () => {
             it('does not claim /storage — dispatch falls through to ROUTE_NOT_FOUND', async () => {
                 const mockStorage = { upload: vi.fn(), download: vi.fn() };
                 (kernel as any).getService = vi.fn().mockImplementation((name: string) => {
-                    if (name === 'file-storage') return Promise.resolve(mockStorage);
+                    if (name === 'storage') return Promise.resolve(mockStorage);
                     return null;
                 });
 
@@ -2716,7 +2716,16 @@ describe('HttpDispatcher', () => {
                 // name-derived guess can never get right.
                 expect(info.services.notification.message).toBe('Install @objectstack/service-messaging to enable');
                 expect(info.services.auth.message).toBe('Install @objectstack/plugin-auth to enable');
-                expect(info.services['file-storage'].message).toBe('Install @objectstack/service-storage to enable');
+                expect(info.services.storage.message).toBe('Install @objectstack/service-storage to enable');
+            });
+
+            it('mirrors the storage row verbatim under the deprecated file-storage alias key (#9683)', async () => {
+                // Existing consumers (objectui's console endpoint catalog)
+                // read the 'file-storage' services key; the alias key must
+                // stay byte-equal to the canonical row until it retires at the
+                // next major.
+                const info = await dispatcher.getDiscoveryInfo('/api/v1');
+                expect(info.services['file-storage']).toEqual(info.services.storage);
             });
 
             it('says nothing ships rather than naming a package that does not exist', async () => {
@@ -3267,7 +3276,8 @@ describe('HttpDispatcher', () => {
         // `upload(key, data, options?)` as `upload(file, { request })`. The
         // "degraded store keeps serving" case is the shape of the problem —
         // asserting a 200 off `upload` mocked to resolve `{ key }`, a return
-        // value the contract (`Promise<void>`) does not have. `file-storage`
+        // value the contract (`Promise<void>`) does not have. `storage`
+        // (spelled `file-storage` before #9683)
         // keeps its slot and its `handlerReady` gate on the ADVERTISEMENT
         // (`routes.storage`, pinned in the discovery block above); what it no
         // longer has is a dispatcher handler to gate.
@@ -3346,7 +3356,7 @@ describe('HttpDispatcher', () => {
         // `unavailable` / "install a plugin" would.
         it('stops advertising routes/features for stub slots, while still reporting them as stubs', async () => {
             const stubs: Record<string, unknown> = {
-                'file-storage': stubbed({ upload: vi.fn() }),
+                storage:        stubbed({ upload: vi.fn() }),
                 automation:     stubbed({ execute: vi.fn() }),
                 notification:   stubbed({ send: vi.fn() }),
                 ai:             stubbed({ chat: vi.fn() }),
@@ -3362,7 +3372,7 @@ describe('HttpDispatcher', () => {
             for (const key of ['files', 'ai', 'notifications', 'i18n'] as const) {
                 expect(info.capabilities[key].enabled, `capabilities.${key}.enabled`).toBe(false);
             }
-            for (const key of ['file-storage', 'automation', 'notification', 'ai', 'i18n'] as const) {
+            for (const key of ['storage', 'automation', 'notification', 'ai', 'i18n'] as const) {
                 expect(info.services[key].enabled, `services.${key}.enabled`).toBe(true);
                 expect(info.services[key].status, `services.${key}.status`).toBe('stub');
                 expect(info.services[key].handlerReady, `services.${key}.handlerReady`).toBe(false);
@@ -3372,7 +3382,7 @@ describe('HttpDispatcher', () => {
 
         it('keeps advertising routes/features for degraded slots that really serve', async () => {
             const degradeds: Record<string, unknown> = {
-                'file-storage': degraded({ upload: vi.fn() }),
+                storage:        degraded({ upload: vi.fn() }),
                 automation:     degraded({ listFlows: vi.fn() }),
                 notification:   degraded({ listInbox: vi.fn() }),
                 ai:             degraded({ chat: vi.fn() }),
@@ -3389,8 +3399,8 @@ describe('HttpDispatcher', () => {
             expect(info.routes.i18n).toBe('/api/v1/i18n');
             expect(info.capabilities.files.enabled).toBe(true);
             expect(info.capabilities.i18n.enabled).toBe(true);
-            expect(info.services['file-storage'].status).toBe('degraded');
-            expect(info.services['file-storage'].handlerReady).toBe(true);
+            expect(info.services.storage.status).toBe('degraded');
+            expect(info.services.storage.handlerReady).toBe(true);
         });
     });
 

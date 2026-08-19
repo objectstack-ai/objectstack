@@ -39,7 +39,7 @@
  * Out-of-row storage for large attachments (`storageKey`) is phase 2
  * (objectstack#5172), and it landed exactly as phase 1 predicted: a
  * *producer* for the key that was already declared, with no migration. Over
- * the budget, the content goes to the `file-storage` capability and the row
+ * the budget, the content goes to the `storage` capability and the row
  * carries a reference plus the permanent audit metadata — see
  * `attachment-storage.ts`. Over the budget with no storage capability (or an
  * upload that fails), the pre-#5172 answer stands: inline delivery, whole,
@@ -125,7 +125,7 @@ export interface PersistedEmailAttachment {
   /** Base64 of the raw content, when the row carries it (phase 1's only producer). */
   inline?: string;
   /**
-   * Reference to content held outside the row, in the `file-storage`
+   * Reference to content held outside the row, in the `storage`
    * capability (objectstack#5172).
    *
    * Written instead of {@link inline} when the message is over
@@ -162,14 +162,14 @@ export type EncodedAttachments =
    * Over {@link SYS_EMAIL_ATTACHMENT_LIMIT_BYTES}.
    *
    * Nothing is written to the row **by this encoder**. The caller may still
-   * offload the content to the `file-storage` capability (#5172); when it
+   * offload the content to the `storage` capability (#5172); when it
    * cannot, `storageDetail` carries the sentence explaining why, so the one
    * log line the operator gets names the actual obstacle instead of only the
    * byte count.
    */
   | { kind: 'over-limit'; totalBytes: number; storageDetail?: string }
   /**
-   * Content held out of the row, in the `file-storage` capability (#5172).
+   * Content held out of the row, in the `storage` capability (#5172).
    * `json` goes into `attachments_json`; `keys` is what a later reclaim
    * deletes.
    */
@@ -299,7 +299,7 @@ function parseJson(column: string, value: unknown): unknown {
 export type AttachmentSource =
   /** Content is in the row; already base64-decoded. */
   | { kind: 'inline'; element: PersistedEmailAttachment; bytes: Buffer }
-  /** Content is in the `file-storage` capability under `storageKey` (#5172). */
+  /** Content is in the `storage` capability under `storageKey` (#5172). */
   | { kind: 'storage'; element: PersistedEmailAttachment; storageKey: string };
 
 /**
@@ -428,8 +428,8 @@ export function decodeAttachmentsFromRow(value: unknown): EmailAttachment[] | un
       reject(
         'attachments_json',
         `[${i}] ('${source.element.filename}') holds its content out of the row under storageKey `
-        + `'${source.storageKey}', and this delivery path has no file-storage capability to fetch it from. `
-        + 'Fix: mount the file-storage capability (@objectstack/service-storage) on the process that delivers '
+        + `'${source.storageKey}', and this delivery path has no storage capability to fetch it from. `
+        + 'Fix: mount the storage capability (@objectstack/service-storage) on the process that delivers '
         + 'sys_email rows. Refusing rather than delivering the message without this attachment',
       );
     }
@@ -464,7 +464,7 @@ export async function decodeAttachmentsFromRowAsync(
       reject(
         'attachments_json',
         `[${i}] ('${source.element.filename}') holds its content out of the row under storageKey `
-        + `'${source.storageKey}', but no file-storage capability is mounted on this process. Fix: mount it `
+        + `'${source.storageKey}', but no storage capability is mounted on this process. Fix: mount it `
         + '(@objectstack/service-storage) wherever sys_email rows are delivered. Refusing rather than '
         + 'delivering the message without this attachment',
       );

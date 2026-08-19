@@ -9,7 +9,9 @@ The Storage Service provides a unified interface for **file management** — upl
 
 <Callout type="info">
 **Source:** `packages/spec/src/contracts/storage-service.ts`  
-**Service name:** `'file-storage'` — resolve via `kernel.getService('file-storage')`.
+**Service name:** `'storage'` — resolve via `kernel.getService('storage')`. The
+pre-rename spelling `'file-storage'` stays accepted as a deprecated alias within v17
+(#9683); both names resolve the same instance.
 </Callout>
 
 ---

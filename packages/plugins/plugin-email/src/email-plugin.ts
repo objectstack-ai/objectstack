@@ -200,8 +200,10 @@ interface MailSettingsSurface {
  * (`__serviceInfo.status === 'degraded'`, ADR-0076 D12), so read the label.
  */
 /**
- * Resolve the `file-storage` capability that can hold out-of-row attachment
- * content (#5172), or `undefined`.
+ * Resolve the `storage` capability that can hold out-of-row attachment
+ * content (#5172), or `undefined`. (`storage` is the canonical slot since
+ * #9683; `file-storage` is its deprecated v17 alias — service-storage
+ * registers the same instance under both names.)
  *
  * Typed at the lookup — `EmailAttachmentStore`, declared in this package —
  * rather than erased to `any` (#4127/#4251, the #5210 shape): the three calls
@@ -211,7 +213,7 @@ interface MailSettingsSurface {
  * like "the operator has no storage", so mail would quietly stop being durable
  * with a log line blaming the deployment.
  *
- * Unlike `queue`, the kernel injects no in-memory fallback for `file-storage`,
+ * Unlike `queue`, the kernel injects no in-memory fallback for `storage`,
  * so absence is a plain throw from `getService` and there is no `degraded`
  * label to read. The structural probe is still real: `SwappableStorageService`
  * forwards to whatever adapter the `storage` settings namespace names.
@@ -220,7 +222,7 @@ export function resolveAttachmentStore(
   getService: (name: string) => unknown,
 ): EmailAttachmentStore | undefined {
   let storage: unknown;
-  try { storage = getService('file-storage'); } catch { return undefined; }
+  try { storage = getService('storage'); } catch { return undefined; }
   const candidate = storage as Partial<EmailAttachmentStore> | undefined;
   if (
     !candidate
@@ -607,7 +609,7 @@ export class EmailServicePlugin implements Plugin {
       ctx.logger.info('EmailServicePlugin: sys_email persistence + template loader enabled');
 
       // Out-of-row attachment content (#5172). A thunk for the same reason the
-      // queue is one: `file-storage` is a SwappableStorageService whose
+      // queue is one: `storage` is a SwappableStorageService whose
       // adapter changes when the `storage` settings namespace does, and it may
       // register after this plugin. Resolving here once would pin the service
       // to the adapter that happened to exist at boot.
