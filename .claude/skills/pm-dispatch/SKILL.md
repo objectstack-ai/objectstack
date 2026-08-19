@@ -189,20 +189,12 @@ changeset 流、无 `packages/`;合并队列 + required `build` + `merge_group` 
 | `domain:services` | `packages/services/*`、`packages/connectors/*`、`packages/triggers/*`、`plugin-approvals`、`plugin-webhooks`、`plugin-email`、`plugin-reports`、`embedder-openai`、`knowledge-*`;`plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit`(2026-08-19 并入,原 `domain:identity` 标签**退役**,同上只退流通不删对象) |
 | `domain:devx` | `packages/lint`、`packages/sdui-parser`、`content/docs/**`、`apps/docs`、`scripts/`(门禁类;与 `domain:skills` 的分界按门禁的 SUBJECT:治理 agent 指令面/governed 面的归 skills,治理代码/文档质量的归本域)—— 与 `domain:spec` 相交的三面按「是否围着 spec 契约转」切分 |
 | `domain:skills` | 两个技能根:`.claude/skills/**`(含本文件)+ `skills/**`(维护者 2026-08-11 裁定单设座位,与维护者走专题讨论;skills 更新 ADR-class,见 Guardrails);指令架构文件:根 `AGENTS.md` + 根 `CLAUDE.md`(所有面向 agent 的宪法文本);governed 面(统一定义见 ACCEPT 路径分叉)的治理执行文件:`.github/CODEOWNERS`(治理路由半边)+ SUBJECT 是 governed 面本身的门禁/审计(现为 `scripts/pm/check-governed-merges.mjs`,一句话见守卫索引;未来同类同判)—— 维护者 2026-08-18 裁决:「skills 相关的应该都归你管,为什么派给了 devx」 |
-| `domain:spec` | `packages/spec` 整包唯一契约,语义/文本/机器三面同席:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及围着 spec 契约转的工具链(门禁/生成器/lint 规则/报错散文/references 管线)—— 一般开发工具面留 `devx`(维护者 2026-08-09 裁决);席内分派判据见下文「spec 席内分派参考」 |
+| `domain:spec` | `packages/spec` 整包唯一契约,语义/文本/机器三面同席:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及围着 spec 契约转的工具链(门禁/生成器/lint 规则/报错散文/references 管线)—— 一般开发工具面留 `devx`(维护者 2026-08-09 裁决);席内分派判据见 `references/lanes/spec.md` |
 | `domain:cli` | `packages/cli`、`runtime`、`verify`、`qa`、`types`、`packages/rest`、`packages/mcp`、`packages/observability`、`packages/client*`、`cloud-connection`、`create-objectstack`、`packages/adapters/*`、`plugin-hono-server`、`plugin-dev` |
 | (无固定归属,按落点分诊) | `packages/apps/*`、`packages/console`(dist 由脚本生成 ⛔ 手改;UI 缺陷走 `repo:objectui`,pin/刷新脚本归 `scripts/` 行)、`examples/*`(归它演练的子系统) |
 
 表未覆盖的包在首次分诊时归类并**走 PR 更新本表**;**新增或退役一个 `domain:*` 必须同批改本表**(在流
 通而不在表 = 无主车道)。座位在编情况以 `label:pm:seat` 索引为准,每个 `domain:*` 与 `repo:*` 恰一张座位贴。
-
-**spec 席内分派参考**(维护者 2026-08-16 裁定合并车道:原 `domain:spec-surface` / `domain:spec-tooling` 标签已退役,
-三面同归 `domain:spec` 一席,锚定规则双射恢复;以下判据降为席内分派与定价依据):语义/文本按
-「合法元数据集合变没变」分 —— 改动前能过校验的输入,改动后逐字节同判 ⇒ 文本面(changeset 恒 patch,
-默认 sweep-first),否则语义面;**任何改变接受/拒绝行为的卡,不论多小,按语义面处理**。机器面改
-「围着契约转的机器」,与文本面无交集,⛔ 不碰 `packages/spec/src/**/*.zod.ts` 与 strictness 台账。
-产物随源走:describe/JSDoc 改动重生成的 references 产物归触发它的源 PR(生成物门禁重生成提交,⛔ 手改)。
-改元数据**格式/接受面**的照旧归 `domain:spec`,`/meta` 路由本体在 `packages/rest` 归 `domain:cli`;拿不准 FLAG 回分诊。
 
 **单一生产者。** `domain:*` 只由分诊座位产出;打标签 ≠ 认领;**未打标签的 issue 任何人不得认领
 ** —— 那意味着分诊还没走到,不是「可以自己判一下」。
@@ -218,17 +210,20 @@ changeset 流、无 `packages/`;合并队列 + required `build` + `merge_group` 
 ## 座位贴协议(一座位一贴,单写手)
 
 多写手共编一个 body 机制上防不住互吞(维护者 2026-08-06 拍板):**贴 = 座位**(标签 `pm:seat`),
-正文固定六段现值、**只由在任座位 PM 编辑**、正文为权威,标题与 assignee 是派生视图、三者同笔更
-新;接管/移交 = 改正文 + 审计评论(**评论只作审计不承载状态**),接管压缩是标准步骤。**写侧刷新
-点 = 轮次边界**(派发、收班、暂停/交接前),中途状态由卡上 claim/ACCEPT 评论承载(本就是 state
-of record)。**读侧闭环(维护者 2026-08-12 批准):接管与巡检只读贴正文 + 晚于正文最后编辑的评
-论** —— 更早的已被吸收,是存档不是现状。**热文件串行队是正文具名段**(区域写不清就只能整文件串
-行)。无心跳,活性惰性判定;竞态三招 —— 动手前重 fetch 正文、审计评论时间戳先到先得、写后回读。**换班报告默
+正文固定**四段**现值(当前 PM / 继承台账 / 热文件串行队 / 说明)、**只由在任座位 PM 编辑**、正文为
+权威,标题与 assignee 是派生视图、三者同笔更新;接管/移交 = 改正文 + 审计评论(**评论只作审计不承
+载状态**),接管压缩是标准步骤。**范围与常设承诺是岗位说明不是状态,版本化在
+`references/lanes/<lane>.md`**(维护者 2026-08-19 裁定:「所以我认为每一种项目经理的岗位说明应该进
+skills,类似分诊」)—— 贴内指针指向其车道文件,升级走技能 PR;存量贴的散文由在任座位在下次写侧刷新
+时迁移瘦身,⛔ 手抄接力(逐任手抄正是本条要退役的失效模式)。**写侧刷新点 = 轮次边界**,读侧只读贴
+正文 + 晚于正文最后编辑的评论(维护者 2026-08-12 批准;更早的已被吸收,是存档不是现状),中途状态
+由卡上 claim/ACCEPT 评论承载。**热文件串行队是正文具名段**(区域写不清就只能整文件串行)。无心跳,
+活性惰性判定;竞态三招 —— 动手前重 fetch 正文、审计评论时间戳先到先得、写后回读。**换班报告默
 认零建议**(维护者 2026-08-12 裁定,原话:「还有各车道下班时会提交 skills 建议有必要吗?就是那些
 搞得后来skills越来越乱。」):强制建议清单已退役,离任报告只收三类 —— 原则错/缺(→ skills 席专题)
 、可机械化项(→ 门禁/脚本卡,⛔ 不是散文)、平台事实变化(→ references 事实表改一行)—— 以
 `finding` 入 skills 车道由该席分诊,三类之外默认关 not planned;「经验教训」散文不再入技能文本
-(防错归门禁,判断归档位)。六段模板、状态词表、接管/退场收尾清单等细则见
+(防错归门禁,判断归档位)。四段模板、状态词表、接管/退场收尾清单等细则见
 `references/seat-post-protocol.md`;epic 委托不入座位贴体系;`packages/spec` 恒归 spec 座位。
 
 ## Epic 子树车道
@@ -398,7 +393,7 @@ dev 侧推分支要早 —— 远程分支是在飞工作最硬的证据。**死
 拿不准就升一档 —— 错派低档的返工贵过省下的额度);上限 `fable`(最重协议/流程/编排卡,按卡取用非新
 默认)。**⛔ 强制条款两条**:① 凡改 `.claude/skills/pm-dispatch/**` 的卡一律
 `model: "claude-fable-5"`;② 凡**改变契约接受/拒绝行为或扩大公开面**的卡(`domain:spec` 语义面;
-判据即分诊代裁的机械边界测试与 spec 席内分派判据,⛔ 不另抄第二份)一律 `claude-fable-5`(维护者
+判据即分诊代裁的机械边界测试与 spec 席内分派判据 —— `references/lanes/spec.md`,⛔ 不另抄第二份)一律 `claude-fable-5`(维护者
 2026-08-12 裁定,原话:「同意,就按语义面收窄,立卡并通知 spec 席」)—— 契约错毒化一切下游,全仓最贵(条款②闸门见「入队与落地」)。两条唯一降档出口:**额度耗尽豁免**(维护者 2026-08-13
 原话:「fable 如果用完了,可以用 opus」):仅当 fable 实测不可用(限流/墙杀中途,重派同样可降)
 才落 `opus`,⛔ 不再往下,档位与理由记入认领评论「Container & model」行。明确不变(合并后按席内
