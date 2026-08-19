@@ -3248,6 +3248,71 @@ function selfTest() {
             expectCount: 1,
             expectKinds: ['silent-swallow'],
         },
+        // ── The UNRECOGNISED census (#9747) ──────────────────────────────
+        {
+            // ⭐ The limb the card exists for. This seam is correctly GREEN —
+            // `logger.error` is right there and readable — and it ALSO contains
+            // a call the resolver cannot read. Before #9747 that fact reached
+            // no output at all: `unreadable` was collected only to pick a
+            // finding's verdict, so a seam that never became a finding threw it
+            // away, and `clean` was printed where the honest answer is "clean,
+            // and there is one call in here I did not understand".
+            name: 'census: an UNREADABLE call inside an otherwise LOUD catch is counted, and stays green',
+            code: `
+                class P { async f(driver: any, obj: any, level: string) {
+                    try { await driver.syncSchema('t', obj); }
+                    catch (e) { this.logger.error('CONSEQUENCE + FIX', { e }); this.logger[level]('x'); }
+                } }`,
+            expectViolation: false,
+            expectSeams: 1,
+            expectUnrecognised: 1,
+        },
+        {
+            // The other direction on the same axis: a catch whose ONLY answer is
+            // unreadable is BOTH a finding (`unreadable-report`, #9657) and a
+            // census row. Two independent verdicts about one seam; wiring either
+            // to the other would lose one of them.
+            name: 'census: a catch whose only answer is unreadable is BOTH a finding and a census row',
+            code: `
+                class P { async f(driver: any, obj: any, level: string) {
+                    try { await driver.syncSchema('t', obj); }
+                    catch (e) { this.logger[level]('something happened', { e }); }
+                } }`,
+            expectViolation: true,
+            expectSeams: 1,
+            expectCount: 1,
+            expectKinds: ['unreadable-report'],
+            expectUnrecognised: 1,
+        },
+        {
+            // ⛔ SILENT is not UNRECOGNISED. An empty catch is fully understood —
+            // the checker read it and it said nothing. Counting it here would
+            // conflate the two states this card exists to separate, in the
+            // direction that turns the count into noise.
+            name: 'census: a truly SILENT catch is NOT counted as unrecognised',
+            code: `
+                class P { async f(driver: any, obj: any) {
+                    try { await driver.syncSchema('t', obj); } catch { /* ignore */ }
+                } }`,
+            expectViolation: true,
+            expectSeams: 1,
+            expectCount: 1,
+            expectKinds: ['silent-swallow'],
+            expectUnrecognised: 0,
+        },
+        {
+            // And the clean direction. Without this limb a census that counted
+            // every discovered seam would satisfy every limb above.
+            name: 'census: an ordinary loud catch contributes nothing to the census',
+            code: `
+                class P { async f(driver: any, obj: any) {
+                    try { await driver.syncSchema('t', obj); }
+                    catch (e) { this.logger.error('CONSEQUENCE + FIX', { e }); }
+                } }`,
+            expectViolation: false,
+            expectSeams: 1,
+            expectUnrecognised: 0,
+        },
         {
             // A propagating catch is still a SEAM — it is reported by `--list`
             // and it must not vanish from the census. #4754's whole precision
