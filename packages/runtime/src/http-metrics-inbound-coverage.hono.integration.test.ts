@@ -38,6 +38,8 @@ import { createDispatcherPlugin } from './dispatcher-plugin.js';
  * `toBe(1)` now pins the retirement). §5 pins the `IHttpServer.afterResponse`
  * contract seam (#9835) on the same booted composition: the ruled successor
  * that makes the observation point transport-agnostic instead of Hono-only.
+ * §6 pins the duration histogram over the same seam (#9834) — the p95 half of
+ * the same operator guidance, which #9835 left behind.
  *
  * ## Why the composition is shaped this way
  *
@@ -804,11 +806,17 @@ describe('#9835 §5 — the `afterResponse` contract seam, on the real booted co
         expect(observed).toHaveLength(3);
     }, 30_000);
 
-    it('keeps the dispatcher-side signals the transport does not emit: duration histogram + X-Request-Id', async () => {
-        // Only the COUNTER moved to the transport seam. The per-route wrapper
-        // still owns request-id echo and `http_request_duration_ms` — gating
-        // those on the seam would have silently dropped them (#9833 named
-        // them as the non-separable remainder).
+    it('keeps the dispatcher-side signals the transport does not emit: X-Request-Id, and the duration series stays single-emitter', async () => {
+        // Written for #9835, when the COUNTER alone had moved and the wrapper
+        // still owned the histogram. #9834 moved the histogram to the same
+        // seam, so the emitter behind `durations` changed — the ASSERTION did
+        // not, and must not: `toBe(1)` is the de-duplication guard, and this
+        // composition hands ONE registry to both layers, so a wrapper copy
+        // left un-gated shows up here as 2 (the #9833 distortion).
+        //
+        // Request-id echo is still the wrapper's alone: the transport seam
+        // emits no header, so gating it would silently drop it (#9833 named
+        // it as part of the non-separable remainder).
         const metrics = new InMemoryMetricsRegistry();
         const { kernel, baseUrl } = await bootMeasurementKernel(metrics);
         const res = await fetch(`${baseUrl}${DISPATCHER_PROBE}`);
