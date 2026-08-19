@@ -7,11 +7,16 @@ import {
     IHttpServer,
     RouteHandler,
     Middleware,
+    UNMATCHED_ROUTE_PATTERN,
     createLogger,
+} from '@objectstack/core';
+import type {
+    HttpResponseObserver,
+    HttpResponseObservation,
 } from '@objectstack/core';
 import type { Logger } from '@objectstack/spec/contracts';
 import type { Context } from 'hono';
-import { currentPerfTiming, RUNTIME_METRICS, type MetricsRegistry } from '@objectstack/observability';
+import { currentPerfTiming, armHttpRequestCounter, type MetricsRegistry } from '@objectstack/observability';
 import { Hono } from 'hono';
 import { routePath } from 'hono/route';
 import { serve } from '@hono/node-server';
@@ -228,8 +233,34 @@ export class HonoHttpServer implements IHttpServer {
     private middlewares: Array<{ path?: string; handler: Middleware }> = [];
     /** Whether the Hono middleware that runs {@link middlewares} is mounted. */
     private middlewareSeamInstalled = false;
-    /** Whether the `http_requests_total` middleware is mounted. See {@link installHttpMetricsSeam}. */
+    /**
+     * Local idempotence for {@link installHttpMetricsSeam}. The cross-caller
+     * "at most one counter per server" latch lives in
+     * `armHttpRequestCounter` (per-server, whoever arms); this flag only
+     * short-circuits repeat calls on this adapter instance.
+     */
     private httpMetricsSeamInstalled = false;
+    /**
+     * Registered {@link HttpResponseObserver}s, in registration order — read
+     * per request by the observation seam, so a consumer may register at ANY
+     * moment after boot (same design as {@link middlewares}). See
+     * {@link afterResponse}.
+     */
+    private responseObservers: HttpResponseObserver[] = [];
+    /** Whether the Hono middleware that delivers to {@link responseObservers} is mounted. */
+    private responseObservationSeamInstalled = false;
+    /**
+     * Requests that reached the `notFound` sink — i.e. matched NO registered
+     * route (Hono routes method mismatches there too). Marked in
+     * {@link installNotFoundSeam}'s hook, read by the observation seam so
+     * `routePattern` can carry the contract's reserved unmatched label:
+     * `routePath(c)` cannot answer this itself — after `next()` it reports
+     * the deepest EXECUTED handler, which for an unrouted request is one of
+     * this adapter's own `use('*')` seams (measured: `/*`), a spelling
+     * indistinguishable from a real static catch-all route. Keyed on the
+     * fetch `Request` object (per request, GC-safe).
+     */
+    private unmatchedMarks = new WeakSet<object>();
     /**
      * The LAST-RESORT handler installed by {@link setFallbackHandler}, or
      * `undefined` when no consumer installed one. Exactly one — installing
@@ -707,6 +738,12 @@ export class HonoHttpServer implements IHttpServer {
         this.notFoundSeamInstalled = true;
 
         app.notFound(async (c: any) => {
+            // Reaching this hook IS the definition of "no registered route
+            // matched" — mark it for the response-observation seam (#9835),
+            // which labels these with the contract's reserved unmatched
+            // pattern. Marked before the fallback runs: a fallback-served
+            // request is still an unrouted one.
+            if (c?.req?.raw) this.unmatchedMarks.add(c.req.raw);
             const handler = this.fallbackHandler;
             if (handler) {
                 const { response, failed } = await this.runHandler(c, handler);
@@ -948,9 +985,9 @@ export class HonoHttpServer implements IHttpServer {
     }
 
     /**
-     * Mount the single Hono middleware that emits
-     * `http_requests_total{method,route,status}` for EVERY inbound request on
-     * this transport. Idempotent.
+     * Arm `http_requests_total{method,route,status}` for EVERY inbound
+     * request on this transport, by registering the counter-emitting observer
+     * on the {@link afterResponse} seam. Idempotent.
      *
      * ## Why the counter lives here and not one layer up (#9650)
      *
@@ -1004,7 +1041,79 @@ export class HonoHttpServer implements IHttpServer {
         if (this.httpMetricsSeamInstalled) return;
         this.httpMetricsSeamInstalled = true;
 
+        // Since #9835 the counter is ONE OBSERVER on the contract-level
+        // response-observation seam rather than a private middleware: the
+        // delivery path (and therefore the reach measured for #9650) is
+        // exactly the one every `afterResponse` consumer gets, so the two can
+        // never drift — and a request can never be double-counted between
+        // "the adapter middleware" and "the hook path", because they are the
+        // same path. De-dup with OTHER arming sites (the runtime dispatcher's
+        // `observability.metrics` wiring) is `armHttpRequestCounter`'s
+        // per-server latch: every counter-arming call in the repo routes
+        // through it, first caller wins — in the shipped composition that is
+        // this plugin, in Phase 1, which is what makes the transport the
+        // counter's owner in fact and not only in documentation.
+        armHttpRequestCounter(this, metrics);
+    }
+
+    /**
+     * Register a RESPONSE OBSERVER — the `IHttpServer.afterResponse` CONTRACT
+     * (#9835); see `@objectstack/spec/contracts` for the full text. Honoured
+     * here as follows:
+     *
+     *  - **Delivery** rides ONE Hono middleware ({@link
+     *    installResponseObservationSeam}) that reads {@link responseObservers}
+     *    per request, so registration works at any moment after boot — same
+     *    design as {@link use}. `HonoServerPlugin` mounts the seam at the end
+     *    of `init()`; a bare `HonoHttpServer` gets it mounted on first
+     *    registration, and only that path carries the register-before-routes
+     *    requirement.
+     *  - **`routePattern` is the matched PATTERN** — `routePath(c)` after
+     *    `next()`, i.e. the route that actually answered; the reserved
+     *    `UNMATCHED_ROUTE_PATTERN` when nothing matched.
+     *  - **Reach**: raw-app mounts included (the seam is a raw-app
+     *    middleware), `use()` short-circuits included (mounted before the
+     *    middleware seam). The documented boundary: a CORS preflight the
+     *    transport's own built-in answers is outside the seam.
+     *  - **Isolation**: each observer runs in its own try/catch — a throwing
+     *    observer affects neither the response nor sibling observers.
+     */
+    afterResponse(observer: HttpResponseObserver): void {
+        this.responseObservers.push(observer);
+        this.installResponseObservationSeam();
+    }
+
+    /**
+     * Mount the single Hono middleware that delivers
+     * {@link HttpResponseObservation}s to every registered observer.
+     * Idempotent.
+     *
+     * WHERE this is called decides what can be observed, exactly like
+     * {@link installMiddlewareSeam} (the two callers are the same pair):
+     *
+     *  - **`HonoServerPlugin.init()`, immediately BEFORE
+     *    `installMiddlewareSeam()`** — after the transport's own built-ins
+     *    (Server-Timing, CORS), so a preflight CORS answers itself is not
+     *    observed; before the middleware seam, so a request a `use()`
+     *    middleware refuses (the inbound rate limiter's 429) IS observed — a
+     *    refused request is exactly the one an operator alerts on; and before
+     *    any route exists (every route mounts in some plugin's `start()`), so
+     *    the observation wraps every handler however late the observer
+     *    registers.
+     *  - **the first {@link afterResponse}** — for a bare `HonoHttpServer`
+     *    composed without the plugin, so the seam is never silently absent.
+     *
+     * A request pays one array-length check when no observers are registered
+     * — the disarmed cost, same shape as the middleware seam's empty-chain
+     * fast path.
+     */
+    installResponseObservationSeam(): void {
+        if (this.responseObservationSeamInstalled) return;
+        this.responseObservationSeamInstalled = true;
+
         this.app.use('*', async (c, next) => {
+            if (this.responseObservers.length === 0) return next();
+            const startedAt = Date.now();
             // Default 500: if `next()` rejects, Hono's error path renders the
             // 500 and `c.res` is not yet set — reading it would synthesize a
             // response and change what the caller receives.
@@ -1013,20 +1122,38 @@ export class HonoHttpServer implements IHttpServer {
                 await next();
                 status = c.res.status;
             } finally {
-                try {
-                    metrics.counter(RUNTIME_METRICS.httpRequestsTotal, {
-                        method: c.req.method,
-                        // `routePath(c)` is the non-deprecated spelling of
-                        // `c.req.routePath` and returns the same matched
-                        // PATTERN — read after `next()`, so it is the route
-                        // that actually answered rather than this middleware's
-                        // own `*`. Empty only when nothing matched at all.
-                        route: routePath(c) || 'unmatched',
-                        status: String(status),
-                    });
-                } catch {
-                    // A metrics backend must never be able to break a
-                    // response. Same discipline as the error reporter.
+                // An unrouted request executes only this adapter's own
+                // `use('*')` seams, so after `next()` `routePath(c)` reports
+                // `/*` — OUR registration, indistinguishable from a real
+                // static catch-all. The `notFound` sink is the authority on
+                // "nothing matched" and marks the request (see
+                // {@link unmatchedMarks}); on a bare server that never
+                // mounted the notFound seam the mark cannot exist and the
+                // label degrades to what `routePath` reports.
+                const unrouted = c.req?.raw ? this.unmatchedMarks.has(c.req.raw) : false;
+                const observation: HttpResponseObservation = {
+                    method: c.req.method,
+                    // `routePath(c)` is the non-deprecated spelling of
+                    // `c.req.routePath` and returns the same matched
+                    // PATTERN — read after `next()`, so it is the route
+                    // that actually answered rather than this middleware's
+                    // own `*`.
+                    routePattern: unrouted
+                        ? UNMATCHED_ROUTE_PATTERN
+                        : routePath(c) || UNMATCHED_ROUTE_PATTERN,
+                    status,
+                    elapsedMs: Date.now() - startedAt,
+                };
+                // Snapshot so an observer registering from inside an observer
+                // cannot mutate the list mid-delivery.
+                for (const observer of [...this.responseObservers]) {
+                    try {
+                        observer(observation);
+                    } catch {
+                        // An observer must never be able to break a response
+                        // or a sibling observer. Same discipline as a metrics
+                        // backend / the error reporter.
+                    }
                 }
             }
         });

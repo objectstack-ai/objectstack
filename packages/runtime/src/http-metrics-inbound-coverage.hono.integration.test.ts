@@ -34,7 +34,10 @@ import { createDispatcherPlugin } from './dispatcher-plugin.js';
  * MEASUREMENTS that disqualified the other candidate seams, so the ruling's
  * evidence stays executable rather than becoming a claim in a comment. §4
  * pins the transport seam's own edges (label shape, refused requests,
- * resolution chain, and the double count it leaves behind).
+ * resolution chain, and the #9833 double count — retired by #9835, whose
+ * `toBe(1)` now pins the retirement). §5 pins the `IHttpServer.afterResponse`
+ * contract seam (#9835) on the same booted composition: the ruled successor
+ * that makes the observation point transport-agnostic instead of Hono-only.
  *
  * ## Why the composition is shaped this way
  *
@@ -178,7 +181,8 @@ describe('#9650 §1 — inbound coverage of http_requests_total', () => {
 
     // Positive control. If this is 0 the harness is wrong, not the repo —
     // every "not counted" below would then be measuring a broken injection
-    // rather than the defect.
+    // rather than the defect. (Since #9835 the emitter behind this row is the
+    // transport seam, not the dispatcher's per-route proxy — see §5.)
     it('CONTROL: counts the dispatcher\'s own route (the local instrumented proxy works)', () => {
         expect(metrics.totalCounter(HTTP_REQUESTS_TOTAL, { route: DISPATCHER_PROBE })).toBeGreaterThan(0);
     });
@@ -647,7 +651,7 @@ describe('#9650 §4 — the transport seam that was ruled, and its edges', () =>
         expect(metrics.totalCounter(HTTP_REQUESTS_TOTAL, { route: `${AUTH_BASE}/*` })).toBe(1);
     }, 30_000);
 
-    it('installs NO middleware when the host configured no metrics backend', async () => {
+    it('arms NO counter when the host configured no metrics backend', async () => {
         const kernel = new LiteKernel();
         kernel.use(new HonoServerPlugin({ port: 0, cors: false }));
         kernel.use(authLikePlugin());
@@ -657,38 +661,163 @@ describe('#9650 §4 — the transport seam that was ruled, and its edges', () =>
         const res = await fetch(`${baseUrl}${AUTH_PROBE}`, { method: 'POST' });
         await kernel.shutdown();
 
-        // Not a disabled counter — no counter. An unconfigured deployment
-        // pays no per-request cost, and the server is unaffected either way.
+        // Not a disabled counter — no counter. Since #9835 the `afterResponse`
+        // DELIVERY seam is mounted regardless (so consumers may register
+        // observers at any time), disarmed to one array-length check per
+        // request when nobody observes; the counter itself exists only when a
+        // registry was resolved. The server is unaffected either way.
         expect(res.status).toBe(200);
     }, 30_000);
 
     /**
-     * ⚠️ KNOWN, FILED CONSEQUENCE — not an endorsement.
+     * The #9833 double count, RETIRED by #9835 (this expectation was `toBe(2)`
+     * while the dispatcher's Proxy still emitted its own copy — the file's
+     * history keeps the measured defect). Two mechanisms compose here, both
+     * of them the `IHttpServer.afterResponse` contract's ownership rule:
      *
-     * The runtime dispatcher still wraps its OWN routes with
-     * `instrumentRouteHandler` (`dispatcher-plugin.ts` Proxy), which emits the
-     * same counter under the same labels. A host that hands one registry to
-     * both the transport and the dispatcher therefore counts the dispatcher's
-     * routes twice — and only the dispatcher's, so the ratio between surfaces
-     * is wrong, not just the scale.
-     *
-     * Removing that emission is a `packages/runtime` change and it is NOT
-     * separable from the rest of `instrumentRouteHandler` (request-id header,
-     * `http_request_duration_ms`, `http_request_errors_total`, the error
-     * reporter), so it is filed rather than folded in here. When it lands,
-     * this expectation becomes `toBe(1)`.
+     *  - the dispatcher feature-detects the seam on the transport and passes
+     *    `emitHttpRequestsTotal: false` to `instrumentRouteHandler`, so its
+     *    per-route wrapper no longer emits the counter;
+     *  - both counter-arming sites (`HonoServerPlugin.init()` and the
+     *    dispatcher's own `observability.metrics` offer) route through
+     *    `armHttpRequestCounter`, whose per-server latch makes "exactly one
+     *    counter-emitting observer per server" structural — one registry
+     *    handed to both layers arms ONCE (first caller wins; here the
+     *    transport plugin, in Phase 1).
      */
-    it('MEASURED: the dispatcher route is counted TWICE while its own Proxy still emits', async () => {
+    it('the dispatcher route is counted ONCE — the #9833 duplicate is retired (#9835)', async () => {
         const metrics = new InMemoryMetricsRegistry();
         const { kernel, baseUrl } = await bootMeasurementKernel(metrics);
         await fetch(`${baseUrl}${DISPATCHER_PROBE}`);
         await fetch(`${baseUrl}${AUTH_PROBE}`, { method: 'POST' });
         await kernel.shutdown();
 
-        expect(metrics.totalCounter(HTTP_REQUESTS_TOTAL, { route: DISPATCHER_PROBE })).toBe(2);
-        // One request each. The surface only the transport seam covers is
-        // counted ONCE, which is what makes the row above a duplicate rather
-        // than a uniform scale factor an operator could divide out.
+        expect(metrics.totalCounter(HTTP_REQUESTS_TOTAL, { route: DISPATCHER_PROBE })).toBe(1);
+        // One request each, one count each: the ratio between surfaces —
+        // which is what the 5xx-rate and traffic-share guidance reads — is
+        // now true, not merely proportional.
         expect(metrics.totalCounter(HTTP_REQUESTS_TOTAL, { route: `${AUTH_BASE}/*` })).toBe(1);
+    }, 30_000);
+});
+
+describe('#9835 §5 — the `afterResponse` contract seam, on the real booted composition', () => {
+    it('feature-detects runtime-real on the registered `http.server` — the ask a consumer must make', async () => {
+        const metrics = new InMemoryMetricsRegistry();
+        const { kernel } = await bootMeasurementKernel(metrics);
+        const httpServer = kernel.getService<IHttpServer>('http.server');
+        await kernel.shutdown();
+
+        // `typeof === 'function'`, the contract's detection idiom (#5122:
+        // must be runtime-real — a wrapper that erases the member makes an
+        // instrumented transport read as "not instrumented").
+        expect(typeof httpServer.afterResponse === 'function').toBe(true);
+    }, 30_000);
+
+    it('fires once per request with STATUS + PATTERN — after boot, with zero Phase-1 choreography', async () => {
+        const metrics = new InMemoryMetricsRegistry();
+        const { kernel, baseUrl } = await bootMeasurementKernel(metrics);
+        const httpServer = kernel.getService<IHttpServer>('http.server');
+
+        // Registered AFTER bootstrap — the plugin mounted the delivery seam
+        // in Phase 1, so an observer may join at any moment and still see
+        // every surface. This is what the raw-app middleware measurements in
+        // §3 could not offer (register-late saw nothing).
+        const seen: Array<{ method: string; routePattern: string; status: number; elapsedMs: number }> = [];
+        httpServer.afterResponse!((observation) => seen.push({ ...observation }));
+
+        await fetch(`${baseUrl}/api/v1/data/abc123`);
+        await fetch(`${baseUrl}${AUTH_PROBE}`, { method: 'POST' });
+        await kernel.shutdown();
+
+        const paramRow = seen.find((o) => o.routePattern === REST_PARAM_ROUTE);
+        expect(paramRow).toBeDefined();
+        // The PATTERN, never the concrete path — the contract's hard
+        // cardinality requirement, now asserted on the contract seam itself.
+        expect(seen.map((o) => o.routePattern)).not.toContain('/api/v1/data/abc123');
+        expect(paramRow!.status).toBe(200);
+        expect(paramRow!.method).toBe('GET');
+        expect(paramRow!.elapsedMs).toBeGreaterThanOrEqual(0);
+        // The raw-app auth mount is inside the seam's reach, labelled by its
+        // registered wildcard — the transport-agnostic seam keeps the reach
+        // the ruled Hono middleware measured (#9650: do not regress).
+        const authRow = seen.find((o) => o.routePattern === `${AUTH_BASE}/*`);
+        expect(authRow).toBeDefined();
+        expect(authRow!.status).toBe(200);
+    }, 30_000);
+
+    it('a host that wires metrics ONLY on the dispatcher now counts EVERY surface through the seam', async () => {
+        // The wiring the production-readiness docs demonstrate. Before #9835
+        // it reached only the dispatcher's own routes (the pre-#9650 blind
+        // spot); the dispatcher now offers its registry to the transport seam
+        // via `armHttpRequestCounter`, so the auth raw-app mount and the REST
+        // RouteManager mount are counted too.
+        const metrics = new InMemoryMetricsRegistry();
+        const kernel = new LiteKernel();
+        kernel.use(new HonoServerPlugin({ port: 0, cors: false })); // no registry here
+        kernel.use(authLikePlugin());
+        kernel.use(restLikePlugin());
+        kernel.use(
+            createDispatcherPlugin({
+                prefix: '/api/v1',
+                securityHeaders: false,
+                observability: { metrics },
+            } as any),
+        );
+        await kernel.bootstrap();
+        const httpServer = kernel.getService<IHttpServer>('http.server');
+        const baseUrl = `http://127.0.0.1:${httpServer.getPort!()}`;
+
+        await fetch(`${baseUrl}${DISPATCHER_PROBE}`);
+        await fetch(`${baseUrl}${AUTH_PROBE}`, { method: 'POST' });
+        await fetch(`${baseUrl}${REST_PROBE}`);
+        await kernel.shutdown();
+
+        expect(metrics.totalCounter(HTTP_REQUESTS_TOTAL, { route: DISPATCHER_PROBE })).toBe(1);
+        expect(metrics.totalCounter(HTTP_REQUESTS_TOTAL, { route: `${AUTH_BASE}/*` })).toBe(1);
+        expect(metrics.totalCounter(HTTP_REQUESTS_TOTAL, { route: REST_PROBE })).toBe(1);
+    }, 30_000);
+
+    it('NO-DOUBLE-COUNT: an extra observer changes nothing, and every surface stays at exactly 1', async () => {
+        // The card's de-duplication acceptance, pinned across all three
+        // potential emitters at once: the transport's armed counter (Phase
+        // 1), the dispatcher's registry offer (Phase 2, latched away), and
+        // the dispatcher's per-route wrapper (suppressed by feature
+        // detection). A second afterResponse OBSERVER is registered too —
+        // observation is many-consumer by contract, while the COUNTER stays
+        // single-owner.
+        const metrics = new InMemoryMetricsRegistry();
+        const { kernel, baseUrl } = await bootMeasurementKernel(metrics);
+        const httpServer = kernel.getService<IHttpServer>('http.server');
+        const observed: string[] = [];
+        httpServer.afterResponse!((o) => observed.push(o.routePattern));
+
+        await fetch(`${baseUrl}${DISPATCHER_PROBE}`);
+        await fetch(`${baseUrl}${AUTH_PROBE}`, { method: 'POST' });
+        await fetch(`${baseUrl}${REST_PROBE}`);
+        await kernel.shutdown();
+
+        expect(metrics.totalCounter(HTTP_REQUESTS_TOTAL, { route: DISPATCHER_PROBE })).toBe(1);
+        expect(metrics.totalCounter(HTTP_REQUESTS_TOTAL, { route: `${AUTH_BASE}/*` })).toBe(1);
+        expect(metrics.totalCounter(HTTP_REQUESTS_TOTAL, { route: REST_PROBE })).toBe(1);
+        // The extra observer really was live the whole time — it observed all
+        // three requests without adding a single count.
+        expect(observed).toHaveLength(3);
+    }, 30_000);
+
+    it('keeps the dispatcher-side signals the transport does not emit: duration histogram + X-Request-Id', async () => {
+        // Only the COUNTER moved to the transport seam. The per-route wrapper
+        // still owns request-id echo and `http_request_duration_ms` — gating
+        // those on the seam would have silently dropped them (#9833 named
+        // them as the non-separable remainder).
+        const metrics = new InMemoryMetricsRegistry();
+        const { kernel, baseUrl } = await bootMeasurementKernel(metrics);
+        const res = await fetch(`${baseUrl}${DISPATCHER_PROBE}`);
+        await kernel.shutdown();
+
+        expect(res.headers.get('X-Request-Id')).toBeTruthy();
+        const durations = metrics.samples.filter(
+            (s) => s.name === RUNTIME_METRICS.httpRequestDurationMs && s.labels.route === DISPATCHER_PROBE,
+        );
+        expect(durations.length).toBe(1);
     }, 30_000);
 });

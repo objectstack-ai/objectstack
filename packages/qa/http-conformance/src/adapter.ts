@@ -7,7 +7,9 @@ import {
     IHttpResponse,
     RouteHandler,
     Middleware,
+    UNMATCHED_ROUTE_PATTERN,
 } from '@objectstack/core';
+import type { HttpResponseObserver } from '@objectstack/core';
 
 /**
  * NodeHttpServer — a thin `IHttpServer` implementation on raw `node:http`,
@@ -33,6 +35,15 @@ import {
  * four testable guarantees, and this adapter has to satisfy them before the
  * conformance suite can assert them CROSS-adapter. Asserting them against a
  * single implementor would prove nothing about the port.
+ *
+ * Since #9835 it implements the optional
+ * {@link NodeHttpServer.afterResponse} response-observation seam for the same
+ * reason — the conformance suite locks the seam's semantics (pattern-never-
+ * path, refused-request reach, observer isolation) across BOTH adapters. It
+ * also retires, for this transport, the "zero means not instrumented" hole
+ * the #9650 ruling documented as an expectation: a composition that arms a
+ * metrics observer through the seam gets `http_requests_total` here too,
+ * instead of a counter that stays flat while traffic flows.
  *
  * Deliberately NOT implemented (each one is a known escape hatch whose
  * consumers feature-detect and degrade):
@@ -118,6 +129,12 @@ export class NodeHttpServer implements IHttpServer {
      * semantics and the zero registration-order dependency structural here.
      */
     private fallbackHandler: RouteHandler | undefined;
+    /**
+     * Registered {@link HttpResponseObserver}s, in registration order — the
+     * `IHttpServer.afterResponse` seam (#9835). Read per request in
+     * {@link handleRequest}, so registration works at any moment.
+     */
+    private responseObservers: HttpResponseObserver[] = [];
 
     constructor(
         private port: number = 3000,
@@ -205,6 +222,33 @@ export class NodeHttpServer implements IHttpServer {
     }
 
     /**
+     * Register a RESPONSE OBSERVER — the `IHttpServer.afterResponse` CONTRACT
+     * (#9835); see `@objectstack/spec/contracts` for the full text. Honoured
+     * here as follows:
+     *
+     *  - **Delivery** hangs off the native response's `finish` event, armed in
+     *    {@link handleRequest} once the route table has been consulted — so
+     *    the observation fires exactly once, after the response was written
+     *    (buffered, streamed, fallback and error paths alike), with the
+     *    status as sent. A connection that dies before `finish` (client
+     *    abort) goes unobserved, as the contract allows.
+     *  - **`routePattern` is the registered PATTERN** the router matched
+     *    (`route.pattern`, the very string the consumer registered), never
+     *    the concrete path; the reserved `UNMATCHED_ROUTE_PATTERN` when no
+     *    route matched (404/405/fallback answers).
+     *  - **Reach**: everything {@link handleRequest} serves — there is no
+     *    raw-app escape hatch on this adapter (`getRawApp` deliberately
+     *    absent), so route, fallback and unmatched answers are the whole
+     *    surface, and all three are observed. This adapter has no transport
+     *    built-ins that answer before the seam, so its boundary is empty.
+     *  - **Isolation**: each observer runs in its own try/catch — a throwing
+     *    observer affects neither the response nor sibling observers.
+     */
+    afterResponse(observer: HttpResponseObserver): void {
+        this.responseObservers.push(observer);
+    }
+
+    /**
      * This adapter's standard answer for a request that matched no route — the
      * `IHttpServer` unmatched-request CONTRACT (#3607 / ADR-0076 OQ#10): 405 +
      * an accurate `Allow` when the path exists under another verb, otherwise
@@ -263,11 +307,42 @@ export class NodeHttpServer implements IHttpServer {
     }
 
     private async handleRequest(nodeReq: IncomingMessage, nodeRes: ServerResponse) {
+        const startedAt = Date.now();
         const method = (nodeReq.method || 'GET').toUpperCase();
         const url = new URL(nodeReq.url || '/', 'http://internal');
         const path = url.pathname;
 
         const matched = this.match(method, path);
+
+        // ── The `afterResponse` observation seam (#9835) ────────────────────
+        // Armed as soon as the router's verdict is known — BEFORE any branch
+        // below writes, so the unmatched 404/405, the fallback and the route
+        // paths are all observed. `finish` fires once, when the response has
+        // been fully written, which is what "after the response exists" means
+        // on node:http. Zero cost when no observer is registered.
+        if (this.responseObservers.length > 0) {
+            nodeRes.once('finish', () => {
+                const observation = {
+                    method,
+                    // The registered PATTERN, never the concrete path — the
+                    // contract's hard cardinality requirement. Unrouted
+                    // requests carry the contract's reserved label.
+                    routePattern: matched?.route.pattern ?? UNMATCHED_ROUTE_PATTERN,
+                    status: nodeRes.statusCode,
+                    elapsedMs: Date.now() - startedAt,
+                };
+                // Snapshot so an observer registering mid-delivery cannot
+                // mutate the list under the loop.
+                for (const observer of [...this.responseObservers]) {
+                    try {
+                        observer(observation);
+                    } catch {
+                        // An observer must never break a response or a
+                        // sibling observer — the contract's isolation rule.
+                    }
+                }
+            });
+        }
         // The LAST-RESORT seam (#6143): consulted ONLY here, i.e. only once
         // every explicitly registered route has missed — see the CONTRACT on
         // {@link setFallbackHandler}. Resolved BEFORE the request body is read
