@@ -752,18 +752,36 @@ most often get missed:
 Resource discipline — parallel agents share ONE container; unbounded build and
 test runs exhaust it. Binding:
 
-1. Serialize the heavy phase. Wrap every build and test run in a shared
-   container-wide lock so editing parallelizes but memory peaks never stack:
-     flock -w 7200 /tmp/heavy-verify.lock -c '<build/test command>'
-   (one lock file per container; waiting on it is normal, not a hang).
+1. Serialize the heavy phase. Editing parallelizes; build and test runs must
+   not — every one of them is wrapped in a lock the whole container shares, so
+   memory peaks never stack. The MECHANISM is the host project's (its wrapper,
+   its lock path, its budget — put it in the conventions file); the properties
+   that make any such wrapper correct are not negotiable:
+   - ONE shared heavy-verify lock per container, so every agent contends on
+     the same file. A path only one agent uses serializes nothing, and it
+     reports exactly like a lock that works.
+   - The acquisition budget fits inside a SINGLE foreground tool call: waiting
+     must never outlive the call carrying it, and backgrounding a wait to
+     escape that ceiling produces the stall the lock exists to avoid.
+   - A queue timeout is distinguishable from the wrapped command's own
+     failure — "I never got the lock" must not read as "the tests failed".
+   - Hold duration is observable, so a stuck holder names itself instead of
+     being inferred from everyone else's queueing.
+   Queueing is normal, not a hang. Queueing with no end in sight is a finding:
+   report it, naming the holder.
 2. Cap the heap: prefix heavy commands with
    NODE_OPTIONS=--max-old-space-size=4096 (raise only with a reason).
 3. Scope, don't sweep. Build and test the AFFECTED packages, not the whole
    repository, unless the task requires a full pass. Cap test parallelism
    (e.g. vitest --maxWorkers=2).
-4. Clean up: after the PR is up, remove your worktree
-   (git worktree remove <path> --force). Leftover dependency trees exhaust the
-   container's disk, which fails as confusingly as running out of memory.
+4. Clean up: after the PR is up, delete the worktree's dependency tree and
+   then remove the worktree. Leftover dependency trees exhaust the container's
+   disk, which fails as confusingly as running out of memory. Do NOT force the
+   removal as the opening move: with dependencies already deleted, a refusal
+   to remove means something in there is uncommitted — your own unpushed work,
+   or another agent's tree if the path was mistyped — and that refusal is the
+   container's only guard for it. Read the refusal first; force only after the
+   answer is genuinely "nothing".
 5. NEVER kill a process by name. A name-matched kill (pkill -f <tool>) can take
    down a parallel agent's run. Record the PID of what you start and operate on
    that PID only (kill $PID; liveness via kill -0 $PID). A pgrep pattern can
@@ -1040,6 +1058,7 @@ them into every dispatch:
 | Required release-note artifact (changeset, CHANGELOG entry, none) | conventions file |
 | Files owned by a release process that a code PR must never touch | conventions file |
 | Test / typecheck / lint commands per package | conventions file |
+| How the shared heavy-verify lock is taken (wrapper, lock path, acquisition budget) | conventions file |
 | Merge policy (merge queue, serial merge, maintainer-only) | conventions file |
 | Capability-expansion stance the business-need axis reads (tight by default, or permissive) | conventions file |
 | Which repositories exist and which is the backlog | `.claude/pm-dispatch.json` |
