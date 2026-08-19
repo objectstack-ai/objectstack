@@ -338,9 +338,10 @@ to re-verify.
 
 The comment also carries a collapsed **"What this run could not see"** section:
 anchorless files, cross-cutting symbols, over-broad anchors, the coarse package-mention
-count, and the `sdk` bridge's reach over the client-bound ledger rows (#9572). That is the point-of-use half of #9192 — every one of the three
-derived-list failures in that shift was caught only because a dev widened the probe past
-what the tool offered, never because the tool signalled its own limits where it was read.
+count, and the `sdk` bridge's reach over the client-bound ledger rows (#9572). That is
+the point-of-use half of #9192 — every one of the three derived-list failures in that
+shift was caught only because a dev widened the probe past what the tool offered, never
+because the tool signalled its own limits where it was read.
 
 ### The comment forks release-owned pages into a read-only section (#6893)
 
