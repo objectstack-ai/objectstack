@@ -3,6 +3,22 @@
  * Runtime publish-gate benchmark (#9851) — what one `active` metadata publish
  * costs at the shipped gate, as a function of the tenant's stored objects.
  *
+ * ── The three modes ─────────────────────────────────────────────────────────
+ *
+ *   --mode total     (default) the whole-gate cost table. #9851's reading.
+ *   --mode per-rule  (#9905) the same total, ATTRIBUTED across the rules the
+ *                    door dispatches.
+ *   --mode closure   (#9905) the whole-gate cost when the `objects` collection
+ *                    is narrowed to the written item's reference closure.
+ *
+ * ⛔ `--mode closure` measures a HYPOTHETICAL. It narrows what the rules are
+ * handed HERE, in this script, and changes nothing about the shipped gate —
+ * which always receives the whole collection. Its closure deriver is a
+ * deliberately generous over-approximation written to bound the saving, NOT a
+ * proposed implementation: how (or whether) the shipped gate should scope its
+ * input is an open maintainer decision (#9612 / #9613), and one that this
+ * measurement exists to inform rather than to pre-empt.
+ *
  * ── Why this file exists ────────────────────────────────────────────────────
  *
  * Two published measurements of THIS operation disagreed by 16-25x with a
@@ -81,7 +97,11 @@
  * Quote the ref you measured at.
  */
 
-import { runRuntimeAuthoringRules } from '../../packages/lint/dist/runtime.js';
+import {
+  runRuntimeAuthoringRules,
+  runtimeAuthoringRulesFor,
+  buildRuntimeWriteSnapshots,
+} from '../../packages/lint/dist/runtime.js';
 import * as showcaseObjects from '../../examples/app-showcase/src/data/objects/index.js';
 import { allFlows } from '../../examples/app-showcase/src/automation/flows/index.js';
 
@@ -114,6 +134,7 @@ const WRITE_TYPE = arg('type', 'flow');
 const SIZES = arg('objects', '21,420').split(',').map((s) => Number(s.trim())).filter(Boolean);
 const ITERATIONS = Number(arg('iterations', '30'));
 const WARMUP = Number(arg('warmup', '5'));
+const MODE = arg('mode', 'total');
 
 /** The shipped showcase object declarations — the `real` seed's source corpus. */
 const SHOWCASE_OBJECTS = (Object.values(showcaseObjects) as AnyRec[])
@@ -204,27 +225,155 @@ if (dispatched.length === 0) {
   console.log(`  ⚠️ no rule gates '${WRITE_TYPE}' at the runtime surface — every number below is gate overhead only`);
 }
 
-console.log('');
-console.log('  shape  N objects   median      min       max');
-const table: Record<string, Record<number, number>> = {};
-for (const shape of Object.keys(SHAPES)) {
-  table[shape] = {};
+/** Median wall-clock of `fn`, same warmup/iteration policy as {@link measure}. */
+function timeMedian(fn: () => void): number {
+  for (let i = 0; i < WARMUP; i++) fn();
+  const samples: number[] = [];
+  for (let i = 0; i < ITERATIONS; i++) {
+    const t0 = ms();
+    fn();
+    samples.push(ms() - t0);
+  }
+  return median(samples);
+}
+
+/** #9851's reading: the whole-gate cost table, both shapes, every N. */
+function totalMode() {
+  console.log('');
+  console.log('  shape  N objects   median      min       max');
+  const table: Record<string, Record<number, number>> = {};
+  for (const shape of Object.keys(SHAPES)) {
+    table[shape] = {};
+    for (const n of SIZES) {
+      const r = measure(SHAPES[shape]!(n), item);
+      table[shape]![n] = r.median;
+      console.log(
+        `  ${shape.padEnd(6)} ${String(n).padStart(9)}   ${r.median.toFixed(2).padStart(7)} ms `
+        + `${r.min.toFixed(2).padStart(7)}   ${r.max.toFixed(2).padStart(7)}`,
+      );
+    }
+  }
+
+  console.log('');
   for (const n of SIZES) {
-    const r = measure(SHAPES[shape]!(n), item);
-    table[shape]![n] = r.median;
-    console.log(
-      `  ${shape.padEnd(6)} ${String(n).padStart(9)}   ${r.median.toFixed(2).padStart(7)} ms `
-      + `${r.min.toFixed(2).padStart(7)}   ${r.max.toFixed(2).padStart(7)}`,
-    );
+    const real = table.real![n]!;
+    const stub = table.stub![n]!;
+    console.log(`  N=${n}: real / stub = ${(real / stub).toFixed(1)}x — same gate, same N, different authored surface`);
+  }
+  console.log('');
+  console.log('  ⇒ per-publish cost tracks authored object SURFACE, not object COUNT.');
+  console.log('    Quote the stack shape with any number taken from this gate (#9851).');
+}
+
+/**
+ * #9905 deliverable 2 — the same total, attributed across the dispatched rules.
+ *
+ * Each rule is timed over BOTH gate passes (baseline + candidate), because that
+ * is what one publish actually costs it, and the snapshots come from the gate's
+ * own exported {@link buildRuntimeWriteSnapshots} rather than a mirror — so the
+ * shares are attributed against the real construction.
+ *
+ * ⭐ The UNATTRIBUTED line is the anti-vacuity check and is printed even when it
+ * is uninteresting: per-rule shares that do not add up to the measured total
+ * mean the attribution is wrong, and that is the finding. Confirm the top share
+ * independently by ablating that rule off the door (`runtimeTypes`), rebuilding,
+ * and checking the total moves by roughly its share — `rules dispatched` above
+ * changes with it, so a stale `dist/` cannot masquerade as a saving.
+ */
+function perRuleMode() {
+  const rules = runtimeAuthoringRulesFor(WRITE_TYPE);
+  const ctx = { sduiManifest: undefined };
+  for (const shape of Object.keys(SHAPES)) {
+    for (const n of SIZES) {
+      const objects = SHAPES[shape]!(n);
+      const snapshots = buildRuntimeWriteSnapshots({ type: WRITE_TYPE, item, context: { objects } });
+      if (!snapshots) continue;
+      const total = timeMedian(() => { run(objects, item); });
+      const per = rules
+        .map((r) => ({
+          name: r.name,
+          ms: timeMedian(() => {
+            try { r.run(snapshots.baseline, ctx); } catch { /* the gate reports throws as findings */ }
+            try { r.run(snapshots.candidate, ctx); } catch { /* idem */ }
+          }),
+        }))
+        .sort((a, b) => b.ms - a.ms);
+      const sum = per.reduce((acc, p) => acc + p.ms, 0);
+      const pct = (x: number) => `${((x / total) * 100).toFixed(1).padStart(5)}%`;
+      console.log('');
+      console.log(`  shape=${shape} N=${n} — whole-gate total ${total.toFixed(2)} ms`);
+      for (const p of per) console.log(`    ${p.name.padEnd(32)} ${p.ms.toFixed(2).padStart(8)} ms  ${pct(p.ms)}`);
+      console.log(`    ${'Σ attributed'.padEnd(32)} ${sum.toFixed(2).padStart(8)} ms  ${pct(sum)}`);
+      console.log(`    ${'unattributed (snapshot + diff)'.padEnd(32)} ${(total - sum).toFixed(2).padStart(8)} ms  ${pct(total - sum)}`);
+    }
   }
 }
 
-console.log('');
-for (const n of SIZES) {
-  const real = table.real![n]!;
-  const stub = table.stub![n]!;
-  console.log(`  N=${n}: real / stub = ${(real / stub).toFixed(1)}x — same gate, same N, different authored surface`);
+/** Every string anywhere in a value — the closure seed scan, deliberately broad. */
+function allStrings(value: unknown, out: string[] = []): string[] {
+  if (typeof value === 'string') out.push(value);
+  else if (Array.isArray(value)) for (const v of value) allStrings(v, out);
+  else if (value && typeof value === 'object') for (const v of Object.values(value)) allStrings(v, out);
+  return out;
 }
-console.log('');
-console.log('  ⇒ per-publish cost tracks authored object SURFACE, not object COUNT.');
-console.log('    Quote the stack shape with any number taken from this gate (#9851).');
+
+/**
+ * The transitive reference closure of the written item over `objects`: every
+ * object NAMED anywhere in the item, expanded through the included objects'
+ * declared relational edges (`fields[].reference`) to a fixed point.
+ *
+ * Over-approximating on purpose — it seeds from any string that happens to equal
+ * an object name, so it can only ever be too LARGE. A saving measured against it
+ * is therefore a lower bound on what an exact closure would buy, which is the
+ * safe direction for a number that argues FOR narrowing.
+ */
+function referenceClosure(written: AnyRec, objects: AnyRec[]): AnyRec[] {
+  const byName = new Map<string, AnyRec>();
+  for (const o of objects) if (typeof o.name === 'string') byName.set(o.name, o);
+  const reached = new Set(allStrings(written).filter((s) => byName.has(s)));
+  const frontier = [...reached];
+  while (frontier.length > 0) {
+    const owner = byName.get(frontier.pop()!)!;
+    for (const field of Object.values((owner.fields ?? {}) as AnyRec)) {
+      const ref = (field as AnyRec)?.reference;
+      for (const target of Array.isArray(ref) ? ref : [ref]) {
+        if (typeof target === 'string' && byName.has(target) && !reached.has(target)) {
+          reached.add(target);
+          frontier.push(target);
+        }
+      }
+    }
+  }
+  return [...reached].map((name) => byName.get(name)!);
+}
+
+/**
+ * #9905 deliverable 1 — what NARROWING the objects collection would buy, timed.
+ *
+ * Prints `|closure| / N` (the size ratio, which is NOT the saving) next to the
+ * measured saving (which is), and re-runs the gate on the narrowed collection to
+ * confirm the differential VERDICT is unchanged — a saving that changes the
+ * verdict is not a saving, it is PR #7886's phantom-findings failure.
+ */
+function closureMode() {
+  const stable = (r: { errors: AnyRec[]; advisories: AnyRec[] }) =>
+    [...r.errors, ...r.advisories].map((f) => `${f.rule}|${f.where}|${f.path}|${f.message}`).sort().join('\n');
+  for (const shape of Object.keys(SHAPES)) {
+    for (const n of SIZES) {
+      const objects = SHAPES[shape]!(n);
+      const closure = referenceClosure(item as AnyRec, objects);
+      const full = timeMedian(() => { run(objects, item); });
+      const scoped = timeMedian(() => { run(closure, item); });
+      const agree = stable(run(objects, item)) === stable(run(closure, item));
+      console.log('');
+      console.log(`  shape=${shape} N=${n}: |closure| = ${closure.length}  (closure/N = ${((closure.length / n) * 100).toFixed(1)}%)`);
+      console.log(`    members: ${closure.map((o) => String(o.name)).join(', ') || '<none>'}`);
+      console.log(`    whole gate: full ${full.toFixed(2)} ms → closure ${scoped.toFixed(2)} ms — saving ${(((full - scoped) / full) * 100).toFixed(1)}%`);
+      console.log(`    differential verdict unchanged: ${agree ? 'YES' : 'NO — narrowing changed the answer'}`);
+    }
+  }
+}
+
+if (MODE === 'per-rule') perRuleMode();
+else if (MODE === 'closure') closureMode();
+else totalMode();
