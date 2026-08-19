@@ -533,29 +533,52 @@ jobs:
       - name: Docs image-tag version-time rewriter self-test
         run: pnpm check:docs-image-tag-sync
 
-      # #9348 — the same treatment for the OTHER version-time rewriter, and the
-      # scheduling gap that made it necessary after #9648 already added a vitest
-      # file which runs the CLI. `create-objectstack#test` is reachable only from
-      # ci.yml's `test` job, which is gated on the `core` paths-filter; `core` is
-      # `packages/**`, `examples/**`, `apps/!(docs)/**`, `package.json`,
-      # `pnpm-lock.yaml`, `tsconfig.json`, `.github/workflows/ci.yml` and matches
-      # no path under `scripts/`. Measured with picomatch 4.0.5 (the matcher
-      # dorny/paths-filter uses): a diff confined to
-      # scripts/sync-template-versions.mjs yields core=false, so Test Core is
-      # skipped ENTIRELY on the PR that changes the rewriter, and with it the
-      # vitest. The two layers that look like they cover it do not: `turbo ls
-      # --affected` returns ZERO packages for that diff (a package-local edit
-      # returns 1, so the probe is live) — turbo.json's `$TURBO_ROOT$` entry
-      # moves the task HASH, which is what stops a cached green on the merge
-      # queue, not what schedules the job — and the `--union-into` step that DOES
-      # pull create-objectstack back in is a step inside the skipped job. The
-      # queue build catches it, one merge late, as batch collateral; that is the
-      # failure shape check-cross-package-test-inputs.mjs's own ledger records
-      # twice.
+      # #9348 — the same treatment for the OTHER version-time rewriter, argued
+      # there from two measured gaps after #9648 had already added a vitest file
+      # which runs the CLI. GAP 1 has since closed; it is recorded here rather
+      # than deleted, so the next reader does not re-derive a conclusion the
+      # workflow no longer supports.
       #
-      # This workflow carries no paths filter and no filter job, so this step
-      # runs on every pull request, push and merge-queue build. That is the whole
-      # reason the flag exists rather than more cases in the vitest file.
+      # GAP 1 — SCHEDULING. CLOSED by #9829 / #10014. The original claim:
+      # `create-objectstack#test` is reachable, at PR time, only from ci.yml's
+      # `test` job; that job was gated on the `core` paths-filter ALONE; and
+      # `core` — `packages/**`, `examples/**`, `apps/!(docs)/**`,
+      # `package.json`, `pnpm-lock.yaml`, `tsconfig.json`,
+      # `.github/workflows/ci.yml` — matches no path under `scripts/`, so a diff
+      # confined to scripts/sync-template-versions.mjs skipped Test Core
+      # ENTIRELY, and the vitest with it. `core` is still false on that diff — it
+      # was never widened — but the `test` job now ORs in a SECOND filter output,
+      # `scripts: ['scripts/**']`, which matches, so
+      # `if: ... (core != 'false' || scripts != 'false')` resolves to RUN.
+      # Re-measured against the merged filter with picomatch 2.3.1 — the version
+      # dorny/paths-filter@v4's own package-lock.json resolves, NOT this repo's
+      # 4.0.5, which is what the old text cited; the two agree on these globs, so
+      # the wrong figure never produced a wrong verdict — `core=false`,
+      # `scripts=true`. With the job running the rest of the chain follows:
+      # `--union-into` is a step inside it, so it runs and unions
+      # create-objectstack back in off its declared globs; `create-objectstack#test`
+      # declares
+      # `$TURBO_ROOT$/scripts/sync-template-versions.mjs` in turbo.json, so the
+      # task hash moves and no cached green is replayed. PR CI is the first
+      # signal now, not the queue build one merge later.
+      #
+      # Two halves of that argument are UNCHANGED, and they are why `--union-into`
+      # has to exist at all: `turbo ls --affected` returns ZERO packages for that
+      # diff (a package-local edit returns 1, so the probe is live), and the
+      # `$TURBO_ROOT$` entry moves the task HASH, which is what stops a cached
+      # green — a different thing from scheduling the job. Unchanged too is the
+      # failure SHAPE the retired sentence pointed at — the merge queue as first
+      # signal, one merge late, as batch collateral — which
+      # check-cross-package-test-inputs.mjs's own ledger records twice. It is
+      # simply no longer what happens to a diff confined to this rewriter.
+      #
+      # GAP 2 — THE RED PATHS. Open, and it carries this step alone now. This
+      # workflow still carries no paths filter and no filter job, so the step
+      # runs on every pull request, push and merge-queue build, unconditionally,
+      # where the vitest's scheduling now rides a chain (filter output, then the
+      # union's declaration, then the task hash). That is robustness; it is no
+      # longer the reason the flag exists. The reason is that the cases below are
+      # executed nowhere else.
       #
       # Only the --self-test runs here, for the same reason as the step above:
       # the rewriter has nothing to do on a green corpus. The cases are scoped to
