@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
+import { Plugin, PluginContext, IHttpServer, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
 import { looksLikeInternalErrorLeak, declaresServerFault, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, demotedDeclaredCode } from '@objectstack/types';
 import { DispatcherErrorCode } from '@objectstack/spec/api';
 import type { IAuthService, IMetadataService } from '@objectstack/spec/contracts';
@@ -210,14 +210,17 @@ function mountRouteOnServer(
             // opt-out is retired, so only a route declaring `auth: false` opens
             // itself, and it does so by declaration.
             if (route.auth !== false && !user) {
-                res.status(401);
+                res.status(ANONYMOUS_DENY_STATUS);
                 if (securityHeaders) {
                     for (const [k, v] of Object.entries(securityHeaders)) res.header(k, v);
                 }
-                res.json({
-                    error: 'UNAUTHENTICATED',
-                    message: 'Authentication is required to access this endpoint.',
-                });
+                // [#9823] The shared flat deny body from @objectstack/core —
+                // this used to be an inline `{ error, message }` copy, which is
+                // exactly why #9487's additive `code` key never reached it.
+                // Writing the constant keeps this seam from drifting again;
+                // the wrapper question (flat vs nested, ADR-0112 D5) is not
+                // settled here.
+                res.json(ANONYMOUS_DENY_BODY);
                 return;
             }
 
