@@ -535,13 +535,17 @@ const DISPATCHER_DOMAINS = {
  * (`plugin-hono-server/src/adapter.ts`, `adapters/hono/src/index.ts`,
  * `cli/src/commands/serve.ts`) are ordinary refusals at ordinary doors, and the
  * ruling never reached them. #9364 converted them instead, which is what a
- * ratchet is FOR and the visible contrast with this block: the first two are
- * conformant above, and what survives in `adapters/hono/src/index.ts` is its two
- * `{ data }` discovery bodies — pre-auth like this block, but read by SDKs and
- * codegen rather than by our own shells, so #9389's closed three-file list does
- * not reach them either and #9436 carries that question. The rejected option
- * (A: envelope them, flip objectui's readers, carry a skew window on the least
- * versionable seam in the product) is on record in #9389 rather than lost.
+ * ratchet is FOR and the visible contrast with this block: all three are
+ * conformant above. `adapters/hono/src/index.ts`'s last two counters — its
+ * `{ data }` discovery bodies, pre-auth like this block but read by SDKs and
+ * codegen rather than by our own shells — carried the SAME fork on a different
+ * consumer population, and the maintainer ruled it the OTHER way (#9436,
+ * 2026-08-18, option A: envelope them). The two rulings are one boundary read
+ * from both sides: WHO reads the body decides. Our own shells, pre-auth, high
+ * migration cost → exempt (here); SDKs/codegen/AI clients, one-key migration →
+ * envelope (#9436). The option #9389 rejected (A: envelope the SPA surfaces,
+ * flip objectui's readers, carry a skew window on the least versionable seam
+ * in the product) is on record in #9389 rather than lost.
  *
  * The reason is the deliverable. The entry is only where it is written down.
  *
@@ -604,17 +608,25 @@ const PLUGIN_ROUTE_MODULES = {
   // slot and `hostname` under `error.details`.
   'packages/cli/src/commands/serve.ts': {},
 
+  // Converted by #9436 (maintainer ruling 2026-08-18, option A): the two
+  // `{ data }` discovery bodies gained `success: true`. This file's
+  // `errorCodeNotString 1` had already been removed by #9364 (the shared
+  // `errorJson` wrote the HTTP status into `error.code` and now derives the
+  // ADR-0112 member from it through `resolveThrownHttpError`), so this was the
+  // file's last counter. The ruling deliberately did NOT extend #9389's
+  // pre-auth exemption here: these bodies are read by SDKs and codegen, not by
+  // our own shells, and the migration was one key.
+  'packages/adapters/hono/src/index.ts': {},
+
   // ── Ratchet: real, tracked, NOT blessed ─────────────────────────────────
   //
   // Measured by #9267 when this surface was added, not chosen. Each entry names
   // the issue that will drive it to zero; every number ticks DOWN only. These
   // are the finding this surface was worth adding for — none of them was
-  // visible to any check in the repo before it.
-  'packages/adapters/hono/src/index.ts': {
-    unenveloped: 2,
-    ratchet: '#9436 (envelope the hono adapter discovery bodies; Blocked-by #9389)',
-    note: 'two `{ data }` discovery bodies with no `success`. #9364 removed this file\'s `errorCodeNotString 1` — the shared `errorJson` wrote the HTTP status into `error.code` and now derives the ADR-0112 member from it through `resolveThrownHttpError`. What is left is the same PRE-AUTH bare-payload fork #9389 rules on, but on a different consumer population (SDKs and codegen read this mount\'s discovery, not the Console SPA), so #9389\'s closed three-file list does not reach it',
-  },
+  // visible to any check in the repo before it. #9436 graduated the last
+  // ratcheted member (`adapters/hono`, above); the section stays because the
+  // next measured drift lands here. `trigger-api` below was measured clean
+  // when the surface was added and is a pinned zero, not a ratchet.
   'packages/triggers/trigger-api/src/plugin.ts': {},
 
   // ── Ruled exempt: the pre-auth bootstrap seam (#9389) ────────────────────
