@@ -23,6 +23,10 @@
  *     migrates the column additively (ADR-0045) and every consumer sees the
  *     same shape. `plugin-pinyin-search` only FILLS the value (the
  *     `plugin-sharing` primary-BU projection pattern).
+ *   - [ADR-0015 / #9469] That materialization premise is what BOUNDS the
+ *     capability: on a federated object the platform runs no DDL, so the
+ *     column can never exist and the declaration is withheld
+ *     ({@link isDdlManaged}). Recall there is served by the source columns.
  *   - Security (ADR-0061 D5): a source field with field-level read
  *     restrictions (`requiredPermissions`) or a secret-ish type never feeds
  *     the companion — otherwise "search hit ⇒ value inference" becomes an
@@ -67,6 +71,12 @@ export interface CompanionObjectMeta {
   nameField?: string;
   displayNameField?: string;
   searchable?: boolean;
+  /**
+   * [ADR-0015] The federated (external) binding. Read as a PRESENCE test only —
+   * this module never inspects its contents, and the same presence test is what
+   * the schema-sync seam runs on. See {@link isDdlManaged}.
+   */
+  external?: unknown;
   fields?: Record<string, CompanionFieldMeta>;
   [k: string]: unknown;
 }
@@ -119,6 +129,53 @@ export function resolveSearchCompanionSources(schema: CompanionObjectMeta | unde
 }
 
 /**
+ * [ADR-0015 / #9469] Does the platform run DDL for this object?
+ *
+ * The companion column is not metadata — it is a REAL column the platform
+ * promises to create: {@link provisionSearchCompanion} declares it, and the
+ * driver's `syncSchema` materializes it as an additive migration (ADR-0045).
+ * On a **federated** object that promise cannot be kept. ADR-0015 gives the
+ * remote database ownership of the schema, so DDL is forbidden there, and the
+ * schema-sync seam skips those objects outright — `packages/objectql/src/
+ * plugin.ts`, verbatim: "their schema is owned by the remote database, so DDL
+ * (syncSchema/initObjects) is forbidden and would throw".
+ *
+ * ⛔ The predicate is `external != null`, and it is deliberately the SAME
+ * expression that seam tests rather than a second question about the same
+ * fact. The two ends must agree by construction: every object the sync seam
+ * declines to build a column for is exactly an object this seam declines to
+ * declare one on. Asking the datasource's `schemaMode` here instead would be a
+ * second implementation of one rule — and this module cannot ask it anyway
+ * (the SchemaRegistry holds no datasource definitions at all), so the drift
+ * would be structural rather than merely possible. The analytics federation
+ * gate (ADR-0062 D6) already reads the same presence test for the same reason.
+ *
+ * ## What went wrong while these two disagreed
+ *
+ * The declaration went on; the column never appeared. So the object carried a
+ * field with no column, and `expandSearchToFilter` — which keys the companion
+ * clause on the DECLARED field — ORed `{ __search: { $contains: term } }` into
+ * every `$search` against it. The backend then refused the statement it could
+ * not compile (`no such column: __search` ⇒ `INVALID_FILTER` / 400, #8790's
+ * refusal, which is correct: the predicate really could not run).
+ *
+ * Measured on the stock showcase, which registers two federated objects and
+ * turns pinyin recall on via its `zh-CN` locale: an **unscoped**
+ * `GET /api/v1/search` — the one call that sweeps every registered object —
+ * answered 400 for the whole search, and so did `?search=` on the federated
+ * object's own list endpoint. Only the console was unaffected, because it
+ * always scopes to objects that are not federated.
+ *
+ * A federated object whose remote table genuinely HAS a `__search` column is
+ * unaffected and keeps its recall: the author declares that column as an
+ * ordinary field, and {@link provisionSearchCompanion} returns early on an
+ * already-present entry before ever reaching this gate.
+ */
+function isDdlManaged(schema: CompanionObjectMeta): boolean {
+  return schema.external == null;
+}
+
+/**
  * Compile-time provisioning: return `schema` with the hidden `__search`
  * companion column appended when the object has an eligible name source.
  * Pure and idempotent — an already-provisioned or ineligible schema is
@@ -156,11 +213,20 @@ export function resolveSearchCompanionSources(schema: CompanionObjectMeta | unde
  *
  * Objects that opt out of search entirely (`searchable: false`, ADR-0061 D2)
  * are skipped: a companion no query will ever read is dead weight.
+ *
+ * [ADR-0015 / #9469] FEDERATED objects are skipped for a stronger reason —
+ * not dead weight but an undeliverable promise. See {@link isDdlManaged}.
  */
 export function provisionSearchCompanion<T extends CompanionObjectMeta>(schema: T): T {
   if (!schema?.fields) return schema;
   if (schema.fields[SEARCH_COMPANION_FIELD]) return schema;
   if (schema.searchable === false) return schema;
+  // [ADR-0015 / #9469] Runs BEFORE the source resolution below: a federated
+  // object may well have a perfectly eligible name field, and that is exactly
+  // the case that used to produce an undeliverable column. See
+  // {@link isDdlManaged} for why this is a presence test and not a
+  // `schemaMode` lookup.
+  if (!isDdlManaged(schema)) return schema;
   if (resolveSearchCompanionSources(schema).length === 0) return schema;
 
   return {

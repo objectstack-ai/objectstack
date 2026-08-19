@@ -1,0 +1,254 @@
+name: Half-State Patrol
+
+# The standing caller for `scripts/pm/check-half-states.mjs` (#9844).
+#
+# ## Why a workflow, and not "a seat should run it"
+#
+# The sweeper carries thirteen predicates over the dispatch protocol's
+# label/assignee/PR invariants, and for most of its life its documented consumer
+# was "a PM seat's patrol round" — which is to say, nobody's calendar. A shift
+# covering two lanes declared a queue empty from memory while eight malformed
+# claims (H2) and an unenumerated backlog sat on the board. Not one predicate had
+# fired. A healing mechanism with no scheduled caller heals only in the
+# counterfactual, and an alarm added to a script nobody runs is still silence.
+#
+# "Some seat should run it" also kept not happening for a MEASURED reason, not a
+# discipline one: the live sweep cannot run inside a PM session container at all
+# (#7412 class 1 — api.github.com refuses that egress in both directions, with and
+# without a token). The fix therefore had to move the caller somewhere the
+# transport prerequisite is actually met. A GitHub Actions runner with the
+# workflow's own `GITHUB_TOKEN` is that place — #7412 class 2, the triage Routine
+# container, is the same shape and measured reachable with 15,000 core quota.
+#
+# ## What lands where
+#
+# One pinned ANCHOR ISSUE, rewritten in place every run (`ANCHOR_ISSUE` below).
+# Never a comment per run: the board is one board, a per-run comment stream would
+# be a second tracker that nobody prunes, and GitHub's edit history is already the
+# archive this needs. The body is owned end-to-end by the generator, so no run can
+# leave half of it stale.
+#
+# The `Swept` timestamp in that body is the patrol's heartbeat and is deliberately
+# refreshed even when the findings are unchanged: a timestamp that stops advancing
+# is how a reader learns the standing caller died. That is the whole defect class
+# this workflow exists to close, so the run must not "optimize away" the no-op
+# edit that proves it is alive.
+#
+# ## Report-only, and the one thing that is NOT report-only
+#
+# Findings never fail anything. A completed sweep exits 0 whether it found 0 or 40
+# half-states, this job never writes a label, never closes a card, never fixes a
+# state, and no H-predicate is a blocking gate — the script's own header argues
+# that at length (a half-state is a fact about a live shared board, not about
+# whichever PR happens to run CI next).
+#
+# The job DOES fail when the sweep could not run, or when its report could not be
+# delivered. That is not a gate on the board; it is the patrol reporting its own
+# death. A workflow that quietly does nothing because a credential lapsed is the
+# exact shape this repo keeps having to fix (#4449, #9575), and it is doubly
+# unacceptable here: silent non-delivery would leave a stale anchor body that
+# reads exactly like a clean board — the #4690 failure ("could not read the input"
+# must never look like "input is clean") with a timestamp on it. Failing costs
+# nobody a PR: this workflow gates no branch and blocks no queue.
+
+on:
+  schedule:
+    # Four times a day, six hours apart, at :37 past the hour.
+    #
+    # The minute is offset ON PURPOSE. The triage Routine that heals these same
+    # states fires hourly near the top of the hour, and a patrol landing at the
+    # same minute would keep reading the board mid-heal — reporting half-states
+    # the healer is in the middle of pairing, i.e. manufacturing findings that
+    # clear themselves. :37 puts this sweep in the quiet part of the healer's
+    # cycle in both directions. Four runs/day rather than hourly: H13's own
+    # threshold is 2h and the incident it comes from sat ~26h, so six-hourly
+    # detection is two orders of magnitude better than the status quo (never)
+    # while staying cheap on the core quota this sweep shares with the loop's
+    # hot path.
+    - cron: '37 1,7,13,19 * * *'
+  workflow_dispatch: {}
+  # Changes to the patrol itself get exercised before they merge — the same
+  # posture as engine-split-metric.yml. On a pull_request run the sweep still
+  # executes (that is the point: the transport, the flags and the rendering are
+  # proven on a real runner), but the anchor write is skipped and the rendered
+  # body goes to the run's step summary instead. A PR must never rewrite the
+  # board's pinned view.
+  pull_request:
+    paths:
+      - 'scripts/pm/check-half-states.mjs'
+      - '.github/workflows/half-state-patrol.yml'
+
+# Least privilege: this job reads the repo and writes exactly one issue BODY.
+# `issues: write` is the narrowest scope GitHub offers for that edit; the job
+# never uses it for labels, comments, assignees or state, and the sweeper it
+# calls is read-only against the API by construction.
+permissions:
+  contents: read
+  issues: write
+
+# One patrol at a time. A scheduled run overlapping a manual dispatch would have
+# two runs racing to rewrite the same body, and the loser's findings would vanish
+# with no trace but an edit-history entry.
+concurrency:
+  group: half-state-patrol
+  cancel-in-progress: false
+
+env:
+  # The pinned anchor issue whose body this workflow owns.
+  #
+  # TO ROTATE: open a new `tracking`-labeled issue, put its number here, and note
+  # the handover in the OLD issue's body before closing it (its edit history is
+  # the archive and does not travel). Nothing else reads this number, so the
+  # rotation is this one line.
+  #
+  # The anchor deliberately carries `tracking` and NO `domain:*` label: `tracking`
+  # is in the sweeper's own H13_EXEMPT_LABELS, so the anchor can never appear as a
+  # finding in the sweep it hosts.
+  ANCHOR_ISSUE: '9857'
+
+jobs:
+  patrol:
+    name: Live half-state sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # No `pnpm install`: the sweeper imports nothing but `node:process` and
+      # global `fetch`. Installing the workspace here would buy nothing and would
+      # give a scheduled patrol a lockfile it could fail on.
+      - name: Run the live sweep
+        id: sweep
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PROVENANCE: >-
+            run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            · commit `${{ github.sha }}` · trigger `${{ github.event_name }}`
+        run: |
+          set +e
+          node scripts/pm/check-half-states.mjs \
+            --format=markdown \
+            --provenance="$PROVENANCE" \
+            > "$RUNNER_TEMP/report.md" 2> "$RUNNER_TEMP/report.err"
+          code=$?
+          set -e
+          # Captured with NO pipe in between. `cmd | tail` would report the
+          # PIPE's status — `tail` essentially never fails, so a green and a red
+          # sweep both read as 0, and the script's own header calls this trap out
+          # by name (its exit codes are 0 / 2 / 3 and the split is the point).
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "check-half-states exited $code"
+          cat "$RUNNER_TEMP/report.err" >&2 || true
+
+      - name: Update the pinned anchor issue
+        # A pull_request run proves the sweep; it must not touch the board.
+        if: github.event_name != 'pull_request'
+        uses: actions/github-script@v9
+        env:
+          SWEEP_EXIT: ${{ steps.sweep.outputs.exit_code }}
+        with:
+          # Delivery is retried, never assumed (#9575): this single PATCH is the
+          # entire product of the run, and a transient answer from the issues
+          # endpoint would otherwise discard a completed sweep.
+          retries: 3
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const exitCode = Number(process.env.SWEEP_EXIT);
+            const anchor = Number(process.env.ANCHOR_ISSUE);
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+            const read = (name) => {
+              try { return fs.readFileSync(path.join(process.env.RUNNER_TEMP, name), 'utf8'); }
+              catch { return ''; }
+            };
+
+            // The composition split, deliberately: a COMPLETED sweep renders its
+            // own body (in the script, where --self-test pins every property of
+            // it). Only the did-not-run body is composed here, because saying
+            // "my callee failed" is the caller's job and the script's classified
+            // output is already the authored explanation — this wraps it, it
+            // does not re-word it.
+            let body;
+            if (exitCode === 0) {
+              body = read('report.md');
+              if (!body.trim()) {
+                throw new Error('the sweep exited 0 but produced an empty report — refusing to blank the anchor');
+              }
+            } else {
+              const classified = (read('report.err') || read('report.md') || '(no output captured)').trim();
+              const kind = exitCode === 3
+                ? 'PREREQUISITE NOT MET — the runner could not reach the board'
+                : 'SWEEP FAILED — an unclassified failure';
+              body = [
+                'os-half-state-sweep — machine-findable marker for this generated view.',
+                '',
+                `# ⛔ THE SWEEP DID NOT RUN (exit ${exitCode})`,
+                '',
+                `_Attempted ${new Date().toISOString()} · [run log](${runUrl}) · ${kind}._`,
+                '',
+                'Nothing below is a finding. **No issue was judged**, so this body says nothing about whether',
+                'the board carries half-states — it is not a clean board and it is not a dirty one, it is no',
+                'reading at all. A sweep that could not run must never read as a clean board.',
+                '',
+                'The standing patrol is DOWN until this is fixed; the previous run\'s findings are in this',
+                'issue\'s edit history. The sweeper\'s own classified output:',
+                '',
+                '```',
+                classified,
+                '```',
+              ].join('\n');
+            }
+
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: anchor,
+              body,
+            });
+            core.info(`anchor #${anchor} updated (${body.length} chars, sweep exit ${exitCode})`);
+
+      - name: Publish the rendered body to the run summary
+        # Always: on a PR this IS the delivery, and on a scheduled run it makes
+        # the run log self-contained when someone opens it after an alert.
+        if: always()
+        run: |
+          {
+            echo "### Half-state patrol — sweep exit ${{ steps.sweep.outputs.exit_code }}"
+            echo
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              echo "_Anchor write skipped: a pull_request run proves the sweep without touching the board._"
+              echo
+            fi
+            echo '<details><summary>Rendered anchor body</summary>'
+            echo
+            cat "$RUNNER_TEMP/report.md" 2>/dev/null || echo '(no report produced)'
+            echo
+            echo '</details>'
+            echo
+            echo '<details><summary>stderr</summary>'
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/report.err" 2>/dev/null || true
+            echo '```'
+            echo
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail the run if the sweep could not run
+        # LAST, on purpose: the anchor is updated with the did-not-run report
+        # BEFORE the job goes red. Land the truth, then raise the alarm — a run
+        # that failed early would leave the previous body in place with its old
+        # timestamp, which is precisely the stale-reads-as-clean shape above.
+        #
+        # Findings are NOT a failure condition and never appear here: exit 0 with
+        # 40 half-states is a successful patrol.
+        if: steps.sweep.outputs.exit_code != '0'
+        run: |
+          echo "::error::check-half-states exited ${{ steps.sweep.outputs.exit_code }} — the standing patrol did not read the board. See the anchor issue and this run's stderr."
+          exit 1

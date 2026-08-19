@@ -7,36 +7,34 @@ description: File/object storage contract for upload/download and presigned URL 
 
 - **Stability:** `stable`
 - **Canonical source:** `packages/spec/src/contracts/storage-service.ts`
-- **Registry slot:** `file-storage` — **not** `storage`; resolve with
-  `ctx.getService('file-storage')`. See [Accessor name vs registry
-  slot](#accessor-name-vs-registry-slot).
+- **Registry slot:** `storage` — resolve with `ctx.getService('storage')`.
+  The pre-rename spelling `file-storage` stays accepted as a deprecated alias
+  within v17. See [Registry slot and its deprecated
+  alias](#registry-slot-and-its-deprecated-alias).
 
-## Accessor name vs registry slot
+## Registry slot and its deprecated alias
 
-`services.storage` is this chapter's **accessor spelling** — the name the contract surface
-is documented under. The **registry slot** is the string the kernel actually keys the
-implementation by, and for storage the two differ:
+`storage` is the canonical registry slot (maintainer ruling, 2026-08-18, issue
+#9683): it is a member of `CoreServiceName`
+(`packages/spec/src/system/core-services.zod.ts`), `CORE_SERVICE_PROVIDER` maps
+it to `@objectstack/service-storage`, and it is the key the `/api/v1/discovery`
+document reports this service's availability under. The accessor spelling and
+the slot are now the same word, like every other service in this chapter.
 
-| | value |
-|:--|:--|
-| Documented accessor | `services.storage` |
-| Registry slot | `file-storage` |
-| Resolve with | `ctx.getService('file-storage')` |
-
-This is the **only** service in this chapter where they differ; for the other seven the
-accessor and the slot are the same word. There is no `storage` alias — nothing calls
-`registerService('storage', ...)` anywhere in the platform — so resolving the accessor
-spelling throws rather than returning an empty value:
+The slot was spelled `file-storage` before the rename, and that spelling is a
+published `CoreServiceName` member — so it stays accepted as a **deprecated
+alias** within v17. `@objectstack/service-storage` registers the **same
+instance** under both names:
 
 ```ts
-ctx.getService('storage');       // ✗ throws: [Kernel] Service 'storage' not found
-ctx.getService('file-storage');  // ✓ the IStorageService documented below
+ctx.getService('storage');       // ✓ canonical — the IStorageService documented below
+ctx.getService('file-storage');  // ✓ deprecated v17 alias — the SAME instance
 ```
 
-`file-storage` is the canonical spelling, not an implementation detail: it is the member
-listed in `CoreServiceName` (`packages/spec/src/system/core-services.zod.ts`),
-`CORE_SERVICE_PROVIDER` maps it to `@objectstack/service-storage`, and it is the key the
-`/api/v1/discovery` document reports this service's availability under.
+New code resolves `storage`. The alias is retired through the standard
+retirement flow at the next major. If you ship a **custom** provider for this
+slot in v17, register it under both names the way `service-storage` does, so
+callers of either spelling keep resolving it.
 
 <Callout type="warn" title="Not this: the client SDK storage accessor">
 A second `storage` accessor exists and is easy to reach for by mistake.
@@ -44,8 +42,8 @@ A second `storage` accessor exists and is easy to reach for by mistake.
 surface — `upload(file, scope)`, `getDownloadUrl(fileId)`, `getPresignedUrl(req)`,
 `initChunkedUpload(req)` — which calls `/api/v1/storage` over the wire. It is a different
 shape from the server-side `IStorageService` documented on this page, which takes storage
-**keys** and returns `Buffer`s. Neither one is reachable through
-`ctx.getService('storage')`.
+**keys** and returns `Buffer`s. `ctx.getService('storage')` resolves the server-side
+service documented here — never the client accessor.
 </Callout>
 
 ## Core Methods

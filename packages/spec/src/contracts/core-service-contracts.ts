@@ -62,6 +62,15 @@ export interface CoreServiceContracts {
     /** `plugin-auth` registers its auth manager. */
     auth: IAuthService;
     /** `service-storage` registers the storage driver; the slot #4087 was about. */
+    storage: IStorageService;
+    /**
+     * **Deprecated alias** of {@link CoreServiceContracts.storage} — the same
+     * instance under the old compound spelling (maintainer ruling 2026-08-18,
+     * issue #9683: 「9683 file-storage 可以叫 storage」). `service-storage`
+     * registers both names, exactly the `http.server` / `http-server` pattern
+     * below. New code resolves `storage`; the alias is retired through the
+     * standard retirement flow at the next major.
+     */
     'file-storage': IStorageService;
     search: ISearchService;
     /** `service-cache`'s own error text names `ICacheService` as the slot's contract. */

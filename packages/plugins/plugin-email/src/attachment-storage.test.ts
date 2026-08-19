@@ -33,7 +33,7 @@ import {
 
 const sha = (s: string | Buffer) => `sha256:${createHash('sha256').update(s).digest('hex')}`;
 
-/** In-memory stand-in for the `file-storage` capability. */
+/** In-memory stand-in for the `storage` capability. */
 function fakeStore(opts: { failUploadAt?: number; failDelete?: Set<string> } = {}) {
   const objects = new Map<string, Buffer>();
   let uploads = 0;
@@ -230,11 +230,11 @@ describe('reading content back — every failure is a refusal, never a stripped 
     const store = fakeStore();
     const res = await offloaded(store);
     await expect(decodeAttachmentsFromRowAsync(res.json, undefined))
-      .rejects.toThrow(/no file-storage capability is mounted on this process/);
+      .rejects.toThrow(/no storage capability is mounted on this process/);
     // …and the synchronous entry point says the same thing rather than
     // silently returning a message with one fewer attachment.
     expect(() => decodeAttachmentsFromRow(res.json))
-      .toThrow(/no file-storage capability to fetch it from/);
+      .toThrow(/no storage capability to fetch it from/);
   });
 });
 

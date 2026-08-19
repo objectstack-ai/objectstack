@@ -3427,10 +3427,27 @@ export const UNKNOWN_HOSTNAME_GUARD_HEALTH_PATHS: readonly string[] = [
  *
  * Implemented as a Plugin so the middleware is wired during init (when
  * `http.server` is available) and BEFORE start() runs on the Console static
- * plugin / route-registering plugins. Hono's `app.use('*')` is order-independent
- * for matching, so as long as the middleware is added before kernel:listening
- * fires, it intercepts every request regardless of which plugin registered its
- * handler. The env-registry is resolved lazily per request on purpose: it is
+ * plugin / route-registering plugins. Phase 1 `init()` is the REQUIREMENT, not
+ * a convenience: Hono composes the handlers a request matched in REGISTRATION
+ * order, so a route registered ahead of this middleware answers and never calls
+ * `next()`, and the guard never runs for that path. Route registration starts
+ * in Phase 2 `start()` (createConsoleStaticPlugin mounts the Console there) and
+ * continues in the `kernel:ready` hooks registered from it (HonoServerPlugin's
+ * current-user endpoints, plugin-auth's terminal `/api/v1/auth/*`), while both
+ * kernels run every plugin's `init()` before the first `start()`
+ * (`LiteKernel.bootstrap`, `ObjectKernel.bootstrap`) — so an install from
+ * `init()` is ahead of all of it.
+ *
+ * ⛔ "Added before kernel:listening" is NOT the condition, however natural it
+ * reads. `kernel:ready`, `kernel:bootstrapped` and `kernel:listening` all fire
+ * strictly AFTER Phase 2, so a guard installed from one of those hooks is
+ * registered behind every route and observes NOTHING — no error, no log, no
+ * refusal (#9745, measured across three install points). A refusal surface that
+ * gates nothing is the failure this guard exists to prevent, so anything
+ * modelled on it installs during `init()`. Both directions are pinned in
+ * `serve-unknown-hostname-guard.test.ts`.
+ *
+ * The env-registry is resolved lazily per request on purpose: it is
  * registered by ObjectOSEnvironmentPlugin's init, and the guard must not depend
  * on plugin ordering to work.
  *

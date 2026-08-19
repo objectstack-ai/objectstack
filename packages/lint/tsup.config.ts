@@ -5,9 +5,12 @@ import { defineConfig } from 'tsup';
  * cannot use the repo-root `tsup.config.ts` (single `src/index.ts`).
  *
  * - `index` — the full authoring surface, used by the CLI.
- * - `runtime` — the kernel-safe subset the metadata write path imports. Kept a
- *   separate entry so a consumer on the boot path never even names the module
- *   graph that reaches the react/jsx source parsers.
+ * - `runtime` — the narrowed subset the metadata write path imports. It is a
+ *   separate entry so that surface can be PINNED (`authoring-rule-wiring.test.ts`
+ *   fails if the kernel gate imports the root barrel instead), not because it is
+ *   lighter. `splitting: false` emits each entry self-contained, and measured
+ *   `dist/runtime.js` is 93.8% of `dist/index.js` and does name the react/jsx
+ *   rules' modules. `src/runtime.ts`'s header carries the measurement.
  */
 export default defineConfig({
   entry: ['src/index.ts', 'src/runtime.ts'],

@@ -35,6 +35,15 @@ vi.mock('./adapter', async (importOriginal) => ({
             // end of init(). Real behaviour is covered against the REAL adapter
             // in `middleware-seam.test.ts`; here it only has to exist.
             installMiddlewareSeam: vi.fn(),
+            // [#9835] init() mounts the `afterResponse` delivery seam
+            // unconditionally (observers may register at any later moment)
+            // and arms the counter only when a registry resolved. Real
+            // behaviour is covered against the REAL adapter in
+            // `response-observation-seam.test.ts` and cross-adapter in
+            // `@objectstack/http-conformance`; here they only have to exist.
+            installResponseObservationSeam: vi.fn(),
+            installHttpMetricsSeam: vi.fn(),
+            afterResponse: vi.fn(),
             // [#5090] Same deal for the unmatched-request seam: `start()` mounts
             // it through the adapter now (one owner for `app.notFound`, which is
             // last-call-wins). The real 404/405/fallback composition is covered

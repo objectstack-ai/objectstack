@@ -8,13 +8,17 @@
 #
 # The label set IS the PM state machine (.claude/skills/pm-dispatch/SKILL.md,
 # "State model"): every label here is consumed by a named query or gate.
-# ⛔ The retired lanes (domain:engine, domain:ui; domain:spec-surface and
-# domain:spec-tooling, retired 2026-08-16 — maintainer ruling 「A」 merged both
-# into the single domain:spec lane; the sub-lane criteria survive as the spec
-# seat's internal dispatch reference in SKILL.md) are deliberately ABSENT —
-# recreating a retired label puts an ownerless lane back into GitHub's
-# autocomplete. Their leftover label OBJECTS may still exist in the repos;
-# deleting those objects is a separate, deliberate PM action.
+# ⛔ The retired lanes (domain:ui; domain:spec-surface and domain:spec-tooling,
+# retired 2026-08-16 — maintainer ruling 「A」 merged both into the single
+# domain:spec lane, the sub-lane criteria surviving as the spec seat's dispatch
+# reference; domain:engine-core / domain:metadata / domain:drivers /
+# domain:identity, retired 2026-08-19 — maintainer ruling 「engine-core +
+# metadata + drivers -> engine, identity + services → services 怎么样?」 folded
+# the engine-side three into domain:engine, which thereby RE-ENTERS circulation
+# after its own earlier retirement, and identity into domain:services) are
+# deliberately ABSENT — recreating a retired label puts an ownerless lane back
+# into GitHub's autocomplete. Their leftover label OBJECTS may still exist in
+# the repos; deleting those objects is a separate, deliberate PM action.
 #
 # Requires the `gh` CLI. Where only the GitHub MCP tools are available, mirror
 # these creations through them — the protocol is identical.
@@ -72,7 +76,7 @@ gh label create repo:cloud    -R objectstack-ai/objectstack -c c5def5 -d "Seam c
 
 # Domain lanes — the roster lives in SKILL.md's domain table; keep both in sync
 # BY PR whenever a lane is added or retired.
-for D in engine-core metadata drivers services identity devx spec cli skills; do
+for D in engine services devx spec cli skills; do
   gh label create "domain:$D" -R objectstack-ai/objectstack -c bfd4f2 -d "Domain lane — seat card indexed by label:pm:seat" 2>/dev/null || true
 done
 

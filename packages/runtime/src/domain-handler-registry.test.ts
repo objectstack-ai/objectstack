@@ -337,7 +337,7 @@ describe('HttpDispatcher extracted domains (PR-3: keys/storage/ui)', () => {
 
     /**
      * [#4087] `/storage` is no longer a dispatcher domain. The registry must
-     * not claim the prefix in either direction — with the `file-storage` slot
+     * not claim the prefix in either direction — with the `storage` slot
      * empty AND with it filled, since the retired bridge's whole reason for
      * existing was "a service is registered, so route to it". It called that
      * service off-contract (`upload(key, data, options?)` invoked as
@@ -354,12 +354,12 @@ describe('HttpDispatcher extracted domains (PR-3: keys/storage/ui)', () => {
 
         const upload = vi.fn();
         const download = vi.fn();
-        const filled = await makeDispatcher({ 'file-storage': { upload, download } })
+        const filled = await makeDispatcher({ storage: { upload, download } })
             .dispatch('POST', '/storage/upload', { some: 'file' }, {}, {} as any);
         expect(filled.response?.status).toBe(404);
         expect(upload).not.toHaveBeenCalled();
 
-        const get = await makeDispatcher({ 'file-storage': { upload, download } })
+        const get = await makeDispatcher({ storage: { upload, download } })
             .dispatch('GET', '/storage/file/abc', undefined, {}, {} as any);
         expect(get.response?.status).toBe(404);
         expect(download).not.toHaveBeenCalled();

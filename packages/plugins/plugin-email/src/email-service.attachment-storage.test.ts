@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// EmailService — large attachments through the file-storage capability
+// EmailService — large attachments through the storage capability
 // (objectstack#5172).
 //
 // The routing table these pin, exhaustively, because every cell of it used to
@@ -188,7 +188,7 @@ describe('the 256 KiB boundary decides in-row vs in-storage, and includes equali
 // ── the loud fallbacks ─────────────────────────────────────────────────────
 
 describe('when the content cannot be stored, the message still goes out WHOLE — and it is said out loud', () => {
-  it('no file-storage capability: delivers inline, names what to mount, stores nothing', async () => {
+  it('no storage capability: delivers inline, names what to mount, stores nothing', async () => {
     const queue = makeQueue();
     const { svc, rows, transport, log } = makeService({ queue }); // no store wired
 
@@ -205,7 +205,7 @@ describe('when the content cannot be stored, the message still goes out WHOLE �
     // Loud: the one line the operator sees names the obstacle and the fix.
     const info = lines(log.info);
     expect(info).toContain('queue delivery skipped for one message');
-    expect(info).toContain('no file-storage capability is mounted');
+    expect(info).toContain('no storage capability is mounted');
     expect(info).toContain('@objectstack/service-storage');
     expect(info).toContain(String(SYS_EMAIL_ATTACHMENT_LIMIT_BYTES));
   });
@@ -348,7 +348,7 @@ describe('rebuilding a stored-content row for delivery', () => {
     const out = await h.svc.deliverPersistedRow(row, { maxAttempts: 1 });
 
     expect(out.status).toBe('failed');
-    expect(out.error).toContain('no file-storage capability is mounted on this process');
+    expect(out.error).toContain('no storage capability is mounted on this process');
     expect(h.transport.send).not.toHaveBeenCalled();
   });
 

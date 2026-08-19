@@ -1006,6 +1006,13 @@ function runTestModeExitFor(paths) {
   return testVerdict(paths).governed ? EXIT_TEST_GOVERNED : EXIT_TEST_NOT_GOVERNED;
 }
 
-if (process.argv.includes('--self-test')) {
+// `invokedDirectly` for the same reason line 810 carries it: this module is
+// imported for its exported predicates (`proxyRearmPlan` — see
+// scripts/pm/ci-failure.mjs), and an unguarded trigger ran THIS file's 77
+// assertions inside the importer's own `--self-test`, printing a second
+// summary and putting an unrelated file's failures on the importer's exit
+// code. A self-test is a mode of the file that is being RUN, never a side
+// effect of importing it.
+if (invokedDirectly && process.argv.includes('--self-test')) {
   selfTest();
 }

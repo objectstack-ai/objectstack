@@ -36,7 +36,7 @@ kernel.use(new StorageServicePlugin({
 await kernel.bootstrap();
 
 // Programmatic access
-const storage = kernel.getService('file-storage');
+const storage = kernel.getService('storage');
 await storage.upload('files/hello.txt', Buffer.from('hello'));
 ```
 
@@ -147,7 +147,9 @@ so administrators can switch adapter, configure S3 credentials, and tune
 TTL / max-upload limits from the Settings hub instead of restarting the
 process.
 
-- Service key in the kernel: `file-storage` — registered as a
+- Service key in the kernel: `storage` (canonical since the 2026-08-18
+  maintainer ruling on #9683; `file-storage` stays registered as a
+  deprecated v17 alias of the same instance) — registered as a
   `SwappableStorageService` proxy at `init` time. The inner adapter
   (local FS or S3) is rebuilt and swapped in on every `settings:changed`
   event for `namespace=storage`.

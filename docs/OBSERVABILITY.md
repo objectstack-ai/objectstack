@@ -9,10 +9,27 @@
 `createDispatcherPlugin` automatically instruments every route it mounts with:
 
 - **Request id** propagation: honors incoming `X-Request-Id` (or mints `req_<uuid>`); echoes on the response.
-- **`http_requests_total{method,route,status}`** counter (1 per request).
 - **`http_request_duration_ms{method,route}`** histogram (handler latency).
 - **`http_request_errors_total{method,route}`** counter (incremented on thrown errors).
 - **Error reporting** for 5xx (handler-thrown or via `errorResponseBase` side channel).
+
+**`http_requests_total{method,route,status}`** (1 per request) is emitted at the
+**transport**, through the `IHttpServer.afterResponse` observation seam — so it
+counts *every* inbound request on the server (auth, REST data API, raw-app
+mounts, requests a middleware refused with 429), not only the routes the
+dispatcher registers. The `route` label is always the registered **pattern**
+(`/api/v1/data/:id`), never the concrete path; requests no route matched are
+labelled `unmatched`. Exactly one counter is armed per server (first wiring
+wins), so handing one registry to both the transport plugin and the dispatcher
+never double-counts.
+
+> **A transport that does not implement the `afterResponse` seam reports no
+> HTTP metrics.** On such a transport `http_requests_total` stays flat while
+> traffic flows: zero there means "not instrumented", never "no traffic". Ask
+> with `typeof server.afterResponse === 'function'` before reading absence as
+> coverage. (The dispatcher degrades on those transports by counting its own
+> routes, which is all it can see.) The shipped Hono adapter and the
+> `@objectstack/http-conformance` node adapter both implement the seam.
 
 Defaults are no-op (zero overhead). Inject real adapters via the `observability` config:
 

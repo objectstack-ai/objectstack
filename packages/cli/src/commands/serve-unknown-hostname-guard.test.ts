@@ -391,3 +391,81 @@ describe('createUnknownHostnameGuardPlugin — install is soft, never fatal', ()
     expect(h.infos.join('\n')).toContain('installed');
   });
 });
+
+/**
+ * The install-order property the guard's rationale in `serve.ts` names.
+ *
+ * That rationale used to say the middleware intercepts everything "as long as
+ * it is added before kernel:listening fires". Measured false (#9745): Hono
+ * composes the handlers a request matched in REGISTRATION order, and
+ * `kernel:ready` / `kernel:bootstrapped` / `kernel:listening` all fire after
+ * Phase 2 `start()` — i.e. after every route on the platform is registered — so
+ * a guard installed from any of those hooks sits behind all of them and refuses
+ * nothing, with no error and no log.
+ *
+ * Nothing else in this file can fail when that claim comes back: every other
+ * test mounts the guard FIRST via `mountGuard`, which is precisely the case
+ * that works. So this pins the ordering itself, both directions on ONE app —
+ * neither direction can be satisfied by the middleware simply never installing:
+ *
+ *   - `/before` is registered BEFORE the guard's `init()` → guard never runs
+ *   - `/after`  is registered AFTER  the guard's `init()` → guard refuses
+ */
+describe('createUnknownHostnameGuardPlugin — install order is the contract', () => {
+  it('gates only what is registered after it, which is why init() is the requirement', async () => {
+    const server = new HonoHttpServer(0);
+    const rawApp = server.getRawApp();
+    const asked: string[] = [];
+
+    // A route that already exists when the guard installs. This is the shape a
+    // guard installed from a lifecycle hook would face for EVERY platform
+    // route, not an exotic one.
+    rawApp.get('/before', (c: { text: (body: string, status: number) => Response }) =>
+      c.text('BEFORE', 200));
+
+    const ctx = {
+      getService: (name: string) =>
+        name === 'http.server'
+          ? { getRawApp: () => rawApp }
+          : name === 'env-registry'
+            ? {
+              resolveByHostname: async (host: string) => { asked.push(host); return null; },
+            }
+            : undefined,
+      logger: { warn: () => {}, info: () => {} },
+    };
+
+    await createUnknownHostnameGuardPlugin({
+      rootDomain: ROOT_DOMAIN,
+      readCloudUrl: () => '',
+    }).init(ctx);
+
+    // Production's order: route-registering plugins run in Phase 2 `start()`,
+    // after every plugin's `init()`.
+    rawApp.get('/after', (c: { text: (body: string, status: number) => Response }) =>
+      c.text('AFTER', 200));
+
+    const call = (path: string) =>
+      rawApp.fetch(new Request(`http://placeholder${path}`, {
+        headers: { host: 'nobody.objectos.ai', accept: 'application/json' },
+      }));
+
+    // Registered first: it answers and never calls `next()`, so the guard is
+    // never reached — an unmapped hostname sails straight through, and the
+    // registry is not even consulted.
+    const before = await call('/before');
+    expect(before.status).toBe(200);
+    expect(await before.text()).toBe('BEFORE');
+
+    // Registered after: the guard is ahead of it in the composed chain and
+    // refuses. Same app, same host, same unmapped environment — registration
+    // order is the only difference between these two requests.
+    const after = await call('/after');
+    expect(after.status).toBe(404);
+    expect((await after.json() as RefusalBody).error?.code).toBe('ENVIRONMENT_NOT_FOUND');
+
+    // The registry was asked exactly once, for the request the guard actually
+    // saw — the direct evidence that the `/before` hit never reached it.
+    expect(asked).toEqual(['nobody.objectos.ai']);
+  });
+});

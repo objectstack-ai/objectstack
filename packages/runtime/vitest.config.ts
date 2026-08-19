@@ -92,6 +92,11 @@ export default defineConfig({
         replacement: path.join(path.resolve(__dirname, '..'), 'spec/src/$1/index.ts'),
       },
       { find: /^@objectstack\/spec$/, replacement: path.resolve(__dirname, '../spec/src/index.ts') },
+      // Subpath BEFORE the bare package, same prefix-match reason: `./node` is a
+      // published subpath served by a FILE (`types/src/node.ts` — the node-only slice
+      // the root export deliberately excludes), so the bare entry would resolve it to
+      // `…/types/src/index.ts/node`. Same published-subpath rule pins it.
+      { find: /^@objectstack\/types\/node$/, replacement: path.resolve(__dirname, '../types/src/node.ts') },
       { find: '@objectstack/types', replacement: path.resolve(__dirname, '../types/src/index.ts') },
       // Dev-only: app-plugin.jobs.test.ts drives the REAL CronJobAdapter, so
       // the #4567 regression (croner rejecting the expression envelope) is

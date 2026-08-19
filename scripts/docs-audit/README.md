@@ -24,6 +24,10 @@ node scripts/docs-audit/affected-docs.mjs --all
 
 # pin the classifiers, package-root and anchor derivations (needs no repo state; CI runs this before the mapping)
 node scripts/docs-audit/affected-docs.mjs --self-test
+
+# how much of the DECLARED client-bound route surface the `sdk` bridge can reach (diff-free)
+node scripts/docs-audit/affected-docs.mjs --bridge-coverage
+node scripts/docs-audit/affected-docs.mjs --bridge-coverage --json   # + the unreachable rows themselves
 ```
 
 **Derivation (#9192): a doc is *affected* when it NAMES something the change touched.**
@@ -80,6 +84,37 @@ Plus a cap on the route bridge itself: a symbol wired into more than 3 routes is
 cross-cutting helper, and "which routes mention this name" then answers *every* route.
 Reported as `crossCuttingSymbols`. `SCREAMING_SNAKE` constants are kept out of the bridge
 entirely — a data table is consulted by handlers, it is not their implementation.
+
+### The `sdk` bridge reaches part of its own population, and says which part (#9572)
+
+The `sdk` hop needs a registrar `path:` tail to select a route-ledger row. Measured on
+`9ff11921a`: **45 of the 221 client-bound ledger rows are reachable, 176 are not.** An
+unreachable row is not "unlisted this time" — no symbol change bridges to it, ever.
+
+That number now travels with the answer. `bridgeCoverage` is emitted on every run whose
+change carried a bridgeable symbol (`{ measured: false, reason }` when it did not — never a
+fabricated zero), the drift comment renders it in *What this run could not see*, and
+`--bridge-coverage` answers it with no diff at all.
+
+Two things it deliberately is **not**:
+
+- **Not a verdict.** The ratio is reported. Failing CI on it would widen the recognizer
+  under CI pressure, which the #9747 family declines explicitly. What *does* exit non-zero
+  is `brokenScan` — no ledger found, no tail produced, or a ledger file matching the
+  convention that the row recognizer parses to zero rows. Those cannot fire on a tree where
+  the scan works at all, and each of them otherwise reports `0 of 0 unreachable`, which is
+  arithmetically true and reads exactly like a healthy bridge.
+- **Not a fix for the 176.** The card measured the causes and they are unrelated: ~97 rows
+  have no static registration of any shape in `packages/**` (better-auth mounts the auth
+  table; the runtime dispatcher matches `cleanPath` with `===`), ~50 have a `path:` literal
+  in a scanned registrar whose static remainder `routeTailOf` declines once the
+  `${basePath}` interpolation is stripped, and the rest are method-call registrations in
+  files outside `REGISTRAR_FILE_RE`. Each needs its own before/after measurement per
+  #9432's standard.
+
+Half the blind spot is load-bearing: **88 of the 176** unreachable rows name a client
+method that at least one hand-written page carries (31 distinct pages, `api/client-sdk.mdx`
+among them), so the silence is not an empty region.
 
 ### What it cannot see is reported, never implied
 
@@ -302,10 +337,11 @@ the source, before it lands on `main`. Reviewers (or an on-demand audit run) dec
 to re-verify.
 
 The comment also carries a collapsed **"What this run could not see"** section:
-anchorless files, cross-cutting symbols, over-broad anchors, and the coarse
-package-mention count. That is the point-of-use half of #9192 — every one of the three
-derived-list failures in that shift was caught only because a dev widened the probe past
-what the tool offered, never because the tool signalled its own limits where it was read.
+anchorless files, cross-cutting symbols, over-broad anchors, the coarse package-mention
+count, and the `sdk` bridge's reach over the client-bound ledger rows (#9572). That is
+the point-of-use half of #9192 — every one of the three derived-list failures in that
+shift was caught only because a dev widened the probe past what the tool offered, never
+because the tool signalled its own limits where it was read.
 
 ### The comment forks release-owned pages into a read-only section (#6893)
 

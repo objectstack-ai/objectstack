@@ -290,12 +290,18 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
   // ─── Explicit routes (framework-specific handling required) ────────────────
 
   // --- Discovery ---
+  //
+  // Enveloped (`{ success: true, data }`) by maintainer ruling on #9436
+  // (2026-08-18, option A) — deliberately NOT inheriting #9389's pre-auth
+  // exemption: these bodies are read by SDKs, codegen and AI clients (the
+  // envelope's core constituency, not our own shells), and the migration was
+  // one key. The SDK's `connect()` unwraps `body.data || body` either way.
   app.get(prefix, async (c) => {
-    return c.json({ data: await dispatcher.getDiscoveryInfo(prefix) });
+    return c.json({ success: true, data: await dispatcher.getDiscoveryInfo(prefix) });
   });
 
   app.get(`${prefix}/discovery`, async (c) => {
-    return c.json({ data: await dispatcher.getDiscoveryInfo(prefix) });
+    return c.json({ success: true, data: await dispatcher.getDiscoveryInfo(prefix) });
   });
 
   // --- .well-known ---

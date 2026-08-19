@@ -59,12 +59,14 @@
 #   SMOKE_MODE  pack | registry            (default: pack)
 #   SMOKE_ROOT  work dir                   (default: mktemp -d)
 #   SMOKE_KEEP  1 = keep work dir + logs   (default: 0, auto-clean)
-#   SMOKE_PORT  dev-server port            (default: 3210)
+#   SMOKE_PORT  dev-server port            (default: a free port per run)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SMOKE_MODE="${SMOKE_MODE:-pack}"
-SMOKE_PORT="${SMOKE_PORT:-3210}"
+# Empty = pick a free port per run, just before the boot. A caller who names a
+# port gets exactly that port and no search — see the port block in section 2.
+SMOKE_PORT="${SMOKE_PORT:-}"
 SMOKE_KEEP="${SMOKE_KEEP:-0}"
 SMOKE_ROOT="${SMOKE_ROOT:-$(mktemp -d "${TMPDIR:-/tmp}/objectstack-publish-smoke.XXXXXX")}"
 APP_NAME="smoke-app"
@@ -73,11 +75,20 @@ APP_DIR="$SMOKE_ROOT/$APP_NAME"
 # scaffolder rewrites AWAY from. APP_NAME must not derive to it — see the
 # identity assertion in section 1b, which is what keeps that true on purpose.
 TEMPLATE_NAMESPACE="blank"
-# localhost, not 127.0.0.1: the auth plugin's default trustedOrigins is a
-# localhost wildcard, so a 127.0.0.1 origin draws a 403 INVALID_ORIGIN.
-BASE_URL="http://localhost:$SMOKE_PORT"
 SERVER_LOG="$SMOKE_ROOT/server.log"
 SERVER_PID=""
+# TMPDIR for the dev child ALONE. `--fresh` puts its ephemeral OS_HOME under the
+# child's own `os.tmpdir()`, and the serve process publishes the port it really
+# bound into a runtime state file there. Pinning that tmpdir to a directory this
+# run created is what makes the file we read provably ours rather than a
+# neighbouring run's — see smoke_wait_for_own_server.
+DEV_TMPDIR="$SMOKE_ROOT/dev-tmp"
+# Assigned only after the server reports the port it ACTUALLY bound; the port we
+# request is a request, not a fact. localhost, not 127.0.0.1: the auth plugin's
+# default trustedOrigins is a localhost wildcard, so a 127.0.0.1 origin draws a
+# 403 INVALID_ORIGIN.
+BASE_URL=""
+BOUND_PORT=""
 
 log()  { printf '\n== %s\n' "$*"; }
 fail() { printf '::error::%s\n' "$*" >&2; exit 1; }
@@ -112,6 +123,152 @@ cleanup() {
   fi
   exit "$code"
 }
+# ── collision safety between CONCURRENT RUNS ────────────────────────────
+#
+# Agent dispatch containers run several agents against one filesystem and one
+# network namespace, so a fixed port is shared state between overlapping runs.
+# The work dir and the server log above are already mktemp-qualified; the port
+# was the one piece of per-run state still spelled as a literal.
+#
+# What makes the port worse than a shared log here is that `objectstack dev`
+# AUTO-SHIFTS off a busy one. Measured, with a neighbour already holding 34217:
+#
+#     $ objectstack dev --port 34217 --fresh
+#       ↪ server bound to port 34218 (requested 34217)
+#     $ curl http://localhost:34217/api/v1/health
+#     {"iam":"NEIGHBOUR-RUN-A", ...}                       ← HTTP 200, someone else
+#     $ curl http://localhost:34218/api/v1/health
+#     {"success":true,"data":{"status":"ok", ...}}          ← HTTP 200, ours
+#
+# packages/cli/src/commands/serve.ts gates that shift on `flags.dev`, which is
+# exactly the path `objectstack dev` takes, so this script always gets it. The
+# non-dev branch beside it refuses loudly instead — but opting into that refusal
+# is not available to a caller (`dev` always spawns `serve --dev`), and changing
+# the CLI to offer it is a contract change, not a fix for this script.
+#
+# The obvious countermeasure does NOT work, and that is the part worth spelling
+# out. A liveness check on our own spawn — `kill -0 "$SERVER_PID"`, which this
+# wait loop ALREADY had — answers "yes" throughout the measurement above: our
+# server did not fail, it succeeded somewhere else. Picking a free port per run
+# does not close it either, because the pick reserves nothing and the shift can
+# still move us after it. So neither half of the sibling fix in
+# scripts/gen-sdui-manifest.sh transfers unchanged: vite could be told
+# `--strictPort`, and its wait loop had no liveness check to begin with.
+#
+# What does work is reading the port our own server actually bound. serve.ts
+# publishes it ("Publish the actually-bound port": pid + port + url, written to
+# a runtime state file under OS_HOME expressly so external supervisors never
+# have to guess), `--fresh` puts that OS_HOME under the dev child's own tmpdir,
+# and we pin that tmpdir to a directory this run created. So the file we read
+# can only describe our own server, and BASE_URL is derived from where our app
+# IS rather than from where we asked it to be.
+#
+# Rejected, with the measurement that rejected it: asserting on something unique
+# to this run's scaffold instead of on the server we spawned. It would be the
+# better assertion — it is what the smoke actually cares about — but there is no
+# anonymous endpoint that carries the app's identity, so it cannot gate the
+# readiness wait, which is the point where the wrong app has to be turned down.
+# Measured against a booted app: `GET /api/v1/data/<this app's object>` and
+# `GET /api/v1/data/no_such_object_zzz` both answer 401 UNAUTHENTICATED (the auth
+# gate runs before routing), and `GET /api/v1/discovery` — which is anonymous —
+# reports the constant `"name":"ObjectStack API"`, not the project. The first
+# app-specific assertion available is the authenticated CRUD probe in section 3,
+# which lands after the auth probes have already run against the wrong app.
+
+# Print a TCP port that is free right now, searching upward from $1.
+#
+# ADVISORY ONLY. It reserves nothing, and `objectstack dev` binds a moment later,
+# so a concurrent run can still take the port in between. Closing that race is
+# not this helper's job — smoke_wait_for_own_server turns losing it into a
+# warning and a correctly retargeted BASE_URL instead of a silent wrong answer.
+# This only has to make losing it rare.
+#
+# Probes the wildcard address with no host argument, the same spelling
+# serve.ts's own isPortAvailable() uses, so this sees a busy port exactly when
+# the CLI would.
+smoke_pick_free_port() {
+  node - "${1:-3210}" "${2:-200}" <<'SMOKE_PICK_FREE_PORT'
+const net = require('node:net');
+const base = Number(process.argv[2]);
+const span = Number(process.argv[3]);
+const isFree = (port) =>
+  new Promise((resolve) => {
+    const probe = net.createServer();
+    probe.once('error', () => resolve(false));
+    probe.once('listening', () => probe.close(() => resolve(true)));
+    probe.listen(port);
+  });
+(async () => {
+  for (let port = base; port < base + span; port += 1) {
+    if (await isFree(port)) {
+      process.stdout.write(String(port));
+      return;
+    }
+  }
+  process.stderr.write(`no free TCP port in [${base}, ${base + span})\n`);
+  process.exitCode = 1;
+})();
+SMOKE_PICK_FREE_PORT
+}
+
+# The argv the dev server runs under, one word per line — `env` and its
+# assignments included, because the TMPDIR pin is part of the invocation and not
+# a detail of it.
+#
+# A function rather than an inline command line so that pin is assertable by
+# SOURCING this file, instead of only by grepping it. A grep assertion would also
+# pass against a version that names TMPDIR in a comment and nowhere else, which
+# is precisely the regression this guards.
+smoke_dev_server_argv() {
+  printf '%s\n' env NO_COLOR=1 "TMPDIR=$DEV_TMPDIR" \
+    ./node_modules/.bin/objectstack dev --port "$SMOKE_PORT" --fresh
+}
+
+# Wait until the dev server THIS RUN started is healthy, and set BOUND_PORT to
+# the port it is actually answering on. $1 = probe count (2s apart).
+#
+# Ordering is load-bearing. The runtime state file is read BEFORE anything is
+# curled, because a neighbouring run's server answers 200 on the requested port
+# exactly like ours would — "the port answers" is no evidence at all. And the
+# liveness check is repeated AFTER a successful curl, because ours can exit
+# between the read and the probe and leave the port to whoever grabs it next.
+smoke_wait_for_own_server() {
+  local timeout="$1" i f runtime_file bound saw_runtime=0
+  for i in $(seq 1 "$timeout"); do
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+      fail "dev server exited before becoming healthy"
+    fi
+    runtime_file=""
+    for f in "$DEV_TMPDIR"/objectstack-dev-*/runtime.*.json; do
+      if [ -f "$f" ]; then runtime_file="$f"; break; fi
+    done
+    if [ -n "$runtime_file" ]; then
+      saw_runtime=1
+      bound=$(jq -er '.port | numbers' "$runtime_file" 2>/dev/null || true)
+      if [ -n "$bound" ] && curl -fsS "http://localhost:$bound/api/v1/health" >/dev/null 2>&1; then
+        kill -0 "$SERVER_PID" 2>/dev/null \
+          || fail "dev server exited while its port was being probed"
+        BOUND_PORT="$bound"
+        echo "  healthy after probe #$i — our server is on port $BOUND_PORT"
+        return 0
+      fi
+    fi
+    sleep 2
+  done
+  if [ "$saw_runtime" = "0" ]; then
+    fail "dev server never published a runtime state file under $DEV_TMPDIR (expected objectstack-dev-*/runtime.*.json, written by packages/cli/src/commands/serve.ts). Without it this script cannot tell its own server from a concurrent run's on the same port, and refuses to guess."
+  fi
+  fail "dev server published port $bound but never answered there within $((timeout * 2))s"
+}
+
+# Sourcing this file defines the helpers above and runs nothing. `${BASH_SOURCE[0]}`
+# differs from `$0` exactly when the file is sourced, which is how the collision
+# test drives the real functions instead of grepping for them — a grep passes
+# against a version that only mentions the behaviour in a comment.
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+  return 0
+fi
+
 trap cleanup EXIT
 
 # ── 1. obtain the project ───────────────────────────────────────────────────
@@ -295,25 +452,44 @@ echo "  ok — built dist/objectstack.json ($(wc -c < "$APP_DIR/dist/objectstack
 # ── 2. boot the dev server ──────────────────────────────────────────────────
 # --fresh: ephemeral OS_HOME + sqlite DB + seeded admin
 # (admin@objectos.ai / admin123) — no first-run wizard to block on.
-log "Starting objectstack dev (port $SMOKE_PORT)"
+# The port, resolved as late as possible so the free-port probe and the bind it
+# informs are as close together as they can be. An explicit SMOKE_PORT is passed
+# through UNCHANGED and never searched around: a caller who names a port is
+# making a request this script has no business quietly re-deciding. The CLI can
+# still shift off it — the warning below says so out loud when it does.
+if [ -n "$SMOKE_PORT" ]; then
+  echo "  SMOKE_PORT=$SMOKE_PORT — using it exactly, no per-run search"
+else
+  SMOKE_PORT="$(smoke_pick_free_port 3210 || true)"
+  case "$SMOKE_PORT" in
+    '' | *[!0-9]*) fail "could not find a free TCP port for this run's dev server" ;;
+  esac
+fi
+
+log "Starting objectstack dev (requested port $SMOKE_PORT)"
+mkdir -p "$DEV_TMPDIR"
 # NO_COLOR: some loggers colorize even without a TTY; ANSI codes around
 # "ERROR" would slip through the log scan below (they did — see the escaped
 # `\x1b[31m…ERROR…` line the negative test produced).
-(cd "$APP_DIR" && exec env NO_COLOR=1 ./node_modules/.bin/objectstack dev --port "$SMOKE_PORT" --fresh) \
+# TMPDIR: see the collision-safety block — it is what makes the runtime state
+# file this run reads back provably its own.
+mapfile -t DEV_ARGV < <(smoke_dev_server_argv)
+(cd "$APP_DIR" && exec "${DEV_ARGV[@]}") \
   > "$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 
-for i in $(seq 1 60); do
-  if curl -fsS "$BASE_URL/api/v1/health" >/dev/null 2>&1; then
-    break
-  fi
-  if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-    fail "dev server exited before becoming healthy"
-  fi
-  [ "$i" = 60 ] && fail "dev server not healthy after 120s"
-  sleep 2
-done
-echo "  healthy after probe #$i"
+smoke_wait_for_own_server 60
+
+if [ "$BOUND_PORT" != "$SMOKE_PORT" ]; then
+  # Not fatal: our app is up and healthy, it is simply not where we asked. Every
+  # probe below now targets it correctly, which is the whole point. What IS
+  # newsworthy is the neighbour — before this diagnostic existed, the run went on
+  # to smoke-test whatever was holding the requested port and reported on it.
+  printf '\n⚠ objectstack dev auto-shifted: requested %s, bound %s.\n' "$SMOKE_PORT" "$BOUND_PORT"
+  printf '   Something else is holding %s — most likely a concurrent publish-smoke run.\n' "$SMOKE_PORT"
+  printf '   Smoking THIS run'"'"'s server on %s; whatever answers on %s is not ours.\n' "$BOUND_PORT" "$SMOKE_PORT"
+fi
+BASE_URL="http://localhost:$BOUND_PORT"
 
 # ── 3. probes ───────────────────────────────────────────────────────────────
 COOKIES_USER="$SMOKE_ROOT/cookies-user.txt"

@@ -181,7 +181,7 @@ Other scripts: `objectui:bump` (pull only), `objectui:build`, `objectui:clean`. 
 
     > **`docs/adr/**` + `.claude/**`(含 agents/hooks/settings,不只 skills)+ `skills/**` + `AGENTS.md` + `CLAUDE.md`。混合 diff 照现行规则一条命中即整 PR 分叉** (2026-08-18)
 
-    **Which surfaces — and where that list actually lives.** The 2026-08-18 quotation above *is* the definition, and it is wider than ADRs and wider than skills: the two repo-root instruction files are on it, so **the file you are reading is itself a governed surface**, and so is `.claude/` entire — agents, hooks and settings, not only `.claude/skills/`. ⚠️ Even so, treat that quotation as a reading aid rather than the register: the set has grown three times in two days. The register is the `GOVERNED_SURFACES` table in `scripts/pm/check-governed-merges.mjs`, and adding a surface is an edit *there*, never here. Print today's set rather than trusting this paragraph: `node -e "import('./scripts/pm/check-governed-merges.mjs').then(m=>console.log(m.GOVERNED_SURFACES.map(s=>s.glob).join(' · ')))"`
+    **Which surfaces — and where that list actually lives.** The 2026-08-18 quotation above *is* the definition, and it is wider than ADRs and wider than skills: the two repo-root instruction files are on it, so **the file you are reading is itself a governed surface**, and so is `.claude/` entire — agents, hooks and settings, not only `.claude/skills/`. ⚠️ Even so, treat that quotation as a reading aid rather than the register: the set has grown three times in two days. The register is the `GOVERNED_SURFACES` table in `scripts/pm/check-governed-merges.mjs`, and adding a surface is an edit *there*, never here. This directive no longer drifts from it in silence: `pnpm check:pm-governed-prose` reds per-PR when the surfaces named here are fewer than the register's — or more, the direction that manufactures enforcement nobody has. ⚠️ When it reds, name the surface **in this paragraph**; ⛔ never edit the quotation above to satisfy a gate — a verbatim ruling rewritten is a ruling rewritten. Print today's set rather than trusting this paragraph: `node -e "import('./scripts/pm/check-governed-merges.mjs').then(m=>console.log(m.GOVERNED_SURFACES.map(s=>s.glob).join(' · ')))"`
 
     **Authoring stays open to every seat** — drafting the ADR, the skill or the instruction edit, pushing the branch, opening the PR, revising it under review. What is reserved is the **landing**: on any PR whose diff touches a governed surface, ⛔ never merge it, ⛔ never add it to the merge queue, ⛔ never call `enable_pr_auto_merge`, ⛔ never flip it out of draft to make any of those possible. Judge it on the PR's **file list**, not on its description, and a **mixed diff is not a proportion question** — one path hit is enough; if the rest needs to land, split the governed files into their own PR. **Reviewed + approved + fully green does not override this.** Under #13 an accepted ADR *is* the decision, so merging one is the act of adopting a governance position — the one class of change about which "CI is green" carries no information at all (a thorough, fully-green ADR draft has been closed by the maintainer on demand grounds no gate could evaluate). The other surfaces are reserved for a reason of the same shape: the agent instruction tree and these two root files are the operating protocol every *later* dispatch reads, and the published catalog lands in codebases this repo cannot see, so a bad merge propagates into work nobody has started yet — and green says nothing about whether it should propagate.
 
@@ -299,6 +299,13 @@ every `update_pull_request` edit; the session-URL form survives both write paths
 — which is precisely how a body comes back in a shape nobody typed. Which layer does
 this is unknown, and the guidance does not depend on the answer — do not spend a
 session establishing it. Comments are a different path and unaffected.
+
+**GitHub mutates body BYTES — spell poison-shaped tokens out in words, never literally.**
+Regex literals and script-tag-shaped tokens go in fenced code with the dangerous
+character spelled out, or are described in words (fences do NOT protect them); after
+writing any less-than fragment, read the body back and verify it survived. The two
+measured mutation shapes and their triggers live in pm-dispatch `references/platform-readings.md`.
+⛔ A body reading short only through the API is probably intact — check the rendered page before "repairing" it; a rewrite destroys a correct card.
 
 Even inside your own worktree, operate defensively:
 
@@ -646,12 +653,14 @@ their output is current; the wrapper reports that each run rather than staying s
 
 ## Skills (`skills/`)
 
-Consult the matching `SKILL.md` when working in its domain: `objectstack-platform`, `objectstack-data`, `objectstack-query`, `objectstack-api`, `objectstack-ui`, `objectstack-automation`, `objectstack-ai`, `objectstack-i18n`, `objectstack-formula` (CEL).
+Two roots; **the filesystem is the catalog**. Consult the matching `SKILL.md` when
+working in its domain — browse the directory, never a hand-written list here (two
+such lists drifted stale as skills landed; a reader who trusts a list cannot see
+what it is missing):
 
-`skills/` is the **published** catalog (it ships to customer projects). Repo-internal
-agent playbooks live in `.claude/skills/` and must carry `metadata.internal: true`:
-`dogfood-verification` (boot and drive the real app in a browser) and
-`spec-property-retirement` (ADR-0049 enforce-or-remove — the full retirement kit).
+- `skills/` — the **published** catalog (it ships to customer projects).
+- `.claude/skills/` — repo-internal agent playbooks; every entry must carry
+  `metadata.internal: true`.
 
 ⛔ **Both roots are governed surfaces**: a PR touching either is human-merge only and may
 never be queued, armed or flipped out of draft — **Prime Directive #14**. No per-PR check

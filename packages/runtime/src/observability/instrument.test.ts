@@ -146,6 +146,64 @@ describe('instrumentRouteHandler', () => {
             ).toEqual([15]);
         });
 
+        it('emitHttpRequestsTotal: false suppresses ONLY the request counter — histogram, error counter, reporter and request-id stay on (#9835)', async () => {
+            // The dispatcher passes this when the transport implements the
+            // `IHttpServer.afterResponse` seam, which then owns the counter
+            // (#9833's duplicate). Everything else the wrapper emits is NOT
+            // emitted by the transport seam and must survive the gate.
+            const clock = makeClock();
+            const wrapped = instrumentRouteHandler(
+                'GET',
+                '/health',
+                async () => {
+                    clock.advance(15);
+                },
+                { metrics, now: clock.now, emitHttpRequestsTotal: false },
+            );
+            const res = makeRes();
+            await wrapped({ headers: {} }, res);
+            expect(
+                metrics.totalCounter('http_requests_total', { route: '/health' }),
+            ).toBe(0);
+            expect(
+                metrics.histogramValues('http_request_duration_ms', {
+                    method: 'GET',
+                    route: '/health',
+                }),
+            ).toEqual([15]);
+            expect(res.headers['X-Request-Id']).toBeTruthy();
+
+            // The error counter is likewise ungated.
+            const throwing = instrumentRouteHandler(
+                'POST',
+                '/boom',
+                async () => {
+                    throw new Error('kaboom');
+                },
+                { metrics, emitHttpRequestsTotal: false },
+            );
+            await expect(throwing({ headers: {} }, makeRes())).rejects.toThrow('kaboom');
+            expect(
+                metrics.totalCounter('http_request_errors_total', { route: '/boom' }),
+            ).toBe(1);
+            expect(
+                metrics.totalCounter('http_requests_total', { route: '/boom' }),
+            ).toBe(0);
+        });
+
+        it('emitHttpRequestsTotal defaults to true — the legacy behavior for hook-less transports', async () => {
+            const wrapped = instrumentRouteHandler(
+                'GET',
+                '/legacy',
+                async () => {},
+                { metrics },
+            );
+            await wrapped({ headers: {} }, makeRes());
+            expect(
+                metrics.totalCounter('http_requests_total', { route: '/legacy' }),
+            ).toBe(1);
+        });
+
         it('records the status as set by res.status() (e.g. 404)', async () => {
             const wrapped = instrumentRouteHandler(
                 'GET',

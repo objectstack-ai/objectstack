@@ -9,7 +9,7 @@
  * A message whose attachments exceed {@link SYS_EMAIL_ATTACHMENT_LIMIT_BYTES}
  * used to be pushed back onto inline delivery — whole, but with none of the
  * durability queue delivery exists to provide. Its content now goes to the
- * `file-storage` capability, the row records a **reference** plus the audit
+ * `storage` capability, the row records a **reference** plus the audit
  * metadata, and the queue worker rebuilds the message by fetching the content
  * back. The messages most likely to matter (a signed contract, an exported
  * report) stop being the ones the platform is weakest about.
@@ -35,7 +35,7 @@
  * {@link EmailAttachmentStore} names the three `IStorageService` methods this
  * package calls and nothing else. Declared in the *consumer* (the #5210
  * `LifecycleFloorRegistrar` shape) so the slot lookup carries a contract type:
- * `getService<any>('file-storage')` would switch off checking on the exact
+ * `getService<any>('storage')` would switch off checking on the exact
  * calls whose failure is invisible — an upload that silently no-ops is a
  * message whose content is gone and whose row says it is there.
  *
@@ -56,7 +56,7 @@ import {
 } from './sys-email-payload.js';
 
 /**
- * The slice of the `file-storage` capability (`IStorageService`) that
+ * The slice of the `storage` capability (`IStorageService`) that
  * out-of-row attachment content actually uses.
  *
  * Declared structurally in this package on purpose (#5210): a slot lookup that
@@ -246,7 +246,7 @@ export async function offloadAttachmentsToStorage(
       return {
         kind: 'unavailable',
         detail:
-          `uploading attachment '${String(att.filename ?? '(unnamed)')}' to the file-storage capability failed `
+          `uploading attachment '${String(att.filename ?? '(unnamed)')}' to the storage capability failed `
           + `(${String(err?.message ?? err)})`,
       };
     }
@@ -316,7 +316,7 @@ export async function fetchAttachmentContent(
     // strict decoder downstream verifies size and digest, and this keeps the
     // failure at the layer that can name the key.
     throw new Error(
-      `the file-storage capability returned a non-Buffer value for attachment content key '${storageKey}'`,
+      `the storage capability returned a non-Buffer value for attachment content key '${storageKey}'`,
     );
   }
   return bytes;

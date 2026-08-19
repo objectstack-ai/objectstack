@@ -2325,6 +2325,23 @@ function selfTest() {
   t('the doc-anchors gate reaches the content page population it declares', anchorHints.some((h) => hintCovers(h, 'content/docs/deployment/cli.mdx')));
   t('and does not thereby claim a path outside that population', !anchorHints.some((h) => hintCovers(h, 'packages/spec/src/index.ts')));
 
+  // The second gate of that class (#9700): a whole-tree ESLint ratchet whose
+  // only literals were its own baseline artifact and the ref it diffs against,
+  // so it scored `silent` for every card in the tree while being REQUIRED in
+  // lint.yml — twice at the cost of a p0's CI round (#9391, PR #9695). It now
+  // declares the subtree it lints. Read from the real gate, not a fixture: what
+  // is being pinned is that the tree still HAS the declaration.
+  const slotHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-slot-lookup-ratchet.mjs'), 'utf8'));
+  t('the slot-lookup ratchet reaches the package source population it declares', slotHints.some((h) => hintCovers(h, 'packages/services/service-datasource/src/admin-routes.ts')));
+  // The negative half is the load-bearing one for a declaration this broad: a
+  // gate named on EVERY card is the louder version of naming none. `packages/**`
+  // must reach nothing outside `packages/`, and these three roots are where a
+  // widened extractor would have leaked it (measured in hintCovers' docblock:
+  // the rejected alternative takes one card from 7 matched families to 34).
+  t('and claims nothing under apps/', !slotHints.some((h) => hintCovers(h, 'apps/console/src/main.tsx')));
+  t('nor under examples/', !slotHints.some((h) => hintCovers(h, 'examples/crm/objects/account.object.ts')));
+  t('nor a content page', !slotHints.some((h) => hintCovers(h, 'content/docs/deployment/cli.mdx')));
+
   // ── A trailing sentence period is not part of the path (#8534, half two) ──
   //
   // Coupled to the rule above: the raw-prefix comparison reached the real file
