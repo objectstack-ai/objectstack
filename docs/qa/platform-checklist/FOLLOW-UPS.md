@@ -166,3 +166,101 @@ base is a showcase design call with consequences beyond this item — it is also
 contrast side `access-security.readonly-package-locks-studio` needs — so it is filed
 separately rather than guessed at. The item keeps its `blocked(fixture)` and its
 `knownGap` untouched.
+
+## 7. Scoped sweep 2026-08-20 — 扫描功能 (scan functionality)
+
+Scoped question from the maintainer: does the platform's scan functionality have test
+coverage? Three read-only hunters (kernel security scanner · TOTP QR enrollment · every
+other scan-shaped surface) diffed against the ledger. The testable gaps were authored in
+the same change (identity-auth two-factor lifecycle ×4; cli doctor/doctor-scan/migrate-
+duplicates/datasource-introspect/hook-body-gates/lint ×6; integration-system
+introspection + drift gate ×2; attachments-storage server-side accept/maxSize;
+platform-core interrupted-migration boot report — plus 3 stale-item revisions). What
+follows is what is NOT a checklist item: inert surfaces, docs drift, defects, and one
+governance hole.
+
+### 7a. Declared-but-inert scan surfaces (ADR-0049 enforce-or-remove candidates — none are testable, none got items)
+
+| surface | evidence | the deadness, precisely |
+|---|---|---|
+| `PluginSecurityScanner` (`packages/core/src/security/security-scanner.ts:43`) | zero constructors outside `packages/core/examples/`; not in plugin-loader, service-package, rest, or any CLI path | Exported dead code on the PUBLIC barrel (`packages/core/src/index.ts:28` re-exports `./security/index.js`). 3 of 5 scan methods are empty stubs; `scanDependencies` has a real loop whose only data source (`addVulnerability`, `:309`) has zero callers; `updateVulnerabilityDatabase` (`:344`) is a log-only no-op. |
+| `KernelSecurityScanResult` / `KernelSecurityVulnerability` / `PluginSecurityManifest.scanResults` (`packages/spec/src/kernel/plugin-security-advanced.zod.ts:385,476,625`) | no `.parse`/`.safeParse` site anywhere; only consumer is the dead scanner (type-only import) | 22 rows published to `packages/spec/authorable-surface/kernel.json:286-310` with zero authors and zero parsers. The whole `plugin-security-advanced` module has no runtime consumer. |
+| `PluginQualityMetrics.securityScan` (`packages/spec/src/kernel/plugin-registry.zod.ts:73-83`) | spec self-test only | Nothing reads or writes it at runtime. |
+| Marketplace/incident scan vocab (`marketplace.zod.ts:348` 'scanning' status, `marketplace-admin.zod.ts:42,193`, `incident-response.zod.ts:39` 'malware') | declared-only enum members, no producer in this repo | Cloud/EE surface. Same shape as the `'failed'`/`'expired'` upload statuses #7667 had to close: declared, published, no writer. |
+| MetadataPlugin FS scan + `metadata-fs` boot scan (`packages/metadata/src/plugin.ts:257,270` — `watch ?? false`; `packages/runtime/src/standalone-stack.ts:698-702` hard-off; `metadata-fs` unwired from any `os dev`/`os serve` lane) | unit-pinned in-package only | No reachable fixture from any shipped boot; if a future lane wires `metadata-fs`, the boot-scan/watcher dot-entry divergence is the risk to test first. |
+
+Compounding the first row: `packages/core/PHASE2_IMPLEMENTATION.md:266-311` advertises
+the scanner as a working feature, tells readers to import from `@objectstack/core/security`
+(a subpath `packages/core/package.json` does not export), and its sample fields
+(`scanResult.passed`/`.score`/`.summary.critical`) do not exist on the actual schema —
+the example (`examples/phase2-integration.ts`) sits outside every tsconfig and is never
+typechecked. Enforce or remove; if removed, the spec-property-retirement playbook applies
+to the authorable-surface rows.
+
+### 7b. Docs drift (PD#10 class — file as docs fixes, not checklist items)
+
+- **Phantom `contentProcessing` virus scanning** — `content/docs/protocol/objectql/types.mdx:1067-1069`
+  and `:1086` promise "thumbnail generation, virus scanning … under `contentProcessing`";
+  `content/docs/data-modeling/validation-rules.mdx:302` redirects file-storage virus
+  scanning to a connector setting. `contentProcessing` exists in exactly those doc lines —
+  no schema key, no code, and no content inspection of any kind exists on the upload path
+  (mimeType is trusted verbatim from the client body, `storage-routes.ts:241-243`). Both
+  docs should say plainly the platform performs no upload-time content inspection; the new
+  `attachments-storage.field-accept-maxsize-server-enforced` item records the same boundary
+  on the QA side.
+- **Dead remediation prescription in a live command** — `doctor.ts:2149` prints "Run
+  `objectstack codemod v2-to-v3` to auto-fix"; no `codemod` command exists (the real path
+  is `os migrate meta`), and `content/docs/protocol/backward-compatibility.mdx:134` admits
+  it. Fix the string; the new `cli.doctor-deprecation-scan` item carries the expected-fail
+  probe until then.
+- **`metadata-service.mdx:188`** presents `eager` bootstrap as "Scans filesystem … at
+  boot (default)"; no shipped boot path scans (`watch` defaults false, `os dev` disables it
+  explicitly). Stop advertising the scan as default behavior.
+- **`admin-routes.ts:518` comment** claims a Studio "sync objects" consumer for
+  `/remote-tables`; no such consumer exists in objectui/app-shell — the live callers are
+  the two `os datasource` commands. Cleanup comment fix.
+
+### 7c. Defects found while grounding (auth-integrity rows: maintainer decision before any public issue)
+
+| # | defect | evidence | captured in | sensitivity |
+|---|---|---|---|---|
+| D9 | `sys_two_factor.verified` declares `defaultValue: true` while better-auth enrols `verified: false` and `AUTH_TWO_FACTOR_SCHEMA` does not map `verified` — if better-auth omits the column on insert, the ObjectQL default marks an unverified enrolment active | `sys-two-factor.object.ts:166-170`; `auth-schema-config.ts:366-374` | identity-auth.two-factor-verify-to-activate (observe-and-flag probe) | **auth-integrity — do not file publicly without maintainer** |
+| D10 | `sys_user.generate_backup_codes` has no `resultDialog` — on the only navigable surface the user regenerates codes they are never shown; permanent-lockout path | `sys-user.object.ts:435-452` | identity-auth.two-factor-backup-codes (observe-and-flag) | UX-integrity/auth — maintainer call |
+| D11 | `POST /api/v1/auth/two-factor/get-totp-uri` live re-reveal vs the reveal dialog's "shown only once" promise; endpoint absent from SDK ledger rows and targeted by no action | `auth-route-ledger.ts:374` vs `sys-two-factor.object.ts:76` | identity-auth.two-factor-enrollment-reveal (probe) | auth — maintainer call |
+| D12 | `os doctor` false-PASS: `findMissingTests`/`findDeprecatedUsages` scan only `<cwd>/packages/spec/src`, so in any user app doctor prints "✓ Test coverage"/"✓ Deprecations" about a tree it never examined | `doctor.ts:1141-1143,1159-1161` → `✓` at `:1939,:1951` | cli.doctor-health-report (expected-fail probe) | correctness — safe to file |
+| D13 | `FileConstraintError` declares `code: 'ERR_FILE_CONSTRAINT'` but no `status`, and rest's `classifyDataError` has no branch for it — the server-side accept/maxSize refusal exits `/api/v1/data` as a sanitized **500 INTERNAL_ERROR** with the field-naming prose withheld from the body (the sibling `FileFieldBulkWriteError` docblock names `status: 400` as exactly what prevents this; same class as #7525) | `file-reference-lifecycle.ts:168-173,181-191`; `packages/rest` error-response classification | attachments-storage.field-accept-maxsize-server-enforced (wire-status recorded per run; a measured 500 is extracted as a finding, not scored as an enforcement fail) | correctness/wire-contract — safe to file |
+| D14 | `MigrationRecoveryPlugin` is composed by NO boot path — `serve.ts` auto-registers `PlatformObjectsPlugin` but never the recovery plugin; standalone-stack, default-host, the showcase config, and the migrate CLI boot all omit it; only its unit test instantiates it. Interrupted-migration detection therefore never runs on any shipped boot, while `sys-migration-journal.object.ts:56-58` argues recovery must need "zero host wiring" | `packages/runtime/src/index.ts:58` (exported); `serve.ts:2073-2098` (what IS auto-registered) | platform-core.interrupted-migration-boot-report (fixtures an explicit registration; knownGap names the composition hole) | correctness/composition — safe to file |
+| D15 | `extract-hook-body.ts:14-18`'s header promises "the build fails… no silent fallback" on a forbidden pattern, but the DEFAULT `os build` catches every extraction error and silently falls back to the .mjs bundle (`lower-callables.ts:63-78`), printing the warnings nowhere; only `--strict-body` (`compile.ts:126-149`) produces the worded refusals with exit 1. `hook-bodies.mdx:256` documents the warn-and-bundle default, so code comment and docs disagree with each other | `extract-hook-body.ts:14-18` vs `lower-callables.ts:63-78`, `compile.ts:126-149` | cli.hook-body-extraction-gates (default-path silent-fallback encoded as expected-fail contradiction clause) | correctness — safe to file |
+
+Two design notes captured inside items rather than as defect rows: `sys_user.mfa_required_at`
+is stamped lazily and never cleared anywhere in source, so post-disable re-gating branches on
+a pre-existing stamp (identity-auth.two-factor-disable-lifecycle, design-note clause); and
+`datasource.checkOnBoot` (spec `datasource.zod.ts:313`, default true, liveness-ledgered live)
+is read by NO runtime code — the drift scan always runs — a declared≠enforced ADR-0049 shape
+encoded as a finding clause in integration-system.external-schema-drift-gate and a liveness
+ledger correction candidate.
+
+### 7d. Governance hole the ratchet cannot see
+
+`coverage.json`'s kind universe derives from `packages/spec/liveness/*.json` — which has
+no `kernel`, `plugin`, `marketplace`, or `incident` kind. The entire
+`packages/spec/src/kernel/**` and `packages/spec/src/cloud/**` surface can grow, publish
+to `content/docs/references/` (e.g. `references/kernel/plugin-security-advanced.mdx:17`
+ships "Security scanning and verification" as a documented capability, auto-generated and
+banner-marked but backed by nothing), and never register as an unmapped kind. Decide:
+either those spec families join the liveness-governed set, or the ratchet's blind spot is
+recorded as accepted scope. Until then, only a sweep like this one can catch it.
+
+### 7e. Checked and CLEAN (so the next sweep does not re-derive)
+
+- qrcode field type: scanning keys (`barcodeFormat`/`qrErrorCorrection`/`displayValue`/`allowScanning`)
+  pruned 2026-06, correctly dead (`field.zod.ts:1113-1119`); rendering covered by
+  `records-forms.field-type-matrix`; residue `suggestions.zod.ts:168` is a live
+  author-time typo alias (`barcode`→`qrcode`), not behavior.
+- No content sniffing on upload: not a capability — boundary recorded in the new
+  attachments item, not a gap.
+- `knowledge.mdx:38-39` PDF/scan extraction: an explicit protocol non-goal, no promise.
+- `packages/verify` conformance `scan`: internal proof-attribution bookkeeping.
+- 2FA challenge gate + lockout: covered (`identity-auth.auth-method-matrix` +
+  `two-factor-lockout.dogfood.test.ts`); endpoint existence pinned by
+  `auth-route-ledger.conformance.test.ts`.

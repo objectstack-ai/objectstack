@@ -187,7 +187,7 @@
       "title": "os migrate: bare command is a read-only plan, apply is safe-by-default, re-runs are idempotent, and --json exits 0 on success (#4873)",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell)"],
@@ -260,6 +260,7 @@
         "apply",
         "resume",
         "recorded-by",
+        "duplicates (#8928 read-only cross-partition duplicate-identifier inventory — ALWAYS JSON on stdout with NO --json flag, so the #4873 --json sweep must not probe it with one; deep coverage at cli.migrate-duplicates-inventory)",
         "meta",
         "files-to-references",
         "summary-nulls",
@@ -270,10 +271,12 @@
       "source": [
         "packages/cli/src/commands/migrate/index.ts + plan.ts (#2186 bare-command-is-plan; #3917 enforced never-mutates; occupancy warning) + apply.ts (--allow-destructive / --force / --yes / in_sync)",
         "packages/cli/src/utils/format.ts (CliExitCode narrows the emitJson exit slot — the #4873 fix, commit 83df2fd)",
-        "packages/cli/src/commands/migrate/ (the eight registered subcommands enumerated as variants)"
+        "packages/cli/src/commands/migrate/ (the nine registered subcommands enumerated as variants)",
+        "sibling item cli.migrate-duplicates-inventory (the duplicates subcommand's own contract — cross-referenced, not duplicated)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item: the migrate topic's read-only/apply/idempotency contract from plan.ts+apply.ts, with #4873 --json exit-code honesty as a load-bearing clause pinned to format.exit-code.test.ts and the subcommand set enumerated from src/commands/migrate/", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item: the migrate topic's read-only/apply/idempotency contract from plan.ts+apply.ts, with #4873 --json exit-code honesty as a load-bearing clause pinned to format.exit-code.test.ts and the subcommand set enumerated from src/commands/migrate/", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-20", "change": "scoped scan-functionality sweep: the enumeration-as-variants under-counted — `duplicates` (#8928, landed 2026-08-16) made it NINE registered subcommands in src/commands/migrate/, not the eight the source note claimed. Added the ninth as a variant pointing detailed coverage at the new cli.migrate-duplicates-inventory item, with the one property a sweep of THIS item must know: duplicates has no --json flag (its output is always the JSON report), so the #4873 exit-code sweep must not feed it one and read the oclif Nonexistent-flag 2 as a violation", "ref": "claude/new-session-0pv25p" }
       ]
     },
     {
@@ -825,6 +828,547 @@
           "ref": "#9299"
         },
         { "revision": 2, "date": "2026-08-18", "change": "corrected the stale 'no seeded admin unless one is requested' assumption in both knownGaps. commands/dev.ts resolves seed-admin as flags['seed-admin'] ?? true and documents it 'Default: on', so a bare `objectstack dev` on an empty DB seeds admin@objectos.ai / admin123 and prints it in the banner. Clause 4's open question ('is there any identity a newcomer can sign in with?') has a definite answer, and leaving the gap as written told the runner not to assume the answer the tree already fixes (#9467 CF-6)", "ref": "#9386" }
+      ]
+    },
+    {
+      "id": "cli.doctor-health-report",
+      "title": "os doctor: every check emits an attributed row, an unparseable posture is an ERROR not a swallow, ledger rows print under every posture, the ✓ is withheld when the read was incomplete — and the two monorepo-anchored ✓s that bless an unexamined tree are the expected-fail",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "cli",
+      "personas": ["operator (local shell)"],
+      "fixtures": {
+        "app": "scaffold",
+        "requires": [
+          "a scratch blank scaffold (`npx -y create-objectstack@latest qa-doctor -t blank` + install — the same provisioning cli.scaffold-first-run drives) as the USER-APP shaped tree; the monorepo-vs-user-app split is load-bearing for the expected-fail clause",
+          "a scratch copy of the config for the deliberate config findings (orphan view, circular lookup pair, unreferenced object) — breakage never touches shared fixtures",
+          "a writable .objectstack/installed-packages/ in the scratch tree, so an unreadable ledger entry can be staged per run"
+        ],
+        "knownGaps": [
+          "no stock fixture ships a config with an orphan view / circular lookup / unused object, so the config-analysis rows must be staged; record the staged shapes in evidence rather than skipping the rows silently",
+          "the config-analysis block runs only `if (configExists())` (doctor.ts:1955) — a bare directory exercises the environment rows alone; run both shapes and label which produced which rows"
+        ]
+      },
+      "steps": [
+        "baseline: from the untouched scaffold run `os doctor; echo $?` and `os doctor -v; echo $?` — capture both full reports (the environment rows print first: Node.js, pnpm, TypeScript, Dependencies, @objectstack/spec, Git, Environment files, then the extended checks)",
+        "stage the config findings in the scratch copy: a view whose object does not exist (orphan), two objects whose lookup fields point at each other (circular), and one object nothing references (unused); run `os doctor` and capture the three warning rows — then restore and capture the three ✓ rows (Dependencies / Object usage / View integrity)",
+        "unparseable posture: `OS_TENANCY_POSTURE=isolatd os doctor; echo $?` — the Tenancy posture ERROR row must print naming the variable and the allowed set, the REST of the report must still run, and the exit must be 1 (#5382: report-not-refuse, resolved OUTSIDE the config-analysis try at doctor.ts:1752-1753, row pushed at :1891-1893)",
+        "env provenance: put the same bad posture in a .env FILE (not the shell) and re-run — the finding must still fire (#5387 dotenv cascade) and the Environment files row must attribute the value to the file that supplied it",
+        "ledger: write .objectstack/installed-packages/broken.json holding non-JSON; run `os doctor` with NO posture set (default `single`) and capture the Installed packages row; then with a valid config and OS_TENANCY_POSTURE=isolated, confirm the run does NOT print the 'Unique scope ✓' success line while that entry is unreadable",
+        "exit split: on a warnings-only run capture `echo $?` (expect 0, '⚠️  Environment is functional' summary); on the posture-error run expect 1 ('❌ Some critical issues found' + the collected fix lines)",
+        "the expected-fail pair: in the scaffold — which has NO packages/spec/src — capture verbatim the '✓ Test coverage         All *.zod.ts files have matching tests' and '✓ Deprecations          No @deprecated tags found' lines, and note the sibling '@objectstack/spec  Not built' warning row from the same monorepo-anchored path family (doctor.ts:1837)"
+      ],
+      "acceptance": [
+        {
+          "clause": "every environment check emits its own row — Node.js, pnpm, TypeScript, Dependencies, @objectstack/spec, Git, Environment files, Installed packages — and -v adds the fix/detail lines without changing the verdicts",
+          "oracle": "log",
+          "verify": "both transcripts carry one row per check through renderHealthCheckResult (doctor.ts:1918-1926); the -v run differs only by detail lines",
+          "evidence": "the paired transcripts"
+        },
+        {
+          "clause": "#5387 env provenance: doctor resolves the same .env* cascade os serve reads, and the Environment files row names WHICH source supplied each value — the files are never silently merged into process.env",
+          "oracle": "log",
+          "verify": "the .env-staged posture still produces the finding, and the Environment files row attributes it to that file rather than the shell (environmentSourcesCheck at doctor.ts:1875; pinned by doctor-env-provenance.test.ts — cite its pass as the attribution oracle, drive the CLI for the row itself)",
+          "evidence": "the transcript + the .env file staged"
+        },
+        {
+          "clause": "#5382 posture honesty: an unrecognized OS_TENANCY_POSTURE is an ERROR row naming the variable — never swallowed by the config-analysis catch as 'Could not load config for analysis' — the rest of the report still runs, and the summary owns exit 1",
+          "oracle": "log",
+          "verify": "the isolatd run prints the Tenancy posture error row, later report sections still print after it, and echo $? is 1 (posture resolved once at doctor.ts:1752-1753, outside every try; exit via the hasErrors summary at :2158-2163)",
+          "evidence": "transcript + exit code"
+        },
+        {
+          "clause": "#5429 ledger independence: installed-package ledger rows print under EVERY posture including the default `single` — an unreadable entry under .objectstack/installed-packages/ is its own row whether or not a config loaded and whether or not any posture was set",
+          "oracle": "log",
+          "verify": "the broken.json run with no posture set carries the Installed packages failure row (readInstalledPackageEntries called unconditionally at doctor.ts:1910-1911; posture-independence pinned by doctor-ledger-posture-independence.test.ts + doctor-ledger-read-failure.test.ts)",
+          "evidence": "the default-posture transcript"
+        },
+        {
+          "clause": "the unique-scope ✓ is WITHHELD when the ledger read was incomplete: under `isolated` with an unreadable ledger entry, the 'Unique scope' success line must NOT print — a ✓ over an unexamined ledger is a false PASS (#5412/#5413/#5644)",
+          "oracle": "log",
+          "verify": "the isolated+broken-ledger run prints no 'Unique scope … No unconfirmed installation-wide uniques' line (gated on ledgerReadingIsComplete at doctor.ts:2063-2065), while the same run with the entry removed prints it",
+          "evidence": "the two isolated-run transcripts diffed on that line"
+        },
+        {
+          "clause": "config-analysis rows both ways: the staged orphan view, circular lookup and unused object each produce a warning row naming the offender, and the restored config produces the three ✓ rows",
+          "oracle": "log",
+          "verify": "detectCircularDependencies / findUnusedObjects / findOrphanViews rows (doctor.ts:1998-2080) name the staged shapes; the clean run prints 'Dependencies', 'Object usage', 'View integrity' successes",
+          "evidence": "the staged and clean transcripts"
+        },
+        {
+          "clause": "exit contract: 1 exactly when any ERROR row exists; warnings alone exit 0 under the '⚠️  Environment is functional' summary — warnings never flip the exit",
+          "oracle": "log",
+          "verify": "echo $? per run matches the summary branch taken (process.exit(1) only under hasErrors, doctor.ts:2158-2169)",
+          "evidence": "exit codes paired with summary lines"
+        },
+        {
+          "clause": "EXPECTED-FAIL (product defect — record actual behavior): findMissingTests and findDeprecatedUsages examine only <cwd>/packages/spec/src (doctor.ts:1142-1143 and :1160-1161) and return [] in any user app, whereupon doctor prints '✓ Test coverage' (:1939) and '✓ Deprecations' (:1951) about a tree it never examined. By doctor's own withhold-the-✓ reasoning (the ledger clause above, :2049-2065) a ✓ over an unexamined tree is the FAIL: the ✓ must be withheld, scoped to the tree actually walked, or the check skipped with a named reason. Today it prints — the run records the verbatim lines as the failure evidence and extracts the defect card",
+          "oracle": "log",
+          "verify": "in the scaffold (no packages/spec/src anywhere) both ✓ lines print verbatim; the clause FAILS while they do, and flips to pass only when the tree ships a fix that withholds or scopes them",
+          "evidence": "the verbatim ✓ lines + an `ls packages/spec/src` refusal from the same cwd"
+        }
+      ],
+      "negative": [
+        "an unrecognized posture reported only as 'Could not load config for analysis' with exit 0 is the exact #5382 regression the placement fix closed",
+        "a 'Unique scope ✓' printed while an installed-packages entry was unreadable is a false PASS — worse than a missing check, because it stops the operator looking further",
+        "warnings flipping the exit to 1, or an error row exiting 0, breaks every CI wrapper that gates on doctor",
+        "adjacent, same class as the expected-fail: the '@objectstack/spec  Not built' WARNING in a user app (doctor.ts:1837 probes <cwd>/packages/spec/dist) is monorepo-anchored noise — record it in the run notes; it is not this item's fail but belongs on the same defect card"
+      ],
+      "traps": ["absence-inference", "stale-dist"],
+      "source": [
+        "packages/cli/src/commands/doctor.ts (class at :1712, flags -v/--scan-deprecations :1715-1718, run body :1720-2172; posture resolve :1752-1753 + row :1891-1893; env sources row :1875; ledger read :1910-1911; unique-scope withhold :2049-2065; findMissingTests :1141-1157; findDeprecatedUsages :1159-1181; summary exit :2158-2169)",
+        "packages/cli/src/commands/doctor-env-provenance.test.ts, doctor-tenancy-posture-report.test.ts, doctor-ledger-dir-authority.test.ts, doctor-ledger-posture-independence.test.ts, doctor-ledger-read-failure.test.ts, doctor-config-load-cause.test.ts, doctor-node-env-default.test.ts (the unit pins — they cover the row-building seams, none drives the CLI end-to-end, which is why this item carries no automated entry)",
+        "sibling item cli.flag-command-error-ux (owns only `os doctor --help`; this item is the command's first functional coverage)",
+        "sibling item cli.doctor-deprecation-scan (the --scan-deprecations flag's own item — cross-referenced, not duplicated)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能): `os doctor` as a whole had NO checklist item; it appeared only as a --help variant on cli.flag-command-error-ux while carrying seven unit-pinned seams (env provenance #5387, posture honesty #5382, ledger independence #5429, withheld ✓ #5412/#5413/#5644). Authored from the run body at doctor.ts:1720-2172 with the withhold-the-✓ discipline the command itself established turned back on its own monorepo-anchored Test-coverage/Deprecations ✓s, which bless a tree they never examined in every user app — encoded as an expected-fail probe rather than silently accepted", "ref": "claude/new-session-0pv25p" }
+      ]
+    },
+    {
+      "id": "cli.doctor-deprecation-scan",
+      "title": "os doctor --scan-deprecations: every retired pattern is found with file:line attribution, decoys are skipped, the run warns without gating — and the remediation hint prescribes a command that does not exist (expected-fail)",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "cli",
+      "personas": ["operator (local shell)", "upgrading author (pre-major sweep)"],
+      "fixtures": {
+        "app": "scaffold",
+        "requires": [
+          "a scratch blank scaffold (`npx -y create-objectstack@latest qa-depscan -t blank` — the template ships src/objects/note.object.ts, the same provisioning cli.scaffold-first-run drives) whose src/ the run seeds with one hit per pattern",
+          "decoy files staged per run: a src/*.test.ts twin, a src/node_modules/dep/index.ts, and a src/*.json metadata file carrying a retired key — all three must stay unreported"
+        ],
+        "knownGaps": [
+          "no test anywhere in the repo references --scan-deprecations — this item is the surface's first coverage of any kind, so there is no automated entry and no pin to lean on"
+        ]
+      },
+      "steps": [
+        "scaffold and seed src/legacy.ts with one line per DEPRECATED_PATTERNS entry — count the table yourself at doctor.ts:1186-1234 (8 entries at authoring time): EnhancedObjectKernel, max_length, default_value, min_length, the retired lookup-scoping pair (one entry, BOTH spellings: reference_filters AND referenceFilters — seed both lines), unique_name, `import ... from '@objectstack/core/enhanced'`, `import ... from '@objectstack/spec/dist/x'`",
+        "stage the decoys: src/legacy.test.ts with the same content, src/node_modules/dep/index.ts with the same content, and src/meta.json carrying \"referenceFilters\"",
+        "run `os doctor --scan-deprecations; echo $?` and capture the per-hit rows and the closing hint line verbatim; re-run with `--scan-deprecations --verbose` and capture the replacement prescriptions",
+        "clean pass: delete the seeds (keep the decoys) and re-run — expect '✓ Deprecation scan      No deprecated patterns found' and exit 0",
+        "absent-src probe: run `os doctor --scan-deprecations` from a scratch dir with NO src/ at all and capture that the SAME success line prints",
+        "record `os help codemod; echo $?` (or `os codemod --help`) from the same shell — the command the hint prescribes"
+      ],
+      "acceptance": [
+        {
+          "clause": "every seeded pattern is reported with file:line attribution matching the seeded lines — 8 registry entries, with the retired-lookup entry attributing BOTH its spellings (reference_filters and referenceFilters land on one regex, doctor.ts:1215)",
+          "oracle": "log",
+          "verify": "each warning row reads '<file>:<line> — <description>' (doctor.ts:2143) and the file:line pairs match where the seeds were written; no seeded line is missing and no unseeded line is reported",
+          "evidence": "the seeded file with line numbers + the transcript rows"
+        },
+        {
+          "clause": "--verbose prints each hit's replacement prescription ('Use maxLength (camelCase)', 'Use lookupFilters … removed in #2377', …); the bare run withholds them",
+          "oracle": "log",
+          "verify": "the dim '→ <replacement>' lines appear under --verbose only (doctor.ts:2144-2146)",
+          "evidence": "the two transcripts diffed"
+        },
+        {
+          "clause": "the scan WARNS and never gates: a run with hits prints the warning rows and the count line yet exits 0 (hits feed hasWarnings only, never hasErrors), and the clean run prints the success line and exits 0 — both sides captured",
+          "oracle": "log",
+          "verify": "echo $? is 0 for both the seeded and the clean run; the seeded run's summary is the '⚠️  Environment is functional' branch (doctor.ts:2140-2152 sets hasWarnings; exit 1 is reserved for error rows at :2158)",
+          "evidence": "both exit codes + summary lines"
+        },
+        {
+          "clause": "decoys stay silent, each for its own documented reason: *.test.ts filtered (doctor.ts:1240), node_modules pruned by the walk (:1130), and the .json file never visited because the walk is .ts-only (:1240) — the .json silence is recorded as a DOCUMENTED BOUNDARY of the scan (retired keys in JSON metadata are out of its reach), never as evidence the metadata is clean",
+          "oracle": "log",
+          "verify": "no transcript row names legacy.test.ts, node_modules, or meta.json; the run record states the .ts-only boundary explicitly",
+          "evidence": "the transcript + the staged decoy listing"
+        },
+        {
+          "clause": "absent-src honesty: with no src/ directory the scanner returns [] (doctor.ts:1238) and doctor prints the SAME success line a genuinely clean tree gets — so the success line alone is NOT evidence of cleanliness. The run must pair the line with proof src/ existed and was walked; a run record citing the line without that proof is the absence-inference false positive this clause exists to block",
+          "oracle": "log",
+          "verify": "the no-src run prints '✓ Deprecation scan      No deprecated patterns found'; the run record annotates it as scanned-nothing, with `ls src` refusal captured alongside",
+          "evidence": "the no-src transcript + the ls refusal"
+        },
+        {
+          "clause": "EXPECTED-FAIL (shippable defect — record actual behavior): the remediation hint printed after hits (doctor.ts:2149) prescribes `objectstack codemod v2-to-v3`, but no codemod command is registered anywhere in packages/cli/src/commands/ — the prescription is a dead end, and content/docs/protocol/backward-compatibility.mdx:134 admits the command is 'not yet available'. The real metadata codemod is `os migrate meta` (cli.migrate-meta-codemod). The clause: the hint must name a command os actually registers; today it does not",
+          "oracle": "log",
+          "verify": "the hint line is captured verbatim from the seeded run, and `os codemod --help` errors 'command … not found' (nonzero) from the same binary — the pair is the failure evidence; the clause flips to pass when the hint names a registered command",
+          "evidence": "the hint line + the command-not-found capture"
+        }
+      ],
+      "negative": [
+        "a hit reported from a *.test.ts or node_modules path is a filter regression",
+        "a run with hits exiting nonzero is a gate this surface never had — the scan is advisory by design",
+        "a run record that ticks the clean clause on the success line alone, without proving src/ existed, is the absence-inference false positive",
+        "the retired-lookup entry reporting only one of its two spellings while both were seeded"
+      ],
+      "traps": ["absence-inference", "stale-dist"],
+      "source": [
+        "packages/cli/src/commands/doctor.ts (flag :1717; scan block :2136-2153 with the scanDir = <cwd>/src at :2138 and the hint at :2149; DEPRECATED_PATTERNS :1186-1234; scanDeprecatedPatterns :1236-1265 — absent-dir [] at :1238, .ts-only walk + .test.ts filter :1240; walkDir node_modules prune :1130)",
+        "content/docs/protocol/backward-compatibility.mdx:126-134 (the documented workflow, including the :134 admission that the codemod command is not yet available)",
+        "packages/cli/README.md §os doctor (documents -v and --scan-deprecations)",
+        "packages/create-objectstack/src/templates/blank/ (the scaffold whose src/ the seeds land in)",
+        "sibling items cli.doctor-health-report (the command's own report contract) and cli.migrate-meta-codemod (the codemod that actually exists)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能), found independently by two hunters and re-verified against source: --scan-deprecations had zero coverage of any kind (no test in the repo references it). The 8-entry pattern table was recounted from doctor.ts:1186-1234; brief line-drift corrected during authoring (absent-dir return is :1238 not :1273, the scanner body ends at :1265 not :1276). The dead `objectstack codemod v2-to-v3` prescription at :2149 is encoded as an expected-fail clause with the docs' own 'not yet available' admission as corroborating source", "ref": "claude/new-session-0pv25p" }
+      ]
+    },
+    {
+      "id": "cli.migrate-duplicates-inventory",
+      "title": "os migrate duplicates: a read-only JSON inventory of identifiers minted across partitions — within-partition repeats excluded, nothing written, the live two-counter condition reported, and runnable BEFORE the #8686 repair destroys the evidence",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "cli",
+      "personas": ["operator (local shell, pre-repair audit)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a scratch app + persistent sqlite DB whose base schema was synced by ONE prior `os dev` boot (the same recipe cli.migrate-plan-apply-json uses), e.g. -d file:/tmp/<run>/dup.db — the app config must declare an org-scoped object with an autonumber (or unique) field",
+          "direct SQL seeding after that boot (sqlite3 CLI or a node better-sqlite3 one-liner): one identifier value held by a row with organization_id NULL AND a row with organization_id '<org>' (the cross-partition duplicate); the same value twice WITHIN '<org>' on a second identifier (the excluded repeat); and two _objectstack_sequences rows for the same object/field — one __global__ tenant, one org-scoped (the live condition)"
+        ],
+        "knownGaps": [
+          "ORDERING IS LOAD-BEARING: do NOT boot the dev server again between seeding and scanning — a #8686-repairing boot backfills organization_id = NULL, which is exactly the evidence this report inventories (the command's own header calls the evidence perishable). The duplicates command itself boots read-only (deferSchemaDdl + readOnlyProbe) and is safe to run any number of times",
+          "the memory and mongodb drivers expose no raw-SQL seam, so the negative no_sql_seam probe needs a second scratch config on the memory driver — stage it per run"
+        ]
+      },
+      "steps": [
+        "boot the scratch app once with `os dev -d file:/tmp/<run>/dup.db` so the base schema exists; stop it",
+        "seed via direct SQL per the fixture recipe: the cross-partition duplicate, the within-partition repeat, an organizations row for '<org>', and the paired sequence counters",
+        "md5sum the DB file; run `os migrate duplicates > report.json; echo $?`; md5sum again and byte-compare",
+        "jq the report: .report/.reportVersion/.generatedAt/.database/.globalPartition/.filter/.counters/.scanned/.skipped/.duplicates/.liveConditions/.summary",
+        "run `os migrate duplicates --object <the-object>` and `--object <an-object-with-no-findings>` — capture .filter in both payloads",
+        "run `os migrate duplicates --database-url file:/tmp/<run>/dup.db` and confirm it reaches the same DB (the flag also honors OS_DATABASE_URL)",
+        "negative: from the memory-driver scratch config run `os migrate duplicates; echo $?` and capture the refusal payload",
+        "stderr/stdout split: confirm report.json parses as ONE JSON document — the boot's own log lines must have gone to stderr (#6217)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the report is the declared machine-readable contract on stdout: report 'duplicate-identifiers', reportVersion 1, generatedAt, database, globalPartition, filter, counters {table, status read|absent}, scanned[], skipped[], duplicates[], liveConditions[], summary — and each duplicate carries object/field/value/holderCount/partitions plus per-holder id/organization/partition/createdAt (createdAt null when the object has no such column, never a failed probe)",
+          "oracle": "log",
+          "verify": "jq walks every declared key of the seeded run's payload; shape pinned by duplicates.contract.test.ts — cite its pass for the full-shape guarantee, drive the CLI for the instance",
+          "evidence": "report.json + the jq walk"
+        },
+        {
+          "clause": "the ruled definition of duplicate holds (#8928 point 2): the value held in two COALESCE(organization_id,'__global__') partitions IS reported; the value repeated WITHIN one partition is NOT — the partitioned unique index owns that defect",
+          "oracle": "log",
+          "verify": "the cross-partition seed appears in .duplicates with both partitions listed; the within-partition seed appears nowhere in .duplicates (the probe demands COUNT(*) > 1 AND COUNT(DISTINCT partition) > 1, duplicates.ts:263-266)",
+          "evidence": "the seeded values vs the report's duplicates array"
+        },
+        {
+          "clause": "read-only in fact, not just in intent: the DB file is byte-identical before and after a full run — no DDL, no seed, no row written (deferSchemaDdl + readOnlyProbe boot, duplicates.ts:670-679)",
+          "oracle": "log",
+          "verify": "the two md5sums match; duplicates.pre-repair.test.ts pins the same invariant down to _objectstack_sequences",
+          "evidence": "the md5 pair"
+        },
+        {
+          "clause": "the live condition (#8928 point 4) fires exactly when a __global__ counter sits beside an org-scoped counter for the same object/field — reported as a prediction with globalLastValue and the per-org counters, and counters.status says where it was read from ('absent' still yields a complete duplicates inventory)",
+          "oracle": "log",
+          "verify": ".liveConditions names the seeded object/field with both counters' last values; dropping the org counter row and re-running empties it while .duplicates is unchanged",
+          "evidence": "the two runs' liveConditions diffed"
+        },
+        {
+          "clause": "--object narrows the scan AND records the narrowing: .filter is {object} on a filtered run and null on a full run, so an archived narrowed report can never be mistaken for a full scan",
+          "oracle": "log",
+          "verify": "the three payloads' .filter fields (null / the object / the no-findings object) match the invocations",
+          "evidence": "the .filter captures"
+        },
+        {
+          "clause": "--database-url (and OS_DATABASE_URL) points the inspection at a named DB directly, and a target the command could not probe lands in .skipped with its reason — never silently omitted from a report that then reads as clean",
+          "oracle": "log",
+          "verify": "the --database-url run returns the same duplicates as the project-resolved run; any unprobeable (object, field) appears in .skipped with reason text",
+          "evidence": "the paired payloads"
+        },
+        {
+          "clause": "a driver with no raw-SQL seam refuses LOUDLY: {error: 'no_sql_seam', …} with exit 1 — an empty clean report from a driver the probe cannot run against would be indistinguishable from 'never looked'",
+          "oracle": "log",
+          "verify": "the memory-driver run emits the no_sql_seam payload and echo $? is 1 (duplicates.ts:697-712); a boot failure likewise answers {error: 'boot_failed'} exit 1, never a zero-duplicate success",
+          "evidence": "the refusal payload + exit code"
+        }
+      ],
+      "negative": [
+        "any write to the inspected DB — a created sqlite file, a synced column, a mutated counter — is the FAIL the ruling's read-only boot exists for",
+        "a within-partition repeat surfacing in .duplicates misdiagnoses a unique-index defect as tenancy damage",
+        "there is NO --json flag: stdout is always the report (the payload IS the deliverable, #8928 point 3) — probing `--json` and reading the oclif Nonexistent-flag exit 2 as this command's contract is a runner error, not a finding",
+        "an empty .duplicates from a run whose .skipped is non-empty must not be summarized as 'no duplicates' without naming what was skipped"
+      ],
+      "traps": ["stale-dist", "absence-inference"],
+      "source": [
+        "packages/cli/src/commands/migrate/duplicates.ts (the :17-80 contract header encoding the 2026-08-16 maintainer ruling's five points; report interfaces :82-165; the cross-partition HAVING at :263-266; flags :648-656; read-only boot :670-679; no_sql_seam refusal :697-712)",
+        "packages/cli/src/commands/migrate/duplicates.contract.test.ts (the full JSON shape against a real sqlite), duplicates.pre-repair.test.ts (byte-identical DB + the #8686 repair measured destroying the evidence), duplicates.integration.test.ts, duplicates.probe-sql.test.ts — seam pins; none drives the oclif command end-to-end, hence no automated entry",
+        "#8928 (the card and ruling), #8686 / #8844 (the closed producers whose damage this inventories)",
+        "sibling item cli.migrate-plan-apply-json (lists duplicates as a variant; the scratch-DB boot recipe is shared)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能): `os migrate duplicates` landed 2026-08-16 (#8928) after the sibling migrate item's enumeration was authored, so the subcommand had no functional coverage. Authored from the :17-80 contract header's five ruling points, with the perishability ordering (seed → scan → only then any repair-bearing boot) carried as a load-bearing knownGap and the no-JSON-flag posture spelled out so the #4873 sweep does not misread an oclif 2", "ref": "claude/new-session-0pv25p" }
+      ]
+    },
+    {
+      "id": "cli.datasource-introspect-codegen",
+      "title": "os datasource list-tables/introspect/validate: the federation door answers, the generated draft is cwd-jailed and compiles, and schema drift maps to ✗ diffs with exit 1",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "cli",
+      "personas": ["operator (local shell)", "integration author (adopting a remote table)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a booted showcase (`pnpm dev -- --fresh -p <port>`) — it ships the external datasource fixture: examples/app-showcase/src/system/datasources/showcase-external.datasource.ts (name 'showcase_external', sqlite file .objectstack/data/showcase_external.db) seeded by external-fixture.ts",
+          "an admin session token minted via POST /api/v1/auth/sign-in/email (the external-datasource routes sit behind the auth guard — external-datasource-routes-auth-guard.test.ts); pass it as --token / OS_TOKEN, with --url / OS_CLOUD_URL pointing at the boot port",
+          "a scratch objects/ dir in the invocation cwd for the --out draft, and a scratch config to wire the draft into for the compile clause"
+        ],
+        "knownGaps": [
+          "no test anywhere references the three CLI commands themselves (the REST side is tested; the oclif wrappers are not) — this item is their first functional coverage, so there is no automated entry",
+          "the #5594 carve-out applies to the fixture DB: .objectstack/data/showcase_external.db is a cwd-relative app-declared path that survives --fresh by documented design — do not file its persistence as a bug"
+        ]
+      },
+      "steps": [
+        "boot showcase on a scratch port and mint the admin token (the cli.qa-suite-execution recipe)",
+        "`os datasource list-tables showcase_external --url http://localhost:<port> --token <t>` — capture the table listing; repeat with `--schema <s>` and with a schema that matches nothing ('No remote tables found.')",
+        "`os datasource introspect showcase_external --table <t> --url … --token <t>` — draft printed to stdout; then re-run with `--out objects/qa_external.object.ts` and capture 'Wrote objects/qa_external.object.ts' plus any 'REVIEW: column …' warnings",
+        "escape probes: re-run with `--out ../qa-escape.object.ts` and `--out /tmp/qa-escape.object.ts` — capture both refusals and `echo $?`, and confirm neither file exists afterwards",
+        "wire the generated object into the scratch config and run `os build; echo $?`",
+        "`os datasource validate showcase_external --url … --token <t>; echo $?` on the untouched fixture (expect ✓ rows, exit 0); then rename a column in the fixture DB (sqlite3 ALTER TABLE) or edit the adopted object's column mapping, re-run, and capture the ✗ diff rows and exit 1",
+        "negative: run all three commands against a datasource name that does not exist and capture each error + exit code"
+      ],
+      "acceptance": [
+        {
+          "clause": "list-tables prints the remote tables with schema qualification and column counts (plus row estimates when the driver reports them) through GET /api/v1/datasources/:name/external/tables, and --schema narrows via the ?schema= query — this item pins the CLI's /external/tables FEDERATION door specifically; the admin twin GET /:name/remote-tables is a different mount owned by the integration-system area",
+          "oracle": "log",
+          "verify": "the listing matches the fixture DB's actual tables (cross-check with sqlite3 .tables on showcase_external.db); the schema filter narrows and the no-match run prints 'No remote tables found.' (list-tables.ts:38-57; route registered in packages/rest/src/external-datasource-routes.ts, ledgered at rest-route-ledger.ts:357)",
+          "evidence": "the listings + the sqlite3 cross-check"
+        },
+        {
+          "clause": "introspect generates an Object draft from the remote table (POST …/external/tables/:remote/draft) — stdout by default, --out writes the file and echoes the path, and draft.review notes surface as REVIEW: warnings rather than being dropped",
+          "oracle": "log",
+          "verify": "the draft source names the remote table's columns; the --out run writes exactly objects/qa_external.object.ts; review notes (if the fixture produces any) print as 'REVIEW: column … — …' (introspect.ts:42-83)",
+          "evidence": "the draft + the written file + any REVIEW lines"
+        },
+        {
+          "clause": "the --out jail holds BOTH ways: an absolute path and a cwd-escaping relative path are each refused with '--out must be a relative path within the current directory', exit nonzero, and NO file is written — the body is server-generated TypeScript, so the jail is a security boundary against a compromised server, not a convenience check",
+          "oracle": "log",
+          "verify": "both escape probes print the worded refusal (introspect.ts:65-74 — resolve() against cwd, isAbsolute + prefix check) with nonzero exit, and ls confirms neither target exists",
+          "evidence": "both refusals + exit codes + the absence listing"
+        },
+        {
+          "clause": "the generated draft COMPILES: wired into a config, os build exits 0 — the codegen's output is a working input to the authoring pipeline, not a sketch",
+          "oracle": "build",
+          "verify": "os build on the scratch config carrying the draft exits 0 and the artifact contains the object; any refusal names what the draft got wrong, and that gap is the finding",
+          "evidence": "build exit code + the artifact excerpt"
+        },
+        {
+          "clause": "validate is the drift detector with an honest exit: matching objects print '✓ <object> matches'; a mismatch prints per-diff rows (kind, column, expected vs actual, ✗ for error / ⚠ for warning) and the run exits 1 exactly when an error-severity diff exists",
+          "oracle": "log",
+          "verify": "the untouched run is all-✓ exit 0; the staged-drift run prints the ✗ row naming the renamed column and echo $? is 1 (validate.ts:59-74 — hasError gates this.error(…, {exit: 1}))",
+          "evidence": "both transcripts + exit codes"
+        },
+        {
+          "clause": "the server's error arm is honored on all three commands: a body.error (unknown datasource, driver failure) becomes this.error — a printed error WITH a nonzero exit, never a 0",
+          "oracle": "log",
+          "verify": "the unknown-name probes each exit nonzero with the server's own error text (list-tables.ts:46, introspect.ts:57, validate.ts:51)",
+          "evidence": "the three error captures + exit codes"
+        }
+      ],
+      "negative": [
+        "an --out escape that lands a server-authored file outside the project tree is the security FAIL the jail exists for — the refusal must be proven, not assumed from the code",
+        "validate exiting 0 while an error-severity diff printed breaks every CI wrapper watching for schema drift",
+        "a draft that does not compile through os build makes the adoption workflow a dead end — the whole point of codegen",
+        "route-spelling trap: the CLI addresses /external/tables (federation, packages/rest); probing the admin /remote-tables spelling and reading its 404 as 'the CLI's route is gone' conflates two mounts — the API-door coverage of the admin twin belongs to the integration-system area, not here"
+      ],
+      "traps": ["dispatcher-vs-hono-route", "seed-data-thin", "wrong-persona"],
+      "source": [
+        "packages/cli/src/commands/datasource/list-tables.ts (:12-15 route doc, :38-57 listing), introspect.ts (:14-18 route doc, :31-36 flags, :65-74 the cwd jail, :81-83 REVIEW passthrough), validate.ts (:12-16 route doc, :59-74 diff rendering + exit)",
+        "packages/rest/src/external-datasource-routes.ts + rest-route-ledger.ts:357-361 (the served federation routes incl. POST …/external/validate) and external-datasource-routes-auth-guard.test.ts (the auth wall the token satisfies)",
+        "examples/app-showcase/src/system/datasources/showcase-external.datasource.ts + external-fixture.ts (the fixture datasource 'showcase_external')",
+        "ADR-0015 (external datasource federation)",
+        "sibling item cli.flag-command-error-ux (owned only the topic's --help until now)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能): the datasource topic's three subcommands had only a --help variant, no functional coverage. Re-verified against source during authoring: the hunter brief asked whether an --out escape refusal exists — it DOES (introspect.ts:65-74, absolute + traversal both refused before any write), so the jail is asserted positively with both escape probes rather than worded observe-and-flag. The /external/tables-vs-/remote-tables mount split is recorded as a runner trap with the admin twin explicitly routed to the integration-system area", "ref": "claude/new-session-0pv25p" }
+      ]
+    },
+    {
+      "id": "cli.hook-body-extraction-gates",
+      "title": "Hook/action body extraction: --strict-body refuses every forbidden pattern with its own worded reason, capability tokens are inferred (and crypto.hash is NOT, #4391), free identifiers fall back to bundling — and the DEFAULT build's silent fallback contradicts the extractor's own contract (expected-fail)",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "cli",
+      "personas": ["build-time author (no session)"],
+      "fixtures": {
+        "app": "scaffold",
+        "requires": [
+          "a scratch blank scaffold whose config authors the probe hooks — one per FORBIDDEN_PATTERNS entry, one per CAPABILITY_PATTERNS shape, the ctx.crypto.hash regression probe, the @capabilities override, the const-api alias, an implicit-return arrow, and one handler calling a module-scope helper",
+          "jq over dist/objectstack.json — body presence and body.capabilities per hook are the artifact-side oracle"
+        ],
+        "knownGaps": [
+          "the RUNTIME half of every token (the sandbox rejecting an undeclared call, log routing) is records-forms territory (its L2 sandbox item cites body-runner.ts:321) — this item owns the BUILD-side gate and inference only; do not re-prove the sandbox here",
+          "bodyExtractionWarnings are invisible on a default build (see the expected-fail clause), so the default-path evidence must come from the artifact (body absent, bundle emitted), not from output that will not appear"
+        ]
+      },
+      "steps": [
+        "author the forbidden seven, one hook each: dynamic import(, require(, fetch(, process.<x>, globalThis.<x>, eval(, new Function( — then run `os build --strict-body; echo $?` and capture every per-callable diagnostic verbatim",
+        "the default-path pair on the SAME config: `os build; echo $?` — capture the exit, the 'Bundling N handler(s)…' line, and jq the artifact for each hook's body (expect ABSENT) and handler ref (expect present)",
+        "the inference matrix, one hook each on a clean config: ctx.api.object('x').find(…) · ctx.api.object('x').update(…) · const api = ctx.api; api.object('x').find(…) · ctx.crypto.randomUUID() · ctx.log.info(…) · a body whose ONLY crypto call is ctx.crypto.hash(…) · a body with '// @capabilities api.read api.write' as its first line and no matching calls · an implicit-return arrow — `os build` then jq each hook's body.capabilities and isExpression handling",
+        "free-identifier probe: a handler calling a module-scope helper function — `os build; echo $?` (expect green, handler bundled, no body) then `os build --strict-body; echo $?` (expect exit 1 naming the identifier)",
+        "all-body-only run: remove every non-extractable handler and confirm the 'Skipping legacy runtime bundle (all N callables are body-only)' line and that no objectstack-runtime.*.mjs remains in dist/",
+        "re-run the strict-body failure with --json and capture the { success: false, error: 'strict-body: missing body', issues } payload"
+      ],
+      "acceptance": [
+        {
+          "clause": "--strict-body refuses EACH forbidden pattern with that pattern's own worded reason — fetch and import prescribe 'declare a Connector recipe instead', require/process/globalThis/eval/new Function each name themselves — never a bare parse error, and the run exits 1 (the --json arm emits the issues payload then exits 1)",
+          "oracle": "build",
+          "verify": "the seven diagnostics each quote the matching FORBIDDEN_PATTERNS reason (extract-hook-body.ts:33-41) under the '--strict-body: N callable(s) lack a metadata body' error (compile.ts:126-149); echo $? is 1 on both the human and --json paths",
+          "evidence": "the seven verbatim diagnostics + exit codes + the --json payload"
+        },
+        {
+          "clause": "read/write inference from the artifact: .object(x).find → api.read and .object(x).update → api.write land in body.capabilities — and the const-api ALIAS is still caught, because the regex deliberately matches any chain ending in .object(…).<method> (over-inclusive by design; a false-positive token is rejected at runtime by the sandbox, not silently honored at build)",
+          "oracle": "build",
+          "verify": "jq shows ['api.read'] on the find hook, ['api.write'] on the update hook, and ['api.read'] on the alias hook (CAPABILITY_PATTERNS at extract-hook-body.ts:49-50 with the :44-48 rationale)",
+          "evidence": "the jq captures per hook"
+        },
+        {
+          "clause": "ctx.crypto.randomUUID → crypto.uuid and ctx.log.<info|warn|error|debug> → log are inferred; and the #4391 regression clause: ctx.crypto.hash infers NOTHING — the crypto.hash token was removed because the sandbox never installed the function, and inferring a capability from a call that always threw is what let os build bless a dead body",
+          "oracle": "build",
+          "verify": "jq shows ['crypto.uuid'] and ['log'] on their hooks, and the hash-only hook's body.capabilities is [] — any crypto token there is the pinned regression (extract-hook-body.ts:51-56, the :52-55 removal note)",
+          "evidence": "the three jq captures"
+        },
+        {
+          "clause": "the '// @capabilities …' first-line override adds exactly the named tokens (from the closed set api.read/api.write/crypto.uuid/log) even when no call pattern matches, merged with any inference — the author's declaration wins additively",
+          "oracle": "build",
+          "verify": "the override hook with no matching calls carries ['api.read','api.write'] in the artifact (extract-hook-body.ts:118-131; documented at content/docs/automation/hook-bodies.mdx:320-327)",
+          "evidence": "the jq capture"
+        },
+        {
+          "clause": "#1876 self-containment: a handler referencing a module-scope identifier throws out of extraction naming the identifier(s), the caller catches and keeps the handler BUNDLED (no body, handler ref into the .mjs) so the default build stays green with no behavior change — while --strict-body surfaces the same message as a hard failure",
+          "oracle": "build",
+          "verify": "default run: exit 0, jq shows no body on that hook, the runtime bundle is emitted; strict run: exit 1 with 'references identifier(s) not in scope at runtime: <helper>' (extract-hook-body.ts:94-109; the catch-and-bundle at lower-callables.ts:63-78)",
+          "evidence": "both runs' exits + the jq capture + the strict diagnostic"
+        },
+        {
+          "clause": "an all-body-only config skips the legacy bundle: the skip line prints, no objectstack-runtime.*.mjs lands in dist/, and previously emitted bundles are cleaned — the artifact is a single self-describing JSON",
+          "oracle": "build",
+          "verify": "the 'Skipping legacy runtime bundle' line (compile.ts:390-393) + an empty dist/ glob for the .mjs after a run that previously emitted one",
+          "evidence": "the line + the dist listing"
+        },
+        {
+          "clause": "EXPECTED-FAIL (contract contradiction — record actual behavior): on a DEFAULT `os build`, a forbidden-pattern hook ships SILENTLY via the .mjs bundle — the extraction failure is caught (lower-callables.ts:63-78), the warning is recorded in bodyExtractionWarnings but printed NOWHERE on the default path and excluded from the --json success payload (whose warnings key carries rule advisories only, compile.ts:437) — while the extractor's own contract header promises the build FAILS with 'no silent fallback to the L3 .mjs path because that path is being closed' (extract-hook-body.ts:14-18). hook-bodies.mdx:256 documents the warn-and-bundle default, so the DOCS and the CODE agree with each other and both contradict the extractor's stated contract. The clause: a forbidden pattern on the default path must at least SURFACE its warning; today the only observable trace is the bundle's existence",
+          "oracle": "build",
+          "verify": "the default run over the forbidden seven exits 0 with zero extraction-related output — grep the transcript and the --json payload for any of the seven reasons (expect none) while jq confirms all seven hooks are body-less and the bundle was emitted; the clause FAILS on that silence and flips when the warnings surface (or the header's fail-the-build contract is actually enforced)",
+          "evidence": "the silent transcript + --json payload + the jq body-absence sweep"
+        }
+      ],
+      "negative": [
+        "a forbidden body reaching the artifact AS body.source is the sandbox-bypass FAIL the whole allow-list exists for — worse than any warning question",
+        "a crypto token inferred from ctx.crypto.hash is the #4391 regression: a build blessing a body that can only throw at runtime",
+        "--strict-body exiting 0 while any callable lacks a body, or a bare 'could not parse' where a pattern's worded reason belongs",
+        "an alias (const api = ctx.api) escaping api.read/api.write inference would ship a body the sandbox then rejects at first call — the over-inclusive regex is deliberate, its narrowing is a regression",
+        "this item does NOT own the runtime sandbox: proving a token's enforcement belongs to records-forms' L2 sandbox coverage, and the build's generic exit contract to cli.build-own-contract"
+      ],
+      "traps": ["stale-dist", "absence-inference"],
+      "source": [
+        "packages/cli/src/utils/extract-hook-body.ts (contract header :3-29 — whose fail-the-build sentence the expected-fail clause tests; FORBIDDEN_PATTERNS :33-41; CAPABILITY_PATTERNS :43-57 with the #4391 removal note :52-55; #1876 free-identifier throw :94-109; @capabilities override :118-131)",
+        "packages/cli/src/utils/lower-callables.ts (:33-36 the warnings field, :63-78 tryExtractBody's catch-all fallback-to-bundle — the seam the default path's silence flows from)",
+        "packages/cli/src/commands/compile.ts (:126-149 the --strict-body gate, :366-393 the needsBundle decision + skip line, :437 the --json warnings key that excludes extraction warnings)",
+        "content/docs/automation/hook-bodies.mdx (:254-256 the documented default + --strict-body posture; :311-327 the inference table + override)",
+        "packages/cli/src/utils/lower-callables.test.ts (the existing unit seam pin — cited, not a substitute for driving os build)",
+        "sibling items records-forms (runtime sandbox side, body-runner.ts) and cli.build-own-contract (the build's own exit/output contract)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能): a security grant derived from a regex had no checklist item — only the runtime side of one token (records-forms) and the build's generic exit contract were covered. RE-VERIFIED against source with one material correction to the hunter brief: a forbidden pattern does NOT fail a default `os build` — lower-callables.ts:63-78 catches every extraction error and falls back to the bundle, the warnings print nowhere on that path, and only --strict-body (compile.ts:126-149) produces the worded refusals; hook-bodies.mdx:256 documents exactly that, while the extractor's own header still promises fail-with-no-fallback. The worded-refusal clauses are therefore pinned to --strict-body, and the default path's silence is encoded as the expected-fail contradiction clause", "ref": "claude/new-session-0pv25p" }
+      ]
+    },
+    {
+      "id": "cli.lint-severity-exit-contract",
+      "title": "os lint: the three-severity vocabulary is closed, exit is 1 exactly on errors, --json is the declared lint shape with duration inside the payload, the #4409 registry keeps lint and build in agreement, and the i18n fold hides platform noise honestly",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "cli",
+      "personas": ["operator (local shell)", "metadata author (pre-build hygiene)"],
+      "fixtures": {
+        "app": "scaffold",
+        "requires": [
+          "a scratch blank scaffold whose config the probes stage: one error-severity finding (a camelCase object name → naming/snake-case, or a missing label → required/label), one warning (a lowercase label → convention/label-case), and one #4409 gating-rule breakage shared with cli.build-own-contract's step (the Approval approver expression that does not parse)",
+          "a throwing config in a second scratch dir for the load-failure probes"
+        ],
+        "knownGaps": [
+          "no staged fixture reliably produces a 'suggestion' finding (they arrive via registry 'info' findings and data-model advisories), so the suggestion tier is asserted through the vocabulary/shape clauses rather than a staged instance — record which severities the run actually produced",
+          "--score and --eval are separate surfaces (the metadata-quality rubric and the generation eval) deliberately out of this item's scope — they need their own item if coverage is wanted",
+          "the stock showcase ships translations, so the platform-fold probe runs on the scaffold where the metadataForm baseline is the only i18n noise"
+        ]
+      },
+      "steps": [
+        "stage the error + warning findings and run `os lint; echo $?` — capture the grouped Errors/Warnings/Suggestions sections with their ✗/⚠/ℹ icons and per-issue rule/path lines",
+        "fix the error, keep the warning: `os lint; echo $?` (expect exit 0 — warnings never gate)",
+        "md5sum the config; run `os lint --fix; echo $?` and capture the '→ fix:' suggestions and the 'Dry-run mode: no files were modified.' line; md5sum again",
+        "`os lint --json; echo $?` on both the error-bearing and warnings-only configs — capture the full payloads and exits",
+        "the registry-parity pair: on the broken-approver config run BOTH `os lint; echo $?` and `os build; echo $?` and compare which findings each reports",
+        "the i18n fold: on the scaffold run bare `os lint` (capture the dim 'platform built-ins: N i18n issue(s) hidden — rerun with --include-platform' line when it appears), then `os lint --include-platform` (the metadataForm findings surface), then `os lint --skip-i18n` (the fold is absent entirely)",
+        "load failure: in the throwing-config dir run `os lint; echo $?` and `os lint --json; echo $?` — capture the message/payload and exits"
+      ],
+      "acceptance": [
+        {
+          "clause": "the severity vocabulary is closed at error | warning | suggestion: every reported issue carries one of the three, the human report groups by them with ✗/⚠/ℹ, and each issue names its rule and path",
+          "oracle": "log",
+          "verify": "every issues[].severity in the --json payloads is one of the three (the Severity type, lint.ts:30); the human sections match (lint.ts:577-615)",
+          "evidence": "the payloads + the grouped transcript"
+        },
+        {
+          "clause": "exit contract: 1 exactly when errors > 0 — warnings and suggestions NEVER flip it, on either path (--json's exit slot is errors.length > 0 ? 1 : 0 through CliExitCode; the human path exits via process.exit(1) only under errors) — and duration reports INSIDE the --json payload, never in the exit slot (the #4873 class; format.ts's own doc names os lint as the command that does this correctly)",
+          "oracle": "log",
+          "verify": "the error-bearing runs exit 1, the warnings-only runs exit 0, on both paths (lint.ts:543-553 and :634); the payload carries a numeric duration key and the exit is exactly 0 or 1, stable across a repeat run",
+          "evidence": "the four exit codes + the payload's duration key + one repeat"
+        },
+        {
+          "clause": "--json emits the DECLARED lint shape: { passed, total, errors, warnings, suggestions, hiddenPlatform?, score?, issues: [{severity, rule, message, path, fix?}], duration } with the counters reconciling against issues[] — note this is lint's OWN shape, not os validate's (the #3782 build/validate parity class does not extend here; the parity lint owes is the registry clause below)",
+          "oracle": "log",
+          "verify": "jq walks the declared keys; recomputed per-severity counts from issues[] equal the counters; passed === (errors === 0) (lint.ts:539-554)",
+          "evidence": "the payload + the jq reconciliation"
+        },
+        {
+          "clause": "#4409 registry parity: os lint runs the shared authoring-rule registry as its single call site, so it cannot disagree with os build about registry rules in either direction (the pre-registry lint returned clean for stacks build rejects AND rejected stacks build ships) — the staged broken-approver finding appears in BOTH commands' output with its rule id, and registry 'info' findings map to lint's 'suggestion' tier",
+          "oracle": "log",
+          "verify": "the broken-approver rule id appears in the lint output AND the build refusal on the same config (runAuthoringRules('lint', …) at lint.ts:428-436 with the :407-427 rationale; build's side is cli.build-own-contract clause 3); the info→suggestion mapping is :430",
+          "evidence": "the paired lint/build transcripts"
+        },
+        {
+          "clause": "the i18n fold separates platform from app findings honestly: metadataForm (platform-registry) coverage issues are hidden by default BUT counted — the dim disclosure line names how many were hidden and how to see them — --include-platform surfaces them as i18n/missing-metadataForm issues at translations.<locale>.<key> paths, and --skip-i18n removes the fold entirely; hiding must never be silent (the 15.1 third-party eval drowned 848 user findings in platform noise, which is why the fold exists)",
+          "oracle": "log",
+          "verify": "the bare run's hiddenPlatform count (payload) and disclosure line (human) match the --include-platform run's surfaced metadataForm issue count; the --skip-i18n payload carries no i18n/* rules (foldCoverageIssues at lint.ts:47-66; disclosure :559-567)",
+          "evidence": "the three runs' payloads/transcripts diffed"
+        },
+        {
+          "clause": "--fix is a dry run in fact: the '→ fix:' suggestions print, the 'no files were modified' line prints, and the config file is byte-identical after",
+          "oracle": "log",
+          "verify": "the md5 pair matches (flag help says dry-run, lint.ts:452; the mode line :627-630)",
+          "evidence": "the md5 pair + the transcript"
+        },
+        {
+          "clause": "a config that fails to load exits 1 on both paths, and the --json path still emits one parseable {error} document — never a stack trace masquerading as a payload, never exit 0",
+          "oracle": "log",
+          "verify": "both throwing-config runs exit 1; the --json output parses as a single JSON document carrying the error message (lint.ts:636-645)",
+          "evidence": "the captures + exit codes"
+        }
+      ],
+      "negative": [
+        "a warning or suggestion flipping the exit to 1 turns the hygiene tool into a false gate; an error exiting 0 makes the gate decorative — both directions are the FAIL",
+        "platform i18n findings silently dropped WITHOUT the hiddenPlatform disclosure is dishonest hiding — the count is what keeps the fold auditable",
+        "--fix writing to any file is a dry-run contract violation",
+        "a lint that disagrees with os build about a #4409 registry rule in either direction is the pre-registry defect the shared table exists to prevent — re-verify with the paired runs before filing which side is wrong",
+        "the hunter brief expected validate-shaped --json parity here; source shows lint's own shape (lint.ts:543-553) — a runner asserting validate's keys against lint is a checklist error, not a product finding"
+      ],
+      "traps": ["stale-dist", "seed-data-thin"],
+      "source": [
+        "packages/cli/src/commands/lint.ts (Severity :30; foldCoverageIssues :47-66; lintConfig's own rubric + the #4409 registry call :407-436 with info→suggestion :430; flags :450-478; --json emit :539-554; disclosure :559-567; human exit :634; load-failure catch :636-645; --fix dry-run :452/:627-630)",
+        "packages/cli/src/utils/collect-docs.ts (the ADR-0046 docs lint folded into the same issues stream)",
+        "packages/cli/src/utils/format.ts (CliExitCode :41 and the #4873 doc note naming os lint as the duration-inside-the-payload exemplar)",
+        "sibling item cli.build-own-contract (clause 3 is the build side of the registry-parity pair; its #3782 --json parity clause binds build↔validate, NOT lint)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能), authored VERIFY-FIRST as the brief required since the hunter had lower confidence here. Source confirmed the three-severity split and errors-only gating; two sketch claims were corrected against lint.ts before authoring: (1) the --json shape is lint's own {passed,total,errors,warnings,suggestions,issues,duration} (:543-553), not the os validate #3782 parity shape — the parity lint actually owes is the #4409 shared-registry agreement with os build (:407-436), encoded as its own clause; (2) the exit contract is 0/1 on both paths (process.exit(1) at :634, CliExitCode slot at :553), not build's human-path oclif-2 split. The i18n platform fold (:47-66) with its hiddenPlatform disclosure is covered as the third load-bearing surface", "ref": "claude/new-session-0pv25p" }
       ]
     }
   ]
