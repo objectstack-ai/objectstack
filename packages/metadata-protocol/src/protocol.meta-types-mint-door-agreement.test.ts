@@ -155,7 +155,11 @@ const SAMPLE: Array<{
         type: 'theme',
         klass: 'url-map-only',
         creatable: true,
-        item: { name: 'probe_theme', label: 'Probe', tokens: {} },
+        // [#10194] spec-valid body — `theme` resolves a schema through
+        // UNREGISTERED_KIND_SCHEMAS now, and the "behaves as advertised" case
+        // drives this body through a real write, so a malformed one would
+        // 422 and misread the ADVERTISEMENT door this suite measures.
+        item: { name: 'probe_theme', label: 'Probe', colors: { primary: '#3b82f6' } },
     },
     { type: 'policy', klass: 'withdrawn', creatable: false, item: { name: 'probe_policy', label: 'Probe' } },
     { type: 'data', klass: 'withdrawn', creatable: false, item: { name: 'probe_data', label: 'Probe' } },
