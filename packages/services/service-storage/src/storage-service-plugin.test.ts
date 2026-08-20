@@ -355,14 +355,15 @@ describe('StorageServicePlugin: sys_file orphan lifecycle wiring (#2755)', () =>
     await ctx._flushReady();
 
     // Lifecycle hooks (beforeDelete/afterDelete/afterInsert) + access hooks
-    // (beforeInsert/beforeDelete) — see attachment-lifecycle.ts and
-    // attachment-access-hooks.ts.
+    // (beforeInsert/beforeUpdate/beforeDelete, #10091 added the update verb)
+    // — see attachment-lifecycle.ts and attachment-access-hooks.ts.
     expect(hookEvents.sort()).toEqual([
       'afterDelete',
       'afterInsert',
       'beforeDelete',
       'beforeDelete',
       'beforeInsert',
+      'beforeUpdate',
     ]);
     // Field-reference ownership: claim/copy on write, release on delete
     // (file-reference-lifecycle.ts). Registered without an object filter.
