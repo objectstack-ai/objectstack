@@ -85,9 +85,38 @@ interface Captured {
   sql: string;
 }
 
+/**
+ * The two surfaces this file reaches for that the `objectql` SLOT CONTRACT does
+ * not declare, spelled out rather than erased to `any` (#4251): the driver
+ * registry, which is where SQL can be observed at all, and the audit entry
+ * point, which is an engine method rather than a contract member. Naming their
+ * shapes keeps the slot lookup itself typed by its contract — the only thing
+ * `getService` is asked to promise here is `IObjectQLEngine`.
+ */
+interface EngineTestSurface {
+  drivers: Map<string, { knex?: { on?: (event: string, cb: (q: { sql: string }) => void) => void } }>;
+  inspectDanglingReferences(options: { objects: string[] }): Promise<{
+    unreadableObjects: string[];
+    unscannedObjects: string[];
+    aborted: boolean;
+  }>;
+}
+
+/** Read one object's field map off `getSchema`, which the contract types as `unknown`. */
+function fieldsOf(schema: unknown): Record<string, unknown> {
+  const fields = (schema as { fields?: unknown } | null | undefined)?.fields;
+  return fields && typeof fields === 'object' ? (fields as Record<string, unknown>) : {};
+}
+
+/** Is this object bound to a remote table (ADR-0015)? */
+function isExternal(schema: unknown): boolean {
+  return (schema as { external?: unknown } | null | undefined)?.external != null;
+}
+
 describe('[#8414] background sweeps do not project phantom columns off a federated remote', () => {
   let stack: VerifyStack;
-  let ql: any;
+  let ql: IObjectQLEngine;
+  let engine: EngineTestSurface;
   const captured: Captured[] = [];
 
   beforeAll(async () => {
@@ -105,18 +134,18 @@ describe('[#8414] background sweeps do not project phantom columns off a federat
     // declared external datasource auto-connects to at boot).
     await onEnable({ logger: { info() {}, warn() {} } } as never);
     stack = await bootStack(showcaseStack, { multiTenant: 'posture-only' });
-    ql = stack.kernel.getService<IObjectQLEngine>('objectql') as any;
+    ql = stack.kernel.getService<IObjectQLEngine>('objectql');
+    engine = ql as unknown as EngineTestSurface;
 
     // Capture at the SQL layer rather than at the engine's `find`: what this
     // card is about is the statement that reaches the remote database, and a
     // projection recorded one level up would still be true if the driver
     // widened it back out.
-    for (const [name, driver] of ql.drivers as Map<string, any>) {
-      const k = driver?.knex;
-      if (typeof k?.on === 'function') k.on('query', (q: any) => captured.push({ driver: name, sql: q.sql }));
+    for (const [name, driver] of engine.drivers) {
+      driver?.knex?.on?.('query', (q) => captured.push({ driver: name, sql: q.sql }));
     }
     expect(
-      (ql.drivers as Map<string, unknown>).has(EXTERNAL_DATASOURCE),
+      engine.drivers.has(EXTERNAL_DATASOURCE),
       'the federated datasource must be connected, or this file proves nothing',
     ).toBe(true);
   }, 180_000);
@@ -129,8 +158,8 @@ describe('[#8414] background sweeps do not project phantom columns off a federat
   it('BEFORE-PICTURE PRESERVED: the federated objects still REGISTER the injected anchors', () => {
     for (const name of FEDERATED) {
       const schema = ql.getSchema(name);
-      expect(schema?.external, `${name} must be federated`).toBeTruthy();
-      const fields = Object.keys(schema?.fields ?? {});
+      expect(isExternal(schema), `${name} must be federated`).toBe(true);
+      const fields = Object.keys(fieldsOf(schema));
       for (const anchor of INJECTED_REFERENCE_ANCHORS) {
         expect(fields, `${name}.${anchor} is still injected — the fix withholds the QUERY, not the column`).toContain(anchor);
       }
@@ -139,7 +168,7 @@ describe('[#8414] background sweeps do not project phantom columns off a federat
 
   it('the dangling-reference audit issues NO statement against the federated remote', async () => {
     captured.length = 0;
-    const report = await ql.inspectDanglingReferences({ objects: [...FEDERATED, LOCAL] });
+    const report = await engine.inspectDanglingReferences({ objects: [...FEDERATED, LOCAL] });
 
     const remote = captured.filter((c) => c.driver === EXTERNAL_DATASOURCE);
     expect(
@@ -157,7 +186,7 @@ describe('[#8414] background sweeps do not project phantom columns off a federat
 
   it('POSITIVE CONTROL: the ordinary object in the same run is still swept with its FULL column set', async () => {
     captured.length = 0;
-    await ql.inspectDanglingReferences({ objects: [...FEDERATED, LOCAL] });
+    await engine.inspectDanglingReferences({ objects: [...FEDERATED, LOCAL] });
 
     const localReads = captured.filter((c) => c.sql.includes(`from \`${LOCAL}\``));
     expect(localReads, 'the local object must still be read').toHaveLength(1);
@@ -171,7 +200,7 @@ describe('[#8414] background sweeps do not project phantom columns off a federat
   it('the pinyin backfill has nothing to enumerate: no `__search` is declared on a federated object', () => {
     for (const name of FEDERATED) {
       expect(
-        ql.getSchema(name)?.fields?.[SEARCH_COMPANION_FIELD],
+        fieldsOf(ql.getSchema(name))[SEARCH_COMPANION_FIELD],
         `${name} must carry no companion column — backfillSearchCompanion's early-out keys on exactly this`,
       ).toBeUndefined();
     }
@@ -179,7 +208,7 @@ describe('[#8414] background sweeps do not project phantom columns off a federat
     // the absence above is a fact about federation and not about the switch
     // being off.
     expect(
-      ql.getSchema(LOCAL)?.fields?.[SEARCH_COMPANION_FIELD],
+      fieldsOf(ql.getSchema(LOCAL))[SEARCH_COMPANION_FIELD],
       'the local object must still carry the companion',
     ).toBeDefined();
   });
