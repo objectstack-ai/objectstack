@@ -1081,9 +1081,12 @@ jobs:
       # — one card per silent exit — and each fix lands as more unexercised
       # code. This step is the exercise: the shipped script is extracted from
       # the YAML with a real parser (never retyped) and run under doubles the
-      # way actions/github-script runs it, as one AsyncFunction body. Ten
+      # way actions/github-script runs it, as one AsyncFunction body. Its
       # scenarios pin the target parse and the outcome of EVERY exit — which of
       # setFailed / warning / job summary fires, and which API calls were made.
+      # How many of them there are is deliberately NOT written here (#9917):
+      # the check names the total on its own OK line, and `--list` prints the
+      # whole table. This comment used to say "ten" against a real eighteen.
       #
       # Assertion 0 is the compile, and it is not theoretical: this job failed
       # twice on 2026-08-02 with `SyntaxError: Identifier 'octokit' has already
@@ -1091,14 +1094,26 @@ jobs:
       # workflow whose red nothing else in CI can see.
       #
       # Its --self-test runs first and is the half that stops the battery
-      # rotting into decoration: it mutates the shipped script seven ways —
-      # downgrade the verdict to a warning, stop collecting failed keys, break
-      # out of the loop instead of isolating, drop the same-repo skip, narrow
-      # the keyword set, drop the already-closed skip, downgrade the notice
-      # path's verdict — and requires the battery to go RED for each, naming the
-      # scenario that catches it. A mutation whose anchor no longer exists is a
-      # failure too, so a rewrite of the workflow cannot leave the mutations
-      # silently matching nothing.
+      # rotting into decoration: it mutates the shipped script along every
+      # CLASS the contract is made of — a verdict downgraded (red becomes a
+      # warning, or an info line nothing annotates), the loop's bookkeeping
+      # deleted (which keys failed, which half was lost, which target was
+      # refused), isolation abandoned mid-loop, the target parse narrowed (the
+      # keyword set, the optional colon, the same-repo skip), a guard removed
+      # (already-closed, triage, pull-request), idempotency eroded (the
+      # backlink marker dropped, or a blind post where a skip belongs) — and
+      # requires the battery to go RED for each, naming the scenario that
+      # catches it. A mutation whose anchor no longer exists is a failure too,
+      # so a rewrite of the workflow cannot leave the mutations silently
+      # matching nothing.
+      #
+      # Classes rather than a count, and rather than the enumeration that used
+      # to sit here, because BOTH hand-maintained numbers in this comment had
+      # gone stale unnoticed — measured 2026-08-20 from the check's own output,
+      # eighteen scenarios and fifteen mutations against a comment claiming ten
+      # and seven (#9917). A stale enumeration reads exactly as authoritative
+      # as a fresh one, and this comment is what the next reader checks the
+      # harness against. Prose classes survive an M16; a count does not.
       #
       # Invoked as `node` rather than through a `pnpm check:*` alias: that alias
       # belongs in root package.json, declared territory of the @changesets/cli
