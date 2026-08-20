@@ -942,11 +942,15 @@ export const AUTH_SSO_PROVIDER_SCHEMA = {
   },
 } as const;
 
-// NOTE: there is intentionally no `buildSsoPluginSchema()`. Unlike
-// `oauthProvider`, the @better-auth/sso plugin exposes NO `schema` option
-// (verified vs 1.6.20), so the mapping above cannot be handed to the plugin —
-// it must be consumed at the ADAPTER layer (AUTH_MODEL_TO_PROTOCOL + field
-// resolution in objectql-adapter.ts). See ADR-0024.
+// NOTE: there is intentionally no `buildSsoPluginSchema()`. The original reason
+// was that the plugin exposed NO `schema` option (true of 1.6.20) — that is no
+// longer why. Measured 2026-08-19 against the installed `@better-auth/sso@1.7.1`:
+// `SSOOptions.schema.ssoProvider.{modelName,fields,additionalFields}` exists and
+// the runtime honours it, so the mapping above COULD be handed to the plugin.
+// It is still consumed at the ADAPTER layer instead (AUTH_MODEL_TO_PROTOCOL +
+// field resolution in objectql-adapter.ts), which is now a deliberate choice
+// about where the bridge lives rather than a limitation of the dependency;
+// revisiting it is the open architecture question on #8224. See ADR-0024.
 
 // ---------------------------------------------------------------------------
 // SCIM plugin – scimProvider table (@better-auth/scim)
@@ -957,10 +961,15 @@ export const AUTH_SSO_PROVIDER_SCHEMA = {
  *
  * Each row is a SCIM connection: a bearer token an external IdP (Okta / Entra)
  * uses to auto-provision / deprovision THIS environment's users — the env is
- * the SCIM Service Provider (ADR-0071). Like `@better-auth/sso`, the plugin
- * hardcodes its model and exposes NO `schema` option, so the mapping is
- * consumed at the ADAPTER layer (AUTH_MODEL_TO_PROTOCOL + field resolution in
- * objectql-adapter.ts), NOT handed to the plugin.
+ * the SCIM Service Provider (ADR-0071). This plugin hardcodes its model and
+ * exposes NO `schema` option — still true of the installed
+ * `@better-auth/scim@1.7.0-rc.1` (`SCIMOptions` declares no `schema` /
+ * `modelName` / `fields` member at all; measured 2026-08-19). It is no longer
+ * true of `@better-auth/sso@1.7.1`, which this doc used to lean on for the
+ * comparison and which now accepts one (#8224). So for scim — and for scim
+ * alone — the ADAPTER layer (AUTH_MODEL_TO_PROTOCOL + field resolution in
+ * objectql-adapter.ts) is the only available route: the mapping cannot be
+ * handed to the plugin.
  *
  * | camelCase (better-auth) | snake_case (ObjectStack) |
  * |:------------------------|:-------------------------|

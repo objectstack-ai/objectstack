@@ -22,6 +22,7 @@
 import {
   isGrantActive,
   isGrantExpired,
+  isRowActive,
   derivePosture as deriveAdminPosture,
   resolveUserAuthzGrants,
 } from '@objectstack/core';
@@ -278,13 +279,31 @@ function untilOfGrantRow(r: any): string | undefined {
 }
 
 /**
- * [#6352 / ADR-0091 D2/D3] The explain-ONLY provenance pass: the two annotations
- * the panel prints that the authorization resolver, correctly, throws away.
+ * [#8714] One entry of the shared "held but not resolving, because X"
+ * vocabulary (the internal counterpart of the spec contract's
+ * `contributors[].state`): a grant row the principal HOLDS that the resolver
+ * fail-closed DROPPED, with the closed reason enumeration naming why —
+ * `expired` (ADR-0091 D2 validity window) or `deactivated` (ADR-0049 / #8613
+ * catalogue `active` switch). `until` is the window bound, present only for
+ * the expired reason. One array, one reason discriminant — deliberately NOT a
+ * sibling array per cause (maintainer ruling 2026-08-18).
+ */
+export interface DroppedGrant {
+  kind: 'position' | 'permission_set';
+  name: string;
+  state: 'expired' | 'deactivated';
+  until?: string;
+}
+
+/**
+ * [#6352 / ADR-0091 D2/D3 / #8714] The explain-ONLY provenance pass: the
+ * annotations the panel prints that the authorization resolver, correctly,
+ * throws away.
  *
  * This is presentation, not aggregation. It decides nothing about who is
  * authorized — `resolveUserAuthzGrants` has already decided that, and this pass
  * never feeds `positions` / `permissions` / the `platform_admin` derivation. It
- * only re-reads the same rows to answer two questions the resolver's output
+ * only re-reads the same rows to answer questions the resolver's output
  * cannot express, because the resolver's output is by construction the set of
  * grants that DID resolve:
  *
@@ -292,30 +311,54 @@ function untilOfGrantRow(r: any): string | undefined {
  *    "held until … — expired" instead of silently omitting a grant the admin
  *    knows they granted. This is "why did access DISAPPEAR", and only a dropped
  *    row can answer it.
+ *  - **deactivated** (#8714) — a row whose CATALOGUE entry
+ *    (`sys_permission_set.active` / `sys_position.active`) is switched off
+ *    (ADR-0049 / #8613), so the grant stopped resolving for everyone holding
+ *    it. Deactivation is an incident-response control with no date on the
+ *    user's own grant row, so without this state the set is simply ABSENT and
+ *    explain answers like the grant never existed — the exact silence the
+ *    contributor-attribution feature exists to prevent.
  *  - **delegated** — the `delegated_from` provenance of a row that DID resolve,
  *    so a position can be attributed "via delegation from X, until Y".
  *
- * Both verdicts come from the SAME shared ADR-0091 predicate module the resolver
- * uses (`isGrantActive` / `isGrantExpired`, `@objectstack/core`) — one
- * implementation of the window rule, consulted twice, never re-derived here.
+ * All verdicts come from the SAME shared predicate modules the resolver uses
+ * (`isGrantActive` / `isGrantExpired` for the ADR-0091 window, `isRowActive`
+ * for the ADR-0049 switch — all `@objectstack/core`) — one implementation of
+ * each rule, consulted twice, never re-derived here.
+ *
+ * A row that is BOTH expired and deactivated reports `expired`: the window
+ * verdict is judged on the user's own grant row, the same order the resolver
+ * drops in, and each dropped row carries exactly one reason (closed enum).
+ *
+ * Boundary (the ruling's cheaper sketch, deliberately): deactivation is
+ * re-read for the grants this pass already walks — `sys_user_position` rows
+ * and direct `sys_user_permission_set` grants. A deactivated position held via
+ * role projection, or a deactivated SET reached only through an active
+ * position's `sys_position_permission_set` linkage, is not re-derived here —
+ * that would replicate the resolver's aggregation, which is the design this
+ * pass exists to avoid.
  */
 async function collectGrantProvenance(
   ql: any,
   userId: string,
   nowMs: number,
 ): Promise<{
-  expiredGrants: Array<{ kind: 'position' | 'permission_set'; name: string; until?: string }>;
+  droppedGrants: DroppedGrant[];
   delegatedPositions: Array<{ name: string; from: string; until?: string }>;
 }> {
-  const expiredGrants: Array<{ kind: 'position' | 'permission_set'; name: string; until?: string }> = [];
+  const droppedGrants: DroppedGrant[] = [];
   const delegatedPositions: Array<{ name: string; from: string; until?: string }> = [];
 
   try {
     const rows = await ql.find('sys_user_position', { where: { user_id: userId }, limit: 500, context: SYSTEM_CTX });
+    // Window-ACTIVE position names — held now, so the only thing that can
+    // still drop them is the catalogue `active` switch, checked below.
+    const heldPositionNames = new Set<string>();
     for (const r of Array.isArray(rows) ? rows : []) {
       const p = String((r as any)?.position ?? '');
       if (!p) continue;
       if (isGrantActive(r, nowMs)) {
+        heldPositionNames.add(p);
         const from = (r as any)?.delegated_from;
         if (from != null && from !== '') {
           delegatedPositions.push({ name: p, from: String(from), until: untilOfGrantRow(r) });
@@ -323,33 +366,66 @@ async function collectGrantProvenance(
       } else if (isGrantExpired(r, nowMs)) {
         // Pending (future `valid_from`) rows are inactive but NOT expired — they
         // are not reported, because nothing was lost yet.
-        expiredGrants.push({ kind: 'position', name: p, until: untilOfGrantRow(r) });
+        droppedGrants.push({ kind: 'position', name: p, state: 'expired', until: untilOfGrantRow(r) });
+      }
+    }
+    // [#8714 / ADR-0049] A held position whose `sys_position` catalogue row is
+    // explicitly deactivated was dropped by the resolver (step 6a) — report it
+    // instead of letting it vanish. A name with no row has no flag to read and
+    // is untouched, matching the resolver.
+    if (heldPositionNames.size > 0) {
+      const posRows = await ql.find('sys_position', {
+        where: { name: { $in: Array.from(heldPositionNames) } },
+        limit: heldPositionNames.size,
+        context: SYSTEM_CTX,
+      });
+      for (const row of Array.isArray(posRows) ? posRows : []) {
+        const n = String((row as any)?.name ?? '');
+        if (n && heldPositionNames.has(n) && !isRowActive(row)) {
+          droppedGrants.push({ kind: 'position', name: n, state: 'deactivated' });
+        }
       }
     }
   } catch { /* table unavailable → no provenance to report */ }
 
   try {
     const rows = await ql.find('sys_user_permission_set', { where: { user_id: userId }, limit: 500, context: SYSTEM_CTX });
-    const expiredRows = (Array.isArray(rows) ? rows : []).filter(
-      (g: any) => !isGrantActive(g, nowMs) && isGrantExpired(g, nowMs),
-    );
-    const ids = expiredRows
-      .map((g: any) => g?.permission_set_id ?? g?.permissionSetId)
-      .filter(Boolean);
+    const grantRows = Array.isArray(rows) ? rows : [];
+    const idOf = (g: any) => g?.permission_set_id ?? g?.permissionSetId;
+    const expiredRows = grantRows.filter((g: any) => !isGrantActive(g, nowMs) && isGrantExpired(g, nowMs));
+    // Window-ACTIVE direct grants: resolvable unless the SET's catalogue row is
+    // deactivated — the one remaining reason the resolver drops them (step 6b).
+    const activeRows = grantRows.filter((g: any) => isGrantActive(g, nowMs));
+    const ids = Array.from(new Set([...expiredRows, ...activeRows].map(idOf).filter(Boolean)));
     if (ids.length > 0) {
+      // [#8714] The existing by-id `sys_permission_set` read now serves both
+      // reasons: names for the expired rows, and the ADR-0049 `active` flag for
+      // the held ones — one read, no second query shape.
       const sets = await ql.find('sys_permission_set', { where: { id: { $in: ids } }, limit: ids.length, context: SYSTEM_CTX });
-      const nameById = new Map<string, string>();
+      const rowById = new Map<string, any>();
       for (const s of Array.isArray(sets) ? sets : []) {
-        if ((s as any)?.id && (s as any)?.name) nameById.set(String((s as any).id), String((s as any).name));
+        if ((s as any)?.id) rowById.set(String((s as any).id), s);
       }
       for (const g of expiredRows) {
-        const n = nameById.get(String((g as any)?.permission_set_id ?? (g as any)?.permissionSetId ?? ''));
-        if (n) expiredGrants.push({ kind: 'permission_set', name: n, until: untilOfGrantRow(g) });
+        const s = rowById.get(String(idOf(g) ?? ''));
+        const n = (s as any)?.name;
+        if (n) droppedGrants.push({ kind: 'permission_set', name: String(n), state: 'expired', until: untilOfGrantRow(g) });
+      }
+      const deactivatedNames = new Set<string>();
+      for (const g of activeRows) {
+        const s = rowById.get(String(idOf(g) ?? ''));
+        const n = (s as any)?.name;
+        // Dedupe: several grant rows can point at one deactivated set; the
+        // catalogue-row fact is reported once.
+        if (n && !isRowActive(s)) deactivatedNames.add(String(n));
+      }
+      for (const n of deactivatedNames) {
+        droppedGrants.push({ kind: 'permission_set', name: n, state: 'deactivated' });
       }
     }
   } catch { /* table unavailable → no provenance to report */ }
 
-  return { expiredGrants, delegatedPositions };
+  return { droppedGrants, delegatedPositions };
 }
 
 /**
@@ -376,14 +452,15 @@ async function collectGrantProvenance(
  * did not make. That is the failure mode the panel exists to prevent, so the
  * mirror is gone rather than pinned.
  *
- * What stays explain-side is presentation only, and additive: the expired /
- * delegated row annotations ({@link collectGrantProvenance}), and
- * `hasPlatformAdminGrant`, which is now READ OFF the resolver's own posture
- * verdict instead of being recomputed from the grant rows.
+ * What stays explain-side is presentation only, and additive: the dropped-grant
+ * (expired / deactivated) and delegated row annotations
+ * ({@link collectGrantProvenance}), and `hasPlatformAdminGrant`, which is now
+ * READ OFF the resolver's own posture verdict instead of being recomputed from
+ * the grant rows.
  */
 export async function buildContextForUser(ql: any, userId: string, nowMs: number = Date.now()): Promise<any> {
   const grants = await resolveUserAuthzGrants(ql, userId, { nowMs });
-  const { expiredGrants, delegatedPositions } = await collectGrantProvenance(ql, userId, nowMs);
+  const { droppedGrants, delegatedPositions } = await collectGrantProvenance(ql, userId, nowMs);
   return {
     userId,
     positions: grants.positions,
@@ -394,7 +471,7 @@ export async function buildContextForUser(ql: any, userId: string, nowMs: number
     ...(grants.tabPermissions ? { tabPermissions: grants.tabPermissions } : {}),
     ...(grants.email != null ? { email: grants.email } : {}),
     ...(grants.posture ? { posture: grants.posture } : {}),
-    expiredGrants,
+    droppedGrants,
     delegatedPositions,
     // [ADR-0068 D2] Not a second derivation: `derivePosture` returns
     // PLATFORM_ADMIN if and only if the resolver saw the unscoped
@@ -914,11 +991,15 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
     if ((context?.permissions ?? []).includes(name)) return 'direct grant';
     return 'resolved';
   };
-  // [ADR-0091 D2] Expired-but-present grant rows (populated by
-  // buildContextForUser when explaining by userId). They contributed nothing —
-  // reported so "why did access disappear" is self-answering.
-  const expiredGrants: Array<{ kind: 'position' | 'permission_set'; name: string; until?: string }> =
-    Array.isArray(context?.expiredGrants) ? context.expiredGrants : [];
+  // [ADR-0091 D2 / ADR-0049 / #8714] Held-but-dropped grant rows (populated by
+  // buildContextForUser when explaining by userId): present, but contributing
+  // nothing, each carrying the closed reason enumeration (`expired` |
+  // `deactivated`) — reported so "why did access disappear" is self-answering
+  // for BOTH lifecycle controls, in ONE shared vocabulary.
+  const droppedGrants: DroppedGrant[] =
+    Array.isArray(context?.droppedGrants) ? context.droppedGrants : [];
+  const expiredGrants = droppedGrants.filter((g) => g.state === 'expired');
+  const deactivatedGrants = droppedGrants.filter((g) => g.state === 'deactivated');
   // [ADR-0091 D3] Positions held via delegation — attributed "via delegation
   // from X, until Y" so a delegated hat is visible in the report.
   const delegatedPositions: Array<{ name: string; from: string; until?: string }> =
@@ -945,6 +1026,11 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
         ? ` ${expiredGrants.length} grant(s) present but EXPIRED (ADR-0091): [${expiredGrants
             .map((g) => `${g.name}${g.until ? ` until ${g.until}` : ''}`)
             .join(', ')}] — contributing nothing.`
+        : '') +
+      (deactivatedGrants.length > 0
+        ? ` ${deactivatedGrants.length} grant(s) present but DEACTIVATED (ADR-0049): [${deactivatedGrants
+            .map((g) => g.name)
+            .join(', ')}] — the catalogue row is switched off, contributing nothing until re-activated.`
         : ''),
     contributors: [
       ...positions.map((p) => {
@@ -954,11 +1040,15 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
           : { kind: 'position' as const, name: p };
       }),
       ...setNames.map((n) => ({ kind: 'permission_set' as const, name: n, via: viaOf(n) })),
-      ...expiredGrants.map((g) => ({
+      // [#8714] One shared "held but not resolving, because X" vocabulary for
+      // every dropped row — the state member IS the reason, closed enum.
+      ...droppedGrants.map((g) => ({
         kind: g.kind,
         name: g.name,
-        via: g.until ? `held until ${g.until} — expired` : 'expired',
-        state: 'expired' as const,
+        via: g.state === 'expired'
+          ? (g.until ? `held until ${g.until} — expired` : 'expired')
+          : 'held — deactivated',
+        state: g.state,
       })),
     ],
   });

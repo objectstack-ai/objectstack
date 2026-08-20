@@ -102,6 +102,37 @@
  * that app is edited. Deliberate — it is the only real, spec-parsed corpus in
  * the repo, and a frozen copy would silently stop describing shipped metadata.
  * Quote the ref you measured at.
+ *
+ * ── THE OBJECT DOOR, BOTH SIDES OF #4716 — MEASURED ON BOTH SHAPES (#9859) ──
+ *
+ * #9825's cost table for the object-door widening was published from the `stub`
+ * shape alone, so its `+0.31 / +3.25 ms` delta describes a stack in which the
+ * rules that judge validation rules and autonumber formats find nothing to
+ * judge. Both legs re-measured here at `17854cba0`, one machine, one session,
+ * median of 30 with warmup 5. The BEFORE leg is built from the PRE-WIDENING
+ * registry — `git restore --source=1408ae337^ -- packages/lint/src/authoring-
+ * rules.ts`, rebuild `@objectstack/lint`, then read `rules dispatched (2)` off
+ * the run's own header before believing any number (`ablation-dist-preflight`
+ * both ways: marker `P2 (#4463): judges an object/field declaration` PRESENT in
+ * `dist` on the BEFORE leg, ABSENT again after restoring):
+ *
+ *   N=420, object write   BEFORE (2 rules)   AFTER (7 rules)      delta
+ *   stub                       3.6-4.4 ms        8.5-8.6 ms     ~  +4.6 ms
+ *   real (showcase decls)     25.5-29.2 ms    282.8-304.4 ms     ~ +265   ms
+ *
+ *   N=21, object write    BEFORE (2 rules)   AFTER (7 rules)      delta
+ *   stub                      0.19-0.21 ms      0.41-0.45 ms     ~ +0.23 ms
+ *   real (showcase decls)      1.20-1.32 ms    16.7-18.9  ms     ~ +16.5  ms
+ *
+ * ⛔ The real-shape delta is NOT the stub delta scaled by the totals ratio, and
+ * this is the measurement that shows it: at N=420 the totals ratio is ~34x, so
+ * `+3.25 x 34` would predict ~+110 ms where the measured delta is ~+265 ms. A
+ * ratio measured on TOTALS does not transfer to a DELTA between two rule sets,
+ * because the sets walk different keys. `--mode per-rule` says exactly why —
+ * on the real shape at N=420 `validateRuleCompilability` alone is ~233 ms (82%
+ * of the whole gate) while on the stub shape it is ~0.04 ms (0.5%), the stub
+ * carrying no validation rules for it to judge. The two rules that were already
+ * at the door cost the same on both legs (~23-25 ms, real, N=420), as they must.
  */
 
 import {

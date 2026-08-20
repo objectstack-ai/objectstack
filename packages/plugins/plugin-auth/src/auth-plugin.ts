@@ -2108,6 +2108,38 @@ export class AuthPlugin implements Plugin {
     }
 
     // ────────────────────────────────────────────────────────────────────
+    // #9941 — organization/add-member. better-auth declares `addMember`
+    // WITHOUT an HTTP path (server-only `auth.api.addMember`; measured on the
+    // installed 1.7.1), so the catch-all never mounts it — yet the
+    // `sys_member` `add_member` toolbar action has always targeted this URL,
+    // and on a multi-org posture it is the only UI path that can attach an
+    // existing user to an organization. This mount restores that declared
+    // surface behind the shared ADR-0068 platform-admin gate (attaching a
+    // user without their consent is a platform-operator action, and the
+    // vendor endpoint does no authorization of its own). Ledgered as
+    // `server-only` in auth-route-ledger.ts; logic in
+    // organization-add-member.ts.
+    rawApp.post(`${basePath}/organization/add-member`, async (c: any) => {
+      try {
+        const actor = await gateAdmin(c);
+        if (actor instanceof Response) return actor;
+        const { runOrganizationAddMember } = await import('./organization-add-member.js');
+        // [#4586] Same seam as create-user: the write is driven server-side
+        // and never passes through `AuthManager.handleRequest`, so open the
+        // attribution seam here — the `sys_member` row this creates is
+        // credited to the admin instead of recorded as the system.
+        const { status, body } = await runAttributedToUser(actor.id, () =>
+          runOrganizationAddMember({ getAuthApi: () => this.authManager!.getApi() as any }, c.req.raw),
+        );
+        return c.json(body, status as any);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] organization/add-member failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
     // ADR-0069 P3 — register a SAML 2.0 IdP. Mirrors the OIDC bridge above:
     // the metadata `register_saml_provider` action posts FLAT fields; the shared
     // helper reshapes them into better-auth's nested `samlConfig` (deriving the
