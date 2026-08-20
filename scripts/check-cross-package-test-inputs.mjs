@@ -430,6 +430,16 @@ const CROSS_PACKAGE_TEST_INPUTS = {
     globs: [
       'content/**',
       'scripts/sync-template-versions.mjs',
+      // The stamper's own import closure, and a live input for the same reason
+      // the stamper is: template-version-stamps.test.ts copies the script into
+      // a fixture and both IMPORTS and SPAWNS it there, so the copy needs every
+      // relative import the script makes. That fixture derives the closure
+      // rather than naming files, so this path appears in NO quoted string the
+      // flat literal collector can see — but a change to it really does break
+      // that test (measured: drop the closure walk and the same 3 cases fail
+      // with ERR_MODULE_NOT_FOUND), which is exactly the trigger radius this
+      // declaration exists to keep honest.
+      'scripts/invoked-as.mjs',
       '.github/workflows/scaffold-e2e.yml',
       'packages/cli/src/commands/serve.ts',
       'scripts/gen-sdui-manifest.sh',
