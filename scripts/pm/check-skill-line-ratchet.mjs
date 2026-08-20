@@ -107,6 +107,10 @@ export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/devx.md', 38],
   ['.claude/skills/pm-dispatch/references/lanes/skills.md', 36],
   ['.claude/skills/pm-dispatch/references/lanes/spec.md', 44],
+  // repo:hotcrm lane charter (maintainer rulings 2026-08-20: exemplar-app repo —
+  // platform capabilities implemented upstream, 展现平台能力, 不扩散需求, runs on
+  // community edition). Set at landed line count (headroom 0, same convention).
+  ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 45],
   ['.claude/agents/os-dev.md', 399],
   // #9473: the other four `.claude/skills/` are read in full by the sessions
   // that use them too — the erosion mechanism the ratchet exists to stop
@@ -234,7 +238,7 @@ function selfTest() {
     ['SKILL.md is covered', CEILINGS.has('.claude/skills/pm-dispatch/SKILL.md'), true],
     ['the dev-agent definition is covered', CEILINGS.has('.claude/agents/os-dev.md'), true],
     ['all five compressed references are covered', ['dispatch-runbook', 'platform-readings', 'review-checklist', 'landing-operations', 'seat-post-protocol'].every((n) => CEILINGS.has(`.claude/skills/pm-dispatch/references/${n}.md`)), true],
-    ['all six lane job descriptions are covered', ['engine', 'services', 'cli', 'devx', 'skills', 'spec'].every((n) => CEILINGS.has(`.claude/skills/pm-dispatch/references/lanes/${n}.md`)), true],
+    ['all seven lane job descriptions are covered', ['engine', 'services', 'cli', 'devx', 'skills', 'spec', 'hotcrm'].every((n) => CEILINGS.has(`.claude/skills/pm-dispatch/references/lanes/${n}.md`)), true],
     ['the other four skills are covered (#9473)', ['checklist-test', 'checklist-author', 'dogfood-verification', 'spec-property-retirement'].every((n) => CEILINGS.has(`.claude/skills/${n}/SKILL.md`)), true],
     ['root AGENTS.md is covered (#9792)', CEILINGS.has('AGENTS.md'), true],
     // The dispatch-gates declaration (#9964). Enforcement cannot hold any of
