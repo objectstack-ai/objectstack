@@ -914,7 +914,7 @@ export const buildOidcProviderPluginSchema = buildOauthProviderPluginSchema;
  * Each row is an external OIDC/SAML IdP this environment federates login to
  * (the relying-party side — ADR-0024's OPEN per-env SSO mechanism). The
  * protocol detail lives in JSON blobs (`oidcConfig` / `samlConfig`); the model
- * itself is thin. Mirrors @better-auth/sso@1.6.20's `BaseSSOProvider`.
+ * itself is thin.
  *
  * | camelCase (better-auth) | snake_case (ObjectStack) |
  * |:------------------------|:-------------------------|
@@ -924,6 +924,30 @@ export const buildOidcProviderPluginSchema = buildOauthProviderPluginSchema;
  * | userId                  | user_id                  |
  * | organizationId          | organization_id          |
  * | issuer / domain         | (same name — no remap) |
+ * | domainVerified          | domain_verified          |
+ *
+ * ## Coverage, measured 2026-08-20 against `@better-auth/sso@1.7.1`
+ *
+ * The previous note here said only "Mirrors `@better-auth/sso@1.6.20`'s
+ * `BaseSSOProvider`" — a field-surface claim about a version two minors behind
+ * the installed one, which nobody had re-checked. Re-measured by resolving the
+ * plugin's real model the way the adapter does (`field.fieldName ?? key`) over
+ * `getAuthTables({ plugins: [sso()] }).ssoProvider.fields`:
+ *
+ *  - `sso()` declares 7 fields — `issuer`, `oidcConfig`, `samlConfig`,
+ *    `userId`, `providerId`, `organizationId`, `domain` — exactly the members
+ *    of the shipped `BaseSSOProvider` type
+ *    (`dist/index-CZytzKv6.d.mts:189-197`).
+ *  - `sso({ domainVerification: { enabled: true } })` — the shape
+ *    `OS_SSO_DOMAIN_VERIFICATION` turns on — adds an 8th, `domainVerified`.
+ *  - Every one of those 8 resolves to a column `sys_sso_provider` declares.
+ *    Nothing in the map is orphaned, and nothing in the model is unmapped.
+ *
+ * ⚠️ Unlike the core models, this mapping has **no parity gate**:
+ * `better-auth-schema-parity.test.ts` deliberately passes `getAuthTables()` no
+ * `sso` plugin, so an upstream field added to `ssoProvider` would land here
+ * silently. Until that changes, re-run the resolution above by hand when the
+ * `@better-auth/sso` pin moves — the check is one `getAuthTables` call.
  */
 export const AUTH_SSO_PROVIDER_SCHEMA = {
   modelName: 'sys_sso_provider',

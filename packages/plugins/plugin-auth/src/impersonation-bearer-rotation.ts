@@ -8,7 +8,8 @@
  * better-auth's `bearer()` plugin authenticates a request by OVERWRITING the
  * request's session cookie with the bearer token (a before-hook calling
  * `setRequestCookie(headers, authCookies.sessionToken.name, decodedToken)` —
- * `dist/plugins/bearer/index.mjs`, verified in 1.7.0-rc.2). The admin plugin's
+ * `dist/plugins/bearer/index.mjs:46` — measured 2026-08-20 against the
+ * installed better-auth `1.7.1`). The admin plugin's
  * `POST /admin/impersonate-user` does the opposite: it mints an impersonation
  * session and hands it over as a *cookie* (`setSessionCookie`), parking the
  * admin's own session token in a signed `admin_session` cookie for the exit

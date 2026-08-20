@@ -31,13 +31,18 @@
  *
  * ## Why the seam is HERE, at the adapter
  *
- * Verified against better-auth `1.7.0-rc.2`, the version this package pins:
+ * Measured 2026-08-20 against the installed better-auth `1.7.1` — the version
+ * `^1.7.1` resolves to today, read from `node_modules/better-auth/package.json`
+ * and never from the range. Each bullet names the shipped file and symbol it
+ * was read out of, so a later bump is re-checkable one grep at a time:
  *
  *  - **better-auth already implements this exact substitution, one layer up,
- *    and we cannot reach it.** `internalAdapter.endPreservedSessions` replaces
- *    the physical delete with `updateMany({ expiresAt: now })` while keeping
- *    the delete hooks running (`deleteManyWithHooks(..., { fn, executeMainFn:
- *    false })`). It is gated on `secondaryStorage` being configured
+ *    and we cannot reach it.** `internalAdapter.endPreservedSessions`
+ *    (`dist/db/internal-adapter.mjs:41`) replaces the physical delete with
+ *    `updateMany({ model: 'session', update: { expiresAt: now } })` while
+ *    keeping the delete hooks running (`deleteManyWithHooks(liveSessions,
+ *    'session', { fn, executeMainFn: false })`). It is gated on
+ *    `secondaryStorage` being configured
  *    (`deleteSession`: `if (secondaryStorage) { … if (preserveSessionInDatabase)
  *    … }`), and ObjectStack deliberately does not wire one — handing better-auth
  *    a `secondaryStorage` moves the session OF RECORD into the cache and makes
@@ -46,8 +51,12 @@
  *    unreachable; this module is that shape at the only layer we own.
  *  - **`databaseHooks.session.delete.before` returning `false` was refused.**
  *    It aborts the delete, which is what we want — but `getWithHooks` then skips
- *    every `delete.after` hook, and `@better-auth/oauth-provider` (enabled by
- *    default here) registers `session.delete.before`/`after` to prepare and
+ *    every `delete.after` hook (`dist/db/with-hooks.mjs:132`: a `before` hook
+ *    answering `false` does a bare `return null`, ahead of the `delete.after`
+ *    loop at `:140`), and `@better-auth/oauth-provider@1.7.1` (enabled by
+ *    default here) registers `session.delete.before`/`after`
+ *    (`dist/authorize-Crqw4_bR.mjs:4413`, `prepareBackchannelLogoutPlan` in
+ *    `before` and the dispatch in `after`) to prepare and
  *    dispatch **OIDC back-channel logout**. Suppressing back-channel logout on
  *    an admin revoke — the single revocation that most needs downstream relying
  *    parties told — trades an audit row for a security hole. Upstream's own
@@ -80,23 +89,36 @@
  *
  * ## Retention — why hiding, and not just stamping
  *
- * Measured, not assumed. better-auth 1.7.0-rc.2 has **no scheduled sweeper** of
- * session rows: the only expiry-driven collection in the whole library is
- * inside `GET /get-session`, which on finding a row whose `expiresAt` has passed
- * calls `internalAdapter.deleteSession(token)` to "clean up the session"
- * (`api/routes/session.mjs`). That single line is what makes the automatic
+ * Measured, not assumed — 2026-08-20, against the installed better-auth
+ * `1.7.1`. It has **no scheduled sweeper** of session rows: grepping the whole
+ * shipped `dist/` for `setInterval` finds only two client-side files
+ * (`dist/client/session-refresh.mjs`, `dist/plugins/oauth-popup/client.mjs`),
+ * neither of which collects rows. The only expiry-driven collection in the
+ * library is inside `GET /get-session`
+ * (`dist/api/routes/session.mjs:146-157`), which on finding a row whose
+ * `expiresAt` has passed calls `internalAdapter.deleteSession(token)` to
+ * "clean up the session". 1.7.1 narrows even that: the call is now conditional
+ * (`if (!deferSessionRefresh || isPostRequest)`, `:155`), so it fires in
+ * strictly fewer cases than the rc line this note was first written against.
+ * That single line is what makes the automatic
  * path's stamps best-effort today — and it would eat an interactive tombstone
  * the moment the revoked client polled once, which for a browser session is
  * seconds. Stamping alone therefore satisfies the letter of D4 and leaves the
  * trail as inert as it was.
  *
- * The collector only fires on a row it can see:
+ * The collector only fires on a row it can see — quoted from the installed
+ * `dist/api/routes/session.mjs:146-158` as it reads at `1.7.1`:
  *
  * ```js
- * const session = await ctx.context.internalAdapter.findSession(token);
+ * const session = await ctx.context.internalAdapter.findSession(sessionCookieToken);
+ * ctx.context.session = session;
  * if (!session || session.session.expiresAt < new Date()) {
  *   deleteSessionCookie(ctx);
- *   if (session) { … await ctx.context.internalAdapter.deleteSession(…); }
+ *   if (session) {
+ *     // Only delete on POST when deferSessionRefresh is enabled
+ *     if (!deferSessionRefresh || isPostRequest)
+ *       await ctx.context.internalAdapter.deleteSession(session.session.token);
+ *   }
  *   return ctx.json(null);
  * }
  * ```

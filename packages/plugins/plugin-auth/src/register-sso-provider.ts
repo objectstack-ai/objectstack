@@ -127,9 +127,10 @@ export async function runRegisterSsoProviderFromForm(
   if (discoveryEndpoint) oidcConfig.discoveryEndpoint = discoveryEndpoint;
   oidcConfig.scopes = scopesRaw ? scopesRaw.split(/[\s,]+/).filter(Boolean) : ['openid', 'email', 'profile'];
 
-  // `oidcConfig.mapping` is a `z.strictObject` in `@better-auth/sso@1.7.0-rc.2`
-  // (dist/index.mjs, `oidcMappingSchema`): members { email, emailVerified?,
-  // name, image?, extraFields? }, with `email` and `name` REQUIRED and NO `id`
+  // `oidcConfig.mapping` is a `z.strictObject`. Measured 2026-08-20 against the
+  // installed `@better-auth/sso@1.7.1` (`dist/index.mjs:1852`,
+  // `oidcMappingSchema`): members { email, emailVerified?, name, image?,
+  // extraFields? }, with `email` and `name` REQUIRED and NO `id`
   // member. Emitting `id` is therefore a hard 400 on EVERY registration:
   //   [body.oidcConfig.mapping] Unrecognized key: "id"
   //
@@ -145,6 +146,14 @@ export async function runRegisterSsoProviderFromForm(
   // `extraFields.id` is silently overwritten by `sub` — a no-op that reads as
   // configured. The subject claim is simply not configurable any more, so a
   // caller that asks for a different one is told so instead of being ignored.
+  //
+  // The two sentences above name rc.2 because that is WHEN the member was
+  // retired; the state they describe is still the installed one. Re-measured
+  // 2026-08-20 against `@better-auth/sso@1.7.1`, `dist/index.mjs`: the
+  // `extraFields` spread at `:3921` precedes `id: readStringClaim(rawUserInfo,
+  // "sub")` at `:3922` (and `:3932` precedes `id: idToken.sub` at `:3933`),
+  // with the cross-checks at `:3907` (`id_token_subject_missing`) and `:3918`
+  // (`id_token_userinfo_subject_mismatch`).
   const mapId = str(body?.mapId);
   if (mapId && mapId !== 'sub') {
     return {

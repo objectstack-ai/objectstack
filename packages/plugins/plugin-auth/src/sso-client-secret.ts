@@ -21,9 +21,18 @@
  * at rest plus our own generic read path.
  *
  * ## The seam
- * `@better-auth/sso` at the pinned 1.7.0-rc.2 has NO secret-at-rest option, so
- * there is no upstream switch to flip: `SSOOptions` has no equivalent of
- * `scim({ storeSCIMToken: 'hashed' })`. better-auth owns the writes, so the seam
+ * `@better-auth/sso` has NO secret-at-rest option, so there is no upstream
+ * switch to flip: `SSOOptions` has no equivalent of
+ * `scim({ storeSCIMToken: 'hashed' })`. Measured 2026-08-20 against the
+ * installed `@better-auth/sso@1.7.1` by enumerating the top-level members of
+ * `SSOOptions` in the shipped `dist/index-CZytzKv6.d.mts` — `resolveUser`,
+ * `guardProviderMutation`, `provisionUser`, `provisionUserOnEveryLogin`,
+ * `organizationProvisioning`, `defaultSSO`, `defaultOverrideUserInfo`,
+ * `disableImplicitSignUp`, `modelName`, `fields`, `schema`, `providersLimit`,
+ * `trustEmailVerified`, `domainVerification`. None of them concerns storage of
+ * `clientSecret`; the only `encrypt`-shaped strings in the package are SAML
+ * assertion algorithms. Re-check by re-listing those members: a new one named
+ * for secret storage is what would retire this whole file. better-auth owns the writes, so the seam
  * sits between better-auth and its adapter — here — and never in a route handler.
  *
  *   register / update-provider

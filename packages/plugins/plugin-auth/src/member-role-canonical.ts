@@ -11,11 +11,13 @@
  *  1. the #5942 grade ladder (`orgRoleGrade` / `isOrgAdminGrade`,
  *     `invitation-role-cap.ts`) — `split(',')` then `trim().toLowerCase()`;
  *  2. `mapMembershipRole` (`@objectstack/spec/identity`) — `trim().toLowerCase()`;
- *  3. **better-auth itself** — `better-auth@1.7.0-rc.2`,
+ *  3. **better-auth itself** — measured 2026-08-20 against the installed
+ *     `better-auth@1.7.1`,
  *     `dist/plugins/organization/routes/crud-members.mjs`, a raw
  *     `role.split(",")` with NO trim and NO lower-casing, in three branches:
- *     `removeMember`'s "only an owner may remove an owner", `updateMemberRole`'s
- *     creator protection, and `organization/leave`'s last-owner count.
+ *     `removeMember`'s "only an owner may remove an owner" (`:193`),
+ *     `updateMemberRole`'s creator protection (`:288`), and
+ *     `organization/leave`'s last-owner count (`:420`).
  *
  * For a row stored as `Owner` (or `' owner'`), (1) and (2) say owner and (3)
  * says plain member. The vendor therefore skips its owner branch entirely and

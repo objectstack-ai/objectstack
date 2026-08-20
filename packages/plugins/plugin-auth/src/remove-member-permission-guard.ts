@@ -7,8 +7,13 @@
  * ## The defect, and where it is minted
  *
  * Not here, and not anywhere in our packages: the wrong answer comes out of the
- * pinned vendor. better-auth `1.7.0-rc.2`,
- * `dist/plugins/organization/routes/crud-members.mjs`, `removeMember` runs:
+ * pinned vendor. Measured 2026-08-20 against the installed better-auth `1.7.1`
+ * (what `^1.7.1` resolves to today), in
+ * `dist/plugins/organization/routes/crud-members.mjs`: `removeMember`
+ * (declared `:139`) still runs the four checks below in this order — (3a) at
+ * `:196`, (3b) at `:197-200`, and the real permission check at `:202-207`,
+ * i.e. AFTER both. Re-check by reading those line numbers; if the order has
+ * changed upstream, this guard is what should be deleted, not adjusted:
  *
  * ```js
  * const roles = toBeRemovedMember.role.split(",");

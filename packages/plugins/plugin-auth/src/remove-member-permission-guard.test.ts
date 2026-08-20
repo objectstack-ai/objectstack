@@ -5,9 +5,11 @@
 //
 // ## Where the wrong answer is minted (measured, not assumed)
 //
-// NOT in our packages. better-auth `1.7.0-rc.2`,
-// `dist/plugins/organization/routes/crud-members.mjs`, the `removeMember`
-// handler, runs its checks in this order:
+// NOT in our packages. Measured 2026-08-20 against the installed better-auth
+// `1.7.1`, `dist/plugins/organization/routes/crud-members.mjs`, the
+// `removeMember` handler (declared `:139`) runs its checks in this order —
+// the branch at `:195`, its two throws at `:196` and `:197-200`, and
+// `hasPermission` at `:202-207`:
 //
 //   1. resolve the caller's own member row              → 400 MEMBER_NOT_FOUND
 //   2. resolve the target member row                    → 400 MEMBER_NOT_FOUND

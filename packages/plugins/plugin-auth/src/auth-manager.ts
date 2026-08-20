@@ -1081,15 +1081,20 @@ export class AuthManager {
         // one adds only the notice. So `sendChangeEmailConfirmation` stays
         // absent above — and that is a measured decision, not an omission:
         //
-        //   `user.changeEmail` in better-auth 1.7.0-rc.2 declares EXACTLY three
-        //   members (`@better-auth/core/src/types/init-options.ts:946-971`):
-        //   `enabled`, `sendChangeEmailConfirmation`, and
-        //   `updateEmailWithoutVerification`. There is NO notify-only hook, and
-        //   `sendChangeEmailConfirmation` is not one: in `update-user.mjs:457`
-        //   it becomes `canSendConfirmation`, and the branch at :495 RETURNS
-        //   right after invoking it — the new address is never mailed until the
-        //   old one clicks. Setting it is therefore structurally the approval
-        //   gate the ruling refuses, not a way to notify.
+        //   `user.changeEmail` declares EXACTLY three members: `enabled`,
+        //   `sendChangeEmailConfirmation`, and `updateEmailWithoutVerification`.
+        //   Measured 2026-08-20 against the installed
+        //   `@better-auth/core@1.7.1`, in the file the package actually SHIPS —
+        //   `dist/types/init-options.d.mts:835-857`. (The previous stamp cited
+        //   `src/types/init-options.ts:946-971`; no `src/` is published, so
+        //   that reference could not be checked by anyone reading it.)
+        //   There is NO notify-only hook, and
+        //   `sendChangeEmailConfirmation` is not one: in better-auth 1.7.1's
+        //   `dist/api/routes/update-user.mjs:457` it becomes
+        //   `canSendConfirmation`, and the branch opening at `:496` RETURNS at
+        //   `:505` right after invoking it — the new address is never mailed
+        //   until the old one clicks. Setting it is therefore structurally the
+        //   approval gate the ruling refuses, not a way to notify.
         //
         // The notice is consequently sent by the framework, from the global
         // `after` hook on `/change-email` (search `__osChangeEmailFrom`), using
@@ -3603,8 +3608,16 @@ export class AuthManager {
     // [#7724] A subject-erasure request is ONE unit of work, and better-auth
     // does not treat it as one: `internalAdapter.deleteUser` deletes the
     // sessions, then the accounts, then the user, in three unrelated adapter
-    // calls with no transaction (verified in better-auth 1.7.0-rc.2 —
-    // `dist/db/internal-adapter.mjs` mentions no transaction at all). Anything
+    // calls with no transaction. Measured 2026-08-20 against the installed
+    // better-auth 1.7.1: `deleteUser` at `dist/db/internal-adapter.mjs:233-247`
+    // is three separate `deleteManyWithHooks` / `deleteWithHooks` calls
+    // (session `:235`, account `:239`, user `:243`), and the string
+    // "transaction" does not occur anywhere in that file — a zero result that
+    // means something because "deleteManyWithHooks" occurs 8 times in it, so
+    // the search does reach the text. (The session call is now conditional on
+    // `!secondaryStorage || storeSessionInDatabase`; ObjectStack wires no
+    // `secondaryStorage` — deliberately, see `session-tombstone.ts` — so all
+    // three fire here.) Anything
     // that refuses the LAST of those three leaves the first two committed: the
     // credential rows are gone, the `sys_user` row is not, and the deployment
     // is left with an identity that still occupies the org roster and can no
