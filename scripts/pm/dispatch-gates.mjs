@@ -1398,6 +1398,40 @@ export function isTestFilePath(path) {
 }
 
 /**
+ * Is this path inside the ROOT package's tsc program — the population behind
+ * the `@objectstack/spec-monorepo` entry of `check:type-check-debt`?
+ *
+ * This is the one gate population in the tree that no path literal can ever
+ * describe, in principle rather than by omission. The root program is declared
+ * by EXCLUSION: `tsconfig.json` names the four directories tsc does not walk,
+ * and "everything else" has no positive spelling. The ordinary derivation —
+ * scan a gate's own source for whole-string path literals — therefore reaches
+ * this gate for the twelve ledgered PACKAGE names and for the single measured
+ * coupling constant the gate declares, and reaches nothing at all for the root
+ * entry, which is the largest of the fifteen.
+ *
+ * The complement is computed from the config's own `exclude` array, never
+ * mirrored here — see `rootTsProgramExcludedDirs`.
+ *
+ * TypeScript extensions ONLY, and that half is load-bearing rather than tidy.
+ * The root config sets no `allowJs`, so the 117 tracked JavaScript files
+ * sitting in exactly these directories — nearly all of them the repo's own
+ * checker scripts — are NOT in the program, against 11 TypeScript files that
+ * are. A bare "outside those directories" test would fire on 128 paths to reach
+ * 11, sending every card that edits a checker to a ratchet needing a built
+ * workspace closure. That is how a convention entry earns the reputation that
+ * gets it skipped, which costs more than the hole it was added to close.
+ *
+ * @param {string} path repo-relative, posix
+ * @param {string[]} excludedTopLevelDirs from `rootTsProgramExcludedDirs()`
+ */
+export function isInRootTsProgram(path, excludedTopLevelDirs) {
+  const rel = path.replace(/^\.\//, '');
+  if (!/\.(ts|tsx|mts|cts)$/.test(rel)) return false;
+  return !excludedTopLevelDirs.includes(rel.split('/')[0]);
+}
+
+/**
  * `isExtractConfigPath` is imported at the top of this file, not defined here.
  *
  * It used to be a hand-written mirror of the gate's own filename test, with a
@@ -1492,6 +1526,61 @@ let metadataFormsExtracted = null;
 export function metadataFormsSurfaceIsExtracted() {
   metadataFormsExtracted ??= anyConfigExtractsMetadataForms(i18nExtractConfigs());
   return metadataFormsExtracted;
+}
+
+/**
+ * The root tsconfig's `exclude` array, as declared. Read, never mirrored: a
+ * hand-written copy of that list here would be a second contract — it agrees
+ * until one side moves and nothing reports the day it stops, which is the
+ * defect the i18n entries above were rewritten to remove. The config is the
+ * authority for this question and it is already on disk.
+ *
+ * Unreadable input must never look like an empty answer, so an unparseable
+ * config or a missing `exclude` THROWS rather than degrading to "excludes
+ * nothing" — that reading would fire this kind on every TypeScript file in the
+ * tree, and a convention entry that cries wolf on every card is worse than one
+ * that was never added. Same contract as the two walks above; the entrypoint
+ * turns the throw into a non-zero exit.
+ */
+export function rootTsconfigExcludeEntries() {
+  const raw = readFileSync(join(ROOT, 'tsconfig.json'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (cause) {
+    throw new Error('tsconfig.json is not parseable, so the root tsc program cannot be derived', { cause });
+  }
+  const exclude = parsed?.exclude;
+  if (!Array.isArray(exclude) || exclude.length === 0) {
+    throw new Error('tsconfig.json declares no non-empty `exclude`: the root tsc program is defined by that list and cannot be derived without it');
+  }
+  return exclude;
+}
+
+/**
+ * A plain top-level directory name — the ONE exclude shape this complement can
+ * judge. A pattern form excludes files INSIDE directories rather than whole
+ * directories, and reading one as a directory would narrow the complement and
+ * put the original hole back in a new place.
+ */
+export function isPlainTopLevelDir(entry) {
+  return typeof entry === 'string' && entry !== '' && !/[\/*?[\]]/.test(entry);
+}
+
+/**
+ * The top-level directories the root program does not walk, memoised.
+ *
+ * Entries that are not plain directory names are DROPPED, which widens the kind
+ * (a card is told to run a gate it may not move) rather than narrowing it — the
+ * safe direction, since these are leads to run locally and not verdicts. It is
+ * not left to rot either: the self-test pins that the live config still
+ * consists only of the shape this reads, so the day someone adds a pattern
+ * form CI says so and a human decides what the complement should mean.
+ */
+let rootProgramExcludes = null;
+export function rootTsProgramExcludedDirs() {
+  rootProgramExcludes ??= rootTsconfigExcludeEntries().filter(isPlainTopLevelDir);
+  return rootProgramExcludes;
 }
 
 /**
@@ -1660,6 +1749,54 @@ export function reachesMetadataFormModule(path, modulePaths) {
  * self-test for the live pins that keep the constants honest as the coupling
  * they are: manual, per-file, and silently rottable if nothing watched it.
  *
+ * ## Why the ROOT-program entry does not weaken the ledger's discipline (#9873)
+ *
+ * `check-type-check-coverage.mjs` states, in its own source, the very thesis
+ * the card for this entry was filed to argue: "The root program is everything
+ * outside packages/apps/examples, so no list here can ever be complete -- add a
+ * constant when a coupling has actually been measured, the way this one was."
+ * That is a deliberate policy, written by the gate's author before the card
+ * existed, and the entry below is a proposal against it. So it owes an answer
+ * rather than a shrug.
+ *
+ * The answer is that the two lists answer different questions, and only one of
+ * them is a measurement.
+ *
+ * The gate's ledger records MAGNITUDE. `ROOT_PROGRAM_COUPLED_SCRIPT` does not
+ * merely say "this file is in the program" — it carries a measured claim, that
+ * the file accounts for 29 of that entry's 80 errors, and the ledger note
+ * spends that number. A rule that manufactured such constants automatically
+ * really would register couplings nobody had measured, and the refusal is
+ * right. This entry adds no constant, moves no count and asserts no magnitude:
+ * the ledger keeps exactly the one measured coupling it has today, with every
+ * reference to it intact.
+ *
+ * This table records RELEVANCE — which gate a seat is told to run before it
+ * pushes. That claim needs no measurement to be true, because it is already
+ * settled by a file the repo maintains for another purpose entirely: a path is
+ * in the root program when the root tsconfig does not exclude it. Nothing here
+ * is kept in sync by hand, so there is no second contract to rot, and the
+ * measured-couplings rule the gate states about ITS list is untouched.
+ *
+ * What leaving the two questions merged cost, once, in the expensive direction:
+ * PR #9853 added a single file under a directory this entry now covers, derived
+ * its gate union with this script at final head, ran both gates the run named
+ * and reported them green — then CI failed the type-debt ratchet with 19 new
+ * errors from that one file. The gate worked exactly as designed. Nobody could
+ * know to run it, and the repair most available at that point is the one the
+ * gate's own text calls maintainer-only.
+ *
+ * ⚠ Its known limit, stated here rather than discovered later: `exclude` drops
+ * files only from tsc's INITIAL WALK, so sources under an excluded directory
+ * that a root script IMPORTS are pulled into the program anyway — the ledger
+ * note for this entry records 4 of its 80 errors arriving exactly that way,
+ * from the showcase example. A path-shaped trigger cannot see an import graph,
+ * so a card editing only such a file is still not sent here. That is
+ * deliberately NOT closed on this card: the direction is the safe one (this
+ * entry under-covers rather than over-covers), and closing it means resolving
+ * the program INCLUDING imports, which is a different tool than a path
+ * predicate and a different card's scope.
+ *
  * ## How these entries stay honest
  *
  * - Every `name` here is resolved against the families actually discovered in
@@ -1721,6 +1858,12 @@ export function reachesMetadataFormModule(path, modulePaths) {
  *     day the entry stops firing by itself (its `matches` reads the flags), so
  *     delete it only once the opt-out is the permanent shape rather than a
  *     transient one.
+ *   - root-program entry: when the gate's own source names its root population
+ *     in a form this derivation can read — a positive literal, or a generated
+ *     manifest of the resolved program — the ordinary path match names it and
+ *     this entry is redundant. Growing more measured coupling constants does
+ *     NOT qualify: each names one file, and this entry exists for the files
+ *     that have no constant yet, which is every new one.
  *
  *   Delete an entry the day its criterion is met, not before.
  */
@@ -1768,6 +1911,16 @@ export const CHANGE_KIND_GATES = [
       {
         name: 'check:i18n',
         why: "the metadataForms half of the bundles is registry-driven, so a form's sections, field labels, helpText or placeholder are extracted into ONE package's committed bundles — platform-objects today — and a form edit drifts them from a package your diff never touches. This is the edge PR #9113 paid a CI round for. Same repair as the entry above: regenerate with `node scripts/check-i18n-bundles.mjs --write` and commit the moved bundles",
+      },
+    ],
+  },
+  {
+    kind: 'adds or edits TypeScript in the ROOT tsc program (outside the directories tsconfig.json excludes)',
+    matches: (path) => isInRootTsProgram(path, rootTsProgramExcludedDirs()),
+    gates: [
+      {
+        name: 'check:type-check-debt',
+        why: 'the ROOT ledger entry (@objectstack/spec-monorepo) IS this program, so a file here moves its raw tsc count even though your diff touches no package — measured, one added bench file put it 19 over and cost a CI round. It is a shrink-only ratchet: the repair is to make the file typecheck, and raising the entry is maintainer-only, never the co-equal option. Most of this class is one missing setting rather than real breakage — the root config carries lib ES2020 and no types, so process and console are absent unless the file declares them ambiently. Needs the workspace closure BUILT — on an unbuilt worktree it refuses outright, and that throw means NOT MEASURED, never `not applicable to me`. Build first, exactly as lint.yml does: pnpm exec turbo run build --filter=./packages/* --filter=./packages/*/* (quote the filter values for your shell)',
       },
     ],
   },
@@ -3030,7 +3183,54 @@ function selfTest() {
   // condition and a command that satisfies it.
   const debtLine = kindHit.find((l) => l.includes('- pnpm check:type-check-debt   —')) ?? '';
   t('the ratchet line states its built-closure prerequisite', /closure BUILT|BUILT closure/.test(debtLine) && debtLine.includes('turbo run build'));
-  t('a non-test path emits nothing', changeKindLines(['scripts/pm/dispatch-gates.mjs'], resolved).length === 0);
+  t('a non-test path in no other kind emits nothing — a .mjs is outside the root tsc program too', changeKindLines(['scripts/pm/dispatch-gates.mjs'], resolved).length === 0);
+
+  // ── The ROOT tsc program entry (#9873) ────────────────────────────────────
+  //
+  // The one gate population no path literal can describe: the root program is
+  // declared by EXCLUSION, so this entry derives the complement from the root
+  // tsconfig's own list. These pin the predicate, the config read under it, the
+  // rendered line, and the property the entry was added for — the path from the
+  // PR that paid for this now derives the ratchet.
+  const rootExcl = rootTsProgramExcludedDirs();
+  t('the root exclude list is read from the config and is not empty', rootExcl.length > 0);
+  t('and it really names the three source trees tsc skips', ['packages', 'apps', 'examples'].every((d) => rootExcl.includes(d)));
+  t('a new script in the root tree is in the root program — the PR #9853 case', isInRootTsProgram('scripts/bench/runtime-publish-gate.bench.mts', rootExcl));
+  t('so is a top-level config file', isInRootTsProgram('tsup.config.ts', rootExcl));
+  t('so is a declaration file in the same tree', isInRootTsProgram('scripts/check-regen-pending.d.mts', rootExcl));
+  t('a leading ./ does not hide one', isInRootTsProgram('./scripts/check-test-typecheck.mts', rootExcl));
+  t('a package source is NOT in the root program', !isInRootTsProgram('packages/rest/src/rest-server.ts', rootExcl));
+  t('nor an app source', !isInRootTsProgram('apps/console/src/main.ts', rootExcl));
+  t('nor an example source — imports can still pull one in, which the entry note states as its limit', !isInRootTsProgram('examples/app-showcase/src/data/objects/index.ts', rootExcl));
+  // The extension half, which is what keeps this entry from firing on nearly
+  // every card that touches tooling. The root config sets no `allowJs`, so the
+  // tree's checker scripts are outside the program: 117 tracked JS files sit in
+  // these same directories against 11 TypeScript files that are really in it,
+  // so a bare "outside those directories" test would fire on 128 paths to reach
+  // 11 — and send each of them to a ratchet that needs a built closure.
+  t('a checker script is NOT in the root program — the root config sets no allowJs', !isInRootTsProgram('scripts/check-type-check-coverage.mjs', rootExcl));
+  t('nor is this deriver itself', !isInRootTsProgram('scripts/pm/dispatch-gates.mjs', rootExcl));
+  t('nor a non-TS file that merely lives there', !isInRootTsProgram('scripts/pm/README.md', rootExcl));
+
+  // The exclude-SHAPE guard. This complement can only judge plain directory
+  // names and silently drops anything else; dropping WIDENS the kind, so the
+  // rot would be quiet by construction. This pair is what makes it loud.
+  t('plain directory names are judged', isPlainTopLevelDir('packages') && isPlainTopLevelDir('.github'));
+  t('a nested path is not a plain directory name', !isPlainTopLevelDir('packages/objectql/src/engine.test.ts'));
+  t('nor is a pattern form', !isPlainTopLevelDir('*.test.ts') && !isPlainTopLevelDir('[abc]'));
+  t('nor an empty or non-string entry', !isPlainTopLevelDir('') && !isPlainTopLevelDir(null));
+  t('the LIVE root tsconfig still consists only of the shape this reads', rootTsconfigExcludeEntries().every(isPlainTopLevelDir));
+
+  // The rendered line, anchored on the delimiters for the reason the pair
+  // above states at length: a bare `includes` survives a prefix-preserving
+  // rename, which is the one rot class the STALE branch exists to report.
+  const rootKind = changeKindLines(['scripts/bench/runtime-publish-gate.bench.mts'], resolved);
+  t('a root-program path emits the convention section', rootKind.length === 2 && rootKind[0].includes('ROOT tsc program'));
+  t('and it names the RATCHET half — the invocation that re-measures', rootKind.some((l) => l.includes('- pnpm check:type-check-debt   —')));
+  const rootLine = rootKind.find((l) => l.includes('- pnpm check:type-check-debt   —')) ?? '';
+  t('the root-program line refuses the baseline raise and states the real repair', /shrink-only/.test(rootLine) && /maintainer-only/.test(rootLine));
+  t('and carries the built-closure prerequisite, like the other ratchet line', /closure BUILT/.test(rootLine) && rootLine.includes('turbo run build'));
+  t('a checker script beside it still emits nothing', changeKindLines(['scripts/check-type-check-coverage.mjs'], resolved).length === 0);
 
   // i18n change-kind derivation — the pure judgments first, each mirroring one
   // line of the gate's own `findConfigs`.
@@ -3467,7 +3667,13 @@ function selfTest() {
   // The table's own rot detector: a name no live run discovers must say so,
   // never disappear quietly.
   const stale = changeKindLines(['a.test.ts'], () => null);
-  t('an undiscoverable gate renders as STALE', stale.filter((l) => l.includes('STALE')).length === 5);
+  // Six, not five, since the root-program entry joined the table: `a.test.ts`
+  // is a root-level TypeScript file, so it is BOTH a test file and inside the
+  // root tsc program and legitimately hits two kinds. The ratchet therefore
+  // renders twice, under a different `why` each time — pinned just below,
+  // because a bare count cannot tell that apart from one kind rotting away.
+  t('an undiscoverable gate renders as STALE', stale.filter((l) => l.includes('STALE')).length === 6);
+  t('a root-level test file hits both kinds, so the ratchet renders STALE under each', stale.filter((l) => l.includes('\u26a0 check:type-check-debt: STALE')).length === 2);
   // Per NAME, anchored on both sides of the rendered name (`⚠ x: STALE`), so the
   // pair that shares one script is reported apart: a count alone stays green if
   // one of the two is dropped from the table and something else is added, and a
