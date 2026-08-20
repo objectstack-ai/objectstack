@@ -12,7 +12,11 @@ import { readEnvWithDeprecation, resolveTenancyPosture, resolveThrownHttpError }
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import type { MetadataHostEngine } from './host-engine.js';
 import { omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
-import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
+import {
+    evaluateRuntimeAuthoringGate,
+    CLOSURE_CONTEXT_KEY_BY_TYPE,
+    type RuntimePendingDeclarations,
+} from './runtime-authoring-gate.js';
 // [#7560] ADR-0070's read-only-package rule, shared with the `/packages`
 // lifecycle gate in `@objectstack/runtime` — see `./package-writability.js`.
 import { isWritablePackage as isWritablePackageShared } from './package-writability.js';
@@ -3920,6 +3924,19 @@ export class ObjectStackProtocolImplementation implements
          * sentinel ⇒ nothing is narrowed.
          */
         packageId?: string | null;
+        /**
+         * [#10377] The declarations this write's own BATCH is publishing
+         * alongside it, when the caller HAS a batch. Only
+         * `publishPackageDrafts` does; every other door writes one item, so its
+         * closure is the live universe and it states nothing here.
+         *
+         * Threaded rather than gathered: the batch's pending drafts are
+         * `sys_metadata` rows the caller has already listed and is about to
+         * consume, and re-deriving them from this side would mean guessing
+         * WHICH batch a write belongs to — which is the question the caller is
+         * the only one holding the answer to.
+         */
+        pending?: RuntimePendingDeclarations;
     }): RuntimeAuthoringIssue[] {
         // [#6710] The ADR-0005 carve-out, now DECLARED instead of inferred.
         //
@@ -4020,6 +4037,9 @@ export class ObjectStackProtocolImplementation implements
             permissions,
             books,
             datasets,
+            // [#10377] The batch's own pending drafts join the four
+            // collections above. Absent on every non-batch door.
+            ...(evt.pending !== undefined ? { pending: evt.pending } : {}),
             ...(packageScope !== undefined ? { packageScope } : {}),
             ...(evt.organizationId !== undefined ? { organizationId: evt.organizationId } : {}),
             orgWallEnforced: this.orgWallEnforced(),
@@ -14398,6 +14418,17 @@ export class ObjectStackProtocolImplementation implements
          * the caller actually has a binding to state.
          */
         packageId?: string | null;
+        /**
+         * [#10377] The OTHER drafts this promotion is part of a batch with,
+         * projected into the gate's context collections. Forwarded verbatim to
+         * {@link assertRuntimeAuthoringRules} — this method computes nothing
+         * from it and holds no opinion about its contents.
+         *
+         * Stated by `publishPackageDrafts` (a package publishes as a unit);
+         * absent on the `publishMetaItem` path, whose batch is one item, so a
+         * "same-batch" closure would be the item itself and change nothing.
+         */
+        pending?: RuntimePendingDeclarations;
     }): Promise<{
         singularType: string;
         orgId: string | null;
@@ -14502,6 +14533,13 @@ export class ObjectStackProtocolImplementation implements
                 // fires while looking like it does. Filed rather than widened
                 // here, because `MetadataItem` is a `packages/spec` contract.
                 ...(request.packageId !== undefined ? { packageId: request.packageId } : {}),
+                // [#10377] The batch's own pending drafts, when this promotion
+                // is part of one. The package closure above says WHICH packages
+                // this write may resolve against; this says which of its own
+                // package's declarations are in flight beside it — two
+                // different narrowings, both needed for a package to be
+                // judged as a self-consistent unit.
+                ...(request.pending !== undefined ? { pending: request.pending } : {}),
             })
             : [];
 
@@ -14803,6 +14841,82 @@ export class ObjectStackProtocolImplementation implements
             ...(request?.packageId ? { packageId: request.packageId } : {}),
         });
         return { drafts };
+    }
+
+    /**
+     * [#10377] The batch's own pending declarations, projected into the gate's
+     * context collections — the half of the closure that makes a package
+     * publishable as a SELF-CONSISTENT UNIT.
+     *
+     * ## What was broken
+     *
+     * `assertRuntimeAuthoringRules` resolves every context collection off
+     * `engine.registry`, i.e. the LIVE universe. A draft is not in it — the
+     * write-through runs on `mode: 'publish'` — and the batch's own promotions
+     * do not put it there either, because `applyRegistryWriteThrough` lives in
+     * Phase 2, after the Phase-1 transaction in which every draft is gated and
+     * promoted. So while a batch is being judged NO sibling of that batch is
+     * visible to any other member's gate pass, in ANY order. Measured
+     * 2026-08-21 on a cloud rig: a package carrying `dataset/shyx_customer_ds`
+     * and a `dashboard` whose widget binds it rolled back at the dashboard
+     * with `[widget-dataset-unknown] … does not resolve to a declared
+     * dataset`, on every attempt and under both dataset names the author
+     * tried. The dataset was in the same batch, three rows away.
+     *
+     * ## Why the bodies are read here and not inside the loop
+     *
+     * The promote DELETES the draft row (`repo.promoteDraft` = active-row put +
+     * draft delete), so a body read after the first promotion is a body that
+     * may already be gone — the same reason the seed capture inside Phase 1
+     * reads BEFORE its own promote. Reading the whole set up front also makes
+     * the closure ORDER-INDEPENDENT by construction rather than by luck of
+     * iteration: every member is judged against the same complete set.
+     *
+     * ## Scope, and why no extra filtering is needed
+     *
+     * `drafts` is already exactly this package's pending set — `listDrafts`
+     * narrows by `package_id`, and surfaces env-wide plus own-org rows, which
+     * is precisely the population the caller is about to promote. So the
+     * closure is "this package's own declarations", restated from the list the
+     * batch is defined by, never a second query with a second scope.
+     *
+     * ⛔ Read failures PROPAGATE. This runs before Phase 1's transaction, so
+     * nothing has been written and the publish fails having changed nothing —
+     * and every row read here is a row `promoteDraftForPublish` is about to
+     * read again anyway. Swallowing would silently shrink the closure, which
+     * does not fail open, it manufactures a refusal that names a declaration
+     * the author can SEE in their own package (ADR-0110 D3: a miss and a fault
+     * are different facts).
+     */
+    private async collectBatchPendingDeclarations(
+        drafts: ReadonlyArray<{ type: string; name: string; organizationId: string | null }>,
+    ): Promise<RuntimePendingDeclarations | undefined> {
+        const pending: {
+            objects: unknown[]; permissions: unknown[]; books: unknown[]; datasets: unknown[];
+        } = { objects: [], permissions: [], books: [], datasets: [] };
+        let any = false;
+        for (const d of drafts) {
+            // The canonical fold, same boundary the promote applies: a stored
+            // manifest-plural spelling must route to the same collection its
+            // singular does, or one row's shape would decide whether the
+            // package is judged against itself.
+            const singular = canonicalMetaType(d.type);
+            const key = (CLOSURE_CONTEXT_KEY_BY_TYPE as Record<string, keyof RuntimePendingDeclarations>)[singular];
+            if (!key) continue;
+            const draftOrgId = d.organizationId ?? null;
+            const repo = this.getOverlayRepo(draftOrgId);
+            const ref = {
+                type: singular, name: d.name, org: draftOrgId ?? 'env',
+            } as unknown as Parameters<typeof repo.get>[0];
+            const draft = await repo.get(ref, { state: 'draft' });
+            if (draft?.body === undefined || draft.body === null) continue;
+            pending[key].push(draft.body);
+            any = true;
+        }
+        // Absent, not empty: `undefined` is what keeps a batch with no
+        // closure-relevant drafts byte-identical to the pre-#10377 gate call,
+        // rather than routing it through a merge that would be a no-op.
+        return any ? pending : undefined;
     }
 
     /**
@@ -15153,6 +15267,14 @@ export class ObjectStackProtocolImplementation implements
         ];
         const seedBodies: unknown[] = [];
 
+        // [#10377] The closure this batch is judged against, read ONCE and
+        // BEFORE any promotion (a promote deletes the draft row it reads).
+        // Every member of the batch is then gated against the same complete
+        // set, which is what makes a dashboard-plus-its-dataset package
+        // publishable in either order — see
+        // {@link collectBatchPendingDeclarations}.
+        const pendingDeclarations = await this.collectBatchPendingDeclarations(drafts);
+
         // ADR-0067 — capture each artifact's PRE-publish state so this turn can
         // be recorded as ONE revertible commit. existedBefore=false → the commit
         // creates it (revert = soft-remove); true → it edits an existing artifact
@@ -15340,6 +15462,12 @@ export class ObjectStackProtocolImplementation implements
                             // `d.packageId` is the row's own binding, so this
                             // is the listed key restated, never a new one.
                             packageId: d.packageId,
+                            // [#10377] The whole batch's own declarations, so
+                            // this member is judged against the package it is
+                            // being published AS PART OF and not against the
+                            // universe as it stood before the publish started.
+                            ...(pendingDeclarations !== undefined
+                                ? { pending: pendingDeclarations } : {}),
                             ...(request.actor ? { actor: request.actor } : {}),
                             message: `publish app package '${request.packageId}'`,
                         });

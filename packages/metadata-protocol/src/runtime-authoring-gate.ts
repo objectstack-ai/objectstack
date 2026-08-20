@@ -50,6 +50,7 @@ import {
     runRuntimeAuthoringRules,
     type AuthoringFinding,
     type RuntimePackageScope,
+    type RuntimeStackContext,
 } from '@objectstack/lint/runtime';
 // The ONE declaration of "which `config` key on which container node type holds
 // a nested region" (#4401, `spec/src/automation/region-slots.ts`). Four passes
@@ -338,6 +339,99 @@ export function findPlatformScheduleOrgGaps(args: {
     return issues;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// #10377 — the batch's OWN pending drafts are part of the closure it is judged
+// against.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The declarations a package is publishing IN THIS BATCH, keyed exactly like
+ * the live resolution context they join.
+ *
+ * ## The defect this exists for
+ *
+ * The gate's context collections are read off `engine.registry` — the LIVE
+ * universe. A draft is deliberately not in that registry (the write-through
+ * runs on `mode: 'publish'`), and the batch door's own promotions do not put
+ * it there either: `applyRegistryWriteThrough` runs in Phase 2, AFTER the
+ * Phase-1 transaction that gates and promotes every draft. So while a batch is
+ * being judged, NO sibling of the batch exists in any collection — measured
+ * 2026-08-21 on a cloud rig as `[widget-dataset-unknown] dataset
+ * "shyx_customer_ds" does not resolve`, with the dataset sitting in the very
+ * same batch. A package shipping a dashboard together with its dataset could
+ * never publish, and no intra-batch ordering could help, because the registry
+ * is not written until the whole transaction has committed.
+ *
+ * ## Why the type is `RuntimeStackContext` rather than a new shape
+ *
+ * It is the SAME set of collections, resolved from a second source. Reusing
+ * the declaration is what stops the two from drifting when #8309's "widening
+ * the snapshot is a one-key edit" note is next acted on: a key added there
+ * arrives here typed, and {@link CLOSURE_CONTEXT_KEY_BY_TYPE} below is the
+ * only thing that then needs a decision.
+ */
+export type RuntimePendingDeclarations = RuntimeStackContext;
+
+/**
+ * Which context collection a pending draft of a given metadata type joins.
+ *
+ * The `satisfies` clause is the drift guard, not decoration: rename a key of
+ * `RuntimeStackContext` in `@objectstack/lint` and this table stops compiling,
+ * instead of silently routing a collection nowhere — the #4449
+ * wired-onto-nothing shape that `TYPE_TO_STACK_KEY`'s own `seed: 'data'` note
+ * records paying for.
+ *
+ * Every metadata type NOT listed here contributes nothing to the closure, and
+ * that is the correct answer rather than a gap: a collection is carried
+ * because some rule RESOLVES REFERENCES INTO IT, and only these four are read
+ * that way (`RuntimeStackContext`'s own docblock records the measurement).
+ */
+export const CLOSURE_CONTEXT_KEY_BY_TYPE = {
+    object: 'objects',
+    permission: 'permissions',
+    book: 'books',
+    dataset: 'datasets',
+} as const satisfies Readonly<Record<string, keyof RuntimeStackContext>>;
+
+/**
+ * The live collection with this batch's pending drafts folded in — REPLACING
+ * by name, never appended beside.
+ *
+ * Replace-not-erase is the same rule `buildRuntimeWriteSnapshots` already
+ * applies when a written item lands in its own context collection, and for the
+ * same reason: a draft that EDITS a live declaration is one declaration in two
+ * states, so appending it would make an update read as a duplicate name — for
+ * `objects` that turns every lookup in the tenant's model into an ambiguity,
+ * and for `permissions` it double-counts grants.
+ *
+ * ⛔ The direction is deliberately additive: a pending draft can only ever make
+ * MORE names resolvable, never fewer. A name in neither the batch nor the live
+ * universe is still unresolved, which is what keeps the #7529 refusal — the
+ * one this change must not weaken — intact for a genuinely dangling binding.
+ *
+ * Pure and total: an entry that is not an object, or carries no usable `name`,
+ * is kept rather than inspected.
+ */
+export function mergePendingDeclarations(
+    live: readonly unknown[],
+    pending: readonly unknown[] | undefined,
+): readonly unknown[] {
+    if (!pending || pending.length === 0) return live;
+    const supersededNames = new Set<string>();
+    for (const entry of pending) {
+        if (!isRec(entry)) continue;
+        const name = entry.name;
+        if (typeof name === 'string' && name !== '') supersededNames.add(name);
+    }
+    if (supersededNames.size === 0) return [...live, ...pending];
+    const kept = live.filter((entry) => {
+        if (!isRec(entry)) return true;
+        const name = entry.name;
+        return !(typeof name === 'string' && supersededNames.has(name));
+    });
+    return [...kept, ...pending];
+}
+
 const toIssue = (f: AuthoringFinding): RuntimeAuthoringIssue => ({
     rule: f.rule,
     path: f.path,
@@ -426,6 +520,22 @@ export function evaluateRuntimeAuthoringGate(args: {
      * so the thread-through is load-bearing, not optional.
      */
     datasets?: readonly unknown[];
+    /**
+     * [#10377] The declarations this write's own BATCH is publishing alongside
+     * it — folded into the four collections above by
+     * {@link mergePendingDeclarations} before any rule runs.
+     *
+     * Stated by the batch door (`publishPackageDrafts`), which is the only
+     * caller that HAS a batch; the single-item door publishes one item, so its
+     * batch is itself and it passes nothing. Absent ⇒ the closure is the live
+     * universe alone, exactly as before, which is the correct answer for every
+     * write that is not part of a package publish rather than a fallback.
+     *
+     * See {@link RuntimePendingDeclarations} for the measured defect: without
+     * it a package shipping a dashboard together with its dataset can never
+     * publish.
+     */
+    pending?: RuntimePendingDeclarations;
     /** ADR-0080 SDUI manifest when the host has one. */
     sduiManifest?: unknown;
     /**
@@ -474,11 +584,17 @@ export function evaluateRuntimeAuthoringGate(args: {
         type: args.type,
         item: args.body,
         ...(args.packageScope !== undefined ? { packageScope: args.packageScope } : {}),
+        // [#10377] Live universe + this batch's own pending drafts, folded per
+        // collection. Uniform across all four on purpose: the closure ruling
+        // judges a package as a self-consistent UNIT, and a per-collection
+        // closure is precisely the state that produced this card — `objects`
+        // had been threaded, `datasets` had not, and the difference was
+        // invisible until an error-severity rule landed on the un-threaded one.
         context: {
-            objects: args.objects ?? [],
-            permissions: args.permissions ?? [],
-            books: args.books ?? [],
-            datasets: args.datasets ?? [],
+            objects: mergePendingDeclarations(args.objects ?? [], args.pending?.objects),
+            permissions: mergePendingDeclarations(args.permissions ?? [], args.pending?.permissions),
+            books: mergePendingDeclarations(args.books ?? [], args.pending?.books),
+            datasets: mergePendingDeclarations(args.datasets ?? [], args.pending?.datasets),
         },
         ...(args.sduiManifest !== undefined ? { sduiManifest: args.sduiManifest } : {}),
     });
