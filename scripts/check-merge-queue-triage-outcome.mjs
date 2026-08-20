@@ -112,8 +112,8 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { isMap, isSeq, parseDocument } from 'yaml';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const WORKFLOW = '.github/workflows/merge-queue-triage.yml';
 const JOB = 'triage';
@@ -1136,7 +1136,7 @@ async function selfTest() {
 // reverse-verification route needs `extractScript` / `judge` pointed at another
 // tree, and a module that ran its gate on import would silently judge THIS repo
 // instead and print a pass about the wrong subject.
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) await selfTest();
   else if (process.argv.includes('--list')) list();
   else await main();

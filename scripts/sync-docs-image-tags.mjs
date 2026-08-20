@@ -77,7 +77,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, statSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -89,6 +89,7 @@ import {
   isConcreteVersion,
   loadExpectedVersion,
 } from './check-docs-image-tag.mjs';
+import { isEntrypoint } from './invoked-as.mjs';
 
 /** The repo this script lives in -- resolved from the script, so cwd cannot lie. */
 function scriptRepoRoot() {
@@ -584,7 +585,7 @@ function selfTest() {
 // Entry-point guard, for the reason #9064 exists: this file is importable, and an
 // import that rewrote three doc surfaces as a side effect would be strictly worse than
 // the gate's version of the same bug.
-if (resolve(process.argv[1] ?? '') === resolve(fileURLToPath(import.meta.url))) {
+if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
     selfTest();
   } else {

@@ -97,7 +97,8 @@ import {
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
+import { isEntrypoint } from './invoked-as.mjs';
 
 /** The repo this script lives in — resolved from the script, so cwd cannot lie. */
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -482,6 +483,13 @@ function writeFixtureFile(file, contents) {
 function buildFixture(dir, { templates = ['blank', 'second'], major = '42' } = {}) {
   const script = join(dir, 'scripts', 'sync-template-versions.mjs');
   writeFixtureFile(script, readFileSync(fileURLToPath(import.meta.url), 'utf8'));
+  // The entry guard is imported, not re-typed (`scripts/invoked-as.mjs`), so the
+  // fixture checkout needs the sibling too — without it the copied script dies
+  // on ERR_MODULE_NOT_FOUND instead of running.
+  writeFixtureFile(
+    join(dir, 'scripts', 'invoked-as.mjs'),
+    readFileSync(new URL('./invoked-as.mjs', import.meta.url), 'utf8'),
+  );
   writeFixtureFile(
     join(dir, VERSION_SOURCE),
     JSON.stringify({ name: 'create-objectstack', version: SELF_TEST_VERSION }, null, 2) + '\n',
@@ -764,7 +772,7 @@ function selfTest() {
 // and for the same reason: this file is importable, and an import that rewrote
 // every bundled template as a side effect is strictly worse than the missing
 // export it was working around.
-if (resolve(process.argv[1] ?? '') === resolve(fileURLToPath(import.meta.url))) {
+if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
     selfTest();
   } else {

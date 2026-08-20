@@ -504,6 +504,7 @@
 
 import process from 'node:process';
 import { execFileSync } from 'node:child_process';
+import { isEntrypoint } from '../invoked-as.mjs';
 
 const OWNER_REPO = process.env.PM_SWEEP_REPO ?? 'objectstack-ai/objectstack';
 const API = 'https://api.github.com';
@@ -5002,7 +5003,7 @@ function selfTest() {
   console.log(`✓ check-half-states self-test: ${cases.length} cases pass.`);
 }
 
-const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop());
+const isMain = isEntrypoint(import.meta.url);
 if (isMain) {
   if (process.argv.includes('--self-test')) {
     selfTest();

@@ -104,6 +104,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } f
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { isEntrypoint } from './invoked-as.mjs';
 
 /** The docs site's `baseUrl` (apps/docs/lib/source.ts). */
 const DOCS_BASE = '/docs';
@@ -689,7 +690,7 @@ async function main() {
  * `firstMatchingSource` are exported so a sibling gate can ask "would Fumadocs
  * serve this /docs/... URL?" without the import itself checking the redirect
  * table (and calling `process.exit` out from under its caller). */
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
     await selfTest();
   } else {

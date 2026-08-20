@@ -71,6 +71,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { PENDING_MARKER, entryForPath } from './regen-artifacts.mjs';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SPEC_DIR = join(REPO_ROOT, 'packages/spec');
@@ -357,7 +358,7 @@ function main({ prePush = false } = {}) {
 
 // `check:generated --fix` imports `distIsStale` from here, so nothing may run on
 // import — only when this file IS the entry point.
-const invokedDirectly = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+const invokedDirectly = isEntrypoint(import.meta.url);
 
 /**
  * Replay the deferred-merge sequence against a THROWAWAY git repo (#8047).

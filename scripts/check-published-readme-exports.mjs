@@ -126,8 +126,8 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, posix, resolve } from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { isEntrypoint } from './invoked-as.mjs';
 
 // Anchored to the script, not to cwd: the verdict must not depend on where the
 // guard was invoked from.
@@ -1317,7 +1317,7 @@ function selfTest() {
 /* Run only when invoked as a program — `publishedDocs` and the extractors are
  * exported so a sibling gate can reuse this gate's population without the
  * import itself building a TypeScript program and sweeping the workspace. */
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
     selfTest();
     process.exit(0);

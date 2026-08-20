@@ -63,6 +63,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..');
@@ -826,7 +827,7 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
 
 // Run only when executed directly: the pure halves above are imported by the
 // self-test and by anything else that wants to ask what a site enumerates.
-if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
+if (isEntrypoint(import.meta.url)) {
   const argv = process.argv.slice(2);
   if (argv.includes('--self-test')) process.exit(selfTest());
   process.exit(run({ list: argv.includes('--list') }));

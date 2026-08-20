@@ -127,6 +127,7 @@ import { join } from 'node:path';
 import process from 'node:process';
 
 import { h7PartOfWithClosingKeyword } from './pm/check-half-states.mjs';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 
@@ -354,7 +355,7 @@ function selfTest() {
 
 // The basename comparison, as in the sweep: this file is imported by nothing
 // today, but a future importer must not trigger a judgment as a side effect.
-const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop());
+const isMain = isEntrypoint(import.meta.url);
 if (isMain) {
   if (process.argv.includes('--self-test')) {
     selfTest();

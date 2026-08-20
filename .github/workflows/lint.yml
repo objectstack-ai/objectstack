@@ -152,6 +152,26 @@ jobs:
       - name: Raw control-byte guard
         run: pnpm check:nul-bytes
 
+      # Every `scripts/**` entry guard goes through ONE predicate (#10086).
+      # The hand-typed forms of "did node run me, or did someone import me?"
+      # had drifted into ELEVEN spellings across 33 files, and NINE were wrong
+      # in the same invisible direction: node resolves symlinks for the module
+      # graph but leaves `process.argv[1]` as the caller typed it, so a script
+      # reached through a symlink compared two different paths, answered false,
+      # and did NOTHING — exit 0, no output. The CI wrappers here hold the
+      # child's exit STATUS only, so an inert child read as a green gate; the
+      # governed-surface register (`scripts/pm/check-governed-merges.mjs`) was
+      # among the affected, where the inert run and its "NOT governed, ordinary
+      # queue landing applies" verdict are the SAME exit code.
+      # The sweep alone would not have held — nothing stopped a twelfth
+      # spelling. This gate is the part that closes the class: only
+      # `scripts/invoked-as.mjs` may read `process.argv[1]`, and that module's
+      # own self-test drives a real probe through a real symlink. Rationale and
+      # the rejected behavioural-sweep alternative: the gate script's header.
+      # Scans ~115 files, no spawns; ~0.2s.
+      - name: scripts/ entry guards go through one predicate
+        run: pnpm check:entry-guard
+
       # Stack-collection enumerations vs the schema (#6242). `stack.zod.ts`
       # decides which collections a stack may declare; eight other enumerations
       # of that same set are hand-maintained (the map-format list, the

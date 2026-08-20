@@ -178,6 +178,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
@@ -1503,7 +1504,7 @@ function selfTest() {
     mkdirSync(join(fwRun, '.changeset'), { recursive: true });
     writeFileSync(join(fwRun, '.changeset', 'pre.json'), '{"mode":"pre","tag":"rc"}\n');
     writeFileSync(join(fwRun, '.objectui-sha'), `${base}\n`);
-    for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs']) {
+    for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs', 'invoked-as.mjs']) {
       writeFileSync(join(fwRun, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
     }
     const bumpStdout = execFileSync(
@@ -1544,7 +1545,7 @@ function selfTest() {
     mkdirSync(join(fwDegraded, 'scripts'), { recursive: true });
     mkdirSync(join(fwDegraded, '.changeset'), { recursive: true });
     writeFileSync(join(fwDegraded, '.objectui-sha'), `${'0'.repeat(40)}\n`);
-    for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs']) {
+    for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs', 'invoked-as.mjs']) {
       writeFileSync(join(fwDegraded, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
     }
     execFileSync('bash', [join(fwDegraded, 'scripts', 'bump-objectui.sh'), '--no-commit', head], {
@@ -2026,6 +2027,9 @@ function selfTest() {
       'scripts/check-adr-0087-registration.mjs',
       readFileSync(join(__dirname, 'check-adr-0087-registration.mjs'), 'utf8'),
     );
+    // That gate imports its entry guard from `scripts/invoked-as.mjs`; the
+    // sibling travels with it or the copy dies on ERR_MODULE_NOT_FOUND.
+    gw('scripts/invoked-as.mjs', readFileSync(join(__dirname, 'invoked-as.mjs'), 'utf8'));
     gg('add', '-A');
     gg('commit', '-q', '-m', 'base');
     const gateBase = gg('rev-parse', 'HEAD').trim();
@@ -2383,7 +2387,7 @@ function selfTest() {
     mkdirSync(join(fwTrunc, 'scripts'), { recursive: true });
     mkdirSync(join(fwTrunc, '.changeset'), { recursive: true });
     writeFileSync(join(fwTrunc, '.objectui-sha'), `${c6from}\n`);
-    for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs']) {
+    for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs', 'invoked-as.mjs']) {
       writeFileSync(join(fwTrunc, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
     }
     // OBJECTUI_NO_DEEPEN=1 on purpose: a self-test must never reach the network,
@@ -2436,7 +2440,7 @@ function selfTest() {
     mkdirSync(join(fwTrunc2, 'scripts'), { recursive: true });
     mkdirSync(join(fwTrunc2, '.changeset'), { recursive: true });
     writeFileSync(join(fwTrunc2, '.objectui-sha'), `${c6from}\n`);
-    for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs']) {
+    for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs', 'invoked-as.mjs']) {
       writeFileSync(join(fwTrunc2, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
     }
     const noopDeepen = spawnSync('bash', [join(fwTrunc2, 'scripts', 'bump-objectui.sh'), '--no-commit', c6to], {
@@ -2480,6 +2484,6 @@ function selfTest() {
   return 0;
 }
 
-if (resolve(process.argv[1] ?? '') === resolve(fileURLToPath(import.meta.url))) {
+if (isEntrypoint(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }

@@ -156,6 +156,7 @@ import {
   isMetadataFormModulePath,
 } from '../i18n-bundle-surface.mjs';
 import { blank, maskComments, scanSource } from '../js-comment-mask.mjs';
+import { invokedAs, isEntrypoint } from '../invoked-as.mjs';
 
 // Re-exported so this tool's self-test drives the SAME predicates the gate
 // runs, not copies of them. They used to be written twice — see the shared
@@ -4088,40 +4089,21 @@ function selfTest() {
 // ── CLI ─────────────────────────────────────────────────────────────────────
 
 /**
- * Is `entryArg` — a `process.argv[1]` — this very module?
+ * The entry guard, and the predicate under it, both live in
+ * `scripts/invoked-as.mjs` — one implementation for all of `scripts/`.
  *
- * Exported so the predicate the entry guard stands on is pinned by cases rather
- * than trusted by reading. Its failure direction is SILENT: an `invokedDirectly`
- * that wrongly answered `false` would turn every mode of this tool into a no-op
- * that prints nothing and exits 0, and `check:pm-dispatch-gates` holds the
- * child's exit STATUS only (see that gate's header) — so the no-op would report
- * as a pass, which is the silent-success direction this tree treats as worse
- * than no check at all.
+ * `invokedAs` is re-exported because this module's self-test drives it
+ * directly, and because that export was this tree's first landing of the
+ * two-comparison shape. The implementation moved; the export did not.
  *
- * Two comparisons, because node resolves symlinks for the module graph but
- * leaves `process.argv[1]` as the caller typed it. The plain `resolve` equality
- * is the spelling of the landed precedent one file over
- * (`scripts/pm/check-governed-merges.mjs`, whose header carries this shape's
- * incident history). The realpath comparison is the half that keeps a checkout
- * REACHED THROUGH A SYMLINK from reading as "imported": `import.meta.url` would
- * name the real file while `argv[1]` named the link, the equality would answer
- * false, and the tool would go quietly inert for whoever ran it that way. It
- * falls back to `false` rather than throwing — an unreadable entry path is not
- * this module.
+ * Its failure direction is SILENT: an entry guard that wrongly answered
+ * `false` would turn every mode of this tool into a no-op that prints nothing
+ * and exits 0, and `check:pm-dispatch-gates` holds the child's exit STATUS
+ * only (see that gate's header) — so the no-op would report as a pass.
  */
-export function invokedAs(entryArg, selfPath) {
-  if (!entryArg) return false;
-  const entry = resolve(entryArg);
-  const self = resolve(selfPath);
-  if (entry === self) return true;
-  try {
-    return realpathSync(entry) === realpathSync(self);
-  } catch {
-    return false;
-  }
-}
+export { invokedAs };
 
-const invokedDirectly = invokedAs(process.argv[1], fileURLToPath(import.meta.url));
+const invokedDirectly = isEntrypoint(import.meta.url);
 
 /**
  * Executed only as a CLI. Importing this module must have NO side effect.

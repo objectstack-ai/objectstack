@@ -198,6 +198,7 @@ import {
   parseRemaining,
 } from './check-half-states.mjs';
 import { PROXY_FLAG, PROXY_REARM_GUARD, proxyRearmPlan } from './check-governed-merges.mjs';
+import { isEntrypoint } from '../invoked-as.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..');
@@ -1378,7 +1379,7 @@ async function selfTest() {
 // Entry point
 // ---------------------------------------------------------------------------
 
-const invokedDirectly = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+const invokedDirectly = isEntrypoint(import.meta.url);
 
 if (!invokedDirectly) {
   // Imported (a sibling's self-test, or a measurement helper). Running the walk
