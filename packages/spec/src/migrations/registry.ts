@@ -1552,7 +1552,7 @@ const step17: MigrationStep = {
         + 'and phase 2 renames the key. `positions` is now the canonical key on that schema '
         + 'and `roles` a deprecated alias of it (#5779); the producer emits both for one '
         + 'deprecation window (#5613 runtime half), after which `roles` is removed on the path '
-        + 'the v11 session-alias removal already walked (#3280 deprecated → #3290 removed). '
+        + 'the v16 session-alias removal already walked (#3280 deprecated → #3290 removed). '
         + 'Why this is a D3 semantic TODO and not a D2 conversion, on two independent grounds: '
         + 'FIRST, there is no source to convert — an action `ctx.session` is constructed per '
         + 'dispatch and never persisted, so no `sys_metadata` row, example or template can '

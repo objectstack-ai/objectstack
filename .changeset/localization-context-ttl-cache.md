@@ -1,0 +1,9 @@
+---
+"@objectstack/core": patch
+---
+
+`resolveLocalizationContext` now memoizes a FAILED read's fallback per `(ql, tenantId, userId)` for 30s (#10221).
+
+On a fresh environment whose `sys_setting` table hasn't been created/migrated yet, every authenticated request re-ran the same `sys_setting` localization read, and every one of those reads failed the same way ("no such table"). The `#2409` batching had already collapsed the three per-key reads a single request used to issue into one query, but that one query still repeated on every subsequent request, and `driver-sql`'s `backendStatementFault` logs a `[sql-driver] DATABASE_ERROR` warning on every failed read — so the identical warning printed once per request and buried real errors in between.
+
+Only the case where the underlying read genuinely fails (a backend fault, e.g. the missing table) is cached; a successful read — including a legitimate "nothing configured yet" empty result — is never cached and always re-reads on the next call, so a settings write takes effect immediately. (An earlier version of this fix cached every outcome, mirroring `packages/plugins/plugin-audit/src/audit-writers.ts`'s existing TTL cache of this same read — safe there because audit-trail enrichment is best-effort, but not safe for `@objectstack/rest`'s use of this function: analytics date-bucketing reads the org timezone on every query and `packages/qa/dogfood/test/analytics-timezone.dogfood.test.ts` — the #1982/#2018 golden regression — asserts the very next read reflects a just-written timezone.) The `UTC` / `en-US` fallback behavior itself is unchanged; this only stops the failing query — and its log line — from re-running every request. The cache is keyed on the `ql` engine instance first, so two environments/tenants sharing one process never share a cached outcome, and self-heals within one TTL window once `sys_setting` exists.

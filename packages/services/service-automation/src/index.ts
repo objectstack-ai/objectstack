@@ -18,6 +18,7 @@ export type {
     RegisteredConnector,
     SuspendedRun,
     SuspendedRunStore,
+    FlowDispatchStore,
     RunRecord,
     StepLogEntry,
     UnknownNodeTypeAuditEntry,
@@ -62,6 +63,13 @@ export type { SuspendedRunStoreEngine, ObjectStoreSuspendedRunStoreOptions } fro
 // The sys_automation_run object backing the durable store — registered by
 // AutomationServicePlugin and exported for hosts wiring a custom store.
 export { SysAutomationRun } from './sys-automation-run.object.js';
+
+// Trigger dispatch idempotency (#10220). The persisted claim ledger behind
+// `AutomationEngine.claim(key)` — the in-memory store is for tests / explicit
+// memory-only hosts; the ObjectQL-backed store makes dedup survive rebuilds.
+export { InMemoryFlowDispatchStore, ObjectStoreFlowDispatchStore } from './flow-dispatch-store.js';
+export type { FlowDispatchStoreEngine } from './flow-dispatch-store.js';
+export { SysFlowDispatch } from './sys-flow-dispatch.object.js';
 
 // Kernel plugin — seeds all built-in nodes; this is the only plugin needed for
 // a fully-functional automation capability.
