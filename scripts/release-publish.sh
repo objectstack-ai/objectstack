@@ -27,6 +27,39 @@
 #   pushes tags itself.
 set -euo pipefail
 
+# ⛔ Do not restore npm_config_globalconfig, and do not "simplify" this away.
+#
+#   npm refuses to start when its "user" and its "global" config resolve to the
+#   SAME file. It aborts inside @npmcli/config before it parses argv:
+#
+#     Exit prior to config file resolving
+#     cause
+#     double-loading config "/home/runner/.config/pnpm/rc" as "global", previously loaded as "user"
+#
+#   Three layers stack up to produce exactly that (#10146):
+#     1. `pnpm run release` exports npm_config_globalconfig=~/.config/pnpm/rc to
+#        every child — pnpm forces `{globalconfig: join(configDir, 'rc')}` into
+#        its rawConfig unconditionally.
+#     2. `changeset publish` v3 detects the pnpm workspace and shells out to
+#        `pnpm info` / `pnpm publish` per package, where v2 always shelled out to
+#        `npm`. The publish therefore runs a NESTED pnpm underneath `pnpm run`.
+#     3. That nested pnpm reads the inherited value back in and, delegating
+#        `info` to npm, hands the npm child BOTH npm_config_userconfig AND
+#        npm_config_globalconfig pointing at that one file (pnpm/pnpm#10914,
+#        unfixed on the 10.31.0 line we pin).
+#
+#   The abort happens before npm has an error code, so changesets can only
+#   report `Received an unexpected error for <pkg>: (no code)` — which is how
+#   run 32355381481 failed 17.5.0 after a fully green build.
+#
+#   Dropping the inherited value is the whole fix: pnpm recomputes its own
+#   global config path from configDir either way, so nothing pnpm needs is lost,
+#   and npm falls back to its own default global config while keeping
+#   $HOME/.npmrc — where release.yml writes NPM_TOKEN — as the user config.
+#   Forcing npm_config_userconfig instead does NOT work: the nested pnpm
+#   recomputes it and overrides whatever we export.
+unset npm_config_globalconfig NPM_CONFIG_GLOBALCONFIG
+
 # Publish to npm and create the local version tags.
 changeset publish
 
