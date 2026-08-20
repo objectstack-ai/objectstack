@@ -111,15 +111,15 @@ import {
   stackRearmPlan,
 } from './eslint-stack-headroom.mjs';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const repoRoot = resolve(__dirname, '..');
-
 // This gate lints IN-PROCESS, so it does not inherit the `--stack-size` the
 // root `lint` script puts on ESLint's CLI entry, and this repo's deepest file
 // does not parse without it (#10449). Re-exec once, before any linting --
 // including before `--self-test`, whose headroom assertion below is only a fact
 // about the gate if the self-test runs on the same stack the gate does.
 ensureStackHeadroom(fileURLToPath(import.meta.url));
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(__dirname, '..');
 const BASELINE_PATH = 'scripts/query-options-erasure-baseline.json';
 const LINT_TARGET = 'packages/**/*.{ts,tsx,mts,cts}';
 
