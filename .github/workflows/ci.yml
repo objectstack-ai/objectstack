@@ -38,9 +38,9 @@ jobs:
       docs: ${{ steps.changes.outputs.docs || 'true' }}
       core: ${{ steps.changes.outputs.core || 'true' }}
       console: ${{ steps.changes.outputs.console || 'true' }}
-      # Gates the `test` job ONLY, ORed with `core` — see the `scripts`
-      # filter below and the `test` job's `if:` (#9829).
-      scripts: ${{ steps.changes.outputs.scripts || 'true' }}
+      # Gates the `test` job ONLY, ORed with `core` — see the `crosspkg`
+      # filter below and the `test` job's `if:` (#9829, #10015).
+      crosspkg: ${{ steps.changes.outputs.crosspkg || 'true' }}
       # ── THE FILTER CONTRACT, both halves (#4928) ──────────────────────────
       #
       # Half 1 is the `|| 'true'` above: when in doubt, RUN EVERYTHING. It
@@ -110,30 +110,66 @@ jobs:
               - 'scripts/console-spec-probes.mjs'
               - 'scripts/assert-console-spec-injection.mjs'
               - '.github/workflows/ci.yml'
-            # Test inputs that live OUTSIDE every package (#9829). Packages whose
-            # suites read across their own boundary declare that radius in
+            # Test inputs that live OUTSIDE every package (#9829, #10015). Packages
+            # whose suites read across their own boundary declare that radius in
             # scripts/check-cross-package-test-inputs.mjs, and turbo.json mirrors each
-            # as a `$TURBO_ROOT$/…` input. SIX of those declarations are rooted at
-            # `scripts/` — @objectstack/spec (`scripts/**`), @objectstack/cli,
-            # @objectstack/metadata-protocol and create-objectstack (five single
-            # files) — and the step that pulls those packages back into the affected
-            # set, `--union-into` in the `test` job below, is a step INSIDE that job.
-            # So on a `scripts/`-only diff `core` was false, the job never started,
-            # the union never ran, and the declarations bought nothing at PR time:
-            # the merge queue was the first signal, which is the #7802 failure this
-            # whole mechanism exists to prevent. Measured with picomatch, the matcher
-            # dorny/paths-filter uses: a diff confined to
-            # `scripts/sync-template-versions.mjs` yields core=false.
+            # as a `$TURBO_ROOT$/…` input. The step that pulls those packages back into
+            # the affected set, `--union-into` in the `test` job below, is a step
+            # INSIDE that job — so when NO filter matches the changed path the job
+            # never starts, the union never runs, and the declaration buys nothing at
+            # PR time: the merge queue is the first signal, which is the #7802 failure
+            # this whole mechanism exists to prevent.
             #
-            # Deliberately a SEPARATE output rather than a widening of `core`,
-            # because it gates ONE job — the `test` job ORs it with `core`, while
-            # Build Core, Dogfood and Temporal Conformance stay filtered exactly as
-            # they are today. `scripts/**` rather than the six declared paths: the
-            # narrower filter does not exist while @objectstack/spec declares
-            # `scripts/**`, and a hand-kept list of script paths is the failure mode
-            # #7802 recorded ("a list you must remember to update").
-            scripts:
+            # Measured by instantiating every one of turbo.json's `$TURBO_ROOT$`
+            # declarations to a real tracked file and running it through these filters
+            # with picomatch — the matcher dorny/paths-filter uses — under BOTH 2.3.1
+            # (what the action's own lockfile resolves and ncc-bundles) and 4.0.5 (what
+            # this tree resolves); the two agree on every row. On `0bfbeb70c`, 19 of 64
+            # declarations were core=false. #9829 closed the nine rooted at `scripts/`;
+            # the four roots added below are the remaining ten (#10015).
+            #
+            # Deliberately a SEPARATE output rather than a widening of `core`, because
+            # it gates ONE job — the `test` job ORs it with `core`, while Build Core,
+            # Dogfood and Temporal Conformance stay filtered exactly as they are today.
+            # That separation is what makes `content/**` affordable at all. Widening
+            # `core` would put the whole core pipeline on every docs PR; here a
+            # docs-only diff starts Test Core, whose package set is `turbo ls
+            # --affected` (empty for such a diff) UNIONED with the packages whose
+            # declarations matched — so it runs the declaring package, not the
+            # workspace. Measured through the real `--union-into` on all three
+            # content-only commits in the window below: `create-objectstack` alone,
+            # all three times, against a positive control where a
+            # `packages/lint/src/**` diff unions in @objectstack/spec and
+            # @objectstack/core.
+            #
+            # WIDTH, per entry — each is exactly what some package declared, never a
+            # root rounded up:
+            #   `scripts/**` and `content/**` are declared verbatim, by
+            #     @objectstack/spec and create-objectstack respectively, so the
+            #     narrower filter does not exist and a hand-kept list of the paths
+            #     inside them is the failure mode #7802 recorded ("a list you must
+            #     remember to update"). Eight further single-file `scripts/`
+            #     declarations and six narrower `content/docs/…` ones (spec, cli,
+            #     dogfood) sit inside the two.
+            #   The last three are a single file, a single file and a single subtree,
+            #     because that is what the declarations say — NOT `docs/**`,
+            #     `skills/**` or `.github/workflows/**`. Over the last 100 first-parent
+            #     commits of `main` at `0bfbeb70c`, those three roots would newly have
+            #     started Test Core on 5, 2 and 3 commits; the declared paths on ZERO.
+            #
+            # PRICE, re-measured over that same 100-commit window through this matcher:
+            # Test Core scheduling goes 80/100 → 83/100. All three additions are
+            # content-only docs commits, and each runs one package's suite.
+            #
+            # This list is a SECOND recognizer of those declarations and is kept in
+            # step with them BY HAND: nothing fails today when a declaration lands in a
+            # root no entry here covers. Closing that is #10379.
+            crosspkg:
               - 'scripts/**'
+              - 'content/**'
+              - 'docs/audits/2026-07-unknown-key-strictness-ledger.md'
+              - 'skills/objectstack-formula/**'
+              - '.github/workflows/scaffold-e2e.yml'
 
   test:
     # Sharded 3-way BY PACKAGE: a core-touching PR ran the affected suite
@@ -160,7 +196,7 @@ jobs:
     # in, never ANDed: two independent reasons to run this job, and it skips only
     # when BOTH filters explicitly said false, so the contract's "when in doubt,
     # RUN EVERYTHING" posture is unchanged (#9829).
-    if: ${{ !cancelled() && (needs.filter.outputs.core != 'false' || needs.filter.outputs.scripts != 'false') }}
+    if: ${{ !cancelled() && (needs.filter.outputs.core != 'false' || needs.filter.outputs.crosspkg != 'false') }}
     runs-on: ubuntu-latest
     # Backstop only — the stall guard on the test steps is the primary
     # detector for a #4250-style hang and fires well before this. 30 min is
