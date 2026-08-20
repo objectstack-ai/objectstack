@@ -20,6 +20,7 @@ import {
   ElementFormPropsSchema,
   ElementRecordPickerPropsSchema,
   ElementTextInputPropsSchema,
+  ObjectMetricPropsSchema,
 } from './component.zod';
 import { PageComponentSchema, PageSchema, ElementDataSourceSchema } from './page.zod';
 
@@ -1935,5 +1936,83 @@ describe('#7751 — object-* block props schemas', () => {
     ] as const) {
       expect(ComponentPropsMap[type].safeParse({}).success, type).toBe(true);
     }
+  });
+});
+
+// #10053 — the accept-pins for the last two `icon` slots in this file whose
+// describes stated only the VOCABULARY. "Icon name (Lucide)" is equally true of
+// the `page:header` `icon` retired in #6946 *because nothing reads it*, so the
+// prose could not separate a live key from a refused one — the same absence
+// that sent #9397 on a full dispatch cycle re-deriving the accordion read point.
+// #9881 and #9972 recorded the accordion and tab items; these two close the set.
+//
+// Both re-measured at the pin this repo builds against — `.objectui-sha` =
+// 9a3daf8d3, NOT the 82a94170c the earlier records cite (the pin moved in
+// #10137; the button anchors are unchanged across the two).
+describe('ElementButtonPropsSchema icon liveness (#10053)', () => {
+  const button = ComponentPropsMap['element:button'];
+
+  it('accepts an icon on a button — the value objectui resolves through the lucide `icons` map', () => {
+    // objectui `packages/components/src/renderers/form/button.tsx:44-47`
+    // PascalCases the name, applies its own one-entry rename map, and looks it
+    // up in `icons` from `lucide-react`; `:69` / `:71` draw it either side of
+    // the label per `iconPosition`.
+    const result = button.safeParse({ label: 'Save', icon: 'arrow-right' });
+    expect(result.success).toBe(true);
+    const parsed = (result.success ? result.data : undefined) as { icon?: string } | undefined;
+    // Carried through to the parsed output, not stripped: what the renderer
+    // reads is what an author writes.
+    expect(parsed?.icon).toBe('arrow-right');
+  });
+
+  it('still refuses an undeclared sibling on the same node — the accept above is not vacuous', () => {
+    // Without this the green above would also be green on a schema that had
+    // stopped being strict, which is the failure mode an accept-pin excludes.
+    const result = button.safeParse({ label: 'Save', iconName: 'arrow-right' });
+    expect(result.success).toBe(false);
+    expect(JSON.stringify(result.error?.issues)).toContain('unrecognized_keys');
+  });
+
+  it('keeps a `.describe()` that names the consumer AND the non-LazyIcon path', () => {
+    // The second half is load-bearing, not decoration: this slot is the one
+    // authorable icon on the surface that does NOT go through `LazyIcon`, so an
+    // author who assumes the shared resolver gets silence instead of a glyph.
+    const shape = (ElementButtonPropsSchema as unknown as {
+      def: { shape: Record<string, { description?: string }> };
+    }).def.shape;
+    expect(shape.icon?.description).toContain('lucide-react');
+    expect(shape.icon?.description).toContain('LazyIcon');
+  });
+});
+
+describe('ObjectMetricPropsSchema icon liveness (#10053)', () => {
+  const metric = ComponentPropsMap['object-metric'];
+
+  it('accepts an icon on the metric tile — the value objectui resolves via getLazyIcon', () => {
+    // objectui `plugin-dashboard/src/index.tsx:161` publishes the input;
+    // `ObjectMetricWidget.tsx:142` destructures it and forwards it at `:474` to
+    // `MetricWidget`, which resolves it at `MetricWidget.tsx:312-321` and draws
+    // it at `:373-382` in the `colorVariant`-tinted square.
+    const result = metric.safeParse({ objectName: 'task', icon: 'circle-alert' });
+    expect(result.success).toBe(true);
+    const parsed = (result.success ? result.data : undefined) as { icon?: string } | undefined;
+    expect(parsed?.icon).toBe('circle-alert');
+  });
+
+  it('still refuses an undeclared sibling on the same node — the accept above is not vacuous', () => {
+    const result = metric.safeParse({ objectName: 'task', iconName: 'circle-alert' });
+    expect(result.success).toBe(false);
+    expect(JSON.stringify(result.error?.issues)).toContain('unrecognized_keys');
+  });
+
+  it('keeps a `.describe()` that names the consumer, so the read point survives a rename', () => {
+    // The describe is the artifact an auditor reads instead of hunting across
+    // repos; deleting it is what re-opens the false candidate, so it is pinned
+    // rather than left to review.
+    const shape = (ObjectMetricPropsSchema as unknown as {
+      def: { shape: Record<string, { description?: string }> };
+    }).def.shape;
+    expect(shape.icon?.description).toContain('getLazyIcon');
+    expect(shape.icon?.description).toContain('MetricWidget');
   });
 });

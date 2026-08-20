@@ -46,7 +46,7 @@ const result = AIChatWindowProps.parse(data);
 | **label** | `string \| Record<string, string>` | ✅ | Button display label |
 | **variant** | `Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'link'>` | optional (default: `"primary"`) | Button visual variant |
 | **size** | `Enum<'small' \| 'medium' \| 'large'>` | optional (default: `"medium"`) | Button size |
-| **icon** | `string` | optional | Icon name (Lucide icon) |
+| **icon** | `string` | optional | Lucide icon name rendered inside the button, left or right of the label per `iconPosition`. Read on this component — the renderer resolves it through `lucide-react`'s `icons` map using its own PascalCase normaliser and rename map, NOT the `LazyIcon` slot the container icons use; the two paths accept different spellings, and an unknown name here renders nothing rather than a fallback glyph. |
 | **iconPosition** | `Enum<'left' \| 'right'>` | optional (default: `"left"`) | Icon position relative to label |
 | **disabled** | `boolean` | optional (default: `false`) | Disable the button |
 | **action** | `{ type?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>; name?: string; label?: string \| Record<string, string>; target?: string; … }` | optional | Inline action executed on click |
@@ -365,7 +365,7 @@ const result = AIChatWindowProps.parse(data);
 | **label** | `string \| Record<string, string>` | optional | Metric label |
 | **description** | `string \| Record<string, string>` | optional | Helper text under the value |
 | **title** | `string \| Record<string, string>` | optional | Drill-down panel title; defaults to the metric label |
-| **icon** | `string` | optional | Icon name (Lucide) |
+| **icon** | `string` | optional | Lucide icon name drawn in the metric tile header, inside the `colorVariant`-tinted square. Read on this component — `ObjectMetricWidget` forwards it to `MetricWidget`, which resolves it with `getLazyIcon` (the `LazyIcon` module: kebab-case or PascalCase, degrading to the `Database` glyph on an unknown name). |
 | **colorVariant** | `Enum<'default' \| 'blue' \| 'teal' \| 'orange' \| 'purple' \| 'success' \| 'warning' \| 'danger'>` | optional | Icon container color variant |
 | **aggregate** | `any` | optional | Aggregation config (`{ field, function, groupBy? }`) run against the object |
 | **filter** | `any` | optional | Filter the aggregation is scoped by |
