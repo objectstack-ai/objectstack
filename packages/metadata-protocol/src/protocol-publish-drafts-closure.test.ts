@@ -433,7 +433,7 @@ describe('publishPackageDrafts judges each draft against the BATCH closure (#103
         // its input reads as "clean" from every surface downstream, so the
         // missing member and the consequence are both named — a bare silent
         // fallback would be the defect this assertion exists to forbid.
-        const said = warn.mock.calls.map((c) => String(c[0])).join('\n');
+        const said = warn.mock.calls.map((c: unknown[]) => String(c[0])).join('\n');
         expect(said).toContain("declares no 'get'");
         expect(said).toMatch(/LIVE declarations only/);
     });
