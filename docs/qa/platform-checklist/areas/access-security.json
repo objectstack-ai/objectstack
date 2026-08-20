@@ -1013,7 +1013,7 @@
       "title": "Per-record manual shares grant, scope, and revoke access on a private-OWD record; rule evaluate reconciles the audience",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1028,20 +1028,20 @@
           "showcase_private_note (sharingModel: private — member_default grants create/read/edit, so a non-owner sees nothing without a share)",
           "three fresh sign-ups (A/B/C) whose sys_user ids are resolved via a system-context read",
           "the seeded criteria sharing rule share_key_account_qualified_contacts_with_managers on showcase_contact (OWD private) + at least one qualified contact at company Northwind — seeded as Nora West (examples/app-showcase/src/security/sharing-rules.ts) — for the evaluate clause",
-          "a holder of the manager position, so the rule's recipient expansion is non-empty: without one the reconcile answers grantsCreated 0 and materializes nothing, which is a fixture gap, not a defect"
+          "a holder of the manager position, so the rule's recipient expansion is non-empty. Since #9237 the STOCK boot already satisfies this — the seeded dev admin holds manager (sys_user_position usp_showcase_admin_manager) and the boot backfill materialises the grant — so an evaluate with no extra assignment answers grantsCreated 0 out of IDEMPOTENCE, not emptiness. Read the gap off expandedUsers/matchedRecords, and assign the position to one more persona so a created grant is observable"
         ]
       },
       "steps": [
         "boot showcase isolated (own port + file DB, dogfood skill §0); admin session + members A/B/C (fresh emails); resolve their sys_user ids system-side",
-        "as A: POST /api/v1/data/showcase_private_note {\"title\": \"A share probe\"} — capture the id",
+        "as A: POST /api/v1/data/showcase_private_note {\"title\": \"A share probe\"} — capture the id; POST a SECOND note as A too (the revoke-scope probe below needs a different record id under the same object)",
         "as B: GET /api/v1/data/showcase_private_note/<A id> — the PRE-grant baseline (private OWD, B is not owner → must be refused)",
         "as A: POST /api/v1/data/showcase_private_note/<A id>/shares {\"recipientType\": \"user\", \"recipientId\": \"<B id>\", \"accessLevel\": \"read\"} — capture the 201 sys_record_share row (source 'manual')",
         "as B: GET the note by id AND GET /api/v1/data/showcase_private_note (list) — the grant must make it visible both ways",
         "as C: GET the note by id — still refused (the grant named B, not everyone)",
         "as A: GET /api/v1/data/showcase_private_note/<A id>/shares (management-gated list) — the manual grant is present",
         "as B (a non-manager on A's note): POST /api/v1/data/showcase_private_note/<A id>/shares granting themselves — must be refused (creating a share is not a reader's power, ADR-0111 D5)",
+        "revoke-scope probe — run it BEFORE the real revoke, while the share still EXISTS: attempt DELETE of the shareId through the SECOND note's path (/data/showcase_private_note/<A second id>/shares/<shareId>) — must be refused (the URL's object/id is the revoke scope, ADR-0111 D4) AND the share must survive the attempt. Ordered after the revoke it proves nothing: the shareId no longer exists by then, so the same refusal comes back for a share that is simply gone",
         "as A: DELETE /api/v1/data/showcase_private_note/<A id>/shares/<shareId> → 204; then as B: GET the note by id again — refused once more",
-        "revoke-scope probe: attempt DELETE of the same shareId through a DIFFERENT record's path (/data/showcase_private_note/<some other id>/shares/<shareId>) — must be refused (the URL's object/id is the revoke scope, ADR-0111 D4)",
         "as admin: assign the manager position to one persona (Setup -> Access Control), then POST /api/v1/sharing/rules/share_key_account_qualified_contacts_with_managers/evaluate — capture the reconcile result; read sys_record_share for the matched contact"
       ],
       "acceptance": [
@@ -1121,6 +1121,12 @@
           "date": "2026-08-18",
           "change": "the evaluate clause was UNRUNNABLE as written and had been since it was authored: it drove share_red_projects_with_execs, a rule on showcase_project, whose public_read_write OWD leaves sharing nothing to widen — so evaluate\u0027s reconcile hit assertNotInertGrant and the call was refused (SHARING_NOT_ENABLED, ADR-0111 D7) rather than returning a reconcile result. That rule is retired; the clause now drives share_key_account_qualified_contacts_with_managers on showcase_contact (OWD private), and a step assigns the manager position so the recipient expansion is non-empty",
           "ref": "#9237"
+        },
+        {
+          "revision": 4,
+          "date": "2026-08-20",
+          "change": "steps only — the revoke-scope probe was ordered AFTER the real revoke, which left clause 6's own evidence requirement ('the share still exists (re-read)') unsatisfiable for anyone following the steps literally: the shareId is already gone, so the refusal observed is the ordinary missing-share 404 and says nothing about record scoping. The probe now runs BEFORE the revoke, and the note-creation step creates the second record it needs. No acceptance clause changed. Found by the FIRST execution of this item, at revision 3",
+          "ref": "#9702"
         }
       ]
     },
