@@ -1296,12 +1296,12 @@ async function selfTest() {
   const class4Result = await probeTransport({ token: PLACEHOLDER, ...class4 });
   t(
     '#9966 class 4 (measured): a healthy /rate_limit plus a refused repo read is NOT reachable',
-    class4Result.verdict.kind,
+    class4Result.verdict?.kind ?? null,
     'repo-scope-refused',
   );
   t(
     '...so the run exits 3 before the walk reads anything, instead of throwing on its first page',
-    class4Result.verdict.kind !== 'reachable',
+    class4Result.verdict?.kind !== 'reachable',
     true,
   );
   t('...and the repo read really was the SECOND request, taken only after stage 1 said reachable',
@@ -1319,20 +1319,20 @@ async function selfTest() {
   const healthy = readers(healthyRate, { status: 200, rateLimitRemaining: 14981 });
   t(
     'both stages passing is the healthy runner class, and it still greens',
-    (await probeTransport({ token: PLACEHOLDER, ...healthy })).verdict.kind,
+    (await probeTransport({ token: PLACEHOLDER, ...healthy })).verdict?.kind ?? null,
     'reachable',
   );
 
   const badCred = readers({ status: 401, rateLimitRemaining: null }, healthyRate);
   const badCredResult = await probeTransport({ token: PLACEHOLDER, ...badCred });
-  t('a failing stage 1 classifies exactly as it did before stage 2 existed', badCredResult.verdict.kind, 'bad-credential');
+  t('a failing stage 1 classifies exactly as it did before stage 2 existed', badCredResult.verdict?.kind ?? null, 'bad-credential');
   t('...and short-circuits, so no failing class costs one request more than it used to',
     badCred.calls, ['rate:token', 'rate:anon']);
 
   const notVisible = readers(healthyRate, { status: 404, rateLimitRemaining: 14980 });
   t(
     'a repo-scoped 404 is repo-not-visible — a wrong PM_SWEEP_REPO, or a credential that cannot see it',
-    (await probeTransport({ token: PLACEHOLDER, ...notVisible })).verdict.kind,
+    (await probeTransport({ token: PLACEHOLDER, ...notVisible })).verdict?.kind ?? null,
     'repo-not-visible',
   );
 
@@ -1341,13 +1341,13 @@ async function selfTest() {
   // diagnosis. What must never happen is that it falls back to `reachable`.
   const unwell = await probeTransport({ token: PLACEHOLDER, ...readers(healthyRate, { status: 503, rateLimitRemaining: null }) });
   t('a repo-scoped 5xx stays unclassified rather than being vouched for', unwell.verdict, null);
-  t('...and the stage-2 reading rides along, so the unclassified container can be reported', unwell.repo.status, 503);
+  t('...and the stage-2 reading rides along, so the unclassified container can be reported', unwell.repo?.status ?? null, 503);
 
   const anonOnly = readers(healthyRate, refusedRepo);
   const anonResult = await probeTransport({ token: '', ...anonOnly });
   t(
     'with no token the anonymous reading is the primary one and stage 2 still fires',
-    [anonResult.verdict.kind, anonOnly.calls],
+    [anonResult.verdict?.kind ?? null, anonOnly.calls],
     ['repo-scope-refused', ['rate:anon', 'repo']],
   );
 
