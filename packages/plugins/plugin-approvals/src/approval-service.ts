@@ -1423,12 +1423,15 @@ export class ApprovalService implements IApprovalService {
     if (!requestOrg) return false;
     let rows: any[] = [];
     try {
+      // No `as any` on this options bag — #4918's ratchet grandfathers this
+      // file for its EXISTING erasures only, and a NEW one must carry the
+      // declared type. `ApprovalEngine.find` already accepts it as written.
       rows = await this.engine.find('sys_member', {
         where: { user_id: managerId },
         fields: ['user_id', 'organization_id'],
         limit: 1000,
         context: SYSTEM_CTX,
-      } as any);
+      });
     } catch { return false; } // membership unreadable — see the fail-open note above
     const orgs = (rows ?? [])
       .map((r: any) => String(r?.organization_id ?? ''))
