@@ -65,6 +65,7 @@
     "ai/BlueprintObject:label",
     "ai/BlueprintObject:name",
     "ai/BlueprintObject:nameField",
+    "ai/BlueprintObject:sharingModel",
     "ai/BlueprintSeed:object",
     "ai/BlueprintSeed:records",
     "ai/BlueprintSummaryOperations:conditions",

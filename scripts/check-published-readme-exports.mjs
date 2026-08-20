@@ -90,6 +90,64 @@
 // naming the build command, never a skip. The gate runs in the workflow job
 // that has already built the workspace, next to the other dist-reading checks.
 //
+// ## The population axis, and the three refusals on it (#9911)
+//
+// Every claim this gate makes is made against a population it narrows in three
+// stages, and a zero at ANY stage means both halves check nothing:
+//
+//   published documents  ->  import statements  ->  workspace type entries
+//
+// A green over a zero at any stage is the #4690 claim ("zero is a broken scan,
+// not a clean repo") in three different costumes, so all three are HARD
+// REFUSALS and they are worded in one place, `populationRefusal`. Two were here
+// from the start; the third was filed as an observation and is what this
+// section exists to explain.
+//
+//   DOCUMENTS = 0 -- the scan read nothing. Refused in `publishedDocs`, which
+//   `check-published-readme-links` shares, so it is attributed to whichever
+//   gate asked.
+//
+//   IMPORT STATEMENTS = 0 -- documents were read and not one holds an import.
+//   The extractor is a text scan over prose; this is what it looks like the day
+//   it stops matching.
+//
+//   WORKSPACE TYPE ENTRIES = 0 -- documents were read, imports WERE found, and
+//   not one of them resolves to a workspace member. Everything parsed; nothing
+//   resolved. `targets` stays empty, so `bound` stays empty in every document,
+//   so both halves check nothing -- while the run reports success. Measured
+//   before it was fixed, on a fixture that publishes one document and three
+//   non-workspace imports: `exit 0`, under a green line reading `3 import
+//   statement(s), 0 workspace type entr(ies)` and three zeros below it.
+//
+// The three are mutually exclusive BY CONSTRUCTION rather than by careful
+// wording: each stage is consulted only because the previous one was non-zero,
+// so exactly one can fire and the third can never shadow the two above it. What
+// separates them for a reader is the remedy each implies -- stage 2 sends you
+// to the extractor, stage 3 to workspace resolution -- so stage 3 prints the
+// two counts that are NOT zero, which is precisely what stage 2 cannot say.
+//
+// ## Why stage 3 stops at `targets`, and what it deliberately leaves out
+//
+// #9870 left this file two more quantities a run can zero. Neither is a safe
+// refusal, and that was MEASURED rather than reasoned -- on a fixture with a
+// wholly legitimate population of one resolving import against a built entry:
+//
+//   `derivedReceivers` -- 0 on that fixture, which is an ordinary healthy tree:
+//   the fence imports a name and calls a static on it without constructing
+//   anything. Refusing there would redden a real population. This gate is
+//   merge-blocking and its own file refuses the baseline as an author remedy,
+//   so a false red here has no cheap way to be lived with -- worse than the
+//   silence it replaces.
+//
+//   `unreadCalls` / `unreadReceivers` -- the COMPLEMENT of what was checked, so
+//   a no-population run drives them UP, not to zero: the empty fixture above
+//   reports `NOT read: 3` against `0 ... checked`. A zero-test on them is
+//   backwards; a ceiling-test on them is a coverage ratchet, which is a
+//   different card and wants a population that exists.
+//
+// => `targets.size` is the whole condition, because it is the one quantity that
+// is zero if and only if BOTH halves are structurally vacuous.
+//
 // ## The baseline
 //
 // The five packages #9532 measured are recorded in
@@ -1053,6 +1111,88 @@ function successSummary({ measured, baselineCount, memberChecks }) {
 // ---------------------------------------------------------------------------
 
 /**
+ * The #4690 population axis, in one place: the refusal for the FIRST stage that
+ * is empty, or `null` when the run has a population to work on.
+ *
+ * The three stages narrow in the order the scan produces them (documents →
+ * import statements → workspace type entries), and each is consulted only
+ * because the previous one was non-zero. That is what makes the three refusals
+ * mutually exclusive rather than merely differently worded; see the header.
+ *
+ * A stage the caller has not measured yet is OMITTED, never passed as `0`. So a
+ * caller holding one quantity cannot accidentally speak for the other two --
+ * `publishedDocs` knows only the document count, and passing `0` for the rest
+ * to satisfy the signature would make it refuse for a reason it never measured.
+ *
+ * Rendered by a function, beside `freshRemedy()` and `successSummary()` and for
+ * the same reason: the counts are interpolated, so reading the SOURCE proves
+ * nothing about the sentence an author gets. The self-test asserts the returned
+ * text.
+ *
+ * @param {{documents: number, importStatements?: number, targets?: number}} counts
+ * @param {string} [caller] gate name the refusal is attributed to
+ * @returns {string|null}
+ */
+export function populationRefusal({ documents, importStatements, targets }, caller = SELF) {
+  if (documents === 0) {
+    return `${caller}: no published markdown found — the scan read nothing (#4690).`;
+  }
+  if (importStatements === 0) {
+    return `${caller}: read ${documents} document(s) and found no imports at all (#4690).`;
+  }
+  if (targets === 0) {
+    return (
+      `${caller}: read ${documents} document(s) and ${importStatements} import statement(s), ` +
+      `but NOT ONE of them resolves to a workspace package — 0 workspace type entr(ies), ` +
+      `so both halves checked nothing (#4690).\n` +
+      `  Everything parsed and nothing resolved, which puts the fault in the RESOLUTION step ` +
+      `rather than in any README: a ${WORKSPACE_FILE} edit that dropped the packages this ` +
+      `gate resolves against, a package rename the READMEs still spell the old way, or a ` +
+      `change to how a member's name is read from its package.json.\n` +
+      `  ⛔ Not a skip, and ${BASELINE_REL} cannot silence it: a pass over a population of ` +
+      `nothing is the same empty claim this gate already refuses at the two stages above.`
+    );
+  }
+  return null;
+}
+
+/**
+ * Pass 1's population: which workspace type entries the READMEs actually reach,
+ * and how many import statements were read to find out.
+ *
+ * Lifted out of `run()` so the population can be MEASURED by the same code the
+ * run uses. The self-test's no-population case turns on `targets.size === 0`
+ * being DERIVED from a fixture rather than typed into an assertion: a
+ * hand-written `targets: 0` would pin the refusal's arithmetic while proving
+ * nothing about the scan that produces the zero -- which is the exact species
+ * of vacuity this refusal was added to catch.
+ *
+ * Resolution to a `.d.ts` deliberately does NOT happen here. This answers "what
+ * did the documents reach?", a question about text and the workspace map alone
+ * -- no disk, no build -- so the refusal above can be decided, and tested,
+ * before a single type entry is touched.
+ *
+ * @param docs   `[{ pkg, file, text }]`
+ * @param byName workspace members by package name
+ * @returns `{ importStatements, targets }`, `targets` keyed `"<name><subpath>"`
+ */
+export function reachedTargets(docs, byName) {
+  let importStatements = 0;
+  const targets = new Map();
+  for (const doc of docs) {
+    for (const imp of extractImports(doc.text)) {
+      importStatements++;
+      const split = splitSpecifier(imp.specifier);
+      if (!split || !byName.has(split.name)) continue;
+      const key = `${split.name}${split.subpath.slice(1)}`;
+      if (targets.has(key)) continue;
+      targets.set(key, { name: split.name, subpath: split.subpath });
+    }
+  }
+  return { importStatements, targets };
+}
+
+/**
  * THE published-markdown population, derived once for every gate that needs it.
  *
  * "Published" is `private` unset AND a non-empty `files` array AND the file
@@ -1086,11 +1226,12 @@ export function publishedDocs(caller = SELF) {
       });
     }
   }
-  // A scan that read nothing is the #4690 failure: indistinguishable from a
-  // clean tree in the output, and green either way. Never a skip.
-  if (docs.length === 0) {
-    throw new Error(`${caller}: no published markdown found — the scan read nothing (#4690).`);
-  }
+  // Stage 1 of the population axis: a scan that read nothing is the #4690
+  // failure -- indistinguishable from a clean tree in the output, and green
+  // either way. Never a skip. Only the document count is measured here, so only
+  // that stage is passed; see `populationRefusal`.
+  const unread = populationRefusal({ documents: docs.length }, caller);
+  if (unread) throw new Error(unread);
   return { members, byName, docs };
 }
 
@@ -1098,37 +1239,41 @@ function run() {
   const { byName, docs } = publishedDocs();
 
   // Pass 1: which workspace type entries do the READMEs actually reach?
+  const { importStatements, targets: reached } = reachedTargets(docs, byName);
+
+  // Stages 2 and 3 of the population axis, decided BEFORE a type entry is
+  // resolved: nothing below this line can check anything the population above
+  // it does not contain. Stage 3 (`reached.size === 0`) is the state where
+  // documents and imports both exist and NOT ONE resolves to a workspace
+  // member -- everything parsed, nothing resolved, both halves vacuous, and
+  // until #9911 a pass. See the header for why it stops at `targets`.
+  const vacuous = populationRefusal({
+    documents: docs.length,
+    importStatements,
+    targets: reached.size,
+  });
+  if (vacuous) throw new Error(vacuous);
+
   const targets = new Map(); // "<name><subpath>" -> { name, subpath, abs, declared, missing }
-  let importStatements = 0;
-  for (const doc of docs) {
-    for (const imp of extractImports(doc.text)) {
-      importStatements++;
-      const split = splitSpecifier(imp.specifier);
-      if (!split || !byName.has(split.name)) continue;
-      const key = `${split.name}${split.subpath.slice(1)}`;
-      if (targets.has(key)) continue;
-      const { dir, manifest } = byName.get(split.name);
-      const { entry, declared } = resolveTypesEntry(manifest, split.subpath);
-      const abs = entry ? join(ROOT, dir, entry.replace(/^\.\//, '')) : null;
-      targets.set(key, {
-        name: split.name,
-        subpath: split.subpath,
-        declared,
-        abs,
-        missing:
-          declared && !abs
-            ? `imports from '${split.name}${split.subpath.slice(1)}', which declares no ` +
-              `TypeScript types for that entry — this gate cannot verify it.`
-            : declared && !existsSync(abs)
-              ? `imports from '${split.name}${split.subpath.slice(1)}', whose type entry ` +
-                `${posix.relative(ROOT, abs)} does not exist. Build first: ` +
-                `\`pnpm --filter ${split.name} build\` (or \`pnpm build\`).`
-              : null,
-      });
-    }
-  }
-  if (importStatements === 0) {
-    throw new Error(`${SELF}: read ${docs.length} document(s) and found no imports at all (#4690).`);
+  for (const [key, { name, subpath }] of reached) {
+    const { dir, manifest } = byName.get(name);
+    const { entry, declared } = resolveTypesEntry(manifest, subpath);
+    const abs = entry ? join(ROOT, dir, entry.replace(/^\.\//, '')) : null;
+    targets.set(key, {
+      name,
+      subpath,
+      declared,
+      abs,
+      missing:
+        declared && !abs
+          ? `imports from '${name}${subpath.slice(1)}', which declares no ` +
+            `TypeScript types for that entry — this gate cannot verify it.`
+          : declared && !existsSync(abs)
+            ? `imports from '${name}${subpath.slice(1)}', whose type entry ` +
+              `${posix.relative(ROOT, abs)} does not exist. Build first: ` +
+              `\`pnpm --filter ${name} build\` (or \`pnpm build\`).`
+            : null,
+    });
   }
 
   const surface = typeSurface(
@@ -1825,6 +1970,129 @@ function selfTest() {
     );
   }
 
+  // -- THE POPULATION AXIS, and the third refusal on it (#9911) ---------------
+  //
+  // The state this refusal exists for: documents exist, import statements
+  // exist, and NOT ONE resolves to a workspace member. Measured on the gate as
+  // it stood before this change, over exactly this shape: `exit 0`, under a
+  // green line reading `3 import statement(s), 0 workspace type entr(ies)`.
+  //
+  // ⭐ The zeros below are MEASURED, never typed. The fixture is a real
+  // document and a real `byName`, put through `reachedTargets` -- the same
+  // function `run()` calls. A hand-written `targets: 0` would pin the refusal's
+  // arithmetic while proving nothing about the scan that produces the zero,
+  // which is the very species of vacuity this card is about.
+  const nothingResolves = [
+    {
+      pkg: '@fixture/alpha',
+      file: 'packages/alpha/README.md',
+      text: [
+        '```typescript',
+        "import { useState } from 'react';",
+        "import { ObjectQL } from '@objectql/core';",
+        "import { z } from 'zod';",
+        'ObjectQL.configure({});',
+        '```',
+      ].join('\n'),
+    },
+  ];
+  const otherWorkspace = new Map([['@objectstack/spec', { dir: 'packages/spec', manifest: {} }]]);
+  const emptyPopulation = reachedTargets(nothingResolves, otherWorkspace);
+  // ⭐ THE REJECT SIDE, ASSERTED POSITIVELY. `targets: 0` on its own is also
+  // what a dead extractor returns -- so what the scan READ and then REJECTED is
+  // pinned next to it. Three import statements were found, resolved against
+  // `byName`, and turned away. Without this number the case below would pass
+  // just as happily on an `extractImports` that had stopped matching entirely.
+  eq(
+    'reachedTargets — the no-population state: imports READ and REJECTED, not absent',
+    { imports: emptyPopulation.importStatements, targets: emptyPopulation.targets.size },
+    { imports: 3, targets: 0 },
+  );
+  const stage3 = populationRefusal(
+    {
+      documents: nothingResolves.length,
+      importStatements: emptyPopulation.importStatements,
+      targets: emptyPopulation.targets.size,
+    },
+    'gate',
+  );
+  if (stage3 === null) {
+    failures.push(
+      'a run that read documents AND import statements but resolved NOTHING to a workspace\n' +
+        '      package is not refused. `targets` is empty, so `bound` is empty in every document\n' +
+        '      and both halves check nothing — the #4690 claim this gate already refuses at two\n' +
+        '      earlier stages, reported as a pass (#9911).',
+    );
+  } else {
+    // Stage 3 must SAY what it read, or a CI log cannot tell it from stage 2 —
+    // and the two send the reader at different files: stage 2 at the extractor,
+    // stage 3 at workspace resolution.
+    for (const [what, ok] of [
+      ['name the documents it read', stage3.includes('1 document(s)')],
+      ['name the imports it read', stage3.includes('3 import statement(s)')],
+      ['carry the #4690 remedy voice', stage3.includes('(#4690)')],
+      ['point at workspace resolution', stage3.includes(WORKSPACE_FILE)],
+      ['refuse the baseline as a silencer', stage3.includes(BASELINE_REL)],
+    ]) {
+      if (!ok) failures.push(`the third population refusal must ${what}.`);
+    }
+  }
+
+  // The other direction, on the SAME document: put one imported package into
+  // the workspace and the refusal must fall silent — against a population of
+  // ONE. A gate that reddens a legitimately small tree is worse than the
+  // silence it replaces, because this one is merge-blocking and its own remedy
+  // refuses the baseline as an escape.
+  const onePopulation = reachedTargets(
+    nothingResolves,
+    new Map([...otherWorkspace, ['@objectql/core', { dir: 'packages/objectql', manifest: {} }]]),
+  );
+  eq(
+    'reachedTargets — one resolving import IS a population, out of the same three',
+    { imports: onePopulation.importStatements, targets: onePopulation.targets.size },
+    { imports: 3, targets: 1 },
+  );
+  eq(
+    'populationRefusal — a population of ONE is never refused',
+    populationRefusal({
+      documents: 1,
+      importStatements: onePopulation.importStatements,
+      targets: onePopulation.targets.size,
+    }),
+    null,
+  );
+
+  // The three stages are one ordered axis. Pinned so a later edit cannot
+  // reorder them into a refusal that shadows the two above it, and so the
+  // wording of each stays the one its remedy belongs to.
+  eq(
+    'populationRefusal — stage 1 speaks for a scan that read nothing',
+    populationRefusal({ documents: 0, importStatements: 0, targets: 0 }, 'gate'),
+    'gate: no published markdown found — the scan read nothing (#4690).',
+  );
+  eq(
+    'populationRefusal — stage 2 speaks when documents were read and hold no imports',
+    populationRefusal({ documents: 7, importStatements: 0, targets: 0 }, 'gate'),
+    'gate: read 7 document(s) and found no imports at all (#4690).',
+  );
+  eq(
+    'populationRefusal — three stages, three DIFFERENT sentences',
+    new Set([
+      populationRefusal({ documents: 0 }, 'gate'),
+      populationRefusal({ documents: 1, importStatements: 0 }, 'gate'),
+      stage3,
+    ]).size,
+    3,
+  );
+  // A stage the caller has not measured must never be refused on. This is what
+  // lets `publishedDocs` — which knows only the document count — share the
+  // function without speaking for quantities it never counted.
+  eq(
+    'populationRefusal — an UNMEASURED stage is not a zero',
+    [populationRefusal({ documents: 7 }), populationRefusal({ documents: 7, importStatements: 3 })],
+    [null, null],
+  );
+
   // The authority convention (#8435): the baseline path must never be offered
   // as a co-equal author remedy.
   const remedy = freshRemedy();
@@ -1855,7 +2123,10 @@ function selfTest() {
       '  the reject side by COUNT (#9870: an empty bind set is also what a dead matcher\n' +
       '  returns) and the author-facing text: the remedy refuses the baseline, and the green\n' +
       '  line reports what each half READ and how much it could NOT, so a scanned tree and an\n' +
-      '  unread one cannot print the same body.',
+      '  unread one cannot print the same body. All THREE stages of the population axis are\n' +
+      '  refusals (#9911), the third one over a fixture whose zero is measured by the same\n' +
+      '  `reachedTargets` the run uses — three imports read, three rejected, nothing resolved\n' +
+      '  — with the reject side pinned as a population of ONE going deliberately silent.',
   );
 }
 

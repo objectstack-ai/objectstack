@@ -9338,15 +9338,26 @@ export class SqlDriver implements IDataDriver {
           if (r.partial === 1 || r.partial === true) entry.partial = true;
         }
       } else if (this.isPostgres) {
+        // `to_regclass` resolves the name the way every other statement in the
+        // session does — first match along `search_path` — instead of pinning
+        // one schema literally. The literal was `n.nspname = 'public'`, which is
+        // the same answer for a default deployment (`current_schema()` IS
+        // `public` there) and NO answer at all for a session pointed anywhere
+        // else: measured on a live Postgres 16 under a non-public search_path,
+        // this returned `[]` for a table carrying a primary key AND a declared
+        // unique index. Empty here does not read as "I could not see"; it reads
+        // as "there are no indexes", which is what `assertConflictTargetHonoured`
+        // turns into a refusal — a silent fail-open on the identity check.
+        // Resolving by OID also removes the ambiguity a schema list would add:
+        // two schemas on the path can hold the same table name, and only one of
+        // them is the one a query would hit.
         const res: any = await this.knex.raw(
           `SELECT i.relname AS index_name, ix.indisunique AS is_unique, ix.indisprimary AS is_primary,
                   (ix.indpred IS NOT NULL) AS is_partial,
                   pg_get_indexdef(ix.indexrelid) AS indexdef
-             FROM pg_class t
-             JOIN pg_namespace n ON n.oid = t.relnamespace
-             JOIN pg_index ix ON t.oid = ix.indrelid
+             FROM pg_index ix
              JOIN pg_class i ON i.oid = ix.indexrelid
-            WHERE t.relname = ? AND n.nspname = 'public'
+            WHERE ix.indrelid = to_regclass(?)
             ORDER BY i.relname`,
           [tableName],
         );
@@ -9663,10 +9674,14 @@ export class SqlDriver implements IDataDriver {
     let tableNames: string[] = [];
 
     if (this.isPostgres) {
+      // Every schema the session can actually reach unqualified, rather than
+      // the literal `'public'` — same answer for a default deployment, where
+      // `current_schemas(false)` is exactly `{public}`, and the right answer for
+      // a session pointed at another schema, where the literal listed nothing.
       const result = await this.knex.raw(`
         SELECT table_name
         FROM information_schema.tables
-        WHERE table_schema = 'public'
+        WHERE table_schema = ANY (current_schemas(false))
         AND table_type = 'BASE TABLE'
       `);
       tableNames = result.rows.map((row: any) => row.table_name);
