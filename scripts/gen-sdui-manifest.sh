@@ -276,6 +276,77 @@ sdui_on_signal() {
   kill -"$sig" "$$"
 }
 
+# ---------------------------------------------------------------------------
+# The remedy for a failed dump is CHOSEN from what failed, not fixed in advance.
+#
+# WHY. Every failure of the dump below used to print one remedy — `playwright
+# install chromium-headless-shell` — because a missing browser was the failure
+# the author had in hand. Measured with `packages/console/dist/` absent: the
+# dump itself SUCCEEDED (the browser launched, the registry was enumerated) and
+# only the final `writeFileSync` failed —
+#
+#     Error: ENOENT: no such file or directory, open '.../sdui.manifest.json'
+#
+# — and the run still printed the Playwright remedy. A reader who follows it
+# reinstalls a browser that was never the problem; in an agent dispatch
+# container they cannot even do that, because `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`
+# is set there and agents are instructed not to override it (see
+# docs/releases-maintenance.md, "If the dispatch container's Playwright browser
+# doesn't match the revision"). Advice that names the wrong layer with
+# confidence costs MORE than no advice, because it is followed — that round was
+# spent on the Playwright trail while the defect was one absent directory.
+#
+# So: the Playwright remedy is printed only on Playwright EVIDENCE, and the
+# fallback is "unclassified", never "Playwright". The direction of that default
+# is the whole fix; a classifier that guesses Playwright when it recognises
+# nothing is the same defect wearing a conditional.
+#
+# The signatures are the ones this repo has actually measured, not invented:
+# `browserType.launch: Executable doesn't exist at ...` is verbatim what the
+# container's revision mismatch produced (docs/releases-maintenance.md), and the
+# install banner is what playwright prints beside it.
+#
+# Reads the log as a FILE rather than piping text into grep: `grep -q` exits on
+# the first match, and under `set -o pipefail` the SIGPIPE'd producer upstream
+# would then set the pipeline non-zero — turning a match into a miss for exactly
+# the long outputs that need classifying most.
+#
+#   $1  file holding the dump's combined output
+#   $2  the OUT path the dump was given
+sdui_dump_failure_advice() {
+  local log="${1:-}" out="${2:-}"
+
+  if [[ -n "$log" && -r "$log" ]] &&
+    grep -qaE "browserType\.launch|Executable doesn't exist|playwright install|download new browsers" -- "$log"; then
+    echo "  Playwright could not start a browser — that IS this failure. Install the"
+    echo "  matching one and retry:"
+    echo "    pnpm exec playwright install chromium-headless-shell"
+    echo "  Can't install here (e.g. an agent dispatch container)? See docs/releases-maintenance.md"
+    echo "  'If the dispatch container's Playwright browser doesn't match the revision'."
+    return 0
+  fi
+
+  # A write failure names the path it could not open, so requiring BOTH the
+  # errno and this run's own OUT path keeps an unrelated ENOENT elsewhere in the
+  # output from being read as one.
+  if [[ -n "$log" && -r "$log" && -n "$out" ]] &&
+    grep -qaE '(ENOENT|EACCES|EROFS|ENOSPC|EISDIR|EPERM)' -- "$log" &&
+    grep -qaF -- "$out" "$log"; then
+    echo "  The dump could not WRITE its output. The browser side is not implicated"
+    echo "  and 'playwright install' would change nothing here."
+    echo "    output file:      ${out}"
+    echo "    its directory:    $(dirname -- "$out")"
+    echo "  Check that directory exists and is writable, then re-run."
+    return 0
+  fi
+
+  echo "  This failure was NOT identified as a missing Playwright browser, so"
+  echo "  'pnpm exec playwright install ...' is not the indicated remedy for it."
+  echo "  Read the dump's own output above first."
+  if [[ -n "$log" ]]; then echo "  It is saved at ${log}"; fi
+  return 0
+}
+
 # Sourced rather than executed: publish the lifecycle helpers above and do
 # nothing else, so the cleanup contract can be exercised without a console
 # build. `${BASH_SOURCE[0]}` differs from `$0` exactly when this file is sourced.
@@ -306,6 +377,27 @@ if [[ ! -f "$DUMP_PAGE" || ! -f "$DUMP_SCRIPT" ]]; then
   echo "ℹ manifest dump tooling not present at objectui@${PINNED_SHA:0:12} — nothing to do."
   echo "  (bump .objectui-sha to >=96b1293 to enable full JSX validation)"
   exit 0
+fi
+
+# The output directory, created HERE — with the other preconditions, before the
+# dev server and the browser, rather than implicitly at write time.
+#
+# `packages/console/dist/` is gitignored and exists only after a successful
+# `scripts/build-console.sh`, so on a tree whose console build is broken it is
+# simply ABSENT. Nothing created it and objectui's dumper calls `writeFileSync`
+# straight out, so the run died `ENOENT ... sdui.manifest.json` — after it had
+# already paid for a vite dev server and a chromium launch. That cost is why
+# this is a precondition and not a `mkdir` beside the write: a precondition that
+# can only fail cheaply is one nobody has to debug at the end of a long run.
+#
+# It also removes a false coupling. The ratchet does not need the built dist at
+# all — this script drives a vite DEV server over `.cache/objectui-<sha>`, and
+# `dist/` is only where the manifest LANDS — so refusing to run for want of a
+# directory left the ADR-0082 D4 ratchet unrunnable exactly on the trees that
+# most want an independent read on the registry.
+if ! mkdir -p "$TARGET"; then
+  echo "✗ could not create the manifest output directory: ${TARGET}"
+  exit 1
 fi
 
 echo "→ Generating SDUI public-tier manifest (ADR-0080) from objectui@${PINNED_SHA:0:12}..."
@@ -363,18 +455,28 @@ if ! sdui_wait_for_own_server "$DUMP_PID_FILE" "$DUMP_PORT" 90; then
   exit 1
 fi
 
-if BASE_URL="http://localhost:${DUMP_PORT}" OUT="${TARGET}/sdui.manifest.json" node scripts/dump-public-manifest.mjs; then
+# The dump's combined output goes to a per-run file as well as to the terminal:
+# the failure branch classifies that text, and a remedy chosen from what
+# actually happened is the point (see sdui_dump_failure_advice above).
+DUMP_OUT_LOG="$(mktemp "${TMPDIR:-/tmp}/sdui-dump-out.XXXXXX.log")"
+
+# `${PIPESTATUS[0]}`, never `$?`: after a pipeline `$?` is TEE's status, and tee
+# does not fail, so `$?` here would read every failure of the dump as a success.
+set +e
+BASE_URL="http://localhost:${DUMP_PORT}" OUT="${TARGET}/sdui.manifest.json" \
+  node scripts/dump-public-manifest.mjs 2>&1 | tee "$DUMP_OUT_LOG"
+dump_status="${PIPESTATUS[0]}"
+set -e
+
+if [[ "$dump_status" -eq 0 ]]; then
   echo "✓ wrote ${TARGET}/sdui.manifest.json"
+  rm -f "$DUMP_OUT_LOG"
 else
-  status=$?
-  echo "✗ manifest generation failed (exit ${status})."
-  echo "  If Playwright reported a missing browser, install it and retry:"
-  echo "    pnpm exec playwright install chromium-headless-shell"
-  echo "  Can't install here (e.g. an agent dispatch container)? See docs/releases-maintenance.md"
-  echo "  'If the dispatch container's Playwright browser doesn't match the revision'."
+  echo "✗ manifest generation failed (exit ${dump_status})."
+  sdui_dump_failure_advice "$DUMP_OUT_LOG" "${TARGET}/sdui.manifest.json"
   echo "  The dev server log for THIS run is at ${DUMP_DEV_LOG}"
   popd > /dev/null
-  exit "$status"
+  exit "$dump_status"
 fi
 popd > /dev/null
 
