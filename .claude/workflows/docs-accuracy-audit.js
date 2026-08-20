@@ -145,6 +145,7 @@ const ALL_HANDWRITTEN = [
   "content/docs/permissions/attachments-access.mdx",
   "content/docs/permissions/authentication.mdx",
   "content/docs/permissions/authorization.mdx",
+  "content/docs/permissions/capabilities.mdx",
   "content/docs/permissions/delegated-administration.mdx",
   "content/docs/permissions/explain.mdx",
   "content/docs/permissions/field-level-security.mdx",
