@@ -51,10 +51,22 @@ interface Captured {
  * would read the 401 body instead of the arm it names, and this file would
  * silently stop measuring what it exists to measure.
  *
+ * [#9901] …and an ENTITLED one: four of the five routes now also require a
+ * capability (`manage_platform_settings` on the reads, `manage_metadata` on the
+ * writes), so this stub holds both. Same reasoning one step further — a
+ * resolver carrying an identity but no grants would turn every case below into
+ * a reading of the 403 body. Holding both rather than one per case is
+ * deliberate: which capability each route requires is not this file's subject,
+ * and pinning it twice would make the split harder to change in the one place
+ * that does own it.
+ *
  * The guard itself is pinned in `external-datasource-routes-auth-guard.test.ts`;
  * the 401's own envelope is the last case below, which is this file's business.
  */
-const CREDENTIALED = async () => ({ userId: 'u_env_conformance' });
+const CREDENTIALED = async () => ({
+  userId: 'u_env_conformance',
+  systemPermissions: ['manage_platform_settings', 'manage_metadata'],
+});
 
 /**
  * A resolver that RESOLVES, and resolves to no identity — the anonymous case as
