@@ -7,6 +7,14 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    // #9350: the live-dialect files each own a schema (Postgres) / database
+    // (MySQL), named in the connection so knex's `client.database()` and the
+    // session cannot disagree. That naming has an ordering constraint — MySQL
+    // refuses the handshake for a database that does not exist — and a
+    // `beforeAll` cannot satisfy it: `cell.config()` is reached from inside
+    // `beforeEach`, and the testkit module is cached per WORKER, not per file.
+    // This runs once, before any worker, and is a no-op without a live URL.
+    globalSetup: ['./src/live-dialect-matrix.globalsetup.ts'],
   },
   resolve: {
     alias: [
