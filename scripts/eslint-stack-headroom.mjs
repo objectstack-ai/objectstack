@@ -59,6 +59,7 @@ import { resolve } from 'node:path';
 import process from 'node:process';
 
 import { GUARDED_GATES, collectFatalMessages } from './eslint-fatal-guard.mjs';
+import { stripComments } from './js-comment-mask.mjs';
 
 /**
  * The headroom the in-process gates run their parser with, in KB.
@@ -259,27 +260,6 @@ export function osThreadStackKb() {
 }
 
 /**
- * The source with whole-line comments removed.
- *
- * ⚠️ Not cosmetic, and found by ablating this very check: without it, commenting
- * the call OUT still satisfies a `/ensureStackHeadroom\\(/` test, because the
- * identifier is still there in the text. An adoption check that a `//` defeats
- * is worse than none -- it reports a gate as armed at exactly the moment it
- * stopped being armed. Whole-line comments are all this needs to strip: a call
- * disabled mid-line is not a shape anyone writes, and the alternative (parsing
- * the gate) buys nothing this check would use.
- *
- * @param {string} src
- * @returns {string}
- */
-export function uncommentedLines(src) {
-  return src
-    .split('\n')
-    .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
-    .join('\n');
-}
-
-/**
  * Assert every gate that drives ESLint in-process still arms its own headroom.
  *
  * Read from the gates' own source, for the same reason `checkGuardAdoption()`
@@ -300,7 +280,14 @@ export function checkHeadroomAdoption(repoRoot) {
       problems.push(`${gate}: named as an in-process ESLint gate but unreadable - renamed or removed?`);
       continue;
     }
-    src = uncommentedLines(src);
+    // Prose is not adoption. Comment out the call and the identifier is still
+    // in the text, so a raw regex reports the gate as armed at exactly the
+    // moment it stopped being armed -- found by ablating this check. The
+    // repo-wide answer to "comment or code" is scripts/js-comment-mask.mjs;
+    // a private strip here would be the 17th copy it exists to retire.
+    // `stripComments` rather than `maskComments` because this reports gate
+    // NAMES, never a line or an offset into the original text.
+    src = stripComments(src);
     if (!/eslint-stack-headroom\.mjs/.test(src)) {
       problems.push(
         `${gate}: does not import scripts/eslint-stack-headroom.mjs. A gate that lints ` +
