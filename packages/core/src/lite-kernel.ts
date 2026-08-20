@@ -4,6 +4,7 @@ import { Plugin } from './types.js';
 import { createLogger, ObjectLogger } from './logger.js';
 import type { LoggerConfig } from '@objectstack/spec/system';
 import { ObjectKernelBase } from './kernel-base.js';
+import { registerPluginByName } from './plugin-registration.js';
 
 /**
  * ObjectKernel - MiniKernel Architecture
@@ -32,16 +33,23 @@ export class LiteKernel extends ObjectKernelBase {
     /**
      * Register a plugin
      * @param plugin - Plugin instance
+     *
+     * Duplicate names OVERWRITE, with one `warn` naming both versions — the
+     * declared contract in `plugin-registration.ts`, applied identically by
+     * `ObjectKernel.use()` (#9864, maintainer ruling 2026-08-19).
+     *
+     * This method used to `throw` `[Kernel] Plugin '<name>' already
+     * registered` here while `ObjectKernel` overwrote silently, so one input
+     * had two meanings depending on which kernel was running — and the kernel
+     * that runs in production was the silent one. The ruling converged them on
+     * the behaviour that already works (an app config superseding a plugin the
+     * CLI auto-registered, #9863) and made it audible rather than removing it.
      */
     use(plugin: Plugin): this {
         this.validateIdle();
 
-        const pluginName = plugin.name;
-        if (this.plugins.has(pluginName)) {
-            throw new Error(`[Kernel] Plugin '${pluginName}' already registered`);
-        }
+        registerPluginByName(this.plugins, plugin, this.logger);
 
-        this.plugins.set(pluginName, plugin);
         return this;
     }
 
