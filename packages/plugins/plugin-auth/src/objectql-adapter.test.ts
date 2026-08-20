@@ -302,9 +302,13 @@ describe('createObjectQLAdapter – legacy model name mapping', () => {
   });
 });
 
-describe('createObjectQLAdapterFactory – schema-less plugin bridging (@better-auth/sso)', () => {
-  // The sso plugin exposes no `schema` option, so its `ssoProvider` table +
-  // camelCase fields are bridged at the adapter layer. Pass the plugin so
+describe('createObjectQLAdapterFactory – adapter-layer plugin bridging (@better-auth/sso)', () => {
+  // The auth manager passes the sso plugin no `schema` option, so its
+  // `ssoProvider` table + camelCase fields are bridged at the adapter layer
+  // instead. (Not because the plugin "exposes no `schema` option" — that was
+  // true of 1.6.20 and expired with the pin: measured 2026-08-19, the installed
+  // `@better-auth/sso@1.7.1` accepts `schema.ssoProvider.{modelName,fields,
+  // additionalFields}`. #8224.) Pass the plugin so
   // better-auth's wrapper recognises the model (it validates against the
   // merged schema before delegating to our adapter methods).
   const makeAdapter = (findOneRow: any = { id: '1', provider_id: 'okta', oidc_config: '{"clientId":"x"}', domain: 'acme.com' }) => {

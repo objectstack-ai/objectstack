@@ -186,8 +186,29 @@ holds a collection of one metadata kind — `manifest`, `objects`,
 There is deliberately **no** top-level `workflows` or `approvals` collection:
 an approval is authored as a flow with Approval nodes (ADR-0019), and record
 state machines are a `state_machine` validation rule on each object
-(ADR-0020). Unknown keys are **silently stripped** by strict parsing — a
-phantom key like `roles:` or `policies:` is a no-op, not an error.
+(ADR-0020). A phantom key like `roles:` or `policies:` is **not** a silent
+no-op — the top level refuses it and the stack fails to load:
+
+```
+defineStack validation failed (1 issue):
+
+  ✗ (root): Unrecognized key(s) on this stack definition: `policies`. …
+```
+
+Undeclared keys are handled per surface, and the two postures are worth
+keeping straight:
+
+- **Refused** — `defineStack()`'s top level, each `objects[]` entry
+  (`ObjectSchema`), and each field (`FieldSchema`). The parse throws, naming
+  the surface and the offending key. TypeScript rejects the literal earlier
+  still, with `TS2353: Object literal may only specify known properties`.
+- **Warned, then dropped** — the authoring surfaces whose shapes have not
+  been closed yet (`connectors` is one). `defineStack()` prints the warning
+  before the parse, and the value does not survive it:
+  `defineStack: connectors.stripe.bogusKey: 'bogusKey' is not a declared connector key, so its value is dropped at load.`
+  Treat these as errors-in-waiting — closing the remaining shapes is a
+  scheduled migration, so a key that only warns today is expected to be
+  refused later.
 
 For the exact Zod shape — including which keys are optional and what types
 the collection items take — read
@@ -1042,7 +1063,7 @@ const metrics = kernel.getPluginMetrics();
 ## Feature Flags
 
 Feature flags are **not a spec/metadata concept**. There is no `featureFlags:` /
-`features:` key on `defineStack` (strict parsing silently strips unknown keys), and the
+`features:` key on `defineStack` (writing one is refused at load, not stripped), and the
 former `FeatureFlagSchema` (`@objectstack/spec/kernel`) was removed — it had zero runtime
 consumers, and its only protocol home (the static `ObjectStackCapabilities.system.features`
 descriptor) was itself dead: no endpoint ever served it. Runtime capability discovery is
