@@ -2726,6 +2726,37 @@ function selfTest() {
   const anchorRootHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-doc-anchors.mjs'), 'utf8'));
   t('and the doc-anchors pair claims neither instruction file', !anchorRootHints.some((h) => hintCovers(h, 'AGENTS.md') || hintCovers(h, 'CLAUDE.md')));
 
+  // The DIRECTORY half of the same class (#10107). A gate whose population is a
+  // top-level DIRECTORY spelled as a bare word is invisible for the same reason
+  // a root file is — `looksPathy` finds no separator, so the extractor builds no
+  // hint at all — and it is the more expensive half, because the word names a
+  // whole subtree rather than one file. `check:role-word` walks
+  // `['content/docs', 'skills']`: the first is a hint, the second was nothing,
+  // so a skills-only card derived the content half and scored this gate
+  // `silent`. PR #10038 paid for it — a green local union, then
+  // `role-word count grew 2 → 3` in CI. It declares the subtree spelling now.
+  //
+  // Read from the real gate, not a fixture: what is pinned is that the tree
+  // still HAS the declaration. If this gate stops walking that root, delete the
+  // declaration and these cases together — never keep them green by re-pointing
+  // at a gate that never read it.
+  const roleWordHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-role-word.mjs'), 'utf8'));
+  t('the role-word ratchet reaches the published skills catalog it declares', roleWordHints.some((h) => hintCovers(h, 'skills/objectstack-platform/SKILL.md')));
+  t('and still reaches the content half it always named', roleWordHints.some((h) => hintCovers(h, 'content/docs/deployment/cli.mdx')));
+  // The negative halves, and the reason this is a DECLARATION and not an
+  // extractor change. `.claude/skills/` is the live specimen: a real tracked
+  // tree whose last segment IS the declared root, which this gate does not walk
+  // — a widened extractor accepting the bare word `skills` would not tell them
+  // apart, and the collapsed subtree does.
+  t('and claims nothing under the internal .claude skills tree it never walks', !roleWordHints.some((h) => hintCovers(h, '.claude/skills/pm-dispatch/SKILL.md')));
+  t('nor a package source file', !roleWordHints.some((h) => hintCovers(h, 'packages/spec/src/index.ts')));
+  t('nor the sibling FILE beside the content root', !roleWordHints.some((h) => hintCovers(h, 'content/docs.site.json')));
+  // The pair that makes the declaration worth having: the bare word this gate
+  // actually spells in its ROOTS array stays refused, so the coverage above is
+  // bought by the declaration and by nothing else.
+  t('the bare root word the gate spells in ROOTS is still refused as too generic', !hintCovers('skills', 'skills/objectstack-platform/SKILL.md'));
+  t('while the declared subtree covers that same path', hintCovers('skills/**', 'skills/objectstack-platform/SKILL.md'));
+
   // ── A trailing sentence period is not part of the path (#8534, half two) ──
   //
   // Coupled to the rule above: the raw-prefix comparison reached the real file
