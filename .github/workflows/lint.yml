@@ -1110,6 +1110,34 @@ jobs:
           node scripts/check-cross-repo-closer-outcome.mjs --self-test
           node scripts/check-cross-repo-closer-outcome.mjs
 
+      # Closing-keyword parser parity (#9755). THREE files parse GitHub's
+      # closing-keyword grammar out of user-authored markdown — the cross-repo
+      # closer, the duplicate-fix guard, and H7's `closingKeywordRe()` behind
+      # partof-closing-keyword-guard.yml — and they had drifted: the guard
+      # accepted `Fixes: <ref>` and the closer silently did not, so a merged PR
+      # written with the colon took the closer's quiet green exit and lost its
+      # foreign issue.
+      #
+      # A shared module is the right shape and is unavailable: neither workflow
+      # checks the repo out (the closer deliberately, on `pull_request_target`;
+      # the guard because its whole job is one github-script step), so
+      # `require()` resolves to nothing in either. This gate is what stands in
+      # for the import — it extracts all three parsers from the shipped bytes
+      # and asserts they agree BEHAVIOURALLY on the keyword set and the
+      # separator, while still refusing what each is scoped to refuse. It also
+      # sweeps all tracked files for a FOURTH parser, because "fix these two"
+      # is exactly the change that would miss one.
+      #
+      # Invoked as `node` rather than a `pnpm check:*` alias for the same reason
+      # as the step above: that alias belongs in root package.json, declared
+      # territory of the @changesets/cli v3 migration lane (#9465) while it
+      # runs. dispatch-gates.mjs derives gate families from either spelling.
+      # No network, no build; ~1 s, most of it the tracked-file sweep.
+      - name: Closing-keyword parser parity
+        run: |
+          node scripts/check-closing-keyword-parity.mjs --self-test
+          node scripts/check-closing-keyword-parity.mjs
+
       # Merge-queue triage outcome contract (#10128, over the #4859 bot).
       # merge-queue-triage.yml carries ~450 lines of inline github-script that
       # only ever runs on a RED merge_group build — a condition nobody can
