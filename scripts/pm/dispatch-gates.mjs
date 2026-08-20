@@ -132,10 +132,21 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync, readdirSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import {
+  readFileSync,
+  readdirSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  realpathSync,
+  symlinkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import process from 'node:process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   anyConfigExtractsMetadataForms,
   findExtractConfigs,
@@ -3686,6 +3697,81 @@ function selfTest() {
     rmSync(gitTmp, { recursive: true, force: true });
   }
 
+  // ── The entry guard (#9757) ───────────────────────────────────────────────
+  //
+  // Both directions are measured by really spawning node, because the guard's
+  // own failure direction is silent in BOTH of them. If the predicate wrongly
+  // answered false, every CLI mode would print nothing and exit 0, and
+  // `check:pm-dispatch-gates` — which holds the child's exit status only —
+  // would report that no-op as a pass. If it wrongly answered true, the defect
+  // this guard exists to remove is simply still here. Reasoning about argv
+  // cannot tell those apart on the invocation forms that actually occur; a
+  // child process can.
+  const SELF = fileURLToPath(import.meta.url);
+  t('the entry predicate answers true for this module named by its own path', invokedAs(SELF, SELF));
+  t('and for the same file named relatively from the repo root, as the gate spells it', invokedAs(join(ROOT, 'scripts/pm/dispatch-gates.mjs'), SELF));
+  t('a different file in the same directory is not this module', !invokedAs(join(ROOT, 'scripts/pm/check-dispatch-gates.mjs'), SELF));
+  t('an absent argv[1] is not this module — the `node --eval` importer', !invokedAs(undefined, SELF) && !invokedAs('', SELF));
+
+  const entryTmp = mkdtempSync(join(tmpdir(), 'dispatch-gates-entry-'));
+  try {
+    // RUN DIRECTLY the modes must all still reach their branches. `--tier`
+    // stands in for every one of them: the guard is a SINGLE site wrapping the
+    // whole chain, so a form that reaches this branch reaches `--self-test`
+    // too — and spawning `--self-test` from inside `--self-test` would recurse.
+    const direct = spawnSync(process.execPath, [SELF, '--tier', 'packages/spec/src/data/filter.zod.ts'], {
+      encoding: 'utf8',
+      cwd: ROOT,
+    });
+    t(
+      'invoked directly, --tier still answers rather than exiting 0 in silence',
+      direct.status === 0 && (direct.stdout ?? '').trim().length > 0,
+    );
+
+    // REACHED THROUGH A SYMLINK — the form a plain path equality gets wrong.
+    // Node resolves the link for the module graph, so `import.meta.url` names
+    // the real file while argv[1] names the link. Under the precedent's
+    // one-comparison spelling this run goes inert, exit 0, no output: the
+    // false-green the gate cannot see.
+    const link = join(entryTmp, 'linked-dispatch-gates.mjs');
+    symlinkSync(SELF, link);
+    const viaLink = spawnSync(process.execPath, [link, '--tier', 'packages/spec/src/data/filter.zod.ts'], {
+      encoding: 'utf8',
+      cwd: ROOT,
+    });
+    t(
+      'invoked through a symlink to this file, --tier still answers',
+      viaLink.status === 0 && (viaLink.stdout ?? '').trim().length > 0,
+    );
+    t('and it answers the SAME thing as the direct invocation', (viaLink.stdout ?? '') === (direct.stdout ?? ''));
+
+    // IMPORTED the module must do nothing at all. The importer's argv carries
+    // this tool's own flags on purpose: that is the shape that fired an
+    // unrelated file's assertions inside the importer's self-test.
+    const consumer = join(entryTmp, 'consumer.mjs');
+    const REACHED = 'CONSUMER-REACHED function function function';
+    writeFileSync(
+      consumer,
+      `const m = await import(${JSON.stringify(pathToFileURL(SELF).href)});\n` +
+        `console.log('CONSUMER-REACHED', typeof m.maskComments, typeof m.isExtractConfigPath, typeof m.deriveTier);\n`,
+    );
+    const imported = spawnSync(process.execPath, [consumer, '--self-test', '--tier', 'packages/spec/src/index.ts'], {
+      encoding: 'utf8',
+      cwd: entryTmp,
+    });
+    t(
+      'imported, the importer reaches its own first statement and the re-exports are there',
+      imported.status === 0 && (imported.stdout ?? '').trim() === REACHED,
+    );
+    t('imported, this module prints nothing of its own on either stream', (imported.stderr ?? '').trim() === '');
+    t(
+      "imported by a consumer whose own argv says --self-test, THIS file's self-test does not fire",
+      !(imported.stdout ?? '').includes('dispatch-gates self-test:'),
+    );
+  } finally {
+    rmSync(entryTmp, { recursive: true, force: true });
+  }
+
   let failed = 0;
   for (const [name, cond] of cases) {
     if (!cond) failed++;
@@ -3698,58 +3784,120 @@ function selfTest() {
   console.log(`✓ dispatch-gates self-test: ${cases.length} cases pass.`);
 }
 
-const argvPaths = process.argv.slice(2).filter((a) => !a.startsWith('--'));
-const wantsChanged = process.argv.includes('--changed');
-if (process.argv.includes('--self-test')) {
-  selfTest();
-} else if (wantsChanged && argvPaths.length > 0) {
-  // The two input modes answer different questions and must never be blended:
-  // silently preferring one would make the other's arguments vanish without a
-  // word, which is the class of failure this whole file is about.
-  console.error('dispatch-gates: --changed derives the paths itself — do not pass paths with it.');
-  process.exit(2);
-} else {
-  let paths;
-  if (argvPaths.length > 0) {
-    paths = argvPaths.map((p) => p.replace(/^\.\//, ''));
-  } else {
-    // No paths: derive them. This is the dev-side form — "the gates my ACTUAL
-    // diff implicates" — and it is the default because the caller-supplied
-    // list was the thing getting it wrong (#9320). `--changed` spells the same
-    // thing out for a caller that would rather say it than imply it.
-    let derived;
-    try {
-      derived = changedPathsFromGit();
-    } catch (err) {
-      console.error(`dispatch-gates: could not derive the change set — ${err.message}`);
-      console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] [--tier] [<path> ...] | --changed | --self-test');
-      process.exit(2);
-    }
-    if (derived.paths.length === 0) {
-      // An empty derivation is an input problem far more often than an answer,
-      // and "no gates" is the most expensive thing this tool could say wrongly
-      // (#4690: an unreadable input must never look like an empty answer).
-      console.error(
-        `dispatch-gates: this branch changes nothing against '${derived.base}' (merge base ${derived.mergeBase.slice(0, 9)}) — ` +
-          'nothing to derive. On the base branch already, or in the wrong checkout? Pass explicit paths to ask about a hypothetical surface.',
-      );
-      process.exit(2);
-    }
-    for (const line of derivationProvenance(derived)) console.error(line);
-    console.error('');
-    paths = derived.paths;
-  }
+// ── CLI ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Is `entryArg` — a `process.argv[1]` — this very module?
+ *
+ * Exported so the predicate the entry guard stands on is pinned by cases rather
+ * than trusted by reading. Its failure direction is SILENT: an `invokedDirectly`
+ * that wrongly answered `false` would turn every mode of this tool into a no-op
+ * that prints nothing and exits 0, and `check:pm-dispatch-gates` holds the
+ * child's exit STATUS only (see that gate's header) — so the no-op would report
+ * as a pass, which is the silent-success direction this tree treats as worse
+ * than no check at all.
+ *
+ * Two comparisons, because node resolves symlinks for the module graph but
+ * leaves `process.argv[1]` as the caller typed it. The plain `resolve` equality
+ * is the spelling of the landed precedent one file over
+ * (`scripts/pm/check-governed-merges.mjs`, whose header carries this shape's
+ * incident history). The realpath comparison is the half that keeps a checkout
+ * REACHED THROUGH A SYMLINK from reading as "imported": `import.meta.url` would
+ * name the real file while `argv[1]` named the link, the equality would answer
+ * false, and the tool would go quietly inert for whoever ran it that way. It
+ * falls back to `false` rather than throwing — an unreadable entry path is not
+ * this module.
+ */
+export function invokedAs(entryArg, selfPath) {
+  if (!entryArg) return false;
+  const entry = resolve(entryArg);
+  const self = resolve(selfPath);
+  if (entry === self) return true;
   try {
-    // `--tier` answers the claim-time question alone: it reads no workflow and
-    // no check script, so it still answers on a tree where the gate derivation
-    // cannot run — and a claim comment is written before any of that matters.
-    if (process.argv.includes('--tier')) {
-      for (const line of tierLines(deriveTier(paths))) console.log(line);
-    } else {
-      derive(paths, { showResidue: process.argv.includes('--residue') });
-    }
-  } catch (err) {
-    console.error(`dispatch-gates: derivation failed — ${err.message}`);
+    return realpathSync(entry) === realpathSync(self);
+  } catch {
+    return false;
+  }
+}
+
+const invokedDirectly = invokedAs(process.argv[1], fileURLToPath(import.meta.url));
+
+/**
+ * Executed only as a CLI. Importing this module must have NO side effect.
+ *
+ * Everything above this line is exported — the two re-export blocks with their
+ * stated rationales, and the derivation functions the self-test drives — and
+ * none of it was reachable while this dispatch ran at module top level. An
+ * `import { maskComments } from './dispatch-gates.mjs'` ran the TOOL against the
+ * IMPORTER's argv and cwd, and on most paths reached `process.exit(2)` before
+ * the importer's own first statement: measured here, a bare consumer printed
+ * this tool's "nothing to derive" refusal and exited 2, its own `console.log`
+ * never having run. On the other branch it is worse than an exit — a consumer
+ * running its own `--self-test` fired all of THIS file's assertions inside it,
+ * printing a second summary line and putting an unrelated file's failures on
+ * the importer's exit code. That is the same defect PR #9897 fixed in
+ * `check-governed-merges.mjs` at 77 assertions; this file carries it at 334. A
+ * self-test is a mode of the file being RUN, never a side effect of importing
+ * it, and a shared module that exits on import is a shared module nobody can
+ * share.
+ *
+ * The guard is ONE site wrapping the whole chain, not a condition repeated per
+ * branch: a branch added inside it later cannot forget to carry it.
+ */
+if (invokedDirectly) {
+  const argvPaths = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+  const wantsChanged = process.argv.includes('--changed');
+  if (process.argv.includes('--self-test')) {
+    selfTest();
+  } else if (wantsChanged && argvPaths.length > 0) {
+    // The two input modes answer different questions and must never be blended:
+    // silently preferring one would make the other's arguments vanish without a
+    // word, which is the class of failure this whole file is about.
+    console.error('dispatch-gates: --changed derives the paths itself — do not pass paths with it.');
     process.exit(2);
+  } else {
+    let paths;
+    if (argvPaths.length > 0) {
+      paths = argvPaths.map((p) => p.replace(/^\.\//, ''));
+    } else {
+      // No paths: derive them. This is the dev-side form — "the gates my ACTUAL
+      // diff implicates" — and it is the default because the caller-supplied
+      // list was the thing getting it wrong (#9320). `--changed` spells the same
+      // thing out for a caller that would rather say it than imply it.
+      let derived;
+      try {
+        derived = changedPathsFromGit();
+      } catch (err) {
+        console.error(`dispatch-gates: could not derive the change set — ${err.message}`);
+        console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] [--tier] [<path> ...] | --changed | --self-test');
+        process.exit(2);
+      }
+      if (derived.paths.length === 0) {
+        // An empty derivation is an input problem far more often than an answer,
+        // and "no gates" is the most expensive thing this tool could say wrongly
+        // (#4690: an unreadable input must never look like an empty answer).
+        console.error(
+          `dispatch-gates: this branch changes nothing against '${derived.base}' (merge base ${derived.mergeBase.slice(0, 9)}) — ` +
+            'nothing to derive. On the base branch already, or in the wrong checkout? Pass explicit paths to ask about a hypothetical surface.',
+        );
+        process.exit(2);
+      }
+      for (const line of derivationProvenance(derived)) console.error(line);
+      console.error('');
+      paths = derived.paths;
+    }
+    try {
+      // `--tier` answers the claim-time question alone: it reads no workflow and
+      // no check script, so it still answers on a tree where the gate derivation
+      // cannot run — and a claim comment is written before any of that matters.
+      if (process.argv.includes('--tier')) {
+        for (const line of tierLines(deriveTier(paths))) console.log(line);
+      } else {
+        derive(paths, { showResidue: process.argv.includes('--residue') });
+      }
+    } catch (err) {
+      console.error(`dispatch-gates: derivation failed — ${err.message}`);
+      process.exit(2);
+    }
   }
 }
