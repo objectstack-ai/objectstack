@@ -398,6 +398,46 @@ describe('publishPackageDrafts judges each draft against the BATCH closure (#103
         expect(res.failed[0]!.error).toMatch(/widget-dataset-unknown/);
     });
 
+    // ── The repository-shape guard: a minimal double must still publish ──
+
+    it('publishes through a repo double declaring only `listDrafts` — the closure degrades, it never throws', async () => {
+        // ⭐ The patch-round regression. Collecting the batch's pending
+        // declarations introduced the batch door's FIRST dependency on
+        // `repo.get`; `getOverlayRepo` is the seam every publish double
+        // replaces, and nine cases in `@objectstack/objectql` drive a double
+        // that declares `listDrafts` alone. Unguarded, this door answered
+        // `TypeError: repo.get is not a function` BEFORE any promotion — a
+        // shape it used to accept, now fatal.
+        const { engine } = makeStubEngine();
+        const protocol: any = new ObjectStackProtocolImplementation(engine);
+        protocol.ensureOverlayIndex = async () => {};
+        protocol.getOverlayRepo = () => ({
+            listDrafts: async () => [
+                { type: 'dataset', name: 'shyx_customer_ds', organizationId: null, packageId: PKG },
+            ],
+        });
+        protocol.runPublishSideEffects = async () => ({});
+        vi.spyOn(protocol, 'promoteDraftForPublish').mockImplementation(async (req: any) => ({
+            singularType: req.type,
+            orgId: null,
+            advisories: [],
+            result: { version: 'h', seq: 1, item: { body: { name: req.name } }, packageId: null },
+        }));
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res).toMatchObject({ success: true, publishedCount: 1, failedCount: 0 });
+        expect(res.failed).toEqual([]);
+
+        // ⛔ And the degrade SAYS WHY. A gate that quietly stops seeing part of
+        // its input reads as "clean" from every surface downstream, so the
+        // missing member and the consequence are both named — a bare silent
+        // fallback would be the defect this assertion exists to forbid.
+        const said = warn.mock.calls.map((c) => String(c[0])).join('\n');
+        expect(said).toContain("declares no 'get'");
+        expect(said).toMatch(/LIVE declarations only/);
+    });
+
     // ── objects: the same gap at advisory severity ──
 
     it('a flow bound to a same-batch OBJECT draft raises no phantom trigger advisory', async () => {

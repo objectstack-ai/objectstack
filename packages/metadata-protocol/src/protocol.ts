@@ -14880,13 +14880,27 @@ export class ObjectStackProtocolImplementation implements
      * closure is "this package's own declarations", restated from the list the
      * batch is defined by, never a second query with a second scope.
      *
-     * ⛔ Read failures PROPAGATE. This runs before Phase 1's transaction, so
-     * nothing has been written and the publish fails having changed nothing —
+     * ⛔ Read failures PROPAGATE — a repository that HAS the read and fails it
+     * is a fault, not a miss. This runs before Phase 1's transaction, so
+     * nothing has been written and the publish fails having changed nothing,
      * and every row read here is a row `promoteDraftForPublish` is about to
      * read again anyway. Swallowing would silently shrink the closure, which
-     * does not fail open, it manufactures a refusal that names a declaration
+     * does not fail open — it manufactures a refusal that names a declaration
      * the author can SEE in their own package (ADR-0110 D3: a miss and a fault
-     * are different facts).
+     * are different facts). The MISSING-member case is the other fact and is
+     * handled below, loudly and without a throw.
+     *
+     * ## Why the batch's existing enumeration cannot supply the bodies
+     *
+     * `listDrafts` — the read that DEFINES this batch — is a declared header
+     * projection: it maps rows to `(type, name, organizationId, packageId,
+     * updatedAt, updatedBy)` and drops `metadata` on purpose, because its other
+     * caller is the console's "pending changes" list. Widening it would put
+     * every draft BODY on that listing, and it would not even remove the guard
+     * below: the doubles that lack `repo.get` stub `listDrafts` too, so a
+     * body-carrying projection would hand back headers there anyway — degrading
+     * SILENTLY instead of degrading with a reason. So the second read stays,
+     * and the absence of the member it needs is stated rather than assumed.
      */
     private async collectBatchPendingDeclarations(
         drafts: ReadonlyArray<{ type: string; name: string; organizationId: string | null }>,
@@ -14905,6 +14919,37 @@ export class ObjectStackProtocolImplementation implements
             if (!key) continue;
             const draftOrgId = d.organizationId ?? null;
             const repo = this.getOverlayRepo(draftOrgId);
+            // ── The repository-shape guard, and why it degrades ALL-OR-NOTHING
+            //
+            // This method introduced the batch door's first dependency on
+            // `repo.get`. `SysMetadataRepository` has always had it, but the
+            // seam is overridable (`getOverlayRepo` is the injection point every
+            // publish double replaces), and the door's only previous body read —
+            // the `seed` capture — fires solely when a seed draft is in the
+            // batch, so a repository shape without `get` had never been asked
+            // for one. Measured: nine `publishPackageDrafts` cases in
+            // `@objectstack/objectql` drive a double declaring `listDrafts`
+            // alone, and this call turned every one of them into
+            // `TypeError: repo.get is not a function` — thrown BEFORE any
+            // promotion, so the batch door died on a shape it used to accept.
+            //
+            // The answer is a declared capability check, not a wider `try`: a
+            // missing member is a fact about the repository, knowable up front,
+            // and it must not read like a failed read. Degrading returns the
+            // closure to its pre-#10377 state (the live universe alone), which
+            // is the safe direction — the gate keeps judging and can only be
+            // MORE strict, never fail open.
+            //
+            // ⛔ All-or-nothing on purpose. Bailing out of the whole collection
+            // rather than skipping this one draft is what keeps the verdict from
+            // depending on WHICH org a draft happens to live in: a partial
+            // closure would resolve some of a package's own names and not
+            // others, which is a third behaviour nobody declared and nobody
+            // could reproduce.
+            if (typeof repo.get !== 'function') {
+                this.warnClosureReadUnavailable(singular, d.name);
+                return undefined;
+            }
             const ref = {
                 type: singular, name: d.name, org: draftOrgId ?? 'env',
             } as unknown as Parameters<typeof repo.get>[0];
@@ -14918,6 +14963,34 @@ export class ObjectStackProtocolImplementation implements
         // rather than routing it through a merge that would be a no-op.
         return any ? pending : undefined;
     }
+
+    /**
+     * [#10377] Say WHY the batch closure degraded — once per process.
+     *
+     * A bare degrade is the failure shape this repo has paid for before: a gate
+     * that quietly stops seeing part of its input reads as "clean", and the
+     * only symptom is a refusal somewhere else that names a declaration the
+     * author can see. So the reason is stated, with the member that was
+     * missing and what the consequence is.
+     *
+     * Deduped because Studio republishes the same package repeatedly and a
+     * repository shape does not change between two publishes — the first line
+     * carries the whole fact, and the hundredth adds nothing.
+     */
+    private warnClosureReadUnavailable(type: string, name: string): void {
+        if (this.closureReadWarned) return;
+        this.closureReadWarned = true;
+        console.warn(
+            `[Protocol] publishPackageDrafts: this overlay repository declares no 'get', so the batch's own `
+            + `pending drafts cannot be read (first reached at ${type}/${name}). Author-time validation falls `
+            + `back to the LIVE declarations only — the pre-#10377 closure — so a draft that references a `
+            + `sibling drafted in the SAME batch may be refused as unresolved. Nothing is published unchecked: `
+            + `the gate still runs, with strictly less resolution context.`,
+        );
+    }
+
+    /** One warn per process for the {@link warnClosureReadUnavailable} degrade. */
+    private closureReadWarned = false;
 
     /**
      * Publish every pending DRAFT bound to a package in one shot (ADR-0033) —
