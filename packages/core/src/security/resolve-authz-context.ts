@@ -577,15 +577,69 @@ export interface ResolveLocalizationInput {
   userId?: string;
 }
 
+type LocalizationResult = { timezone: string; locale: string; currency?: string };
+
+/**
+ * Process-local TTL cache for {@link resolveLocalizationContext} (#10221).
+ *
+ * `resolveAuthzContext`'s #2409 de-dup already collapsed the THREE per-key
+ * reads a request used to issue into one batched `sys_setting` query; what it
+ * did not address is the SAME query repeating on EVERY request. On a fresh
+ * environment (`sys_setting` not yet migrated / never written) that one query
+ * fails every time, and `packages/drivers/driver-sql`'s
+ * `backendStatementFault` — deliberately generic; see its doc — logs a
+ * `[sql-driver] DATABASE_ERROR` line for EVERY failed read, so the identical
+ * "no such table: sys_setting" warning repeats once per request and buries
+ * real errors in between.
+ *
+ * `tryFind` below already guarantees the FUNCTIONAL fallback (catch → `[]` →
+ * built-in `UTC` / `en-US` defaults) — this cache only stops the query (and
+ * therefore the log line) from re-running every request. It mirrors the
+ * TTL-memoization `packages/plugins/plugin-audit/src/audit-writers.ts`
+ * (`resolveWriteLocale`) already applies to this exact read for the same
+ * reason ("workspace locale changes rarely"); this closes the gap for the
+ * OTHER callers (`@objectstack/rest`, `@objectstack/runtime`) that call
+ * `resolveLocalizationContext` directly, once per request, without their own
+ * cache.
+ *
+ * Keyed on the `ql` instance (one entry-set per environment engine, so two
+ * environments/tenants sharing a process never see each other's cached
+ * locale) and then `tenantId|userId` beneath it, matching the audit writer's
+ * key shape. A `ql` that isn't cacheable (missing/non-object — `tryFind`
+ * already no-ops on that) skips the cache entirely; there is no query to
+ * dedupe in that case.
+ */
+const LOCALIZATION_CACHE_TTL_MS = 30_000;
+const localizationCache = new WeakMap<object, Map<string, { value: LocalizationResult; expiresAt: number }>>();
+
 /**
  * Resolve workspace localization defaults (reference `timezone` / `locale` /
  * `currency`). Canonical path is the `localization` SettingsManifest (cascade:
  * platform default → global → tenant); falls back to direct tenant-scoped
  * `sys_setting` rows, then the built-ins `UTC` / `en-US`. Never throws.
+ *
+ * Cross-request result is memoized for {@link LOCALIZATION_CACHE_TTL_MS} per
+ * `(ql, tenantId, userId)` — see the cache doc above (#10221).
  */
-export async function resolveLocalizationContext(
-  input: ResolveLocalizationInput,
-): Promise<{ timezone: string; locale: string; currency?: string }> {
+export async function resolveLocalizationContext(input: ResolveLocalizationInput): Promise<LocalizationResult> {
+  const { ql, tenantId, userId } = input;
+  if (ql && typeof ql === 'object') {
+    const cacheKey = `${tenantId ?? ''}|${userId ?? ''}`;
+    const now = Date.now();
+    const perEngine = localizationCache.get(ql);
+    const hit = perEngine?.get(cacheKey);
+    if (hit && hit.expiresAt > now) return hit.value;
+
+    const value = await resolveLocalizationContextUncached(input);
+    const bucket = perEngine ?? new Map<string, { value: LocalizationResult; expiresAt: number }>();
+    bucket.set(cacheKey, { value, expiresAt: now + LOCALIZATION_CACHE_TTL_MS });
+    if (!perEngine) localizationCache.set(ql, bucket);
+    return value;
+  }
+  return resolveLocalizationContextUncached(input);
+}
+
+async function resolveLocalizationContextUncached(input: ResolveLocalizationInput): Promise<LocalizationResult> {
   const { ql, settings, tenantId, userId } = input;
   try {
     if (settings && typeof settings.get === 'function') {

@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { resolveAuthzContext, resolveUserAuthzGrants, resolveLocalizationContext } from './resolve-authz-context.js';
 import { POSTURE_RANK } from './posture-ladder.js';
 import { hashApiKey } from './api-key.js';
@@ -170,6 +170,77 @@ describe('resolveLocalizationContext — batched fallback read (#2409)', () => {
     expect(loc.timezone).toBe('UTC');
     expect(loc.locale).toBe('en-US');
     expect(loc.currency).toBeUndefined();
+  });
+});
+
+// #10221: a fresh environment's `sys_setting` table doesn't exist yet, so
+// EVERY request's read used to fail and the sql-driver's `[sql-driver]
+// DATABASE_ERROR` warning repeated once per request, burying real errors.
+// The #2409 batching above already collapsed one request down to a single
+// query; this collapses that query across requests with a short TTL cache,
+// mirroring `packages/plugins/plugin-audit/src/audit-writers.ts`
+// (`resolveWriteLocale`)'s existing memoization of this same read.
+describe('resolveLocalizationContext — cross-request TTL cache (#10221)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // Simulates a fresh environment: `sys_setting` not migrated/written yet, so
+  // every read rejects the way the real sql-driver's "no such table" does.
+  function makeMissingTableQl() {
+    const counts = { sys_setting: 0 };
+    return {
+      counts,
+      async find(_object: string) {
+        counts.sys_setting += 1;
+        throw new Error('no such table: sys_setting');
+      },
+    };
+  }
+
+  it('does not re-query on a second call within the TTL window (same tenant)', async () => {
+    const ql = makeMissingTableQl();
+    const first = await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    const second = await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    // Functional behavior is unchanged — still the built-in defaults — the
+    // second call just doesn't repeat the failing query (and its log line).
+    expect(first).toEqual({ timezone: 'UTC', locale: 'en-US', currency: undefined });
+    expect(second).toEqual(first);
+    expect(ql.counts.sys_setting).toBe(1);
+  });
+
+  it('re-queries once the TTL expires, so the cache self-heals once the table/migration lands', async () => {
+    const ql = makeMissingTableQl();
+    await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    expect(ql.counts.sys_setting).toBe(1);
+    await vi.advanceTimersByTimeAsync(30_001);
+    await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    expect(ql.counts.sys_setting).toBe(2);
+  });
+
+  it('keys the cache per tenant, so a lookup for one tenant never reuses another tenant\'s entry', async () => {
+    const ql = makeCountingQl({
+      sys_setting: [{ namespace: 'localization', key: 'locale', scope: 'tenant', value: 'ja-JP' }],
+    });
+    const a = await resolveLocalizationContext({ ql, tenantId: 'tenant-a' });
+    const b = await resolveLocalizationContext({ ql, tenantId: 'tenant-b' });
+    expect(ql.counts.sys_setting).toBe(2);
+    expect(a).toEqual(b);
+    // A repeat for the first tenant hits its own cache entry, not tenant-b's.
+    await resolveLocalizationContext({ ql, tenantId: 'tenant-a' });
+    expect(ql.counts.sys_setting).toBe(2);
+  });
+
+  it('keys the cache per `ql` instance, so two environments in one process never share a cached locale', async () => {
+    const qlA = makeMissingTableQl();
+    const qlB = makeMissingTableQl();
+    await resolveLocalizationContext({ ql: qlA, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql: qlB, tenantId: 'o1' });
+    expect(qlA.counts.sys_setting).toBe(1);
+    expect(qlB.counts.sys_setting).toBe(1);
   });
 });
 
