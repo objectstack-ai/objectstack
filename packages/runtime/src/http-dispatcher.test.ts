@@ -69,6 +69,19 @@ const METADATA_AUTHOR = () => ({ request: {}, executionContext: { userId: 'u1', 
  */
 const PKG_ADMIN = () => ({ request: {}, executionContext: { userId: 'u_pkg_admin', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'] } }) as any;
 
+/**
+ * [#10145] The same move for the `/automation` DEFINITION writes — `POST /`,
+ * `PUT /:name` and `DELETE /:name` now demand `manage_metadata`, the authoring
+ * capability the metadata plane these flows live on already required. The three
+ * cases using this caller are about ROUTING — which automation-service method a
+ * path reaches and with which arguments — and were written when an ordinary
+ * session could register a flow, which is precisely the premise the gate
+ * destroys. Only the caller changes; the gate itself is pinned in
+ * `domains/automation-write-capability-gate.test.ts`, and every EXECUTION route
+ * on the domain (trigger / toggle / resume) keeps `AUTHED_CALLER`, deliberately.
+ */
+const FLOW_AUTHOR = () => ({ request: {}, executionContext: { userId: 'u_flow_author', systemPermissions: ['manage_metadata'] } }) as any;
+
 describe('HttpDispatcher', () => {
     let kernel: ObjectKernel;
     let dispatcher: HttpDispatcher;
@@ -314,20 +327,20 @@ describe('HttpDispatcher', () => {
 
         it('should create a flow via POST /', async () => {
             const body = { name: 'new_flow', label: 'New Flow' };
-            const result = await dispatcher.handleAutomation('', 'POST', body, AUTHED_CALLER());
+            const result = await dispatcher.handleAutomation('', 'POST', body, FLOW_AUTHOR());
             expect(result.handled).toBe(true);
             expect(mockAutomationService.registerFlow).toHaveBeenCalledWith('new_flow', body);
         });
 
         it('should update a flow via PUT /:name', async () => {
             const body = { definition: { label: 'Updated' } };
-            const result = await dispatcher.handleAutomation('flow_a', 'PUT', body, AUTHED_CALLER());
+            const result = await dispatcher.handleAutomation('flow_a', 'PUT', body, FLOW_AUTHOR());
             expect(result.handled).toBe(true);
             expect(mockAutomationService.registerFlow).toHaveBeenCalledWith('flow_a', { label: 'Updated' });
         });
 
         it('should delete a flow via DELETE /:name', async () => {
-            const result = await dispatcher.handleAutomation('flow_a', 'DELETE', {}, AUTHED_CALLER());
+            const result = await dispatcher.handleAutomation('flow_a', 'DELETE', {}, FLOW_AUTHOR());
             expect(result.handled).toBe(true);
             expect(mockAutomationService.unregisterFlow).toHaveBeenCalledWith('flow_a');
             expect(result.response?.body?.data?.deleted).toBe(true);
