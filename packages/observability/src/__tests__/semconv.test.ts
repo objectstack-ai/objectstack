@@ -29,10 +29,10 @@ describe('SEMCONV', () => {
         expect(SEMCONV as Record<string, string>).not.toHaveProperty(
             'httpRequestErrorsTotal',
         );
-        expect(Object.values(SEMCONV)).not.toContain('http_request_errors_total');
+        expect(Object.values(SEMCONV) as string[]).not.toContain('http_request_errors_total');
         expect(RUNTIME_METRICS as Record<string, string>).not.toHaveProperty(
             'httpRequestErrorsTotal',
         );
-        expect(Object.values(RUNTIME_METRICS)).not.toContain('http_request_errors_total');
+        expect(Object.values(RUNTIME_METRICS) as string[]).not.toContain('http_request_errors_total');
     });
 });
