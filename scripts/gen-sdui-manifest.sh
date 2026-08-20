@@ -187,22 +187,154 @@ sdui_stop_detached() {
 # two literals in this file, it was between the port requested and the port bound.
 # ---------------------------------------------------------------------------
 
-# Print a TCP port on 127.0.0.1 that is free right now, searching upward from $1.
+# Print a TCP port on 127.0.0.1 that is free right now AND reserved for this
+# caller, searching upward from $1.
 #
-# ADVISORY ONLY. It reserves nothing, and between this probe and vite's own bind
-# a concurrent run can take the port. Closing that race is not this helper's job:
-# `--strictPort` turns losing it into a loud failure instead of a silent redirect
-# onto a neighbour's server.
+# WHY A RESERVATION AND NOT JUST A PROBE.
+#
+# The probe below used to be the whole of this helper: bind a socket, CLOSE it,
+# and report the port free. Between that close and the caller's own bind the
+# port is unowned, and the scan is deterministic from $base upward, so every
+# concurrent caller starting at the same base was handed the same number. A
+# check-then-use race whose "use" is in another process — and one that collides
+# by construction rather than by bad luck. Measured on this tree with the
+# reservation removed, eight concurrent callers scanning from 5180:
+#
+#     DISTINCT_PORTS=1 of 8       # every one of them was handed 5180
+#     BIND_OK=2  BIND_ERR=6       # six lost the follow-up bind:
+#                                 #   Error: listen EADDRINUSE 127.0.0.1:5180
+#
+# That is the shape that dequeued a PR from the merge queue. The contention is
+# not hypothetical: the collision test beside this script draws from 5180 three
+# times, the write-target test drives this real path for a fourth, and they run
+# concurrently inside one package's test run.
+#
+# So a port is CLAIMED before it is probed, in a registry every caller on this
+# host shares, and the claim outlives this function — it is released when the
+# claiming process dies, not when this function returns. Two cooperating callers
+# can no longer be handed the same port at all. The probe stays, because a claim
+# says nothing about processes that never heard of this registry.
+#
+# STILL ADVISORY against those. Nothing here can stop a process outside the
+# registry from taking the port between this function and the caller's bind;
+# `--strictPort` plus `sdui_wait_for_own_server` is what turns losing that race
+# into a loud failure instead of a silent redirect onto a neighbour's server.
+# What the claim removes is the collision this script's own callers cause each
+# other, which is every collision anyone has actually measured here.
 #
 # 127.0.0.1 is the interface vite's dev server binds. A wildcard listener on the
 # same port collides with a loopback bind too, so this probe sees a neighbour
 # whichever way the neighbour bound.
 sdui_pick_free_port() {
   local base="${1:-5180}" span="${2:-200}"
-  node - "$base" "$span" << 'SDUI_PICK_FREE_PORT'
+  local dir="${SDUI_PORT_RESERVATION_DIR:-${TMPDIR:-/tmp}/sdui-port-reservations}"
+
+  # `O_EXCL` alone already gives exactly one winner per port, so the lock is not
+  # what makes a claim exclusive — it makes the SWEEP of abandoned claims safe,
+  # which is the one step that unlinks a file another scanner may be creating.
+  # Missing `flock` therefore degrades to "sound, minus the sweep's tie-break",
+  # never to a hard failure: this helper runs on developer machines too.
+  #
+  # The descriptor is opened by a subshell that exits before anything is
+  # spawned, so nothing this script starts can inherit it — see the cleanup
+  # contract above, where an inherited lock fd is what closed a container.
+  if command -v flock > /dev/null 2>&1; then
+    (
+      flock -w 30 9 2> /dev/null || true
+      sdui_scan_and_reserve_port "$base" "$span"
+    ) 9> "${dir}.lock"
+  else
+    sdui_scan_and_reserve_port "$base" "$span"
+  fi
+}
+
+# The scan itself: claim, then probe, then hand the port over. Split out from
+# `sdui_pick_free_port` only so the lock above wraps one named thing.
+sdui_scan_and_reserve_port() {
+  local base="$1" span="$2"
+  node - "$base" "$span" "$$" << 'SDUI_PICK_FREE_PORT'
 const net = require('node:net');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
 const base = Number(process.argv[2]);
 const span = Number(process.argv[3]);
+// The CALLER's pid, not this node process's: the caller is what will hold the
+// port, and its death is what makes the claim collectable.
+const owner = Number(process.argv[4]);
+
+// One registry per host, shared by every caller that sources this script —
+// sharing it IS the fix, so the tests that measure contention deliberately do
+// not override this. The override exists for tests of the protocol itself.
+const dir =
+  process.env.SDUI_PORT_RESERVATION_DIR ||
+  path.join(process.env.TMPDIR || os.tmpdir(), 'sdui-port-reservations');
+
+// A claim is collectable once its owner is gone. The floor keeps a claim
+// written moments ago out of the sweep whatever its pid says; the ceiling is a
+// backstop for the case pid liveness cannot see — a dead owner whose pid number
+// has since been reused by something unrelated.
+const SWEEP_FLOOR_MS = 10_000;
+const SWEEP_CEILING_MS = 12 * 60 * 60 * 1000;
+
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === 'EPERM'; // it exists, it is simply not ours to signal
+  }
+};
+
+const sweep = () => {
+  let names = [];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return;
+  }
+  const now = Date.now();
+  for (const name of names) {
+    if (!/^\d+$/.test(name)) continue;
+    const file = path.join(dir, name);
+    let holder;
+    let age;
+    try {
+      holder = Number(String(fs.readFileSync(file, 'utf8')).trim());
+      age = now - fs.statSync(file).mtimeMs;
+    } catch {
+      continue; // vanished under us — someone else already collected it
+    }
+    if (age < SWEEP_FLOOR_MS) continue;
+    if (age < SWEEP_CEILING_MS && Number.isInteger(holder) && holder > 0 && alive(holder)) continue;
+    try {
+      fs.unlinkSync(file);
+    } catch {
+      /* already gone */
+    }
+  }
+};
+
+// `wx` is O_CREAT|O_EXCL: exactly one creator wins, and the losers are told so
+// HERE rather than discovering it at bind time in another process.
+const claim = (port) => {
+  try {
+    fs.writeFileSync(path.join(dir, String(port)), `${owner}\n`, { flag: 'wx' });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const release = (port) => {
+  try {
+    fs.unlinkSync(path.join(dir, String(port)));
+  } catch {
+    /* already gone */
+  }
+};
+
 const isFree = (port) =>
   new Promise((resolve) => {
     const probe = net.createServer();
@@ -210,12 +342,21 @@ const isFree = (port) =>
     probe.once('listening', () => probe.close(() => resolve(true)));
     probe.listen(port, '127.0.0.1');
   });
+
 (async () => {
+  fs.mkdirSync(dir, { recursive: true });
+  sweep();
   for (let port = base; port < base + span; port += 1) {
+    // Claimed by a live caller — including by an earlier call from THIS caller,
+    // which is why two picks in one run cannot return one port.
+    if (!claim(port)) continue;
     if (await isFree(port)) {
       process.stdout.write(String(port));
       return;
     }
+    // Held by something outside the registry. Hand the claim back rather than
+    // hoarding a port we never got, and keep scanning.
+    release(port);
   }
   process.stderr.write(`no free TCP port in [${base}, ${base + span})\n`);
   process.exitCode = 1;
