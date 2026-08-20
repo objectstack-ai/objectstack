@@ -11,7 +11,7 @@ Two different things get deployed here, and they run on **separate clocks**:
 |:---|:---|:---|
 | The sentence that fits | "I operate ObjectStack." | "I build an app that runs on it." |
 | Ships as | a Docker image (or the `os` CLI on a host) | a compiled artifact, `dist/objectstack.json` |
-| Versioned by | our release train (`17.0.0`) | your own catalog |
+| Versioned by | our release train (`X.Y.Z`) | your own catalog |
 | Whose cadence | ours | yours |
 | The deploy action | move the image tag, restart | compile, then install it or pin it at boot |
 | Rolling back | restore the previous tag or artifact | install the previous version |
@@ -39,8 +39,9 @@ jobs, two cadences, two checklists. Read the one you are acting on today.
 The platform ships as a single version-locked train: every `@objectstack/*`
 package shares one version number, and that number is the platform version. It
 is published as an official runtime image, `ghcr.io/objectstack-ai/objectstack`,
-whose tags mirror `@objectstack/cli` versions (`17.0.0`, `17.0`, `17`,
-`latest`). Pin the exact version in production and move it deliberately.
+whose tags mirror `@objectstack/cli` versions: the exact `X.Y.Z`, plus the
+rolling `X.Y`, `X` and `latest` tags. Pin the exact version in production and
+move it deliberately.
 
 ### Where it runs
 
