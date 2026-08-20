@@ -22,6 +22,7 @@
  *           therefore moves that input from accepted to refused.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { ApprovalService } from './approval-service.js';
 
 function makeFakeEngine() {
@@ -50,14 +51,35 @@ function makeFakeEngine() {
       return rows.slice(0, options?.limit ?? 1000);
     },
     async insert(object: string, data: any) { ensure(object).push({ ...data }); return { ...data }; },
-    async update(object: string, idOrData: any, _opts?: any) {
-      const data = typeof idOrData === 'object' ? idOrData : _opts;
-      const id = typeof idOrData === 'object' ? idOrData.id : idOrData;
-      const t = ensure(object); const i = t.findIndex(r => r.id === id);
+    async update(object: string, data: any, options?: any) {
+      // Pinned to ObjectQL.update's OWN dispatch predicate — a double looser
+      // than the engine it stands in for turns a green suite into no suite.
+      const dispatch = assertEngineUpdateDispatch(data, options);
+      const t = ensure(object);
+      if (dispatch.kind === 'multi') {
+        let n = 0;
+        for (let i = 0; i < t.length; i++) {
+          if (matches(t[i], options?.where)) { t[i] = { ...t[i], ...data }; n++; }
+        }
+        return { updated: n };
+      }
+      const i = t.findIndex(r => r.id === dispatch.id);
       if (i >= 0) t[i] = { ...t[i], ...data };
       return t[i];
     },
-    async delete() { return {}; },
+    async delete(object: string, options?: any) {
+      const dispatch = assertEngineDeleteDispatch(options);
+      const t = ensure(object);
+      if (dispatch.kind === 'multi') {
+        const survivors = t.filter(r => !matches(r, options?.where));
+        const deleted = t.length - survivors.length;
+        t.splice(0, t.length, ...survivors);
+        return { deleted };
+      }
+      const i = t.findIndex(r => r.id === dispatch.id);
+      if (i >= 0) t.splice(i, 1);
+      return { id: dispatch.id };
+    },
     registerHook() {}, unregisterHooksByPackage() { return 0; }, async fire() {},
   };
 }
