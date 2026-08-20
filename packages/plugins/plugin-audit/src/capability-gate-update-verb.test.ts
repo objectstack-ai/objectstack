@@ -148,7 +148,7 @@ async function boot() {
     label: 'Lead (capabilities on)',
     fields: fieldMap('id', 'name'),
     enable: { files: true, feeds: true },
-  } as any);
+  } as any, 'test.fixture');
   reg.registerObject({
     name: 'lead_walled',
     label: 'Lead (capabilities off)',
@@ -158,31 +158,31 @@ async function boot() {
     // merely NOT saying `files: true` already walls attachments off. Both are
     // spelled out here so the fixture reads as one "capabilities off" object.
     enable: { files: false, feeds: false },
-  } as any);
+  } as any, 'test.fixture');
   reg.registerObject({
     name: 'sys_attachment',
     label: 'Attachment',
     fields: fieldMap('id', 'parent_object', 'parent_id', 'file_id', 'file_name'),
-  } as any);
+  } as any, 'test.fixture');
   reg.registerObject({
     name: 'sys_comment',
     label: 'Comment',
     fields: fieldMap('id', 'thread_id', 'body'),
-  } as any);
+  } as any, 'test.fixture');
   reg.registerObject({
     name: 'sys_audit_log',
     label: 'Audit Log',
     fields: fieldMap(
       'id', 'action', 'user_id', 'actor', 'object_name', 'record_id', 'old_value', 'new_value', 'tenant_id',
     ),
-  } as any);
+  } as any, 'test.fixture');
   reg.registerObject({
     name: 'sys_activity',
     label: 'Activity',
     fields: fieldMap(
       'id', 'type', 'timestamp', 'summary', 'actor_id', 'object_name', 'record_id', 'record_label', 'metadata',
     ),
-  } as any);
+  } as any, 'test.fixture');
 
   installAuditWriters(engine as any, 'test.audit');
   return engine;
