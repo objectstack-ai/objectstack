@@ -44,12 +44,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqlDriver } from '@objectstack/driver-sql';
-import {
-  GLOBAL_TENANT,
-  SEQUENCES_TABLE,
-  ORGANIZATION_TABLE,
-  SEED_TENANCY_MIGRATION_ID,
-} from '@objectstack/metadata-protocol';
+import { GLOBAL_TENANT, SEQUENCES_TABLE, ORGANIZATION_TABLE } from '@objectstack/metadata-protocol';
 import { bootSchemaStack } from './schema-migrate.js';
 
 // [#10126] Pay the first transform of these dist-resolved workspace deps at MODULE
@@ -62,6 +57,18 @@ import '@objectstack/runtime';
 import '@objectstack/platform-objects/plugin';
 
 const ORG_ID = 'org_x';
+/**
+ * [#9451] The receipt's well-known migration id, spelled as a LITERAL rather
+ * than imported from `@objectstack/metadata-protocol`.
+ *
+ * Not a workaround for a missing export — it is the stronger assertion. This id
+ * is an operator-facing string: `content/docs/deployment/seed-tenancy-repair.mdx`
+ * documents `WHERE id = 'seed-tenancy-backfill'` as the query to run, so renaming
+ * it breaks every query written from that page. A test importing the constant
+ * would follow such a rename in silence; this one goes red, which is the correct
+ * verdict for a change that is breaking for operators.
+ */
+const RECEIPT_MIGRATION_ID = 'seed-tenancy-backfill';
 /** The `__global__` counter the seed loader ran ahead to before the org existed. */
 const SEEDED_LAST_VALUE = 38;
 
@@ -375,7 +382,7 @@ describe('#9380 the kernel:ready platform migrations, on the boots that reach th
     const receipts = await readReceipts();
     expect(receipts).not.toBe('no-table');
     const rows = receipts as any[];
-    const receipt = rows.find((r) => r.id === SEED_TENANCY_MIGRATION_ID);
+    const receipt = rows.find((r) => r.id === RECEIPT_MIGRATION_ID);
     expect(receipt).toBeDefined();
 
     // The reading, pinned where a real ledger writes it: no self-check ran, so
@@ -411,13 +418,13 @@ describe('#9380 the kernel:ready platform migrations, on the boots that reach th
     // so it writes nothing — and the receipt from the first boot is still the
     // answer.
     await bootServingStack({ platformObjects: true });
-    const first = (await readReceipts() as any[]).find((r) => r.id === SEED_TENANCY_MIGRATION_ID);
+    const first = (await readReceipts() as any[]).find((r) => r.id === RECEIPT_MIGRATION_ID);
     expect(first).toBeDefined();
 
     await bootServingStack({ platformObjects: true });
 
     const rows = (await readReceipts()) as any[];
-    const second = rows.filter((r) => r.id === SEED_TENANCY_MIGRATION_ID);
+    const second = rows.filter((r) => r.id === RECEIPT_MIGRATION_ID);
     // Exactly one row, unchanged: the ledger's grain is one row per migration,
     // and a healthy boot must not restamp it — `last_run_at` moving on a boot
     // that repaired nothing would make the receipt lie about when the data was
