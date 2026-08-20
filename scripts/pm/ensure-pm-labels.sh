@@ -156,7 +156,19 @@ gh() {
 # repo, no changeset/release flow, no release board). Those absences are
 # deliberate, not oversights. Actually RUNNING this against objectos is a PM
 # landing step (needs label-write credentials on that repo).
-for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud objectstack-ai/objectos; do
+#
+# hotcrm enrolled on the SAME Option B terms when its execution seat was opened
+# (maintainer ruling 2026-08-20, verbatim prefix — the full quote lives on the
+# lane-registration card: 「新增了 hotcrm 仓库的席位,这个仓库作为 objectstack 的样板工程,
+# 使用元数据开发crm应用…」). It is the EXEMPLAR APP repo, so like objectos it sits
+# outside the spec dependency chain: it gets the full pm state-machine vocabulary
+# below, and stays OUT of the domain-lane loop (lanes are main-repo-only — hotcrm
+# is a REPO lane, seated through the repo:hotcrm seam label further down) and OUT
+# of the target:<major> loop (no changeset/release flow of its own, so no release
+# board unless one is later ruled). Those absences are deliberate, not oversights.
+# Actually RUNNING this against hotcrm is a PM landing step, same as objectos
+# (needs label-write credentials on that repo).
+for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud objectstack-ai/objectos objectstack-ai/hotcrm; do
   gh label create pm:queue            -R "$R" -c 0e8a16 -d "Ready for the PM dispatch loop" 2>/dev/null || true
   gh label create pm:dispatched       -R "$R" -c 1d76db -d "Dispatched to a dev agent by /pm-dispatch" 2>/dev/null || true
   gh label create needs-user-decision -R "$R" -c d93f0b -d "Blocked on a maintainer decision — do not dispatch" 2>/dev/null || true
@@ -169,8 +181,8 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # consumers: the lane pull order below (p0 > pm:blocking > target board > Bug
   # > the rest) and the half-state sweep's H10 (stale unclaimed p0) and H11
   # (important card parked) in scripts/pm/check-half-states.mjs. It is in this
-  # four-repo loop because that sweep is repo-parameterized (PM_SWEEP_REPO) and
-  # grading is a four-repo triage duty — the same reasoning as pm:retriage
+  # five-repo loop because that sweep is repo-parameterized (PM_SWEEP_REPO) and
+  # grading is a five-repo triage duty — the same reasoning as pm:retriage
   # below. Measured 2026-08-20: objectui carries a live priority:p0 card whose
   # label OBJECT was auto-created by that first application, so it has GitHub's
   # default colour and an EMPTY description — exactly the drift this row closes
@@ -196,8 +208,8 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # what makes the state safe. Named consumers: the dispatchable-candidate
   # query (a pm:queue card carrying it is skipped — objection undecided, no
   # dispatch) and the triage round's high-priority re-judgement pass. It is in
-  # this four-repo loop because the state-model row requires the label to exist
-  # in all four; where a first application already auto-created the object,
+  # this five-repo loop because the state-model row requires the label to exist
+  # in all five; where a first application already auto-created the object,
   # creation here is a no-op and `--reconcile` is what gives it this colour and
   # description (measured 2026-08-20: grey with an empty description in
   # objectstack, and absent entirely from objectui).
@@ -223,8 +235,23 @@ gh label create needs:contract-review -R objectstack-ai/objectstack -c d93f0b -d
 
 # Routing labels exist only on the main backlog repo, and mark SEAM cards only
 # (file-at-destination ruling: pure sibling-repo fixes live in the target repo).
+#
+# repo:hotcrm joined 2026-08-20 with the hotcrm execution seat. The seam reading
+# is the ordinary one and needs no special case: a card is repo:hotcrm only when
+# cross-repo ORDERING with hotcrm is its substance. The charter's own routing rule
+# runs the OTHER way and produces no label here — a platform gap discovered while
+# building the exemplar app is filed AT the platform repo (never worked around in
+# hotcrm), which makes it an ordinary platform card, not a seam card.
+#
+# ⚠️ Colour: the two rows below already disagree (fbca04 / c5def5), so there is no
+# single family colour to inherit. This row takes objectui's fbca04 — also the
+# colour the published pm-dispatch skill's routing-label example carries — so the
+# family converges on two spellings instead of gaining a third. ⛔ Do NOT "tidy"
+# repo:cloud to match while you are here: under --reconcile that rewrites a LIVE
+# label object's colour, which is a deliberate PM action and not this row's.
 gh label create repo:objectui -R objectstack-ai/objectstack -c fbca04 -d "Seam card: cross-repo ordering with objectui is the substance (pure objectui fixes live in objectui)" 2>/dev/null || true
 gh label create repo:cloud    -R objectstack-ai/objectstack -c c5def5 -d "Seam card: cross-repo ordering with cloud is the substance (pure cloud fixes live in cloud)" 2>/dev/null || true
+gh label create repo:hotcrm   -R objectstack-ai/objectstack -c fbca04 -d "Seam card: cross-repo ordering with hotcrm is the substance (pure hotcrm fixes live in hotcrm)" 2>/dev/null || true
 
 # pm:seat marks a SEAT REGISTRY post — the protocol carrier, not dispatchable
 # work (SKILL.md state model): one post per seat, its body is the single-writer
