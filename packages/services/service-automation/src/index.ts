@@ -68,6 +68,7 @@ export { SysAutomationRun } from './sys-automation-run.object.js';
 // `AutomationEngine.claim(key)` — the in-memory store is for tests / explicit
 // memory-only hosts; the ObjectQL-backed store makes dedup survive rebuilds.
 export { InMemoryFlowDispatchStore, ObjectStoreFlowDispatchStore } from './flow-dispatch-store.js';
+export type { FlowDispatchStoreEngine } from './flow-dispatch-store.js';
 export { SysFlowDispatch } from './sys-flow-dispatch.object.js';
 
 // Kernel plugin — seeds all built-in nodes; this is the only plugin needed for

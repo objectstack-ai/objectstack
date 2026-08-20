@@ -1,7 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { FlowDispatchStore } from './engine.js';
-import type { SuspendedRunStoreEngine } from './suspended-run-store.js';
 
 /**
  * Durable claim ledger for trigger dispatch idempotency (#10220).
@@ -25,6 +24,18 @@ import type { SuspendedRunStoreEngine } from './suspended-run-store.js';
 const TABLE = 'sys_flow_dispatch';
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
+/**
+ * The exact ObjectQL slice `claim()` needs: a keyed read and an insert.
+ * Narrower than `SuspendedRunStoreEngine` on purpose — the ledger never
+ * updates or deletes (rows are immutable claims; the platform Reaper owns
+ * deletion via the object's declared retention), and demanding only what is
+ * used keeps every test double honest about that.
+ */
+export interface FlowDispatchStoreEngine {
+  find(object: string, options?: any): Promise<any[]>;
+  insert(object: string, data: any, options?: any): Promise<any>;
+}
+
 /** In-memory {@link FlowDispatchStore} — process-lifetime dedup only. */
 export class InMemoryFlowDispatchStore implements FlowDispatchStore {
   private readonly keys = new Set<string>();
@@ -46,7 +57,7 @@ export class InMemoryFlowDispatchStore implements FlowDispatchStore {
  * uses a system context: these are infrastructure rows, not tenant data.
  */
 export class ObjectStoreFlowDispatchStore implements FlowDispatchStore {
-  constructor(private readonly engine: SuspendedRunStoreEngine) {}
+  constructor(private readonly engine: FlowDispatchStoreEngine) {}
 
   async claim(key: string): Promise<boolean> {
     const existing = await this.engine.find(TABLE, {

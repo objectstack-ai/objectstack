@@ -6,7 +6,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { AutomationEngine } from './engine.js';
 import { InMemoryFlowDispatchStore, ObjectStoreFlowDispatchStore } from './flow-dispatch-store.js';
-import type { SuspendedRunStoreEngine } from './suspended-run-store.js';
+import type { FlowDispatchStoreEngine } from './flow-dispatch-store.js';
 
 function testLogger() {
     const warn = vi.fn();
@@ -20,14 +20,22 @@ function testLogger() {
     return { logger, warn };
 }
 
-/** Fake ObjectQL slice with a real primary-key uniqueness on `id`. */
+/**
+ * Fake ObjectQL slice with a real primary-key uniqueness on `id`. The `where`
+ * handling REFUSES any shape other than the keyed-by-id read the store makes —
+ * an unsupported filter must fail the test, never silently match everything.
+ */
 function fakeQl() {
     const rows = new Map<string, Record<string, unknown>>();
-    const engine: SuspendedRunStoreEngine = {
+    const engine: FlowDispatchStoreEngine = {
         async find(_table, options) {
-            const id = (options?.where as { id?: string } | undefined)?.id;
-            if (id == null) return [...rows.values()];
-            const row = rows.get(id);
+            const where = (options?.where ?? {}) as Record<string, unknown>;
+            const keys = Object.keys(where);
+            if (keys.length === 0) return [...rows.values()];
+            if (keys.length !== 1 || keys[0] !== 'id' || typeof where.id !== 'string') {
+                throw new Error(`fake driver: unsupported where shape ${JSON.stringify(where)}`);
+            }
+            const row = rows.get(where.id);
             return row ? [row] : [];
         },
         async insert(_table, data) {
@@ -35,9 +43,6 @@ function fakeQl() {
             if (rows.has(id)) throw new Error('UNIQUE constraint failed: sys_flow_dispatch.id');
             rows.set(id, data as Record<string, unknown>);
             return data;
-        },
-        async update() {
-            throw new Error('claim never updates');
         },
     };
     return { engine, rows };
@@ -68,7 +73,7 @@ describe('ObjectStoreFlowDispatchStore', () => {
         // First find sees no row; the insert then collides (a racing sweep won);
         // the re-check finds the winner's row → the key IS claimed.
         let finds = 0;
-        const engine: SuspendedRunStoreEngine = {
+        const engine: FlowDispatchStoreEngine = {
             async find() {
                 finds++;
                 return finds === 1 ? [] : [{ id: 'k1' }];
@@ -76,17 +81,15 @@ describe('ObjectStoreFlowDispatchStore', () => {
             async insert() {
                 throw new Error('UNIQUE constraint failed: sys_flow_dispatch.id');
             },
-            async update() { throw new Error('unused'); },
         };
         const store = new ObjectStoreFlowDispatchStore(engine);
         await expect(store.claim('k1')).resolves.toBe(false);
     });
 
     it('a genuine store failure propagates (the engine decides the fallback)', async () => {
-        const engine: SuspendedRunStoreEngine = {
+        const engine: FlowDispatchStoreEngine = {
             async find() { return []; },
             async insert() { throw new Error('no such table: sys_flow_dispatch'); },
-            async update() { throw new Error('unused'); },
         };
         const store = new ObjectStoreFlowDispatchStore(engine);
         await expect(store.claim('k1')).rejects.toThrow('no such table');
