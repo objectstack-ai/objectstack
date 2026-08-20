@@ -654,10 +654,10 @@
     },
     {
       "id": "cli.migrate-meta-codemod",
-      "title": "os migrate meta actually rewrites authored sources across a spec major — the prescription hundreds of retirement messages point at is honest, idempotent, and refuses below its floor",
+      "title": "os migrate meta replays the spec migration chain over authored sources and PRINTS the mechanical edit list the retirement messages prescribe — it rewrites no source file, its --out snapshot is schema-valid, replay is idempotent, and a below-floor --from is refused",
       "since": "v14.7",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "cli",
       "personas": ["build-time author (no session)"],
@@ -665,46 +665,55 @@
         "app": "showcase",
         "requires": [
           "a scratch copy of an authored source tree. ⚠️ NOT because the command rewrites in place — it does not: the authored-source chain reads the config and writes nothing but --out (commands/migrate/meta.ts: 'The command does not silently rewrite TS config source (that AST rewrite is unsafe and lossy)'), and the --stored arm is a read-only preview until --apply. A scratch copy is still the right hygiene for planting retired spellings, and --stored --apply IS a real write — to this deployment's sys_metadata ROWS, not to files",
-          "authored sources deliberately carrying retired spellings from the previous major, so the codemod has something to rewrite"
+          "authored sources deliberately carrying retired spellings from the previous major, so the chain has something to report"
         ],
         "knownGaps": [
-          "Constructing sources that carry the OLD spellings requires authoring against a retired surface, which the current schemas refuse at parse. Author the fixture files as raw text (they are the input a real upgrader has on disk — files written before the retirement, which is exactly why they do not parse now); do NOT try to produce them through the current schema. If a retired spelling cannot be reconstructed for a sampled entry, record that entry as blocked(fixture) rather than declaring the codemod clean over it.",
-          "The registry carries entries for both the shipped major and the next one. Rewrites for the NEXT major may be staged but not yet reachable through a released --from/--to pair; record which sampled entries were actually exercised."
+          "Constructing sources that carry the OLD spellings requires authoring against a retired surface, which the current schemas refuse at parse. Author the fixture files as raw text (they are the input a real upgrader has on disk — files written before the retirement, which is exactly why they do not parse now); do NOT try to produce them through the current schema. If a retired spelling cannot be reconstructed for a sampled entry, record that entry as blocked(fixture) rather than declaring the chain clean over it.",
+          "The registry carries entries for both the shipped major and the next one. Conversions for the NEXT major may be staged but not yet reachable through a released --from/--to pair; record which sampled entries were actually exercised.",
+          "The in-place SOURCE REWRITE this item was first authored against does not exist and is deliberately out of scope at revision 3: `os migrate meta` declares no --write/--fix/in-place flag and the authored-source arm's only file write is the --out snapshot. It is commissioned as #9591 for v18 (pm:on-hold, with its own Restart-when line). ⛔ Do NOT record it as blocked(dependency) and do NOT file it as a defect — print-only IS the shipped contract. The restart is mechanical instead: the last step and the last acceptance clause read the --help flag surface, and a --write appearing there is the signal to restore the rewrite assertions here."
         ]
       },
       "steps": [
         "enumerate the migration registries and record their sizes: packages/spec/src/migrations/entries/{retired-defs,retired-keys,semantic}",
-        "collect the codemod's advertised contract: grep the spec's retirement messages for the exact command string they prescribe (many read `Run \\`os migrate meta --from <N>\\` to rewrite existing sources automatically`) and record which majors are named",
-        "copy an authored source tree to a scratch dir and plant retired spellings sampled from the retired-keys registry (at minimum one ui/ key and one data/ key)",
+        "collect the command's advertised contract from the SHIPPED retirement messages: grep the spec for the house sentence they carry — `Run \\`os migrate meta --from <N>\\` to list the mechanical edits for existing sources; apply them by hand.` (shared text in packages/spec/src/shared/retired-key.ts, reworded class-wide by #9529) — and record which majors are named. ⚠️ The sentence promises a LIST, not an automatic rewrite: what this item verifies is that the listing is complete and honest, not that files change",
+        "copy an authored source tree to a scratch dir and plant retired spellings sampled from the retired-keys registry (at minimum one ui/ key and one data/ key); record a per-file checksum of the scratch tree BEFORE the run",
         "run `os migrate meta --from <previous major>` and capture stdout + the exit code",
-        "diff the tree before/after and confirm each planted spelling was rewritten to its declared successor",
-        "run `os build` (or `os validate`) on the rewritten tree — the whole point is that it now passes",
-        "run the SAME migrate command a second time on the already-migrated tree and diff again (idempotence)",
-        "run it with a --from BELOW the supported floor and capture the MigrationFloorError path",
+        "confirm every planted spelling appears in the printed `Applied <N> mechanical change(s):` block as `<path>: <from> → <to> (<conversionId>)`, naming the successor the registry declares",
+        "re-checksum the scratch tree and confirm every authored file is byte-identical — the run's only file write is --out",
+        "re-run with `--out <snapshot>.json`, read the snapshot back, and confirm the run states its schema verdict honestly: `Migrated stack is schema-valid` when it is, and the `Migrated stack does not yet pass schema validation — resolve the manual changes above, then run \\`os validate\\`` warning when manual changes are still outstanding",
+        "idempotence: replay from the TARGET major (`--from <current major>`) and confirm `Nothing to migrate — the metadata is already canonical for this range.` with exit 0; then run the identical `--from <previous major>` command a second time and diff the two stdouts",
+        "run it with a --from BELOW the supported floor and capture the MigrationFloorError path (`Cannot migrate from protocol <N>: the chain's support floor is <F>`)",
         "run it with --json where supported and check the exit code in the same way #4873 required of every other migrate subcommand",
-        "confirm the semantic-only entries behave as ADVISORIES: they are reported to the operator, not silently 'fixed' (a semantic change has no mechanical rewrite by definition)"
+        "confirm the semantic-only entries behave as ADVISORIES: they are reported under `<N> manual change(s) require your judgment:` with their why/verify text, never silently 'fixed' (a semantic change has no mechanical rewrite by definition)",
+        "RESTART CHECK for #9591 — run `os migrate meta --help` and record the flag surface. Today it is exactly from/to/step/out/stored/database-url/apply/yes/force/type/json, with no in-place rewrite flag. If a --write (or equivalent) has appeared, #9591 has LANDED and this item is stale: restore the source-rewrite assertions revision 3 removed and bump the revision, rather than ticking or failing the clauses below"
       ],
       "acceptance": [
         {
-          "clause": "every planted retired spelling is REWRITTEN to the successor the registry declares — the codemod does what the retirement messages promise, for each sampled entry",
+          "clause": "every planted retired spelling is REPORTED in the printed mechanical-edit list, with the successor the registry declares — the listing the retirement messages prescribe is complete, for each sampled entry",
           "oracle": "log",
-          "verify": "per-entry before/after diff; an entry left untouched while a message prescribes this command is a FAIL naming that entry",
-          "evidence": "the per-entry diff"
+          "verify": "locate each sampled entry in the `Applied <N> mechanical change(s):` block (`<path>: <from> → <to> (<conversionId>)`); an entry left unlisted while a shipped message prescribes this command for it is a FAIL naming that entry — the prescription is then a dead end",
+          "evidence": "the printed block, with each sampled entry located in it"
         },
         {
-          "clause": "the rewritten tree BUILDS — the migration is complete, not partial: running the codemod is sufficient to clear the retirements it claims to handle",
-          "oracle": "build",
-          "verify": "os build exits 0 on the rewritten tree; if it still refuses, the refusal text names something the codemod did not rewrite, and that gap is the finding",
-          "evidence": "build exit code + any residual refusal"
-        },
-        {
-          "clause": "the codemod is IDEMPOTENT: a second run over an already-migrated tree changes nothing and still exits 0",
+          "clause": "the authored sources are UNTOUCHED — the run's only file write is the --out snapshot. This is the shipped contract, not a defect: the command declines the AST rewrite as 'unsafe and lossy' in its own header",
           "oracle": "log",
-          "verify": "second-run diff is empty and exit is 0 — a codemod that double-rewrites (or errors on clean input) cannot be safely re-run, and upgraders re-run it",
-          "evidence": "second-run diff + exit code"
+          "verify": "per-file checksums of the scratch tree before and after: every file byte-identical, and the only new or changed path is the --out target when --out was passed",
+          "evidence": "the before/after checksum pairs + the --out path"
         },
         {
-          "clause": "a --from below the supported floor is REFUSED loudly (MigrationFloorError) rather than silently doing a partial or wrong rewrite",
+          "clause": "the --out snapshot is the migrated stack, and the run reports its schema verdict honestly rather than claiming success over outstanding manual work",
+          "oracle": "log",
+          "verify": "read the snapshot back and reconcile it against the printed applied set; check the success/warning line agrees with `schemaValid` in the --json output for the same input",
+          "evidence": "the snapshot, the verdict line, and the --json schemaValid field"
+        },
+        {
+          "clause": "replay is IDEMPOTENT: replaying from the target major applies nothing and still exits 0, and two identical runs print the same thing",
+          "oracle": "log",
+          "verify": "`--from <current major>` prints `Nothing to migrate — the metadata is already canonical for this range.` and exits 0; the two identical runs diff empty. An upgrader re-runs this command, and a chain reporting fresh work on clean input cannot be trusted",
+          "evidence": "both exit codes + the diff of the two stdouts"
+        },
+        {
+          "clause": "a --from below the supported floor is REFUSED loudly (MigrationFloorError) rather than silently doing a partial or wrong replay",
           "oracle": "log",
           "verify": "non-zero exit and a message naming the floor and the supported range; a silent no-op here would leave an upgrader believing they had migrated",
           "evidence": "message + exit code"
@@ -712,7 +721,7 @@
         {
           "clause": "semantic-registry entries are surfaced as ADVISORIES the operator must act on — reported, never silently marked handled",
           "oracle": "log",
-          "verify": "the output distinguishes mechanically-rewritten entries from advisory ones; a run that reports 'migrated' over a semantic change nobody applied is the dangerous direction",
+          "verify": "the output distinguishes mechanically-listed entries from advisory ones; a run that reports 'migrated' over a semantic change nobody applied is the dangerous direction",
           "evidence": "the output, with the two classes identified"
         },
         {
@@ -720,22 +729,32 @@
           "oracle": "log",
           "verify": "`os migrate meta --json ...; echo $?` is 0 on a successful run",
           "evidence": "exit code"
+        },
+        {
+          "clause": "RESTART CONDITION — the command still has NO in-place rewrite flag, i.e. #9591 (v18) has not landed and this item's print-only scope is still the right one",
+          "oracle": "log",
+          "verify": "`os migrate meta --help` lists exactly from/to/step/out/stored/database-url/apply/yes/force/type/json. A --write/--fix/in-place flag appearing is NOT a failure of this item — it is the trigger to restore the source-rewrite assertions here and bump the revision",
+          "evidence": "the --help flag list"
         }
       ],
       "negative": [
-        "a retirement message prescribing `os migrate meta --from N` for a spelling the codemod does not actually rewrite — the prescription is then a dead end, and the author who follows it is worse off than one who was told nothing",
-        "a codemod that rewrites into a spelling that ALSO does not parse (rewriting to a second retired name)",
-        "a non-idempotent second run (double-rewrite, or an error on clean input)",
+        "a retirement message prescribing `os migrate meta --from N` for a spelling the chain does not LIST — the prescription is then a dead end, and the author who follows it is worse off than one who was told nothing",
+        "a listed edit whose declared successor ALSO does not parse (pointing the author at a second retired name)",
+        "a run that MUTATES the authored sources. Against today's contract that is a FAIL of the untouched-sources clause; if it turns out to be #9591 landing rather than a bug, the correct response is to revise this item, never to tick it",
         "a below-floor --from that silently no-ops and exits 0",
-        "in-place rewriting with no backup/confirmation on a tree the operator did not expect to be mutated — record the actual safety posture (--yes / prompt / backup) whatever it is"
+        "a replay from the target major that reports changes, or two identical runs whose stdouts disagree",
+        "`Migrated stack is schema-valid` printed while manual changes are still outstanding — the same dishonesty as reporting 'migrated' over a semantic change nobody applied"
       ],
-      "traps": ["destructive-in-place"],
+      "traps": ["destructive-in-place", "absence-inference"],
       "source": [
-        "packages/cli/src/commands/migrate/meta.ts (applyMetaMigrations, composeSpecChanges, normalizeStackInput, MigrationFloorError, PROTOCOL_MAJOR)",
-        "packages/spec/src/migrations/entries/retired-defs/ · retired-keys/ · semantic/ (the registries it applies)",
-        "the retirement messages across packages/spec that prescribe this command by name (e.g. the BOOK_TRANSLATIONS_RETIRED text in packages/spec/src/system/book.zod.ts)",
+        "packages/cli/src/commands/migrate/meta.ts (applyMetaMigrations, composeSpecChanges, normalizeStackInput, MigrationFloorError, PROTOCOL_MAJOR; the declared flag surface and the two --out-guarded writeFileSync calls)",
+        "packages/spec/src/migrations/entries/retired-defs/ · retired-keys/ · semantic/ (the registries it replays)",
+        "the retirement messages across packages/spec that prescribe this command by name — the shared sentence in packages/spec/src/shared/retired-key.ts and its per-key sites (e.g. the BOOK_TRANSLATIONS_RETIRED text in packages/spec/src/system/book.zod.ts), pinned class-wide by packages/spec/src/shared/retired-key-migrate-sentence.test.ts",
         "ADR-0087 (retirement registries and conversion routes)",
         "#4873 (--json exit-code honesty across migrate subcommands)",
+        "#9529 (the 2026-08-18 reword: the messages promise a LIST of mechanical edits applied by hand, not an automatic rewrite)",
+        "#9591 (the v18 `--write` AST codemod, pm:on-hold — `Restart-when: the v18 major development cycle opens (first v18 changeset-major accepted on main), or a maintainer instruction pulls it forward`; when it lands, the assertions removed at revision 3 come back here)",
+        "#9733 (the disposition: keep the item active and rewrite it to today's contract rather than retire a P1 over a capability parked two majors out)",
         "sibling item cli.migrate-plan-apply-json (the DATABASE migrate lane — lists `meta` as a variant but asserts nothing about it)"
       ],
       "history": [
@@ -745,7 +764,18 @@
           "change": "new — cli.migrate-plan-apply-json lists `meta` among its eight subcommand variants, but every one of its acceptance clauses is about the DATABASE lane (plan/apply/destructive/busy/--json), so the source-rewriting codemod was named but never exercised. It is load-bearing well beyond its own command: retirement messages throughout the spec prescribe it by name as THE way to clear a retired spelling, so if it does not rewrite what it claims, every one of those prescriptions is a dead end. Authored against a registry that now holds nearly 200 entries across the two most recent majors",
           "ref": "#9299"
         },
-        { "revision": 2, "date": "2026-08-18", "change": "corrected the fixture warning, which claimed the command REWRITES files in place. commands/migrate/meta.ts states the opposite in its own header and code: the authored-source chain writes nothing but --out (a JSON snapshot), and --apply is documented as '--stored: rewrite the rows (default is a read-only preview)'. The warning both misdescribed the safe default and hid where the real write actually lands (the sys_metadata rows under --stored --apply) — md5sum-confirmed untouched sources in the run (#9417)", "ref": "#9386" }
+        {
+          "revision": 2,
+          "date": "2026-08-18",
+          "change": "corrected the fixture warning, which claimed the command REWRITES files in place. commands/migrate/meta.ts states the opposite in its own header and code: the authored-source chain writes nothing but --out (a JSON snapshot), and --apply is documented as '--stored: rewrite the rows (default is a read-only preview)'. The warning both misdescribed the safe default and hid where the real write actually lands (the sys_metadata rows under --stored --apply) — md5sum-confirmed untouched sources in the run (#9417)",
+          "ref": "#9386"
+        },
+        {
+          "revision": 3,
+          "date": "2026-08-20",
+          "change": "rewritten to the contract the command actually ships. Revisions 1-2 asserted an in-place source codemod: the title said it 'actually rewrites authored sources', and the steps prescribed grepping the spec for `Run \\`os migrate meta --from <N>\\` to rewrite existing sources automatically`, then diffing the tree to confirm each planted spelling had been rewritten. Both halves are false. The command declares exactly from/to/step/out/stored/database-url/apply/yes/force/type/json — no --write/--fix/in-place — and the authored-source arm's only file write is `if (flags.out) writeFileSync(...)`, a JSON snapshot; meta.ts's own header calls the AST rewrite 'unsafe and lossy'. The prescribed grep also finds nothing in shipped sources: #9529 (closed 2026-08-18) reworded the class-wide sentence to '... to list the mechanical edits for existing sources; apply them by hand', which left this item the last place in the repo asserting the withdrawn promise as live (the only other carriers are the deliberate pin test and four CHANGELOGs). So the item was replaced clause-for-clause with what IS real today — the printed mechanical-edit list, sources provably untouched, the schema-valid --out snapshot, idempotent replay, floor refusal, semantic advisories, --json exit honesty — and kept `active`/P1 rather than retired: the reason it could not pass was a wording defect in the ITEM, not missing coverage, and retiring it would have dropped six assertions that hold today to zero. The rewrite half is NOT re-homed as a parked item; #9591 (v18, pm:on-hold) already carries it with a Restart-when line, so the restart lives here as a mechanical trigger instead — the last step and the last acceptance clause read the --help flag surface, and a --write appearing there is defined as the signal to restore these assertions and bump the revision, not as a failure. The id keeps its `-codemod` spelling because ids are immutable and never reused (README lifecycle); it reads as a forward reference until #9591 lands, at which point it is accurate again. Added the `absence-inference` trap: the runner's live false-positive risk is now the inverse of revision 1's — reading 'no files changed' as a broken capability when print-only is the shipped contract",
+          "ref": "#9733"
+        }
       ]
     },
     {
