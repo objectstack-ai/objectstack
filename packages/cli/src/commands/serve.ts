@@ -2491,6 +2491,32 @@ export default class Serve extends Command {
             }
 
             // Pair: AuditPlugin — optional
+            //
+            // [#9863 / #9864] Registered with NO options, so record-view
+            // auditing (`readAudit`) is off on this path. The one way an app
+            // turns it on today is to put its own
+            // `new AuditPlugin({ readAudit: … })` in the stack's `plugins`
+            // array, which this file registers further down — AFTER this line.
+            // Both instances carry the name `com.objectstack.audit`, so the
+            // app's supersedes this one and the opt-in takes effect.
+            //
+            // That is a DECLARED contract now, not the accident #9863 found it
+            // as: duplicate registration by name overwrites — last-one-wins,
+            // with a `warn` naming both versions — identically on both kernels,
+            // stated in `packages/core/src/plugin-registration.ts` and pinned
+            // against `ObjectKernel` AND `LiteKernel` by
+            // `packages/core/src/plugin-registration.contract.test.ts` (#9864,
+            // maintainer ruling 2026-08-19, option B). Before that ruling the
+            // behaviour was undeclared, untested and order-dependent, and
+            // `LiteKernel.use()` threw on the very same input.
+            //
+            // ⚠️ The dependency is on the ORDER as much as on the overwrite:
+            // this registration must stay ABOVE the stack's `plugins` loop, or
+            // the CLI's option-less instance would supersede the app's
+            // configured one instead. #9863 remains open on its own question —
+            // whether `os serve` should grow an `appAuditPluginOptions(config)`
+            // helper like its `SecurityPlugin` sibling above, rather than
+            // reaching the capability only through a supersede.
             try {
               const auditPkg = '@objectstack/plugin-audit';
               const { AuditPlugin } = await import(/* webpackIgnore: true */ auditPkg);
@@ -2535,6 +2561,12 @@ export default class Serve extends Command {
               }
             }
 
+            // [#9863 / #9864] The superseding half of the pair documented at
+            // the `AuditPlugin` auto-registration above: a stack plugin whose
+            // `name` matches one auto-registered earlier REPLACES it, by
+            // declared contract (`packages/core/src/plugin-registration.ts`),
+            // with a `warn` naming both versions. That is how an app supplies
+            // options to a plugin this CLI mounts without them.
             await kernel.use(pluginToLoad);
             const pluginName = plugin.name || plugin.constructor?.name || 'unnamed';
             trackPlugin(pluginName);

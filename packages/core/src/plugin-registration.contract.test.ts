@@ -32,10 +32,10 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { LiteKernel } from './lite-kernel';
-import { ObjectKernel } from './kernel';
-import { describeSupersededRegistration } from './plugin-registration';
-import type { Plugin } from './types';
+import { LiteKernel } from './lite-kernel.js';
+import { ObjectKernel } from './kernel.js';
+import { describeSupersededRegistration } from './plugin-registration.js';
+import type { Plugin } from './types.js';
 
 const DUPLICATE_NAME = 'com.objectstack.test.duplicate';
 
