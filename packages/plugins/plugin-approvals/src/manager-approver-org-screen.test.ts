@@ -1,25 +1,37 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 /**
- * MEASUREMENT HARNESS for #10153 — it pins the CURRENT (defective) behaviour on
- * purpose, so the premise and the tiering question are reproducible rather than
- * argued. It is NOT the fix and it is NOT on a pull request.
+ * #10153 — the `manager` approver is screened to the request's organization.
  *
- * ⛔ Whoever implements the org screen must INVERT `PREMISE A` and `CLAUSE-2 (a)`
- * — they assert today's cross-org resolution, which is exactly what the fix
- * removes. `PREMISE B` / `B2` / `CLAUSE-2 (b)` describe the sibling treatment
- * and stay as they are.
+ * This file began as round 1's MEASUREMENT HARNESS, which pinned the defective
+ * behaviour on purpose so the premise and the tiering question were
+ * reproducible rather than argued. `PREMISE A` and `CLAUSE-2 (a)` asserted
+ * today's cross-org resolution; the fix inverts both, exactly as that file's
+ * header instructed. The probes that describe the SIBLING treatment (`B`,
+ * `B2`, `C-b`) and the `team` gap (`W`) are unchanged, and they are what makes
+ * the inversion readable: the same tree, the same run, one screened type next
+ * to the newly screened one.
  *
- * What it measures, all on one tree:
- *   A     — `manager` resolves a manager whose only `sys_member` row is in
- *           another organization, into this organization's approver slate.
- *   B/B2  — the sibling `position` expansion IS screened, and the screen is not
- *           reject-everything (a same-org holder still resolves).
- *   W     — `team` is NOT screened either, which is why #10153's warrant
- *           ("every sibling expansion is org-scoped") does not hold as stated.
- *   C-a/b — the tiering question: today a sole cross-org `manager` approver
- *           under `onEmptyApprovers: 'fail'` OPENS the request; a screened type
- *           in the identical shape THROWS `NO_APPROVERS`. Applying the screen
- *           therefore moves that input from accepted to refused.
+ * What it pins, both directions and both policies:
+ *   A     — a manager whose only `sys_member` row is in ANOTHER organization no
+ *           longer resolves into this organization's slate.
+ *   A2    — a manager who IS a member here still resolves. Without this, a
+ *           screen that rejected everything would pass A.
+ *   A3    — a manager with NO membership row anywhere still resolves: the
+ *           tenancy fact is absent, so routing is left exactly as it was.
+ *   A4    — a request with no organization at all is untouched (no screen, and
+ *           no read to perform it).
+ *   B/B2  — the sibling `position` expansion IS screened, and its screen is not
+ *           reject-everything.
+ *   W     — `team` is still NOT screened. #10230 owns that; this card did not
+ *           touch it, and the pin says so out loud.
+ *   C-a   — THE ACCEPT-TO-REJECT FLIP. Under `onEmptyApprovers: 'fail'` a node
+ *           whose sole approver is a cross-org `manager` used to OPEN; it now
+ *           throws `NO_APPROVERS`. That throw is PRE-EXISTING code and a bare
+ *           `Error`, not a minted ADR-0112 envelope — there is no `code` /
+ *           `status` to assert here, and inventing one would be a fiction.
+ *   C-a2  — the same node under the DEFAULT policy (`admin_rescue`) still
+ *           OPENS. This is what confines the flip to one non-default policy.
+ *   C-b   — a screened sibling in the identical shape throws too (unchanged).
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
@@ -96,7 +108,7 @@ function input(approvers: any[], configExtra: Record<string, any> = {}) {
   };
 }
 
-describe('#10153 probe', () => {
+describe('#10153 manager approver org screen', () => {
   let engine: ReturnType<typeof makeFakeEngine>;
   let svc: ApprovalService;
   let n = 0;
@@ -123,9 +135,38 @@ describe('#10153 probe', () => {
     ];
   });
 
-  it('PREMISE A — `manager` resolves ACROSS the org boundary (unscreened)', async () => {
-    const req = await svc.openNodeRequest(input([{ type: 'manager' }]), CTX_A);
+  // `{ type: 'manager' }` and `{ type: 'manager', value: 'owner_id' }` resolve
+  // through the same line (`record[a.value] ?? record.owner_id`); the explicit
+  // spelling is used from here on only so the unresolved fallback slot reads as
+  // `manager:owner_id` rather than `manager:undefined`.
+  const MGR = { type: 'manager', value: 'owner_id' };
+
+  it('A — a manager whose membership is in ANOTHER organization is screened OUT', async () => {
+    const req = await svc.openNodeRequest(input([MGR]), CTX_A);
     console.log('[PROBE A] request org =', req.organization_id, 'pending_approvers =', JSON.stringify(req.pending_approvers));
+    // Inverted from round 1, which measured ['u_mgr_b'] here.
+    expect(req.pending_approvers).toEqual(['manager:owner_id']);
+    expect(req.pending_approvers.some((x: string) => !x.includes(':'))).toBe(false);
+  });
+
+  it('A2 — a manager who IS a member of the request org still resolves', async () => {
+    engine._tables['sys_member'].push({ id: 'm3', user_id: 'u_mgr_b', organization_id: ORG_A, role: 'member' });
+    const req = await svc.openNodeRequest(input([MGR]), CTX_A);
+    console.log('[PROBE A2] pending_approvers =', JSON.stringify(req.pending_approvers));
+    expect(req.pending_approvers).toEqual(['u_mgr_b']);
+  });
+
+  it('A3 — a manager with NO membership row anywhere is left alone (no tenancy fact)', async () => {
+    engine._tables['sys_member'] = engine._tables['sys_member'].filter((m: any) => m.user_id !== 'u_mgr_b');
+    const req = await svc.openNodeRequest(input([MGR]), CTX_A);
+    console.log('[PROBE A3] pending_approvers =', JSON.stringify(req.pending_approvers));
+    expect(req.pending_approvers).toEqual(['u_mgr_b']);
+  });
+
+  it('A4 — a request carrying no organization is untouched by the screen', async () => {
+    const ctxNoOrg = { userId: 'u_sub', positions: [], permissions: [] } as any;
+    const req = await svc.openNodeRequest(input([MGR]), ctxNoOrg);
+    console.log('[PROBE A4] request org =', req.organization_id, 'pending_approvers =', JSON.stringify(req.pending_approvers));
     expect(req.pending_approvers).toEqual(['u_mgr_b']);
   });
 
@@ -142,10 +183,24 @@ describe('#10153 probe', () => {
     expect(req.pending_approvers).toEqual(['u_pos_a']);
   });
 
-  it('CLAUSE-2 (a) — TODAY: sole cross-org `manager` + onEmptyApprovers:fail SUCCEEDS', async () => {
-    const req = await svc.openNodeRequest(input([{ type: 'manager' }], { onEmptyApprovers: 'fail' }), CTX_A);
-    console.log('[PROBE C-a] opened OK, status =', req.status, 'approvers =', JSON.stringify(req.pending_approvers));
+  it('C-a — THE FLIP: sole cross-org `manager` + onEmptyApprovers:fail now THROWS', async () => {
+    // Round 1 measured this same call OPENING (status 'pending'). This is the
+    // accept-to-reject flip that re-graded the card `Clause-2: yes`, pinned so
+    // a reviewer reads it here rather than discovering it.
+    let err: any = null;
+    try {
+      await svc.openNodeRequest(input([MGR], { onEmptyApprovers: 'fail' }), CTX_A);
+    } catch (e) { err = e; }
+    console.log('[PROBE C-a] threw =', err ? String(err.message).slice(0, 90) : 'NOTHING');
+    expect(err).toBeTruthy();
+    expect(String(err.message)).toMatch(/^NO_APPROVERS:/);
+  });
+
+  it('C-a2 — the SAME node under the DEFAULT policy still opens (the flip is confined)', async () => {
+    const req = await svc.openNodeRequest(input([MGR]), CTX_A); // onEmptyApprovers absent => admin_rescue
+    console.log('[PROBE C-a2] status =', req.status, 'approvers =', JSON.stringify(req.pending_approvers));
     expect(req.status).toBe('pending');
+    expect(req.pending_approvers).toEqual(['manager:owner_id']);
   });
 
   it('CLAUSE-2 (b) — a SCREENED sibling in the same shape THROWS NO_APPROVERS', async () => {
@@ -157,7 +212,7 @@ describe('#10153 probe', () => {
     expect(err).toBeTruthy();
   });
 
-  it('WARRANT — sibling `team` is NOT org-screened either (cross-org team resolves)', async () => {
+  it('W — `team` is STILL not org-screened (#10230 owns it; this card did not touch it)', async () => {
     engine._tables['sys_team'] = [{ id: 'team_b', name: 'B team', organization_id: 'org_b' }];
     engine._tables['sys_team_member'] = [{ id: 'tm1', team_id: 'team_b', user_id: 'u_team_b' }];
     const req = await svc.openNodeRequest(input([{ type: 'team', value: 'team_b' }]), CTX_A);

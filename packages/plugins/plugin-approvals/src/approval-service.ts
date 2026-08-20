@@ -985,7 +985,12 @@ export class ApprovalService implements IApprovalService {
       } else if (type === 'manager' && record) {
         const subject = (record as any)[a.value] ?? (record as any).owner_id;
         if (subject) {
-          const mgr = await this.lookupManager(String(subject));
+          // #10153: the request's OWN organization, not `directoryOrg`. They are
+          // provably equal on this branch (`manager` is not org-scoped, so a
+          // `organization` declaration is refused above), and naming the request
+          // org says what the screen asserts: tenancy of the request, never an
+          // ADR-0105 D9 retarget this type does not have.
+          const mgr = await this.lookupManager(String(subject), organizationId);
           if (mgr) return this.applyOooDelegation(mgr, now, organizationId, substitutions);
         }
       }
@@ -1339,14 +1344,107 @@ export class ApprovalService implements IApprovalService {
     return Array.from(new Set((rows ?? []).map((r: any) => String(r.user_id ?? '')).filter(Boolean)));
   }
 
-  private async lookupManager(userId: string): Promise<string | null> {
+  /**
+   * `sys_user.manager_id`, screened to the request's organization (#10153).
+   *
+   * Takes an organization argument for the same reason its siblings do
+   * ({@link expandPositionUsers}, {@link expandMembershipTierUsers}): an
+   * approver expansion answers "who, in THIS organization". Before #10153 this
+   * one did not ask, and it was the only expansion that did not — a
+   * `manager_id` pointing at a person in another organization routed that
+   * person an approval over a record they are not a tenant of.
+   *
+   * ⚠️ The screen reads `sys_member`, which LOOKS like the D2 read-visibility
+   * filter next to it ({@link filterApproversWhoCanRead}). It is not, and this
+   * comment exists so the next reader does not conclude that #7497 (does
+   * approver routing imply record read visibility?) was settled here. It was
+   * not. Two facts make this the SIBLING treatment rather than a
+   * read-visibility ruling:
+   *
+   *   1. Two of the three org-scoped expansions already screen on exactly this
+   *      column — `expandMembershipTierUsers` filters `sys_member.organization_id`
+   *      outright, and it is also the second limb of `expandPositionUsers`. So
+   *      `sys_member.organization_id` is already this file's answer to "which
+   *      organization is this person in", independent of what they may read.
+   *   2. `sys_user` carries no `organization_id` at all. It is a GLOBAL identity
+   *      table, so a membership row is the only tenancy fact that exists for a
+   *      user — there is no other read this screen could have been written with.
+   *
+   * This change grants no reads and applies no read screen to any type that
+   * lacks one today, so it decides nothing #7497 asks.
+   */
+  private async lookupManager(userId: string, organizationId?: string | null): Promise<string | null> {
     try {
       const rows = await this.engine.find('sys_user', {
         where: { id: userId }, fields: ['id', 'manager_id'], limit: 1, context: SYSTEM_CTX,
       } as any);
       const row: any = Array.isArray(rows) ? rows[0] : null;
-      return row?.manager_id ? String(row.manager_id) : null;
+      const managerId = row?.manager_id ? String(row.manager_id) : null;
+      if (!managerId) return null;
+      if (await this.managerIsProvablyOutsideOrg(managerId, organizationId)) return null;
+      return managerId;
     } catch { return null; }
+  }
+
+  /**
+   * Is `managerId` PROVABLY a member of other organizations and not of
+   * `organizationId`? (#10153)
+   *
+   * "Provably" is the whole shape of this screen, and it is deliberate rather
+   * than a weaker version of "must prove membership":
+   *
+   *   - membership rows exist for this user, none in the request's org
+   *       ⇒ the tenancy fact is present and NEGATIVE ⇒ screen him out;
+   *   - no membership rows at all, or the read failed
+   *       ⇒ the tenancy fact is ABSENT ⇒ leave routing exactly as it was.
+   *
+   * The fail-open half is not timidity, it is this file's ruled posture on
+   * addressing paths, stated twice already: {@link filterApproversWhoCanRead}
+   * refuses to empty a live slate on an infrastructure hiccup, and
+   * {@link expandPositionUsers} carries "a step routing to nobody is worse than
+   * one routing to a lapsed holder". It is also load-bearing in practice — a
+   * stack that stamps an organization on its requests but does not materialize
+   * `sys_member` rows would otherwise lose every manager approver at once,
+   * which is a bigger behaviour change than the hole being closed. Measured:
+   * this repo's own `type:manager` out-of-office fixture is such a stack.
+   *
+   * Screening the MANAGER only, before OOO delegation, is deliberate too: the
+   * delegate arrives from `sys_approval_delegation`, whose rows already carry
+   * (and are already filtered by) an `organization_id` in
+   * {@link lookupActiveDelegation}. This card is about `sys_user.manager_id`.
+   */
+  private async managerIsProvablyOutsideOrg(
+    managerId: string,
+    organizationId?: string | null,
+  ): Promise<boolean> {
+    const requestOrg = organizationId ? String(organizationId) : '';
+    // No organization on the request ⇒ nothing to screen against, and no read.
+    // The ordinary single-organization / embedded stack costs nothing here.
+    if (!requestOrg) return false;
+    let rows: any[] = [];
+    try {
+      rows = await this.engine.find('sys_member', {
+        where: { user_id: managerId },
+        fields: ['user_id', 'organization_id'],
+        limit: 1000,
+        context: SYSTEM_CTX,
+      } as any);
+    } catch { return false; } // membership unreadable — see the fail-open note above
+    const orgs = (rows ?? [])
+      .map((r: any) => String(r?.organization_id ?? ''))
+      .filter(Boolean);
+    if (!orgs.length) return false;          // no tenancy fact recorded for this user
+    if (orgs.includes(requestOrg)) return false; // he is a member here — route as before
+    this.logger?.warn?.(
+      `[approvals] #10153: manager '${managerId}' was dropped from the approver slate — `
+      + `'sys_user.manager_id' points across an organization boundary. He holds membership in `
+      + `${orgs.length} organization(s), none of them the request's organization '${requestOrg}', `
+      + `so routing this approval to him would put approval authority over the record outside its `
+      + `tenant. Fix the 'manager_id' link, grant him a membership in this organization, or route `
+      + `this step with an approver type that names someone in it.`,
+      { managerId, requestOrganizationId: requestOrg, managerOrganizationIds: orgs },
+    );
+    return true;
   }
 
   /**
