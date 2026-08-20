@@ -927,7 +927,9 @@ export class LifecycleService {
         'global',
         report,
       );
-      outcomes.push(await this.reap(engine, object, lc, 'ttl', lc.ttl.field, windowMs, report));
+      // [#10165] `ttl.onlyWhen` rides the same argument `retention.onlyWhen`
+      // does below — one reap path, one scope spread (see `reap()`'s `scope`).
+      outcomes.push(await this.reap(engine, object, lc, 'ttl', lc.ttl.field, windowMs, report, lc.ttl.onlyWhen));
     }
 
     // Rotation (P2): physical time-sharding when the driver supports it —
@@ -1251,8 +1253,9 @@ export class LifecycleService {
     const tenantWindows = (this.governance.tenantOverrides.get(object) ?? []).filter(
       (t) => typeof t[overrideKey] === 'string',
     );
-    // `retention.onlyWhen` narrows every delete to the declared row filter —
-    // rows outside it (live workflow state) are retained regardless of age.
+    // `retention.onlyWhen` / `ttl.onlyWhen` [#10165] narrow every delete to
+    // the declared row filter — rows outside it (live workflow state, audit
+    // tombstones) are retained regardless of age/expiry.
     const scope = onlyWhen ?? {};
 
     // A guarded object is NEVER blind-deleted: without row reads the guard

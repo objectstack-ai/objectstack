@@ -81,8 +81,8 @@ const result = ApiMethod.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **class** | `Enum<'record' \| 'audit' \| 'telemetry' \| 'transient' \| 'event'>` | ✅ | Persistence contract: record (business truth, permanent) \| audit (compliance ledger) \| telemetry (high-freq log) \| transient (ephemeral state) \| event (bus messages). |
-| **retention** | `{ maxAge: string; onlyWhen?: Record<string, string \| number \| boolean \| object> }` | optional | Age-based retention window enforced by the LifecycleService Reaper. |
-| **ttl** | `{ field: string; expireAfter: string }` | optional | Per-row TTL auto-expiry (transient/event classes). |
+| **retention** | `{ maxAge: string; onlyWhen?: Record<string, string \| number \| boolean \| object \| object> }` | optional | Age-based retention window enforced by the LifecycleService Reaper. |
+| **ttl** | `{ field: string; expireAfter: string; onlyWhen?: Record<string, string \| number \| boolean \| object \| object> }` | optional | Per-row TTL auto-expiry (transient/event classes). |
 | **storage** | `{ strategy: 'rotation'; shards: integer; unit: Enum<'day' \| 'week' \| 'month'> }` | optional | Physical storage strategy for high-frequency telemetry (LifecycleService Rotator). |
 | **archive** | `{ after: string; to: string; keep?: string }` | optional | Cold-store archival (LifecycleService Archiver) — audit-class hot→cold hand-off. |
 | **reclaim** | `boolean` | optional | Run driver space reclamation (SQLite incremental_vacuum) after sweeping this object. Default true for non-record classes. |
