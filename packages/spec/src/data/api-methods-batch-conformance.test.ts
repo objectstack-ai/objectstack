@@ -61,7 +61,7 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // `revoked` on ONE key. The multi-select surface this rule protects does not
   // exist for API keys, and the shape a future one would take does not need
   // `bulk` either — both read off the console build this release pins
-  // (`.objectui-sha` 6314e87f2, `packages/plugin-grid`):
+  // (`.objectui-sha` pin `6314e87f2`, `packages/plugin-grid`):
   //
   //  · No checkbox column is rendered. None of the object's four list views
   //    declares `bulkActions` / `bulkActionDefs` / `selection`, and `ObjectGrid`

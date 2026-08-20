@@ -274,11 +274,11 @@ describe('PageAccordionProps variant (#6776)', () => {
 // sweep once read as declared-but-unenforced. It has a live cross-repo consumer:
 // objectui's `PageAccordionRenderer` renders `{item.icon && <LazyIcon
 // name={item.icon} …/>}` inside the `AccordionTrigger`
-// (`packages/components/src/renderers/layout/containers.tsx:851-853`), and the
+// (`packages/components/src/renderers/layout/containers.tsx:851-857`), and the
 // same file's `ComponentRegistry.register('accordion', …)` publishes the key to
 // the Studio block designer at `:898` (the `items` input, documented as
 // `[{ label, icon?, collapsed?, children }]`). Measured at the pin this repo
-// builds against — `.objectui-sha` = 82a94170c.
+// builds against — `.objectui-sha` = `9a3daf8d3`.
 //
 // #9397 spent a full dispatch cycle re-deriving that read point from scratch
 // after the sweep proposed retiring the key. This block plus the `.describe()`
@@ -357,11 +357,11 @@ describe('PageTabsProps items[].value / items[].count (#5775)', () => {
 // same bare declaration a liveness sweep reads as declared-but-unenforced.
 // objectui's `PageTabsRenderer` renders `{item.icon && <LazyIcon
 // name={item.icon} …/>}` inside the `TabsTrigger`
-// (`packages/components/src/renderers/layout/containers.tsx:662-665`), and the
+// (`packages/components/src/renderers/layout/containers.tsx:662-668`), and the
 // same file's `ComponentRegistry.register('tabs', …)` publishes the key to the
 // Studio block designer at `:721` (the `items` input, documented as
 // `[{ label, value?, icon?, count?, visibleWhen?, children }]`). Measured at
-// the pin this repo builds against — `.objectui-sha` = 82a94170c.
+// the pin this repo builds against — `.objectui-sha` = `9a3daf8d3`.
 //
 // #9397 spent a full dispatch cycle re-deriving the accordion's read point
 // after the sweep proposed retiring it. This block plus the `.describe()` it
@@ -1946,9 +1946,11 @@ describe('#7751 — object-* block props schemas', () => {
 // that sent #9397 on a full dispatch cycle re-deriving the accordion read point.
 // #9881 and #9972 recorded the accordion and tab items; these two close the set.
 //
-// Both re-measured at the pin this repo builds against — `.objectui-sha` =
-// 9a3daf8d3, NOT the 82a94170c the earlier records cite (the pin moved in
-// #10137; the button anchors are unchanged across the two).
+// Both re-measured at the pin this repo builds against —
+// `.objectui-sha` = `9a3daf8d3`. These two were the first records written at
+// that pin: #10137 moved it while the #9881/#9972 records above still cited
+// `82a94170c`, and #10274 re-measured those four at this same pin, so all of
+// them now agree. (The button anchors were unchanged across the move.)
 describe('ElementButtonPropsSchema icon liveness (#10053)', () => {
   const button = ComponentPropsMap['element:button'];
 
