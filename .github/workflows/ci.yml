@@ -1385,11 +1385,19 @@ jobs:
   # 2026-08-18 (#9533) found it had never landed there, and the row was dropped
   # rather than left claiming otherwise — see that file's TOMBSTONE for the full
   # provenance. So a red here does NOT block a merge, and renaming this job no
-  # longer turns anything red. The name is still load-bearing PROSE in four
-  # places that tell it apart from `Console Pin Freshness`
-  # (docs/releases-maintenance.md, packages/console/README.md,
-  # scripts/check-objectui-pin-fresh.mjs, .github/workflows/objectui-pin-freshness.yml);
-  # renaming it silently falsifies all four.
+  # longer turns anything red. The name is still load-bearing PROSE that renaming
+  # this job silently falsifies — docs/releases-maintenance.md and
+  # packages/console/README.md both describe the pin flow by this name (#9793
+  # tracks the missing pin for job names that are not required contexts).
+  #
+  # ⚠️ It used to need telling apart from a same-shaped sibling, `Console Pin
+  # Freshness`, which asked whether the pin was CURRENT. That gate is gone
+  # (#10134, 2026-08-20 ruling: which objectui revision we pin is a decision
+  # recorded in an objectstack issue, never derived from objectui `main`). This
+  # gate's question is unaffected and it stays: does the PINNED SHA still BUILD.
+  # ⛔ Do not read the sibling's deletion as licence to rebuild one under this
+  # name — see scripts/check-required-contexts.mjs for why that name in
+  # particular must stay out of any required set.
   console-pin:
     name: Console Pin Gate
     needs: filter

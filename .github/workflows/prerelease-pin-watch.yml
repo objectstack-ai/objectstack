@@ -37,8 +37,10 @@ name: Prerelease Pin Watch
 # which is the one thing it must never do. `--strict` promotes exit 2 to exit 1 if
 # the warnings ever start being missed.
 #
-# (Contrast `check:objectui-pin-fresh`, where an unreadable remote DOES fail: that
-# one is a required gate on the release PR, so silence there ships the defect.)
+# (Contrast a blocking release gate that reads a remote, where an unreadable
+# remote must FAIL, because silence there ships the defect the gate exists to
+# catch. The repo's example of that shape used to be `check:objectui-pin-fresh`;
+# it was deleted in #10134 and the contrast is kept as a rule, not a pointer.)
 #
 # WHY NOT lint.yml / validate-deps.yml
 # ------------------------------------

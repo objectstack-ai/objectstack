@@ -455,27 +455,23 @@ jobs:
         run: node scripts/check-changeset-fixed.mjs
 
       # ──────────────────────────────────────────────────────────────────────
-      # R4 (#6170) — the gate the old lane skipped, now ON the publish path.
+      # ⛔ TOMBSTONE — the #3340 pin-currency gate that used to sit here is gone
+      # (2026-08-20 ruling, #10134). Do not re-add one.
       #
-      # `check:objectui-pin-fresh` (#3340) was required on the Version Packages
-      # PR only, so a lane that published without going through that PR never
-      # ran it: rc.4 shipped `.objectui-sha = f995a452` and dropped the 7-changeset
-      # objectui window (#6159) out of the release record. A gate that is required
-      # on a PR the publishing lane can skip is not a gate.
+      # It compared `.objectui-sha` against objectui `main` at publish time and
+      # refused a release whose pin lagged. The ruling removed the question, not
+      # just the job: WHICH objectui revision this repo pins is a decision taken
+      # in an objectstack issue, never derived from another repo's HEAD, so
+      # "the pin is behind main" is not a defect a release lane may diagnose.
       #
-      # ENFORCING here, deliberately: a stale pin means the release record is
-      # about to be wrong, and the remedy is to bump the pin (`pnpm
-      # objectui:refresh`), never to bypass this. There is no override input on
-      # purpose. Note this runs the SCRIPT directly — it is NOT added to any
-      # branch-protection required set, which #6121 warns would deadlock the
-      # merge queue until objectui-pin-freshness.yml grows a `merge_group:`
-      # trigger.
-      - name: Console pin is fresh (#3340 — enforcing on the publish path)
-        env:
-          # Only ITEMIZES an already-established lag (`git ls-remote` decides the
-          # verdict); the token keeps the API off the 60/hr anonymous limit.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: pnpm check:objectui-pin-fresh
+      # R4's lesson (#6170 — "a gate required on a PR the publishing lane can
+      # skip is not a gate") is untouched and does not resurrect this one:
+      # #3340's actual invariant is "everything published is covered by the
+      # changeset record", and that is carried by `scripts/bump-objectui.sh` +
+      # `scripts/objectui-changeset-digest.mjs` at BUMP time — on the manual pin
+      # PR, which is now the only way the pin ever moves. Publishing an old
+      # console is therefore a published decision, not an unnoticed gap.
+      # ──────────────────────────────────────────────────────────────────────
 
       - name: Build
         run: pnpm run build

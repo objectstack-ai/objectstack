@@ -173,46 +173,51 @@ changesets also embed companion frontend notes inline ("Companion objectui PR
 ships…", renderer notes), which are enough to write an accurate Console section on
 their own.
 
-### Pin freshness — the gate on the release PR (#3340)
+### Which objectui revision we pin is a decision, and nothing checks its currency
 
-Everything above reads the range `OLD_PIN..NEW_PIN`. That is exact, and it is also the
-whole blind spot: anything objectui merged **after** the current pin is outside every
-range, so it reaches no changeset, no changelog and no release page — and a
-complete-*looking* release record is indistinguishable from a complete one. Cutting v16
-that way lost four frontend changes, two of them `minor` features, while objectui `main`
-sat 4 commits and 21 pending changesets ahead of the pin.
+Everything above reads the range `OLD_PIN..NEW_PIN`. That is exact, and the obvious
+next question — "but is `NEW_PIN` objectui's latest?" — is deliberately **not asked
+anywhere in this repo**. Maintainer ruling, 2026-08-20, verbatim and untranslated:
 
-`scripts/check-objectui-pin-fresh.mjs` (`pnpm check:objectui-pin-fresh`) closes it. It is
-red when the pin is not objectui `main` (or the `--ref` you name), and it lists the
-commits ahead plus the `.changeset/*.md` files that exist at `main` and not at the pin.
+> objectui 每次 pin 的时候，对应的 changeset 应该带过来，但是发版本的时候不需要去扫描
+> objectui 仓库的最新版
+>
+> 更新到哪个版本是 objectstack 的 issue 自己决定的
 
-```bash
-pnpm check:objectui-pin-fresh                          # enforcing
-node scripts/check-objectui-pin-fresh.mjs --advisory   # report only
-node scripts/check-objectui-pin-fresh.mjs --ref v17.0.0 --json
-```
+So the process is:
 
-- **Where it blocks:** the changesets **Version Packages / release PR**, via
-  `.github/workflows/objectui-pin-freshness.yml`. The job runs on every PR — so the
-  context always reports and can be a branch-protection *required* check — but passes
-  `--advisory` outside the release lane, because a pin lagging between bumps is the
-  normal state of an ordinary code PR.
-- **It does not run on the rc snapshot lane, deliberately.** `cut-rc` bumps the pin
-  *inside its own run* and then asserts self-consistency instead of liveness — see
-  "Cutting a release" below for why that preserves this gate's invariant rather than
-  bypassing it. This script is unchanged and still enforces on the GA publish path.
-- **It is not the Console Pin Gate.** `ci.yml`'s **Console Pin Gate** (#4290) proves the
-  pinned SHA still **builds**; this one proves the pin is still **current**. Either can
-  be green while the other is red; neither replaces the other.
-- **Network failure is never green.** `git ls-remote` alone decides the verdict, so the
-  GitHub API (which only itemizes an already-established lag) can be rate-limited or
-  down without turning red into green — the degradation is printed, not swallowed. An
-  unreachable remote is reported as `unreadable` and exits non-zero.
-- **Fix when it fires:** `scripts/bump-objectui.sh` to move the pin (which writes the
-  `@objectstack/console` changeset for the crossed range), then `pnpm sdui:manifest` to
-  run the declaration-parity ratchet at the new pin (see "After the pin moves" above —
-  the bump is that ratchet's only trigger), then re-source the Console section with
-  `scripts/objectui-range.mjs`.
+1. **The target revision is chosen in an objectstack issue.** Someone decides which
+   objectui commit this platform should ship and records the decision there. It is
+   never derived from objectui's `main` HEAD, and never by a release lane.
+2. **The pin moves by hand, in its own PR**, with `scripts/bump-objectui.sh <sha>`.
+   That is the *only* way `.objectui-sha` ever changes.
+3. **The changeset is carried over in that same PR.** The bump emits the
+   `@objectstack/console` changeset for `OLD_PIN..NEW_PIN` from objectui's own
+   declared changesets (`scripts/objectui-changeset-digest.mjs`). This is the
+   mechanism that keeps the release record honest, and it is the whole of it.
+4. **Then the declaration-parity ratchet** — see "After the pin moves" above; the
+   bump is that ratchet's only trigger.
+5. **Releases build against the pin as committed.** Both `cut-rc.yml` and
+   `release.yml` read `.objectui-sha` and build the Console SPA at it. Neither
+   resolves objectui `main`; neither moves the pin.
+
+**Stated plainly, because it is the point rather than a caveat:** a release ships
+whatever console the committed pin names. If the pin is old, the release's frontend
+is old, and **nothing will warn you**. The pin lagging objectui `main` is not a
+defect — it is a decision that nobody has revisited yet. Revisit it by filing an
+issue and bumping, not by teaching a release lane to second-guess it.
+
+There *was* a gate that asked the currency question — `Console Pin Freshness`
+(`check:objectui-pin-fresh`, #3340), on the Version Packages PR and on the publish
+path. The 2026-08-20 ruling removed it (#10134): the workflow, the script and the
+`package.json` entry are all gone. Do not rebuild it. #3340's real invariant —
+*everything shipped is covered by the changeset record* — is delivered by step 3
+above, at bump time, which is where the decision is actually taken.
+
+**What still checks the pin, and what it checks.** `ci.yml`'s **Console Pin Gate**
+(#4290) clones objectui at the pin and builds the SPA, so it proves the pinned SHA
+still **builds**. It has never had an opinion about whether the pin is current, and
+that is now the only question anyone asks about the pin automatically.
 
 ## Rehearsing the version pass (throwaway clone)
 
@@ -283,14 +288,16 @@ run would push, so the first real dispatch is never this workflow's first execut
 
 What it does, in order:
 
-1. Checks out `main` and records that sha. Resolves objectui `main` HEAD **once**.
-   Those two values are the snapshot; nothing downstream re-reads either repo's
-   `main`, so **both repositories may keep moving for the whole run**.
-2. Bumps the pin to the snapshot (`scripts/bump-objectui.sh <sha>` — always with an
-   explicit sha; with no argument it pins the local checkout's HEAD, which is stale
-   by construction), builds the vendored Console, and runs the ADR-0082 D4
-   declaration-parity ratchet (`pnpm sdui:manifest`) — the mandatory second half of
-   every pin move. Because this lane moves the pin, it owes the ratchet too.
+1. Checks out `main` and records that sha — the snapshot. Reads `.objectui-sha`
+   for the objectui revision; it does **not** resolve objectui `main`. Nothing
+   downstream re-reads either repo's `main`, so **both repositories may keep
+   moving for the whole run**.
+2. Clones objectui at the committed pin, builds the vendored Console there, and
+   runs the ADR-0082 D4 declaration-parity ratchet (`pnpm sdui:manifest`) against
+   it. ⛔ **No pin bump happens** — the pin is committed input (#10134). The
+   ratchet still runs because it is an on-demand gate whose live failure mode is
+   "unrun": this is the last place before publish that can catch a bump PR that
+   skipped it.
 3. Runs the gates that read `.changeset/*`, before versioning consumes it.
 4. Runs `pnpm run version` — the repo script, never a bare `changeset version` —
    and **fails unless the computed version equals the one you typed**.
@@ -298,22 +305,20 @@ What it does, in order:
    commit**. Never the other way round: rc.3 and rc.4 tagged commits that lived only
    on `changeset-release/main`, which is #6170.
 
-**Why this lane exists.** The Version-PR flow needs the pin fresh against a *moving*
-objectui `main`, which on a busy day is a race the cutter cannot win — rc.6 was
-chased across four pin-bump laps, every one overtaken before its CI finished, and
-finishing would have needed ~40 minutes of coordinated freezes across two repos. The
-standing Version Packages PR is also force-refreshed on every main push, so its CI
-cannot converge while main is busy. A snapshot removes the race instead of asking
-people to hold still.
+**Why this lane exists.** The standing Version Packages PR is force-refreshed on
+every main push, so its CI cannot converge while main is busy — and cutting through
+it used to mean chasing a moving objectui pin as well (rc.6 was chased across four
+pin-bump laps, every one overtaken before its CI finished, and finishing would have
+needed ~40 minutes of coordinated freezes across two repos). A snapshot removes the
+race instead of asking people to hold still.
 
-**On pin freshness.** `cut-rc` deliberately does **not** run
-`pnpm check:objectui-pin-fresh`; it asserts `.objectui-sha` equals the sha *this run*
-resolved. Liveness is exactly what a snapshot gives up, and re-checking it would
-re-introduce the race — one objectui merge mid-run would fail an otherwise perfect
-cut. #3340's real invariant ("everything shipped is covered by the changeset record")
-still holds by construction: the bump changeset covers `OLD_PIN..SNAPSHOT`, and
-objectui commits landing past the snapshot are the *next* release's record, not a gap
-in this one.
+**On the pin.** `cut-rc` builds against `.objectui-sha` exactly as committed. It
+does not resolve objectui `main`, does not compare the pin to anything, and does not
+move it — which objectui revision we ship is a decision taken in an issue, not a
+release-time lookup (#10134; see "Which objectui revision we pin is a decision"
+above). What the lane still asserts about the pin is that the sha is well-formed and
+that it is a real commit reachable in a full clone of objectui `main`; a pin naming a
+revision nobody can resolve later fails the cut.
 
 **One-time admin prerequisite.** The lane pushes the version commit straight to
 `main`, so the pushing identity must be on main's ruleset **bypass** list —
@@ -365,8 +370,11 @@ pending a human" and exits green either way. For an image immediately, dispatch
 ### Cutting a GA release — the Version Packages PR flow
 
 Unchanged, and everything that makes a GA release a *judgement* stays here: the
-board-clearing pass, the #7275-A cut precondition, the human review of the generated
-changelogs on the PR, and the pin-freshness gate above. Merge the `chore: version
+board-clearing pass, the #7275-A cut precondition, and the human review of the
+generated changelogs on the PR. ⚠️ There is no longer a pin-freshness gate on this
+lane either (#10134) — a GA release ships the committed pin, same as an rc, and the
+judgement about which console revision that should be belongs in an issue and a bump
+PR *before* the cut. Merge the `chore: version
 packages` PR (#4935), then **Actions → Release → Run workflow** with the version
 `main` now carries. `release.yml`'s three lanes are untouched by the rc lane.
 

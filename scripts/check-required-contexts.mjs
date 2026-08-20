@@ -52,8 +52,9 @@
  *      an advisory gate wearing a required gate's name;
  *   6. its workflow carries a `merge_group:` trigger. Without it the queue
  *      build never produces the context and the whole queue stalls waiting for
- *      it (#5617's audit lists `Console Pin Freshness` as exactly this shape:
- *      a file whose own comment invites required-ization it cannot survive);
+ *      it (#5617's audit named `Console Pin Freshness` as exactly this shape at
+ *      the time of the audit; that workflow has since been deleted outright —
+ *      see the ⛔ exclusion note below, which outlives it);
  *   7. its workflow's `pull_request:` trigger exists and carries no `paths:` /
  *      `paths-ignore:`, and, if it names `types:` at all, that list is a
  *      superset of GitHub's default `[opened, synchronize, reopened]`. A
@@ -194,8 +195,17 @@ import { fileURLToPath } from 'node:url';
  *
  * ⛔ Names the #5617 audit ruled must STAY OUT of the required set, recorded so
  * a later reader does not enroll them here by symmetry: `Console Pin Freshness`
- * (no `merge_group` trigger — required-izing it deadlocks the queue, and that
- * file's own comment invites it), `Spec property liveness` (PR-side `paths:`,
+ * (the audit's stated reason was "no `merge_group` trigger — required-izing it
+ * deadlocks the queue, and that file's own comment invites it". ⚠️ Two things
+ * happened to that reason and neither reopens the question: #6121 added the
+ * trigger, which #6991 recorded as making the stated reason stale; then #10134
+ * DELETED the workflow, the script and the `package.json` entry outright, so no
+ * check-run of this name reports at all — the 2026-08-20 ruling is that which
+ * objectui revision we pin is a decision taken in an objectstack issue, never
+ * derived from objectui `main`, so there is no currency question for a gate to
+ * ask. This entry STAYS for a reason the deletion CREATES: it is now the only
+ * thing standing between a future author and rebuilding a same-named gate and
+ * enrolling it here), `Spec property liveness` (PR-side `paths:`,
  * so PRs touching no spec/docs sit pending forever), `Validate Package
  * Dependencies` (both faults), `Check PR Size` / `Auto Label` / `Check
  * Changeset` (the `labeled` event republishes the same context as `skipped`,
@@ -253,18 +263,23 @@ import { fileURLToPath } from 'node:url';
  * these `name:` literals, and still publish these check-runs on every PR that
  * trips their filter. They lost REQUIRED status, which is a different fact.
  * Ledgering them anyway was measured before it was rejected (2026-08-18):
- * `docs/releases-maintenance.md` names `Console Pin Gate` 2× in correct,
- * current prose that exists to keep it apart from `Console Pin Freshness`, so
+ * `docs/releases-maintenance.md` names `Console Pin Gate` in correct, current
+ * prose describing what still checks the pin, so
  * the row reds the scan there and prints the diagnostic "a seat following this
  * text looks for a check-run that no longer reports" — false, about prose that
  * is right. Budgeting around it would only arm the trap for the next author
  * who legitimately names the live job.
  *
  * ⚠️ The cost of the drop, stated rather than discovered later: these two
- * `name:` literals are now pinned by NOTHING, while five places still refer to
- * the jobs by name (`docs/releases-maintenance.md`, `packages/console/README.md`,
- * `scripts/check-objectui-pin-fresh.mjs`, `.github/workflows/objectui-pin-freshness.yml`
- * and lint.yml's cross-reference). Renaming either job no longer detaches a
+ * `name:` literals are now pinned by NOTHING, while prose elsewhere still refers
+ * to the jobs by name — `docs/releases-maintenance.md`,
+ * `packages/console/README.md` and lint.yml's cross-reference among them. This
+ * list read FIVE until #10134 deleted `scripts/check-objectui-pin-fresh.mjs` and
+ * `.github/workflows/objectui-pin-freshness.yml`, both of which named
+ * `Console Pin Gate` only to tell it apart from `Console Pin Freshness`; the
+ * recorded debt shrank by two and did not close. ⚠️ It was never asserted by
+ * anything either way, so read it as examples and never as a census — the same
+ * trap the `carries` note below is about. Renaming either job no longer detaches a
  * required gate — that is the whole point — but it does silently falsify that
  * prose. Filed as its own card rather than solved here, since a pin for
  * "contract job names that are not required contexts" is a new mechanism and
@@ -992,8 +1007,9 @@ export async function scanInstructionSurfaces(
  * Settings entry. A required check that reddened on registry-vs-settings
  * disagreement would therefore be red on precisely the PR carrying the repo
  * half, and could not go green before merging: it would deadlock the sitting it
- * claims to protect, the same way required-izing `Console Pin Freshness`
- * deadlocks the queue. Report-only is not timidity here, it is the only shape
+ * claims to protect, the same way required-izing a context with no `merge_group`
+ * trigger — the `Console Pin Freshness` shape — deadlocks the queue. Report-only
+ * is not timidity here, it is the only shape
  * that does not self-block.
  *
  * The posture is `check-governed-merges.mjs`'s, verbatim in behaviour: a

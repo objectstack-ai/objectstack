@@ -75,11 +75,12 @@
 // branch would be exercised by nobody and would rot; this way the offline path is
 // the online path.
 //
-// Note the contrast with check-objectui-pin-fresh.mjs, whose header says network
-// failure is NEVER green. Both are right, because the audiences differ: that gate
-// runs in CI on a release PR where the network is part of the contract; this one
-// runs on a long-lived human/agent working tree where being offline is an
-// ordinary Tuesday. Same word "freshness", different blast radius.
+// Note the contrast with a CI release gate that reads a remote, for which network
+// failure is NEVER green (check-objectui-pin-fresh.mjs was the local example until
+// #10134 deleted it, and the rule outlives the file). Both are right, because the
+// audiences differ: such a gate runs in CI where the network is part of the
+// contract; this one runs on a long-lived human/agent working tree where being
+// offline is an ordinary Tuesday. Same word "freshness", different blast radius.
 //
 // WHERE IT RUNS
 // -------------

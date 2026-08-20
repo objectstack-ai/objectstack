@@ -83,7 +83,6 @@
     "check:console-injection": "node scripts/check-console-injection.mjs --self-test && node scripts/check-console-injection.mjs",
     "check:dev-prereqs": "node scripts/check-dev-prereqs.mjs --self-test && node scripts/check-dev-prereqs.mjs",
     "check:objectui-changeset": "node scripts/objectui-changeset-digest.mjs --self-test && node scripts/objectui-range.mjs --self-test",
-    "check:objectui-pin-fresh": "node scripts/check-objectui-pin-fresh.mjs --self-test && node scripts/check-objectui-pin-fresh.mjs",
     "check:prerelease-pins": "node scripts/check-prerelease-pin-watch.mjs --self-test && node scripts/check-prerelease-pin-watch.mjs",
     "check:empty-changeset": "node scripts/check-empty-changeset.mjs --self-test && node scripts/check-empty-changeset.mjs",
     "check:adr-0087-registration": "node scripts/check-adr-0087-registration.mjs --self-test && node scripts/check-adr-0087-registration.mjs",
