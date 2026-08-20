@@ -43,6 +43,8 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import type { ObjectQL } from '@objectstack/objectql';
+import type { IDataEngine } from '@objectstack/spec/contracts';
 import { MessagingServicePlugin } from './messaging-service-plugin.js';
 
 /** Fast enough that a handful of ticks fit in a short window; still real time. */
@@ -83,7 +85,7 @@ async function bootMessagingKernel(): Promise<Booted> {
     );
     await kernel.bootstrap();
 
-    const objectql: any = kernel.getService('objectql');
+    const objectql = kernel.getService<ObjectQL>('objectql');
     const driver: any = new SqlDriver({
         client: 'better-sqlite3',
         connection: { filename: ':memory:' },
@@ -97,7 +99,9 @@ async function bootMessagingKernel(): Promise<Booted> {
     // Count on the engine instance the dispatchers captured at `kernel:ready`
     // (`getData()` resolves the `data` service, which is this same object), so
     // the tally is of real `outbox.claim()` traffic.
-    const engine: any = kernel.getService('data');
+    type EngineCall = (name: string, ...rest: unknown[]) => unknown;
+    const engine = kernel.getService<IDataEngine>('data') as unknown as
+        Record<'find' | 'findOne' | 'update', EngineCall>;
     let calls = 0;
     for (const method of ['find', 'findOne', 'update'] as const) {
         const orig = engine[method].bind(engine);
