@@ -421,10 +421,36 @@ jobs:
             --report-dir "$RUNNER_TEMP/stall-reports" -- \
             pnpm turbo run test $FILTERS --concurrency=4
 
-      # Runs even when the suite failed — that is when it earns its keep. A red
-      # suite plus a GREEN completeness check means real test failures; a red
-      # suite plus a RED completeness check means a worker died and the cases it
-      # owned never ran, which reads almost identically in the log (#3812).
+      # Runs even when the suite failed — that is when it earns its keep. It
+      # answers TWO questions about a red suite, and needs both to be able to
+      # say anything at all about a green one.
+      #
+      #   1. Was every test vitest COUNTED actually run (#3812)? A worker dying
+      #      at the process level leaves a summary that still leads with
+      #      "passed" while falling short of its own declared count — a red
+      #      that READS like a pass.
+      #   2. Did every package scheduled on this shard report AT ALL (#10032)?
+      #      Question 1 is answered from summary lines PRESENT in the log, so a
+      #      package that printed nothing contributes no row: neither counted
+      #      nor missed, simply invisible. That is why this step is handed the
+      #      shard's scheduled package list (and the `turbo ls` document it was
+      #      sharded from, which resolves each name to a directory) instead of
+      #      grading the log against itself.
+      #
+      # ⛔ THE OLD NOTE HERE WAS WRONG AND COST A REAL TRIAGE. It read "a red
+      # suite plus a GREEN completeness check means real test failures". That
+      # inference does not hold for case 2, and #10032 is the bill: Test Core
+      # (2/3) failed naming @objectstack/example-showcase#test while this guard
+      # printed OK, because the failing package was the one that printed
+      # nothing — its complete 5083-line job log mentions that package twice,
+      # both times in the error summary, with no vitest output anywhere. The
+      # dichotomy is true again only because green now covers both questions.
+      #
+      # ⚠ The guard does NOT charge a silent package to this shard when turbo
+      # simply never reached it — turbo stops scheduling on the first failure,
+      # so an ordinary red suite leaves later packages unrun. Those are printed
+      # as notes. See the script header for the two exemptions and the two
+      # rules that decide red.
       - name: Test completeness guard
         if: always()
         run: |
@@ -432,7 +458,9 @@ jobs:
             echo "No test log — the test step did not get far enough to produce one."
             exit 0
           fi
-          node scripts/check-test-completeness.mjs "$RUNNER_TEMP/test-core.log"
+          node scripts/check-test-completeness.mjs "$RUNNER_TEMP/test-core.log" \
+            --scheduled "$RUNNER_TEMP/shard-packages.txt" \
+            --package-list "$RUNNER_TEMP/turbo-ls.json"
 
       # A stall's full diagnostic reports (JS stacks, libuv handles, heap
       # summary per process) outlive the in-log digest — keep them so a #4250
