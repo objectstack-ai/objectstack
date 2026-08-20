@@ -50,7 +50,7 @@ set -euo pipefail
 #
 #   The abort happens before npm has an error code, so changesets can only
 #   report `Received an unexpected error for <pkg>: (no code)` — which is how
-#   run 32355381481 failed 17.5.0 after a fully green build.
+#   run 32355381481 failed 17.1.0 after a fully green build.
 #
 #   Dropping the inherited value is the whole fix: pnpm recomputes its own
 #   global config path from configDir either way, so nothing pnpm needs is lost,
