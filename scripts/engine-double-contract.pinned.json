@@ -52,6 +52,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/migrations/seed-tenancy-backfill.test.ts",
+      "verb": "update",
+      "pinned": 3
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol-publish-drafts-advisories.test.ts",
       "verb": "delete",
       "pinned": 1

@@ -22,6 +22,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import {
   backfillSeedTenancy,
   buildSeedTenancyReceipt,
@@ -314,7 +315,16 @@ describe('#9451 the seed-tenancy repair leaves a durable receipt', () => {
           rows.push(data);
           return data;
         },
-        update: async (_object: string, data: Record<string, unknown>) => {
+        update: async (
+          _object: string,
+          data: Record<string, unknown>,
+          opts?: Record<string, unknown>,
+        ) => {
+          // The double must refuse exactly what `ObjectQL.update` refuses — a
+          // fake looser than the producer is how a dead write path ships with
+          // its suite green. The receipt is addressed by `data.id`, so this
+          // also pins that the row carries one.
+          assertEngineUpdateDispatch(data as any, opts as any);
           if (options.failWrites) throw new Error('no such table: sys_migration');
           calls.push({ op: 'update', data });
           return data;
@@ -464,7 +474,10 @@ describe('#9451 the seed-tenancy repair leaves a durable receipt', () => {
       getObject: () => undefined,
       find: async () => [],
       insert: async () => { throw new Error('must not be called'); },
-      update: async () => { throw new Error('must not be called'); },
+      update: async (_object: string, data: Record<string, unknown>, opts?: Record<string, unknown>) => {
+        assertEngineUpdateDispatch(data as any, opts as any);
+        throw new Error('must not be called');
+      },
     };
 
     await backfillSeedTenancy(
@@ -512,7 +525,10 @@ describe('#9451 the seed-tenancy repair leaves a durable receipt', () => {
       getObject: () => ({}),
       find: async () => [],
       insert: async () => ({}),
-      update: async () => ({}),
+      update: async (_object: string, data: Record<string, unknown>, opts?: Record<string, unknown>) => {
+        assertEngineUpdateDispatch(data as any, opts as any);
+        return {};
+      },
     };
     expect(resolveSeedTenancySeam(engine)?.ledger).toBeDefined();
 
