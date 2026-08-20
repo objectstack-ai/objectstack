@@ -209,14 +209,16 @@
 //
 // The convention, in one sentence: **clocked windows measure behaviour, never
 // loading — a test that boots a real plugin chain pays its first load at module
-// top.** It is stated here rather than in AGENTS.md § Build & Test, which is
-// where #10126 asked for it: that file sits exactly on its shrink-only line
-// ceiling (`scripts/pm/check-skill-line-ratchet.mjs`, 958, headroom 0), the
-// sentence costs three lines, and its own section has two lines of lossless
-// rewrap headroom. Raising a ceiling takes a maintainer ruling, and truncating
-// the sentence to fit one is not this gate's call to make — so the doc placement
-// is still open, and every author who trips this rule reads the sentence in the
-// failure text either way.
+// top.** It is stated for authors in AGENTS.md § Build & Test, beside the sibling
+// test-gate conventions, and repeated in this gate's own failure text — where it
+// is pinned by a self-test assertion, so it cannot decay back into a comment that
+// no author tripping the rule ever reads.
+//
+// Getting it into that file took the one raise `scripts/pm/check-skill-line-
+// ratchet.mjs` has granted: AGENTS.md sat exactly on its shrink-only ceiling of
+// 958 with the sentence costing three lines and its section carrying two lines of
+// lossless rewrap headroom, so it could not be paid for in place. Maintainer
+// ruling 2026-08-20, verbatim and untranslated: 「A — 抬上限到 961 (Recommended)」.
 //
 // Boundaries, stated so they are not rediscovered as bugs:
 //

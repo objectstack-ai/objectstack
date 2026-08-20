@@ -118,6 +118,9 @@ judged on the **shallowest** point a path reaches, not where it ends — a liter
 climbs past the package root and then descends into a sibling ends at a positive depth
 while addressing another package entirely.
 
+Clocked windows measure behaviour, never loading — a test that boots a real plugin chain
+pays its first load at module top; `pnpm check:test-source-alias` gates it.
+
 ### Running the dev server
 
 | Scenario | Command | Notes |
