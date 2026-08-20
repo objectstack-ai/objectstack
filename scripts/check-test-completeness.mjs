@@ -125,9 +125,47 @@ export function stripAnsi(raw) {
   return raw.replace(/\x1B\[[0-9;]*m/g, '');
 }
 
+// HOW A SUMMARY LINE IS ATTRIBUTED TO A PACKAGE, and why one spelling is not
+// enough. Measured on turbo 2.10.10, both shapes from real runs:
+//
+//   STREAM order (what you get running turbo by hand) prefixes every line:
+//     `@objectstack/types:test:  Tests  356 passed (356)`
+//
+//   GROUPED order (what turbo switches to in GitHub Actions, and therefore the
+//   ONLY shape CI ever writes) emits a group header and NO per-line prefix:
+//     `::group::@objectstack/spec:test`      <- GitHub renders this `##[group]`
+//     ` Test Files  415 passed (415)`
+//     `       Tests  11045 passed (11045)`
+//     `::endgroup::`
+//
+// Reading only the prefix therefore attributes NOTHING in CI: every summary
+// arrives anonymous, every scheduled package looks silent, and the shard join
+// reddens the whole shard. That is not hypothetical -- it is what the first
+// version of this check did on its own PR (Test Core (1/3), run 32376757655:
+// `@objectstack/spec` reported 415 files and 11045 tests, and the guard said it
+// had reported nothing). The group header is turbo's own statement of whose
+// output follows, so it is read as the primary attribution, not a heuristic.
+const GROUP_OPEN = /^(?:::group::|##\[group\])(.+?)\s*$/;
+const GROUP_CLOSE = /^(?:::endgroup::|##\[endgroup\])\s*$/;
+
 export function parseSummaries(text) {
   const rows = [];
+  let group = null;
   for (const line of text.split('\n')) {
+    if (GROUP_CLOSE.test(line)) {
+      group = null;
+      continue;
+    }
+    const open = line.match(GROUP_OPEN);
+    if (open) {
+      // `@objectstack/spec:test` -> spec, but `@objectstack/spec:build` and
+      // GitHub's own `Run <script>` groups attribute nothing. Package names
+      // carry `@` and `/` but never `:`, so the last `:` is the task boundary.
+      const label = open[1];
+      const sep = label.lastIndexOf(':');
+      group = sep > 0 && label.slice(sep + 1) === 'test' ? label.slice(0, sep) : null;
+      continue;
+    }
     const m = line.match(SUMMARY);
     if (!m) continue;
     const [, pkg, kind, tallies, declared] = m;
@@ -137,7 +175,7 @@ export function parseSummaries(text) {
     const counted = [...tallies.matchAll(/(\d+)\s+[a-z]+/g)].reduce((sum, t) => sum + Number(t[1]), 0);
 
     rows.push({
-      pkg: pkg ?? '(vitest)',
+      pkg: pkg ?? group ?? '(vitest)',
       kind,
       counted,
       declared: Number(declared),
@@ -182,10 +220,11 @@ export function parseRunCompleted(text) {
  * `shard-packages.txt` is derived FROM that document, so a name in one and not
  * the other means they are from different runs and neither can be trusted.
  */
-export function classifyShard({ scheduled, reported, failed, runCompleted, describe }) {
+export function classifyShard({ scheduled, reported, anonymousReports = 0, failed, runCompleted, describe }) {
   const silent = [];
   const notReached = [];
   const exempt = [];
+  const expected = [];
   for (const name of scheduled) {
     const info = describe(name);
     if (!info) {
@@ -202,7 +241,27 @@ export function classifyShard({ scheduled, reported, failed, runCompleted, descr
       exempt.push({ name, why: 'owns no test files, so vitest prints no summary' });
       continue;
     }
-    if (reported.has(name)) continue;
+    expected.push(name);
+  }
+
+  // Summaries the parser could attribute to nobody -- no `<pkg>:test:` prefix
+  // and no enclosing group. With both spellings understood this should be
+  // empty, so it is a backstop for a THIRD log shape rather than a routine
+  // path, and it deliberately refuses to guess: attributing a stray summary to
+  // the wrong package would mark a silent package as having reported, which is
+  // the one error worse than not attributing at all. One candidate is not a
+  // guess (there is nothing else it could belong to); more than one is.
+  const candidates = expected.filter((name) => !reported.has(name));
+  let unattributable = [];
+  let judged = candidates;
+  if (anonymousReports > 0 && candidates.length === 1) {
+    judged = [];
+  } else if (anonymousReports > 0 && candidates.length > 1) {
+    unattributable = candidates;
+    judged = [];
+  }
+
+  for (const name of judged) {
     if (failed.has(name)) {
       silent.push({ name, why: 'turbo reported this task FAILED, and the log holds no vitest summary for it' });
     } else if (runCompleted === true) {
@@ -211,7 +270,7 @@ export function classifyShard({ scheduled, reported, failed, runCompleted, descr
       notReached.push(name);
     }
   }
-  return { silent, notReached, exempt };
+  return { silent, notReached, exempt, unattributable };
 }
 
 function countTestFiles(dir) {
@@ -380,6 +439,107 @@ function selfTest({ quiet = false } = {}) {
     throw new Error('contradiction: a package absent from the turbo ls document was accepted');
   }
 
+  // -- GROUPED log order: the shape CI actually writes. --
+  // The exact three lines from Test Core (1/3), run 32376757655, which the
+  // prefix-only version read as "@objectstack/spec reported nothing".
+  const ciGrouped = [
+    '##[group]@objectstack/spec:test',
+    ' Test Files  415 passed (415)',
+    '       Tests  11045 passed (11045)',
+    '##[endgroup]',
+  ].join('\n');
+  eq(
+    parseSummaries(ciGrouped).map((r) => [r.pkg, r.kind, r.counted, r.declared]),
+    [['@objectstack/spec', 'Test Files', 415, 415], ['@objectstack/spec', 'Tests', 11045, 11045]],
+    'grouped: the real CI summary was not attributed to its group',
+  );
+  // turbo's own spelling, before GitHub rewrites the marker.
+  eq(
+    parseSummaries('::group::@objectstack/spec:test\n       Tests  11045 passed (11045)\n::endgroup::').map((r) => r.pkg),
+    ['@objectstack/spec'],
+    'grouped: turbo\'s ::group:: spelling was not read',
+  );
+  // Several packages in one grouped log -- the multi-package CI shard.
+  eq(
+    parseSummaries(
+      [
+        '::group::@objectstack/sdui-parser:test',
+        '      Tests  6 passed (6)',
+        '::endgroup::',
+        '::group::@objectstack/types:test',
+        '      Tests  356 passed (356)',
+        '::endgroup::',
+      ].join('\n'),
+    ).map((r) => [r.pkg, r.counted]),
+    [['@objectstack/sdui-parser', 6], ['@objectstack/types', 356]],
+    'grouped: a multi-package grouped log lost its attribution',
+  );
+  // A group must not leak past its end.
+  eq(
+    parseSummaries('::group::@objectstack/spec:test\n::endgroup::\n      Tests  5 passed (5)').map((r) => r.pkg),
+    ['(vitest)'],
+    'grouped: attribution leaked past ::endgroup::',
+  );
+  // Only the `test` task attributes: a build group and GitHub's own step
+  // groups must never lend their name to a summary.
+  eq(
+    parseSummaries('::group::@objectstack/spec:build\n      Tests  5 passed (5)').map((r) => r.pkg),
+    ['(vitest)'],
+    'grouped: a build group was read as a test group',
+  );
+  eq(
+    parseSummaries('##[group]Run if [ ! -f "$RUNNER_TEMP/test-core.log" ]; then\n      Tests  5 passed (5)').map((r) => r.pkg),
+    ['(vitest)'],
+    'grouped: a GitHub step group was read as a test group',
+  );
+  // An explicit prefix still wins -- stream order is unaffected.
+  eq(
+    parseSummaries('::group::@objectstack/spec:test\n@objectstack/cli:test:  Tests  5 passed (5)').map((r) => r.pkg),
+    ['@objectstack/cli'],
+    'grouped: an explicit prefix lost to the enclosing group',
+  );
+
+  // -- Anonymous summaries: attribute only when there is nothing to guess. --
+  const anon = (over) =>
+    classifyShard({
+      scheduled: ['a', 'b'],
+      reported: new Set(),
+      failed: new Set(),
+      runCompleted: true,
+      describe: describe({ a: { hasTestScript: true, testFileCount: 1 }, b: { hasTestScript: true, testFileCount: 1 } }),
+      ...over,
+    });
+  // Two candidates, one stray summary -> refuse to guess, and NEVER red.
+  eq(anon({ anonymousReports: 1 }).silent, [], 'anonymous: guessed between two candidates');
+  eq(anon({ anonymousReports: 1 }).unattributable, ['a', 'b'], 'anonymous: the ungraded pair was not surfaced');
+  // One candidate, one stray summary -> unambiguous, so not a finding.
+  eq(
+    classifyShard({
+      scheduled: ['a'],
+      reported: new Set(),
+      anonymousReports: 1,
+      failed: new Set(),
+      runCompleted: true,
+      describe: describe({ a: { hasTestScript: true, testFileCount: 1 } }),
+    }).silent,
+    [],
+    'anonymous: a single candidate with a stray summary was charged',
+  );
+  // ...and with NO stray summary the same single candidate is still red, so
+  // the fallback cannot be used to launder a genuinely silent package.
+  eq(
+    classifyShard({
+      scheduled: ['a'],
+      reported: new Set(),
+      anonymousReports: 0,
+      failed: new Set(),
+      runCompleted: true,
+      describe: describe({ a: { hasTestScript: true, testFileCount: 1 } }),
+    }).silent.map((x) => x.name),
+    ['a'],
+    'anonymous: the #10032 case stopped being red',
+  );
+
   if (!quiet) console.log('check-test-completeness: self-test OK');
 }
 
@@ -445,9 +605,11 @@ function main() {
       process.exit(1);
     }
     try {
+      const testRows = rows.filter((r) => r.kind === 'Tests');
       shard = classifyShard({
         scheduled,
-        reported: new Set(rows.filter((r) => r.kind === 'Tests').map((r) => r.pkg)),
+        reported: new Set(testRows.filter((r) => r.pkg !== '(vitest)').map((r) => r.pkg)),
+        anonymousReports: testRows.filter((r) => r.pkg === '(vitest)').length,
         failed: parseFailedTestPackages(text),
         runCompleted: parseRunCompleted(text),
         describe: describeFromPackageList(packageListPath),
@@ -463,6 +625,15 @@ function main() {
   if (shard) {
     for (const n of shard.notReached) {
       console.log(`check-test-completeness: note: ${n} was scheduled but never reached -- the run stopped before it.`);
+    }
+    if (shard.unattributable.length > 0) {
+      console.log(
+        `check-test-completeness: note: ${shard.unattributable.length} scheduled package(s) could not be ` +
+          `matched to a summary, and the log holds unattributed summaries, so completeness is NOT graded for ` +
+          `them: ${shard.unattributable.join(', ')}. Attributing a stray summary by guesswork would be worse ` +
+          'than this gap. If you are seeing this, the log carries a shape neither the `<pkg>:test:` prefix nor ' +
+          'turbo\'s `::group::<pkg>:test` header covers -- that is the bug to fix.',
+      );
     }
   }
 
