@@ -85,7 +85,14 @@ describe('DevPlugin', () => {
   it('registers no service implementation of its own — every unfilled slot stays empty', async () => {
     const { ctx, registeredServices } = mockCtx();
 
-    await new DevPlugin({ seedAdminUser: false }).init(ctx);
+    const plugin = new DevPlugin({ seedAdminUser: false });
+    await plugin.init(ctx);
+    // [#10036] `start()` too: the "nothing is enforcing security" warning
+    // asserted at the bottom of this test moved to the start phase, because
+    // `security` — the published service that means enforcement, as opposed
+    // to the `init()`-registered internals that only mean "plugin loaded" —
+    // is not registered until SecurityPlugin.start() has run.
+    await plugin.start(ctx);
 
     // Not one slot was filled by this plugin itself.
     expect(ctx.registerService).not.toHaveBeenCalled();
@@ -116,6 +123,9 @@ describe('DevPlugin', () => {
       (call: any[]) => typeof call[0] === 'string' && call[0].includes('NOT enforced'),
     );
     expect(securityWarn).toBeDefined();
+    // …and with the plugin genuinely absent it says so, rather than reporting
+    // the loaded-but-failed-to-start state (#10036).
+    expect(securityWarn![0]).toContain('SecurityPlugin is not loaded');
   });
 
   describe('production guard (ADR-0115 D6)', () => {
