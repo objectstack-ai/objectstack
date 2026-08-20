@@ -32,8 +32,13 @@
 
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { SqlDriver } from '../src/index.js';
+import { PG_CELL } from './live-dialect-matrix.testkit.js';
 
-const URL = process.env.OS_TEST_POSTGRES_URL;
+// The cell, not `process.env.OS_TEST_POSTGRES_URL`: the env var is one value for
+// the whole process, so a config built from it puts this file in the same schema
+// as every other live file. `PG_CELL.config()` derives a per-FILE schema from
+// vitest's own `testPath` (#9350).
+const URL = PG_CELL.url;
 const TABLE = 'os3912_probe';
 
 /** 20:00Z is 04:00 the NEXT day at +08:00 — so a day window discriminates. */
@@ -45,14 +50,14 @@ describe.skipIf(!URL)('Field.datetime on Postgres is timezone-independent (#3912
   let serverTimeZone = '';
 
   beforeAll(async () => {
-    const probe = new SqlDriver({ client: 'pg', connection: URL });
+    const probe = new SqlDriver(PG_CELL.config());
     const res: any = await probe.execute(`select current_setting('TimeZone') as tz`);
     serverTimeZone = ((res?.rows ?? res)[0] as any).tz;
     await probe.disconnect();
   });
 
   beforeEach(async () => {
-    driver = new SqlDriver({ client: 'pg', connection: URL });
+    driver = new SqlDriver(PG_CELL.config());
     await driver.execute(`drop table if exists "${TABLE}" cascade`);
     await driver.initObjects([
       { name: TABLE, fields: { label: { type: 'string' }, at: { type: 'datetime' } } },

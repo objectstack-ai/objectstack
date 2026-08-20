@@ -2,7 +2,7 @@
 
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
 import type { Cube } from '@objectstack/spec/data';
-import type { AnalyticsStrategy, StrategyContext } from './types.js';
+import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext } from './types.js';
 import {
   lowerAnalyticsWhere,
   normalizeAnalyticsFilterTree,
@@ -34,7 +34,15 @@ import { nextUtcCalendarDay } from '@objectstack/core';
  * author's expression rather than wrapping it.
  */
 const AGGREGATE_SQL: Record<string, (col: string) => string> = {
-  'count': () => 'COUNT(*)',
+  // [#10298] `count` takes its COLUMN when the measure declares one. The
+  // wrapper used to discard `col` and always emit `COUNT(*)`, so a measure
+  // written `{ aggregate: 'count', field: 'resolved_by_article' }` counted
+  // ROWS instead of non-null values — and a deflection rate built as
+  // `kb_resolved_count / closed_count` read 100% where the truth was 12.5%,
+  // with the numerator and denominator printed beside it as 8 and 8. `*` is
+  // still `COUNT(*)`: the compiler writes `sql: m.field ?? '*'`, so the star
+  // IS the "no field declared" spelling and must keep counting rows.
+  'count': (col) => (col === '*' ? 'COUNT(*)' : `COUNT(${col})`),
   'sum': (col) => `SUM(${col})`,
   'avg': (col) => `AVG(${col})`,
   'min': (col) => `MIN(${col})`,
@@ -42,8 +50,43 @@ const AGGREGATE_SQL: Record<string, (col: string) => string> = {
   'count_distinct': (col) => `COUNT(DISTINCT ${col})`,
 };
 
+/**
+ * The same six aggregates, restricted to the rows a measure's own `filter`
+ * admits (#10298).
+ *
+ * Spelled `CASE WHEN` rather than SQL-standard `FILTER (WHERE …)` on purpose:
+ * `FILTER` is Postgres and SQLite ≥ 3.30 only — MySQL has never had it — and
+ * this strategy hand-compiles ONE statement for whichever SQL driver owns the
+ * object. A portable conditional aggregate is the only form that cannot answer
+ * a syntax error on one supported driver and a number on another.
+ *
+ * `count` over `*` counts a constant, because `COUNT(CASE WHEN p THEN * END)`
+ * is not a thing; over a real column it counts that column's non-null values
+ * among the admitted rows, which composes the two corrections this card makes.
+ *
+ * Keyed identically to {@link AGGREGATE_SQL} — `aggregation-lockstep.test.ts`
+ * pins the two key sets equal, so an aggregate added to one and not the other
+ * fails a test instead of silently losing its measure filter.
+ */
+const CONDITIONAL_AGGREGATE_SQL: Record<string, (col: string, pred: string) => string> = {
+  'count': (col, pred) => `COUNT(CASE WHEN ${pred} THEN ${col === '*' ? '1' : col} END)`,
+  'sum': (col, pred) => `SUM(CASE WHEN ${pred} THEN ${col} END)`,
+  'avg': (col, pred) => `AVG(CASE WHEN ${pred} THEN ${col} END)`,
+  'min': (col, pred) => `MIN(CASE WHEN ${pred} THEN ${col} END)`,
+  'max': (col, pred) => `MAX(CASE WHEN ${pred} THEN ${col} END)`,
+  'count_distinct': (col, pred) => `COUNT(DISTINCT CASE WHEN ${pred} THEN ${col} END)`,
+};
+
 /** Exported for the lockstep guard — the aggregates this strategy can lower. */
 export const SUPPORTED_AGGREGATE_SQL_KEYS = Object.keys(AGGREGATE_SQL);
+
+/**
+ * Exported for the same guard — the aggregates this strategy can lower WITH a
+ * measure-scoped filter (#10298). Equal to {@link SUPPORTED_AGGREGATE_SQL_KEYS}
+ * by construction and pinned equal by the lockstep suite: an aggregate present
+ * in one table only would silently drop the author's `filter` rather than fail.
+ */
+export const CONDITIONAL_AGGREGATE_SQL_KEYS = Object.keys(CONDITIONAL_AGGREGATE_SQL);
 
 /**
  * Metric types that are a custom SQL *expression*, not an aggregate to wrap.
@@ -375,10 +418,37 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       }
     }
 
+    // ── #10298 — the half of a compiled dataset the Cube cannot carry ──────
+    // A dataset's definition-level `filter` and each measure's own scoped
+    // `filter` live beside the Cube, in the dataset registry. `DatasetExecutor`
+    // read them; this strategy did not — so `/api/v1/analytics/query`, which
+    // addresses the registered Cube directly, answered UNFILTERED aggregates
+    // under the author's measure names while the dashboard answered filtered
+    // ones, for the same cube. `undefined` for any cube that is not a compiled
+    // dataset, which is why an inferred or manifest cube compiles unchanged.
+    const datasetScope = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!);
+
     // Build SELECT for measures
     if (query.measures && query.measures.length > 0) {
       for (const measure of query.measures) {
-        const aggExpr = this.resolveMeasureSql(cube, measure, tableName, joins);
+        // The measure's own filter becomes a CONDITIONAL aggregate rather than
+        // a `WHERE` conjunct: the statement carries several measures at once and
+        // a `WHERE` would narrow ALL of them. Compiled here, inside the SELECT
+        // loop, so its bound values are pushed onto `params` in the order the
+        // placeholders appear in the statement — the SELECT list precedes the
+        // WHERE clause, and `$n` is positional.
+        const measureFilter = datasetScope?.measureFilters?.[measure];
+        const predicate = measureFilter
+          ? this.compileFilterNode(
+              normalizeAnalyticsFilterTree({ where: measureFilter }),
+              cube,
+              tableName,
+              joins,
+              params,
+              ctx,
+            )
+          : null;
+        const aggExpr = this.resolveMeasureSql(cube, measure, tableName, joins, predicate);
         selectClauses.push(`${aggExpr} AS "${measure}"`);
       }
     }
@@ -396,6 +466,24 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       ctx,
     );
     if (filterSql) whereClauses.push(filterSql);
+
+    // [#10298] The dataset's OWN scope, for the door that never went through
+    // `DatasetExecutor`. Applied as a plain conjunct because it narrows the
+    // whole statement — every measure in it — which is exactly what the
+    // definition-level filter means. Redundant on the dataset door (the
+    // executor already merged it into `where`) and idempotent there: ANDing a
+    // predicate with itself selects the same rows.
+    if (datasetScope?.filter) {
+      const scopeSql = this.compileFilterNode(
+        normalizeAnalyticsFilterTree({ where: datasetScope.filter }),
+        cube,
+        tableName,
+        joins,
+        params,
+        ctx,
+      );
+      if (scopeSql) whereClauses.push(scopeSql);
+    }
 
     // Build time dimension filters
     if (query.timeDimensions && query.timeDimensions.length > 0) {
@@ -669,11 +757,17 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     return this.qualifyAndRegisterJoin(raw, parentTable, joins, cube);
   }
 
+  /**
+   * @param predicate - The measure's own scoped filter, already compiled to a
+   *   SQL boolean (`null` = the measure declares none, or declares one that
+   *   constrains nothing — `compileFilterNode`'s TRUE). #10298.
+   */
   private resolveMeasureSql(
     cube: Cube,
     member: string,
     parentTable: string,
     joins: Map<string, string>,
+    predicate: string | null = null,
   ): string {
     const measure = this.lookupMember(cube, member, 'measure') as
       | { sql: string; type: string }
@@ -701,6 +795,25 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     const col = measure.sql === '*'
       ? '*'
       : this.qualifyAndRegisterJoin(measure.sql, parentTable, joins, cube);
+
+    if (predicate !== null) {
+      const wrapConditional = CONDITIONAL_AGGREGATE_SQL[measure.type];
+      if (wrapConditional) return wrapConditional(col, predicate);
+      // [#10298] Deliberately BARE — an undeclared 500, same tier and same
+      // reasoning as the "unrecognised type" throw below. A measure filter only
+      // ever arrives here from a COMPILED DATASET, and `DatasetMeasure.aggregate`
+      // is `AggregationFunction`, whose every member is a key of the table
+      // above — so an expression metric type (`number`/`string`/`boolean`,
+      // where `sql` IS the whole computation and there is no aggregate to make
+      // conditional) cannot carry one. What would reach here is our own drift.
+      // Emitting the unfiltered aggregate instead is precisely the defect this
+      // card closes: a 200 carrying different arithmetic than the author declared.
+      throw new Error(
+        `[native-sql-strategy] measure "${member}" on cube "${cube.name}" carries a ` +
+          `scoped filter, but its type "${measure.type}" has no conditional form ` +
+          `(conditional: ${CONDITIONAL_AGGREGATE_SQL_KEYS.join(', ')}).`,
+      );
+    }
 
     const wrap = AGGREGATE_SQL[measure.type];
     if (wrap) return wrap(col);

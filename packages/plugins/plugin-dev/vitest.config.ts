@@ -15,6 +15,48 @@ export default defineConfig({
   },
   resolve: {
     alias: [
+      // [#10112] `@objectstack/plugin-security` and the source graph it drags in.
+      //
+      // `dev-plugin.ts` boots the real SecurityPlugin through a dynamic
+      // `await import('@objectstack/plugin-security')`, and
+      // `dev-plugin-security-enforcement-warning.test.ts` deliberately leaves that
+      // chain unmocked -- the real plugin's `init()`/`start()` phase split IS the
+      // subject. Without these entries that import resolves through `exports` to
+      // `dist/`, so the file's verdict was a function of build state: on an unbuilt
+      // closure the whole file died at COLLECTION with `Failed to resolve entry for
+      // package "@objectstack/plugin-security"` (`Test Files 1 failed` / `Tests no
+      // tests`), and on a built-but-STALE closure it would have passed against the
+      // old artifact silently -- the quiet failure `check:test-source-alias` exists
+      // to make impossible.
+      //
+      // ⛔ The alias belongs HERE, never on the test's line-51 specifier. Measured:
+      // rewriting line 51 to a source path leaves `dev-plugin.ts`'s dynamic import
+      // still pointing at `dist/`, so the two diverge and line 51 pre-warms a copy
+      // nothing uses -- bail #1 went 28ms -> 476ms on a built closure, re-arming the
+      // clocked-window cost that #10115 / PR #10120 landed to remove. A config alias
+      // covers BOTH specifiers because Vite resolves the whole module graph through
+      // it, which is why one entry here beats an edit at either import site.
+      //
+      // Aliasing a dep to source imports its ENTIRE surface into this package's
+      // resolution domain (see the gate's "Where the walk goes" note), so
+      // plugin-security's own `formula` / `metadata-core` / `platform-objects`
+      // imports have to be aliased too -- without them the failure merely MOVES
+      // outward one package at a time.
+      //
+      // Subpaths precede the bare entry, and the FILE-shaped `./plugin` gets its own
+      // rule ahead of the directory-shaped group: `platform-objects` publishes both
+      // kinds, so a single `([a-z-]+)` rule of the sort `@objectstack/spec` can use
+      // below would resolve `./plugin` to `…/src/plugin/index.ts`. The group
+      // enumerates the directory-shaped subpaths for exactly that reason.
+      { find: /^@objectstack\/platform-objects\/plugin$/, replacement: path.resolve(__dirname, '../../platform-objects/src/plugin.ts') },
+      {
+        find: /^@objectstack\/platform-objects\/(identity|pages|security|metadata|system|apps|audit|integration|metadata-translations)$/,
+        replacement: path.join(path.resolve(__dirname, '../..'), 'platform-objects/src/$1/index.ts'),
+      },
+      { find: /^@objectstack\/platform-objects$/, replacement: path.resolve(__dirname, '../../platform-objects/src/index.ts') },
+      { find: /^@objectstack\/plugin-security$/, replacement: path.resolve(__dirname, '../plugin-security/src/index.ts') },
+      { find: /^@objectstack\/formula$/, replacement: path.resolve(__dirname, '../../formula/src/index.ts') },
+      { find: /^@objectstack\/metadata-core$/, replacement: path.resolve(__dirname, '../../metadata-core/src/index.ts') },
       // Subpath BEFORE the bare package: `@objectstack/core` is a PREFIX match with a
       // FILE replacement, so without this entry it swallows the published `./logger`
       // subpath and resolves it to `…/core/src/index.ts/logger` — ENOTDIR at run time.

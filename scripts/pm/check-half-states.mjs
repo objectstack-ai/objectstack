@@ -290,6 +290,35 @@
  *       item exists to name. Report-only and NOT loud, like H14–H16: the
  *       remedy is the triage Routine's next fire, never a label written here.
  *
+ * ## H19 — the question that ENDS a block
+ *
+ *   H19 an open `pm:blocked` card whose `Blocked-by:` target has CLOSED — the
+ *       block has outlived its blocker. Two items already read that line and
+ *       NEITHER expires a block: H4 asks whether the line EXISTS, H14 asks the
+ *       REVERSE index (does anything target THIS card). Nothing asked whether
+ *       the issue the line NAMES is still open, so an expired block sat in
+ *       complete silence with a well-formed line, a correct label and no row
+ *       anywhere. Two measured instances, both found by READING and neither by
+ *       any gauge: a card whose comment-borne `Blocked-by:` target closed at
+ *       09:03:37Z and which sat blocked ~4.5h after that, released only when a
+ *       human walked the lane's dependency graph; and one whose body-borne,
+ *       backtick-decorated target closed at 07:58:08Z and which was released
+ *       only by a manual triage pass. Targets are read from BOTH channels
+ *       through the shared decorated-directive reader — one of the two
+ *       measured cards states its blocker only in a comment, so a body-only
+ *       read would have seen half the evidence the item was filed on — and
+ *       cross-repo targets are resolved rather than dropped (the opposite call
+ *       from `buildBlockingIndex`, and both are right: the index asks which
+ *       LOCAL card is waiting, H19 asks whether THAT issue is still open).
+ *       Three target states, never two: a target that could not be resolved
+ *       fires its own quieter row saying the liveness is UNJUDGED, because a
+ *       silently dropped target reads as a healthy block forever — this item's
+ *       own disease in a new mask (#4690). Report-only, and pointedly: the
+ *       release is a protocol procedure with two mechanical double-checks
+ *       (state model, 「放行双查」) over the card's conversion comments and its
+ *       merged-PR timeline, so this row surfaces the candidate and the unlock
+ *       sweep releases it — ⛔ never a label written from this script.
+ *
  * ## The close mechanism, measured (#8293)
  *
  * A half-delivered card (#8131) was closed `completed` two seconds after its
@@ -2234,6 +2263,257 @@ export function h18RetriageAged(issue, nowMs = Date.now()) {
 }
 
 // ---------------------------------------------------------------------------
+// H19 — a block that OUTLIVED its blocker.
+//
+// The one question about a block that nothing here asked. Two items already
+// read the `Blocked-by:` line and NEITHER expires a block: H4 asks whether the
+// line EXISTS, H14 asks the REVERSE index (does anything target THIS card).
+// The question that actually ENDS a block — is the issue it names still open?
+// — had no reader at all, so a block outlives its blocker in complete silence:
+// well-formed line, correct label, no row anywhere.
+//
+// Measured on this board, both found by READING and neither by any gauge:
+//
+//   • `Blocked-by: #10126` parked in a COMMENT; the target closed
+//     2026-08-20T09:03:37Z; the card sat blocked ~4.5 h past that and was
+//     released only because a human walked the lane's dependency graph.
+//   • 「`Blocked-by: #9612`」 in the BODY, backtick-decorated (the decorated-
+//     directive shape); the target closed 2026-08-20T07:58:08Z; released only
+//     by a manual triage pass.
+//
+// Both shapes are fixtures in the self-test, and between them they are why the
+// target list is read from BOTH channels through the shared reader rather than
+// from the body alone: one of the two measured cards states its blocker only
+// in a comment, so a body-only H19 would have seen exactly half of the
+// evidence this row was filed on.
+//
+// ## Report-only, and pointedly so
+//
+// The release is a protocol procedure with two mechanical double-checks the
+// state model spells out (`pm:blocked`/`pm:on-hold` row, 「放行双查(两查皆机
+// 械、零判断)」), and neither is a thing this file could perform: they read the
+// card's conversion-comment history and its merged-PR timeline. So this row
+// surfaces the CANDIDATE and the unlock sweep releases it. ⛔ Never a label
+// written from this script — the same posture H14 holds for `pm:blocking`.
+// ---------------------------------------------------------------------------
+
+/**
+ * One `Blocked-by:` ref as a canonical, comparable target.
+ *
+ * `blockedByTargets` returns the ref AS WRITTEN (`{repo: null | 'objectui' |
+ * 'objectstack-ai/objectui', number}`), and three spellings can name one
+ * issue. Collapsing them here is what makes the per-target cache a real cache
+ * rather than three cache entries and three requests for one answer.
+ *
+ * An UNQUALIFIED repo name (`objectui#4356`) is resolved against the swept
+ * repo's OWNER. That is a guess, and it is a SAFE one in the only direction
+ * that matters: if the owner is wrong the fetch fails and the target reports
+ * as `unresolved` — named on the row, never silently dropped and never read
+ * as closed. A guess that can only ever produce an "I could not tell" is
+ * worth making; one that could produce a false finding would not be.
+ *
+ * Note `buildBlockingIndex` makes the opposite call on the same ref shape and
+ * both are right: the INDEX drops cross-repo refs because reading `objectui#N`
+ * as a local number would invent a dependent for an unrelated card, while H19
+ * resolves them because the target's repo is part of the address it fetches.
+ * One asks "which LOCAL card is waiting", the other "is THAT issue still open".
+ *
+ * @param {{ repo: string|null, number: number }} ref
+ * @param {string} [ownerRepo] — `owner/repo`, defaulting to the swept one.
+ * @returns {{ key: string, repo: string, number: number, local: boolean }}
+ */
+export function blockerTargetKey(ref, ownerRepo = OWNER_REPO) {
+  const owner = ownerRepo.split('/')[0];
+  const written = ref?.repo ?? null;
+  const repo =
+    written === null ? ownerRepo : written.includes('/') ? written : `${owner}/${written}`;
+  const number = Number(ref?.number);
+  return { key: `${repo}#${number}`, repo, number, local: repo === ownerRepo };
+}
+
+/**
+ * Every DISTINCT `Blocked-by:` target one card names, both channels, in the
+ * order written — the input H19 resolves.
+ *
+ * Channels are UNIONED exactly as `buildBlockingIndex` unions them, and for
+ * the same reason: a card whose body says `#A` and whose comment says `#B` is
+ * waiting on BOTH, so a priority order would silently drop one live blocker.
+ * Dedup is by canonical key, so a card that states one target in both channels
+ * (the natural shape when a seat backfills the body line later) is resolved
+ * once and listed once.
+ *
+ * Self-references are dropped, as in the index: a card cannot be its own
+ * blocker, and resolving one would always answer `open` (the card is in the
+ * open listing by construction) — a permanent no-op that costs a row of noise
+ * in every explanation of what H19 read.
+ *
+ * ## The comment channel's stated boundary
+ *
+ * `commentBodies` is whatever the sweep's gated fallback read, and that gate
+ * (`needsBlockedByComments`) skips a card whose BODY already carries a line.
+ * So a card with a body line AND a second, different blocker parked in a
+ * comment has its comment-borne target invisible to H19 — a bound inherited
+ * from the gate, not a decision taken here. `undefined` (unconsulted) and
+ * `null` (consulted, unreadable) both contribute nothing; the `null` case is
+ * a card H4 is already firing on with a sentence that says the thread could
+ * not be read, which is the louder and more accurate place for it.
+ *
+ * @param {object} issue
+ * @param {string[]|null|undefined} commentBodies
+ * @param {string} [ownerRepo]
+ */
+export function blockerTargetsFor(issue, commentBodies, ownerRepo = OWNER_REPO) {
+  const refs = [
+    ...blockedByTargets(issue?.body),
+    ...commentBlockedByTargets(commentBodies),
+  ];
+  const out = [];
+  const seenKeys = new Set();
+  for (const ref of refs) {
+    const target = blockerTargetKey(ref, ownerRepo);
+    if (!Number.isFinite(target.number)) continue;
+    if (target.local && target.number === issue?.number) continue;
+    if (seenKeys.has(target.key)) continue;
+    seenKeys.add(target.key);
+    out.push(target);
+  }
+  return out;
+}
+
+/**
+ * Which cards H19 resolves targets for — exported for the same reason every
+ * other gathering policy here is: a policy that decides what gets READ AT ALL
+ * is where a silent hole would live.
+ *
+ * `pm:blocked` and nothing else, which is the ruled scope and also the exact
+ * population H4 judges — the two items then say complementary things about one
+ * set of cards ("did you leave the machine a line" / "is what the line names
+ * still running"). A card carrying a `Blocked-by:` line WITHOUT the label is
+ * deliberately out of scope: that is a different half-state (a wait nobody
+ * declared), and inventing a row for it here would report against cards whose
+ * line is documentation rather than state.
+ */
+export function needsBlockerLiveness(issue) {
+  return labelNames(issue ?? {}).includes('pm:blocked');
+}
+
+/**
+ * How many targets a row names before it counts the rest — the same render
+ * budget `BLOCKING_DEPENDENT_LIST_CAP` keeps, for the same reason (the
+ * markdown renderer writes into a body with a hard cap and a fold). Every
+ * blocked card measured on this board names one or two targets, so five names
+ * the whole set in practice while bounding the pathological case.
+ */
+export const H19_TARGET_LIST_CAP = 5;
+
+/** `#N` for a local target, `owner/repo#N` for a cross-repo one, + its note. */
+function namedTargets(rows) {
+  const shown = rows.slice(0, H19_TARGET_LIST_CAP);
+  const named = shown
+    .map((r) => {
+      const ref = `\`${r.local ? `#${r.number}` : r.key}\``;
+      if (r.state === 'closed') return `${ref}${r.closedAt ? ` (closed ${r.closedAt})` : ' (closed)'}`;
+      if (r.state === 'unresolved') return `${ref}${r.detail ? ` (${r.detail})` : ''}`;
+      return ref;
+    })
+    .join(', ');
+  const more = rows.length > shown.length ? ` +${rows.length - shown.length} more` : '';
+  return `${named}${more}`;
+}
+
+/**
+ * H19 — null when every named target is still open, else the finding sentence.
+ *
+ * ## Three target states, never two (#4690)
+ *
+ * A resolution is `open`, `closed`, or `unresolved`, and the third is the one
+ * the row exists to keep visible. "Could not be read" is not "still open": a
+ * target dropped in silence reads as a healthy block FOREVER, which is
+ * precisely this item's own disease wearing a new mask. So an unresolved
+ * target FIRES a row — a quieter one, which says the liveness is unjudged
+ * rather than asserting anything about the block.
+ *
+ * What the row deliberately does NOT do is name a CAUSE for an unresolved
+ * target. A 404 on `owner/repo#N` is equally "that repo is not reachable to
+ * this credential" and "that issue number does not exist in a perfectly
+ * reachable repo", and this file's standing posture is to refuse to name what
+ * it cannot distinguish (the transport classifier's narrowness, and H16's
+ * refusal to vouch for an `unknown` mergeability). The observation — the ref
+ * and the HTTP status — is reported; the diagnosis is the reader's.
+ *
+ * ## A PARTIAL discharge is reported as partial, not as an unblock
+ *
+ * A card naming two blockers where one has closed is very possibly still
+ * legitimately blocked. The row says how many closed and how many are still
+ * open and leaves the judgement where the protocol puts it — with the unlock
+ * sweep's double-checks. Report-only means the row never decides; it also
+ * means the row must not go quiet on a half-expired block, because "one of
+ * your two blockers landed" is exactly the state a seat cannot see by looking.
+ *
+ * @param {object} issue — an OPEN issue.
+ * @param {{ key: string, number: number, local: boolean,
+ *   state: 'open'|'closed'|'unresolved', closedAt?: string|null,
+ *   detail?: string|null }[]} resolutions — this card's targets, resolved.
+ */
+export function h19BlockOutlivedBlocker(issue, resolutions) {
+  if (!needsBlockerLiveness(issue)) return null;
+  const rows = resolutions ?? [];
+  if (rows.length === 0) return null;
+  const closed = rows.filter((r) => r.state === 'closed');
+  const unresolved = rows.filter((r) => r.state === 'unresolved');
+  const open = rows.filter((r) => r.state === 'open');
+  if (closed.length === 0 && unresolved.length === 0) return null;
+
+  const release =
+    ' Report-only, and the release is NOT this script\'s to make: the state model gives it two ' +
+    'mechanical double-checks (`pm:blocked`/`pm:on-hold` row, 「放行双查」) — ① release only against the ' +
+    'condition carried by the MOST RECENT conversion comment, never an earlier blocker on the thread (a ' +
+    'condition already spent, re-fired, reinstates an expired premise as the current one), and ② refuse ' +
+    'to release when the card carries a MERGED PR newer than that conversion comment (the card moved on ' +
+    'after the condition was written, so the cited fact can be true and no longer current). This row ' +
+    'surfaces the candidate; the unlock sweep releases it — ⛔ never a label written from this script.';
+
+  if (closed.length > 0) {
+    const rest =
+      open.length > 0
+        ? ` ${open.length} target(s) are still open (${namedTargets(open)}), so this is a PARTIAL ` +
+          'discharge and the card may still be legitimately blocked — the row reports it, it does not ' +
+          'decide it.'
+        : ' Every target it names is closed: nothing this card declared a wait on is still running.';
+    const alsoUnresolved =
+      unresolved.length === 0
+        ? ''
+        : ` A further ${unresolved.length} target(s) could not be resolved this sweep ` +
+          `(${namedTargets(unresolved)}) and are unjudged, not open (#4690).`;
+    return (
+      `\`pm:blocked\` while ${closed.length} of ${rows.length} \`Blocked-by:\` target(s) — read from body ` +
+      `OR comment — ${closed.length === 1 ? 'is' : 'are'} CLOSED (${namedTargets(closed)}): the block has ` +
+      'outlived its blocker. Nothing else here asks this question — H4 asks whether the line EXISTS, H14 ' +
+      'asks the REVERSE index — so an expired block sits with a well-formed line, a correct label and no ' +
+      'row anywhere: one measured card sat ~4.5h past its blocker\'s close and was found only by a human ' +
+      'walking the graph, another was released only by a manual triage pass.' +
+      rest +
+      alsoUnresolved +
+      release
+    );
+  }
+
+  return (
+    `\`pm:blocked\` and ${unresolved.length} of ${rows.length} \`Blocked-by:\` target(s) could NOT be ` +
+    `resolved this sweep (${namedTargets(unresolved)}) — so whether this block has outlived its blocker ` +
+    'is UNJUDGED, not confirmed. Unread is not still-open (#4690): a target dropped in silence reads as ' +
+    'a healthy block forever, which is the exact failure this item exists to end, so it is named here ' +
+    'instead. A cross-repo target resolves when its repo answers this sweep\'s credential; the status is ' +
+    'reported and the cause is not guessed at (a 404 is equally an unreachable repo and a number that ' +
+    'does not exist).' +
+    (open.length > 0
+      ? ` The card's other ${open.length} target(s) did resolve, and are still open.`
+      : '') +
+    release
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -2284,7 +2564,8 @@ export function isLoudFinding(message) {
  * @param {{ repo: string, issues: number, unscoped: number, prs: number,
  *   merged: number, conflictProbed?: number, conflictCandidates?: number,
  *   holdProbed?: number, holdCandidates?: number, fallbackProbed?: number,
- *   fallbackCandidates?: number }} counts
+ *   fallbackCandidates?: number, blockerResolved?: number,
+ *   blockerTargets?: number }} counts
  * @param {number} findingCount
  */
 export function summaryLine(counts, findingCount) {
@@ -2299,6 +2580,14 @@ export function summaryLine(counts, findingCount) {
   // declined to judge it".
   const fbProbed = counts.fallbackProbed ?? 0;
   const fbCandidates = counts.fallbackCandidates ?? 0;
+  // The fourth pair, and the one whose shortfall is NOT silent: an unresolved
+  // `Blocked-by:` target fires its own H19 row on the card that names it, so
+  // this number is a total rather than the only place the gap is visible. It
+  // is still owed, for the reason every pair here is owed — a pass that
+  // resolved nothing must not read the same as a board whose blocks are all
+  // still live (#4690).
+  const btResolved = counts.blockerResolved ?? 0;
+  const btTargets = counts.blockerTargets ?? 0;
   return (
     `check-half-states: swept ${counts.issues} open pm-/p0-labeled issue(s), ${counts.unscoped} open ` +
     `issue(s) in the unscoped pass (H13–H15, H18), ${counts.prs} open PR(s) ` +
@@ -2307,6 +2596,9 @@ export function summaryLine(counts, findingCount) {
     `Hold comments read on ${held} of ${holdCandidates} H17 candidate(s). ` +
     `\`Blocked-by:\` comment fallback read on ${fbProbed} of ${fbCandidates} candidate(s)` +
     `${fbProbed < fbCandidates ? " — H14's stale direction is SUSPENDED for this sweep (the index is known incomplete)" : ''}. ` +
+    `Blocker liveness (H19): targets resolved on ${btResolved} of ${btTargets} distinct \`Blocked-by:\` ` +
+    `target(s) named by open \`pm:blocked\` card(s)` +
+    `${btResolved < btTargets ? ' — each unresolved target is named on its own card\'s row, never dropped' : ''}. ` +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -3079,6 +3371,10 @@ async function sweep(options = {}) {
     conflictProbed: 0,
     fallbackCandidates: 0,
     fallbackProbed: 0,
+    // H19's coverage pair — distinct `Blocked-by:` targets seen, and how many
+    // got a definite open/closed answer.
+    blockerTargets: 0,
+    blockerResolved: 0,
   };
   // H17's gathering rides out of the sweep the same way, because it has the
   // same per-row failure mode as H16's detail pass and therefore owes the
@@ -3104,6 +3400,8 @@ async function sweep(options = {}) {
     holdProbed: hold.probed,
     fallbackCandidates: stats.fallbackCandidates,
     fallbackProbed: stats.fallbackProbed,
+    blockerTargets: stats.blockerTargets,
+    blockerResolved: stats.blockerResolved,
   };
   // The oracle is read ONCE per sweep, after gathering: it is a local
   // `git ls-files`, not a request, and every candidate token is checked
@@ -3400,6 +3698,81 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, stat
   // exactly like every other row and neither renderer needs a special case.
   const oldestBlocking = h15OldestUnclaimedBlocking(unscoped);
   if (oldestBlocking) findings.push([oldestBlocking.issue, 'H15', oldestBlocking.message]);
+
+  // H19 — blocker liveness. Last, because it is the only pass that reads a
+  // card this sweep did not list: every other item answers from a listing
+  // already in hand, while "is the target still open" is a fact about an
+  // issue that, if the answer is the interesting one, is CLOSED and therefore
+  // in no open listing by construction.
+  //
+  // ## The shortcut that makes the cost proportional to the FINDINGS
+  //
+  // A target already present in an open listing this sweep took is open —
+  // positive evidence, free, no request. ABSENCE is not evidence of closure
+  // (the listings are capped, and PRs are filtered out of them), so an absent
+  // target is FETCHED rather than assumed. The asymmetry is the whole cost
+  // story: a healthy block names an open card and costs nothing, so the
+  // request count is bounded by the number of expired blocks plus the
+  // cross-repo refs — the population the row is about — rather than by the
+  // number of blocked cards.
+  //
+  // One request per DISTINCT target, cached across cards: several cards
+  // waiting on one epic is the normal shape, and it costs one read.
+  const openLocalNumbers = new Set();
+  for (const number of seen.keys()) openLocalNumbers.add(number);
+  for (const number of seenUnscoped.keys()) openLocalNumbers.add(number);
+  const blockerCache = new Map();
+  const resolveBlockerTarget = async (target) => {
+    const cached = blockerCache.get(target.key);
+    if (cached) return cached;
+    let resolved;
+    if (target.local && openLocalNumbers.has(target.number)) {
+      resolved = { ...target, state: 'open', closedAt: null, detail: null };
+    } else {
+      try {
+        const row = await rest(`/repos/${target.repo}/issues/${target.number}`);
+        resolved = {
+          ...target,
+          state: row.state === 'closed' ? 'closed' : 'open',
+          closedAt: row.closed_at ?? null,
+          detail: null,
+        };
+      } catch (err) {
+        // Per-target, never fatal — and deliberately NOT the rethrow H16/H17
+        // and the comment fallback make on a total shortfall. Those passes
+        // read only THIS repo with a credential that either works or does
+        // not, so "nothing readable" there really is the transport. H19's
+        // candidates include refs to sibling repos this credential may quite
+        // legitimately not be able to read, so a zero-resolved pass is a
+        // possible HEALTHY reading here and must not kill a sweep whose other
+        // items are already gathered. The #4690 duty is discharged louder
+        // instead: every unresolved target fires its own card's row.
+        resolved = {
+          ...target,
+          state: 'unresolved',
+          closedAt: null,
+          detail: err?.status ? `HTTP ${err.status}` : 'unreadable',
+        };
+      }
+    }
+    blockerCache.set(target.key, resolved);
+    return resolved;
+  };
+
+  for (const issue of seen.values()) {
+    if (!needsBlockerLiveness(issue)) continue;
+    const resolutions = [];
+    for (const target of blockerTargetsFor(issue, fallbackFor(issue))) {
+      resolutions.push(await resolveBlockerTarget(target));
+    }
+    const expired = h19BlockOutlivedBlocker(issue, resolutions);
+    if (expired) findings.push([issue, 'H19', expired]);
+  }
+  // Distinct targets, which is the unit the cache and the request count are
+  // in — and the word is in the summary sentence so the number cannot be read
+  // as a per-card edge count.
+  stats.blockerTargets = blockerCache.size;
+  stats.blockerResolved = [...blockerCache.values()].filter((r) => r.state !== 'unresolved').length;
 }
 
 // ---------------------------------------------------------------------------
@@ -4270,6 +4643,177 @@ function selfTest() {
   t('H15 reverse-verify: …the same card unassigned DOES produce the row', h15OldestUnclaimedBlocking([live7276([])], Date.parse('2026-08-19T09:00:00Z')).issue.number, 7276);
   t('H15 reverse-verify: …and its measured age', h15OldestUnclaimedBlocking([live7276([])], Date.parse('2026-08-19T09:00:00Z')).message.includes('open ~220h'), true);
 
+  // -- H19: a block that outlived its blocker (2026-08-20) -------------------
+  // The two measured instances are the fixtures, and they are DIFFERENT
+  // shapes on purpose: one states its blocker in a COMMENT and the other in a
+  // backtick-decorated BODY line. A body-only reader would have caught one of
+  // the two, which is why the target list unions both channels.
+  const keyOf = (ref) => blockerTargetKey(ref, 'objectstack-ai/objectstack').key;
+
+  // The canonical key — three spellings, one issue, therefore one request.
+  t('H19 key: a bare local ref qualifies against the swept repo', keyOf({ repo: null, number: 10126 }), 'objectstack-ai/objectstack#10126');
+  t('H19 key: …as does the bare repo name', keyOf({ repo: 'objectstack', number: 10126 }), 'objectstack-ai/objectstack#10126');
+  t('H19 key: …and the fully qualified form', keyOf({ repo: 'objectstack-ai/objectstack', number: 10126 }), 'objectstack-ai/objectstack#10126');
+  t('H19 key: a local ref is marked local', blockerTargetKey({ repo: null, number: 1 }, 'objectstack-ai/objectstack').local, true);
+  // An unqualified SIBLING repo takes the swept repo's owner. The guess can
+  // only ever produce an unresolved target, never a false finding.
+  t('H19 key: an unqualified sibling repo takes the swept owner', keyOf({ repo: 'objectui', number: 4356 }), 'objectstack-ai/objectui#4356');
+  t('H19 key: …and is NOT local', blockerTargetKey({ repo: 'objectui', number: 4356 }, 'objectstack-ai/objectstack').local, false);
+  t('H19 key: a foreign owner is preserved verbatim', keyOf({ repo: 'vercel/next.js', number: 7 }), 'vercel/next.js#7');
+
+  // The target list — both channels, deduped, self-references dropped.
+  const blockedCard = (number, body = '', labels = ['pm:blocked']) => ({ ...issue(labels, [], body), number });
+  const keysOf = (issueObj, comments) =>
+    blockerTargetsFor(issueObj, comments, 'objectstack-ai/objectstack').map((t2) => t2.key).join(' ');
+  t('H19 targets: the body channel', keysOf(blockedCard(1, 'Blocked-by: #9612')), 'objectstack-ai/objectstack#9612');
+  t('H19 targets: the comment channel', keysOf(blockedCard(1, 'no line here'), ['Blocked-by: #10126']), 'objectstack-ai/objectstack#10126');
+  t('H19 targets: both channels are UNIONED, never prioritised', keysOf(blockedCard(1, 'Blocked-by: #9612'), ['Blocked-by: #10126']), 'objectstack-ai/objectstack#9612 objectstack-ai/objectstack#10126');
+  t('H19 targets: one target stated in both channels is resolved once', keysOf(blockedCard(1, 'Blocked-by: #9612'), ['Blocked-by: #9612']), 'objectstack-ai/objectstack#9612');
+  t('H19 targets: a self-reference is dropped', keysOf(blockedCard(500, 'Blocked-by: #500')), '');
+  t('H19 targets: …but a same-numbered CROSS-REPO ref is not a self-reference', keysOf(blockedCard(4356, 'Blocked-by: objectui#4356')), 'objectstack-ai/objectui#4356');
+  t('H19 targets: an unreadable comment thread contributes nothing', keysOf(blockedCard(1, 'no line'), null), '');
+  t('H19 targets: an unconsulted comment thread contributes nothing', keysOf(blockedCard(1, 'no line'), undefined), '');
+  t('H19 targets: a card with no line anywhere has no targets (H4\'s row, not this one)', keysOf(blockedCard(1, 'waiting on upstream'), ['triage note']), '');
+  // The multi-ref line the index's own parser already handles, seen from here.
+  t('H19 targets: a two-ref line yields two targets, in order', keysOf(blockedCard(1, 'Blocked-by: #10126, #9612')), 'objectstack-ai/objectstack#10126 objectstack-ai/objectstack#9612');
+
+  // The gathering gate.
+  t('H19 gate: an open pm:blocked card is in scope', needsBlockerLiveness(blockedCard(1, 'Blocked-by: #2')), true);
+  t('H19 gate: a Blocked-by line WITHOUT the label is out of scope', needsBlockerLiveness(blockedCard(1, 'Blocked-by: #2', ['pm:queue'])), false);
+  t('H19 gate: a pm:blocking card is out of scope (that is H14\'s population)', needsBlockerLiveness(blockedCard(1, '', ['pm:blocking'])), false);
+  t('H19 gate: a missing issue does not crash', needsBlockerLiveness(undefined), false);
+
+  // The predicate. Resolutions are what the sweep resolved, so the offline
+  // fixtures are the three target states and their combinations.
+  const target = (number, state, extra = {}) => ({
+    key: `objectstack-ai/objectstack#${number}`,
+    repo: 'objectstack-ai/objectstack',
+    number,
+    local: true,
+    state,
+    closedAt: null,
+    detail: null,
+    ...extra,
+  });
+  const foreign = (repo, number, state, extra = {}) => ({
+    key: `${repo}#${number}`,
+    repo,
+    number,
+    local: false,
+    state,
+    closedAt: null,
+    detail: null,
+    ...extra,
+  });
+
+  // POSITIVE — a closed target fires.
+  const expired10112 = h19BlockOutlivedBlocker(blockedCard(10112), [target(10126, 'closed', { closedAt: '2026-08-20T09:03:37Z' })]);
+  t('H19: a CLOSED target fires', typeof expired10112, 'string');
+  t('H19: …and names the target', expired10112.includes('`#10126`'), true);
+  t('H19: …with the close timestamp, so the latency is readable off the row', expired10112.includes('closed 2026-08-20T09:03:37Z'), true);
+  t('H19: …and says the block outlived its blocker', expired10112.includes('outlived its blocker'), true);
+  t('H19: …and says nothing else here asks this question', expired10112.includes('H4 asks whether the line EXISTS'), true);
+  t('H19: …and hands the release to the unlock sweep\'s double-checks', expired10112.includes('放行双查'), true);
+  t('H19: …naming double-check ① (most recent conversion comment)', expired10112.includes('MOST RECENT conversion comment'), true);
+  t('H19: …and double-check ② (a newer merged PR refuses release)', expired10112.includes('MERGED PR newer than that conversion comment'), true);
+  t('H19: …and forbids a label written from this script', expired10112.includes('never a label written from this script'), true);
+  t('H19: a fully discharged block says every target is closed', expired10112.includes('Every target it names is closed'), true);
+  t('H19: …and does not claim a partial discharge', expired10112.includes('PARTIAL'), false);
+
+  // NEGATIVE — an open target is clean, and silence here is a real reading.
+  t('H19: an OPEN target -> clean', h19BlockOutlivedBlocker(blockedCard(1), [target(2, 'open')]), null);
+  t('H19: every target open -> clean', h19BlockOutlivedBlocker(blockedCard(1), [target(2, 'open'), foreign('objectstack-ai/objectui', 4356, 'open')]), null);
+  t('H19: no targets at all -> no row (H4 owns the missing line)', h19BlockOutlivedBlocker(blockedCard(1), []), null);
+  t('H19: absent resolutions -> no row', h19BlockOutlivedBlocker(blockedCard(1), undefined), null);
+  t('H19: the label gate outranks a closed target', h19BlockOutlivedBlocker(blockedCard(1, '', ['pm:queue']), [target(2, 'closed')]), null);
+
+  // PARTIAL — one of two closed. Fires, and says it is partial.
+  const partial = h19BlockOutlivedBlocker(blockedCard(1), [target(2, 'closed', { closedAt: '2026-08-20T07:58:08Z' }), target(3, 'open')]);
+  t('H19: one closed of two still fires', typeof partial, 'string');
+  t('H19: …and reports the count as 1 of 2', partial.includes('1 of 2 `Blocked-by:` target(s)'), true);
+  t('H19: …names it a PARTIAL discharge', partial.includes('PARTIAL'), true);
+  t('H19: …names the target that is still open', partial.includes('`#3`'), true);
+  t('H19: …and does not decide the card is unblocked', partial.includes('it does not decide it'), true);
+  t('H19: two closed of two reads as 2 of 2', h19BlockOutlivedBlocker(blockedCard(1), [target(2, 'closed'), target(3, 'closed')]).includes('2 of 2'), true);
+
+  // UNRESOLVED — never reads as clean, and never reads as closed either.
+  const unresolvedOnly = h19BlockOutlivedBlocker(blockedCard(1), [foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' })]);
+  t('H19: an UNRESOLVED target fires rather than reading clean', typeof unresolvedOnly, 'string');
+  t('H19: …saying the liveness is UNJUDGED', unresolvedOnly.includes('UNJUDGED, not confirmed'), true);
+  t('H19: …and never claims the block is expired', unresolvedOnly.includes('outlived its blocker. Nothing else here'), false);
+  t('H19: …citing the unreadable-is-not-absent rule', unresolvedOnly.includes('#4690'), true);
+  t('H19: …naming the cross-repo target in full owner/repo#N form', unresolvedOnly.includes('`objectstack-ai/cloud#88`'), true);
+  t('H19: …with the observed status', unresolvedOnly.includes('HTTP 404'), true);
+  t('H19: …and refuses to guess WHY it did not resolve', unresolvedOnly.includes('the cause is not guessed at'), true);
+  t('H19: …and still routes the release through the unlock sweep', unresolvedOnly.includes('放行双查'), true);
+  // An unresolved target alongside an open one still fires, and says which.
+  const mixedUnresolved = h19BlockOutlivedBlocker(blockedCard(1), [target(2, 'open'), foreign('objectstack-ai/objectui', 4356, 'unresolved', { detail: 'HTTP 403' })]);
+  t('H19: unresolved + open still fires', typeof mixedUnresolved, 'string');
+  t('H19: …and reports the resolved remainder as open', mixedUnresolved.includes("The card's other 1 target(s) did resolve, and are still open."), true);
+  // Closed AND unresolved: the closed row leads, the gap is appended.
+  const closedAndUnresolved = h19BlockOutlivedBlocker(blockedCard(1), [target(2, 'closed'), foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' })]);
+  t('H19: a closed target leads even when another is unresolved', closedAndUnresolved.includes('outlived its blocker'), true);
+  t('H19: …and the unresolved one is still declared unjudged', closedAndUnresolved.includes('unjudged, not open'), true);
+
+  // The render budget: many targets are capped and the row says it counted.
+  const manyClosed = h19BlockOutlivedBlocker(blockedCard(1), [2, 3, 4, 5, 6, 7, 8].map((n) => target(n, 'closed')));
+  t('H19: the target list is capped at the render budget', manyClosed.includes(`+${7 - H19_TARGET_LIST_CAP} more`), true);
+  t('H19: …and the count is the full one, not the shown one', manyClosed.includes('7 of 7'), true);
+
+  // Report-only, ordinary row in both media — never loud, like H14–H16/H18.
+  t('H19: not a loud finding', isLoudFinding(expired10112), false);
+
+  // -- H19: the two MEASURED instances, byte-for-byte ------------------------
+  // Instance ①: the comment-channel card. Its `Blocked-by:` line lives in a
+  // triage first-touch comment; the target closed at 09:03:37Z and the card
+  // sat blocked ~4.5h after that. This is the fixture that makes the comment
+  // channel load-bearing rather than a nicety.
+  const liveTriageComment =
+    'Triage first-touch: graded **Bug · `domain:cli` · `pm:blocked`**.\n\nBlocked-by: #10126\n\nRationale: ' +
+    '#10126 (in flight, `priority:p0`, queue-incident layer ①) is building the gate that flags exactly ' +
+    "this site's class — a test resolving a sibling package's dist";
+  t('H19 measured ①: the live triage comment yields the target', keysOf(blockedCard(10112, 'body carries no line'), [liveTriageComment]), 'objectstack-ai/objectstack#10126');
+  t('H19 measured ①: …a body-only read would have found nothing', keysOf(blockedCard(10112, 'body carries no line')), '');
+  t(
+    'H19 measured ①: …and the card fires once its target is resolved closed',
+    h19BlockOutlivedBlocker(blockedCard(10112, 'body carries no line'), [target(10126, 'closed', { closedAt: '2026-08-20T09:03:37Z' })]).includes('`#10126` (closed 2026-08-20T09:03:37Z)'),
+    true,
+  );
+
+  // Instance ②: the body-channel card, whose line is backtick-DECORATED —
+  // the shape that was invisible to the reader before the shared decorated-
+  // directive reader landed. Byte-for-byte from the live body.
+  const liveDecoratedBody =
+    'Filed unassigned from #9612 (PR #10058), which implements package-closure narrowing at the runtime ' +
+    'publish gate. Recording the half that card\'s fence could not reach.\n\n`Blocked-by: #9612`\n\n' +
+    '## What is true after #9612';
+  t('H19 measured ②: the decorated body line yields the target', keysOf(blockedCard(10063, liveDecoratedBody)), 'objectstack-ai/objectstack#9612');
+  t(
+    'H19 measured ②: …and the card fires once its target is resolved closed',
+    h19BlockOutlivedBlocker(blockedCard(10063, liveDecoratedBody), [target(9612, 'closed', { closedAt: '2026-08-20T07:58:08Z' })]).includes('closed 2026-08-20T07:58:08Z'),
+    true,
+  );
+  // The prose around the line names #9612 four more times; only the DIRECTIVE
+  // line is a target. Reading the prose would manufacture duplicates and, on
+  // other cards, blockers that were only ever context.
+  t('H19 measured ②: prose mentions of the same number are not extra targets', blockerTargetsFor(blockedCard(10063, liveDecoratedBody), undefined, 'objectstack-ai/objectstack').length, 1);
+
+  // The summary line's fourth `read X of Y` pair. Unlike the other three a
+  // shortfall here suspends nothing — the unresolved targets fire their own
+  // rows — so the clause says where to look rather than announcing a silence.
+  const btCounts = (blockerResolved, blockerTargets) => ({
+    repo: 'objectstack-ai/objectstack', issues: 1, unscoped: 1, prs: 0, merged: 0,
+    blockerResolved, blockerTargets,
+  });
+  t('summary: the H19 coverage pair is reported', summaryLine(btCounts(11, 12), 1).includes('targets resolved on 11 of 12 distinct `Blocked-by:` target(s)'), true);
+  t('summary: …and says the unit is DISTINCT targets, not per-card edges', summaryLine(btCounts(11, 12), 1).includes('distinct'), true);
+  t('summary: …scoped to the population H19 judges', summaryLine(btCounts(11, 12), 1).includes('named by open `pm:blocked` card(s)'), true);
+  t('summary: an H19 shortfall points at the rows that carry it', summaryLine(btCounts(11, 12), 1).includes('each unresolved target is named on its own card\'s row, never dropped'), true);
+  t('summary: a complete H19 pass adds no shortfall clause', summaryLine(btCounts(12, 12), 1).includes('never dropped'), false);
+  t('summary: absent H19 counts degrade to 0, never to undefined', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('resolved on 0 of 0 distinct'), true);
+  t('summary: …and the H19 clause never prints the string undefined', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('undefined'), false);
+  t('summary: the report-only contract still ends the sentence', summaryLine(btCounts(12, 12), 1).endsWith('not a gate verdict.'), true);
+
   // -- H16: open non-draft PR stuck in a merge conflict (2026-08-19 incident) --
   // The single-PR payload shape, since `mergeable_state` is absent from the
   // listing rows this sweep otherwise runs on.
@@ -4655,6 +5199,16 @@ function selfTest() {
   // someone "helpfully" giving the plain path the markdown sort — by feeding
   // it loud-first input and requiring the loud row to stay where it was put.
   t('plain: preserves the caller\'s order, applying no priority sort', renderPlain([loudRow, quietRow], counts).indexOf('#900') < renderPlain([loudRow, quietRow], counts).indexOf('#200'), true);
+  // H19 rides both media as an ordinary row — no renderer special case, which
+  // is the property that lets a new item land without touching either.
+  const h19Row = finding(10112, 'H19', '`pm:blocked` while 1 of 1 `Blocked-by:` target(s) is CLOSED (`#10126`)');
+  t(
+    'plain: an H19 row renders in the same two-line shape as every other item',
+    renderPlain([h19Row], counts).split('\n').slice(0, 2).join('|'),
+    '  H19 #10112 `pm:blocked` while 1 of 1 `Blocked-by:` target(s) is CLOSED (`#10126`)|     https://example.test/10112',
+  );
+  t('markdown: an H19 row links the card it names', renderMarkdown([h19Row], counts).includes('- **H19** [#10112](https://example.test/10112)'), true);
+  t('markdown: …and is NOT sorted above the loud band', renderMarkdown([h19Row, loudRow], counts).indexOf('#900') < renderMarkdown([h19Row, loudRow], counts).indexOf('#10112'), true);
   t('plain: …and the markdown renderer on the same input DOES sort loud first', renderMarkdown([quietRow, loudRow], counts).indexOf('#900') < renderMarkdown([quietRow, loudRow], counts).indexOf('#200'), true);
   t('summaryLine: names what was READ, not only what was found', summaryLine(counts, 0).includes('swept 3 open pm-/p0-labeled issue(s)'), true);
   t('summaryLine: the unscoped-pass clause names H18 alongside H13-H15', summaryLine(counts, 0).includes('unscoped pass (H13–H15, H18)'), true);
