@@ -84,7 +84,10 @@ const REPO_ROOT = new URL('../../', import.meta.url);
 // quoted in the raising PR (see header).
 export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/SKILL.md', 682],
-  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 223],
+  // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
+  // 2026-08-20, quoted in the raising PR): three mandated conventions land in
+  // the runbook's triage sections. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 244],
   ['.claude/skills/pm-dispatch/references/platform-readings.md', 134],
   ['.claude/skills/pm-dispatch/references/review-checklist.md', 82],
   ['.claude/skills/pm-dispatch/references/landing-operations.md', 82],

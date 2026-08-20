@@ -453,6 +453,18 @@ const AUTH_MANAGER_PLUGINS: Record<string, { construct: () => unknown } | { skip
   hasPermission: {
     skip: 'permission predicate exported by the organization plugin — declares no schema',
   },
+  // [#10069] NOT a plugin factory either — same scanner shape as
+  // `hasPermission` above. `defaultRoles` is the admin plugin's exported
+  // role→AccessControl map (`better-auth/plugins/admin/access`); it declares no
+  // schema, contributes no model and no column, so there is nothing here for
+  // the collision loop to compare. `assertAdminRevokeUserSessionIdentifiesRecord`
+  // reads it so the admin-revoke-user-session gate asks the vendor's own
+  // permission question (its `hasPermission` fallback roles) rather than keeping
+  // a second spelling of it. The `stale` assertion below removes this entry's
+  // licence the moment that import goes away.
+  defaultRoles: {
+    skip: 'role→AccessControl map exported by the admin plugin — declares no schema',
+  },
 };
 
 /** The plugin set the auth manager actually assembles (`buildPluginList()`). */

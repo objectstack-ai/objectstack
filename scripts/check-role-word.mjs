@@ -48,6 +48,50 @@ const EXTENSIONS = new Set(['.mdx', '.md']);
 const BASELINE_PATH = 'scripts/role-word-baseline.json';
 const WORD = /\brole(?:s)?\b/gi;
 
+/**
+ * The half of ROOTS that `scripts/pm/dispatch-gates.mjs` cannot see, written in
+ * the subtree spelling that tool compares in. Provenance ONLY: nothing in this
+ * gate reads this list, and the scan above behaves exactly as it did without it.
+ *
+ * ## The gap this closes (#9964's declaration pattern, one class over)
+ *
+ * That tool builds every dispatch's gate list by scanning each gate's own source
+ * for the path literals it operates on, and "looks like a path" there means
+ * "carries a separator". `content/docs` has one; `skills` does not, so no hint
+ * was ever built for it — this gate's population reached the derivation as its
+ * content half plus its baseline artifact, and a card touching only the skills
+ * tree scored `silent`: not "irrelevant", but "its sources name paths, none of
+ * which cover yours", which that tool's residue summary calls its weakest claim
+ * and explicitly not a clearance.
+ *
+ * Not hypothetical. PR #10038 — a skills-only docs fix — derived a green local
+ * union and met this gate as red CI (`role-word count grew 2 → 3`), costing one
+ * repair round. CI enforces either way (lint.yml carries no path filter); what
+ * was missing is discoverability, and this restores it.
+ *
+ * ## Why the subtree spelling, and not a wider extractor
+ *
+ * `hintCovers` refuses a bare single-segment literal (`skills`) as too generic
+ * BY DESIGN, and that refusal is measured, not incidental: teaching the
+ * extractor to accept bare top-level directory words was priced at +139084
+ * fabricated (gate, file) pairs, because `packages`, `apps` and `examples` are
+ * path COMPONENTS in dozens of gates that never read those roots. A declared
+ * subtree is a different claim from a bare word — an author stating what the
+ * gate reads, in the syntax the repo uses for that everywhere else — and the
+ * glob collapse reduces this one back to this gate's second root and to nothing
+ * else. `.claude/skills/...` is NOT under it, which is correct: ROOTS does not
+ * reach there, so the tool must not name this gate for a card that edits it.
+ *
+ * ## Provenance, never a lookup key
+ *
+ * `walk()` runs over ROOTS behind `existsSync`, so the glob form appearing there
+ * would send the scan at a directory that does not exist — skipped in exactly
+ * the silence the green line below is built to expose. The self-test pins both
+ * halves of the coupling: every separator-less ROOT is declared here, and
+ * nothing declared here is itself a ROOTS entry.
+ */
+const ROOT_DIR_WATCH_HINTS = ['skills/**'];
+
 const update = process.argv.includes('--update');
 
 function walk(dir, out) {
@@ -341,6 +385,29 @@ function selfTest() {
     + 'over a dead scan cannot read like a debt fully paid',
     updateSummary(DEAD_SCAN, PAID_OFF) !== updateSummary(SCANNED, PAID_OFF));
 
+  // ── The dispatch-gates declaration (#9964's pattern) ──────────────────────
+  //
+  // Enforcement cannot hold any of these: the declaration is read by another
+  // tool entirely, so a wrong or stale one runs green here forever and pays
+  // itself out as a dev dispatched on a skills card with this gate missing from
+  // the brief. The coupling is derived from ROOTS on both sides rather than
+  // re-spelled, so widening or renaming a root cannot leave the declaration
+  // describing the old population.
+  const separatorless = ROOTS.filter((r) => !r.includes('/'));
+  expect('the declaration exists for every ROOT the hint extractor cannot see (a root with no '
+    + 'path separator is refused as too generic, so it needs the subtree spelling)',
+    separatorless.every((r) => ROOT_DIR_WATCH_HINTS.includes(`${r}/**`)));
+  expect('and it declares no root this gate does not walk (a declaration that can drift from the '
+    + 'scan is worse than none — it replaces a silent gate with a lying one)',
+    ROOT_DIR_WATCH_HINTS.every((h) => ROOTS.includes(h.replace(/\/\*+$/, ''))));
+  expect('skills is the root it declares (the half PR #10038 met as red CI)',
+    ROOT_DIR_WATCH_HINTS.includes('skills/**'));
+  // Provenance, never a lookup key: `walk()` runs behind existsSync(root), so
+  // the glob form appearing in ROOTS would skip the root in silence — the exact
+  // failure the per-root green line above exists to make visible.
+  expect('the declared form is NOT a ROOTS entry',
+    !ROOTS.some((r) => ROOT_DIR_WATCH_HINTS.includes(r)));
+
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\ncheck-role-word --self-test: ${failures.length} failure(s).\n`);
@@ -350,7 +417,8 @@ function selfTest() {
     'OK  self-test: the NEW-use remedy marks baseline expansion as maintainer-only, the predicate '
     + 'rejects an unmarked offer, the ratchet-DOWN remedy stays the author\'s own, and both '
     + 'success texts report what was READ \u2014 so a scanned tree and an unscanned one cannot print '
-    + 'the same result once the ledger is empty.',
+    + 'the same result once the ledger is empty. Every separator-less ROOT also declares the '
+    + 'subtree spelling dispatch-gates derives from, and declares nothing this gate does not walk.',
   );
   process.exit(0);
 }

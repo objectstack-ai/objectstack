@@ -32,7 +32,7 @@ import type {
  *    NEITHER an id NOR a `where` is refused outright (#4757) — the engine
  *    would hand `deleteMany` an AST over the whole table, and a gate that
  *    resolved no rows for it would be authorizing exactly that. The refusal
- *    reaches this handler through the `dispatchUnscopedMultiDelete`
+ *    reaches this handler through the `dispatchUnscopedMultiWrite`
  *    whole-operation dispatch its registration declares (#9719) — the
  *    per-row dispatch alone can never deliver the shape it refuses.
  *
@@ -229,7 +229,7 @@ export function installAttachmentAccessHooks(
           // (Mirrors #4630's `resolveTargetRows` for sys_comment.)
           //
           // [#9719] Reached through the wired engine ONLY via the
-          // `dispatchUnscopedMultiDelete` whole-operation dispatch declared on
+          // `dispatchUnscopedMultiWrite` whole-operation dispatch declared on
           // this registration (see the registration options below): the
           // per-row contract (#5038/#5574) binds `input.id` on every predicate
           // dispatch — which routes into the by-id branch above — and a
@@ -294,13 +294,20 @@ export function installAttachmentAccessHooks(
         }
       }
     },
-    // [#9719] `dispatchUnscopedMultiDelete` is what makes the #4757 branch
+    // [#9719] `dispatchUnscopedMultiWrite` is what makes the #4757 branch
     // above REACHABLE through the wired engine: the predicate path dispatches
     // per row with `input.id` bound (so the by-id branch shadows the check),
     // and a zero-match predicate dispatches nothing at all — the engine's
     // opt-in whole-operation dispatch is the one call that arrives with no id
     // and the caller's raw `options`, before any row is resolved.
-    { object: 'sys_attachment', packageId: PACKAGE_ID, dispatchUnscopedMultiDelete: true },
+    //
+    // [#9974] The flag was renamed from `dispatchUnscopedMultiDelete` when the
+    // mechanism was ruled onto `beforeUpdate` as well. This guard stays
+    // DELETE-ONLY on purpose: #4757 declares an unscoped-multi refusal for the
+    // delete verb only, and `sys_attachment` registers no `beforeUpdate` guard
+    // at all — the flag is per-registration, so declaring it here and nowhere
+    // else says exactly that. Nothing about this object's accept set changed.
+    { object: 'sys_attachment', packageId: PACKAGE_ID, dispatchUnscopedMultiWrite: true },
   );
 }
 

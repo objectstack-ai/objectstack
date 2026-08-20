@@ -55,6 +55,12 @@ import {
   revokeTargetsCallerSession,
 } from './revoke-session-match-guard.js';
 import {
+  ADMIN_REVOKE_USER_SESSION_NOT_FOUND_CODE,
+  ADMIN_REVOKE_USER_SESSION_NOT_FOUND_MESSAGE,
+  adminMayRevokeUserSessions,
+  anySessionCarriesToken,
+} from './admin-revoke-user-session-match-guard.js';
+import {
   reconcileMembership,
   type MembershipPolicy,
   type ReconcileOutcome,
@@ -1484,6 +1490,24 @@ export class AuthManager {
           // no-existence-oracle property.
           if (ctx?.path === '/revoke-session') {
             await this.assertRevokeSessionIdentifiesRecord(ctx);
+            // fall through — the vendor still performs the revoke itself
+          }
+
+          // ── #10069: the ADMIN revoke that identifies NO record must not ──
+          // report success either. better-auth 1.7.1's `admin/revoke-user-
+          // session` handler calls `deleteSession(ctx.body.sessionToken)`
+          // blindly and answers `200 { success: true }` unconditionally —
+          // measured on this pipeline: zero-match AND already-revoked tokens
+          // both answered success. NOT the #9714 predicate: no ownership
+          // dimension here (the caller is an admin acting on arbitrary
+          // users) — the question is only "does any session carry this
+          // token", and it is asked AFTER the vendor's own permission
+          // question so non-admins keep the vendor's 401/403 and gain no
+          // existence oracle. Before-hook on purpose: an after-hook cannot
+          // change the status. `admin-revoke-user-session-match-guard.ts`
+          // carries the full reading.
+          if (ctx?.path === '/admin/revoke-user-session') {
+            await this.assertAdminRevokeUserSessionIdentifiesRecord(ctx);
             // fall through — the vendor still performs the revoke itself
           }
 
@@ -4508,6 +4532,65 @@ export class AuthManager {
       throw new APIError('NOT_FOUND', {
         message: REVOKE_SESSION_NOT_FOUND_MESSAGE,
         code: REVOKE_SESSION_NOT_FOUND_CODE,
+      });
+    }
+  }
+
+  /**
+   * [#10069] `/admin/revoke-user-session` admission gate — refuse (404,
+   * standard `RESOURCE_NOT_FOUND`) when the supplied token identifies no
+   * session at all, instead of letting the vendor's unconditional success
+   * line answer `{ success: true }` over a delete that dispatched nothing.
+   *
+   * NOT the #9714 predicate: this route has no ownership dimension — the
+   * caller is an admin acting on arbitrary users, so the question is only
+   * "does any session carry this token". And it is asked strictly AFTER the
+   * vendor's own permission question ({@link adminMayRevokeUserSessions},
+   * the vendor's `hasPermission` with the LIVE mounted-plugin options), so
+   * every caller the vendor would refuse falls through to the vendor's own
+   * 401/403 and never learns whether the token exists. Everything else the
+   * guard cannot decide falls through too: a non-string token (the vendor's
+   * zod body schema answers 400), an adapter read failure (never convert
+   * "could not look" into "does not exist"). Full reading:
+   * `admin-revoke-user-session-match-guard.ts`.
+   */
+  private async assertAdminRevokeUserSessionIdentifiesRecord(ctx: any): Promise<void> {
+    const token = ctx?.body?.sessionToken;
+    if (typeof token !== 'string') return; // vendor's body schema answers 400
+
+    let admitted: boolean;
+    try {
+      // The vendor's own session resolution — the exact call adminMiddleware
+      // makes (authoritative: a role graded off the cookie cache could admit
+      // a demoted caller the vendor is about to refuse).
+      const { getAuthoritativeSessionFromCtx } = await import('better-auth/api');
+      const s: any = await getAuthoritativeSessionFromCtx(ctx).catch(() => null);
+      // No resolvable caller → the vendor's adminMiddleware issues the 401.
+      if (!s?.user?.id) return;
+
+      // The vendor's own permission question, with the vendor's own inputs:
+      // the LIVE admin-plugin options (the object the mounted plugin retains)
+      // and its exported defaultRoles as the fallback. A caller this refuses
+      // gets the vendor's 403 — never this guard's 404.
+      const adminOptions = ((ctx?.context?.options?.plugins ?? []) as any[]).find(
+        (p: any) => p?.id === 'admin',
+      )?.options;
+      const { defaultRoles } = await import('better-auth/plugins/admin/access');
+      if (!adminMayRevokeUserSessions(s.user, adminOptions, defaultRoles as any)) return;
+
+      const found = await ctx.context.internalAdapter.findSession(token);
+      admitted = anySessionCarriesToken(found);
+    } catch {
+      // A lookup that did not complete hands the request back to the vendor
+      // unchanged — an engine hiccup must not invent a "not found".
+      return;
+    }
+
+    if (!admitted) {
+      const { APIError } = await import('better-auth/api');
+      throw new APIError('NOT_FOUND', {
+        message: ADMIN_REVOKE_USER_SESSION_NOT_FOUND_MESSAGE,
+        code: ADMIN_REVOKE_USER_SESSION_NOT_FOUND_CODE,
       });
     }
   }

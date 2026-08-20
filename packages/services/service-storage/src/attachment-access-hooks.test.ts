@@ -214,7 +214,7 @@ describe('attachment access — beforeDelete (uploader or parent editor)', () =>
 //
 // A real `ObjectQL` + in-memory driver + this module's installer — the exact
 // path `ql.delete('sys_attachment', …)` takes in production. The unscoped
-// refusal reaches the handler through the `dispatchUnscopedMultiDelete`
+// refusal reaches the handler through the `dispatchUnscopedMultiWrite`
 // whole-operation dispatch its registration declares; the per-row gate keeps
 // firing per matched row; the scoped paths keep resolving. Every refusal here
 // asserts the rows SURVIVED, because the defect this replaces was precisely a
