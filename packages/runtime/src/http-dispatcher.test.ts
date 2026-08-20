@@ -3273,8 +3273,21 @@ describe('HttpDispatcher', () => {
             // What this test pins is unchanged and is the part that matters:
             // the stub is NEVER CALLED, so nothing can read "flow executed"
             // off a flow that never ran.
-            for (const [path, method] of [['', 'GET'], ['', 'POST'], ['trigger/x', 'POST'], ['x/trigger', 'POST']] as const) {
-                const result = await dispatcher.handleAutomation(path, method, { name: 'x' }, AUTHED_CALLER());
+            // [#10145] The caller is per row now. `POST /` is a DEFINITION
+            // write and demands `manage_metadata`, whose gate sits ahead of the
+            // service probe deliberately — so an unentitled caller stops at a
+            // 403 and never reaches the 501 this row exists to pin. Giving that
+            // one row the capability keeps the row measuring what it is named
+            // after; the execution rows keep the ordinary caller, which is
+            // exactly the scope line #10145 drew.
+            const rows = [
+                ['', 'GET', AUTHED_CALLER],
+                ['', 'POST', FLOW_AUTHOR],
+                ['trigger/x', 'POST', AUTHED_CALLER],
+                ['x/trigger', 'POST', AUTHED_CALLER],
+            ] as const;
+            for (const [path, method, caller] of rows) {
+                const result = await dispatcher.handleAutomation(path, method, { name: 'x' }, caller());
                 expect(result.response?.status, `${method} /automation/${path}`).toBe(501);
             }
             expect(stub.execute).not.toHaveBeenCalled();
