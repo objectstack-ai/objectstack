@@ -1,5 +1,373 @@
 # @objectstack/plugin-sharing
 
+## 17.1.0
+
+### Minor Changes
+
+- 04d03c3: fix(security): a deactivated `sys_position` stops conferring sharing-rule record shares (#8710)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable
+  changes. `active` is a ROW property of a `sys_position` record, not a key on any
+  `packages/spec` schema, and no exported surface, stored metadata shape or
+  recipient vocabulary is added, renamed or retired. The change is a runtime read
+  at one call site inside `SharingRuleService`; the remedy for an affected
+  deployment is operational (re-activate a position whose shares are still meant
+  to flow), not a metadata migration. -->
+  
+  **BREAKING for deployments that already deactivated a position named as a
+  sharing-rule recipient.** Their `sys_record_share` rows are revoked on the next
+  evaluation of that rule.
+  
+  #8613 made `sys_position.active` real at the authorization DERIVATION seam: a
+  deactivated position stops carrying its permission sets and its name leaves
+  `context.positions`. A sharing rule reaches users by a **second road that never
+  passes that seam** — `SharingRuleService.expandRecipient` → `PositionGraphService`
+  — so a rule sharing records with `cfo` kept sharing them after `cfo` was
+  deactivated, while the `deactivate_position` dialog promises, unqualified:
+  
+  > Deactivate this position? Users keep their assignment but the position stops
+  > granting permissions until re-activated.
+  
+  A record share is access, so the promise covers it. Maintainer ruling,
+  2026-08-15, verbatim: **"Access-conferring paths filter deactivated positions;
+  addressing paths do not."**
+  
+  **What changes at runtime.** When a sharing rule's recipient is a position, the
+  evaluator reads the `sys_position` catalogue row and, if it is explicitly
+  deactivated, the rule expands to **nobody**:
+  
+  - no new shares are materialised for that position's holders;
+  - the shares it had already materialised are **revoked** on the next
+    reconcile — by `evaluateRule`, by the per-record hook pass, and by the
+    synchronous recipient-axis revoke (#7729) — because a rule that confers
+    nothing has an empty desired set and every existing grant is stale;
+  - the verdict is read with `isRowActive` (`@objectstack/core`), the same
+    predicate #8613 established, so the 1/0 and `'false'` storage shapes every
+    driver produces are judged identically.
+  
+  This is **not** a refactor and **not** a no-op: it changes who receives record
+  shares.
+  
+  **What deliberately does NOT change**, per the same ruling:
+  
+  - **approval ROUTING** keeps reading the raw directory — filtering there is
+    fail-OPEN (an approval step routing to nobody), #8613's carve-out, reaffirmed;
+  - **write gates and blast-radius reads** (`assertAudienceAnchorBindingGate`,
+    `setsBoundToPosition`, the delegated-admin surfaces) stay unfiltered, because
+    dropping a deactivated row there would make a refused binding permitted and
+    narrow a delegate's boundary — access *widening*;
+  - `PositionGraphService.expandPositionUsers`, the ADDRESSING primitive, is
+    untouched: the filter is at the sharing call site, so moving it down into the
+    helper would take the paths above with it. A pin fails if it ever does.
+  
+  **Rows that keep granting exactly as before:** a position whose `active` column
+  is absent or NULL (the predicate is "explicitly deactivated", never "explicitly
+  active"), a recipient name with no `sys_position` row at all (the
+  `sys_member.role` transition source of ADR-0057 D4), and a position whose
+  same-name row was deactivated in *another* organization — `sys_position.name` is
+  unique per organization (#8468), so the flag is read off this rule's own
+  tenant's row.
+  
+  **Cost.** One `sys_position` read per distinct position per evaluator pass,
+  memoised for that pass only (a memo outliving the pass would make a deactivation
+  take effect late). The ruling accepted the extra read explicitly; the sibling
+  seam in #8613 needed none because both tables were already at hand there.
+  
+  **Before upgrading**, list the deactivated positions and check whether any is a
+  sharing-rule recipient whose shares are still meant to flow — re-activate those,
+  or move the grant onto the rule:
+  
+  ```
+  GET /api/v1/data/sys_position?filters=[["active","=",false]]
+  GET /api/v1/data/sys_sharing_rule?filters=[["recipient_type","=","position"]]
+  ```
+- f8537df: A write refused because a federated object's `owner_id` is the platform's phantom anchor now says so, once per object (#8418).
+  
+  **No verdict changes.** `checkEdit` / `checkDelete` stay fail-closed exactly as shipped — this adds a diagnostic and nothing else. Maintainer ruling 2026-08-13 (option C on #8418): keep `deny`, make the refusal visible.
+  
+  What was wrong: on an ADR-0015 federated object with no author-declared `owner_id`, the registry injects the anchor but the platform provisions no column behind it, so the ownership fast path selects `owner_id` off a remote table that does not have it. The SQL driver's recovery ladder DISCARDS a projection naming an unresolvable column and re-runs `select('*')` instead of raising — so `matchesOwnerScope` receives a good row that simply has no `owner_id` key, reads `owner == null`, and refuses. Because nothing threw, `writeGateFailClosed` was never reached and **nothing was logged anywhere**: the operator got a bare 403 with no trace, at every write depth (`org` included — the null-owner short-circuit runs before the scope is consulted). Only a `modifyAllRecords` holder could still write.
+  
+  `SharingService` now emits `PHANTOM_ANCHOR_WRITE_DENY_NOTICE` at `warn` on that path, naming the object, the owner field and the caller, with both remedies in the wording: declare the real remote owner column, or move the object off an owner-scoped sharing model. The constant is exported so a deployment can match on it.
+  
+  Deduped **per object**, for the service's lifetime. The condition is a property of the registered schema, identical for every row and every caller, so a bulk write emits one line rather than one per row and one misconfiguration is not multiplied by the principal count.
+  
+  It fires only on the phantom anchor, never on an ordinary owner-less row: the discrimination is `hasPhantomOwnerAnchor` provenance (is this `owner_id` the platform's injected constant, or a column the author declared?), not `owner == null` and not an `external` test. A federated object with a real declared remote owner column keeps scoping normally and stays silent.
+  
+  The diagnostic cannot cost a write — it returns `void`, its caller ignores it, and a throwing logger is swallowed, so no ordering of schema lookup, latch and logger can move a verdict.
+  
+  Also corrected in passing: this package attributed the driver's non-throwing unknown-column recovery to **SQLite specifically**. That understated it — the projection rung is gated by the driver's single shared `isUnresolvableColumnError` predicate, which spells all three dialects it speaks (`no such column`, `column … does not exist`, and since #8926 `Unknown column '…'`), so the silent refusal reproduced on every supported dialect. Wording only; no driver change.
+
+### Patch Changes
+
+- 4ea921c: Repair the ADR-0090 `sys_role` → `sys_position` rename in the es-ES object
+  translation bundles, and guard it mechanically.
+  
+  The rename half-landed in Spanish: an unreviewed substring find-replace produced
+  two non-words (`Puestoes` as the plural of `Puesto`, and `contpuesto` where the
+  replace ate the unrelated word `control`), while nine further leaves in
+  `plugin-security` and three in `plugin-sharing` were missed entirely and still
+  named the pre-rename concept. In `plugin-sharing` the same picklist key rendered
+  two different ways in one file — `position` was `Puesto` on the sharing rule and
+  `posición` on the record share, and `unit_and_subordinates` read `Rol y
+  subordinados` (naming the removed role concept) against `Unidad de negocio y
+  subordinados` on its sibling.
+  
+  Spanish-facing admins saw `Puestoes` as the object's plural label in navigation
+  and list views, and two different words for one recipient kind across two Setup
+  screens.
+  
+  Two regression guards now cover the classes involved: a malformed-compound and
+  stale-term check on the renamed security objects, and a self-consistency check
+  asserting that a picklist option key shared by several sharing objects renders
+  identically within a locale. Neither needs a reader of the locale to review it.
+- b705a6c: Repair the ADR-0090 `sys_role` → `sys_position` rename in the ja-JP object
+  translation bundle, and extend the mechanical guard to cover it.
+  
+  `sys_record_share.fields.recipient_id.help` still read "...ユーザー/グループ/ロールの
+  ID" — naming the pre-rename `role` concept — while the same bundle already
+  rendered the renamed concept correctly, twice, as `ポジション`
+  (`recipient_type.options.position` on both sharing objects), and the English
+  source for this exact leaf says `position`. Japanese-facing admins saw the
+  stale word in the Setup field-help tooltip for Record Share's `Recipient` field.
+  
+  `recipient-vocabulary-consistency.test.ts` (added when the es-ES half of this
+  same rename damage was repaired) now asserts a ja-JP stale-term rule alongside
+  the existing es-ES one, generalised into one per-locale table so a future
+  locale's rule is one entry, not a parallel `describe` block. The ja-JP pattern
+  excludes `ロールアップ` (rollup) and `ロールバック` (rollback) by lookahead rather
+  than `\b`, which does not bound katakana in JS regex (`\w` is ASCII-only) and
+  would otherwise match nothing at all.
+- fab693b: fix(sharing): `publicSharing.eligibility` binds declared fields through the canonical `materializeDeclaredFields` instead of a local copy (#8489)
+  
+  `share-link-service.ts` carried its own `bindDeclaredFields` — a hand-written
+  mirror of `@objectstack/objectql`'s `materializeDeclaredFields`, named as a copy
+  in its own doc comment. It is retired; `assertEligible` now imports the
+  canonical helper from `@objectstack/objectql/core` (already a runtime dependency
+  of this package), with a spread at the call site because the canonical
+  materialises in place.
+  
+  **This changes eligibility verdicts on exactly one row shape**, and the change
+  was accepted knowingly (maintainer ruling, 2026-08-16). The retired mirror bound
+  a declared field by key PRESENCE (`!(name in record)`); the canonical binds by
+  VALUE (`record[name] === undefined`). They agree on every other input class,
+  including a missing or malformed `fields` map, where both return the record
+  untouched. Where they differ is a declared field held as an own key whose value
+  is `undefined` — a shape `InMemoryDriver` measurably produces (an explicit
+  `undefined` on `create` survives to `find`) and `SqlDriver` structurally cannot
+  (a SQL NULL arrives as `null`).
+  
+  On that shape only, with a declared `status`:
+  
+  | eligibility predicate         | before                         | after                    |
+  |:------------------------------|:-------------------------------|:-------------------------|
+  | `record.status == null`       | 422 `ELIGIBILITY_UNEVALUABLE`  | **link is minted**       |
+  | `has(record.status)`          | 422 `RECORD_NOT_ELIGIBLE`      | **link is minted**       |
+  | `!has(record.status)`         | **link was minted**            | 422 `RECORD_NOT_ELIGIBLE` |
+  | `record.status == 'published'`| 422 `ELIGIBILITY_UNEVALUABLE`  | 422 `RECORD_NOT_ELIGIBLE` |
+  
+  The first two rows widen acceptance: the predicate is now *answered* rather than
+  faulting on a key CEL reads as absent, and on this fail-closed gate a fault was a
+  refusal. The third row is the one that mattered for the decision — it **closes an
+  over-acceptance**. `has()` guards an UNDECLARED key and never an empty value once
+  bindings are materialised, so `!has(record.<declared field>)` is false; the
+  mirror was minting share links there that every other server-side surface
+  refuses. The fourth row keeps its direction and changes only its ADR-0112 `code`.
+  
+  The eligibility pin is rewritten to discriminate (#9085): its previous
+  declared-field case passed with the binder fully ablated, because every seeded
+  row carried the field it claimed was absent. The replacements use a declared
+  field the stored row genuinely does not carry, and fail in opposite directions
+  under ablation.
+- b53d38e: fix(plugin-sharing): stamp the filter-subtree provenance mark at the read merge, so an author's own cross-field refusal stops being redacted on the sharing-composed path (#8430)
+  
+  `#8220` declared the filter-subtree provenance mark and set it at two read-scope
+  merge boundaries — `plugin-security`'s CRUD injection and `service-analytics`'
+  `withReadScope`. `plugin-sharing`'s read path is a **third**: on every read it
+  AND-composes an OWD / record-share visibility filter into `ast.where`, and it
+  stamped nothing.
+  
+  Two marks, and they are not the same job:
+  
+  - **the scopes it injects are marked `'policy'`** — the OWD/record-share read
+    filter, the delegator's intersected filter (ADR-0090 D10) and the
+    `sys_record_share` self-scope (ADR-0111 D5). **No behaviour change**: an
+    unmarked subtree already withheld, so these refusals kept the `#7929`
+    redaction before and keep it now. What changes is that the withhold becomes a
+    *declared* verdict instead of an accident of the mark's absence — which
+    matters because an unmarked node **inherits its ancestor's mark positionally**
+    (`resolveFilterSubtreeProvenance`, innermost wins), so an unmarked policy arm
+    nested inside a vouched subtree would read as the author's.
+  - **the caller's own predicate is vouched `'author'`** immediately before the
+    rewrite that would otherwise make it unrecognisable to every later boundary.
+    This is the one user-visible change: an author's own `{ $field }` refusal on
+    an object with active sharing again names its columns, its operator and its
+    reason, instead of the redacted "operands withheld" text.
+  
+  **The vouch is an identity check, not a heuristic.** The mark is stamped only
+  while `ast.where` is still, by object identity, the `where` the caller handed
+  the engine. If a sibling middleware already composed into it, or the engine
+  rewrote it resolving filter tokens, identity fails and **nothing** is vouched —
+  the tree stays unmarked, and unmarked withholds. The arms of a pure
+  `{ $and: [ … ] }` root are vouched too, because `composeAnd`'s flattening branch
+  spreads that root's arms into a new object and would otherwise drop the vouch
+  out of the tree with it (that shape is what the array authoring form lowers to,
+  so it is the common case, not an edge one).
+  
+  **Fail-closed is unchanged in every direction**, and the pins say so at a real
+  `SqlDriver`: the injected scope still withholds, a policy arm sitting beside an
+  author-vouched arm in the same `$and` still withholds, and a predicate no
+  boundary ever vouched still withholds byte-identically to the policy case.
+  
+  **The write path is untouched.** `buildWriteFilter`'s composition is a different
+  question with different consequences and was not declared by `#8220`.
+  
+  Measured while implementing, and worth recording because the card says
+  otherwise: in a stack that composes **both** plugins, the author vouch was
+  already surviving. `plugin-security` is registered before `plugin-sharing` on
+  both real boot paths and `resolvePluginOrder` preserves insertion order, so
+  security vouches first and its mark — which lives on the caller's object —
+  travels through this composition untouched. The gap this fixes is a stack that
+  mounts `plugin-sharing` **without** `plugin-security`, where nothing else can
+  vouch for the caller.
+- Updated dependencies [56656aa]
+- Updated dependencies [c9f5950]
+- Updated dependencies [d6e80b2]
+- Updated dependencies [07e630e]
+- Updated dependencies [66beee0]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [2782805]
+- Updated dependencies [e43d63a]
+- Updated dependencies [e374b4d]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [03520eb]
+- Updated dependencies [a751f7d]
+- Updated dependencies [eccb8b2]
+- Updated dependencies [650cd3d]
+- Updated dependencies [b735507]
+- Updated dependencies [91c6c28]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [2d0af57]
+- Updated dependencies [420804d]
+- Updated dependencies [716ac9b]
+- Updated dependencies [a38408a]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [27a567d]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [24173e9]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [f8eb736]
+- Updated dependencies [11b779e]
+- Updated dependencies [4e71ae1]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [4dfa369]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [5e2f594]
+- Updated dependencies [e2899f6]
+- Updated dependencies [b6c7690]
+- Updated dependencies [855591f]
+- Updated dependencies [3851f87]
+- Updated dependencies [845e164]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [e1bb0ca]
+- Updated dependencies [326f5de]
+- Updated dependencies [30d3752]
+- Updated dependencies [21995d7]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [6a5e6ad]
+- Updated dependencies [30b1c63]
+- Updated dependencies [7fc01db]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [04f8fdb]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [b2a451f]
+- Updated dependencies [6158146]
+- Updated dependencies [84cb121]
+- Updated dependencies [ca19ee8]
+- Updated dependencies [a675b4d]
+- Updated dependencies [b887013]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [402c125]
+- Updated dependencies [7901b2d]
+- Updated dependencies [7c2f386]
+- Updated dependencies [56bca91]
+- Updated dependencies [b3f9831]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [8a9e7f4]
+- Updated dependencies [3d0ded8]
+- Updated dependencies [44bc51d]
+- Updated dependencies [bbbfcfc]
+- Updated dependencies [1258dca]
+- Updated dependencies [4639cec]
+- Updated dependencies [91c4ff5]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+- Updated dependencies [682b86b]
+- Updated dependencies [6a1b45e]
+  - @objectstack/spec@17.1.0
+  - @objectstack/platform-objects@17.1.0
+  - @objectstack/types@17.1.0
+  - @objectstack/core@17.1.0
+  - @objectstack/objectql@17.1.0
+  - @objectstack/metadata-core@17.1.0
+  - @objectstack/formula@17.1.0
+
 ## 17.0.0
 
 ### Major Changes

@@ -1,5 +1,165 @@
 # create-objectstack
 
+## 17.1.0
+
+### Minor Changes
+
+- 1eb28a1: Retire the five remote content templates from the scaffolder's catalog.
+  
+  `todo`, `compliance`, `content`, `contracts` and `procurement` were delisted
+  from the official ObjectStack template marketplace and are no longer
+  maintained, but the CLI carried its own hardcoded catalog and never learned
+  that: `--help` recommended all five by name with marketing descriptions, and
+  the `Available:` line on a bad `-t` offered them too.
+  
+  - `blank` (bundled, offline) is now the whole catalog, so the help text
+    advertises only what is actually supported.
+  - Asking for one of the five by name — `-t todo` in an old script or tutorial —
+    is refused with a message that says the template was retired, instead of the
+    generic "Unknown template" error that reads as a typo.
+  - The GitHub tarball-fetch path that served the remote templates is removed
+    along with its `tar` dependency; nothing else reached it.
+  
+  Note this corrects the catalog at HEAD only. Already-published versions keep
+  advertising the retired templates until a new version of `create-objectstack`
+  is released.
+
+### Patch Changes
+
+- 4906c90: Fix scaffolded projects describing themselves as the blank template (#9263)
+  
+  `rewriteProjectIdentity` rewrote `id` / `namespace` / `name` in both
+  `objectstack.config.ts` and `objectstack.manifest.json` from the project name,
+  but left `description` untouched — every scaffolded project carried the blank
+  template's own line verbatim ("Minimal ObjectStack environment — a clean
+  slate for building."), confidently wrong rather than empty, and printed by
+  the first command the getting-started flow tells people to run (`os
+  validate`).
+  
+  The scaffolder now drops `description` from both files instead of rewriting
+  it. There is nothing but the project name to derive a replacement from, and a
+  name-derived sentence (e.g. "Support Desk — an ObjectStack environment.")
+  would be a bare restatement of the `name`/`displayName` row already shown —
+  worse than no sentence at all. `os validate` already omits the description
+  line entirely when the field is unset, so a freshly scaffolded project now
+  prints cleanly:
+  
+  ```
+    Support Desk v0.1.0
+  ```
+  
+  instead of
+  
+  ```
+    Support Desk v0.1.0
+    Minimal ObjectStack environment — a clean slate for building.
+  ```
+- f2f09e4: fix(create-objectstack): the scaffolded Dockerfile pins the runtime image to the CLI that builds the artifact, instead of `latest` under a comment saying to pin (#9017)
+  
+  `src/templates/blank/Dockerfile` shipped `FROM ghcr.io/objectstack-ai/objectstack:latest`
+  directly beneath a comment instructing the reader to "pin the tag to the
+  `@objectstack/cli` version in your package.json so the runtime matches the CLI that built
+  the artifact" — an instruction the scaffold itself did not follow. Every app made with
+  `npx create-objectstack` shipped that contradiction from day one, and `docker/README.md`'s
+  tag table already scopes `latest` to quick starts while documenting `X.Y.Z` as the
+  production pin.
+  
+  Measured on scaffolded output rather than the template's bytes, before the fix:
+  
+  ```
+  emitted package.json cli range : ^17.0.0
+  emitted Dockerfile FROM        : FROM ghcr.io/objectstack-ai/objectstack:latest
+  agreement (tag vs cli range)   : DISAGREE
+  ```
+  
+  **The tag is resolved after `install`, from the installed CLI — not from the generated
+  `package.json`.** That file carries a caret RANGE, and the two are not interchangeable:
+  npm resolves `^17.0.0` to the newest 17.x, so pinning the range's floor would ship a
+  runtime image *older* than the CLI that built the artifact — breaking the same promise in
+  a new way. The rolling `:17` tag does match the range's float window but is exactly what
+  the tag table tells production not to use. The resolved version is the only value that
+  makes the sentence true, and it is the rule the repo already applies for this purpose in
+  `.github/workflows/scaffold-e2e.yml` ("Pin the runtime's CLI to the SAME version the
+  generated project actually resolved to — NOT a hardcoded `latest`").
+  
+  **Both halves move together.** Pinning the line while leaving an imperative to pin by hand
+  would relocate the contradiction rather than remove it, so the comment above the `FROM`
+  line is replaced in the same rewrite. With `--skip-install` there is no resolved version:
+  the tag stays `latest` and the comment keeps telling the reader to pin — which is true on
+  that path, because there the user really must do it by hand.
+  
+  The regression proof asserts on **scaffolded output**, never on the template: it scaffolds
+  with the real copy/sync/pin path, plants an installed CLI whose version is deliberately
+  *not* the range's floor (the normal case, and the one that a package.json-derived tag
+  would get wrong), and checks the emitted `FROM` tag against the emitted `package.json`
+  range with a satisfies-check rather than equality.
+  
+  `.github/workflows/scaffold-e2e.yml` now reads the tag it builds its local runtime image
+  under **out of the generated Dockerfile** instead of hardcoding `:latest`. Those were two
+  hand-matched literals; had they skewed, Docker would have quietly pulled the last
+  published image instead of the one built from this checkout, and the job's own stated
+  hermeticity would have been false while it stayed green.
+- 0a5adba: fix(create-objectstack): the blank template's `specVersion` stops shipping eleven majors stale, and the version-time sync covers every declared surface on every template (#9264)
+  
+  The one bundled template declared the platform it targets in **two** places that
+  disagreed by eleven majors:
+  
+  | file | key | was |
+  |:--|:--|:--|
+  | `objectstack.manifest.json` | `specVersion` | `^6.0.0` |
+  | `objectstack.config.ts` | `engines.protocol` | `^17` |
+  
+  `scripts/sync-template-versions.mjs` re-stamped the config key and the template's
+  `@objectstack/*` dependency ranges, and **never opened the manifest at all**. So
+  `engines.protocol` tracked every major bump while `specVersion` sat at the value
+  it held when the script was written — and a green `sync-template-versions` run
+  was never evidence about it, because the script's failure mode was loud for the
+  keys it covered and mute for the key it did not.
+  
+  **This is not confined to the registry contract.** `create-objectstack` copies
+  the manifest into every scaffolded project, rewriting `name`, `displayName` and
+  `namespace` and dropping `description` — it has never touched `specVersion`. So
+  every project scaffolded since v7 was stamped with a `^6.0.0` spec range while
+  installing `@objectstack/spec@^17.0.0`.
+  
+  **The two keys are two facts, and the fix keeps them apart.** `engines.protocol`
+  is the ADR-0087 D1 runtime handshake range and carries the protocol major
+  (`^17`). `specVersion` is documented by `TemplateManifestSchema` as the
+  "Compatible `@objectstack/spec` semver range" and carries the package range
+  (`^17.0.0`) — the same value the script already writes into the template's own
+  `@objectstack/spec` dependency, so the manifest and the `package.json` now state
+  one fact once. They agree on the major only because the spec package's major and
+  the protocol major are kept in lockstep; they are stamped from two different
+  values.
+  
+  Deleting the key was not available: `specVersion` is **required** by
+  `TemplateManifestSchema`, and every shipped manifest is parsed against it by
+  `check:template-manifests`.
+  
+  **Two structural changes, because one-key-one-file coverage is what let this
+  sit:**
+  
+  - the sync script's file list is now **discovered**, not hard-coded — templates
+    are found by walking `src/templates/`, the same way `check-template-manifests`
+    finds the manifests it parses, so a second template is covered on the day it
+    lands;
+  - **every stamp is required**. A template whose file is missing, whose stamp is
+    absent, or whose `package.json` declares no `@objectstack/*` dependency is a
+    hard failure naming the path — never a skip. A skipped stamp is
+    indistinguishable from a synced one in the log, which is the invisibility this
+    fixes.
+  
+  The manifest is rewritten as **text** rather than parsed and re-serialized:
+  `objectstack.manifest.json` keeps `scaffold.variables` compact on one line, and
+  `JSON.stringify(…, null, 2)` would reformat unrelated structure on every release.
+  
+  CI coverage lands as four per-template ratchets in `template-consistency.test.ts`,
+  generalized off `blank` onto the same directory walk — including the invariant
+  that catches this exact class: the manifest's `specVersion` must equal the
+  `@objectstack/spec` range the template actually installs. Either file alone can
+  be self-consistently stale; only comparing them catches a stamp that covered one
+  and not the other.
+
 ## 17.0.0
 
 ### Major Changes

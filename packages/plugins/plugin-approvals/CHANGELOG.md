@@ -1,5 +1,197 @@
 # @objectstack/plugin-approvals
 
+## 17.1.0
+
+### Minor Changes
+
+- 08d6d3c: feat(approvals): read-only approval visibility for users who can read the target record, per object, default OFF (#8652)
+  
+  A new `ApprovalsPluginOptions.recordReaderVisibleObjects` names the objects on
+  which **a user who can READ a business record may also see that record's
+  approval requests and full action history** — read-only. Omitted or empty (the
+  default) leaves visibility exactly as it is today, so an existing deployment
+  sees no behaviour change on upgrade. **This is not a no-op change**: on an
+  object you list, a population that could previously see nothing gains a real
+  read.
+  
+  ```ts
+  new ApprovalsServicePlugin({ recordReaderVisibleObjects: ['exam_sheet'] })
+  ```
+  
+  **Who gains visibility.** Until now the visible set was submitter ∪ current
+  approver ∪ historical actor, with a platform/tenant admin override as the only
+  bypass — so a ledger or supervisor role that holds full read on the record but
+  never appears in the approval itself received `200` with an empty list, and the
+  Console's approval tab never rendered. On an enabled object, that role now sees
+  the record's approvals.
+  
+  **What becomes visible on an enabled object**, stated plainly because the switch
+  is an opt-in decision about confidentiality:
+  
+  - the approval request row, including its `payload` snapshot of the record as it
+    stood at submission time;
+  - the full action history — each actor, their decision, the timestamp, **and the
+    action's comment text** (意见正文);
+  - decision attachments on those actions, which are gated on the same rule.
+  
+  Enable it on objects whose approval commentary the record's readers are meant to
+  see; the comment text is often evaluative, and it is per object precisely so
+  that enabling it for a ledger object does not enable it for anything else.
+  
+  **What does NOT change.**
+  
+  - **Read-only.** No approval action is delivered through this tier. Approve,
+    reject, reassign, recall and comment keep authorizing exactly as before — on
+    the pending-approver slate, the submitter, or admin override — and a viewer
+    admitted by this tier gets `can_act: false`. Seeing a request confers nothing.
+  - **No new permission concept.** The tier is anchored on the existing
+    record-read permission: the service asks the engine to read the record **as
+    the caller**, so ordinary object CRUD and RLS decide. No new role, grant type
+    or policy, and no host-injected visibility hook — a security predicate the
+    platform can neither constrain nor audit was considered and rejected.
+  - **The inbox.** An untargeted list is unchanged. The rule is anchored on one
+    record, so it applies only where a record is named — a list filtered by
+    `object` + `recordId` (what a record page's approval tab sends), or a request
+    loaded by id. A work queue does not become a browse surface.
+  - **Tenant isolation, and everything else about the existing visible set.** The
+    tier only ever adds ids to the participant set; it can never return the "sees
+    everything" verdict and never relaxes an existing constraint.
+
+### Patch Changes
+
+- 66beee0: Guard every authored record-scoped action predicate for the sparse action face, so a list row that did not project the gated column no longer silently drops the button.
+  
+  An action's `visible` / `disabled` predicate binds whatever record the client already fetched — a record-detail read, or a list row carrying only the view's `$select` projection. That binding stays sparse by decision (it is the one record binding the platform does not make total), and CEL aborts the whole expression at key resolution when a key is absent. The abort is fail-closed, so the button is simply not offered — indistinguishable to the user from the gate having said no, and reported nowhere.
+  
+  Every authored predicate on `sys_user`, `sys_invitation`, `sys_member`, `sys_oauth_application` and `sys_approval_request` now opens each `record.*` read with `has()`. The guard is the minimal measured form per predicate, not one blanket rewrite: a bare equality against a literal needs `has()` alone, because CEL compares heterogeneously and answers `false` on a projected-null column rather than faulting.
+  
+  Two predicates change what a user sees, both on `sys_oauth_application`, whose `disabled` column is nullable upstream and therefore null on every application nobody has ever toggled:
+  
+  - `disable_oauth_application` was `!record.disabled`, which faulted on a projected-null row (`!` needs a bool) — so the Disable button was missing from every never-toggled application in the list. It is now `has(record.disabled) && record.disabled != true` and is offered.
+  - `enable_oauth_application` was `record.disabled`, which answered `null` rather than a boolean and left the decision to the renderer. It is now `has(record.disabled) && record.disabled == true`.
+  
+  `sys_approval_request`'s decision levers gate on the attached `record.viewer` block and traverse, so they are guarded at the leaf (`has(record.viewer) && has(record.viewer.can_act) && record.viewer.can_act == true`). Measured, that is the minimal safe form for a nested read: the canonical `has(x) && x != null` conjunction still faults when the block is present but the flag is absent or null, while a leaf `has()` subsumes the parent `!= null` half. Their intended fail-closed behaviour is unchanged — it is now a real `false` instead of an evaluation fault.
+- 7ff5aa2: `sys_automation_run` resolves its organization from the DECLARED `AutomationContext.tenantId` and from no other spelling (cloud#1395).
+  
+  The suspended-run store read `context.organizationId ?? context.tenantId`. `AutomationContext` declares `tenantId` and not `organizationId`, and no producer writes the latter — `RecordChangeTrigger.buildContext` maps the hook session's organization onto `tenantId`, and the runtime's automation domain sets `tenantId` directly. The dead limb was not inert: the one test covering `sys_automation_run.organization_id` fed the phantom key, so the column's only coverage exercised a path production cannot reach and said nothing about the live one. The limb is removed, the fixture speaks the declared contract, and a test now asserts the absence so restoring the alias goes red.
+  
+  Both `sys_approval_request.organization_id` and `sys_automation_run.organization_id` now document the measured attribution defect this uncovered and the negative control that makes it a defect: on a walled single-database boot these two tables stored customer activity with no organization (27/27 and 31/31) while `sys_audit_log` (1669 rows) was correctly attributed on the same boot, because the audit writer resolves the organization from the record the row is ABOUT rather than from the acting context. The write-side repair is not in this change — which column a side-table row should follow is an open contract question, since the audit resolver is scope-pinned to audit stamping by the #8778 ruling. The current behaviour is pinned by test so the fix must promote the assertion rather than quietly satisfy it.
+- Updated dependencies [56656aa]
+- Updated dependencies [c9f5950]
+- Updated dependencies [d6e80b2]
+- Updated dependencies [07e630e]
+- Updated dependencies [66beee0]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [2782805]
+- Updated dependencies [e43d63a]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [03520eb]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [2d0af57]
+- Updated dependencies [420804d]
+- Updated dependencies [716ac9b]
+- Updated dependencies [a38408a]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [27a567d]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [24173e9]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [f8eb736]
+- Updated dependencies [11b779e]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [e2899f6]
+- Updated dependencies [b6c7690]
+- Updated dependencies [3851f87]
+- Updated dependencies [845e164]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [e1bb0ca]
+- Updated dependencies [30d3752]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [7fc01db]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [04f8fdb]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [6158146]
+- Updated dependencies [84cb121]
+- Updated dependencies [ca19ee8]
+- Updated dependencies [a675b4d]
+- Updated dependencies [b887013]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [402c125]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [b3f9831]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [44bc51d]
+- Updated dependencies [bbbfcfc]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+  - @objectstack/spec@17.1.0
+  - @objectstack/platform-objects@17.1.0
+  - @objectstack/types@17.1.0
+  - @objectstack/core@17.1.0
+  - @objectstack/metadata-core@17.1.0
+  - @objectstack/formula@17.1.0
+
 ## 17.0.0
 
 ### Minor Changes

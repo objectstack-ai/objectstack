@@ -1,5 +1,1784 @@
 # @objectstack/metadata-protocol
 
+## 17.1.0
+
+### Minor Changes
+
+- e374b4d: fix(metadata-protocol): arm the three `kernel:ready` platform-table migrations on a self-hosted boot, and keep the read-only CLI commands read-only (#9380)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) One new optional
+  declaration (`runPlatformMigrations`) added to three existing option bags and
+  one Zod boot config. Nothing authorable is renamed, retired or tombstoned, so
+  there is no conversion to register. The behavioural change is that three
+  migrations which never ran on a self-hosted install now run on its serving
+  boot. -->
+  
+  `assembleMetadataProtocol` arms three `kernel:ready` migrations — #5839's
+  `sys_view_definition` active-row index, #8629's `sys_setting` row-identity
+  index, and #8686's seed/API tenancy backfill — behind one gate whose own comment
+  states the intent: *"platform / standalone kernels own their local sys_metadata;
+  per-project (cloud) kernels source metadata from the control plane and must NOT
+  provision these tables locally."* So standalone was always meant to be on the
+  INSIDE of that gate.
+  
+  It never was. The gate **deduced** ownership from `environmentId === undefined`,
+  and `runtime/src/standalone-stack.ts` stamps `'proj_local'` on every boot — so
+  the block never ran on a self-hosted install at all. #8686's own header calls
+  its `kernel:ready` half the one that "repairs an install that is ALREADY in that
+  state, which covers every existing deployment"; on self-hosted it covered none,
+  and those installs kept minting duplicate business identifiers.
+  
+  **The fix is a declaration, not a wider deduction.** `environmentId` is a
+  row-scoping key, not a topology signal — the same lesson `authoringChannel`
+  already records one field above it in the same options bag. A new optional
+  `runPlatformMigrations` is threaded from the host that knows the answer down to
+  the one assembly both protocol mounts share:
+  
+  - `AssembleMetadataProtocolOptions` / `MetadataProtocolPluginOptions` /
+    `ObjectQLPluginOptions` gain `runPlatformMigrations?: boolean`;
+  - `createStandaloneStack` gains the same key and **defaults it to `true`** — a
+    standalone kernel owns its local platform tables, whatever environment id it
+    stamps rows with;
+  - the predicate is exported as `shouldRunPlatformMigrations(environmentId,
+    declared)` so the default lives in exactly one place.
+  
+  **Undeclared means unchanged.** The default is `environmentId === undefined`,
+  the historical deduction, so every caller that does not declare — including
+  cloud's per-project kernels (`createMetadataProtocolPlugin({ environmentId })`)
+  and the control-plane assembly (`createMetadataProtocolPlugin()`) — keeps
+  today's behaviour exactly.
+  
+  **The read-only contract is preserved, and not by keying on deferral.** The
+  CLI's one-shot boot funnel (`bootSchemaStack`) declares
+  `runPlatformMigrations: false` for every `os migrate *` / `os meta *` command.
+  Keying it on `deferSchemaDdl` would have covered only `os migrate plan` and
+  `os migrate duplicates`; `os migrate summary-nulls`, `value-shapes`,
+  `recorded-by`, `resume`, `files-to-references` and `os migrate meta` all boot
+  **non-deferred** and are still dry-run-by-default ("a dry run writes NOTHING"),
+  so that half would have quietly repaired rows behind a report. The serving boots
+  — `os dev`, `os serve`, `os start` — do not come through that funnel and take
+  the default, which is where an install now gets repaired.
+  
+  Proven on real kernels over a real SQLite file carrying the real #8686 damage,
+  not on the predicate: the serving boot merges the split counter and adopts the
+  movable seed row while leaving the colliding one reported-not-renumbered; the
+  deferred and non-deferred one-shot boots both leave the data untouched; and a
+  per-project kernel assembled cloud's way still repairs nothing.
+  `os migrate duplicates`' own byte-identical-after-run pin
+  (`duplicates.integration.test.ts`) still passes unchanged.
+- 40d5b2d: `publishPackageDrafts` (Studio's "publish whole app", `POST /packages/:id/publish-drafts`) now reports the #4463 runtime authoring gate's non-blocking findings on each `published[]` element as an optional `advisories` key — the same element shape and omitted-when-empty discipline as the single-item publish door (#9176). An advisory-free batch's response bytes are unchanged, and `failed[]` elements are unaffected (an `error` finding still aborts the batch). Previously the batch door computed these per-draft findings and discarded them.
+- 13d7864: Dashboard writes are now judged by `validateWidgetBindings` at the runtime publish gate (#7529). A dashboard widget bound to a dataset that resolves to nothing — previously a `200` on both save and publish, failing only as a runtime error on the live board — is refused at **publish** with a located 422 (`INVALID_METADATA`, the offending key path named). Drafts are unaffected: a draft may still hold a forward reference to a dataset not yet authored, and only the draft→active promotion runs the gate.
+  
+  Because rule surfaces are registered per-rule, all six of the rule's error-tier findings now gate a dashboard publish as one reference-integrity class: `widget-dataset-unknown`, `widget-dimension-unknown`, `widget-measure-unknown`, `chart-field-unknown`, `widget-legacy-analytics-unrenderable`, `dashboard-filter-field-unknown`. Warning-tier findings (`table-count-only`, `chart-config-missing`, …) ride the non-blocking `advisories` channel on the save response. Config-authored stacks are unaffected — `os validate` / `os build` / `os lint` already ran this rule; the newly gated population is exactly the `sys_metadata` overlay writes (Studio / REST `/meta` / MCP) that previously bypassed it.
+  
+  The per-write snapshot (`RuntimeStackContext`) now carries the live `datasets` collection so bindings resolve against the real dataset universe — without it every legitimate board would read as dangling. Existing stored rows are untouched (the gate blocks new publishes only), and `OS_ALLOW_UNLINTED_METADATA_WRITES=1` remains the migration-window escape hatch.
+- a8189ae: feat(objectql,metadata-protocol): refuse a dotted filter key whose head is a relation, a formula, or a plain scalar — at both doors (#8371)
+  
+  <!-- adr-0087: registered engine-dotted-filter-refused -->
+  
+  **BREAKING** accept-set narrowing on the FILTER axis, landing after the v17.0.0
+  cut (the lockstep launch-window convention ships it as `minor`; the migration
+  prescription is registered under protocol major 18, where `objectstack migrate
+  meta` users will look).
+  
+  FILTER was the last of the four query axes with no verdict for a dotted name:
+  SORT refuses it (#4256), PROJECTION refuses it at both doors (#7589), while
+  `where: { 'project_id.name': 'Apollo' }` cleared the unknown-field check on its
+  head segment and answered `200` with zero rows. Measured across all three
+  drivers before ruling (#8371): relation-head, formula-head, system-column-head
+  and plain-scalar-head dotted filters return zero rows on `driver-memory`,
+  `driver-sql` and `driver-mongodb` alike — a lookup stores the related record's
+  scalar id, so there is no working capability for this refusal to remove; every
+  answer was a silent empty list indistinguishable from an empty table, and the
+  virtual case answered one unserviceable intent two ways by spelling
+  (`{is_open: true}` refused since #8296, `{'is_open.x': true}` not).
+  
+  **What is refused:** a dotted filter key whose head field is a relation
+  (`lookup`/`master_detail`/`user`/`tree`), a virtual `formula`, or a plain
+  scalar — `400 INVALID_FIELD`, naming the whole offending key, at both the REST
+  ingress (`assertFilterFieldsExist`) and the engine's own filter seam
+  (`assertFilterIsMaterializable`, reached by saved reports, flows and dashboard
+  widgets whose filters never pass the ingress). Both doors judge the head by the
+  shared `@objectstack/spec/data` classification (`classifyDottedFilterHead`,
+  new export), so they cannot drift apart. Precedence mirrors the sort axis:
+  `unknown` > `dotted` > unmaterializable.
+  
+  **What stays accepted:** a dotted path into a structured/JSON head
+  (`{'address.city': 'Beijing'}`) — deliberately unjudged per the ruling, since
+  it genuinely works on two of three backends; array-valued and file heads, for
+  the same reason; the nested-relation OBJECT form `{ owner: { region: 'NA' } }`;
+  and every undotted spelling, byte-identically.
+  
+  ## FROM → TO
+  
+  ```ts
+  // before — 200, zero rows, indistinguishable from an empty table
+  await engine.find('task', { where: { 'project_id.name': 'Apollo' } });
+  
+  // after — 400 INVALID_FIELD naming 'project_id.name', with the remedy:
+  // denormalise the value onto a stored field of the queried object and
+  // filter that (or, to test the relation itself, filter the head field):
+  await engine.find('task', { where: { project_id: apolloId } });
+  ```
+  
+  There is deliberately no automatic rewrite: the platform cannot invent the
+  stored column the remedy prescribes, and it must not join or post-filter
+  instead — the drivers have already applied `limit`/`offset`, so a post-hoc
+  predicate would filter an arbitrary page.
+- b69d0f5: fix(metadata): `PUT /meta/:type` refuses a type name the platform does not have, instead of minting a namespace for it (#8421)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) This narrows when an HTTP endpoint refuses. No authorable key, no stored shape and no spelling changes: `DEFAULT_METADATA_TYPE_REGISTRY` and the URL-spelling map are untouched, so `os migrate meta` has nothing to rewrite. Rows already at rest under an unrecognised type keep their shape, stay readable and stay deletable — the refusal is on the mint path only. #8586's own retirement entry (protocol 18) already carries the declared-kind half of this ruling. -->
+  
+  
+  **BREAKING** accept-set narrowing on a published HTTP surface, landing after the
+  v17.0.0 cut (the lockstep launch-window convention ships it as `minor`). A write
+  that answered `200 {"success":true}` now answers `400 INVALID_REQUEST`:
+  
+  ```
+  PUT /api/v1/meta/fieldz/showcase_task.title
+    before → 200, sys_metadata row persisted with type='fieldz'
+    after  → 400 INVALID_REQUEST, nothing persisted
+  ```
+  
+  `fieldz` — or any typo — was neither a declared metadata type nor a known plural
+  spelling of one, so the boundary classified it as PLUGIN-registered, which every
+  authorization gate is permissive toward by construction. The row was persisted
+  under a type nothing reads and nothing serves, and the caller was told it had
+  succeeded. That silence is the real cost: a metadata-type typo, from a human or
+  from generated code, produced `success: true` and no indication the type is not
+  real.
+  
+  **Why this is only now safe to refuse.** #7894 closed the sibling case (a plural
+  spelling of a type the platform DECLARES) and left this one open on purpose: a
+  static predicate cannot tell `fieldz` from a plugin kind, and the live-registry
+  alternative was measured to be worse than the defect — the live type set is
+  ITEM-POPULATED, so it omits every legitimate kind that has no items yet, which
+  is the state each kind is in immediately before its first create. What changed
+  is the platform, not the boundary's information: #8586 retired
+  `MetadataPluginConfig.additionalTypes` and with it the last channel by which a
+  plugin could DECLARE a metadata kind, so an unrecognised name can no longer be a
+  declaration this refusal has not heard about (maintainer ruling 2026-08-14).
+  
+  **What still passes, pinned in both directions.** Every declared type in
+  `DEFAULT_METADATA_TYPE_REGISTRY`, in canonical and REST-plural spelling; every
+  manifest spelling and the singular each folds to; and the six plugin kinds that
+  have no static registry entry at all — `theme`, `webhook`, `connector`,
+  `sharing_rule`, `analytics_cube`, `rag_pipeline`. `PUT /meta/theme/dark` on a
+  deployment with zero themes is explicitly covered, because that first create is
+  exactly what a live-registry check would have broken.
+  
+  **The refusal is scoped to the door that mints.** Reads still ANSWER: a running
+  kernel legitimately holds live type keys the static contract does not — `data`,
+  `kind` and `package` all enter the registry during an ordinary `registerApp`,
+  and `GET /api/v1/meta/types` lists that live set — so refusing unrecognised
+  names on the read path would answer 400 for types the same service advertises.
+  `DELETE` is untouched for the mirror-image reason: rows minted under an
+  unrecognised type before this change are real, nothing rewrites them on upgrade,
+  and refusing their deletion would turn the accumulation this fixes into an
+  accumulation nobody can clear.
+  
+  **…but one published ADVERTISEMENT narrows with it, and that is a second
+  behaviour change worth reading on its own.** `GET /api/v1/meta/types` keeps
+  listing every live type, and every entry keeps every field — what changes is the
+  VALUE of one boolean:
+  
+  ```
+  GET /api/v1/meta/types  →  entries[] where type ∈ {policy, data, package, kind}
+    before → allowRuntimeCreate: true
+    after  → allowRuntimeCreate: false
+  ```
+  
+  The listing synthesised `allowRuntimeCreate: true` for every live type with no
+  static registry entry, on the same expired premise as the write door: a name the
+  registry does not carry might be a kind some plugin declared. It now derives that
+  flag from the SAME predicate the mint door enforces, so the two endpoints agree
+  by construction instead of via two rules maintained apart. Nothing ever honoured
+  a runtime create on those four — they are internal bookkeeping (seed datasets,
+  package rows, kind descriptors) — so the advertisement was a promise the platform
+  did not keep, which is the same defect this card is about, relocated to the read
+  door. Direct precedent: `api` declared `allowRuntimeCreate: true`, the runtime
+  never honoured it, and the 2026-08-07 ruling removed the declaration rather than
+  converging the read path onto it.
+  
+  ⛔ The six plugin kinds with no registry entry — `theme`, `webhook`, `connector`,
+  `sharing_rule`, `analytics_cube`, `rag_pipeline` — are **not** affected: they are
+  in the static spelling contract, stay advertised `allowRuntimeCreate: true`, and
+  stay mintable. A UI reading this field (Setup → Metadata, the Studio designers)
+  therefore loses create affordances on exactly the four types whose creates were
+  already refused, and keeps them everywhere else.
+  
+  **The premise behind both halves is a CURRENT posture, not a closed door.**
+  Maintainer ruling, 2026-08-15, verbatim and untranslated:
+  暂时不考虑让插件申明新的元数据类型 — plugins do not declare new metadata types
+  *for now*. That word is recorded deliberately: plugin-declared kinds were
+  considered and deferred, not ruled out. If they are ever wanted, the two sites
+  that encode the deferral name it and its date in place —
+  `getMetaTypes()`'s synthesis and `isRuntimeCreateAllowed` in
+  `@objectstack/metadata-protocol` — so the decision is findable rather than
+  re-derived from the code's silence.
+  
+  **Two shapes reaching the mint door are exempt, and each is a fact about the
+  request rather than a claim the caller makes.**
+  
+  1. *The COMPOUND arity carries an OBJECT name in the `:type` segment.*
+     `PUT /api/v1/meta/lead/views/all_leads` is `type='lead'`,
+     `name='views/all_leads'` — one operation reaching one save, the shape both
+     the runtime dispatcher and the REST route document verbatim. `lead` is an
+     object, i.e. runtime data no static contract can enumerate, so a type verdict
+     applied there would refuse every object name that is not coincidentally a
+     metadata type. The ruling is about metadata TYPE names like `fieldz`.
+     ⚠️ Residue, stated rather than hidden: `PUT /meta/fieldz/a/b` is therefore
+     still accepted, because at that arity `fieldz` is a claim about an object and
+     the only way to check it is the live-registry lookup this card ruled out.
+  2. *A namespace that already exists is not being minted.* `duplicatePackage`
+     re-saves every row of a package under a new name, taking each type from the
+     stored row — measured: a package holding one pre-existing residue row
+     answered `{success: false, copiedCount: 0, failedCount: 1}`, i.e. could not
+     be duplicated at all. That contradicts the `DELETE` reasoning above, so the
+     store (never the request) exempts a type that already has rows. The probe
+     runs only once the refusal has already fired, and a store that cannot answer
+     refuses — a fresh deployment has no residue to protect.
+     `migrate meta --stored` was read as a third victim and measured NOT to be
+     one: an unrecognised type has no manifest collection, hence no ADR-0087
+     chain, hence no notice, so such a row is reported `canonical` and the mint
+     door is never reached.
+  
+  **What breaks.** A caller creating metadata at runtime, at the simple arity,
+  under a type name that is in neither half of the static spelling contract and
+  has no rows already. That set is **not** empty in this repo — measured on
+  `objectql`, `runtime` and `rest`, three in-tree fixtures minted `trigger` (a kind
+  ADR-0088 retired outright), `policy`, and a synthetic `my_plugin_kind`. All three
+  are corrected here rather than exempted, and each for its own reason: the
+  `trigger` specimens were debt independent of any ruling (a retired kind cannot
+  demonstrate a live tier, and they were green only through the hole this card
+  closes), `policy` becomes a refusal case of its own, and #7894's control keeps
+  its `metaUrlSpellingRefusal` claim while its boundary expectation follows the
+  narrowing. An out-of-tree plugin that made its kind live by registering an item
+  of it, and then accepted runtime writes to that kind through `/meta`, needs its
+  spelling in the contract; there is no declared-kind channel to register one
+  through today — that is the trade #8586's retirement made, and the `暂时` above
+  is what makes it revisitable.
+  
+  `@objectstack/spec` gains one export, `unrecognisedMetaTypeRefusal`, alongside
+  the #7894 verdict it deliberately does not merge with: one says *you spelled a
+  declared type wrongly* and can name the replacement, the other says *there is no
+  such type* and never guesses. The residue pin #7894 left behind
+  (`metadata-url-spelling.test.ts`, the case that asserted `fieldz` was refused by
+  nobody) is **flipped, not deleted**. ⚠️ #7894's positive control keeps its own
+  claim intact — `metaUrlSpellingRefusal` still cannot refuse a kind that is a
+  misspelling of nothing, which is what makes that control true by construction —
+  but the BOUNDARY it drives now refuses six of the twelve names it exercises,
+  and that case says so in place rather than leaving it to inference.
+- 09a6eee: The publish door now reports the runtime authoring gate's advisory findings (#9176). `POST /api/v1/meta/:type/:name/publish` carries the same optional, omitted-when-empty `advisories` key the save door already carries (#4463 D1/D3, #4717): `PublishMetaItemResponseSchema` declares it (`RuntimeAuthoringIssueSchema` elements, declared once in `@objectstack/spec`), and `publishMetaItem` attaches the findings the promotion-time gate run returns instead of discarding them. A clean publish's response bytes are unchanged — the key is present only when at least one `warning`/`info` finding was raised; `error` findings still refuse the promotion as the 422 envelope. This matters most for Studio / MCP / AI authors, whose designer takes draft-then-publish on every edit and has no CLI to surface the same findings.
+- 6f5a449: The runtime publish gate judges a package write against that package's own closure (#9612)
+  
+  The gate handed every rule the tenant's **entire** `objects` collection on every
+  publish. That is the wrong validation unit, not merely a large one: a tenant
+  that has grown to hundreds of objects is many packages, and judging one
+  package's write against all of them asks a question nobody wanted answered.
+  Per the maintainer's ruling, the unit is now the package —
+  「客户开发开发,校验是否也应该基于软件包」·「当然这里面要考虑系统对象」.
+  
+  `buildRuntimeWriteSnapshots` accepts an optional `packageScope`
+  (`{ packageId, dependencies }`) and reduces `objects` to that closure:
+  
+  - the package being written;
+  - the transitive closure of its **declared** `manifest.dependencies` — a
+    package's declared dependencies bound what it may reference, so this is a set
+    the platform computes exactly rather than estimates;
+  - platform / system objects, **unconditionally** — a package legitimately
+    references `sys_*` objects it never declares, and a closure that dropped them
+    would report unresolved references that are not there;
+  - rows carrying no package provenance (tenant-authored overlays), because
+    nothing declares what they may reference and so nothing bounds them.
+  
+  `ObjectStackProtocolImplementation` resolves that scope from the package
+  registry and passes it through `evaluateRuntimeAuthoringGate`.
+  
+  **A write that names no package, or names one the registry cannot produce,
+  narrows nothing** and is judged exactly as before. That direction is the whole
+  design: an unresolvable package buys a write *more* validation input, never
+  less. There is no branch that skips rules, and none that skips them past a
+  size.
+  
+  One behaviour change follows from the unit being right: a **package-scoped**
+  write that references an object in a package it never declared a dependency on
+  is now judged against a closure that does not contain it, so the reference is
+  reported. That is the ruling's intended consequence — such a reference is not
+  resolvable by declaration — and it applies only to writes that state a package.
+  
+  Also exported: `narrowObjectsToPackageClosure` and the `RuntimePackageScope`
+  type from `@objectstack/lint` and `@objectstack/lint/runtime`, and
+  `isSystemObject` from the security-posture rule module so the closure and the
+  rules share one reading of what "system" means rather than two.
+- a4c11ad: Derive the metadata reference graph from the type schemas instead of curating it by hand
+  
+  `GET /api/v1/meta/:type/:name/references` — the admin "Used by" panel, rendered
+  immediately before a rename or a delete — was driven by a hand-written table of
+  seven target types and forty dotted paths. Measured against the schemas it was
+  supposed to describe, **34 of those 40 paths named properties no metadata type
+  declares**: `app.navItems[]` / `app.tabs[]` (the schema declares `navigation`
+  and `areas`), `agent.tools[]` (removed in `@objectstack/spec` 17),
+  `permission.objects[].name` (a name-keyed record, not an array),
+  `object.fields{}.referenceTo` (the field property is `reference`),
+  `dashboard.widgets[].view`, `page.viewName`, and every path the table listed for
+  `flow`. Five of its seven target types therefore answered `{ references: [] }`
+  unconditionally, on every deployment, while appearing to be covered — and an
+  empty panel reads as "nothing depends on this, safe to delete".
+  
+  Coverage is now derived at boot from `DEFAULT_METADATA_TYPE_REGISTRY` and each
+  type's Zod schema, so a newly declared metadata type arrives covered instead of
+  waiting for someone to remember it. Seventeen target types now resolve real
+  reference sites, including `permission`-to-object grants (through the record
+  key, which the old path grammar could not express), `translation`, `dataset`,
+  `action`, `report`, `doc` and `datasource`, plus flow-node references such as
+  `subflow`. References nested inside recursive containers — a view named from a
+  third-level app navigation group — are found at any depth, which no finite path
+  list could do.
+  
+  No wire change: the response shape, status codes and error envelope are
+  untouched. The `path` and `kind` values now describe where the reference was
+  actually found rather than which table row matched.
+  
+  Two gaps are deliberately declared rather than papered over: `external_catalog`
+  resolves no schema, so its references are not computable and it is named in the
+  derivation's `unwalkableSourceTypes` (pinned by a test, so the set cannot grow
+  silently), and reference properties whose name does not spell their target —
+  `FieldSchema.reference` is the one carried — need a producer-side annotation to
+  become derivable.
+- ad217b1: fix(metadata-protocol): compile the seed-tenancy backfill's statements for the connected dialect, so they run on MySQL (#9381)
+  
+  `seed-tenancy-backfill.ts` quoted every identifier the ANSI way (`"x"`) on every
+  dialect. MySQL does not run with `ANSI_QUOTES` — measured on a live MySQL 8.0.46,
+  whose `sql_mode` is
+  `ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION`,
+  and nothing in `driver-sql` sets one — so `"x"` is a string literal there and all
+  seven statements failed with `ER_PARSE_ERROR`. The repair for #8686 therefore
+  never ran on MySQL, silently: a migration must not fail a boot, so every call site
+  turns the failure into a warning and the symptom was a skipped repair in the log
+  rather than an error.
+  
+  The statements are now compiled for the driver actually connected, and the seam
+  carries the dialect with it (`resolveSeedTenancySeam` returns `{ exec, client }`;
+  `backfillSeedTenancy` takes that pair) so a caller cannot lose it. Two further
+  MySQL-only defects in the same statements, both measured on the same server, are
+  fixed with it: `last_value` is a reserved word on MySQL 8.0 and is now quoted
+  wherever it is unqualified, and the stamp's exclusion sub-SELECTs go through a
+  derived table because MySQL refuses `UPDATE t … (SELECT … FROM t)` with
+  `ER_UPDATE_TABLE_USED`. SQLite and PostgreSQL keep the exact ANSI spelling they
+  had (both re-verified live).
+  
+  `resolveSeedTenancyExec` stays exported and unchanged for callers that resolve the
+  dialect themselves; `backfillSeedTenancy` now takes the seam object instead of a
+  bare exec.
+
+### Patch Changes
+
+- 5047cb8: fix(metadata-protocol): scope the metadata audit read to the caller's organization (#8747)
+  
+  `ObjectStackProtocolImplementation.auditMetaItem` declared
+  `organizationId?: string | null` and never read it. The comment directly above
+  its query described the filter it would have built — "include rows for the
+  specific org AND env-wide (`organization_id IS NULL`) rows" — while the `where`
+  was exactly `{ type, name }`. The parameter was dead on the caller side too:
+  `GET /api/v1/meta/:type/:name/audit` never passed one.
+  
+  The consequence was a cross-tenant disclosure, measured rather than inferred:
+  three saves of one view name under two organizations and env-wide, then one
+  `auditMetaItem({ type, name })` read, returned all three organizations' rows —
+  and with each row its `actor`, `note`, `lock_state`, `code`, `operation`,
+  `source` and `request_id`. Nothing compensated lower down. The driver's tenant
+  wall never engaged, because it is armed only from an execution context this
+  read did not pass; the security plugin's Layer 0 never engaged, because the
+  middleware short-circuits on a principal-less call long before the field gate
+  that would have carried it; and no tenancy posture would have supplied the
+  scope either. The route carries no capability gate — unlike its `PUT` twin,
+  which gates on `manage_metadata` — so the reachable cohort was any
+  authenticated principal of any tenant, on the published `meta.getAudit` SDK
+  surface.
+  
+  The query now builds the described filter: rows for the caller's organization
+  plus env-wide (`organization_id IS NULL`) rows, and nothing else. The env-wide
+  limb is load-bearing rather than defensive — the REST `PUT /meta/:type/:name`
+  door passes no organization, so every row it writes is stamped
+  `organization_id: null`, and an equality-only filter would have blanked the
+  audit tab on those deployments instead of scoping it. A read that resolves no
+  organization is fail-closed onto the env-wide rows, symmetric with what an
+  org-less write produces, so omitting the parameter is no longer a skeleton key.
+  
+  The REST route supplies the organization from the execution context it already
+  resolves for 40-plus handlers, adding no new organization-resolution plumbing
+  to `packages/rest`. The same call also stopped passing `environmentId`, which
+  the request type never declared and the method body never read; environment
+  scoping is unaffected, since it comes from which protocol instance is resolved
+  rather than from the request payload.
+  
+  Behaviour change worth stating plainly: a caller that previously saw another
+  tenant's metadata audit rows for a same-named item no longer sees them. Own-org
+  and env-wide rows are unchanged.
+- c766ec3: refactor(metadata-protocol,rest,runtime): one declared shape for the `protocol.deletePackage` seam, imported by both doors (#9960)
+  
+  `deletePackage` had **three** independent statements of its own contract, and
+  they did not agree:
+  
+  | site | what it said |
+  |---|---|
+  | `packages/metadata-protocol/src/protocol.ts` (the producer) | an inline structural type on the method — `packageId`, `organizationId?`, `allTenants?`, `actor?`, `keepData?` |
+  | `packages/rest/src/package-routes.ts` (direct-mount option) | `{ packageId; actor?; allTenants? }` — named **neither** `organizationId` **nor** `keepData`, and its response omitted `deleted` |
+  | `packages/runtime/src/domains/packages.ts` (dispatcher twin) | nothing at all — it reached the verb through `(protocol as any)` |
+  
+  The twin routinely sent exactly the two keys the REST option's type could not
+  express, and the only reason that was not a compile error was the cast.
+  
+  `organizationId` is the member that makes this load-bearing rather than
+  cosmetic: the protocol refuses a call naming neither it nor `allTenants`
+  (`TENANT_SCOPE_REQUIRED`, 400), so it is precisely the key whose presence
+  decides an uninstall's blast radius — and it was the key one of the two doors
+  had no word for.
+  
+  **What changes:** `DeletePackageRequest` and `DeletePackageResponse` are
+  declared once at the producer and exported from `@objectstack/metadata-protocol`
+  (the only user-visible half of this change — two additive type exports); both
+  consumers import them, and the `as any` seam is gone. `@objectstack/rest` also
+  gains three compile-time pins over its option, in compiled source rather than a
+  test file, so a later hand-rolled restatement fails `tsc` instead of drifting
+  green.
+  
+  **What does not change:** nothing about what the verb accepts or returns. The
+  members are identical to the ones the implementation already had, the live call
+  sites send the same keys, and the emitted JavaScript of both consumers is
+  unchanged. The member stays optional at both seams and the runtime's
+  `typeof … === 'function'` capability probe stays — the `protocol` service slot
+  is deliberately uncontracted, the spec's `PackageProtocol` does not declare this
+  verb, and registrants carrying no `deletePackage` are real.
+  
+  No `packages/spec` declaration: minting protocol surface for a verb with zero
+  external consumers is a spec-seat decision nobody has asked for.
+- 177442d: fix(metadata-protocol): `getMetaDiagnostics` stops publishing an unreadable metadata store as "0 problems" (#8855)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) One `catch` inside one
+  method is narrowed from untyped to "rethrow the 503 the producer already
+  classified". No authorable key is added, renamed, retired or tombstoned, no
+  stored shape changes, and the response type is byte-identical — so there is
+  nothing for a conversion entry to convert. -->
+  
+  `GET /api/v1/meta/diagnostics` sweeps every metadata type and publishes four
+  numeric facts about the corpus. Its per-type read was wrapped in an **untyped**
+  `catch` that `continue`d, and the comment above it named a benign reason ("type
+  not listable in this kernel scope") that is genuinely real. The catch took
+  everything else with it — including the one error the callee exists to raise.
+  
+  `getMetaItems` classifies a failed `sys_metadata` read by error **type** and
+  throws a 503 (`SERVICE_UNAVAILABLE`) for every read failure that is not "the
+  table has not been provisioned yet" — the discrimination #5532 introduced so an
+  outage would stop looking like emptiness. `getMetaDiagnostics` caught that 503
+  back into emptiness one layer up, then published the emptiness as a **number**.
+  
+  **Measured on `origin/main` @ `8664a2c99` before the fix**, prediction written
+  down first and matched exactly. With an engine whose every read rejects:
+  
+  ```
+  [outage: connect ECONNREFUSED 10.0.0.5:5432]     RESOLVED
+    total=0  scannedTypes=26  scannedItems=0  Object.keys(stats).length=0
+  [benign: SQLITE_ERROR: no such table: sys_metadata]  RESOLVED
+    total=0  scannedTypes=26  scannedItems=0  Object.keys(stats).length=26
+  ```
+  
+  Two user-visible harms from one `catch`, and the benign run is what makes them
+  legible — it is the same payload minus the `stats`:
+  
+  - `stats[t]` is never written, so an unreadable type is **absent** from the
+    response rather than zero. The Studio directory tile the field's own doc names
+    loses the type, byte-shaped like an environment that declares none of it.
+  - `total` counts entries that **failed validation**, and a store nobody can read
+    contributes none — so the endpoint whose whole job is reporting problems
+    answered `total: 0` at the exact moment it could read nothing. Green was the
+    failure mode.
+  
+  `scannedTypes` reported the full 26 in both runs: it is computed from the intent
+  (`targetTypes.length`, fixed before the loop) and never decremented on
+  `continue`.
+  
+  **The fix narrows the catch; it does not delete it.** A 503 arriving from the
+  read is rethrown **unchanged** and the sweep fails loudly (ADR-0110 D3: a miss
+  and an outage are different facts with opposite dispositions). Every other
+  failure still skips that one type, so a kernel scope that cannot enumerate one
+  type does not fail the whole governance sweep.
+  
+  **No response field was added.** A per-type degradation marker would be a
+  public-surface addition, and the payload type is unchanged.
+  
+  The envelope is **propagated, not rebuilt**: re-running the driver-error
+  classification here would re-wrap an already-shaped 503 in a second one and
+  displace the driver error riding as `cause` — the object `logWithheldServerFault`
+  prints for the operator. The REST boundary needs no change: the handler already
+  routes thrown errors through `handleRouteError`, which preserves the 503.
+  
+  The pin carries the discriminating control in the same file: an unprovisioned
+  `sys_metadata` still answers benignly with every type present at `count: 0`, a
+  type that is genuinely not listable is still skipped at the cost of one type,
+  and a healthy store still counts its rows — while the outage cases throw. "0
+  problems" is the right answer in the benign cell, and it is exactly the answer a
+  blanket change would have kept producing in the wrong one.
+- 950bd94: perf(metadata-protocol): `diffMetaItem` stops awaiting a `historyMetaItem` read it discarded, halving the history round trips on the live diff endpoint (#8798)
+  
+  `diffMetaItem` opened by awaiting a full `historyMetaItem` read, mapped it into a
+  `versions` array, and threw it away (`const _used = versions; void _used;`) while
+  the read it actually uses ran a few lines below through the engine. Every request
+  to the routed `GET /api/v1/meta/:type/:name/diff` paid for two reads of
+  `sys_metadata_history` where one is used.
+  
+  Diff bodies are unchanged. The authorization gate the discarded call passed
+  through never reached this function's output: `historyMetaItem`'s early return
+  answers `{ events: [] }` for a type that is neither `isOverlayAllowed` nor
+  `isRuntimeCreateAllowed`, without throwing and without touching the engine, and
+  `diffMetaItem` reads the history rows directly — so the five gated-shut types
+  (`field`, `job`, `api`, `capability`, `agent`) were already served a full diff
+  regardless.
+  
+  One behaviour change, on the outage path only. The discarded call was unguarded,
+  so an unavailable `sys_metadata_history` was fatal for gated-open types while
+  gated-shut types fell into the `try`/`catch` below it and answered an empty diff
+  — one outage, two answers, decided by an authorization gate unrelated to reading
+  history. Every type now takes the `catch`, which is the function's only stated
+  intent for that failure. Whether swallowing that outage is the right answer at
+  all is tracked in #8833.
+- 3043e98: fix(metadata-protocol): `diffMetaItem` folds its type at the request boundary and stops serving a history outage as an empty diff (#8868, #8833)
+  
+  `GET /api/v1/meta/:type/:name/diff` is a routed live endpoint with a
+  caller-supplied `:type`. Two independent defects in that one method, fixed
+  together because they land in the same function.
+  
+  **#8868 — the canonical fold.** `diffMetaItem` was the NINTH `/meta` entry point
+  on this URL family and the last one still deriving its type key from
+  `PLURAL_TO_SINGULAR`, the manifest-COLLECTION map that #7894 moved this boundary
+  off (#8769 routed `publishMetaItem`, #8819 routed `rollbackMetaItem`). It now
+  routes through `canonicalizeMetaRequestType`, which changes three things:
+  
+  - **the answer.** For the four MANIFEST-ABSENT types — `field`, `seed`,
+    `external_catalog`, `translation`, legitimately absent from that map because
+    they are not stack collections — a plural spelling stayed plural all the way
+    into the `sys_metadata_history` query, matched no row, and the endpoint
+    answered a well-formed **empty diff** (`added: []`, `removed: []`,
+    `changed: []`) for an item that does have history. Not a refusal and not an
+    error: a silent "nothing changed". Manifest-present types (`views` → `view`)
+    folded already and were never affected.
+  - **unrecognised spellings.** The #7894 boundary refusal never ran on this verb,
+    so a spelling like `viewes` was forwarded to the plugin path instead of
+    refused. It is now `400 INVALID_REQUEST`, naming both accepted spellings. The
+    refusal stays narrow by construction: a name that reaches for no declared type
+    (a possible plugin kind) is still served.
+  - **the echoed `type`.** The response echoed the caller's spelling back while the
+    read had used a different key. It now reports the canonical spelling — the
+    precedent `saveMetaItem` and `deleteMetaItem` already set, both of which
+    `return { type: request.type }` after their own fold.
+  
+  **#8833 — the swallowed outage.** The history read sat in a `try` whose `catch`
+  was empty apart from a comment. `histRows` stayed `[]` and the code below read
+  that never-filled accumulator as a real answer, so a `sys_metadata_history`
+  outage was served as a successful 200 with an empty diff — byte-identical to
+  "these two versions are the same", with no log line either. An operator
+  comparing versions before a rollback, and any SDK or agent reading this
+  endpoint, acted on "unchanged" with full confidence.
+  
+  Per the maintainer ruling on #8833, the `catch` now routes through the
+  platform's existing discrimination, `rethrowUnlessMetadataStoreUnprovisioned`:
+  
+  - a **genuinely absent table** — a minimal deployment that never provisioned
+    history — keeps its benign empty answer, so first boot does not explode;
+  - **every other read failure** (connection drop, timeout, permission denial,
+    query error) propagates `503 SERVICE_UNAVAILABLE`, carrying the driver error
+    as `cause`. ADR-0110 D3: a miss and an outage are different facts. This is the
+    same guard #5532 restored for `getMetaItems`.
+  
+  ⚠️ **Behaviour change worth reading before upgrading.** This ADDS loudness where
+  there was none. PR #8841 had removed the last path that threw here, so as of
+  that change the outage was silent for *every* type; a diff whose history store
+  is unreachable now returns 503 where it previously returned 200 with an empty
+  diff. A diff against a deployment that never provisioned `sys_metadata_history`
+  is unaffected. No response field was added — a `historyUnavailable` key was
+  considered and declined.
+- 7b3c033: Publishing a package no longer promotes another package's draft row.
+  
+  `publishPackageDrafts` lists a package's pending drafts with
+  `listDrafts({ packageId })`, but the promotion then re-resolved each row without
+  the ADR-0048 `package_id` dimension. Overlay rows are keyed by
+  `(org, type, name, package_id)` precisely so two installed packages shipping the
+  same name keep separate rows, so that lookup could not tell them apart: with two
+  packages holding drafts for the same `(type, name)`, publishing package A
+  promoted package B's unreviewed draft to active, drained B's draft row, recorded
+  it under A's ADR-0067 commit and ADR-0010 audit row, and left A's own edit still
+  pending — while answering `success: true`. Which of the two rows won was
+  driver-order dependent, so on a real driver this was a coin toss per publish.
+  
+  The listed row's `package_id` is now threaded through to the promotion, which
+  resolves and drains the draft under the same key it was listed by. Publishes
+  that name no package (`publishMetaItem`) are unchanged.
+- 14935ab: Refuse `GET /api/v1/meta/field/<object>.<field>/references` instead of clearing it for deletion
+  
+  A `field` metadata item is addressed by the composite key `<object>.<field>` (e.g. `account.owner`), but every metadata property that names a field holds the **bare** field name — `view.list.columns[].field`, `dataset.dimensions[].field`, `object.validations[].field`, `object.fields{}` and 150 further non-recursive paths across nine source types. The two sides are drawn from disjoint vocabularies, so the reference scan answered `{ references: [] }` for every field, on every deployment, regardless of real usage.
+  
+  The admin "Used by" panel renders that empty answer verbatim as *"Nothing in the metadata graph points at this item. Safe to delete."* — an unanswerable question shown as a positive clearance, on the screen where someone decides to delete.
+  
+  `findReferencesToMeta` now refuses a `field` target with `501 NOT_IMPLEMENTED` in the ADR-0112 envelope, carrying the answerable alternative (`GET /api/v1/meta/object/<object>/references`). Per ADR-0110 D3, a miss and a fault are different facts. Nothing is added to the success response, and no new error code is introduced — this is the same code the route already returns when the protocol cannot compute the graph at all.
+  
+  Every other target type is unaffected: a genuine "nothing points at this item" still answers `{ references: [] }`.
+- fd6bdf8: Declare `saveMetaItem`'s missing-item refusal as a real ADR-0112 envelope: `400` / `INVALID_REQUEST`, was an undeclared throw served as `500 INTERNAL_ERROR`.
+  
+  `PUT /api/v1/meta/:type/:name` unwraps the `{ item }` / `{ metadata }` envelope shapes before calling the protocol, so a caller sending `{"item": null}` or `{"metadata": null}` reached a guard that declared neither `code` nor `status` — the only refusal in the method that did not. With no status to read, the REST boundary defaulted to a server fault, so an authoring mistake was reported as `500 INTERNAL_ERROR` and the guard's own sentence was withheld by the ADR-0112 disclosure rule and replaced with a generic fallback. Callers now receive `400` with the refusal quoted and the remedy named.
+  
+  Unchanged: a missing, empty or literal-`null` request body never reached this guard and still answers `422 INVALID_METADATA` from the per-type schema parse. No new error code is introduced — `INVALID_REQUEST` is already registered to this package in the ADR-0112 ledger, and is what the structurally identical opening guard in `rollbackMetaItem` already uses.
+- 29d055b: Refuse a non-canonical metadata `type` at the SchemaRegistry overlay mint door
+  
+  `hydrateOverlayIntoRegistry` — the one choke point boot hydration, the read-side
+  hydration and the write-through all funnel through — minted registry entries under
+  whatever `type` spelling it was handed, with no fold and no assertion. It now asserts
+  the spelling is canonical and refuses with `REGISTRY_TYPE_NOT_CANONICAL` (status 500)
+  when it is not, so an entry can no longer be minted into a second registry namespace
+  that no canonical read, listing or declaration lookup can reach.
+  
+  Four of the six producer routes already folded at the boundary. The two that did not
+  (boot hydration and `revertCommit`) fold through the manifest-collection map, which
+  omits the types that are not stack collections — so it resolved the plurals that were
+  never the hazard and passed through the ones that were. Reachable only from metadata
+  rows written before the `/meta` URL boundary began folding; such a row is now reported
+  loudly (counted and named at boot, warned on the write-through) instead of silently
+  registering under its stored spelling.
+  
+  Deliberately an assertion rather than a fold: folding here would honour, process-wide,
+  the override that the canonical `/meta` door refuses.
+- 11b779e: Declare `MetadataProtocol.getMetaItemLayered` — the layered three-way diagnostic read (`GET /api/v1/meta/:type/:name/layers`) now appears on the protocol interface, typed against the already-declared `GetMetaItemLayeredRequestSchema` / `GetMetaItemLayeredResponseSchema`, so callers no longer reach the verb through `any`. Declared optional like its `getMetaItemCached` / `deleteMetaItem` siblings: a declared-surface catch-up to a shipped verb, not a new capability.
+  
+  In `@objectstack/metadata-protocol`, the implementation's inline return-type annotation for `getMetaItemLayered` drops its dead `'overlay'` arm on `lockSource` and annotates with `MetadataLockSource` directly — the only producer feeding that field on the layered read path is `resolveLockState`, whose return is already typed `MetadataLockSource | undefined` (`'artifact' | 'package' | 'env-forced'`); the `'overlay'` literal in the file belongs to `getEffectiveLock`, a write/delete-door helper that never feeds this response. Type-level change only; no runtime behaviour or wire vocabulary changes.
+- bc03179: Fold the metadata lock gate's type key at its producer, so an ADR-0010 `_lock` can no longer be addressed around by spelling.
+  
+  `getEffectiveLock` handed `type` to its two limbs verbatim, and the limbs did not read it the same way: the artifact limb folded (`lookupArtifactItem` resolves the singular and retries the raw spelling), while the overlay limb queried `sys_metadata` with the raw `type`. Since `SysMetadataRepository` stores rows under the canonical spelling with no at-rest fallback, a non-canonical `type` missed the stored active row and the gate fell through to `lock: 'none'` — not a neutral value but the verdict "the author declared no protection", which `evaluateLockForWrite` / `evaluateLockForDelete` turn into "allow".
+  
+  `getEffectiveLock` now folds once with `canonicalMetaType` and uses that one key for both limbs. Nothing changes for any caller reachable today — `saveMetaItem`, `deleteMetaItem`, `rollbackMetaItem`, `publishMetaItem` and `publishPackageDrafts` all fold their own request first, which was measured rather than assumed. What changes is the failure mode of a future caller that does *not* fold: the lock is now found, and the write is refused instead of silently admitted.
+  
+  The fold uses the URL map rather than the manifest-collection map on purpose — the latter omits `field`, `seed`, `external_catalog` and `translation`, i.e. it would canonicalize the types that never needed it and leave the four that do.
+- ead96d0: fix(metadata-protocol): the metadata read path no longer serves stored cleartext credentials (#8154)
+  
+  `decorateMetadataItem` returned the whole stored body, so a `datasource` row
+  written before #8078 closed the write door came back with `config.password` in
+  cleartext — and the password embedded in `config.url` alongside it — from
+  `GET /api/v1/meta/datasources`, from the single-item read, and from the layered
+  read in **both** its `overlay` and `effective` layers. PR #8126 closed the
+  datasource-admin door (`GET /api/v1/datasources/:name`); this closes the
+  platform door one over. Meta read permission is granted at a far lower bar than
+  "may see the production database password", which is what made this reachable.
+  
+  The fix consumes the per-type redactor registry #8300 landed in
+  `@objectstack/spec/kernel` (`getMetadataTypeRedactor`) rather than redacting
+  `datasource` specifically: `datasource` is that registry's first consumer, and a
+  type-shaped patch here would be the narrow fix that leaves the next
+  secret-bearing type exposed. A plugin whose metadata type stores secrets gets
+  the same protection by calling `registerMetadataTypeRedactor` — no change here.
+  
+  Three properties worth knowing, each measured rather than assumed:
+  
+  - **`_diagnostics` are still computed on the RAW stored body, before
+    redaction.** The redacted body is exactly the shape the post-#8078 schema
+    accepts, so computing them afterwards flips `valid:false` to `valid:true` on
+    precisely the rows that hold a stored credential — which would delete the
+    operator's only inventory of what still needs migrating (#8081 item 3). The
+    two steps are composed inside one function so no call site can invert an
+    ordering it cannot see.
+  - **The stored record is never mutated, and the connect path is untouched.**
+    Redaction is a serving act; datasource connection and boot-time restore read
+    `sys_metadata` directly through the data engine, not through these exits.
+  - **The write path carries the credential forward**, and this half is not
+    optional: `saveMetaItem` accepts a redacted body and persists the credential
+    away, so a read scrub shipped alone would convert today's loud `422` into
+    **silent credential deletion** on an ordinary GET → edit → PUT round trip.
+    `config.url` makes it unavoidable rather than a masking choice — a
+    URL-embedded password is schema-accepted, so dropping it round-trips to
+    deletion and masking it round-trips to storing the mask as the literal
+    password. Stored material is re-applied only where the incoming body is
+    indistinguishable from what the read served; anything the author actually
+    wrote wins and is still judged by #8078's write gate on its own merits. This
+    also restores the #4326 byte-identical round-trip invariant, which
+    read-redaction alone would have broken.
+  
+  It preserves cleartext already at rest and creates none; moving stored
+  credentials into `sys_secret` is #8081 item 3's migration and is deliberately
+  not attempted on a write door an author drove.
+- c15eb23: fix(metadata): the `422 INVALID_METADATA` envelope descends `invalid_key` / `invalid_element`, so a rejected record key arrives with the rule it broke (#8783)
+  
+  Zod raises a `z.record` / `z.map` **key** rejection as `invalid_key` and a
+  `z.map` **element** rejection as `invalid_element`, and in both cases the
+  issue's own `message` is a bare wrapper — `"Invalid key in record"` — with the
+  real diagnosis one level down in `issue.issues`. That is structurally the
+  `invalid_union` shape #4971 named: the prescription is produced and then
+  dropped by a walk that reads only the top level.
+  
+  Both `packages/spec` walks learned to descend those codes in #5389.
+  `zodIssuesToMetadataIssues` — the walk behind `saveMetaItem`'s 422 (#5364) and
+  the read path's diagnostics (#5598) — expanded `invalid_union` only, so it
+  stopped at the wrapper. Three walks over one `safeParse`, two of them reaching
+  the prescription and the Studio-facing one not.
+  
+  **It was reachable from ordinary authored metadata, not synthetic.**
+  `ObjectSchema.fields` is a record whose KEY schema carries the snake_case rule
+  (`spec/src/data/object.zod.ts`), and `object` is in the builtin
+  `getMetadataTypeSchema` registry. So the commonest authoring mistake on the
+  most-authored metadata type — writing `firstName` for a field key, which is
+  exactly what an agent coming from JS naming writes — produced:
+  
+  ```
+  { path: 'fields.firstName', code: 'invalid_key', message: 'Invalid key in record' }
+  ```
+  
+  The author was told a key was invalid and never told what a valid one looks
+  like, so the next move was to guess. The declared message existed and was
+  correct; it just did not reach anyone. Now the same save answers:
+  
+  ```
+  { path: 'fields.firstName', code: 'invalid_key',    message: 'Invalid key in record' }
+  { path: 'fields.firstName', code: 'invalid_format', message: 'Field names must be lowercase snake_case (e.g., "first_name", …)' }
+  ```
+  
+  **Additive, and matched to the walks that already worked** rather than chosen.
+  The other two were measured over the card's own repro first: `formatZodIssue`
+  prints the wrapper line then the indented detail, and `zodIssuesToFields` emits
+  the `invalid_shape` wrapper entry then the detail entry. So the wrapper stays at
+  index 0 — it is the only entry naming the slot the client sent, and Studio's
+  designer keys on it — and the detail joins it on the same path. No entry that
+  shipped before is removed or renumbered.
+  
+  **Targeted, not a widened walk.** Only the two container codes open the descent;
+  an `issues` array hanging off any other code is still ignored, `invalid_union`
+  still expands through the unchanged ranking, and the nesting bound now covers
+  both descents at the same depth of 3. Container issues are deliberately *not*
+  ranked the way union branches are: a union's branches are competing candidates,
+  while a container has one inner schema, so every issue it raised is a true
+  statement about the value.
+  
+  The verdict is unchanged in every case — this moves what a refusal *says*, never
+  whether it is one. `union-branch-policy.cross-package-parity.test.ts` gains a §5
+  comparing the container descent across all three walks; its §1 (the policy is
+  not publicly exported from `@objectstack/spec`, so this package must run its own
+  copy) is untouched, and no export was added.
+- b740440: fix(metadata-protocol): the stored migration reports a non-canonical stored `type` as `skipped` instead of counting it `canonical` (#8957)
+  
+  `migrateStoredMetadata` — the method behind `POST /meta/_migrate-stored` and
+  `os migrate meta --stored` — opened every row with
+  `PLURAL_TO_SINGULAR[rawType] ?? rawType`, the **manifest-collection** map. That
+  map legitimately omits the metadata types that are not stack collections, so
+  for a row stored under one of their plural spellings the fold was a no-op: the
+  pass looked up ADR-0087 body conversions registered for a type named `fields`,
+  found none, saw nothing had changed, and recorded the row `canonical`.
+  
+  `canonical` is counted and never itemised — by design, because on a healthy
+  deployment that is every row — so the row disappeared from `report.rows`
+  altogether. The verdict means "nothing to do", and there was something to do:
+  the row sits in a second namespace that no registry read and no compliance
+  query on the canonical type can reach.
+  
+  Since #8908, `publishPackageDrafts` **refuses** exactly these rows at its
+  pre-flight (`STORED_TYPE_NOT_CANONICAL`). The stored migration is the door an
+  operator naturally reaches for next, and it answered that the row was already
+  fine. The two doors now agree.
+  
+  ## What changed in the report
+  
+  The scan folds with the URL/registry map (`canonicalMetaType`) instead of the
+  manifest map, and a row whose **stored** spelling is non-canonical is reported:
+  
+  ```jsonc
+  // before — the row was invisible
+  { "scanned": 1, "canonical": 1, "skipped": 0, "rows": [] }
+  
+  // after
+  {
+    "scanned": 1, "canonical": 0, "skipped": 1,
+    "rows": [{
+      "type": "field", "name": "showcase_task.title", "outcome": "skipped",
+      "reason": "the row is stored under the non-canonical metadata type 'fields' ('fields/showcase_task.title'), and its canonical type is 'field'. …"
+    }]
+  }
+  ```
+  
+  The reason names the stored spelling in the same `type/name` form the publish
+  refusal quotes, the canonical type, the other door's error code, and the
+  re-author path. `--type field` and `--type fields` now both reach the row —
+  the filter folds the same way, so the spelling an operator was just handed by
+  the publish refusal is not the one spelling that fails to find it.
+  
+  The fold swap cannot change the answer for any spelling the old fold resolved:
+  `META_URL_TO_SINGULAR` embeds every manifest spelling verbatim under a
+  module-load agreement assertion, and measured on this tree the set of spellings
+  where the two folds disagree is empty. The set the new fold newly resolves is
+  exactly the six-member class `isNonCanonicalStoredType` derives (`fields`,
+  `seeds`, `external_catalogs`, `externalCatalogs`, `translations`,
+  `email_templates`), which is the set now reported.
+  
+  ## What did NOT change
+  
+  The method's contract. It still canonicalizes **bodies**, and it still writes
+  nothing for this class: rewriting a stored `type` is an identity move — a new
+  `(org, type, name, package_id)` key, history and audit continuity to decide,
+  and a collision question when the canonical row already exists — which #8908's
+  ruling parked as a follow-up needing its own appetite.
+  
+  `storedMigrationClean` is also unchanged: `skipped` rows still do not flip it.
+  This pass has no lever for the condition, so failing the verdict over it would
+  give `os migrate meta --stored` a non-zero exit that no run of that command
+  could ever clear. The row is reported per-row instead, and the publish door is
+  what refuses it.
+- b6c7690: fix(rest): org-overridable metadata is served back by every `/meta` read door, not just persisted (#9454)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key is
+  added, renamed, retired or tombstoned. One new exported predicate in
+  `metadata-core` (`organizationIdForMetaRead`), one widened optional request
+  member on an existing protocol method (`getMetaItemCached`'s `organizationId`),
+  and caller-side threading in `packages/rest`. The accept/reject behaviour of
+  every write door is unchanged — this card is read-side only. -->
+  
+  A runtime `PUT` of an org-overridable metadata type — `view`, `dashboard`,
+  `report`, `translation`, `email_template` — answered **200** with a receipt
+  reporting `state: 'active'` plus a version and sequence number, **persisted the
+  row with its `organization_id`**, and was then served back by **nothing**: the
+  direct `GET` answered 404, the scoped listing was unchanged, the unfiltered
+  listing was missing it, and the browser rendered an empty view or "Dashboard Not
+  Found". The platform reported success in the same breath as not delivering the
+  work, which is declared ≠ enforced in the direction hardest for an author to
+  notice — the write path says everything worked.
+  
+  **The write door was correct as-is.** The row really is persisted, so the
+  receipt is truthful; this was persisted-but-not-served, never a silent write
+  no-op. **The overlay-resolution layer was correct too**, and type-agnostic:
+  `getMetaItem` resolves `(orgId ? findOverlay(orgId) : undefined) ??
+  findOverlay(null)`, `getMetaItems` unions both scopes under org-wins precedence,
+  and `getMetaItemLayered` even reports `overlayScope`. The defect was that the
+  REST read doors **never stated the scope**, so every one of them asked for the
+  env-wide partition and the org partition was never consulted.
+  
+  **The repair is one registry-derived predicate, threaded at the read doors.**
+  `organizationIdForMetaRead` joins `organizationIdForMetaWrite` in
+  `metadata-core`, deriving from the same `allowOrgOverride` registry flag, so
+  read scope and write scope cannot drift and a registry entry flipping the flag
+  moves both doors together. It is threaded through the **already-memoised**
+  `resolveExecCtx`, so no new per-request organization resolution is introduced.
+  
+  ⛔ **Not a bare `ctx?.tenantId` at each site**, and the reason is measurable
+  rather than stylistic: deployments predating the #6190 ruling hold **phantom
+  org-scoped rows for types the registry declares non-overridable** (the runtime
+  used to stamp `organization_id` on every type). Boot hydration deliberately
+  walks past those rows, so they are dead. A read door naming the org for *every*
+  type would resolve them again — serving, on the read side, a document that
+  vanishes at the next restart.
+  
+  **`getMetaItemCached` gains an `organizationId` member** — it was the only meta
+  read verb that could not express one, having hard-coded a two-key delegation to
+  `getMetaItem`. The organization is also folded into its **ETag**. The mechanism
+  differs from `locale` and the difference is stated rather than glossed: `locale`
+  is invisible to the hash (the body is translated after the validator runs), so
+  folding it in was the only way it could vary the validator at all, whereas the
+  org-resolved document *is* the thing hashed. No cache leak is claimed — the
+  directive is `private, no-cache` and there is no server-side cache entry keyed by
+  type+name. It is folded in because that makes scope a **declared** property of
+  the validator instead of an emergent property of the body.
+  
+  **Both REST branches are fixed, which is the half-fix this card could easily
+  have shipped instead.** `view` and `dashboard` share one mechanism but reach it
+  through two different arms: `view` takes the cached arm (`getMetaItemCached`),
+  while `dashboard` bypasses the cache via `isDashboardType` and takes the
+  uncached arm. Both omitted the org, so a fix applied to one arm would have
+  fixed exactly one type while the receipt kept claiming success for the other.
+  The scope is now resolved **above** the fork, so the two arms cannot disagree.
+  
+  The regression proof drives real REST routes against a real protocol over a stub
+  engine — write-then-read agreement on **one boot**, for all five types, through
+  both arms. Its most important assertions are the ones that do **not** merely
+  check the item comes back: an org-less caller and a **second organization** must
+  each be refused it. An org-blind overlay fallback would satisfy every other
+  assertion in the file while matching an arbitrary tenant's row.
+- 845e164: fix(metadata-protocol): a package publish refused by the namespace-prefix rule now leaves an audit row per violation (#8595)
+  
+  `publishPackageDrafts` refuses a whole batch pre-flight when an object draft's
+  name is missing its package namespace prefix (ADR-0028). That refusal returns
+  ABOVE the batch's `engine.transaction()`, so it reached neither the post-commit
+  `allowed` rows nor the rollback handler's `batch_aborted` row: it wrote nothing
+  to `sys_metadata_audit` at all. The compliance consequence is the defect — a
+  package rejected for a bad object name was **indistinguishable in the trail from
+  a package nobody ever pressed Publish on**, so a compliance query could not tell
+  a refused publish from one that never happened.
+  
+  Each violation now leaves its own `publish` / `denied` row keyed on the
+  offending draft's `(type, name)` — the tuple `auditMetaItem` reads, so the
+  refusal is visible on that item's own audit-log tab via
+  `GET /api/v1/meta/:type/:name/audit`. The row carries the violated rule
+  (`namespace_prefix`) as its `code`, and the rule's actionable message as `note`.
+  Rows are keyed on the draft's own organization scope, matching the promoted
+  rows: an env-wide draft audits env-wide even when the publishing session carries
+  an active org.
+  
+  One row per violation rather than one per batch: a pre-flight refusal names N
+  violating items and no single causal one, so a batch-level row would have had to
+  mint a synthetic identity — exactly what the `batch_aborted` row declines to do
+  for its own unattributable case.
+- 8d017eb: fix(metadata-protocol): route `publishMetaItem` through the `/meta` canonical-type fold (#8769)
+  
+  `canonicalizeMetaRequestType` is the `/meta` request boundary, and its own
+  header describes it as the fold "all six entry points funnel through".
+  `publishMetaItem` is a **seventh** entry point on the same URL family
+  (`/api/v1/meta/:type/:name/publish` and the `…/published` overlay) and did not
+  funnel through it: it reached the draftability check through
+  `PLURAL_TO_SINGULAR`, the MANIFEST-COLLECTION map, which is the exact lookup
+  #7894 replaced at the other six. One contract, two dialects, decided by which
+  verb you used (Prime Directive #12).
+  
+  The fix is the same one line the other six carry, at the top of the method. What
+  that line reaches — measured on `origin/main`, not inferred — differs by whether
+  the type is in the manifest map, and the two halves are not the same severity:
+  
+  **The four manifest-absent types — fail-closed, but closed for the wrong reason
+  and with the wrong verdict.** `field`, `seed`, `external_catalog` and
+  `translation` are legitimately absent from `PLURAL_TO_SINGULAR` (they are not
+  stack collections; that absence is precisely why #7894 moved the boundary onto
+  the URL map). Unfolded, they arrived at the draftability check as unrecognised,
+  where `isRuntimeCreateAllowed`'s "no static registry entry ⇒ this is a
+  plugin-registered kind" arm answers **true** — the permissive plugin branch,
+  taken for a type the platform itself declares. So a publish addressed
+  `/meta/fields/showcase_task.title` PASSED a gate that `/meta/field/...` answers
+  `403 NOT_OVERRIDABLE`, and only failed further down, on `404 no_draft`, having
+  already forgotten which type it was judging. A publish addressed
+  `/meta/translations/zh_cn` likewise never resolved the draft that
+  `PUT /meta/translations/zh_cn` had folded and written under `translation`. After
+  the fold: the first is refused `403 NOT_OVERRIDABLE` by its real registry entry,
+  the second promotes the row it names.
+  
+  **Manifest-present types — one lookup that did NOT fail closed.**
+  `promoteDraftForPublish` folds through the manifest map before the row lookup,
+  so a publish addressed `/meta/views/case_grid` always resolved the canonical
+  row. `getEffectiveLock` does not agree with it: its artifact limb folds, its
+  **overlay limb queries `sys_metadata` with the raw `type`**. Addressed with the
+  plural, the ADR-0010 `_lock` carried by the stored active row was looked up
+  under a `type` no row has and came back `'none'` — which is not a neutral value,
+  it is the verdict "the author declared no protection" (#5706) — while the
+  promote one line later read the folded key and overwrote the row the lock
+  protected. Measured on `origin/main`: `_lock: 'no-overlay'` plus a pending
+  draft, canonical spelling `403 ITEM_LOCKED`, plural spelling **200 and the
+  active body replaced**.
+  
+  That window is narrow and is stated at its real width rather than rounded up: it
+  needs an environment kernel (the gate is skipped wholesale when `environmentId`
+  is `undefined`), a lock carried by a *stored overlay* row rather than a packaged
+  artifact, and a draft that predates the lock — because the save door refuses to
+  mint one once the lock is live. It is nevertheless a lock gate that could be
+  addressed around from the wire, and "a lock gate must not fail open" is the rule
+  this file already carries.
+  
+  `promoteDraftForPublish`'s own `PLURAL_TO_SINGULAR` fold is **kept**, and the
+  measurement is the reason: that helper's other caller is `publishPackageDrafts`,
+  which feeds it stored row types. That is data at rest, where a legacy row
+  written under a plural `type` is real and nothing rewrites it on upgrade — a
+  different input class needing a different map, exactly as `canonicalMetaType`'s
+  header describes. Deleting it as "now redundant" would have changed the batch
+  path.
+  
+  `publishPackageDrafts` and `deletePackage` need no fold of their own: neither
+  takes a caller-supplied `type` at all (both are addressed by `packageId`), and
+  the per-row work they delegate is already covered — `deletePackage` routes every
+  row through `deleteMetaItem`, which folds, and `publishPackageDrafts` reaches
+  the manifest-map fold described above.
+  
+  The audit row and the publish receipt now record the canonical type too; both
+  read `request.type`, so a publish addressed `/meta/views/case_grid` previously
+  wrote `type='views'` into `sys_metadata_audit` for a row stored under `view`,
+  and a compliance query on the canonical spelling did not find it.
+  
+  Pinned in `packages/objectql/src/protocol-publish-canonical-fold.test.ts`
+  against a real engine and repository, with the reverse verification's direction
+  predicted before it was run: predicted 3 red / 4 green, measured 3 red / 4
+  green, each red for its predicted reason.
+- 1a7f907: fix(metadata): a package publish refuses a draft stored under a non-canonical metadata type, and the ADR-0010 audit writer asserts its `type` instead of folding it (#8908)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is
+  renamed, retired or tombstoned — no spec key changes shape, so there is no
+  conversion to register. Two accept sets are narrowed at runtime (the batch
+  publish's pre-flight, and `recordMetadataAudit`'s `type` argument), and two
+  error codes are added to the ADR-0112 ledger. The rows this refuses are
+  pre-#7894 residue that no current writer can mint. -->
+  
+  **Two tightenings, one card, because they are the same defect at two layers.**
+  
+  `publishPackageDrafts` reads `sys_metadata` rows **at rest**, so #7894's `/meta`
+  boundary fold never reached it. `promoteDraftForPublish` folds the stored
+  spelling through `PLURAL_TO_SINGULAR` — the *manifest-collection* map, which
+  legitimately omits types that are not stack collections. For those the fold is a
+  **no-op**: the lookup key equals the stored spelling, the draft resolves, and the
+  publish mints an ACTIVE row in the namespace `PUT /meta/field/…` answers
+  403 NOT_OVERRIDABLE for. Measured on the card with the real repository over a
+  stub engine:
+  
+  ```
+  publishPackageDrafts({ packageId: 'app.demo' })
+    → { success: true, publishedCount: 1, published: [{ type: 'fields', name: 'legacy_field' }] }
+  active row: { type: 'fields', name: 'legacy_field', package_id: 'app.demo' }
+  audit row:  { type: 'fields', name: 'legacy_field', outcome: 'allowed', code: 'ok' }
+  ```
+  
+  Every registry read and every compliance query on `field` misses an item the
+  platform just reported as published — the #4432 shadowing shape, minted at
+  publish time instead of at the URL, and the last route by which a pre-#7894 row
+  could be re-promoted rather than migrated.
+  
+  **1. The publish refuses it, at the pre-flight, batch-atomically.** Same shape as
+  the ADR-0028 namespace-prefix gate that already stands there: found before
+  anything is promoted, failing the whole batch (`publishedCount: 0`,
+  `published: []`) rather than publishing the healthy siblings around it, with one
+  audit row per violation. The refusal names the row, names the canonical type, and
+  states the re-author path; `failed[].code` is the new
+  `STORED_TYPE_NOT_CANONICAL`, and the audit column's spelling is
+  `stored_type_not_canonical`.
+  
+  The rule is **derived, not a list**: a spelling the platform's URL/registry map
+  folds elsewhere *and* the manifest map leaves unchanged. Against the real maps
+  that is **six** spellings — `fields`, `seeds`, `external_catalogs`,
+  `externalCatalogs`, `translations`, `email_templates` — where the card named
+  four; the last two would have been missing from any hand-written list, and a
+  newly declared type that never reaches the manifest map is covered on the day it
+  is declared. A manifest-**present** plural (`objects`) is deliberately *not* in
+  the class: it is already fail-closed at the promote (`NO_DRAFT`, batch aborted)
+  and keeps that verdict.
+  
+  ⛔ Deliberately **not** included: migrating the row (a `_migrate-stored` /
+  boot-reconciliation conversion). That was the other option on the card and is
+  explicitly unruled — it stays available as a follow-up with its own appetite.
+  
+  **2. `recordMetadataAudit` refuses a non-canonical `type` (`AUDIT_TYPE_NOT_CANONICAL`)
+  instead of folding it.** The writer used to open with
+  `type: PLURAL_TO_SINGULAR[entry.type] ?? entry.type` — a lenient consumer, and a
+  **tolerant-and-incomplete** one: the fold read the same manifest map, so the
+  compliance trail came out canonical for the 29 types that never needed it and
+  non-canonical for exactly the ones that did. Ruled the same direction as the
+  refusal above: **fold at the boundary, assert at the writer.** Every call site
+  that builds a row out of an at-rest `type` — all of them on
+  `publishPackageDrafts` — now folds with `canonicalMetaType`; the `/meta` routes
+  were already canonical by the time they got there. The throw sits **outside** the
+  writer's best-effort `try`, because inside it the method's own `catch` would
+  degrade the assert into a `console.warn`.
+  
+  The assert cannot refuse a canonical type (no canonical spelling folds
+  elsewhere — 33 of 33, measured) nor a plugin-registered or otherwise
+  unrecognised kind (`canonicalMetaType` is the identity for anything the static
+  map does not carry), so it narrows the accept set without closing it.
+  
+  **Reachability was enumerated before the assert landed**, as the ruling required:
+  `recordMetadataAudit` is private to `protocol.ts` with 11 call sites, `sys_metadata`
+  rows have exactly one producer in the repository (`saveMetaItem` → `repo.put`,
+  post-fold), and no current write path can mint a non-canonical stored type. The
+  only non-canonical types that ever reached an audit write came from the batch
+  publish's at-rest rows, which is what the boundary folds now cover.
+  
+  Also fixed, as a consequence of that fold rather than as a separate change: on
+  the batch route `getEffectiveLock`'s overlay limb was queried with the raw stored
+  spelling, so an ADR-0010 `_lock` carried by the canonical active row was looked
+  up under a `type` no row has and came back `'none'` — the verdict "the author
+  declared no protection". That is the batch twin of the hole #8769 closed on
+  `publishMetaItem`.
+- 4e3a4c3: fix(metadata-protocol): four read seams that FAILED no longer answer out of an empty accumulator — only an unprovisioned table is read as truthful emptiness (#8896)
+  
+  Four reads in `@objectstack/metadata-protocol` sat behind a bare `catch` that
+  fell through — or, in one case, jumped — above a value the read was supposed to
+  fill. Each handed its caller an answer indistinguishable from a legitimate one,
+  with nothing logged and no field saying the answer was incomplete. Per ADR-0110
+  D3 those are different facts, and at every one of these seams they have opposite
+  consequences:
+  
+  - **`SeedLoaderService.loadExistingRecords()`** returned an empty `Map`. That map
+    is not a cache — it IS the write decision, in all three of its callers, and
+    "empty" means *write these rows*: the upsert pre-load turns every update into
+    an INSERT, and `bulkWrite`'s `attempt > 1` recheck — the only thing standing
+    between an at-least-once retry and a duplicate of every row the first attempt
+    already committed (framework#3149) — is silently disarmed.
+  - **`searchAll()`** skipped the object on a per-object `catch { continue; }`
+    while the response still reported `totalObjects` / `totalHits` / `truncated`
+    as though the sweep had been complete: a partial scan wearing a whole one's
+    numbers.
+  - **`findReferencesToMeta()`** dropped a whole source type on a per-matcher
+    `catch { return; }`. That list answers "what would break if I delete this" and
+    is rendered as the admin UI's "Used by" panel, so a silently short list reads
+    as "nothing depends on it — safe to remove".
+  - **`publishPackageDrafts()`** did not fall through: it pushed a **fabricated**
+    ADR-0067 revert-plan entry, `{ existedBefore: false, prevVersion: null }` —
+    the literal opposite of the healthy branch's `existedBefore: !!activeRow`.
+    `existedBefore: false` means "revert = soft-remove", so reverting that commit
+    DELETES an artifact whose previous version was supposed to be restored.
+  
+  None of the four `catch`es is removed; each is **discriminated by error type**,
+  through the same shared `isMissingTableError` predicate
+  (`@objectstack/metadata/errors`) that `DatabaseLoader`, `SysMetadataRepository`
+  and `cascadeDeleteRelations` already use:
+  
+  - **benign, unchanged** — the table was never provisioned (schema sync not run
+    yet). It can hold no rows, so the empty answer is the truth and each seam
+    behaves exactly as before: the seed writes its rows, the search skips the
+    object, the publish records `existedBefore: false`.
+  - **everything else now surfaces** — a connection drop, a timeout, a permission
+    denial, a query error, a missing column on a provisioned table. The caller
+    receives the read's own failure, envelope intact.
+  
+  `findReferencesToMeta` is the one seam that gets no predicate of its own: it
+  reads through `getMetaItems`, which already performs exactly this discrimination
+  (`rethrowUnlessMetadataStoreUnprovisioned`, #5532) and raises a 503
+  `SERVICE_UNAVAILABLE` for a real outage. The only thing its `catch` could
+  swallow was that deliberate 503, so it is simply gone.
+  
+  No new error code and no new response field. The behavioural change is that a
+  seed load, a global search, a reference scan or a package publish which used to
+  report success over an unreadable store now reports the failure that made it
+  unreadable. `publishPackageDrafts` refuses before Phase 1's transaction, so a
+  refused publish leaves the draft pending and writes nothing.
+  
+  The comment above the publish capture claimed a capture failure "just omits that
+  item from the revert plan". That was wrong twice — the code fabricated rather
+  than omitted, and omitting would have left the item unreverted while reporting
+  the turn undone — and it now describes what the code does.
+- 3b0b61c: fix(metadata): the three read-side `/meta` verbs reach the canonical type boundary — history, audit and references (#9157)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key is
+  added, renamed, retired or tombstoned. This routes three existing protocol
+  methods through an existing request-boundary function; the only externally
+  visible movement is on three GET routes, described below. -->
+  
+  Step ① of the maintainer ruling in #9180 (2026-08-16): **the `/meta` type
+  segment is singular, always.**
+  
+  `auditMetaItem`, `historyMetaItem` and `findReferencesToMeta` each opened by
+  deriving their type key from `PLURAL_TO_SINGULAR` — the MANIFEST-COLLECTION map
+  that #7894 moved this boundary off — instead of calling
+  `canonicalizeMetaRequestType`, which the nine sibling `/meta` verbs already
+  call. That one call carries **both** the URL spelling map **and**
+  `metaUrlSpellingRefusal`, and the refusal is the half these three could never
+  reach: it lives *inside* the function they skipped.
+  
+  **What changes on the wire**, on `GET /api/v1/meta/:type/:name/history`,
+  `…/audit` and `…/references`:
+  
+  | caller's `:type` | before | after |
+  | --- | --- | --- |
+  | `viewes` — an unrecognised spelling of a **declared** type | 200 with an empty body | **400 `INVALID_REQUEST`**, naming both accepted spellings (`view`, `views`) |
+  | `translations`, `fields`, `seeds`, `external_catalogs` — recognised plurals of the four types absent from the manifest map | 200 with an empty body | 200 with the **real** rows |
+  | `views` — a recognised plural already in the manifest map | unchanged | unchanged |
+  | `fieldz` — reaches for no declared type | unchanged | unchanged; the refusal stays narrow, so a plugin-registered kind can never trip it |
+  
+  The harm being closed is the empty-accumulator shape: a plural read answered
+  `{ "events": [] }` / `{ "references": [] }` — read by an operator as *"nothing
+  depends on this"* — at exactly the moment they were about to rename or delete.
+  **Loudly wrong beats quietly lying**, so a spelling the platform cannot honour
+  is now refused with the canonical one named rather than answered emptily.
+  
+  Two measured details worth stating, because both invert an intuition:
+  
+  - On `historyMetaItem` the unfolded plural was not merely a wrong key, it was a
+    door **around** a gate. `field` declares neither `allowOrgOverride` nor
+    `allowRuntimeCreate`, so the canonical spelling is refused by the overlay gate
+    and never reaches the store — while `fields` took
+    `isRuntimeCreateAllowed`'s no-static-registry-entry arm (the plugin path,
+    permissive by construction) and issued a real `sys_metadata_history` read
+    keyed `'fields'`. Same empty body, opposite path.
+  - On `findReferencesToMeta` the refusal is the **whole** visible change. Every
+    `REFERENCE_PATHS` key is manifest-present and already folded, so a
+    manifest-absent target still answers `{ "references": [] }` — which that
+    method documents as a legitimate no-hit. Widening that registry is a coverage
+    question, not a spelling one.
+  
+  Recognised plural spellings are **not** retired here — `metaUrlSpellingRefusal`
+  returns `null` for `views` and for `translations`, and a pin asserts it. That is
+  #9180 step ③, which the ruling requires to stay independently revertible.
+- 8914915: fix(metadata-protocol): a failed `sys_metadata_commit` write is reported instead of swallowed — the turn that cannot be reverted is now visible to an operator (#9066)
+  
+  `recordPackageCommit` — the ADR-0067 commit writer `publishPackageDrafts` calls
+  with the revert plan it just captured — sat behind a bare `catch` that answered
+  `null` for every reason, with nothing logged. The comment's premise was true
+  (the publish already succeeded and cannot be unwound) but its conclusion —
+  "grouping is a best-effort overlay" — understated the row: `sys_metadata_commit`
+  is the ONLY record of a turn's revert plan (`existedBefore` / `prevVersion` per
+  artifact), the thing `revertCommit` and `rollbackToPackageCommit` act on. When
+  the insert failed, the artifacts went live, the response read `success: true`
+  with `commitId` merely absent, the turn could never be reverted, and no line
+  anywhere said so — so a commit store that was failing kept failing, losing every
+  later publish's plan the same silent way.
+  
+  The failure is now discriminated by error TYPE, through the shared
+  `isMissingTableError` predicate the read seams in this file already ask:
+  
+  - an **unprovisioned** `sys_metadata_commit` (a first boot, or an environment
+    kernel composed without the commit log) is a configuration fact, identical on
+    every publish and fixed in one place — reported at `info`, once per protocol
+    instance, naming the consequence and how to provision the store;
+  - **every other** failure (connection drop, timeout, permission denial, schema
+    drift on that table) is a durability degradation and is reported at `error`,
+    once per turn, naming the package, the operation, the item count, the driver's
+    own reason, that the publish itself succeeded and still reports success, and
+    the fix.
+  
+  Publish semantics are unchanged: the `catch` still returns `null`, the publish
+  still succeeds, and no response field was added — whether the caller should be
+  told the turn is unrevertible is a separate, undecided question.
+  
+  The gate that stops this from regressing is extended in the same change: the
+  insert now goes through a named `persistPackageCommitRow`, declared in
+  `DURABILITY_CRITICAL_CALLEES` in
+  `scripts/check-durability-degradation-log-level.mjs`, so a future edit that
+  quiets this `catch` fails CI instead of shipping.
+- 2416dd5: fix(metadata-protocol): `revertCommit` refuses a non-canonical stored type on its restore limb, with the wire-visible code its sibling doors already give (#9174)
+  
+  `isNonCanonicalStoredType` (#8908) names a six-member class of AT-REST spellings
+  whose type the manifest-collection map omits — `fields`, `seeds`,
+  `external_catalogs`, `externalCatalogs`, `translations`, `email_templates`. Rows
+  of that class are pre-#7894 residue: `PUT /meta/fields/…` answered 200 and
+  persisted before the `/meta` boundary fold closed that door, and nothing
+  rewrites them on upgrade.
+  
+  Two doors that consume an at-rest `type` already answer for the class **by
+  name**: `publishPackageDrafts` refuses with a `failed[].code` of
+  `STORED_TYPE_NOT_CANONICAL` (#8908), and `migrateStoredMetadata` reports the row
+  `skipped` with the same reason stated in full (#8957). `revertCommit` is the
+  third consumer, and it is the producer #9111 traced and left explicitly
+  unguarded.
+  
+  **Measured at HEAD before choosing a shape**, end to end over the real
+  `SysMetadataRepository` on an unscoped kernel, per limb:
+  
+  - **restore limb** (`existedBefore: true`) — answered
+    `{ success: true, revertedCount: 1, failed: [] }` with
+    `reverted[0].action === 'restored'`, called `registerItem` **zero** times, and
+    left one line of server-side stderr as the only trace:
+    `[Protocol] registry write-through failed for fields/showcase_task.title:
+    [registry_type_not_canonical] …`. The receipt claims the pre-commit body is
+    what the platform now serves; for this class it cannot be — #9111's mint door
+    refuses the entry and boot refuses it too, so the restored body reaches no
+    reader at all.
+  - **soft-remove limb** (`existedBefore: false`) — answered
+    `{ success: true, action: 'removed' }`, the row **gone** from `sys_metadata`,
+    no warning emitted and no registry key touched. Nothing about that outcome is
+    wrong.
+  
+  **The shape is `saveMetaItem`'s refusal**, carried on this door's existing
+  per-item `failed[]` channel — the same one `VERSION_NOT_FOUND`, `ITEM_LOCKED`
+  and `NOT_OVERRIDABLE` already ride. No new receipt surface and no new error
+  code: `STORED_TYPE_NOT_CANONICAL` is already this package's and already in the
+  error-code ledger. The test that separates it from `migrateStoredMetadata`'s
+  decline is whether the door can do what it *promises* for this row: the migrate
+  pass declines because rewriting a stored type spelling is an identity move and
+  out of its reach entirely, so `skipped` must not poison `storedMigrationClean`
+  for a scan that runs forever; here the write is squarely in reach and still
+  delivers none of what `restored` promises, which is `saveMetaItem`'s case. So it
+  is refused, and `success` goes false — the commit the operator asked to undo was
+  not undone, and a one-shot operator action has no forever to poison.
+  
+  **The soft-remove limb is deliberately outside the gate.** It performs its
+  promise exactly and completely, and the removal is the one action that makes
+  this residue smaller; refusing it would answer `success: false` for a revert
+  that fully succeeded and would hand back an instruction ("drop the `fields`
+  row") naming the very operation it had just declined to perform.
+  
+  **Nothing is folded.** The refusal writes no audit row and no commit record, and
+  carries the stored spelling into `failed[]` verbatim, so #9161's ruling — the
+  caller's spelling reaches the ledger keys unfolded, and `AUDIT_TYPE_NOT_CANONICAL`
+  fires loudly when it is wrong — is untouched in both directions. A refused item
+  is simply absent from `reverted[]`, so the append-only revert commit built from
+  it never claims an undo that did not happen.
+  
+  The predicate stays the narrow at-rest one rather than the complete
+  `canonicalMetaType(t) !== t`: `objects`/`views` fold in the manifest map, so the
+  restore limb already hands the write-through a canonical key and those rows are
+  not this defect — widening would change a wire-visible `failed[].code` for them.
+- 88ef34d: fix(metadata-protocol): `rollbackMetaItem` routes through the canonical type fold, closing an ADR-0010 `_lock` a plural URL spelling could address around (#8819)
+  
+  `rollbackMetaItem` is the **eighth** `/meta` entry point on the
+  `POST /api/v1/meta/:type/:name/rollback` URL family, and it was the last one
+  still deriving its type key from `PLURAL_TO_SINGULAR` — the
+  MANIFEST-COLLECTION map #7894 moved this boundary off — instead of
+  `canonicalizeMetaRequestType`. The other seven fold; this one did not.
+  
+  **The half of that asymmetry that was not fail-closed is the lock.**
+  `assertLockAllowsWrite` delegates to `getEffectiveLock`, whose artifact limb
+  folds and whose **overlay limb queries `sys_metadata` with the raw `type`**. The
+  rollback passed the caller's spelling to the gate while every row operation
+  below it used the folded key. So for a manifest-present type, a rollback
+  addressed `/meta/views/case_grid/rollback` looked the `_lock` up under a `type`
+  no row carries, got `'none'` back — which is not a neutral value but the verdict
+  "the author declared no protection" (#5706) — and then restored the history body
+  against the folded key, which resolves the protected row perfectly. A lock gate
+  addressable around from the wire, on the verb that overwrites the active body.
+  
+  **The severity window is narrow and is not rounded up here.** It needs an
+  environment kernel (`assertLockAllowsWrite` opens with
+  `if (this.environmentId === undefined) return null`, skipping the gate wholesale
+  otherwise) **and** a lock carried by a **stored overlay row** rather than a
+  packaged artifact — the artifact limb folds, so an artifact `_lock` was already
+  found under either spelling. Inside that window the write landed.
+  
+  The fold also reaches three things that were merely incoherent rather than
+  unsafe: the revertability tier (`isOverlayAllowed` / `isRuntimeCreateAllowed`)
+  took the permissive **plugin** branch for the four manifest-absent types
+  (`field`, `seed`, `external_catalog`, `translation`); and the
+  `[not_overridable]` refusal, both ADR-0010 audit rows and both receipt sentences
+  reported the **caller's** spelling for a row written under the canonical one.
+  `recordMetadataAudit` re-folds internally through `PLURAL_TO_SINGULAR`, which
+  covers a manifest-present plural and misses the four manifest-absent ones — so
+  folding at the boundary is what makes the audit trail agree with the write for
+  both classes.
+  
+  Placed after the existing `toVersion` envelope guard rather than at the very top
+  of the method: that is the position `saveMetaItem` documents for this exact pair,
+  naming this method's opening guard its structural twin — a malformed request
+  envelope is refused before its type key is canonicalised, and both refusals are
+  `[invalid_request]`/400 either way.
+  
+  **What this does not do.** `getEffectiveLock`'s overlay limb still queries the
+  raw `type`. Folding it there would close the class at the producer for every
+  present and future caller, which is the contract-first shape — but it is a
+  shared gate whose blast radius wants its own measurement, so it is deliberately
+  left open as its own card rather than ridden in here.
+  
+  Pinned in `packages/objectql/src/protocol-publish-canonical-fold.test.ts` as
+  group D, driving the real `ObjectQL` / protocol / `SysMetadataRepository` over an
+  in-memory driver on an environment kernel: the canonical spelling is refused by
+  the lock, the plural spelling is refused by the **same** lock, and — the clause
+  that matters, since the first two can both pass while the write still lands —
+  the protected active body is **unchanged** afterwards. A positive control runs
+  the identical plural call with the lock removed and asserts it really does
+  restore the earlier body, so the group cannot pass by being unable to roll back
+  at all.
+- add2d19: fix(metadata-protocol): global search titles a hit from the canonical `nameField`, not only the deprecated `displayNameField` alias (#8786)
+  
+  `searchAll` — the global-search (⌘K) palette — resolved a hit's title from a
+  candidate list that opened with `obj.displayNameField` **alone**. Under
+  ADR-0079 `nameField` is the canonical primary-title pointer and
+  `displayNameField` is the deprecated alias, so this was the one consumer a
+  canonical designation could not reach.
+  
+  It is reachable rather than theoretical because `provisionPrimary` — the
+  ADR-0079 designation seat the SchemaRegistry runs on every object at
+  registration — stamps `nameField` **only** and never the alias. An object that
+  declares its primary title canonically, without also carrying the deprecated
+  alias, produced `undefined` for that entry, the entry was filtered out of the
+  candidate list, and the title fell through to `String(row.id)`: the palette
+  showed a raw record id where the object's own declared, populated title
+  existed.
+  
+  Impact was bounded to objects whose primary title is **outside**
+  `name` / `full_name` / `title` / `subject` / `label` / `company` — anything in
+  that conventional list already resolved through the later entries, which is why
+  this stayed invisible. An object declaring `nameField: 'company_name'` now
+  titles its hits `Acme Industrial` instead of `acc_1`.
+  
+  The fix reads the precedence the rest of the platform already spells —
+  `obj.nameField ?? obj.displayNameField` — matching `resolveDisplayField`
+  (`@objectstack/spec`), the #4254 ingress gate, and this same function's
+  search-field resolution 44 lines below. The deprecated alias is still honored
+  on its own; only objects that carry **both** pointers naming **different**
+  fields see a precedence change, and no such object exists in this repo (every
+  one that carries both spells them identically).
+  
+  Presentation only: which rows come back is untouched.
+- 5d4d20e: fix(metadata-protocol): SeedLoader asks the registry for a `name` column before probing it — no more hundreds of provoked `INVALID_FILTER` refusals per seeded boot (#9071)
+  
+  `SeedLoaderService.resolveFromDatabase()` resolves a reference authored as a
+  natural key by walking a probe chain: the target dataset's declared
+  `externalId`, then the historical `name` default, then the internal `id`. The
+  `name` leg was spelled **unconditionally** — including on objects that have no
+  `name` column at all.
+  
+  On those objects the probe is not a cheap miss. The driver **refuses** it:
+  
+  ```
+  [sql-driver] INVALID_FILTER — Filter on 'name' names a column that object
+  'crm_contact' has no column for, so the predicate never ran.
+  ERROR Find operation failed {"object":"crm_contact", …}
+  ```
+  
+  and it is right to. A predicate naming a column the object does not have never
+  ran, so answering "no rows" would be a lie (ADR-0110 D3 — a miss and a fault are
+  different facts). One refusal is raised per reference value, per pass: a real
+  `serve` boot with a 342-row seed emitted **hundreds of ERROR-level
+  `Find operation failed` lines**, on every seeded boot and every per-organization
+  replay, each reading exactly like a real failure that everyone downstream has to
+  learn to ignore.
+  
+  **The fix is on the asking side, not the answering side.** The driver's refusal
+  is untouched — not caught more quietly, not downgraded, not filtered out of the
+  log. Instead the loader now asks the metadata registry whether the target
+  declares a `name` column, through the same `resolveObjectDefinition` resolver it
+  already builds the reference graph from (metadata service first, then the
+  engine's own schema registry), and drops the leg when the answer is no.
+  
+  Which probe answers cannot change: on an object with no `name` column that leg
+  could only ever throw, never match. The guard covers the leg in **both** of its
+  positions — the fallback, and the first position it occupies when a referenced
+  target carries no dataset in this load and keeps the metadata-level `name`
+  default.
+  
+  **An unknown is not a denial.** When neither the metadata service nor the
+  engine's schema registry can describe the object, the leg is kept — the
+  historical behaviour — rather than narrowed on a fact nobody established. The
+  answer is memoised per `load` (the question is asked once per unresolved
+  reference value, hundreds per boot) and re-asked on the next one, since a
+  publish between two loads can add the very column it is about.
+- 2b9d33a: Stamp seeded rows with the install's organization so one object runs one autonumber scope (#8686)
+  
+  Seed writes and API writes disagreed about tenancy. Seed data is loaded during
+  app start, before any human user exists, so the seed loader had no organization
+  to stamp and its rows landed `organization_id = NULL`; API writes carried the
+  signed-in user's organization. The SQL driver keys its autonumber counter by
+  exactly that column (`__global__` when NULL), so a single object ran two
+  independent counters — and the uniqueness index is partitioned by the same key
+  (`COALESCE(organization_id, '__global__'), <field>`), so the duplicates the
+  second counter minted were invisible to the constraint. On a single-tenant
+  install seeded with `CASE-00001..38`, the first four API creates returned
+  `CASE-00001..4` again: four duplicated values on a field declared `unique`, with
+  201s and no warning.
+  
+  Seed writes now carry the organization the same way API writes do. The moment an
+  install's organization first exists, untenanted seed rows are adopted into it and
+  the `__global__` counter is merged into the organization-scoped one, so the
+  `__global__` pseudo-tenant stops acting as a peer of a real organization. Existing
+  installs are repaired by a one-shot boot-time backfill, guarded to single-tenant
+  installs; a multi-tenant install where a split is detected is never guessed at —
+  the backfill skips and logs the condition and the remedy. Business identifiers
+  that were already minted twice are reported for the operator, never silently
+  renumbered. Platform namespaces (`sys_`/`cloud_`/`ai_`) stay global, exactly as
+  the seed loader already treats them.
+- 593c4bf: feat(spec): `storage` becomes the canonical `CoreServiceName` slot; `file-storage` stays a deprecated v17 alias (#9683)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A service-registry slot
+  name is not authorable metadata — nothing in a stack definition spells it — so
+  there is no conversion-layer entry to register. Compatibility is carried by the
+  enum keeping the old member and by @objectstack/service-storage registering the
+  same instance under both names; the alias retires through the standard
+  retirement flow at the next major. -->
+  
+  Maintainer ruling, 2026-08-18, verbatim: 「9683 file-storage 可以叫 storage」.
+  The `file-storage` slot was the only `CoreServiceName` member whose spelling
+  diverged from its documented accessor (`services.storage`), with no recorded
+  reason anywhere in the tree.
+  
+  - `CoreServiceName` gains `storage` as the canonical member; `file-storage`
+    stays an accepted, deprecated alias within v17 (it is a published enum
+    member — existing `getService('file-storage')` callers keep working).
+    `CORE_SERVICE_PROVIDER` and `ServiceRequirementDef` carry both.
+  - `@objectstack/service-storage` registers the **same instance** under both
+    names (the `http.server` / `http-server` pattern), pinned by an
+    alias-equivalence test.
+  - Every internal consumer resolves `storage`: the HTTP dispatcher, the email
+    plugin's attachment store, and `os migrate files-to-references`. Discovery
+    reports the service under the canonical `storage` key and mirrors the row
+    verbatim under the `file-storage` key for the alias's v17 lifetime, so
+    existing discovery readers (e.g. the console endpoint catalog) keep
+    working.
+  - Docs (`kernel/runtime-services`, `kernel/contracts`) now document the
+    canonical slot; a custom v17 provider for this slot should register both
+    names.
+- 0f59584: fix(metadata-protocol): `sys_setting`'s declared row identity is enforced on the tenant and global layers — a runtime NULL-safe UNIQUE index over `COALESCE(user_id, '')` (#8629)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Adds one runtime index
+  migration module and its exports to `@objectstack/metadata-protocol`, armed at
+  `kernel:ready`. No authorable metadata surface is added, renamed, retired or
+  tombstoned — `packages/spec` and the `sys_setting` declaration itself are
+  untouched, deliberately: expressing NULL-safe uniqueness in the declared
+  vocabulary is the deferred route-2 half. Nothing exists for `objectstack migrate
+  meta` to rewrite, and no author has to change any file. -->
+  
+  `sys-setting.object.ts` declares the object's row identity as
+  `{ fields: ['namespace', 'key', 'scope', 'user_id'], unique: 'organization' }`,
+  and the object's own header calls that the row identity. It was not one.
+  `user_id` is NULL on every row that is not `scope='user'` — `SettingsService.set`
+  computes it as `scope === 'user' ? ctx.userId ?? null : null` — and SQL UNIQUE
+  treats NULLs as mutually distinct, so the constraint was **void on the `tenant`
+  and `global` limbs**: exactly the two carrying organization-level and
+  platform-level configuration.
+  
+  Measured on a real engine, before this fix: two identical `scope='tenant'` rows
+  in ONE organization both landed (`201`, `201`), two identical `scope='global'`
+  platform defaults both landed, while the same rows with a non-NULL `user_id`
+  were refused — the control that identifies the mechanism as the NULL rather than
+  the `scope` value. `SettingsService` then resolves a layer with a positional
+  `rows.find(...)` and `set()` upserts against `{ namespace, key, scope, user_id }`,
+  so which value an organization got for a tenant-scoped key was unspecified and
+  two rows could disagree indefinitely with no way for an admin to see why the
+  effective value was not the one they set. `lifecycle.retention_overrides` is a
+  live tenant-scoped key, so this reached real retention behaviour.
+  
+  The fix follows the paradigm that has shipped twice in this package
+  (`ensureOverlayIndex`, `ensureViewDefinitionActiveIndex`): at `kernel:ready` the
+  declared index is rebuilt in raw SQL with both nullable key parts folded —
+  `COALESCE(organization_id, '__global__')` (ADR-0120 D3's tenant form, unchanged
+  from what the driver already emits) and `COALESCE(user_id, '')` (the
+  `ensureOverlayIndex` spelling for a non-tenant nullable discriminator). Storage
+  is untouched: the row keeps its NULL, only the index folds it. The index reuses
+  the **declared name**, so the additive `syncDeclaredIndexes` — which skips by
+  name — never re-imposes the NULL-distinct form on a later boot, and the drift
+  reconciler leaves it alone because an index carrying a non-tenant expression key
+  part is not sync-reproducible.
+  
+  **⚠️ Operator-visible: this is a TIGHTENING, and on an installation that has
+  already accumulated duplicate settings rows it will REFUSE to build the index.**
+  That is the intended behaviour, not a failure mode to work around. Those
+  duplicates exist precisely because the constraint has been void, and settings
+  rows are admin-authored configuration, so no row is discarded automatically and
+  no deterministic keep-one rule is applied. On refusal:
+  
+  - **nothing is deleted, rewritten or reordered**, and the boot continues;
+  - the **previous index stays in place** — the tightening is proved buildable
+    under a throwaway probe name before the declared name is ever dropped, so the
+    table never spends a moment with no unique index at all;
+  - one `error` line names the key that is not enforced, the consequence (duplicate
+    tenant-scope and global-scope rows can still be created, and `SettingsService`
+    has no defined answer for which one wins), and ships the **exact query that
+    lists the offending rows**, so the operator has the list from the boot log
+    without waiting for `os migrate plan`;
+  - the migration keeps refusing on every boot until an operator decides which row
+    survives, then converges on the next restart.
+  
+  Two hosts are deliberately quiet rather than degraded: a kernel composed without
+  the optional `service-settings` has no `sys_setting` table at all, which is
+  probed for and is a silent no-op; and a MySQL/MariaDB server that rejects
+  functional key parts keeps the previous index and is told what is not enforced,
+  the same degradation `SqlDriver.createNullSafeUniqueIndex` already reports for
+  this class of event.
+- f6c904a: fix(metadata-protocol): the sys_setting degradation report hands MySQL operators a duplicate-probe statement MySQL can actually run (#9434)
+  
+  When `sys_setting`'s NULL-safe row-identity index cannot be built, the migration
+  degrades and prints a query so the operator can list the duplicate rows
+  themselves. The `unsupported` arm is reached specifically on MySQL/MariaDB — no
+  functional key parts, no `CREATE INDEX IF NOT EXISTS` — so that arm's audience is
+  exactly one dialect, and the statement it printed used bare identifiers. `key` is
+  a RESERVED word on MySQL, so the one remedy offered to a MySQL operator came back
+  as `ERROR 1064 (42000)`, measured on a live MySQL 8.0.46. Nothing in the platform
+  executes the statement, so no boot path was affected — what failed was the
+  operator's copy-paste, in the arm that has no other remedy to offer.
+  
+  That arm now prints the MySQL spelling: every identifier quoted with backticks,
+  the convention `seed-tenancy-backfill.ts` adopted for the same reason in #9381.
+  Both spellings are generated from one body over one key-part array, so the
+  operator's list and the index's own key cannot drift apart, and the ANSI
+  statement `buildSysSettingDuplicateProbeSql()` returns is unchanged byte for byte
+  — the `conflict` arm still prints it, because a conflict means real rows blocked
+  a build the server was willing to attempt, which only SQLite and PostgreSQL ever
+  are.
+  
+  Identifiers are quoted uniformly rather than only where a word looks reserved:
+  MySQL's reserved-word list grows across point releases, and #9381's `last_value`
+  is the recorded case of quoting the table while leaving a reserved column bare.
+  
+  The `CREATE UNIQUE INDEX` statement is deliberately untouched and still bare.
+  MySQL refuses it for reasons quoting does not reach — unparenthesized `COALESCE`
+  key parts — and that verdict is now checked on a live server rather than
+  asserted, in both its quoted and unquoted spellings.
+- 159e299: Global search (`GET /api/v1/search`) now resolves searchable fields the same way `$search` does, so the ⌘K palette recalls what the list quick-search recalls (#7643)
+  
+  `searchAll` built its own filter instead of going through the engine's ADR-0061 `$search` expansion, which made the palette's recall a strict subset of the executor's. It now hands the engine `search: <query>` per object and lets one expansion resolve the fields and compile the clause.
+  
+  What a caller observes changing on `GET /api/v1/search` — both are widenings; no query that returned a hit before returns fewer:
+  
+  - **Pinyin/initials recall now works on this endpoint.** Where the deployment provisions the hidden `__search` companion column (`OS_SEARCH_PINYIN_ENABLED`), latin terms are OR-ed against it, so `hnkj` and `huaningkeji` now return the CJK-named record that `POST /api/v1/data/:object/query {"search":"hnkj"}` already returned. Previously: 0 hits.
+  - **Which columns are scanned now follows the object, not a field flag.** Resolution is the object's declared `searchableFields`, else the auto-default (display/name field plus short-text and enum fields) — the set `searchableFields` documents itself as governing. The endpoint previously scanned only text-typed fields carrying the field-level `searchable: true` flag, falling back to the title field alone, so most objects were searched on one column. Hits from a second column (an email, a description, a select's label) are new.
+  - Enum (`select`/`status`) columns are now matched by option LABEL, and virtual `formula` fields are excluded, both as on the executor path.
+  - **The endpoint no longer substring-scans primary keys.** An object whose only text-typed column is `id` — system tables, junction tables, append-only logs — used to fall through to "the first text-typed field" and be queried as `{id: {$icontains: term}}` on every keystroke. Such objects are now skipped, as `$search` already skipped them (#4483). Callers relying on a bare `id` fragment matching through this endpoint will no longer get that hit; query the record by id instead.
+  
+  Unchanged: which objects are swept and their opt-outs (`enable.searchable`, `enable.apiEnabled`, the `sys_*` skips), the per-object and overall caps, ordering, RLS/RBAC enforcement, and the response shape. The `$search` executor path itself is untouched. A record matched only through the pinyin companion has no `snippet` — no source column contains the typed term.
+  
+  Also corrects the stale case declaration on this path (#7850): the doc comment said "case-insensitive LIKE" while the sentence below it named `$contains`, which #4706 Q2 = A defines as case-**sensitive**. Matching folds case via `$icontains`; behaviour is unchanged by that edit.
+- 52fbba6: `auditMetaItem` no longer reports a failed audit read as an empty audit trail
+  
+  The `catch` closing the audit read in `ObjectStackProtocolImplementation.auditMetaItem`
+  was unqualified. Its comment named two benign causes — the `sys_metadata_audit` table not
+  being provisioned (legacy environments) and a host engine that exposes no `find` — but the
+  clause took every other cause with them: a connection drop, a permission denial, a
+  timeout, a malformed row, a query bug. Each was reported to the caller as the well-formed
+  statement `{ events: [] }`, i.e. "this item has no audit entries".
+  
+  This is the compliance surface behind `GET /api/v1/meta/:type/:name/audit`, which exists
+  so Studio's audit-log tab can show who tried what and whether a lock blocked it, so an
+  empty answer reads as *nobody touched this item*. Because the swallowed failures are
+  transient, the same item could report a full trail one minute and a clean one the next.
+  
+  Both benign causes still answer `{ events: [] }` exactly as documented. Every other read
+  failure now raises `SERVICE_UNAVAILABLE` / 503 carrying the driver error as `cause`, which
+  the route's existing error handler turns into an honest 5xx — the same treatment the
+  sibling `listCommits` and `getMetaItem` reads in this package already give (ADR-0110 D3: a
+  miss and a fault are different facts).
+- d5156b9: Remove the four dead `'objects'` spelling tolerances in the metadata protocol's object registry and storage seams.
+  
+  `applyObjectRegistryMutation`, `applyRegistryWriteThrough`, `ensureObjectStorage` and `dropObjectStorage` each admitted a plural `'objects'` type key, and the first of them *registered under it* — the spelling-tolerant-lookup shape `canonicalMetaType`'s header rejects, and the one that previously let a plural registry entry shadow an entire code-authored listing.
+  
+  All four are unreachable: every producer folds the type through `PLURAL_TO_SINGULAR` / `canonicalMetaType` before these seams see it. No behaviour changes for any caller that folds — which is all of them. What changes is the failure mode of a future caller that does *not* fold: it no longer silently registers an object under a plural key, so `assertObjectRegistered` fails closed with a loud, recoverable error instead.
+  
+  Folding at the producer remains the rule; these guards were never a second line of defence.
+- 75e66fc: Stop `GET /api/v1/meta/:type/:name/diff` serving stored credential values.
+  
+  `diffMetaItem` compared two stored metadata bodies and emitted the raw values it
+  found, so a `datasource` row whose credential rotated between versions returned
+  both the old and the new password in cleartext (inline `config.password` and the
+  password component of `config.url` alike).
+  
+  The diff is still computed on the RAW bodies — a credential rotation continues to
+  report its path as changed — but the emitted `value` / `from` / `to` are now taken
+  from the type's redacted projection of those same bodies, on both sides. Types
+  with no registered redactor are unaffected and keep serving their values by
+  reference.
+- a726154: test(metadata-protocol): pin the THIRD union-branch policy copy against `@objectstack/spec` (#8660)
+  
+  The union-branch selection policy — kind-mismatch drop, fewest-issues ranking,
+  `unrecognized_keys` tie-break, declaration-order determinism, depth limit 3,
+  branch cap 3 — has three implementations. #8318 (PR #8659) consolidated the two
+  inside `packages/spec` into one package-internal module and pinned them with a
+  shared-fixture parity test. The third, `zodIssuesToMetadataIssues` in
+  `protocol.ts` (the walk behind `saveMetaItem`'s `422 INVALID_METADATA` and the
+  read path's diagnostics), was structurally out of that consolidation's reach:
+  the shared module is deliberately not a public export (#4001), so a consumer in
+  another package cannot import it.
+  
+  That left this copy exactly where the spec pair sat before #8318 — held in step
+  by a header comment and nothing else. A future tie-break or ranking tweak lands
+  in `union-branch-policy.ts` for both spec walks at once and silently not for
+  this one, and then the same authored metadata gets one prescription from the
+  terminal, another from the data API, and a third from Studio: the forked verdict
+  #5014 ruled out.
+  
+  `src/union-branch-policy.cross-package-parity.test.ts` is the enforcement the
+  header stood in for. One fixture corpus, one `safeParse` per fixture, three
+  walks reached through PUBLIC surfaces only — `formatZodIssue` from
+  `@objectstack/spec`, `zodIssuesToFields` from `@objectstack/spec/api`, and this
+  package's own copy — compared as ordered `(path, message)` pairs. The corpus
+  covers every element of the policy by name, plus a hand-authored expectation per
+  fixture so both sides drifting the same way still fails. The two deliberate
+  asymmetries (the prose-only omission line, and raw zod codes here vs the
+  ADR-0114 catalog on the wire) are asserted in place rather than normalised away.
+  
+  **`patch`, deliberately not a skipped changeset.** No production line changes,
+  no export moves, and every assertion is green on `main` before this lands — but
+  the bump floor is right rather than absent, for the same reason
+  `legacy-unique-guard-attribution` took one: what ships is a ratchet on
+  release-relevant behaviour. The 422 envelope this pins is a published contract
+  of `@objectstack/metadata-protocol`, and a consumer reading the CHANGELOG should
+  be able to see when its verdict acquired mechanical protection against drifting
+  away from the spec's.
+- Updated dependencies [56656aa]
+- Updated dependencies [07e630e]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [34392a1]
+- Updated dependencies [f287435]
+- Updated dependencies [2782805]
+- Updated dependencies [e43d63a]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [13d7864]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [2d0af57]
+- Updated dependencies [7337f30]
+- Updated dependencies [420804d]
+- Updated dependencies [716ac9b]
+- Updated dependencies [a38408a]
+- Updated dependencies [62b1427]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [27a567d]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [24173e9]
+- Updated dependencies [818c27c]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [f8eb736]
+- Updated dependencies [11b779e]
+- Updated dependencies [73cfddf]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [2a9752c]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [1408ae3]
+- Updated dependencies [e2899f6]
+- Updated dependencies [b6c7690]
+- Updated dependencies [3851f87]
+- Updated dependencies [845e164]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [6f5a449]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [e1bb0ca]
+- Updated dependencies [30d3752]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [7fc01db]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [b849e69]
+- Updated dependencies [71ac21c]
+- Updated dependencies [192213f]
+- Updated dependencies [42d8990]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [402c125]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [44bc51d]
+- Updated dependencies [bbbfcfc]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+  - @objectstack/spec@17.1.0
+  - @objectstack/types@17.1.0
+  - @objectstack/lint@17.1.0
+  - @objectstack/core@17.1.0
+  - @objectstack/metadata@17.1.0
+  - @objectstack/metadata-core@17.1.0
+  - @objectstack/formula@17.1.0
+
 ## 17.0.0
 
 ### Major Changes

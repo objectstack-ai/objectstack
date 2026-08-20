@@ -1,5 +1,397 @@
 # @objectstack/client
 
+## 17.1.0
+
+### Minor Changes
+
+- bc6434b: **BREAKING** — `POST /api/v1/automation/:name/runs/:runId/resume` answers real HTTP
+  status codes for a failed run instead of HTTP 200 wrapping an inner `{success: false}`.
+  
+  Until now a screen flow driven to a server-side node failure answered:
+  
+  ```
+  HTTP 200
+  {"success":true,"data":{"success":false,"error":"Node 'create_opportunity' failed: …"}}
+  ```
+  
+  The run genuinely failed; the transport reported success. A scripted or integration
+  caller that branches on the HTTP status alone read a failed run as a successful one.
+  This applies to the resume route the ruling for `/actions` (business failures must not
+  ride HTTP 200 inside a double envelope), which every other automation refusal on this
+  route already followed.
+  
+  What changes on the wire:
+  
+  - **A run that resumed and then failed ⇒ `400` with `error.code: 'FLOW_FAILED'`.** The
+    node failure stays the human-readable `error.message`. The flow author's own
+    `errorMessage` travels in `error.details.errorMessage` — one documented location, the
+    same one the console reads — and the run's per-node `summary` in
+    `error.details.summary`. `durationMs` is no longer carried on this response.
+  - **A stale suspension ⇒ `404`.** The flow the run belongs to was deregistered, or the
+    node it was parked on was edited away under a live pause. Nothing ran and the pause can
+    never continue, so this is reported as terminal rather than as a business rejection.
+    The engine now classifies both cases as `RUN_NOT_FOUND`; the message names which one.
+  - **Unchanged:** every refusal that leaves the suspension intact keeps its own code and
+    stays retryable — `PERMISSION_DENIED` (403), `INVALID_SIGNAL` /
+    `INVALID_SCREEN_INPUT` (400), `RESUME_IN_PROGRESS` (409), `STORE_UNAVAILABLE` (503) —
+    and a resume that pauses again still answers 200 with the next screen.
+  
+  **`@objectstack/client`:** `client.automation.resume()` and
+  `client.project(id).automation.resume()` now **reject** on a failed run instead of
+  resolving with `{success: false, error, summary}` — the SDK throws on every non-2xx
+  before unwrapping. Callers that inspected the resolved value must move to a `catch`:
+  
+  ```ts
+  try {
+    await client.automation.resume(flow, runId, { inputs });
+  } catch (err: any) {
+    err.code;                   // 'FLOW_FAILED' (400) — the run ran and failed
+    err.httpStatus;             // 400 | 404 | 403 | 409 | 503
+    err.message;                // the node failure, verbatim
+    err.details?.errorMessage;  // the flow author's own message, when the flow declares one
+  }
+  ```
+  
+  Raw-HTTP callers that treated `2xx` as success and never opened the inner envelope now
+  see the failure they were already being told about, one level up.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) retires no metadata surface: no Zod schema, no authorable key, no stored sys_metadata row changes shape, so `objectstack migrate meta` has nothing to rewrite and no ledger entry can be written for it. What changes is an HTTP status plus an SDK method's promise contract, and the only channel that reaches those consumers is this changeset itself. -->
+- 9aa8890: **BREAKING** — the automation `trigger` routes now answer **409** for a disabled
+  flow and **422** for a flow whose definition has no start node, instead of HTTP
+  200 wrapping an inner `{success: false}`.
+  
+  This finishes the migration the previous release started. That changeset flipped
+  two of the four outcomes and said of the other two:
+  
+  > **Also unchanged, pending a ruling:** a DISABLED flow and one with no start
+  > node still answer 200 with the inner failure. Both are exits that never
+  > dispatched anything, and telling them apart needs a producer-side
+  > classification the closed `AutomationResult.code` union cannot yet express.
+  
+  That is the paragraph this change resolves. The union was widened deliberately —
+  two new members, with measured need — rather than the transport guessing from
+  message text or re-implementing the engine's enable-state policy.
+  
+  `POST /api/v1/automation/:name/trigger` and the legacy
+  `POST /api/v1/automation/trigger/:name` now answer, in full:
+  
+  | Status | `error.code` | The run |
+  |:---|:---|:---|
+  | `404` | — | never dispatched: no such flow |
+  | `409` | `FLOW_DISABLED` | never dispatched: the flow is switched off |
+  | `422` | `FLOW_NO_START_NODE` | never dispatched: the definition has no `start` node |
+  | `400` | `FLOW_FAILED` | RAN, and was rejected |
+  | `200` | — | succeeded, or PAUSED at a screen node — a pause is not a failure |
+  
+  The three refusals report no run because none exists: no node executed and
+  nothing was written. Only `400` describes a run, and only it carries
+  `error.details.summary` / `error.details.errorMessage`.
+  
+  Why two statuses and not one: a disabled flow is reversible operational state —
+  enable it and the identical request succeeds, which is what `409` means. A flow
+  with no start node cannot be executed as stored, and no retry helps, which is
+  what `422` means. Collapsing them would tell an operator to flip a switch that
+  will not help.
+  
+  **`@objectstack/spec`:** `AutomationResult.code` gains `'FLOW_DISABLED'` and
+  `'FLOW_NO_START_NODE'`. The union stays closed; these are trigger-time refusals
+  classified *before* dispatch, documented as a group distinct from the existing
+  resume-refusal members. Both are registered in the ADR-0112 error-code ledger.
+  
+  **`@objectstack/service-automation`:** `execute()` stamps the matching `code` on
+  its disabled-flow and no-start-node exits. They continue to carry **no**
+  `status` — that absence is what lets a transport tell a never-dispatched exit
+  from a run that dispatched and failed (`status: 'failed'`) without inspecting
+  `summary`, `durationMs` or the message.
+  
+  **`@objectstack/client`:** `client.automation.trigger()`, `.execute()` and
+  `client.project(id).automation.execute()` already rejected on a failed run;
+  they now reject with these two additional classifications, so a caller can tell
+  "enable the flow and retry" from "the flow definition is broken":
+  
+  ```ts
+  try {
+    await client.automation.execute(flow, { params });
+  } catch (err: any) {
+    err.httpStatus;   // 409 | 422 | 400 | 404
+    err.code;         // 'FLOW_DISABLED' | 'FLOW_NO_START_NODE' | 'FLOW_FAILED'
+  }
+  ```
+  
+  Callers that branch only on `FLOW_FAILED` keep working for the case they
+  handle, but will no longer see these two refusals under it — they arrive with
+  their own codes, which is the point.
+  
+  Not affected, and deliberately so: `POST /api/v1/actions/...` with a
+  `type: 'flow'` action, and metadata-declared `type: 'flow'` endpoints. Both
+  dispatch the same flow through a different door with its own response
+  conventions, and whether they should inherit this table is tracked separately.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) retires no metadata surface: no Zod schema, no authorable key, and no stored sys_metadata row changes shape, so `objectstack migrate meta` has nothing to rewrite and no ledger entry could be written for it. What changes is an HTTP status plus two new members of a runtime result type, and the channel that reaches those consumers is this changeset plus the compiler. -->
+- 48032c9: **BREAKING** — both automation `trigger` routes answer real HTTP status codes for a flow
+  that ran and failed, instead of HTTP 200 wrapping an inner `{success: false}`.
+  
+  This is the second and wider half of the migration the resume route shipped in the same
+  release (#8684, merged 2026-08-17): one SDK-visible behaviour change, one migration note.
+  The resume flip touched the screen-flow runner; this one touches the door every app
+  dispatches flows through.
+  
+  Until now a flow driven to a node failure answered:
+  
+  ```
+  HTTP 200
+  {"success":true,"data":{"success":false,"error":"Node 'create_opportunity' failed: …"}}
+  ```
+  
+  The run genuinely failed; the transport reported success. A scripted or integration caller
+  that branches on the HTTP status alone read a failed run as a successful one. This applies
+  the `/actions` ruling (business failures must not ride HTTP 200 inside a double envelope)
+  to `POST /api/v1/automation/:name/trigger` and to the legacy
+  `POST /api/v1/automation/trigger/:name` — the shape `client.automation.trigger()` calls.
+  Both doors answer through one mapper, so they cannot drift.
+  
+  What changes on the wire:
+  
+  - **A flow that ran and then failed ⇒ `400` with `error.code: 'FLOW_FAILED'`.** The node
+    failure stays the human-readable `error.message`. The flow author's own `errorMessage`
+    travels in `error.details.errorMessage` — one documented location, the same one the
+    console reads — and the run's per-node accounting in `error.details.summary`. A flow
+    whose `errorHandling.strategy` is `retry` answers the same way once its attempts are
+    exhausted. `durationMs` is no longer carried on this response.
+  - **A flow name the deployment does not hold ⇒ `404`,** answered before anything is
+    dispatched, through the same registry probe `POST /:name/toggle` and `GET /:name` use.
+  - **Unchanged:** a successful run still answers 200 with its result, and a run that PAUSED
+    at a `screen` node still answers 200 with the next screen — a pause is not a failure.
+  - **Also unchanged, pending a ruling:** a DISABLED flow and one with no start node still
+    answer 200 with the inner failure. Both are exits that never dispatched anything, and
+    telling them apart needs a producer-side classification the closed
+    `AutomationResult.code` union cannot yet express. Tracked on #9378.
+  
+  **`@objectstack/service-automation`:** `execute()` now stamps `status: 'failed'` on the
+  results of runs that dispatched and were rejected — the same lifecycle verdict it already
+  writes to the run log. Its never-dispatched exits carry no `status`, which is what lets a
+  transport answer the two classes differently without inspecting the result's internals.
+  
+  **`@objectstack/client`:** `client.automation.trigger()`, `client.automation.execute()` and
+  `client.project(id).automation.execute()` now **reject** on a failed run instead of
+  resolving with `{ success: false, error }` — the SDK throws on every non-2xx before
+  unwrapping. Callers that inspected the resolved value must move to a `catch`:
+  
+  ```ts
+  try {
+    await client.automation.execute(flow, { params });
+  } catch (err: any) {
+    err.code;                   // 'FLOW_FAILED' (400) — the run ran and failed
+    err.httpStatus;             // 400 | 404
+    err.message;                // the node failure, verbatim
+    err.details?.errorMessage;  // the flow author's own message, when the flow declares one
+    err.details?.summary;       // which node failed
+  }
+  ```
+  
+  Raw-HTTP callers that treated `2xx` as success and never opened the inner envelope now see
+  the failure they were already being told about, one level up.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) retires no metadata surface: no Zod schema, no authorable key, no stored sys_metadata row changes shape, so `objectstack migrate meta` has nothing to rewrite and no ledger entry can be written for it. What changes is an HTTP status plus an SDK method's promise contract, and the only channel that reaches those consumers is this changeset itself. -->
+- 7c9c1dd: The batch publish response is declared (#9406). `POST /packages/:id/publish-drafts` (Studio's "publish whole app") now has a spec contract behind it: `PublishPackageDraftsResponseSchema` in `@objectstack/spec/api` declares the full wire payload — `success` / `publishedCount` / `failedCount` / `published[]` (each element with its ADR-0008 `version` OCC token and the optional omitted-when-empty `advisories` from #9343) / `failed[]` / `seedApplied` / `materializeApplied` / `commitId`, plus the REST door's own receipts (`unhiddenApps` / `unhideError` / `rebindError`) — the #5745/#7294 "declared = returned" discipline carried to the batch door, with the two pin suites mirroring the single door's pair (spec-side declaration pins plus producer- and route-side conformance gates). `probes` is deliberately opaque in the declaration per the #9406 ruling: the key is declared and carried through verbatim, but its inner `BuildProbeReport` shape is staged until a consumer needs a field of it. `@objectstack/client`'s `packages.publishDrafts` now resolves `PublishPackageDraftsResponse` instead of `any`, and the runtime route ledger names the schema. Additive declaration of an existing wire face — no response bytes change.
+- caaae2c: feat(client): `security.explain()` accepts the `recordIds` batch spelling (#8480)
+  
+  The typed `security.explain()` request now declares the optional
+  `recordIds?: string[]` field alongside the existing `recordId?: string`, so a
+  typed-client consumer can reach the batch record-grained explain form added
+  server-side by #8326 without a cast. Type-level and TSDoc only — the method
+  still forwards the request body verbatim over POST; the 200-id cap and the
+  `recordId`/`recordIds` mutual exclusion are validated server-side by
+  `ExplainRequestSchema` (`@objectstack/spec`), unchanged.
+
+### Patch Changes
+
+- 03520eb: deps(auth): the better-auth family moves off the `1.7.0-rc.2` prerelease onto stable `^1.7.1` (#3002)
+  
+  `@objectstack/plugin-auth` shipped with **exact pins on a release candidate** —
+  `better-auth`, `@better-auth/core`, `@better-auth/oauth-provider` and
+  `@better-auth/sso` all at `1.7.0-rc.2`. That pin was never housekeeping debt: it was
+  the remediation for **GHSA-p2fr-6hmx-4528** (`@better-auth/oauth-provider`) and
+  **GHSA-j8v8-g9cx-5qf4** (`@better-auth/scim`, high — account/provider takeover), both
+  patched only in `>=1.7.0-beta.4`, so there was no stable line to move to. Upstream has
+  now shipped one: `npm view <pkg> dist-tags` reports `latest: 1.7.1` for every family
+  member. The declarations become `^1.7.1`, which is what a downstream
+  `npx create-objectstack` install now resolves.
+  
+  **`@better-auth/scim` deliberately stays at `1.7.0-rc.1`.** Measured against the
+  published stable tarball rather than assumed: `@better-auth/scim@1.7.1` ships the rc.2
+  **rewrite** — no `scimProvider` model, no generate-token endpoint, and six replacement
+  models (`scimUser`, `scimGroup`, `scimGroupMember`, `scimSubject`,
+  `scimConnectionBinding`, `scimIdentityTombstone`). Adopting it is a feature migration
+  (ADR-0071, tracked separately), not a version bump. The hold stays security-clean: rc.1
+  is above the advisory's fix floor, `pnpm audit --audit-level=high` is green, and rc.1's
+  peer ranges accept the stable 1.7.1 core the rest of the family resolves to.
+  
+  **Three pieces of upstream drift are absorbed here, and one of them was a live
+  sign-in outage waiting to happen.**
+  
+  `1.7.0-rc.2` renamed the account model's `accountId` field to `providerAccountId`;
+  **stable 1.7.0/1.7.1 renamed it back to `accountId`**, keeping the new required
+  `issuer`. Carrying the rc.2 spelling into the stable line left the field unmapped, so
+  better-auth's adapter asked for a column named `accountId` and **every sign-up answered
+  500** — `Unknown field 'accountId' on object 'sys_account'`. The `account_id` column
+  itself never changed and no data moves; only the camelCase key does. The same rename
+  reaches `@objectstack/client`: `auth.accounts.list()` (better-auth's `/list-accounts`)
+  returns `accountId`, and its declared response type said `providerAccountId`. If you
+  read that field off the client's typed response, rename it.
+  
+  `@better-auth/oauth-provider` 1.7.1's client model writes three fields the platform
+  object did not answer for. `applicationType` is the OIDC spelling of what rc.2 called
+  `type`, so it maps onto the **existing** `type` column and no data moves;
+  `clientDiscoveryId` and `clientCredentialsScopes` are genuinely new and are now
+  declared on `sys_oauth_application` as `client_discovery_id` and
+  `client_credentials_scopes`. Without them, dynamic client registration
+  (`POST /oauth2/register`) fails at the driver.
+  
+  Two endpoints are newly mounted by the auth catch-all and are now ledgered:
+  `POST /oauth2/end-session` and `POST /oauth2/end-session/confirm` — the POST form of
+  OIDC RP-initiated logout, whose `GET` counterpart was already published.
+  
+  **Nothing here needs an action on upgrade.** The new columns are additive and optional,
+  and the field rename is internal to how the plugin talks to better-auth — with the one
+  exception of the `@objectstack/client` response type named above.
+- 79c46da: feat(contract): a hook refusal can mark its message user-facing — `userMessage`, the producer-side opt-in channel (#9934, producer half of objectui#5210)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Purely additive: one
+  new OPTIONAL field on the two error-envelope schemas, a new shared reader in
+  @objectstack/types, and passthrough plumbing at the boundaries. Nothing
+  authorable is renamed, retired, aliased or tombstoned, so there is no
+  conversion to register. Unmarked errors produce byte-identical wire bodies. -->
+  
+  The console form deliberately discards the server `message` on 403 and
+  substitutes a generic string — the recorded #3821 fix for platform diagnostics
+  leaking to end users. That substitution also suppressed every deliberate,
+  localized refusal an application hook author wrote (11 real hook guards in the
+  objectui#5210 report), and incentivized misusing 400 for permission refusals.
+  The maintainer-accepted ruling (2026-08-19, option 1): give the AUTHOR a
+  producer-side way to mark a refusal message user-facing, once, at the contract
+  level — status-agnostic, with #3821 preserved by construction for everything
+  unmarked.
+  
+  **The marking**: set `userMessage` (non-empty string) on the thrown error at
+  throw time. It is a text-carrying field, not a boolean beside `message` — the
+  mark and the marked text are one value, so no boundary that rewraps or
+  substitutes `message` can promote platform prose into the marked channel, and
+  platform/driver code never sets it.
+  
+  - `@objectstack/spec`: `ApiErrorSchema.userMessage` and
+    `EnhancedApiErrorSchema.userMessage` (optional, additive).
+  - `@objectstack/types`: `declaredUserMessage(error)` — the ONE "is this
+    marked?" read (non-empty string, nothing invented) — and
+    `ThrownHttpError.userMessage` on `resolveThrownHttpError`.
+  - `@objectstack/rest`: `mapDataError` / `resolveErrorResponse` ride a declared
+    marking onto whatever envelope classification chose (flat body top-level
+    `userMessage`, truncated at the same #5423 bound as the 4xx message).
+  - `@objectstack/runtime`: the QuickJS side-channel carries `userMessage`
+    across the sandbox boundary (both directions, joining `code`/`fields`/
+    `status`), and the dispatcher door emits it as a declared sibling in the
+    nested envelope.
+  - `@objectstack/client`: the SDK attaches `err.userMessage` from both wire
+    dialects, so a UI renders it verbatim when present and keeps its generic
+    substitution when absent.
+  
+  The consumer half — the console form rendering a marked message instead of the
+  generic `form.noPermissionToSave` — is objectui#5210.
+- Updated dependencies [56656aa]
+- Updated dependencies [07e630e]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [2782805]
+- Updated dependencies [e43d63a]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [420804d]
+- Updated dependencies [716ac9b]
+- Updated dependencies [a38408a]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [24173e9]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [f8eb736]
+- Updated dependencies [11b779e]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [e2899f6]
+- Updated dependencies [3851f87]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [e1bb0ca]
+- Updated dependencies [30d3752]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [402c125]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [44bc51d]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+  - @objectstack/spec@17.1.0
+  - @objectstack/core@17.1.0
+
 ## 17.0.0
 
 ### Major Changes

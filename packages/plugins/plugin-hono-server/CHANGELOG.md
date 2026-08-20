@@ -1,5 +1,362 @@
 # @objectstack/plugin-hono-server
 
+## 17.1.0
+
+### Minor Changes
+
+- 152bff8: fix(hono-server): `http_requests_total` is emitted by the transport, so every inbound mount is counted (#9650)
+  
+  The counter had exactly one emitter: a `Proxy` the runtime dispatcher built
+  over its **own** `IHttpServer` handle. It therefore saw only the routes the
+  dispatcher itself registered — and nothing else on the same server.
+  
+  Measured, that left at least **14** inbound surfaces uncounted, in two
+  structurally different classes:
+  
+  - plugins that mount through `getRawApp()` — auth (`/api/v1/auth/*`),
+    metadata HMR, cloud-connection, marketplace, runtime-config, trigger-api,
+    webhooks, approvals, the console SPA. These bypass `IHttpServer` entirely,
+    so **no** wrapper at that level can ever reach them.
+  - plugins that resolve `http.server` themselves and mount through the verb
+    methods — the REST data API via `RouteManager`, storage, i18n, settings,
+    datasource admin.
+  
+  The two highest-traffic surfaces an operator actually cares about, auth and
+  the REST data API, were both in that set. The documented guidance is to alert
+  on the 5xx rate derived from this counter, so a deployment could be melting
+  down on `/api/v1/*` with the counter flat.
+  
+  The counter is now emitted from the Hono adapter itself, as a raw-app
+  middleware installed at the end of `HonoServerPlugin.init()` beside
+  `installMiddlewareSeam()` — the one layer every inbound request converges on,
+  whatever registered the handler.
+  
+  **The route label is the matched PATTERN, never the concrete path.**
+  `/api/v1/data/:id`, not one series per record id; `/api/v1/auth/*`, not one
+  per sign-in endpoint. Cardinality has to stay bounded or the counter is
+  unusable for the alerting it exists for, and the label is unfixable in place
+  once dashboards are wired against the first shipped one.
+  
+  **Wiring.** `HonoServerPlugin` takes a new `observability.metrics` option and
+  otherwise follows the canonical chain `ObservabilityServicePlugin` documents:
+  explicit option, then the `observability:metrics` service, then **nothing** —
+  with no backend configured no middleware is installed at all, so an
+  unconfigured deployment pays no per-request cost.
+  
+  **Two consequences, stated rather than left to be discovered:**
+  
+  - **A transport that does not implement this seam reports no HTTP metrics.**
+    The seam is Hono's. Another `IHttpServer` implementation emits nothing until
+    it grows its own, and a zero there means "not instrumented", never "no
+    traffic". A response-observing hook on the `IHttpServer` contract is the
+    transport-agnostic successor and is filed separately.
+  - **A request the `use()` chain refuses is still counted** — the seam is
+    installed before the middleware seam, so the inbound rate limiter's `429`
+    appears with `status="429"`. A preflight `OPTIONS` that the transport's own
+    CORS built-in answers is **not** counted: it short-circuits earlier and
+    never reaches a route.
+- 88e1bac: fix(api): the plugin-mounted Hono error paths answer the declared envelope — six refusal bodies stop speaking the pre-#3675 dialect (#9364)
+  
+  Six hand-built refusal bodies on plugin-mounted Hono routes departed from
+  `BaseResponseSchema`. They were invisible to every check in the repo until
+  #9267 added the gate's third surface, which discovers these routes by parsing
+  rather than by filename. This converts the **error-path** half of what that
+  first run measured; the bare pre-auth discovery payloads it also found are a
+  separate wire ruling (#9389) and are untouched here.
+  
+  **If you branch on these bodies, this is the change.** Every one of them was
+  readable only by reaching for a key the contract does not declare, so no
+  consumer that followed `ApiErrorSchema` was reading them successfully in the
+  first place — `body.error.message` read `undefined` on all six.
+  
+  `@objectstack/plugin-hono-server` — the adapter's own refusals, the answer any
+  host using it as its transport gets for an unmatched request or a handler that
+  produced nothing:
+  
+  | status | was | now |
+  |:--|:--|:--|
+  | 404 unmatched path | `{ error: 'Not found' }` | `{ success: false, error: { code: 'ENDPOINT_NOT_FOUND', message: 'Not found' } }` |
+  | 405 method mismatch | `{ error, code, message, method, path, allowed }` | `{ success: false, error: { code: 'METHOD_NOT_ALLOWED', message, details: { method, path, allowed } } }` |
+  | 500 handler wrote nothing | `{ error: 'No response from handler' }` | `{ success: false, error: { code: 'INTERNAL_ERROR', message: 'No response from handler' } }` |
+  | 500 fallback threw | `{ error: 'Fallback handler failed' }` | `{ success: false, error: { code: 'INTERNAL_ERROR', message: 'Fallback handler failed' } }` |
+  
+  The 405 is the sharpest of the four: it already carried a real semantic code,
+  but placed it BESIDE `error` rather than inside it, so `body.error.code` read
+  `undefined` while `body.code` worked — the #7035 dialect. Its `code` **value**
+  is unchanged (`METHOD_NOT_ALLOWED`, a `StandardErrorCode` member); only its
+  position moved, along with the three context keys, which are now
+  `error.details` — the slot `ApiErrorSchema` declares for exactly that. The
+  `Allow` header is unchanged and remains the primary channel for it.
+  
+  `@objectstack/hono` — the shared `errorJson` helper wrote the HTTP **status**
+  into `error.code`, so every refusal from this mount shipped `error.code: 404`
+  or `500` where `ApiErrorSchema.code` declares a closed STRING vocabulary
+  (ADR-0112 D3/D4). It now derives the standard member for the status through
+  `resolveThrownHttpError` (`@objectstack/types`) — the one rule the REST and
+  dispatcher doors already read for this question, so this third door does not
+  become a fourth dialect. A 404 from this mount now carries
+  `error.code: 'RESOURCE_NOT_FOUND'`; the numeric status stays where it is
+  authoritative, on the response line.
+  
+  `@objectstack/cli` — the unbound-hostname 404 from `os serve`'s
+  `OS_ROOT_DOMAIN` guard answered
+  `{ error: 'environment_not_found', message, hostname }`: a bare-string error
+  with two stray top-level keys, and a lowercase code where error codes are
+  `SCREAMING_SNAKE`. It is now
+  `{ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND', message, details: { hostname } } }`.
+  The `Accept: text/html` branch still serves the styled 404 page, unchanged.
+  
+  **The cross-adapter reference implementation moved with it.**
+  `@objectstack/http-conformance`'s zero-dependency `NodeHttpServer` mirrors the
+  adapter's unmatched-request bodies byte-for-byte on purpose — the whole point
+  of that package is proving the transport port is free of framework-isms, and
+  `fallback-seam.conformance.test.ts` runs the same cases against both. Leaving
+  it behind would have made "both adapters agree" false in the suite that exists
+  to assert it.
+  
+  Every converted body is judged by `scripts/check-route-envelope.mjs`, whose
+  per-file counters for these three modules go to zero and are banked as
+  conformant. The literals are deliberately written INLINE at each `c.json(...)`
+  call rather than hoisted into shared constants: the gate reads the object
+  literal, and an identifier reads to it as a relayed body it must not police —
+  hoisting would have zeroed the counters by hiding the bodies from the scanner
+  instead of by conforming them.
+
+### Patch Changes
+
+- c1731d0: `/auth/me/permissions` and `/me/apps` now resolve the caller's permission sets by
+  calling `ISecurityService.resolvePermissionSetsForContext` on the `security`
+  service, instead of re-implementing that resolution twice locally.
+  
+  The endpoints previously composed the requested set names themselves (positions ∪
+  explicit sets ∪ the deployment baseline), built their own `sys_permission_set` DB
+  loader, and called the permission evaluator directly — one rule in three copies,
+  which diverged from the enforcement path three times, each divergence found only
+  after it reached a user. They now project a single resolution owned by the
+  enforcement path.
+  
+  Behaviour is unchanged on the ordinary paths, measured on the wire. Three states
+  change, all of them states where the UI plane previously disagreed with the data
+  plane:
+  
+  - A deactivated `sys_permission_set` row whose name matches a live position name
+    no longer grants capabilities, tabs or object access on these endpoints. It
+    already granted nothing on the data plane.
+  - A permission set with a malformed JSON column is no longer dropped whole by
+    `/auth/me/permissions`; the malformed column degrades on its own, as it already
+    did for the data plane and for `/me/apps`.
+  - A stack whose SecurityPlugin started in degraded mode (no middleware-capable
+    engine, so the `security` service is never registered and nothing is enforced)
+    now takes the endpoints' documented degraded branch instead of reporting a
+    restrictive map computed against enforcement that does not exist.
+  
+  `plugin-hono-server` still takes no runtime dependency on `plugin-security`: the
+  resolution is reached through the service locator, and the degraded branches for
+  a stack with no SecurityPlugin are unchanged.
+- 7337f30: chore(deps): production-dependency patch bumps from the weekly Dependabot group (#9212)
+  
+  Routine dependency-range refresh, no behavior change: `@oclif/core` 4.13.2→4.13.3,
+  `esbuild` 0.28.1→0.28.2 and `better-sqlite3` ^13.0.2→^13.0.3 (optional) on
+  `@objectstack/cli`; `mingo` 7.2.2→7.2.4 on `@objectstack/driver-memory`; `nanoid`
+  6.0.0→6.0.1 on `@objectstack/driver-mongodb`, `@objectstack/driver-sql`,
+  `@objectstack/driver-sqlite-wasm` and `@objectstack/driver-turso`, plus
+  `better-sqlite3` ^13.0.2→^13.0.3 (optional on `@objectstack/driver-sql`, peer on
+  `@objectstack/driver-turso`); `js-yaml` 5.2.2→5.2.3 on `@objectstack/metadata`;
+  `@noble/hashes` 2.2.0→2.3.0 and `jose` 6.2.5→6.2.8 on `@objectstack/plugin-auth`;
+  `nodemailer` 9.0.3→9.0.5 on `@objectstack/plugin-email`; `@hono/node-server`
+  2.0.12→2.1.1 and `hono` 4.12.34→4.13.2 on `@objectstack/plugin-hono-server`;
+  `pinyin-pro` 3.28.2→3.29.1 on `@objectstack/plugin-pinyin-search`; and
+  `@noble/ciphers` 2.2.0→2.3.0 on `@objectstack/service-settings`.
+  
+  Every entry above changed a `dependencies`, `optionalDependencies` or
+  `peerDependencies` range in the published manifest — the only kind of change
+  that reaches a consumer's install. The same Dependabot group also bumped
+  `devDependencies` on `@objectstack/hono`, `@objectstack/client`,
+  `@objectstack/core`, `@objectstack/plugin-sharing` and `@objectstack/spec`
+  (none consumer-facing), and touched the private `apps/docs`,
+  `examples/app-todo` and workspace-root manifests (none published) — none of
+  those get an entry here.
+- 1e050a5: fix(observability): emit `http_request_duration_ms` from the transport seam, so
+  p95 latency sees every inbound surface instead of dispatcher routes only
+  (#9834)
+  
+  #9835 moved `http_requests_total` to the `IHttpServer.afterResponse` seam and
+  stopped there, which left the two derived signals the operator guidance names
+  inconsistent with each other: 5xx rate covered auth's `getRawApp()` mount and
+  the REST data API, while p95 latency still saw only the routes the dispatcher's
+  own `Proxy` wrapped. A missing latency panel is at least loud; the worse
+  reading is the p95 that IS drawn, computed from dispatcher routes only and
+  presented as the server's.
+  
+  - `@objectstack/observability`: new `armHttpRequestDurationHistogram(server,
+    metrics)`, the duration family's counterpart to `armHttpRequestCounter` —
+    same `afterResponse` seam, its own `Symbol.for` first-wins latch, so a host
+    that armed one family can still arm the other. `ArmHttpMetricResult` is the
+    family-neutral spelling of the result union; `ArmHttpRequestCounterResult`
+    stays as an alias.
+  - `@objectstack/plugin-hono-server`: `installHttpMetricsSeam` arms both
+    families, so the transport owns every transport-observable HTTP metric in the
+    shipped composition rather than splitting ownership across layers.
+  - `@objectstack/runtime`: the dispatcher offers its registry to the histogram
+    seam as well, and `instrumentRouteHandler` gains
+    `emitHttpRequestDurationMs` (default `true`) — passed `false` exactly when
+    the transport implements the seam, which is what keeps the dispatcher's own
+    routes at ONE observation instead of reintroducing the #9833 double count one
+    family over.
+  
+  **⚠️ The observation window changes with the emitter.** The per-route wrapper
+  timed `await handler(req, res)` — handler latency. The transport times from
+  first seeing the request to the response existing, so the middleware chain and
+  body parse are now included and samples can only move UP. This is the number a
+  latency panel should show (the request's latency, not one layer's share of it),
+  but it is a visible shift in an existing series: compare p95 across the upgrade
+  boundary deliberately. Documented in `docs/OBSERVABILITY.md` and the
+  production-readiness guide.
+  
+  `http_request_errors_total` is deliberately NOT moved. The observation carries
+  no throw signal — only `{method, routePattern, status, elapsedMs}` — so a
+  transport-side emitter would have to key off a status class, which counts a
+  different population than "the handler threw". That is a semantics decision,
+  recorded on #9834 rather than guessed at here; the counter stays ungated on
+  every transport and keeps its documented meaning.
+- 7ff3975: feat(spec): `IHttpServer` gains an optional `afterResponse` response-observing
+  hook so HTTP metrics are transport-agnostic instead of Hono-only (#9835)
+  
+  The contract addition (additive — a new optional member plus the
+  `HttpResponseObservation` / `HttpResponseObserver` types and the reserved
+  `UNMATCHED_ROUTE_PATTERN` label): a transport invokes each registered observer
+  exactly once per answered request with `{ method, routePattern, status,
+  elapsedMs }`, after the response exists — the observation point the `use()`
+  middleware contract cannot express (it runs before dispatch and never sees a
+  status). `routePattern` is REQUIRED to be the registered route pattern
+  (`/api/v1/data/:id`), never the concrete path, so no adapter re-decides metric
+  cardinality. Optionality is feature-detected runtime-real
+  (`typeof server.afterResponse === 'function'`); a transport that does not
+  implement the seam reports **no** HTTP metrics — zero there means "not
+  instrumented", never "no traffic".
+  
+  Implementations and consumers in the same change:
+  
+  - `@objectstack/plugin-hono-server`: `HonoHttpServer` implements the seam (the
+    ruled #9650 raw-app middleware becomes its delivery path — same reach,
+    including `getRawApp()` mounts and middleware-refused 429s); unrouted
+    requests are now labelled with the reserved `unmatched` pattern (previously
+    they could surface as `/*`).
+  - `@objectstack/observability`: new `armHttpRequestCounter(server, metrics)`
+    arms the `http_requests_total` counter through the seam at most once per
+    server (first caller wins), which is what makes "exactly one counter per
+    server" structural.
+  - `@objectstack/runtime`: the dispatcher offers its `observability.metrics`
+    registry to the seam (a host that wires only the dispatcher now counts every
+    inbound surface) and suppresses its own per-route copy of
+    `http_requests_total` when the transport implements the seam — retiring the
+    #9833 double count. Request-id echo, the duration histogram, the error
+    counter and the error reporter are unchanged.
+  - `@objectstack/http-conformance`: `NodeHttpServer` implements the seam, and a
+    new cross-adapter conformance suite locks the semantics for both adapters.
+  - `@objectstack/core`: re-exports the new contract types/constant.
+- Updated dependencies [56656aa]
+- Updated dependencies [07e630e]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [2782805]
+- Updated dependencies [e43d63a]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [899052a]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [2d0af57]
+- Updated dependencies [420804d]
+- Updated dependencies [716ac9b]
+- Updated dependencies [a38408a]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [27a567d]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [1e050a5]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [24173e9]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [f8eb736]
+- Updated dependencies [11b779e]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [e2899f6]
+- Updated dependencies [3851f87]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [e1bb0ca]
+- Updated dependencies [30d3752]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [402c125]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [44bc51d]
+- Updated dependencies [bbbfcfc]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+  - @objectstack/spec@17.1.0
+  - @objectstack/types@17.1.0
+  - @objectstack/core@17.1.0
+  - @objectstack/observability@17.1.0
+
 ## 17.0.0
 
 ### Major Changes

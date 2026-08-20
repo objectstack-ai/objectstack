@@ -1,5 +1,289 @@
 # @objectstack/plugin-email
 
+## 17.1.0
+
+### Minor Changes
+
+- 23abe27: feat(messaging): `IEmailService` gains a render-only `renderTemplate({ template, locale, data, timezone }) → { subject, html, text }`, and the inbox channel consumes it — localized `sys_email_template` content now reaches `sys_inbox_message` (#9225)
+  
+  A template-path notify node with `channels: ['inbox', 'email']` delivered a
+  localized email and an inbox row whose title was the topic and whose body was
+  empty: the locale ladder + `{{var}}` renderer (ADR-0053 format filters
+  included) lived inside plugin-email's `sendTemplate`, unreachable without
+  sending mail (maintainer-ruled seam, 2026-08-17, on #9225).
+  
+  - `IEmailService.renderTemplate` (new contract method, `packages/spec`)
+    resolves a `sys_email_template` bundle by `(name, locale)` with the same
+    documented en-US ladder as `sendTemplate`, validates required variables, and
+    returns the rendered `{ subject, html, text }` — strictly render-only: no
+    transport call, no queueing, no `sys_email` row. Implemented ONCE in
+    plugin-email by extracting the resolver `sendTemplate` already used;
+    `sendTemplate` now delivers what the shared resolver renders, byte for byte.
+  - The messaging inbox channel consumes it the way the email channel consumes
+    `sendTemplate`: a delivery whose payload carries a notify `template`
+    reference renders `subject` into the row's `title` and `text` into
+    `body_md`, per recipient, at delivery time. A registered email service
+    without the method — or no email service at all — fails the delivery LOUDLY
+    (`TEMPLATE_UNSUPPORTED`, graded permanent) instead of silently degrading to
+    topic-as-title; renderer failure codes (`TEMPLATE_NOT_FOUND` /
+    `TEMPLATE_INACTIVE` / `MISSING_VARIABLES`) land on the delivery row and are
+    graded permanent, mirroring the email channel.
+  
+  The result shape follows what `sys_email_template` rows carry
+  (`subject`/`body_html`/`body_text?`): `html` is the rendered `body_html`,
+  `text` is the rendered `body_text` or, when the row declares none, derived
+  from the rendered HTML.
+
+### Patch Changes
+
+- 445ae4d: fix(auth): auth emails follow the deployment locale — all five remaining templates localized, and every send names a locale (#8195)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable property is
+  added, renamed, retired or tombstoned. This adds locale ROWS to templates that
+  already exist (the `sys_email_template` shape is unchanged — `(name, locale)` was
+  always its key), plus one new public method on `AuthManager` and one new
+  plugin-layer read. Nothing existing changes spelling, so there is no conversion
+  to register. -->
+  
+  Outbound auth mail was English-only on a platform that supports four locales and
+  whose UI already switches between them. Two facts made every non-`en-US` template
+  row unreachable through the platform's own send path:
+  
+  - **no auth send named a locale** — all five `sendTemplate` calls in
+    `auth-manager.ts` omitted it, so `EmailService`'s ladder resolved
+    `DEFAULT_TEMPLATE_LOCALE` (`en-US`) every time;
+  - **only one auth template had non-`en-US` rows at all** —
+    `auth.email_change_notice` shipped four locales with #8019; the other five were
+    `en-US`-only.
+  
+  Both halves land together, and that is the substance of the fix rather than its
+  packaging. Shipping the resolution alone was measured to be **worse than the
+  English status quo**: the ladder falls back to the **en-US row body** on a miss
+  while `const locale = preferred || row.locale` still hands the caller's locale to
+  the render filters — so a zh-CN deployment would have received English prose
+  carrying zh-CN-formatted dates and numbers *inside a single message*, which is
+  precisely the artefact the row-locale authority (#7801) exists to prevent.
+  
+  **Templates.** `auth.password_reset`, `auth.verify_email`, `auth.magic_link`,
+  `auth.invitation` and `auth.two_factor_otp` each gain `zh-CN`, `ja-JP` and
+  `es-ES` rows — 15 new rows, seeded through `BUILTIN_AUTH_TEMPLATES` so they are
+  selectable rather than merely exported. Each localized row also carries a
+  localized **footer**: `wrap()` supplies an English one by default, so a row that
+  forgets it renders fluently translated prose under an English sign-off.
+  
+  **Resolution.** Per the maintainer ruling of 2026-08-13, the recipient locale is
+  the **deployment default**, read from `II18nService.getDefaultLocale()` and
+  resolved at the plugin layer — `AuthPlugin` pushes it into
+  `AuthManager.setDefaultEmailLocale()` on `kernel:ready`, exactly as it already
+  pushes the auth **SMS** locale (#2815). `Accept-Language` is rejected: auth mail
+  is routinely sent outside the triggering request (invitations, admin-initiated
+  resets), so a per-device header is the wrong authority. A per-user
+  `sys_user.locale` column is deferred until there is measured pull for one; when
+  it arrives it layers on top of this as an override.
+  
+  **One spelling gap had to be bridged**, and it is measured rather than assumed:
+  `getDefaultLocale()` carries the message-**catalog** language, whose English
+  spelling is the bare `en` (`FileI18nAdapter`: `options.defaultLocale ?? 'en'`),
+  while template rows are keyed `en-US` and `SendTemplateInput.locale` is
+  documented as matched exactly, with "no language-only prefix matching". Passed
+  through raw, the commonest deployment of all would miss every row and lean on the
+  en-US fallback while telling the render filters `en`. `normalizeAuthEmailLocale`
+  therefore promotes a **bare language subtag** to the regional row the platform
+  ships (`en` ⇒ `en-US`, `zh` ⇒ `zh-CN`, …) and passes everything else through
+  untouched — an unshipped regional tag such as `en-GB` or `fr-FR` may well be a
+  tenant's own overlay row, and swallowing it would re-create this very bug for the
+  fifth locale onward.
+  
+  **Nothing changes for an unconfigured deployment.** With no i18n service
+  registered, or none declaring `getDefaultLocale`, no `locale` key is passed at
+  all and the ladder resolves its documented `en-US` default exactly as before.
+- 7337f30: chore(deps): production-dependency patch bumps from the weekly Dependabot group (#9212)
+  
+  Routine dependency-range refresh, no behavior change: `@oclif/core` 4.13.2→4.13.3,
+  `esbuild` 0.28.1→0.28.2 and `better-sqlite3` ^13.0.2→^13.0.3 (optional) on
+  `@objectstack/cli`; `mingo` 7.2.2→7.2.4 on `@objectstack/driver-memory`; `nanoid`
+  6.0.0→6.0.1 on `@objectstack/driver-mongodb`, `@objectstack/driver-sql`,
+  `@objectstack/driver-sqlite-wasm` and `@objectstack/driver-turso`, plus
+  `better-sqlite3` ^13.0.2→^13.0.3 (optional on `@objectstack/driver-sql`, peer on
+  `@objectstack/driver-turso`); `js-yaml` 5.2.2→5.2.3 on `@objectstack/metadata`;
+  `@noble/hashes` 2.2.0→2.3.0 and `jose` 6.2.5→6.2.8 on `@objectstack/plugin-auth`;
+  `nodemailer` 9.0.3→9.0.5 on `@objectstack/plugin-email`; `@hono/node-server`
+  2.0.12→2.1.1 and `hono` 4.12.34→4.13.2 on `@objectstack/plugin-hono-server`;
+  `pinyin-pro` 3.28.2→3.29.1 on `@objectstack/plugin-pinyin-search`; and
+  `@noble/ciphers` 2.2.0→2.3.0 on `@objectstack/service-settings`.
+  
+  Every entry above changed a `dependencies`, `optionalDependencies` or
+  `peerDependencies` range in the published manifest — the only kind of change
+  that reaches a consumer's install. The same Dependabot group also bumped
+  `devDependencies` on `@objectstack/hono`, `@objectstack/client`,
+  `@objectstack/core`, `@objectstack/plugin-sharing` and `@objectstack/spec`
+  (none consumer-facing), and touched the private `apps/docs`,
+  `examples/app-todo` and workspace-root manifests (none published) — none of
+  those get an entry here.
+- e9534a4: A durability failure reported to a logger without `error` is no longer lost
+  
+  Six degradation reports — a lost `sys_audit_log` row (CRUD, auth-event and
+  read-audit writers), a stranded `sys_email` row, and the two permission-set
+  metadata backfill failures — were spelled `logger?.error?.(…)`. `error` is
+  declared OPTIONAL on those sinks, and an optional call emits nothing at all when
+  the method is absent: a host injecting a `{ info, warn }` logger received no
+  report whatsoever, on exactly the paths whose whole point is that nothing else
+  looks broken afterwards.
+  
+  Each now reaches for `error` and falls back to `warn`, never to silence. The
+  message, its consequence and its fix are identical on both channels; only the
+  level degrades, and only when the sink cannot do better.
+  
+  `AuthEventAuditLogger` additionally declares the `warn?` method it needs for
+  that fallback, matching `ReadAuditLogger`, which always had it. The addition is
+  optional, so no existing sink stops satisfying the interface.
+- 593c4bf: feat(spec): `storage` becomes the canonical `CoreServiceName` slot; `file-storage` stays a deprecated v17 alias (#9683)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A service-registry slot
+  name is not authorable metadata — nothing in a stack definition spells it — so
+  there is no conversion-layer entry to register. Compatibility is carried by the
+  enum keeping the old member and by @objectstack/service-storage registering the
+  same instance under both names; the alias retires through the standard
+  retirement flow at the next major. -->
+  
+  Maintainer ruling, 2026-08-18, verbatim: 「9683 file-storage 可以叫 storage」.
+  The `file-storage` slot was the only `CoreServiceName` member whose spelling
+  diverged from its documented accessor (`services.storage`), with no recorded
+  reason anywhere in the tree.
+  
+  - `CoreServiceName` gains `storage` as the canonical member; `file-storage`
+    stays an accepted, deprecated alias within v17 (it is a published enum
+    member — existing `getService('file-storage')` callers keep working).
+    `CORE_SERVICE_PROVIDER` and `ServiceRequirementDef` carry both.
+  - `@objectstack/service-storage` registers the **same instance** under both
+    names (the `http.server` / `http-server` pattern), pinned by an
+    alias-equivalence test.
+  - Every internal consumer resolves `storage`: the HTTP dispatcher, the email
+    plugin's attachment store, and `os migrate files-to-references`. Discovery
+    reports the service under the canonical `storage` key and mirrors the row
+    verbatim under the `file-storage` key for the alias's v17 lifetime, so
+    existing discovery readers (e.g. the console endpoint catalog) keep
+    working.
+  - Docs (`kernel/runtime-services`, `kernel/contracts`) now document the
+    canonical slot; a custom v17 provider for this slot should register both
+    names.
+- 6158146: Stop serving custom email headers through the generic data-API read of `sys_email` (#8149).
+  
+  **What this closes.** `sys_email.headers_json` — the custom headers handed to `IEmailService.send`, the ordinary place a relay credential or provider token goes — was readable by every caller the data API admits (list, get, an explicit `?select=headers_json`). The column is now declared `internal: true`, so the engine omits it from every generic read with no system carve-out (#7728); `SYSTEM_CTX` does not reopen it either. This is the same shape #8118 ruled on for `sys_http_delivery.headers_json`: this change adopts that remedy rather than deciding it a second time.
+  
+  **Delivery is unaffected, and fail-closed.** `sys_email` is not delivered from the in-memory message but FROM THE ROW: the after-insert outbox drain hook, the `email.send.async` queue subscriber and the boot outbox sweep all re-read the row and hand it to `EmailService.deliverPersistedRow`. All three read through `engine.find`, which is exactly what the flag empties — so the recovery ships with the flag. `deliverPersistedRow` now recovers the column through ObjectQL's privileged accessor (`resolveInternalField`, consumed unchanged) and sends every authored header verbatim. A message whose headers cannot be recovered is NOT sent without them: a missing header is not self-announcing — a relay that does not require it accepts the mail while the delivery silently deviates from the authored configuration. That case throws and leaves the row `queued`, not `failed`, so the queue retry or the next boot's sweep delivers it intact.
+  
+  **New optional seam.** `EmailPersistence.readHeadersJson(rowIds)` — the readback the plugin wires off the raw engine. It probes the OBJECT SCHEMA flag, never the absence of the key from a result row: `headers_json` is `required: false` and most real rows carry no custom headers at all, so a key-absence inference would treat every ordinary email as redacted (the regression measured on `sys_account`'s optional token columns in #7987/PR #8675). Engines that do not redact are left untouched and trigger no privileged read.
+  
+  **What this deliberately does NOT close.** The row still holds the header map in cleartext at rest. Encrypting it (`Field.secret()`) was measured and rejected on #8118 — an orphan `sys_secret` row per message with no cascade or retention, a boot-window fail-open, and a per-row decrypt on every delivery — and this change adopts that ruling unchanged.
+- Updated dependencies [56656aa]
+- Updated dependencies [c9f5950]
+- Updated dependencies [d6e80b2]
+- Updated dependencies [07e630e]
+- Updated dependencies [66beee0]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [2782805]
+- Updated dependencies [e43d63a]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [03520eb]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [420804d]
+- Updated dependencies [716ac9b]
+- Updated dependencies [a38408a]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [24173e9]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [f8eb736]
+- Updated dependencies [11b779e]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [e2899f6]
+- Updated dependencies [3851f87]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [e1bb0ca]
+- Updated dependencies [30d3752]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [04f8fdb]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [6158146]
+- Updated dependencies [84cb121]
+- Updated dependencies [ca19ee8]
+- Updated dependencies [a675b4d]
+- Updated dependencies [b887013]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [402c125]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [b3f9831]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [44bc51d]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+  - @objectstack/spec@17.1.0
+  - @objectstack/platform-objects@17.1.0
+  - @objectstack/core@17.1.0
+  - @objectstack/formula@17.1.0
+
 ## 17.0.0
 
 ### Minor Changes

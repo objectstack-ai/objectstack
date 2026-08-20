@@ -1,5 +1,220 @@
 # @objectstack/observability
 
+## 17.1.0
+
+### Patch Changes
+
+- 899052a: docs(observability): record what a zero on `cache_*` MEANS — "no configured consumer", not "no cache activity" (#9954)
+  
+  `SEMCONV` declares the `cache_*` families as a stable namespace explicitly so
+  hosts can wire alerts and dashboards against it. An operator who does that gets
+  a flat zero on `cache_lookups_total` in a default install — and nothing in the
+  declaration or the operator docs said why, so the only available readings were
+  "0% hit rate" or "the adapter is broken". Both are wrong.
+  
+  **Nothing about emission changes.** The path is proven working: #9832 wired the
+  cache adapter to the host's registry and #9951 pins a real lookup observing
+  `cache_lookups_total{adapter=memory,result=miss}`. The zero is *true*; what it
+  failed to communicate is its cause.
+  
+  The cause, re-measured on `origin/main` rather than taken from the card: no
+  consumer of the `cache` service is unconditional. Every production consumer is
+  a rate-limit or budget counter store, and each is gated on a declaration
+  somebody has to write:
+  
+  - `packages/plugins/plugin-auth/src/auth-plugin.ts` — better-auth's per-IP
+    counters, reached only when `rate_limit_max` or `rate_limit_window_seconds`
+    is explicitly supplied in auth settings.
+  - `packages/runtime/src/dispatcher-plugin.ts` — the inbound rate limiter and
+    the declarative per-endpoint buckets. Both register *nothing at all* when no
+    budget is declared (`createInboundRateLimitMiddleware` returns `null`;
+    `limiterFor` returns `null` on an endpoint with no armed `rateLimit`), so an
+    unmetered deployment never reaches the cache.
+  - the per-number OTP send budget, reached only on an SMS send path.
+  
+  Declare none of them — the default slate — and the family sits at 0 while the
+  server handles traffic normally.
+  
+  So the annotation states the invariant rather than a roster: *every* consumer
+  is an explicitly-declared rate-limit/budget counter store. That sentence stays
+  true when another conditional consumer is added, and goes false exactly when an
+  unconditional one appears — which is when it should be revisited.
+  
+  This is the mirror image of the HTTP note that landed alongside it: there a
+  zero means "not instrumented"; here a zero is a true count of a service nothing
+  asked anything of. The two are deliberately worded so they cannot be read as
+  the same statement.
+  
+  The note is attached as per-family JSDoc rather than a `//` group header, and
+  that placement is load-bearing: `tsup`'s dts generation drops line comments, so
+  only the JSDoc form reaches `dist/index.d.ts` — i.e. the operator's IDE hover,
+  which is where somebody wiring a `cache_lookups_total` panel actually meets the
+  declaration. Verified in the built artifact, not assumed.
+- 1e050a5: fix(observability): emit `http_request_duration_ms` from the transport seam, so
+  p95 latency sees every inbound surface instead of dispatcher routes only
+  (#9834)
+  
+  #9835 moved `http_requests_total` to the `IHttpServer.afterResponse` seam and
+  stopped there, which left the two derived signals the operator guidance names
+  inconsistent with each other: 5xx rate covered auth's `getRawApp()` mount and
+  the REST data API, while p95 latency still saw only the routes the dispatcher's
+  own `Proxy` wrapped. A missing latency panel is at least loud; the worse
+  reading is the p95 that IS drawn, computed from dispatcher routes only and
+  presented as the server's.
+  
+  - `@objectstack/observability`: new `armHttpRequestDurationHistogram(server,
+    metrics)`, the duration family's counterpart to `armHttpRequestCounter` —
+    same `afterResponse` seam, its own `Symbol.for` first-wins latch, so a host
+    that armed one family can still arm the other. `ArmHttpMetricResult` is the
+    family-neutral spelling of the result union; `ArmHttpRequestCounterResult`
+    stays as an alias.
+  - `@objectstack/plugin-hono-server`: `installHttpMetricsSeam` arms both
+    families, so the transport owns every transport-observable HTTP metric in the
+    shipped composition rather than splitting ownership across layers.
+  - `@objectstack/runtime`: the dispatcher offers its registry to the histogram
+    seam as well, and `instrumentRouteHandler` gains
+    `emitHttpRequestDurationMs` (default `true`) — passed `false` exactly when
+    the transport implements the seam, which is what keeps the dispatcher's own
+    routes at ONE observation instead of reintroducing the #9833 double count one
+    family over.
+  
+  **⚠️ The observation window changes with the emitter.** The per-route wrapper
+  timed `await handler(req, res)` — handler latency. The transport times from
+  first seeing the request to the response existing, so the middleware chain and
+  body parse are now included and samples can only move UP. This is the number a
+  latency panel should show (the request's latency, not one layer's share of it),
+  but it is a visible shift in an existing series: compare p95 across the upgrade
+  boundary deliberately. Documented in `docs/OBSERVABILITY.md` and the
+  production-readiness guide.
+  
+  `http_request_errors_total` is deliberately NOT moved. The observation carries
+  no throw signal — only `{method, routePattern, status, elapsedMs}` — so a
+  transport-side emitter would have to key off a status class, which counts a
+  different population than "the handler threw". That is a semantics decision,
+  recorded on #9834 rather than guessed at here; the counter stays ungated on
+  every transport and keeps its documented meaning.
+- 7ff3975: feat(spec): `IHttpServer` gains an optional `afterResponse` response-observing
+  hook so HTTP metrics are transport-agnostic instead of Hono-only (#9835)
+  
+  The contract addition (additive — a new optional member plus the
+  `HttpResponseObservation` / `HttpResponseObserver` types and the reserved
+  `UNMATCHED_ROUTE_PATTERN` label): a transport invokes each registered observer
+  exactly once per answered request with `{ method, routePattern, status,
+  elapsedMs }`, after the response exists — the observation point the `use()`
+  middleware contract cannot express (it runs before dispatch and never sees a
+  status). `routePattern` is REQUIRED to be the registered route pattern
+  (`/api/v1/data/:id`), never the concrete path, so no adapter re-decides metric
+  cardinality. Optionality is feature-detected runtime-real
+  (`typeof server.afterResponse === 'function'`); a transport that does not
+  implement the seam reports **no** HTTP metrics — zero there means "not
+  instrumented", never "no traffic".
+  
+  Implementations and consumers in the same change:
+  
+  - `@objectstack/plugin-hono-server`: `HonoHttpServer` implements the seam (the
+    ruled #9650 raw-app middleware becomes its delivery path — same reach,
+    including `getRawApp()` mounts and middleware-refused 429s); unrouted
+    requests are now labelled with the reserved `unmatched` pattern (previously
+    they could surface as `/*`).
+  - `@objectstack/observability`: new `armHttpRequestCounter(server, metrics)`
+    arms the `http_requests_total` counter through the seam at most once per
+    server (first caller wins), which is what makes "exactly one counter per
+    server" structural.
+  - `@objectstack/runtime`: the dispatcher offers its `observability.metrics`
+    registry to the seam (a host that wires only the dispatcher now counts every
+    inbound surface) and suppresses its own per-route copy of
+    `http_requests_total` when the transport implements the seam — retiring the
+    #9833 double count. Request-id echo, the duration histogram, the error
+    counter and the error reporter are unchanged.
+  - `@objectstack/http-conformance`: `NodeHttpServer` implements the seam, and a
+    new cross-adapter conformance suite locks the semantics for both adapters.
+  - `@objectstack/core`: re-exports the new contract types/constant.
+- Updated dependencies [56656aa]
+- Updated dependencies [07e630e]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [420804d]
+- Updated dependencies [716ac9b]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [11b779e]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [e2899f6]
+- Updated dependencies [3851f87]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [30d3752]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [44bc51d]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+  - @objectstack/spec@17.1.0
+
 ## 17.0.0
 
 ### Patch Changes

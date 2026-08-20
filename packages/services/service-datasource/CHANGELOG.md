@@ -1,5 +1,629 @@
 # @objectstack/service-external-datasource
 
+## 17.1.0
+
+### Minor Changes
+
+- 3508678: feat(service-datasource): operator-initiated re-homing of stored cleartext datasource credentials into `sys_secret` (#8155)
+  
+  A datasource row created before #8078 closed the write door can still hold its
+  credential in cleartext inside `config`. #8081 and #8154 closed the read paths so
+  none of it is SERVED; neither removes what is already at rest. This adds the
+  migration that does — `IDatasourceAdminService.migrateCredential(name)`, reached
+  from the Setup action **"Move credential to the secret store"** on a datasource
+  record, backed by `POST /api/v1/datasources/:name/migrate-credential`.
+  
+  **Per datasource, initiated by an operator, never a sweep.** There is no batch
+  spelling of the route, deliberately: deciding a stored secret's identity with no
+  operator present and rewriting rows at boot is the destructive shape the standing
+  ruling escalates rather than permits. The inventory is free and already exists —
+  `/meta` badges every affected row `_diagnostics: { valid: false }`, so the
+  operator works from a list the platform already computes, and it shrinks visibly
+  as each row is done.
+  
+  **Durability ordering.** The secret is written to the store, **read back and
+  compared**, and only then does a single record write add
+  `external.credentialsRef` and drop the inline key together. A crash before that
+  write leaves the row untouched and working on its inline credential; a crash
+  after it leaves a row referencing a secret this run already proved readable. A
+  failed read-back or a failed record write unbinds the secret it just minted
+  rather than orphaning it. It deliberately does NOT write the ref in one step and
+  delete the key in a second: the connect path is fail-closed on a `credentialsRef`
+  it cannot resolve (ADR-0062 D3) and never falls back to `config`, so a row
+  carrying an unverified ref beside its cleartext is not a safe intermediate state.
+  
+  **Idempotent.** A row that already references a secret is never bound again — a
+  re-run answers `already-bound`, writes nothing, and mints no second `sys_secret`
+  row. A row holding both a ref and an inline copy (an interrupted run, or a wizard
+  re-entry, whose redacted round-trip carries the stored credential forward by
+  design) has the copy dropped against the ref it already has.
+  
+  **What it refuses, and what it tells the operator instead.** Only the key a
+  driver's own contract declares as its inline credential slot is re-homed —
+  `password` for postgres/mysql/mongodb, `authToken` for turso — because that is
+  exactly the key the injected secret substitutes at connect time. Everything else
+  is refused with a reason and a remedy rather than guessed at: a credential
+  embedded in a connection URL (the mysql and mongodb DSN branches hand the URL to
+  the client verbatim and drop the injected secret, so re-homing it could leave the
+  datasource connecting unauthenticated), a pre-#8078 alias spelling that no
+  connection builder reads, turso's still-writable `encryptionKey`, a code-defined
+  datasource, and a host whose secret binder cannot read a secret back. Nothing is
+  deleted that was not re-homed, and credential-shaped keys left behind are named
+  in the result so "migrated" never reads as "this row is now clean".
+- 20067c5: fix(runtime,mcp,service-datasource): the #6504 consumer sweep — three list consumers stop making claims a known-partial read cannot support (#6504)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable surface is
+  added, renamed, retired or tombstoned. Two package-local host-wiring interfaces
+  gain OPTIONAL members (`DatasourceAdminServiceConfig.countBoundObjectsDiagnosed`,
+  `McpDataBridge.listObjectsDiagnosed`); `packages/spec` is untouched, since
+  `IMetadataService.listDiagnosed` — the contract this consumes — landed in PR
+  #7721. -->
+  
+  `IMetadataService.listDiagnosed?(type)` (PR #7721) lets a plural read say whether
+  its answer can be trusted as complete. This is the consumer half: the callers
+  that were restating a possibly-short listing as a fact about the environment.
+  
+  Each consumer was qualified individually, per PR #6051's discipline, and most
+  were left alone — a caller publishing a snapshot with no count has nothing to
+  mis-state. Three make a claim, and each now withholds exactly that claim while
+  still serving everything it could read:
+  
+  - **`removeDatasource` no longer deletes on a bound-object count it could not
+    take completely.** The guard `if (bound > 0) throw` is the only thing standing
+    in front of an irreversible delete that also unbinds the datasource's secret,
+    and its input is derived from the metadata service's object listing. During a
+    loader outage that listing goes silently short, and the worst value is the
+    benign one: `0` reads exactly like "nothing is bound", so the guard OPENED.
+    It now refuses with `SERVICE_UNAVAILABLE` / 503 — a dependency outage the
+    operator can retry, not a client error — and the record, its credential and
+    its pool all survive.
+  - **The MCP `list_objects` tool stops publishing `totalCount` on a known-partial
+    listing.** This is the same claim PR #7721 removed from the
+    `objectstack://objects` resource, on the other MCP primitive: same payload
+    shape, different door, never covered. A degraded read now serves the same
+    objects with `totalCount` **absent** and `partial` / `returnedCount` /
+    `warning` plus the 503 envelope in its place, so a client reading the total
+    gets `undefined` rather than a believable wrong integer. Both bridges
+    implement it — stdio (`@objectstack/mcp`) and HTTP (`@objectstack/runtime`) —
+    because a completeness claim must not depend on which transport a client
+    connected over.
+  - **The ADR-0015 §5.2 boot gate stops announcing an all-clear over a sweep it
+    could not complete.** It validated whatever `listObjects()` returned and then
+    logged *all federated objects match their remote schema*, with a count.
+    Federated objects behind an unreadable loader were never validated, so
+    `onMismatch: 'fail'` could not have fired for them. The gate now warns that
+    the swept set was incomplete and names what it did validate. ⛔ It does **not**
+    abort boot on a degraded metadata read: turning a transient outage into a
+    refusal to start would be a new failure mode bought with a diagnosis fix.
+  
+  Every new member is optional in the same way `listDiagnosed` itself is: a host
+  whose metadata service predates the verdict behaves exactly as it did before,
+  and a service without it reports nothing degraded — precisely what it could
+  express.
+
+### Patch Changes
+
+- 5c38492: fix(security): the datasource-admin HTTP family requires authentication (#9391)
+  
+  Every route `registerDatasourceAdminRoutes` mounts under `/api/v1/datasources`
+  — the list, the single read, the driver catalog, remote-table introspection,
+  the two connection probes, the credential migration, and create / patch /
+  remove — now answers `401 UNAUTHENTICATED` to a caller whose identity cannot be
+  resolved. The refusal is made before any service is resolved and before any
+  handler body runs, so an anonymous request reaches neither the datasource
+  lifecycle nor a configured remote.
+  
+  This family mounts straight onto `IHttpServer` from a plugin `init()`, which is
+  outside both seams that produce the platform's 401s: the REST server's
+  `enforceAuth` runs inside `RestServer`'s own handlers, and the dispatcher
+  domains' anonymous floor runs inside the dispatcher. Neither is a middleware a
+  direct mount can be routed through, and the registrar carried no check of its
+  own — so on a server where `/api/v1/data`, `/api/v1/meta`, `/api/v1/batch` and
+  `/api/v1/security/explain` all refuse an anonymous caller, this one family did
+  not.
+  
+  The guard imports rather than restates both halves of the decision:
+  `shouldDenyAnonymous` (the one anonymous-deny decision every HTTP seam shares,
+  so this family cannot drift on who counts as anonymous) over
+  `resolveAuthzContext` (the one identity resolution `RestServer` and the runtime
+  dispatcher perform, so every credential kind the platform admits — better-auth
+  session and `sys_api_key` alike — is admitted here too). It fails closed:
+  anything that throws or resolves to no identity is refused, and there is no
+  posture, config key or absent service that opens the routes.
+  
+  **Why this is a fix and not a feature, and why `patch` rather than a breaking
+  bump.** The change only ever narrows the accept set: every request admitted
+  after it was admitted before, and the requests it now refuses are exactly the
+  ones every sibling family already refuses. Nothing authorable is renamed,
+  retired or tombstoned, and no declared contract changes shape — the routes'
+  paths, request bodies, success payloads and existing failure codes are
+  untouched, so there is no ADR-0087 conversion to register and no upgrade
+  prescription to write. What changes is that a declared expectation starts being
+  enforced. A caller that depended on reaching platform datasource configuration
+  with no credential was depending on the defect.
+  
+  Authentication is the whole of it. Whether these routes should further require
+  a platform-configuration capability is a separate, separately-ruled question
+  (#9593) and is deliberately not anticipated here.
+  
+  Pinned by a both-sides test on one boot (`admin-routes-auth-guard.test.ts`): an
+  anonymous caller is refused on every read and on every write verb, and an
+  entitled caller still succeeds on the same routes in the same run — the second
+  half being what distinguishes a guarded family from a broken one.
+- 2420641: feat(spec): refuse a credential in the mongo options passthrough (`config.options.auth.password`) at publish (#9040)
+  
+  **BREAKING** accept-set narrowing, landing after the v17.0.0 cut (the lockstep
+  launch-window convention ships it as `minor`; the migration prescription is
+  registered under protocol major 18, where `os migrate meta` users will look).
+  
+  The FOURTH spelling of the same inline secret: #7990 refused the top-level
+  `password` key, #8082 the URL userinfo (`user:password@host`), #8337 the
+  credential-bearing URL query parameters — and the MongoClient `options`
+  passthrough stayed open one syntax over.
+  `options: { auth: { username, password } }` parsed green, persisted the
+  password cleartext into `sys_metadata` (served back by the ordinary data API,
+  unredacted), and genuinely authenticated: measured on `mongodb@7.5.0`, the
+  client the driver spreads `config.options` into, the block is transformed into
+  `MongoCredentials` — so the workaround was live, not inert.
+  
+  **What is refused** (write door, closed measured list
+  `MONGO_OPTIONS_CREDENTIAL_PATHS` behind `credentialFreeMongoOptions`, composed
+  with the #8336 placeholder refusal on the same slot): a NON-EMPTY STRING
+  `options.auth.password`, with the binder prescription — and the "wins over"
+  reassurance is true for this syntax: a bound `external.credentialsRef` secret
+  outranks the passthrough `auth` block at connect (#8696, measured).
+  Deliberately not refused, each measured: `auth.username` alone (#8876's
+  asymmetry — a username is not credential material), an empty password (the
+  passthrough twin of `user:@host`), every legitimate passthrough option
+  (`replicaSet`, `tls`, timeouts — byte-identical pins),
+  `authMechanismProperties.AWS_SESSION_TOKEN` (the v7 client itself throws on it
+  under MONGODB-AWS and nothing reads it otherwise), and the binder-slotless
+  client secrets (`proxyPassword`, `tlsCertificateKeyFilePassword`, `key`,
+  `passphrase`) — refusing those would name a remedy that does not exist (the
+  binder fills exactly one slot; the turso-`encryptionKey` posture, #8081
+  item 4).
+  
+  **Read half** (additive, never the substitute — #8082's ruling): stored
+  passthrough secrets are now redacted on every read exit —
+  `options.auth.password` plus the binder-slotless names above and
+  `AWS_SESSION_TOKEN` — reported as dotted `redactedKeys`
+  (`options.auth.password`), which the metadata write door's generic
+  carry-forward already walks, so an untouched "Save" keeps the stored
+  credential on both admin doors (`restoreRedactedConfig` mirrors per leaf).
+  The #8155 credential-migration planner refuses a stored passthrough-credential
+  row with the per-row remedy instead of planning `nothing-to-migrate` over live
+  cleartext (dropping only the nested leaf would leave an `auth` block the
+  client refuses at construction, measured).
+  
+  ## FROM → TO
+  
+  ```yaml
+  # before — parsed green; password stored cleartext in sys_metadata and
+  # resolved into MongoCredentials at connect
+  driver: mongodb
+  config:
+    url: mongodb://app@mongo.internal:27017/events
+    options:
+      replicaSet: rs0
+      auth: { username: app, password: PLAINTEXT-IN-METADATA }
+  
+  # after — rejected with the binder prescription; bind the secret instead
+  driver: mongodb
+  config:
+    url: mongodb://app@mongo.internal:27017/events
+    options:
+      replicaSet: rs0
+  external:
+    credentialsRef: sys_secret:01J9ZK4T2N   # or the connection form's secret field
+  ```
+  
+  There is deliberately no automatic rewrite: moving the value requires
+  encrypting it into `sys_secret` through a running secret binder, which a
+  source-file transform cannot do — and auto-dropping only the nested password
+  would leave an `auth` block the MongoDB client refuses outright.
+  
+  <!-- adr-0087: registered datasource-config-mongo-options-credential-refused -->
+- f57fb38: feat(spec): refuse credential-bearing URL query parameters (`?authToken=` / `?password=`) in authored driver config at publish (#8337)
+  
+  **BREAKING** accept-set narrowing, landing after the v17.0.0 cut (the lockstep
+  launch-window convention ships it as `minor`; the migration prescription is
+  registered under protocol major 18, where `os migrate meta` users will look).
+  
+  The third spelling of the same secret: #7990 refused the inline credential
+  keys, #8082 refused the URL userinfo form (`user:password@host`), and the
+  query string stayed open — `libsql://x.turso.io?authToken=eyJ…` persisted the
+  JWT cleartext into `sys_metadata` (served back by the ordinary data API) and,
+  measured against the clients this tree pins, actually authenticates:
+  `@libsql/core@0.17.4` assigns the URL's `?authToken=` OVER the config-level
+  token — so the workaround also silently defeated the binder-injected secret —
+  and `pg-connection-string@2.14.0` copies every query parameter into the client
+  config, `?password=` winning over userinfo.
+  
+  **What is refused** (write door, shared value-level parse
+  `urlCredentialQueryParams` beside #8082's `urlUserinfoPassword`): turso
+  `config.url` / `config.syncUrl` carrying `?authToken=`, postgres `config.url`
+  carrying `?password=` — matched case-insensitively on the percent-decoded key,
+  non-empty values only, with the #8082-template prescription (datasource secret
+  binder / `external.credentialsRef`; runtime-environment DSNs are unaffected).
+  mysql and mongo URLs are deliberately NOT narrowed: both clients were measured
+  ignoring `?password=`, so refusing it would widen past the measured defect.
+  
+  **What stays accepted:** every credential-free URL byte-identically, benign
+  query parameters (`?tls=`, `?sslmode=`, …) included, and the parameter-absent
+  shape the read path serves — which keeps an untouched "Save" on a legacy row
+  working.
+  
+  **Read half** (the same PR, per the card): `redactDatasourceConfig` /
+  `getDatasource()` now strip credential query parameters from served URLs for
+  every driver (new `redactUrlCredentials` / `redactUrlCredentialQueryParams`
+  exports), `restoreRedactedConfig` mirrors the composite so an untouched
+  round-trip keeps the stored token, and the credential-migration planner
+  refuses a query-token row with the per-row remedy instead of planning
+  `nothing-to-migrate` over cleartext.
+  
+  ## FROM → TO
+  
+  ```yaml
+  # before — parsed green; JWT stored cleartext in sys_metadata, and at connect
+  # it silently overrode the binder-injected secret
+  driver: turso
+  config:
+    url: libsql://app-org.turso.io?authToken=eyJhbGciOiJFZERTQSJ9.x.y
+  
+  # after — rejected with the binder prescription; bind the secret instead
+  driver: turso
+  config:
+    url: libsql://app-org.turso.io
+  external:
+    credentialsRef: sys_secret:01J9ZK4T2N   # or the connection form's secret field
+  ```
+  
+  There is deliberately no automatic rewrite: moving the value requires
+  encrypting it into `sys_secret` through a running secret binder, which a
+  source-file transform cannot do — stripping the parameter alone would silently
+  drop a live credential.
+  
+  <!-- adr-0087: registered datasource-config-url-query-credential-refused -->
+- 90a12fb: fix(security): a mongo datasource that binds `external.credentialsRef` and authors a connection URL now connects with the bound credential instead of none (#8696)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) One connect-time
+  behaviour fix inside the driver factory. No authorable key is added, renamed,
+  retired or tombstoned — `MongoConfigSchema` already declared this behaviour and
+  the runtime simply did not perform it — so there is no stored shape to convert. -->
+  
+  `buildMongoUrl`'s DSN branch returned the authored `config.url` verbatim and
+  applied `spec.secret` nowhere. A mongo datasource that bound its secret through
+  `external.credentialsRef` (or the connection form's secret field) therefore
+  connected with **whatever the URL itself carried** — which, since #8082 refuses
+  a `user:password@` userinfo at the publish door, is **no credential at all**.
+  Measured on `origin/main` @ `792524c22`, mongodb 7.5.0:
+  
+  ```text
+  config.url 'mongodb://app@db.internal:27017/app' + a bound secret
+    -> MongoClient credentials {username:'app', password:''}
+  ```
+  
+  The connect path is fail-closed on a ref it cannot resolve, so an operator
+  reasonably reads "the datasource connected" as "the bound credential was used".
+  It was not: the credential was declared, resolved, injected into the factory —
+  and then dropped at the last call site with no diagnostic. That is
+  declared-≠-enforced (Prime Directive #10) one layer below the spec, and
+  `MongoConfigSchema.url` is the contract it broke, verbatim: *"bind the secret
+  (`external.credentialsRef` / the connection form's secret field) and **it is
+  injected at connect time**. A bare username (`user@host1`) stays writable."*
+  The arm's behaviour was decided by whether the operator happened to author a
+  URL — the composed branch five lines below had honoured the secret since #4410.
+  This closes the last arm of the family #7314 / #7385 / #8152 / #8875 have each
+  closed one driver at a time.
+  
+  **The fix injects `options.auth` beside an unmodified url — it does not rewrite
+  the URL.** Measured on mongodb 7.5.0 (the `MongoClient` constructor resolves
+  credentials eagerly, so all of it is assertable with no server):
+  
+  ```text
+  'mongodb://app@db.internal:27017/app'  + auth{app,BOUND} -> password BOUND
+  'mongodb://app:embedded-legacy@h/app'  + auth{app,BOUND} -> password BOUND
+  'mongodb://app@h1:27017,h2:27017/app'  + auth{app,BOUND} -> password BOUND
+  'mongodb+srv://app@c0.example.net/app' + auth{app,BOUND} -> password BOUND
+  'mongodb://app@h/app?authSource=admin' + auth{app,BOUND} -> source admin
+  ```
+  
+  So the authored URL is handed over byte for byte, no second dialect of
+  `mongodb://…` enters this repo, the multi-host and `+srv` forms ride through
+  unharmed, and a bound secret **wins** over a legacy password embedded in a
+  stored pre-#8082 row — the same precedence the mysql arm states, reached by a
+  different mechanism because the clients merge in opposite directions. The
+  userinfo **username** `auth` also requires is read through the platform's own
+  DSN grammar (`urlUserinfoUsername`, #8876) and percent-decoded at the call
+  site: `new URL()` cannot even parse the multi-host form this schema documents,
+  and a second hand-rolled copy of those boundaries is the shape #8082's ruling
+  rejects by name.
+  
+  **A URL that names no user gets nothing, deliberately.** `auth` is not
+  constructible from a password alone, and inventing an empty username is
+  measurably worse than silence: `mongodb://db.internal:27017/app` carries no
+  credentials at all today, and would carry `{username:''}` — a guaranteed
+  handshake failure — if the arm injected regardless. Injection happens only
+  where the URL already declares authenticated intent, which is also exactly what
+  the composed branch has always done with the same input. Making that
+  contradictory pair (a bound `credentialsRef` beside a user-less URL) loud
+  belongs at the authoring door, where both halves are visible at once; it is
+  filed rather than guessed at here.
+  
+  **Blast radius is exactly the broken class.** A datasource that binds no secret
+  reaches the client byte-for-byte as before, and the `options` passthrough keeps
+  arriving verbatim — the injected `auth` is merged into it, not assigned over
+  it.
+  
+  The pin extends `__tests__/bound-secret-dsn-branches.test.ts` (the mysql half's
+  file) and asserts at the **client-construction seam**: every mongo assertion
+  reads `MongoClient`'s own resolved `credentials`, never the URL string the
+  factory built. That distinction is load-bearing — a test asserting
+  `buildMongoUrl`'s return value would have passed throughout this defect's life,
+  and the postgres arm passes the equivalent config-layer assertion while still
+  being broken one layer lower.
+- 72050cc: fix(service-datasource): a bound `external.credentialsRef` reaches the mysql client on the DSN branch instead of being dropped (#8696)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) One connection-builder
+  branch stops discarding an already-resolved secret. Nothing authorable is
+  renamed, retired or tombstoned — `MysqlConfigSchema` is untouched, and this
+  change makes the runtime honour what that schema's `url` field has declared
+  since #8082 — so there is no conversion to register. -->
+  
+  `DatasourceConnectionService` resolves a datasource's `external.credentialsRef`
+  to a cleartext secret and hands it to the driver factory as `spec.secret`. The
+  mysql arm then **threw it away** whenever `config.url` was present: the DSN
+  string became the whole knex `connection`, and the resolved credential reached
+  nothing. Measured on `origin/main`, driver `mysql`, `config.url`
+  `mysql://app@db.internal:3306/app`, secret bound:
+  
+  ```text
+  knex connection: typeof=string  value="mysql://app@db.internal:3306/app"
+  ```
+  
+  **This is a broken binding, not a disclosure.** Since #8082 refuses a
+  `user:password@` userinfo at the publish door, a bare-username DSN plus a bound
+  secret is the *only* authorable URL shape for this driver — the exact shape the
+  connection form produces and the exact shape #8155's re-homing remedy tells
+  operators to write. Such a datasource therefore connected **unauthenticated**,
+  or failed with a driver-level auth error naming nothing about the binding, while
+  its Setup page showed a credential bound and the connect path reported success.
+  It is the declared-≠-enforced shape one layer below Prime Directive #10:
+  `MysqlConfigSchema.url` already states the contract this code failed to keep —
+  *"bind the secret … and it is injected at connect time. A bare username
+  (`user@host`) stays writable."*
+  
+  **The fix hands mysql2 the DSN and the secret together** — `{ uri, password }`
+  rather than a hand-parsed URL. mysql2 keeps owning its own DSN grammar (no URL
+  parsing, no re-encoding, no second dialect of `mysql://…` in this repo), and its
+  merge gives the **explicit** key precedence, so the bound credential also wins
+  over a legacy password embedded in a stored pre-#8082 row — the precedence the
+  postgres arm's DSN branch already declares. Measured on mysql2 3.23.1, knex
+  3.3.0 and pg 8.22.0.
+  
+  A DSN with **nothing bound passes through unchanged**, as the bare string it has
+  always been, so the entire blast radius is datasources that bind a secret — the
+  ones that are broken today.
+  
+  Two measured findings this change deliberately does **not** act on, each filed
+  on its own:
+  
+  - **The mongodb arm is still open.** `buildMongoUrl`'s `if (explicit) return
+    explicit;` drops the bound secret the same way, so a mongo DSN datasource
+    still reaches `MongoClient` with an **empty** password. The remedy is not a URL
+    rewrite — `MongoClient`'s `auth` option injects beside an unmodified url, and
+    it wins over an embedded userinfo password (measured on mongodb 7.5.0) — but it
+    requires a username as well, and reading the url's userinfo username needs the
+    platform's own DSN grammar (`new URL()` rejects the multi-host form
+    `MongoConfigSchema` documents). `@objectstack/spec/data` exports the password
+    half of that grammar and no username half; adding one belongs beside it rather
+    than as a second copy of the userinfo boundaries here.
+  - **The postgres arm passes this assertion at the config layer and is broken one
+    layer below it.** `pg` merges `parse(connectionString)` **over** the explicit
+    `password`, so `{connectionString, password}` resolves to the DSN's own
+    (absent) password — effective `password: null`, measured on pg 8.22.0. Its
+    `if (url)` branch is not fixed by symmetry with this one; the two clients merge
+    in opposite directions, which is why each arm's precedence is measured rather
+    than assumed.
+- d70428a: A mysql datasource that declares TLS now gets it, on both branches of the arm and in the spelling `mysql2` can read (#8874).
+  
+  Two defects with one cause — `buildMysqlConnection` resolved the TLS option and then handed it to a client that could not use it, or to nobody at all.
+  
+  **A declared `ssl` was dropped on the DSN branch.** With a `config.url` present the arm returned before the resolved option could be attached, so a datasource that declared TLS **and** wrote a connection url negotiated none — declared, resolved, dropped, with no diagnostic — while the discrete-fields branch of the same arm carried it. Whether a connection was encrypted therefore depended on which branch of one arm the datasource happened to take. The postgres arm has honoured this case since #4410 with its reasoning written in-code, and the same argument holds here: `mysql2` reads a uri and the `ssl` option as separate channels, and keeps the explicit key.
+  
+  **`ssl: true` was never a `mysql2` value.** Measured on mysql2 3.23.1, `new ConnectionConfig({ …, ssl: true })` throws `SSL profile must be an object, instead it's a boolean` — and `true` is exactly what a declared `ssl: { enabled: true }` with no certificate material resolves to, as does the `config.ssl` shorthand, whose schema is a boolean and so has no other authorable value. The branch that appeared to honour the declaration was therefore throwing on every connection acquisition for the commonest way of writing it. The resolved `true` is now translated to the empty-options object it is already documented to be short for (`{}`, which mysql2 normalises to `{ rejectUnauthorized: true }` — its own default for an object, not a verification policy chosen here). Certificate objects, `false`, and a stored profile name pass through untouched.
+  
+  **What does not change.** The DSN branch returns an object instead of the bare connection string **only when a declared `ssl` actually resolved** (or a secret is bound, unchanged from #8696). A datasource that declared neither still gets the byte-identical string knex has always parsed for it. Where the switch does happen, knex's own parse of the string and mysql2's parse of the same value as `uri` were compared key-by-key (`host`/`port`/`user`/`password`/`database`/`charset`/`timezone`/`connectTimeout`/`flags`/`socketPath`/`multipleStatements`) across the bare-username, embedded-password, no-userinfo, portless, percent-encoded-username and query-parameter forms — identical in every case, and pinned as a test rather than measured once.
+  
+  Nothing that declared no TLS moves, so the behaviour change is confined to the datasources that were already broken: the ones connecting in cleartext against their own metadata, and the ones that could not connect at all.
+- 0961065: fix(security): a bound `external.credentialsRef` reaches the postgres SERVER on the DSN branch, not just the knex config (#8873)
+  
+  A postgres datasource whose `config.url` is a DSN and whose credential is bound
+  through `external.credentialsRef` (or the connection form's secret field) opened
+  its connection **with no password at all**. Not a disclosure — a broken binding,
+  of the fail-quietly kind: `DatasourceConnectionService` resolved the secret
+  fail-closed, the operator saw a bound credential and a datasource reporting
+  connected, and the handshake carried nothing.
+  
+  **This arm was the one that looked correct.** It had an explicit secret branch
+  and a comment declaring the intent — *"For a DSN, a separately-supplied secret
+  overrides the embedded password"* — and it emitted
+  `{ connectionString: url, password: spec.secret }`, which passes any assertion
+  written against the factory's own output. `pg` discarded the credential one
+  layer lower:
+  
+  ```js
+  // pg 8.22.0, lib/connection-parameters.js
+  if (config.connectionString) {
+    config = Object.assign({}, config, parse(config.connectionString))
+  }
+  ```
+  
+  Two independent mechanisms destroyed it, either sufficient on its own. `parse()`
+  emits a `password` key for **every** url — `''` when the url carries no userinfo
+  password — and `Object.assign` copies that over the injected value, after which
+  `val('password', …)` falls through to `PGPASSWORD` and the defaults; and knex's
+  `setHiddenProperty` has already made `password` a non-enumerable own property of
+  `connectionSettings`, which `Object.assign` does not copy at all. Measured on pg
+  8.22.0 + knex 3.3.0: `postgresql://app@db.internal:5432/app` with a secret bound
+  resolved to password `null`, and a stored pre-#8082 url embedding
+  `app:embedded-legacy@` resolved to `'embedded-legacy'` — the DSN beating the
+  credential an operator deliberately bound. Since #8082 refuses a
+  `user:password@` userinfo at the publish door, the credential-free DSN is the
+  only authorable URL shape for this driver, so this was the shape the connection
+  form produces.
+  
+  **The remedy is a third shape, not either sibling's.** The clients merge a DSN
+  against explicit keys in opposite directions: `mysql2` lets the explicit key win
+  (`{ uri, password }`, #8875) and mongodb rides in `options.auth` beside an
+  untouched url (#9042), while `pg` lets the DSN win. So on the postgres DSN
+  branch — and only when a secret is bound — `connectionString` is gone: the arm
+  hands `pg` **pg's own parse of the url** (`pg-connection-string`, the client's
+  parser, so there is no second dialect of `postgresql://…` in this repo to drift
+  out of agreement) with the credential applied afterwards, where nothing
+  re-parses over it. Everything else resolves exactly as before, verified
+  key-by-key across the sslmode, unix-socket, `?options=`, credential-free,
+  embedded-password and no-userinfo forms.
+  
+  The competing remedy — keep `connectionString` and splice the secret into the
+  userinfo — was measured and rejected on two counts: `pg-connection-string`
+  honours a `?password=` query parameter **over** userinfo, so a stored pre-#8337
+  row would still lose the bound secret; and it would materialise the cleartext
+  credential into a string nothing hides (`JSON.stringify` of knex's
+  `connectionSettings` prints the whole DSN, while a discrete `password` stays
+  hidden), re-creating at connect time the hardest-to-redact credential spelling
+  that #8082 refuses to let anyone author.
+  
+  **What changes for an existing deployment.** A DSN datasource that binds no
+  secret is byte-for-byte unaffected — it still hands `pg` the url unparsed. One
+  behaviour worth knowing: a stored pre-#8082 row that embeds a password in its
+  url *and* binds a credential now authenticates with the **bound** credential,
+  which is the precedence this arm's own comment always claimed and both sibling
+  arms already apply. A DSN naming no user still receives the credential (unlike
+  the mongodb arm's deliberate no-op there): `pg` sends a password only when the
+  server asks for one, so injecting cannot break a datasource that connects today.
+  Finally, a url `pg`'s own parser rejects (a multi-host DSN, which node-postgres
+  does not implement) is now refused when the driver is built rather than on first
+  query — the same error, named and located, with the url deliberately not echoed
+  because it may itself embed a credential.
+- 05864fb: Datasource-admin HTTP routes now require the `manage_platform_settings` capability, not merely authentication.
+  
+  All eleven routes under `/api/v1/datasources` — list, read, driver catalog, remote-table
+  introspection, connection probes, credential migration, create, patch and remove — answer
+  `403 PERMISSION_DENIED` to a caller that resolves to an identity holding no
+  `manage_platform_settings` grant. The anonymous floor is unchanged (`401 UNAUTHENTICATED`).
+  
+  The capability is matched to what the adjacent Setup-admin families already gate on, not
+  minted: `@objectstack/service-settings`'s platform-infrastructure namespaces (`mail`,
+  `storage`, `sms`, `auth`, `ai`, `knowledge`) declare it for reads and writes alike, and this
+  service's own Setup nav entry already declared `requiredPermissions:
+  ['manage_platform_settings']` for the console door in front of these routes. There is no
+  read/write split for the same reason those namespaces have none: a datasource read returns
+  stored connection configuration and live remote-schema introspection.
+  
+  Impact: `admin_full_access` carries `manage_platform_settings`, so platform admins are
+  unaffected. A deployment that granted non-admin users access to Setup → Datasources through
+  some other capability must now grant `manage_platform_settings` (or bind those users to a
+  permission set carrying it).
+- Updated dependencies [56656aa]
+- Updated dependencies [07e630e]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [2782805]
+- Updated dependencies [e43d63a]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [2d0af57]
+- Updated dependencies [420804d]
+- Updated dependencies [716ac9b]
+- Updated dependencies [a38408a]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [27a567d]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [24173e9]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [f8eb736]
+- Updated dependencies [11b779e]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [e2899f6]
+- Updated dependencies [3851f87]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [e1bb0ca]
+- Updated dependencies [30d3752]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [402c125]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [44bc51d]
+- Updated dependencies [bbbfcfc]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+  - @objectstack/spec@17.1.0
+  - @objectstack/types@17.1.0
+  - @objectstack/core@17.1.0
+
 ## 17.0.0
 
 ### Major Changes

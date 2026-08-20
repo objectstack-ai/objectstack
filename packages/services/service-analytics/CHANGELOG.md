@@ -1,5 +1,254 @@
 # Changelog — @objectstack/service-analytics
 
+## 17.1.0
+
+### Patch Changes
+
+- d09d0fd: Source the comparand-type allow-list and the accepted-set refusal sentence from the shared `@objectstack/spec/data` door instead of re-spelling them locally.
+  
+  `comparand-shape.ts`'s `isBindableComparand` / `isRenderableTextComparand` spelled the same six accepted comparand types (`string | number | bigint | boolean | null | Date`) that `isAcceptedFilterComparand` single-sources for the SQL driver family, and two refusal messages hand-copied the accepted-set sentence. Both predicates now delegate the type membership to the door and quote `ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE`, matching how `driver-sql` and `driver-turso` consume it.
+  
+  No comparand is accepted or refused differently: the local copies already agreed with the door, and the full accept/refuse matrix is pinned end to end at both analytics filter doors, in three comparand positions each, measured before the change and re-run unchanged after it.
+  
+  One user-visible wording correction falls out of removing the copy: the hand-copied sentence omitted `bigint`, a type both predicates have always accepted and both doors have always compiled, so a refusal message under-described the values it accepts. The message now names the full set. The package-local extras — a binary bindable, and the `undefined` arm both doors already refuse upstream — are unchanged and recorded at their use sites.
+- 0425db9: Published READMEs link to the docs site in the one form that works on npm, on GitHub and on the docs site (#9632)
+  
+  **Seven docs links in these READMEs pointed nowhere.** They were spelled as a repo
+  path rooted at `/` — `[Flows](/content/docs/automation/flows.mdx)` — and a README in a
+  package's `files` array with `private` unset is rendered on the **npm package page** and
+  on **GitHub**, not only in this repository. There a root-relative href resolves against
+  `npmjs.com` and `github.com` respectively. It was not a docs-site route either:
+  `apps/docs/lib/source.ts` mounts `loader({ baseUrl: '/docs' })` over `content/docs`, so
+  the route for that first link is `/docs/automation/flows`, and `apps/docs/redirects.mjs`
+  carries no `/content` source that would rescue the written form. Every target page
+  existed and every one of them was reachable — only the links were not.
+  
+  All seven now use the absolute form the repo had already established in
+  `create-objectstack`'s published READMEs: `https://docs.objectstack.ai/docs/...`, with
+  the path taken under `content/docs` and the page extension dropped, because the route
+  carries none. Each target was re-verified at the route level rather than as a file — the
+  two that named a **directory** (`/content/docs/automation/`,
+  `/content/docs/references/automation/`) resolve only because those directories carry an
+  `index.mdx`; a directory without one is a 404, not a section.
+  
+  **Two more links in the same class were converted in the same pass.**
+  `service-knowledge` and `knowledge-ragflow` pointed at
+  `../../../content/docs/protocol/knowledge.mdx`. Those relative paths do resolve on both
+  GitHub and npm, so they are a milder defect than the seven — but they land the reader on
+  **raw MDX source** instead of the rendered page. They now point at the rendered page as
+  well. `service-knowledge`'s link text changed with it: it was the source filename in a
+  code span, which stops being an honest label once the destination is the page.
+  
+  No API, behaviour or type surface changes — this is the published documentation these
+  packages ship.
+- f01c0ee: docs: five published service READMEs stop documenting an API that does not exist (#9532)
+  
+  A version bump is the point, not a side effect: these five READMEs are in their
+  packages' `files` arrays with `private` unset, so they are the pages npm renders —
+  and a docs-only fix with no bump never reaches npm at all.
+  
+  Each of the five told a reader to an import of a `Service…` class from its own package
+  and call a static `.configure({...})` on it. Neither has ever existed: no class in
+  this repo exposes a static `configure`, and none of `ServiceAnalytics`,
+  `ServiceAutomation`, `ServiceCache`, `ServiceI18n` or `ServiceJob` is exported by
+  anything. A reader following any of them wrote code that could not compile. The real
+  entry point in every case is a kernel plugin constructed with `new`:
+  `AnalyticsServicePlugin`, `AutomationServicePlugin`, `CacheServicePlugin`,
+  `I18nServicePlugin`, `JobServicePlugin`.
+  
+  ⛔ A name swap alone would not have been enough, and the gate landed in #9546 is what
+  proves it: substituting the genuine class while keeping `.configure(...)` turns the
+  import finding into a call-site finding rather than into silence. Each README is
+  rewritten against the package's built type surface, and each package's entry is
+  deleted from `scripts/published-readme-exports.baseline.json` in the same change
+  (the baseline is reconciled in both directions, so a stale entry fails too).
+  
+  What was removed as fabricated, beyond the entry point:
+  
+  - **service-analytics** — a nine-endpoint REST surface (`/analytics/count`, `/sum`,
+    `/avg`, `/min`, `/max`, `/group-by`, `/time-series`, `/metrics`, `/metrics/:name`)
+    of which none exists; the real surface is `POST /analytics/query`,
+    `GET /analytics/meta`, `POST /analytics/sql` and `POST /analytics/dataset/query`.
+    Also removed: `defineMetric`, `getMetric`, `compare`, `funnel`,
+    `executeDashboard`, `invalidateCache`, and an `AnalyticsServiceConfig` block whose
+    four keys (`defaultDriver`, `enableCaching`, `cacheTTL`, `maxMemoryResults`) are
+    none of the real ones.
+  - **service-automation** — `executeFlow`/`getFlow`/`listFlows`/`getFlowHistory`/
+    `registerTrigger` as the contract (the real contract is `execute(flowName, context?)`
+    plus `listFlows()` and a set of optional members), and a five-endpoint REST list that
+    matches no mounted route. The flow-authoring half of that README was already accurate
+    and is kept.
+  - **service-cache** — `mget`/`mset`/`del`/`delPattern`/`namespace`/`ttl`/`expire`/
+    `persist`/`incr`/`incrby`/`decr`/`getOrSet`/`invalidateTag`/`resetStats`, none of
+    which exist; `ICacheService` has six members. `CacheStats.keys`/`hitRate` corrected to
+    `keyCount` (there is no `hitRate`), and `set(key, value, { ttl })` corrected to the
+    real positional `set(key, value, ttl?)` in seconds.
+  - **service-i18n** — an `await i18n.t('ns:key')` dialect with namespaces, plural
+    suffixes, `context`, `returnObjects`, `setLocale`/`getLocale`, `formatDate`/
+    `formatNumber`/`formatRelative`, `addLocale`/`removeLocale`/`reload`, `getCoverage`/
+    `getMissingKeys`, and a `{{lng}}/{{ns}}` file layout. The real `t()` is synchronous
+    and takes the locale positionally — `t(key, locale, params?)` — over one
+    `{locale}.json` file per locale. The `POST /i18n/translate` endpoint does not exist.
+  - **service-job** — `scheduleInterval`/`scheduleOnce`/`getJob`/`stopJob`/`resumeJob`/
+    `deleteJob`/`runNow`/`getJobHistory`/`clearHistory`/`getLastExecution`, and a
+    `schedule({ name, schedule, handler })` options-object call. The real `schedule` is
+    positional — `schedule(name, schedule, handler, options?)` — and returns `void`.
+    Retry defaults corrected to the enforced ones (`maxRetries: 0`,
+    `backoffMultiplier: 1`).
+  
+  Two capability claims are corrected rather than deleted, because the source is what
+  decides:
+  
+  - **service-cache** advertised Redis as production support. `RedisCacheAdapter` throws
+    `RedisCacheAdapter not yet implemented` from every method, and
+    `new CacheServicePlugin({ adapter: 'redis' })` throws during `init` rather than
+    falling back to memory. The README now says so at the top and points at registering
+    a custom `ICacheService` under the slot instead.
+  - **service-job**'s `adapter: 'interval'` stores cron registrations that never fire.
+    That is now stated in the adapter table rather than left for a reader to discover.
+  
+  No compliance claim (SOC 2 / HIPAA / GDPR or similar) was found in any of the five —
+  the shape that raised `plugin-audit`'s severity in #9517 is absent here.
+- 402c125: fix(objectql): a temporal filter comparand the platform cannot interpret is refused at the engine door instead of answering 200 with zero rows (#8690)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is
+  renamed, retired or tombstoned — no spec schema is touched at all. The change
+  is a new runtime refusal at the engine's filter collection point, plus the
+  routing decline that stops the raw-SQL analytics path bypassing it. -->
+  
+  A `datetime` / `date` / `time` field filtered with a bare string the platform
+  cannot read — `last_30_days`, `not-a-date-at-all` — was bound **as written**
+  all the way to the driver, where the comparison is false for every row. The
+  caller received `HTTP 200`, an empty result set, and nothing to indicate the
+  filter was meaningless. An unknown `{placeholder}` in the same position was
+  already refused loudly (`FILTER_TOKEN_UNKNOWN` / 400, listing the resolvable
+  tokens), so one API answered two shapes of unusable comparand two different
+  ways.
+  
+  It is concretely reachable rather than theoretical: `last_7_days` /
+  `last_30_days` / `last_90_days` are **declared preset names** in the dashboard
+  schema. The shipped console lowers them to `{N_days_ago}` macros before they
+  reach the API, so the console path was always safe — but a saved report, an
+  integration, an MCP client or an AI-authored query sends the preset name itself
+  and got a silent zero. An empty chart is the hardest failure to debug: it is
+  indistinguishable from "there is genuinely no data".
+  
+  Such a comparand is now refused at the ObjectQL engine's single filter
+  collection point, with `code: 'INVALID_FILTER'` and `status: 400`, naming the
+  field, the value, the key path and the spellings that would work. That seam is
+  the one place holding the caller's comparand and the field's **declared type**
+  at the same moment, and every verb (`find` / `findOne` / `count` / `aggregate`
+  / `update` / `delete`) and both filter spellings (the array sugar and the
+  lowered condition) pass through it, so all four backends inherit one answer
+  rather than four. `NativeSQLStrategy` additionally **declines** such a query so
+  the raw-SQL analytics path falls through to that door instead of binding the
+  value into its own statement.
+  
+  Deliberately unchanged, each by ruling: a `{placeholder}` keeps its existing
+  refusal one layer down (the door runs before token resolution and steps around
+  them, so `{30_days_ago}` still resolves normally); non-string comparands are
+  untouched (a number is epoch milliseconds, a `Date` is an instant); and the
+  **empty string** keeps today's behaviour exactly — it binds as `''` and matches
+  every non-null row, which is a separate question that remains its own card.
+- Updated dependencies [56656aa]
+- Updated dependencies [07e630e]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [2782805]
+- Updated dependencies [e43d63a]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [2d0af57]
+- Updated dependencies [420804d]
+- Updated dependencies [716ac9b]
+- Updated dependencies [a38408a]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [27a567d]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [24173e9]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [f8eb736]
+- Updated dependencies [11b779e]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [e2899f6]
+- Updated dependencies [3851f87]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [e1bb0ca]
+- Updated dependencies [30d3752]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [402c125]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [44bc51d]
+- Updated dependencies [bbbfcfc]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+  - @objectstack/spec@17.1.0
+  - @objectstack/types@17.1.0
+  - @objectstack/core@17.1.0
+
 ## 17.0.0
 
 ### Major Changes

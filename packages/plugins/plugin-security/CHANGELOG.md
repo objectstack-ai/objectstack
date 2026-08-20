@@ -1,5 +1,958 @@
 # @objectstack/plugin-security
 
+## 17.1.0
+
+### Minor Changes
+
+- 720ee95: fix(security): the shipped admin permission sets no longer grant export on the `*` wildcard (#8681)
+  
+  <!-- adr-0087: registered admin-export-wildcard-removed -->
+  
+  **BREAKING for any deployment whose administrators export today.** Landing after
+  the v17.0.0 cut, so it ships as `minor` under the lockstep launch-window
+  convention; the migration prescription is registered under protocol major 18,
+  where `objectstack migrate meta` users will look.
+  
+  `admin_full_access`, `organization_admin` and the derived
+  `organization_admin_no_bypass` shipped `objects['*'].allowExport = true`. That
+  single line made the 17.0 export axis **undeniable** for anyone holding an admin
+  set: an application could declare an object exportable by nobody, ship it, and
+  the platform would export it anyway.
+  
+  Measured on 17.0.0 GA — 40 export probes, 5 principals, 8 objects, real Bearer
+  tokens — an org owner exported `crm_quote` (9 rows), `crm_campaign` (13) and
+  `crm_task` (15) with 200 and full data. No app permission set granted export on
+  any of the three, and the app had no way to say no:
+  
+  1. the wildcard lives in code-package metadata, so editing it answers
+     `403 [not_overridable] Metadata item 'permission/admin_full_access' is
+     provided by a code package`;
+  2. the org admin holds no app-authored permission set, so there is nowhere to
+     author the per-object `allowExport: false` that would otherwise have won.
+  
+  **This was never a gate defect.** The same run proves the export gate exact for
+  every other principal: a token refused on one object exports another on the same
+  route, granting `allowExport` at runtime flips 403 to 200, and revoking it flips
+  it back. A plain member carrying `'*': { allowExport: true }` exported too — the
+  wildcard was simply doing what it said. What changes is that the platform stops
+  shipping that grant.
+  
+  This is #5491 applied to the export axis. That change removed `member_default`'s
+  CRUD wildcard because a wildcard in a set every principal resolves is not a
+  default but a floor no app can get under; the export wildcard survived by
+  omission rather than by decision, one tier up.
+  
+  **Migration — grant `allowExport` explicitly in an app permission set where
+  admin export is intended.** There is no automatic replacement, deliberately:
+  which principals may take a bulk machine-readable copy of a table is the
+  segregation-of-duties judgement the axis exists to make explicit.
+  
+  ```ts
+  // In YOUR app's permission set — not a platform set (those are not overridable).
+  {
+    name: 'system_admin',
+    objects: {
+      crm_account: { allowRead: true, allowExport: true },  // export intended
+      crm_quote:   { allowRead: true },                     // export withheld
+    },
+  }
+  ```
+  
+  ⚠️ **Nothing fails at parse time, and the shipped sets are re-seeded on
+  upgrade.** A deployment that upgrades without editing anything is valid metadata
+  whose administrators have quietly lost export on every object no app set names —
+  the first sign is a support report, not an error. Verify behaviourally: sign in
+  as an org owner and call `GET /api/v1/data/<object>/export`, expecting 200 where
+  export is intended and 403 `EXPORT_NOT_PERMITTED` where it is not.
+  
+  **What is deliberately unchanged.** READ is untouched — an admin still sees
+  every record they saw before; this narrows bulk egress only. `allowExport` on a
+  `'*'` entry remains a supported, honoured authoring shape in an app's own sets.
+  Specific-over-wildcard precedence is unchanged (an explicit per-object entry
+  still overrides the wildcard). The `viewAllRecords` / `modifyAllRecords`
+  super-user bits still do not imply export, exactly as before. And an app's own
+  admin set already gets precisely its declared posture — declared `false` answers
+  403, declared `true` answers 200 — which is what makes withdrawing the platform
+  grant safe rather than merely restrictive.
+  
+  Both admin sets are fixed together, and the org-admin pair from one declaration
+  (`organization_admin_no_bypass` is derived from `organization_admin`). Fixing
+  one and not the other was rejected outright: a half-closed export boundary reads
+  as closed and is not.
+- cc5c07b: fix(plugin-security)!: an insert that omits a required master-detail parent answers `400 VALIDATION_FAILED` with `fields[]`, not a `[Security]`-prefixed `422` (#8688)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable moves.
+  No spec property, object or field is renamed, retired or tombstoned — the change
+  is confined to which HTTP error envelope one runtime condition answers with
+  (`assertControlledByParentWrite`'s insert leg), and both envelopes already exist
+  in ADR-0112's closed vocabulary. There is no metadata an upgrader could migrate:
+  an app's declarations are byte-identical before and after, and the only consumer
+  action is branching on `VALIDATION_FAILED` instead of `MISSING_REQUIRED_FIELD`
+  for this one condition, which is prose in this changeset rather than a
+  prescription `objectstack migrate meta` could carry out. -->
+  
+  **BREAKING (error contract).** On an `insert` into a `controlled_by_parent`
+  detail whose master reference is absent, the platform used to answer:
+  
+  ```
+  HTTP 422
+  code  : MISSING_REQUIRED_FIELD
+  error : [Security] Missing master reference: insert on 'crm_contact' did not
+          supply 'crm_account'. …
+  fields: (absent)
+  ```
+  
+  It now answers the same envelope every other missing-required-field case
+  answers — `400 VALIDATION_FAILED`, carrying `fields[]` with
+  `{ field, code: 'required' }` — wherever required-field validation provably
+  refuses that omission. A client branching on `code === 'MISSING_REQUIRED_FIELD'`
+  for this condition must branch on `VALIDATION_FAILED` instead; a client already
+  handling the platform's ordinary missing-field envelope needs no change and
+  gains the field it could not previously highlight.
+  
+  **What was wrong.** `assertControlledByParentWrite` runs in the security
+  middleware chain, *outside* the executor that calls `validateRecord`, so on an
+  insert it short-circuited required-field validation on the one field they
+  share. One user-visible condition therefore had two answers on adjacent
+  branches of the same field: absent → `422` with no `fields[]`, present but
+  unresolvable → `400 VALIDATION_FAILED` with `fields[]`. A form could highlight
+  the offending input in the second case and not the first, and any surface
+  rendering the message string showed a missing required field as a security
+  refusal. Measured live on 17.0.0 GA over REST.
+  
+  The two harms could not be separated: both transport doors emit `fields[]` only
+  for the `VALIDATION_FAILED` duck-type and each overwrites `code` when it
+  matches, so "add `fields[]` while keeping `MISSING_REQUIRED_FIELD`" is not a
+  reachable throw shape.
+  
+  **The stand-down is CONDITIONAL, and the residue is deliberate.** It applies
+  only where `validateRecord` really does refuse the omission: a `master_detail`
+  declared `required: true` and not `readonly`/`system`. For three other
+  declarable shapes — a `master_detail` with no `required`; `required` +
+  `readonly`; `required` + `system` — the validator skips the field before its
+  required check ever runs (`if (def.system || def.readonly) continue;`), so the
+  master gate is the only thing refusing the insert. There it keeps answering
+  `422 MISSING_REQUIRED_FIELD` exactly as before. A flat hand-over was measured to
+  mint a detail row with a null master FK, which the `controlled_by_parent` read
+  filter (`fk IN (readable masters)`) can never match — readable by nobody, and
+  answering `422` on every later by-id write.
+  
+  **So the envelope asymmetry is not gone, it is confined** — to precisely those
+  three declarations, and no further. But confined is not unreachable: #8772
+  *proposes* a publish-time lint that would refuse them, and that issue is open
+  and unruled, so nothing refuses them at publish today. A `master_detail` with
+  no `required` draws only a non-blocking `warning`; `required` + `readonly` and
+  `required` + `system` draw nothing at all. An app can therefore newly declare
+  any of the three, publish cleanly, and still see the old
+  `422 MISSING_REQUIRED_FIELD` with no `fields[]` — so treat these shapes as a
+  live surface to avoid authoring into, not as a legacy tail that is already
+  closing. One further residual, narrower still: a
+  `controlled_by_parent` object whose relation resolves through the required-*lookup*
+  fallback also keeps the `422` — validation would cover it, but the ruling covers
+  `master_detail`, and widening a ruling is not the implementer's call.
+  
+  **Unchanged, and pinned as unchanged:** a master that is *present but not
+  writable* by the caller still answers `403 PERMISSION_DENIED — requires edit
+  access to its master record`. The stand-down is keyed on the FK being absent;
+  every access leg still runs when one is supplied. The stored-row shape (a by-id
+  write whose persisted FK is null) also keeps its `422`: the caller sent no such
+  field, so a `fields[]` naming it would name a field that was never in the
+  request, and no payload the caller could send would fix it.
+  
+  **One pin was rewritten deliberately**, not adjusted to match new behaviour: the
+  `[#7474]` six-envelope truth table's **insert** leg in
+  `controlled-by-parent-sharing.test.ts`. Its successor asserts both sides of the
+  condition — the covered shape hands over (the executor is reached, and the real
+  `validateRecord` refuses with `VALIDATION_FAILED` + `fields[]`), and each
+  uncovered shape still gets the `422` (with the real validator raising nothing on
+  the same payload, which is why the gate must stay). The truth table's other
+  legs are update-path and are untouched.
+  
+  This supersedes the 2026-08-11 envelope choice on #7474, on that ruling's own
+  rationale: if a detail without its master is "precisely a required value that is
+  absent", the platform's contract for a required value that is absent is
+  `400 VALIDATION_FAILED` with `fields[]`.
+- 6feac91: **Security boundary change — this WIDENS who may write rows that are refused today.** On an ADR-0055 `controlled_by_parent` detail, the ADR-0055 master gate is now the sole row-level write authority: the platform's wildcard ownership floor (`owner_only_writes` / `owner_only_deletes`, `created_by == current_user.id`) is no longer applied to such a detail at the by-id write pre-image gate. A by-id UPDATE or DELETE of a child row **created by another user** now succeeds whenever the caller may edit that child's master — where it previously answered `403` `record_access_denied`. Maintainer ruling 2026-08-15 on #8757 (delegated adjudication).
+  
+  What the widening rests on: `assertControlledByParentWrite` — the object's declared write gate — already runs on the same operation, immediately after the pre-image gate, under a superset of its guard, and it refuses whenever the master is not editable. The floor is handed to that gate, not removed. Callers who could not edit the master are refused exactly as before, with the master gate's own sentence instead of the record-access one.
+  
+  Why it was wrong before: `controlled_by_parent` means "access derives from the master", and the detail declares nothing about who may write it. Two gates were answering one write, and the stricter — a creator-only rule no author wrote — always won: `SharingService.checkEdit` abstains on the `public`-mapped model before reaching its `modifyAllRecords` branch, so ownership depth, an `edit`-level `sys_record_share` and Modify All Data were all inert on a detail.
+  
+  Deliberately unchanged, each measured:
+  
+  - **BULK (AST) writes keep the floor.** `assertControlledByParentWrite` returns early with no single id, so nothing would replace it there. The floor is dropped from the by-id call site, never from the object's posture alone.
+  - **Delegated (on-behalf-of) by-id writes keep both principals' floors**, matching ADR-0090 D10's existing exclusion at this gate.
+  - **INSERT and the read path are untouched** — an insert has no pre-image and so never carried the floor; the floor is `update`/`delete`-only.
+  - **App-authored policies are untouched** (provenance, ADR-0105 D3), Layer 0's tenant wall is untouched, and a detail that authors its own `select` policies still derives its write scope from them (#7665).
+- 5f5e234: fix(security): `sys_permission_set.active` and `sys_position.active` now actually stop granting access (#8613)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is
+  added, renamed or retired. `active` is a ROW property of a `sys_permission_set`
+  / `sys_position` record, not a key on `PermissionSetSchema` (which is a strict
+  object in `packages/spec` and deliberately declares no such key — see
+  `permission-set-projection.ts`'s ROW_STATE_COLUMNS). No spec schema, export or
+  stored metadata shape changes, so there is no conversion to register and no
+  tombstone to write. The change is a runtime predicate at the authorization
+  resolution seam; the remedy for an affected deployment is operational
+  (re-activate rows that were switched off), not a metadata migration. -->
+  
+  **BREAKING for deployments that already switched a permission set or position
+  off.** Both objects ship a Deactivate action whose confirmation dialog promises,
+  in all four locales, that access stops:
+  
+  > Deactivate this permission set? Existing assignments stay in place but stop
+  > granting access until re-activated.
+  > Deactivate this position? Users keep their assignment but the position stops
+  > granting permissions until re-activated.
+  
+  Nothing read the column. Measured on the real resolver: a position seeded
+  `active: false` still granted its permission sets, and a permission set seeded
+  `active: false` still returned `posture: PLATFORM_ADMIN` with its system
+  permissions. Deactivation moved a badge in Setup and nothing else — while the
+  admin who had just revoked a compromised or over-broad grant was told the
+  opposite, and whose likely next step was therefore *not* the action that would
+  have worked (delete the set, or remove the assignments).
+  
+  **What changes at runtime.** `resolveAuthzContext` / `resolveUserAuthzGrants`
+  (`@objectstack/core`) — the single seam every transport resolves authorization
+  through — now drop a deactivated row **before** any derivation:
+  
+  - a deactivated `sys_position` no longer contributes its
+    `sys_position_permission_set` grants, and its name leaves `positions` (so the
+    name-reuse path cannot resolve the same grant one layer down);
+  - a deactivated `sys_permission_set` contributes no name, no
+    `system_permissions`, no `tab_permissions`, **and no `PLATFORM_ADMIN`
+    posture** — the flag is applied before the posture is derived, not after;
+  - the `plugin-security` DB loader applies the same predicate, which is what
+    judges a set reached by NAME through an active position of the same name.
+  
+  Both tables were already read at that seam, so this costs **zero new hot-path
+  queries**.
+  
+  **⚠️ Read this before upgrading.** Any `sys_permission_set` or `sys_position`
+  row currently carrying `active: false` **stops granting the moment this
+  lands** — on live data, with no migration step to notice. That is the correct
+  direction (it is what the dialog said when someone clicked Deactivate), but on
+  an installation that used the switch believing it was inert it is a real
+  revocation. Before upgrading, list the deactivated rows and re-activate any that
+  are still meant to grant:
+  
+  ```
+  GET /api/v1/data/sys_permission_set?filters=[["active","=",false]]
+  GET /api/v1/data/sys_position?filters=[["active","=",false]]
+  ```
+  
+  A row whose `active` column is **absent or NULL** is unaffected: the predicate
+  is "explicitly deactivated", never "explicitly active", so rows that predate the
+  column keep granting exactly as before.
+  
+  **Break-glass, closed in the same change** (`@objectstack/plugin-auth`).
+  Enforcing the flag opened a one-click, installation-wide lockout: deactivating
+  `admin_full_access` un-makes every platform admin at once, through a payload
+  that touches neither `name` nor any identity table, and re-activating requires
+  the permission the click just took away (the seeders deliberately never
+  reconcile `active`, so no restart restores it). The last-administrator guard now
+  judges that write like the delete and rename spellings it already refused, and
+  an environment whose break-glass set is *already* off is read as emptied rather
+  than as a bootstrap window — so it does not silently disarm the guard for every
+  other identity write. Re-activation itself stays permitted, or the refusal would
+  have no way out from inside the product.
+- 0ccea4a: fix(security): security explain reports partial masking — the field-mask layer gains the third state instead of calling gated fields hidden and gate-less rule fields readable (#9127)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable
+  changes. No `packages/spec` property is added, renamed, retired or tombstoned:
+  `field.maskingRule` was minted by #8993 and is untouched here, and the explain
+  report's own schema (`ExplainLayerSchema`) keeps its exact shape — the fix
+  lands entirely in what the `fls` layer's existing `verdict` and `detail` say.
+  There is no stored data to migrate and no author-facing spelling to convert. -->
+  
+  #8993 landed partial masking on the enforcement channel: a field declaring
+  `maskingRule` is no longer deleted from a masked caller's response, its value
+  is **replaced** (`13812345678` → `138****5678`), with the field's
+  `requiredPermissions` acting as the unmask gate. The access-explanation
+  engine's field-mask layer predates that and read only the binary mask, so on
+  the one surface whose whole job is to describe enforcement it stated two
+  things that were not true:
+  
+  - a field with `maskingRule` **and** a `requiredPermissions` gate the caller
+    does not hold was listed under *"N field(s) masked from responses"* — an
+    admin reading the report concluded the key was absent, while the caller was
+    in fact receiving the partially masked value;
+  - a field with `maskingRule` and **no** gate was reported under *"No
+    field-level masking applies"* — invisible in the report, and masked for
+    every non-system caller in reality.
+  
+  Both directions matter, and they fail opposite ways: the first overstates the
+  protection in place, the second hides that any applies at all.
+  
+  The `fls` layer now reports the three states the enforcement path actually
+  produces — **hidden** (key deleted), **partially masked** (key served, value
+  replaced, the applicable rule named) and **readable** — and answers `narrows`
+  whenever either dimension bites, where a gate-less rule previously produced
+  `not_applicable`.
+  
+  **Mirrored, not re-derived.** The composition deciding which rules apply to a
+  caller — `computePartialMaskRules` AND the explicit-deny exclusion that a
+  permission-set `readable: false` still wins outright — is lifted into one
+  method on the plugin (`computeReadPartialMaskRules`) that the result-masking
+  middleware, the readable-field projection and now explain all call. The
+  hidden/partial split in the report is `FieldMasker.maskResults`' own rule
+  (`!(field in rules)`), so the report cannot disagree with the masking it
+  describes. A second, independent derivation inside the explain engine is
+  exactly how this drift opened in the first place; `security-service.ts`'s
+  module contract claims explain *"matches enforcement by construction"*, and
+  this restores that for the partial-mask dimension.
+  
+  **Breaking for direct embedders of the engine** (hence `minor`, not `patch`):
+  `ExplainEngineDeps` gains a **required** `getPartialMaskRules`. It is required
+  rather than optional on purpose — the field-mask decision has three outcomes
+  and the existing binary `getFieldMask` can express only two, so an engine
+  wired without it would silently reproduce both misreports above. A compile
+  error is the correct way for that omission to surface. Callers going through
+  `SecurityPlugin` / the `security` service's `explain()` — every consumer in
+  this repo — need no change.
+- 3851f87: Partial field masking (#8993): `FieldSchema` declares `maskingRule` — a closed
+  preset enum (`phone`, `id_card`, `bank_account`, `email`, `name`) plus a
+  `{ keepHead, keepTail }` escape hatch — and plugin-security's `FieldMasker`
+  enforces it in the same PR (ADR-0049 declare = enforce; the key re-enters the
+  schema only with its runtime consumer attached, honouring the 2026-06 prune in
+  spirit).
+  
+  A field declaring a rule is served masked-but-recognisable (`138****5678`) to
+  every non-system caller; the field's `requiredPermissions` (ADR-0066 D3) is the
+  unmask gate — holders of all listed capabilities read the full value. A
+  permission set that marks the field non-readable still deletes it entirely.
+  Masking rides the single runtime channel, so API callers, browser users, the
+  CSV/XLSX export route and the AI-context interceptor all see the same
+  deterministic, length-preserving masked value. Masked callers cannot filter,
+  sort, group or aggregate on the field (403, the FLS predicate-oracle guard),
+  and a write that round-trips a masked placeholder is refused with
+  `400 VALIDATION_ERROR` instead of silently overwriting the stored value.
+  New exports: `FieldMaskingRuleSchema`, `FieldMaskingKeepSchema`,
+  `FIELD_MASKING_PRESETS`, `maskFieldValue`, `MASK_CHAR`.
+- 73cfddf: fix(security): **BREAKING** — `sys_user_permission_set` retires the `delegated_from` column (ADR-0049 enforce-or-remove, #9730)
+  
+  Maintainer ruling 2026-08-18: **REMOVE**. The runtime delegation gate is
+  structurally scoped to `sys_user_position` — `isDelegationWrite` returns `false`
+  for every other object, so `assertSelfDelegation` was unreachable for
+  `sys_user_permission_set` — and the explain engine reads delegation provenance
+  from position rows only. On the permission-set grant table the column was
+  therefore declared and data-door-writable while **no runtime consumer read
+  it**: its only enforcement was the authoring-time lint rule requiring a
+  `reason` on delegation rows, which a row written through the generic data door
+  never meets. A declared-but-unenforced writable column on a security object is
+  the declare-not-enforce trap in its pure form — an author stamping
+  `delegated_from` on a permission-set grant believed they constrained
+  delegation, and nothing refused or honoured it. Producers measured at zero:
+  the only object literals naming both the table and the column were lint test
+  fixtures.
+  
+  Migration (FROM → TO):
+  
+  | Wrote | Write instead |
+  |---|---|
+  | `delegated_from` on a `sys_user_permission_set` seed row or data-door write | Delete the key. Provenance prose belongs in `reason` (still declared on both grant tables); actual delegation-of-duty belongs on `sys_user_position`, where `delegated_from` remains declared **and** runtime-enforced (ADR-0091 D3). |
+  
+  One-line fix: delete `delegated_from` from any authored `sys_user_permission_set` row.
+  
+  <!-- adr-0087: registered ups-delegated-from-column-retired -->
+  
+  Enforcement after the removal is loud, not silent: the engine's schema
+  preflight refuses an undeclared field with `400 INVALID_FIELD` before the
+  driver or any hook runs, so a stale seed or client write is told exactly what
+  to remove. Physical columns on already-deployed databases are untouched
+  (ADR-0045 schema sync is additive); the platform stops declaring, projecting
+  and accepting the column. The sibling `sys_user_position.delegated_from` — the
+  enforced half of ADR-0091 D3 — is untouched, pinned by test. If
+  permission-set-granularity delegation ever becomes a real need, the column is
+  re-declared **with a runtime reader in the same PR** — declare-and-enforce or
+  don't declare.
+  
+  The docs' per-object grant-column table (`content/docs/permissions/
+  authorization.mdx`) now records the retirement, and the security-posture
+  lint's D3 rule is scoped to the position table (see the `@objectstack/lint`
+  changeset).
+
+### Patch Changes
+
+- cf0d902: fix(security): the `controlled_by_parent` master-editability check consults the same app-authored write widener the by-id path does (#8679)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable surface
+  changes: nothing is added, renamed, retired or tombstoned in `packages/spec`.
+  This is a behavioural fix inside one existing gate, which now asks an
+  already-shipped question at a second call site. -->
+  
+  `crm_campaign_member`-shaped objects — ADR-0055 `controlled_by_parent` details —
+  route every insert/update/delete through `assertControlledByParentWrite`, which
+  asks whether the caller may EDIT the master. That gate's record-sharing leg
+  hard-refused on `canEdit === false` **without ever asking whether an app-authored
+  RLS update-widener admits the master row**. The by-id write path has asked
+  exactly that since #5493 (merged as PR #6909), where the deferral was installed
+  on the sharing middleware's refusal branch.
+  
+  So one principal, one master record and one operation got **two different
+  answers depending on who was asking** — measured on 17.0.0 GA with real Bearer
+  tokens, one variable (who created the master), everything else identical:
+  
+  | step | master created by ADMIN | master created by the caller |
+  |---|---|---|
+  | PATCH the master itself, by id | **200** | 200 |
+  | INSERT a child | **403** | 201 |
+  | UPDATE a child | **403** | 200 |
+  | `security/explain` update on the master, record-scoped | **`allowed=true`** | `allowed=true` |
+  
+  The master write and the platform's own `explain` verdict both said yes; only the
+  derived write disagreed, refusing with `master '...' not editable by this user
+  (record sharing)` — naming the very layer #6909 had already taught to defer.
+  
+  **The fix consults the same composition, and does not relax the check.** The
+  verdict comes from `checkAuthoredRowWrite` — the method
+  `SharingService.probeAuthoredRowWrite` passes straight through to — so the answer
+  at this call site is byte-for-byte the one a direct by-id write of that master
+  would get. There is no second copy to drift, which matters because a duplicated
+  permission composition is how the two paths diverged. The question is asked for
+  `update`, matching the two legs already above it: this gate's subject is edit
+  access to the master, never the detail's own verb.
+  
+  Nothing else widens. The object-level `update` grant and the master's own
+  write-RLS leg run first and still refuse on their own terms; `admit` retracts
+  only the record-sharing leg's refusal, exactly as an `admit` on the by-id path
+  hands the row to the pre-image gate rather than authorizing anything. Every other
+  outcome — `abstain`, no authored policy, a `check`-only policy, a principal-less
+  or delegated context, a throwing probe — leaves the refusal untouched, and the
+  method is fail-closed in the `abstain` direction, so no failure mode here can
+  open access.
+  
+  The regression proof drives both directions on one fixture and refuses to be
+  satisfiable by a relaxation: the RLS-widened master **permits** the derived write
+  **and** a principal with no widener and no share is still refused on the same
+  route with the same payload. A transferred master (write RLS admits via the
+  platform floor, record sharing refuses because the owner is someone else) keeps
+  the record-sharing leg itself pinned live — deleting that leg outright would
+  otherwise leave the suite green — with an `edit`-level share admitting the same
+  row and a `read`-level share still refusing it.
+- 498f4e8: fix(security): `controlled_by_parent` detail writes compose the master's ownership floor the same way a direct write does (#8865)
+  
+  **This change widens a permission boundary, deliberately and with maintainer
+  approval (ruling of 2026-08-15, direction 1): children of a master become
+  writable by every principal whose record-sharing verdict on that master is
+  `allow`.** That is the same set which already reaches the master itself — the
+  widening restores a symmetry the platform declares, it does not mint a new
+  capability — but it is a real widening and it is stated here rather than
+  softened.
+  
+  ## What was measured
+  
+  `assertControlledByParentWrite` (ADR-0055, step 2.8) resolves master-edit access
+  in two legs. Leg 1 — the master's own write RLS — computed
+  `computeRlsFilter(master, 'update')` with **no** `dropPlatformOwnershipFloor`,
+  while the by-id write pre-image gate (step 2.7) computes the same filter for the
+  same object with that knob set whenever `ISharingService` answers `allow`. So the
+  platform's ownership floor (`created_by == current_user.id`, shipped by
+  `member_default`) was dropped on the direct path and left standing on the derived
+  one, and one principal, one master row and one `update` got two answers:
+  
+  | step | verdict before |
+  |---|---|
+  | PATCH the master `camp_mkt` directly, by id | allowed |
+  | UPDATE a child of `camp_mkt` | `403 … requires edit access to its master record (master 'crm_campaign' not editable by this user (row-level security))` |
+  
+  The principal in that measurement holds `modifyAllRecords` on the master, which
+  is exactly what makes the sharing verdict `allow` and drops the floor on the
+  direct path; it did not create the master, so the undropped floor refused it on
+  the derived path. Every widening mechanism the platform declares — ownership at
+  write DEPTH, an `edit`-level `sys_record_share`, `modifyAllRecords` — was
+  therefore inert **for children** while it worked **for the master itself**. An
+  app author saw a master they could edit and children they could not.
+  
+  This is the divergence #8679 closed in leg 2 (record sharing), surviving one leg
+  over, and it is closed the same way: one principal, one row, one operation must
+  not get two answers.
+  
+  ## The change
+  
+  Leg 1 adopts step 2.7's composition, clause for clause:
+  
+  - ask `resolveSharingWriteVerdict('update', master, masterId, …)` — the tri-state
+    verdict, not `canEdit`'s boolean projection — and drop the platform ownership
+    floor **only** on `allow`;
+  - ask it only when a platform floor policy is actually applicable to this
+    (principal, master, `update`), so an object with no floor in play spends no
+    sharing probe;
+  - `abstain` and `deny` both leave the floor standing, and the verdict answers
+    `deny` when its own probe throws, so no failure mode of this composition can
+    widen;
+  - the on-behalf-of path (ADR-0090 D10) is excluded, mirroring step 2.7: a
+    delegated write keeps **both** principals' floors, exactly as before.
+  
+  Only the PLATFORM's floor is droppable (provenance, ADR-0105 D3). An app-authored
+  policy — including one spelling the identical predicate — reaches the compiler
+  untouched and still refuses (ADR-0049), and Layer 0 (the tenant wall) is not
+  affected at all. Step 2.7's composition and the insert leg's #8688 stand-down are
+  untouched.
+  
+  ## Pinned
+  
+  The residual assertion the measuring run left in the tree
+  (`controlled-by-parent-detail-write-authority.test.ts`, labelled `RESIDUAL
+  (#8865)` with the comment "When #8865 lands the assertion above flips") now
+  asserts the permission, and keeps its witness — the same principal, the same
+  master row, the same operation, asked directly — so the two paths cannot drift
+  apart again without a red.
+  
+  A new section pins the flip to the composition rather than to a relaxation, each
+  case varying one input and asserting the direct write of the master agrees:
+  
+  - an `edit`-level `sys_record_share` on the master — and nothing else — is what
+    moves a child write from refused to permitted;
+  - an owner-less master, where `checkEdit` abstains for everyone (Modify All Data
+    included), keeps its floor and refuses on both paths — the case that separates
+    the ruled `=== 'allow'` composition from the boolean projection;
+  - an app-authored master policy still refuses a principal whose sharing verdict
+    is `allow`, while the same write without that policy is permitted.
+- 4c178c1: fix(security): the ADR-0091 D5 attestation columns stop claiming a recertification review the platform does not run (#9046)
+  
+  `last_certified_at` and `certified_by` are declared on both grant tables
+  (`sys_user_permission_set`, `sys_user_position`) as the ADR-0091 D5
+  recertification *substrate*. A whole-tree sweep over `packages/`, `apps/` and
+  `examples/` — every `.ts`/`.tsx`, tests included — finds the pair in exactly two
+  kinds of place: those two declarations and the generated i18n bundles carrying
+  their strings. **No producer and no consumer.** Nothing stamps either column,
+  nothing reads either one, and no surface derives "never certified" or
+  "certification stale" from them. The sweep is not blind: the sibling ADR-0091
+  columns on the same objects all resolve to real enforcement — `valid_from` /
+  `valid_until` through `isGrantActive` at resolution time, `reason` and
+  `delegated_from` through the delegated-admin gate and the security-posture lint.
+  
+  Their descriptions nonetheless stated D5's intent as though it were the
+  behavior — *"When this grant was last attested in a recertification review. Null
+  = never certified"* and *"Reviewer who last attested this grant."* Access
+  recertification is a compliance control (SOX / ISO 27001 access review), so that
+  misreading is the expensive kind: an admin walking `plugin-security`'s objects,
+  or an AI agent authoring against this model, takes a populated `Last Certified
+  At` as evidence of a review the platform never performed and never checked.
+  
+  ADR-0049 enforce-or-remove, settled the way `sys_capability.active` was
+  (maintainer ruling, 2026-08-13): **the claim is withdrawn in prose.** Building
+  the review workflow is a designed feature with no measured pull, and dropping
+  shipped columns costs a migration over existing rows while buying nothing the
+  prose fix does not — the harm here is the promise, not the storage, and a
+  description is one line to change back if D5 is ever implemented. The columns,
+  their types and their storage are untouched; no producer and no consumer is
+  added, deliberately.
+  
+  Both descriptions now state the inertness outright rather than merely omitting
+  the promise, so a reader who remembers the old wording is told it was wrong
+  instead of being left to infer it. All four locale bundles carry the corrected
+  text.
+- 8656d67: fix(plugin-security): the derived capability seeder's skip is counted and warned instead of leaving the platform bucket silently unseeded (#8536)
+  
+  **This does not change what the seeder does. It changes whether an operator can
+  tell what it did.** No adoption, no backfill, no new writes — the #5876 guard
+  keeps declining an authored row, which is the ruled behaviour (#8552 settled the
+  posture on an occupied platform bucket: keep declining, loudly).
+  
+  `bootstrapSystemCapabilities` derives a placeholder `sys_capability` row for any
+  capability a bootstrap permission set grants by name. Its lookup runs under the
+  system context, which carries no `tenantId`, so it reads **across
+  organizations** — and when the row it finds is one it does not own, the #5876
+  guard `continue`s before any insert is attempted.
+  
+  Before #8461 that was harmless, because `name` was unique installation-wide: "a
+  row resolves this name" and "the platform holds a row for this name" were one
+  statement, which is exactly what #5876's reasoning rests on ("the capability
+  resolves and the authored copy is the better one"). Per-organization uniqueness
+  (ADR-0120 D1) separated them. An organization's row now satisfies the lookup
+  while the platform's NULL-organization bucket is **never written at all**, and
+  nothing said so: `skippedAuthored` moved, and that counter cannot distinguish
+  "an authored copy was left alone" from "the platform's definition exists
+  nowhere".
+  
+  The skip now reads the platform bucket once — on that branch only, the same cost
+  the curated half already accepted — and warns with the curated half's
+  provenance-naming shape: it names the `managed_by` and organization it **read**
+  off the blocking row rather than asserting an ownership verdict, states which of
+  the three bucket observations it saw (free / held by an unstamped row / held by
+  a row with a named provenance), and carries the #8552 hand-resolution line only
+  where a row an operator may legitimately rename is what blocks the bucket. Where
+  an organization's row is what stands in the way, the message says there is
+  nothing to remove — that row is a supported ADR-0066 D1 extension.
+  
+  The warning fires only where the platform's own placeholder is genuinely
+  **absent**, so it means one thing. A skip that declines a mere refresh — the
+  placeholder is present and simply was not the row the cross-organization lookup
+  selected — stays summary-only, as #4632 decided.
+  
+  `CapabilitySeedResult` gains `unseededDerived`, a documented **subset** of
+  `skippedAuthored` rather than a split of it: the existing counter keeps its
+  meaning and its value, because the two facts are separable only since #8461 and
+  neither should be inferred from the other.
+- e9534a4: A durability failure reported to a logger without `error` is no longer lost
+  
+  Six degradation reports — a lost `sys_audit_log` row (CRUD, auth-event and
+  read-audit writers), a stranded `sys_email` row, and the two permission-set
+  metadata backfill failures — were spelled `logger?.error?.(…)`. `error` is
+  declared OPTIONAL on those sinks, and an optional call emits nothing at all when
+  the method is absent: a host injecting a `{ info, warn }` logger received no
+  report whatsoever, on exactly the paths whose whole point is that nothing else
+  looks broken afterwards.
+  
+  Each now reaches for `error` and falls back to `warn`, never to silence. The
+  message, its consequence and its fix are identical on both channels; only the
+  level degrades, and only when the sink cannot do better.
+  
+  `AuthEventAuditLogger` additionally declares the `warn?` method it needs for
+  that fallback, matching `ReadAuditLogger`, which always had it. The addition is
+  optional, so no existing sink stops satisfying the interface.
+- 4ea921c: Repair the ADR-0090 `sys_role` → `sys_position` rename in the es-ES object
+  translation bundles, and guard it mechanically.
+  
+  The rename half-landed in Spanish: an unreviewed substring find-replace produced
+  two non-words (`Puestoes` as the plural of `Puesto`, and `contpuesto` where the
+  replace ate the unrelated word `control`), while nine further leaves in
+  `plugin-security` and three in `plugin-sharing` were missed entirely and still
+  named the pre-rename concept. In `plugin-sharing` the same picklist key rendered
+  two different ways in one file — `position` was `Puesto` on the sharing rule and
+  `posición` on the record share, and `unit_and_subordinates` read `Rol y
+  subordinados` (naming the removed role concept) against `Unidad de negocio y
+  subordinados` on its sibling.
+  
+  Spanish-facing admins saw `Puestoes` as the object's plural label in navigation
+  and list views, and two different words for one recipient kind across two Setup
+  screens.
+  
+  Two regression guards now cover the classes involved: a malformed-compound and
+  stale-term check on the renamed security objects, and a self-consistency check
+  asserting that a picklist option key shared by several sharing objects renders
+  identically within a locale. Neither needs a reader of the locale to review it.
+- 42b05af: feat(security): the explain engine reports a DEACTIVATED permission set / position as a held-but-not-resolving contributor state, sharing one vocabulary with the ADR-0091 expired state (#8714)
+  
+  ADR-0091 validity windows and the ADR-0049 `active` switch are structural
+  siblings — both resolution-time, fail-closed filters that can make a grant a
+  user visibly held yesterday stop resolving today. The explain engine narrated
+  only one of them: an expired grant reported "held until … — expired", while a
+  deactivated permission set or position simply vanished from
+  `layers[].contributors[]`, answering exactly like a grant that never existed.
+  Deactivation is an incident-response, installation-wide control with no date on
+  the user's own grant row, so the silence hit precisely where attribution
+  matters most.
+  
+  Per the 2026-08-18 maintainer ruling, the two lifecycle controls now share ONE
+  "held but not resolving, because X" vocabulary:
+  
+  - `@objectstack/spec`: `ExplainLayerSchema.contributors[].state` widens from
+    `['active', 'expired']` to `['active', 'expired', 'deactivated']` — a closed
+    enumeration of reasons, extended only deliberately (an unknown state such as
+    `'suspended'` is still refused, and stays pinned as refused). Widening only:
+    every payload that parsed before parses unchanged.
+  - `@objectstack/plugin-security`: the explain-only provenance pass re-reads the
+    grant rows it already walks (`sys_user_position`, direct
+    `sys_user_permission_set` grants at the existing by-id `sys_permission_set`
+    read) and reports a held row whose catalogue entry is switched off as
+    `{ state: 'deactivated', via: 'held — deactivated' }`, judged by the same
+    shared `isRowActive` predicate the resolver enforces with. The resolver's
+    fail-closed dropping is untouched — this is presentation, never aggregation.
+    A row both expired and deactivated reports `expired` (one reason per row,
+    resolver drop order).
+  
+  Internal (not a public contract): `buildContextForUser`'s context annotation
+  `expiredGrants` is replaced by `droppedGrants`, one array whose entries carry
+  the same closed reason enumeration (`state: 'expired' | 'deactivated'`) instead
+  of a per-cause sibling array.
+- c73eacd: Reconcile audience-binding suggestions per organization (ADR-0090 D5/D9)
+  
+  `sys_audience_binding_suggestion` rows are per-tenant by construction — a
+  package suggests, and a TENANT admin confirms — but the reconciler read and
+  wrote through a module-level `{ isSystem: true }` context carrying no tenant.
+  On a shared-runtime multi-organization installation that produced ONE
+  organization-less row that every tenant read: the first admin to confirm or
+  dismiss answered for all of them, while the binding their confirm created
+  existed only in their own organization, so every other tenant's users never
+  received the package's default permission set and the surface reported the
+  suggestion resolved.
+  
+  - every read and write in the module now carries `{ isSystem: true, tenantId }`
+    — the anchor lookup, the "is it already bound?" lookup, and the
+    list/confirm/dismiss paths, not just the writes;
+  - `reconcileAudienceBindingSuggestions` is the new entry point the runtime
+    calls: one pass per organization under a `group`/`isolated` posture, and the
+    publishing organization alone on the package-door publish path;
+  - pre-existing organization-less rows are reaped before the passes and
+    regenerated per organization. Without that, ADR-0120 D3's platform bucket
+    keeps showing the old row to every tenant and the per-organization passes
+    create nothing at all. No permission binding is touched by the reap.
+  
+  A `single`-posture deployment is unchanged: exactly one organization-less pass,
+  and no reap.
+- 712e185: fix(security): platform default permission sets are stamped `managed_by: 'platform'`, so `os meta resync` stops skipping every one of them (#8692)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) One column value added to
+  one seeder's INSERT, plus a reworded warn line. Nothing authorable is renamed,
+  retired or tombstoned, so there is no conversion to register — and the ruling
+  this implements explicitly prescribes NO migration for existing rows (see
+  below), which is the opposite of a migration prescription rather than an omitted
+  one. -->
+  
+  `bootstrapPlatformAdmin` seeded the default permission sets
+  (`admin_full_access` / `member_default` / `viewer_readonly` …) **without writing
+  `managed_by`**, so the value fell to the declared `defaultValue: 'admin'` on
+  `sys_permission_set`. `os meta resync` only reconciles rows the platform still
+  owns (`managed_by` absent or `'platform'`), so the platform's own default sets
+  took the skip branch — **measured on a real engine: `resynced 0` /
+  `resyncSkipped 8`, every shipped set**, each one logged as an *"intentional
+  override"* for a row no admin had ever touched.
+  
+  That is the exact inverse of what the resync flag was built for (#2705:
+  *"reconcile the row to the shipped dist so a dev source edit takes effect
+  without `--fresh`"*). The command could not perform, for the rows it names in
+  its own help text, the one job it exists to do.
+  
+  **The seed insert now stamps `managed_by: 'platform'` explicitly**, which also
+  puts this seeder in line with its two siblings in the same package —
+  `bootstrap-builtin-positions.ts` and `bootstrap-system-capabilities.ts` both
+  stamp `'platform'` rather than inheriting a default. A fresh install's default
+  sets are now platform-owned, and a resync reconciles all of them. Admin-takeover
+  protection is unchanged in shape and becomes *real* rather than nominal: a set
+  an admin takes over in Setup is stamped `'admin'` by the projection path, so
+  platform-seeded and admin-authored rows finally carry **different** values
+  instead of the same one.
+  
+  **Forward-stamp only — existing rows are deliberately NOT migrated.** A stored
+  `'admin'` is indistinguishable between "the old seeder's field default" and "an
+  administrator took this set over in Setup". Restamping legacy rows to
+  `'platform'` would make genuine admin customizations reconcilable and could
+  silently overwrite them on the next `os meta resync`, so pre-existing rows keep
+  the skip permanently and by decision. Report, don't rewrite. A legacy install
+  that wants its platform defaults reconciled has to re-own the rows deliberately
+  (or re-seed with `--fresh`) — an operator's choice, not one a boot makes for
+  them. The seeder's docblock records this so the next reader finds a decision
+  rather than a mystery.
+  
+  **The skip warning stops claiming intent.** It read
+  `… row is admin-owned (intentional override)`; on any pre-existing install that
+  sentence is false, because the only writer may have been this same seeder one
+  call earlier. It now reads `… row is admin-owned` — provenance and action, no
+  claim about anybody's intent.
+  
+  Two comments asserting that the insert-once posture *"keeps the platform
+  defaults env-authored — the posture `bootstrapDeclaredPermissions` relies on"*
+  are removed: that reliance was measured false. `bootstrapDeclaredPermissions`
+  special-cases only `managed_by === 'package'`; every other value — `'platform'`
+  included — falls to the same `skippedEnvAuthored` branch, so its behaviour is
+  identical before and after this change.
+  
+  The pin suite added by the measurement round now asserts both sides of the line
+  the ruling drew: a fresh install stores `'platform'` and resyncs everything, and
+  a pre-ruling `'admin'` row is still skipped with its content intact.
+- 693c788: fix(security): the derived capability seeder owns its row by the same conjunction as the curated half
+  
+  `bootstrapSystemCapabilities`' DERIVED half tested ownership with `managed_by === 'platform'` alone. That was sufficient while `sys_capability.name` was unique installation-wide; since #8461 made it unique per ORGANIZATION (ADR-0120 D1) it also admits a platform-STAMPED row sitting inside an organization — the shape the file header names ("from seed data or a legacy import") and the shape #8470 refused to let `managed_by` alone stand for on the curated half, because it "would not carry that guarantee". The guard admitted such a row and rewrote its `label`/`description` with `humanize(name)`, which is the precise harm #5876 exists to prevent, while the platform (NULL-organization) bucket was never written. Every counter read zero and nothing was logged, because both #5876's counter and #8536's live on the branch where the guard DECLINES.
+  
+  The ownership test is now the same conjunction the curated half uses — `managed_by: 'platform'` AND `organization_id: null`. The lookup is unchanged (still cross-organization, by design). This restores a declared invariant rather than widening an accept set: what the derived half may refresh narrows to the rows it provably owns.
+  
+  **Reachability: a DORMANT asymmetry with a LIVE route — not a live defect.** No shipped artifact in this repository produces such a row: both capability seeders run under a system context with no tenant and never write `organization_id`, `normalizeManagedByVocab` does not touch this object, the admin door refuses the stamp outright (`assertSystemRowWriteGate`), and no `sys_capability` seed dataset exists anywhere in the repo. The ROUTE is nevertheless live and needs no unsupported step, and its load-bearing link is measured rather than argued: the seed loader writes as `isSystem` specifically so seeds can target `sys_*` tables, `defineSeed` type-checks `managed_by: 'platform'`, and on a per-organization replay the loader's tenant stamp short-circuits its own `sys_` exemption when an organization is pinned. Measured against the real seed loader, a `sys_capability` seed carrying `managed_by: 'platform'` was inserted with `organization_id` set when an organization was pinned, and inserted unstamped when none was — so the stamp is the pinning's doing, not a fixture artifact. Not claimed: how many organizations a given deployment replays seeds into is a provisioning question this repo cannot answer. So the fix lands as trap-removal and invariant-restoration, at exactly that severity — worth landing because the mistake would be invisible, ADR-0066 asset ownership forbidding the organization's own admin from editing or deleting the row through Setup.
+  
+  **Observability.** The newly-declined row flows through #8536's skip branch unchanged, so `skippedAuthored` and `unseededDerived` keep their exact documented meanings and their subset relationship; they simply become reachable on a state the broken guard used to swallow. The misplaced stamp gets its OWN signal, a new `platformStampedInOrg` counter on `CapabilitySeedResult`, rather than being folded into `unseededDerived` — "the platform's definition is missing" and "a row wears the platform's stamp where the platform never writes" are different facts, and the second is worth counting even when the first is false. The warning gains a matching remediation arm; the admin-authored row's "supported extension" sentence would be false here, and its "nothing for an operator to remove" advice would be wrong about the one row Setup cannot touch at all.
+  
+  **Not changed:** the platform bucket is still not backfilled when another row satisfies the lookup. That is #8552's ruled posture (no adoption, no backfill), shipped for the admin-authored case in #8536; the fix makes the state observable, not repaired, and the suite pins the bucket ABSENT so a future backfill has to fail rather than pass.
+  
+  `patch`, not `minor`: the behaviour change is a guard declining a row it should never have rewritten, plus diagnostics. `platformStampedInOrg` is a new field on a returned result object, but `bootstrapSystemCapabilities` is a boot-time internal whose only caller ignores the result shape — no consumer reads the type, so nothing gains a capability it can build on.
+- c25b2d5: fix(security): comment moderation stops being dead behind the platform delete floor — `sys_comment` gets the per-object delete policy that lets a parent-record editor moderate (#8839)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) One per-object RLS policy
+  added to a shipped default permission set. Nothing authorable is renamed,
+  retired or tombstoned, so there is no conversion to register. The behavioural
+  change is that a `sys_comment` DELETE by a non-author is no longer refused by the
+  platform's ownership floor before plugin-audit's author-or-parent-editor gate is
+  consulted. -->
+  
+  `plugin-audit` implements an explicit **author-or-parent-editor** rule for
+  removing a comment — *"Rewriting or removing someone else's words is moderation,
+  hence the tighter author-or-parent-editor rule"* — deriving a comment's access
+  from the record its `thread_id` names, the way an attachment's derives from its
+  parent.
+  
+  **That rule was unreachable in every org-bound deployment.** `member_default`
+  ships a wildcard row-level delete floor:
+  
+  ```
+  { name: 'owner_only_deletes', object: '*', operation: 'delete',
+    using: 'created_by == current_user.id', positions: ['org_member'] }
+  ```
+  
+  A parent-record editor moderating someone else's comment holds `org_member` and
+  is not the comment's `created_by`, so the floor answered `PERMISSION_DENIED`
+  before the moderation rule was ever consulted. The floor is a **second,
+  parent-blind implementation** of "who may remove this row", and on `sys_comment`
+  it was winning against the one authority that can actually see the parent.
+  
+  **Why nothing caught it:** the only fixture proving the capability
+  (`comments-permission-matrix.dogfood.test.ts` case (d)) booted **org-less**, so
+  its principals resolved `positions: ['everyone']`, the positions-gated floor never
+  applied, and the case passed over the broken behaviour — #8023's disarm shape.
+  
+  **The fix is one per-object policy** in `member_default`:
+  
+  ```
+  { name: 'sys_comment_moderation', object: 'sys_comment', operation: 'delete',
+    using: 'id != null', positions: ['org_member'] }
+  ```
+  
+  It contributes the **alternate match** that stops the floor pre-empting the gate;
+  it does not re-implement the rule. The parent-editor limb is not expressible as a
+  row predicate — the authority lives on another record and RLS has no join — so
+  `id != null` is every row of this object said plainly, the same spelling and
+  reasoning as the existing `sys_invitation_org_admin`. What actually narrows a
+  `sys_comment` delete is, in order: the object-level delete bit (this set grants no
+  `allowDelete` at all), Layer 0's tenant wall, and then plugin-audit's gate, which
+  requires every matched row to pass and fails closed on a thread naming no
+  authorizable parent. That gate is not optional — `AuditPlugin` registers
+  `sys_comment` and installs the gate in the same `start()`.
+  
+  ⛔ **The wildcard floor itself is unchanged.** The widening is scoped to
+  `sys_comment`, and to the `delete` limb only; the `update` half of plugin-audit's
+  rule deliberately stays under the floor.
+  
+  The `positions: ['org_member']` domain is load-bearing rather than cosmetic: it
+  confines the widening to exactly the principals the floor binds. An undomained
+  twin would carry a `using` into a delete class that is **empty** today for
+  org-less and `everyone`-only principals, switching off the derive-from-select rule
+  that currently bounds their writes to their readable set — widening them too.
+  
+  Access-widening approved by maintainer ruling (2026-08-15), which is what the
+  standing manual floor on relaxing an access-control boundary required.
+  
+  The pin is the fixture, now **armed**: `orgContext: true` plus `assertArmed` on
+  both the author and the moderator persona, so the file can never again certify
+  moderation from a boot structurally unable to observe the floor. Reverse-verified
+  — with the policy removed and the artifact rebuilt, exactly one case reddens with
+  `PERMISSION_DENIED` on `sys_comment` and the other nine stay green. The
+  stranger-without-parent-EDIT case now asserts its refusal code **exactly**
+  (`RECORD_NOT_ACCESSIBLE`, plugin-audit's gate — not the floor's
+  `PERMISSION_DENIED`), so the floor silently re-asserting itself over `sys_comment`
+  cannot pass as a correct refusal.
+- 147eadc: Correct `sys_position`'s translated uniqueness text in the `es-ES`, `ja-JP` and `zh-CN` bundles to say the machine name is unique **per organization**
+  
+  The English bundle and the object source both already state that a position's machine name is unique per organization — the declared index is `{ fields: ['name'], unique: 'organization' }`. The three other shipped locales still asserted bare, unqualified uniqueness, so an admin reading Setup in Spanish, Japanese or Chinese was told the name had to be free installation-wide, which the declared index does not enforce.
+  
+  Both places `sys_position` states the rule are corrected:
+  
+  - `fields.name.help`, the field help in the object's detail and edit views. It now also carries the source's current examples (`sales_manager`, `hr_specialist` rather than the superseded `admin`, `editor`, `viewer`).
+  - `actions.clone_position.params.name.helpText`, the help on the Clone Position dialog's API-name input — the text an admin reads at the moment they type a new name.
+  
+  Leaf string values only — no bundle structure was hand-edited.
+- Updated dependencies [56656aa]
+- Updated dependencies [c9f5950]
+- Updated dependencies [d6e80b2]
+- Updated dependencies [07e630e]
+- Updated dependencies [66beee0]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [2782805]
+- Updated dependencies [e43d63a]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [03520eb]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [420804d]
+- Updated dependencies [716ac9b]
+- Updated dependencies [a38408a]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [24173e9]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [f8eb736]
+- Updated dependencies [11b779e]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [e2899f6]
+- Updated dependencies [b6c7690]
+- Updated dependencies [3851f87]
+- Updated dependencies [845e164]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [e1bb0ca]
+- Updated dependencies [30d3752]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [7fc01db]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [04f8fdb]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [6158146]
+- Updated dependencies [84cb121]
+- Updated dependencies [ca19ee8]
+- Updated dependencies [a675b4d]
+- Updated dependencies [b887013]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [402c125]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [b3f9831]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [44bc51d]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+  - @objectstack/spec@17.1.0
+  - @objectstack/platform-objects@17.1.0
+  - @objectstack/core@17.1.0
+  - @objectstack/metadata-core@17.1.0
+  - @objectstack/formula@17.1.0
+
 ## 17.0.0
 
 ### Major Changes
