@@ -1557,7 +1557,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
  * `organizationId`, `positions`, `accessToken`, plus the conditional
  * `isSystem` / `actor` / `skipTriggers` / `skipAutomations` / `preserveAudit`.
  * There is no spread, so no other key can arrive. `session.tenantId` was a
- * deprecated alias (#3280) REMOVED repo-wide in the v11 major (#3290).
+ * deprecated alias (#3280) REMOVED repo-wide in the v16 major (#3290).
  *
  * The writer nevertheless read `sess.tenantId` for the RLS fallback, so the
  * fallback could never fire: on an object with no organization column, or a

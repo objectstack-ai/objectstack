@@ -1,5 +1,206 @@
 # @objectstack/service-messaging
 
+## 17.1.0
+
+### Minor Changes
+
+- 23abe27: feat(messaging): `IEmailService` gains a render-only `renderTemplate({ template, locale, data, timezone }) → { subject, html, text }`, and the inbox channel consumes it — localized `sys_email_template` content now reaches `sys_inbox_message` (#9225)
+  
+  A template-path notify node with `channels: ['inbox', 'email']` delivered a
+  localized email and an inbox row whose title was the topic and whose body was
+  empty: the locale ladder + `{{var}}` renderer (ADR-0053 format filters
+  included) lived inside plugin-email's `sendTemplate`, unreachable without
+  sending mail (maintainer-ruled seam, 2026-08-17, on #9225).
+  
+  - `IEmailService.renderTemplate` (new contract method, `packages/spec`)
+    resolves a `sys_email_template` bundle by `(name, locale)` with the same
+    documented en-US ladder as `sendTemplate`, validates required variables, and
+    returns the rendered `{ subject, html, text }` — strictly render-only: no
+    transport call, no queueing, no `sys_email` row. Implemented ONCE in
+    plugin-email by extracting the resolver `sendTemplate` already used;
+    `sendTemplate` now delivers what the shared resolver renders, byte for byte.
+  - The messaging inbox channel consumes it the way the email channel consumes
+    `sendTemplate`: a delivery whose payload carries a notify `template`
+    reference renders `subject` into the row's `title` and `text` into
+    `body_md`, per recipient, at delivery time. A registered email service
+    without the method — or no email service at all — fails the delivery LOUDLY
+    (`TEMPLATE_UNSUPPORTED`, graded permanent) instead of silently degrading to
+    topic-as-title; renderer failure codes (`TEMPLATE_NOT_FOUND` /
+    `TEMPLATE_INACTIVE` / `MISSING_VARIABLES`) land on the delivery row and are
+    graded permanent, mirroring the email channel.
+  
+  The result shape follows what `sys_email_template` rows carry
+  (`subject`/`body_html`/`body_text?`): `html` is the rendered `body_html`,
+  `text` is the rendered `body_text` or, when the row declares none, derived
+  from the rendered HTML.
+- d31785f: feat(automation): flow `notify` nodes can reference an email template for localized delivery — `template` + `templateData` on `NotifyNodeConfig`, resolved by `(name, recipient locale)` at delivery time (#9205)
+  
+  Ruled 「立项，走 emailTemplates 路线」: instead of widening the `flows`
+  translation surface (whose guidance excludes notification text, #7646), a
+  `notify` node now bridges to the existing localized email-template subsystem.
+  
+  - **Spec** — `NotifyConfigSchema` gains `template` (a `sys_email_template`
+    name, read raw like `topic`/`channels`) and `templateData` (render context
+    for the template's `{{var}}` holes; values interpolate `{token}` templates
+    per run) as the localizable alternative to inline `title`/`message`. Inline
+    strings stay fully valid and byte-identical for existing flows — they are
+    the non-localizable path, and the describes now say so. A node carrying BOTH
+    paths, or `templateData` without `template`, or NEITHER path, is refused
+    loudly with the fix in the message (the `objectNavTargetExclusivity`
+    posture: unrepresentable over silent precedence).
+  - **service-automation** — the notify executor forwards the template
+    reference and its interpolated render context in the emit payload (the
+    outbox snapshots it onto each delivery row), and no longer demands an
+    inline title when a template is referenced.
+  - **service-messaging** — the email channel routes a template-carrying
+    delivery through `IEmailService.sendTemplate({ template, locale, data })`,
+    resolving the recipient locale per delivery: `payload.locale` if the
+    producer set one, else the deployment default
+    (`II18nService.getDefaultLocale()`, the #8195 ruled source), else
+    `sendTemplate`'s documented `en-US` ladder. Template-resolution failures
+    (`TEMPLATE_NOT_FOUND` / `TEMPLATE_INACTIVE` / `MISSING_VARIABLES`, and an
+    email service without `sendTemplate`) are graded `permanent` — dead
+    immediately with the code on the delivery row, instead of burning the retry
+    schedule on metadata that cannot fix itself.
+  
+  The inbox channel keeps its existing rendering (notification title/body,
+  falling back to the topic on the template path): it has no locale-capable
+  rendering seam to the email-template subsystem today, and that gap is
+  documented in the PR rather than papered over with a duplicated resolver.
+
+### Patch Changes
+
+- 44738f7: docs(service-messaging): mark the `sys_notification_subscription` expansion not-yet-wired and align the `principal` description with the resolver (#9807)
+  
+  The object header described a live routing control that does not exist: "where a
+  producer emits with `audience: 'subscribers'` … the resolver expands the topic's
+  subscriptions into recipients". Nothing implements that. `AudienceSpec`
+  (`messaging-service.ts`) has no `'subscribers'` member, `EmitInput.audience` is
+  required, and `RecipientResolver` has no branch that reads
+  `sys_notification_subscription` — the literal `'subscribers'` occurs exactly once
+  in the repo, in that sentence. Every delivery today comes from the explicit
+  `audience` a producer passes to `emit()`, so the Setup "Notification
+  Subscriptions" grid is admin-authored data, not a live routing control. The
+  header now says so, per the maintainer ruling on #9807 (annotate now; the
+  ADR-0030 Layer-3 expansion stays future work, deferred on measured zero pull).
+  
+  The `principal` field description shipped a four-form list (`'role:x'` |
+  `'team:x'` | `'user:id'` | bare user id) narrower than what
+  `RecipientResolver.resolveOne()` accepts for the same string shape; it now also
+  names `'owner_of:object:id'` and the email form (matched against `sys_user`).
+  This is a user-visible string: it ships into `dist/` and into the generated `en`
+  translation bundle as the field's help text in the Setup grid.
+- Updated dependencies [56656aa]
+- Updated dependencies [c9f5950]
+- Updated dependencies [d6e80b2]
+- Updated dependencies [07e630e]
+- Updated dependencies [66beee0]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [2782805]
+- Updated dependencies [e43d63a]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [03520eb]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [2d0af57]
+- Updated dependencies [420804d]
+- Updated dependencies [716ac9b]
+- Updated dependencies [a38408a]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [27a567d]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [24173e9]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [f8eb736]
+- Updated dependencies [11b779e]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [e2899f6]
+- Updated dependencies [3851f87]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [e1bb0ca]
+- Updated dependencies [30d3752]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [04f8fdb]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [6158146]
+- Updated dependencies [84cb121]
+- Updated dependencies [ca19ee8]
+- Updated dependencies [a675b4d]
+- Updated dependencies [b887013]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [402c125]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [b3f9831]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [44bc51d]
+- Updated dependencies [bbbfcfc]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+  - @objectstack/spec@17.1.0
+  - @objectstack/platform-objects@17.1.0
+  - @objectstack/types@17.1.0
+  - @objectstack/core@17.1.0
+
 ## 17.0.0
 
 ### Minor Changes

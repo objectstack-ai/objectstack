@@ -1,5 +1,871 @@
 # @objectstack/cli
 
+## 17.1.0
+
+### Minor Changes
+
+- 14c9ad7: fix(cli): `os start` / `os dev` stop writing `OS_ARTIFACT_PATH` into the child `serve` environment — the CLI's own plumbing moves to an internal channel (#8985)
+  
+  `os start` and `os dev` are supervisors: each resolves an artifact, then spawns
+  `os serve` to boot it. Both handed the resolved path down by writing
+  **`OS_ARTIFACT_PATH`** into the child environment — the same variable an operator
+  sets to name an artifact. `dev` wrote it unconditionally; `start` wrote it
+  whenever it had resolved anything and no `OS_ARTIFACT_URL` was in play. Both
+  writes happen **before** the downstream `objectstack.config.ts` is evaluated.
+  
+  So inside any config, that variable was set on **every** boot, including boots
+  where no operator had ever mentioned it — measured from the shipped EE image
+  with its own `ENV` deliberately deleted: `os start` still printed
+  `Artifact: dist/objectstack.json` and handed that path down. A config could not
+  answer *"did a human ask for this, or did the CLI put it here?"*
+  
+  The resolved path now travels on **`OS_INTERNAL_ARTIFACT_PATH`**, a channel the
+  CLI owns both ends of (`packages/cli/src/utils/internal-artifact-channel.ts`),
+  and the property downstream consumers need is restored:
+  
+  > **the presence of `OS_ARTIFACT_PATH` in a config's environment means an
+  > operator set it.**
+  
+  **Nothing about resolution changed.** Each command's ladder resolves in the
+  parent exactly as before, and `serve` reads the new channel strictly between the
+  reference and the operator knob:
+  
+  ```
+  --artifact > OS_ARTIFACT_URL > OS_INTERNAL_ARTIFACT_PATH > OS_ARTIFACT_PATH > <cwd>/dist/objectstack.json
+  ```
+  
+  That position is what preserves today's answers in both directions. It beats
+  `OS_ARTIFACT_PATH` because `os start --artifact X` run with an operator's
+  `OS_ARTIFACT_PATH=Y` exported boots **X** today — the parent used to overwrite
+  the variable on the way down, and now inherits it untouched. It loses to
+  `OS_ARTIFACT_URL` because `os dev` writes the channel unconditionally, as it
+  wrote the old variable unconditionally, and the reference has always outranked
+  the path.
+  
+  Two further behaviours are unchanged and now pinned rather than incidental:
+  `start` still refuses to set `OS_BOOT_EMPTY` when a reference is driving the
+  boot (an unreachable artifact host stays a loud refusal instead of a silently
+  empty platform), and a resolved-but-missing artifact is still "named" to
+  `resolveDefaultArtifactPath`, so it fails loudly rather than booting empty.
+  
+  **If you depended on the old side effect** — a config reading
+  `process.env.OS_ARTIFACT_PATH` and expecting the CLI to have populated it — set
+  the variable yourself, or read the artifact from the config's own inputs.
+  `OS_ARTIFACT_PATH` remains a fully supported operator knob on the exact rung it
+  has always occupied; the CLI simply no longer manufactures it on your behalf.
+  `OS_INTERNAL_ARTIFACT_PATH` is not a supported knob and is deliberately absent
+  from the environment-variable reference.
+- 51cd953: feat(cli): `os migrate duplicates` — an operator-facing inventory of the business identifiers the tenancy split already minted twice (#8928)
+  
+  Two producers of untenanted rows have been closed (#8686's seed loader plus its
+  one-shot backfill, and #8844's runtime system-context write). Neither touches
+  the **damage already done**, and both rulings say the same thing about it: a
+  business identifier that has already been handed out — on an invoice, in a
+  notification, in another system's idempotence key — is not the platform's to
+  rewrite. What an operator needs instead is to know **which ones they are**.
+  
+  ```bash
+  os migrate duplicates                        # the whole report, JSON on stdout
+  os migrate duplicates > duplicates-2026-08-17.json
+  os migrate duplicates --object crm_case      # narrowed (and the report says so)
+  ```
+  
+  **Run it BEFORE the #8686 backfill is applied.** The evidence is perishable:
+  `organization_id = NULL` is the marker that says "this row came from the
+  untenanted side", and it is exactly what that repair overwrites. The repair also
+  merges and deletes the `__global__` counter, which is the report's only
+  forward-looking line — an install that repairs before reporting can never
+  produce it again. The command itself applies nothing: it boots read-only (no
+  DDL, no seed, no database file brought into existence) and issues SELECTs only.
+  
+  What the report contains, per the 2026-08-16 maintainer ruling on all five of
+  the card's decision points:
+  
+  - **one row per duplicated value, with its holders** — id, organization,
+    partition and creation timestamp per row, so the operator can decide case by
+    case rather than per value. JSON on stdout, no persistence and no new schema:
+    the operator archives it;
+  - **the narrow definition of duplicate** — a value held by rows in more than one
+    of the partitions `COALESCE(organization_id, '__global__')` separates
+    (ADR-0120 D3). A value repeated *inside* one partition is refused by the
+    partitioned unique index and is not reported;
+  - **the live condition too** — an object still running a `__global__` counter
+    beside an organization-scoped one is about to mint more duplicates;
+  - **a data-side probe** — `GROUP BY <field> HAVING COUNT(*) > 1` over the
+    object's own table, never an enumeration of `_objectstack_sequences`, so a
+    duplicate whose counter was since merged is still found. The counter table is
+    read for the live condition alone, because that fact lives nowhere else.
+  
+  Scope is every registered object that is organization-scoped, and on it every
+  `autonumber` or `unique` field. `sys_` / `cloud_` / `ai_` objects are **not**
+  filtered out — that filter is correct for a repair (platform seeds stay global
+  by design) and wrong for a report, which must not silently omit a real
+  duplicate. Anything that could not be probed is listed in `skipped` with the
+  driver's own message, so a target the command could not read never reads as a
+  target with no findings; a driver with no raw-SQL seam refuses loudly and exits
+  non-zero rather than reporting zero duplicates.
+  
+  ⛔ Reporting is all it does. Renumbering, deduplicating or otherwise rewriting an
+  already-minted identifier stays out of scope per both rulings.
+- 88e1bac: fix(api): the plugin-mounted Hono error paths answer the declared envelope — six refusal bodies stop speaking the pre-#3675 dialect (#9364)
+  
+  Six hand-built refusal bodies on plugin-mounted Hono routes departed from
+  `BaseResponseSchema`. They were invisible to every check in the repo until
+  #9267 added the gate's third surface, which discovers these routes by parsing
+  rather than by filename. This converts the **error-path** half of what that
+  first run measured; the bare pre-auth discovery payloads it also found are a
+  separate wire ruling (#9389) and are untouched here.
+  
+  **If you branch on these bodies, this is the change.** Every one of them was
+  readable only by reaching for a key the contract does not declare, so no
+  consumer that followed `ApiErrorSchema` was reading them successfully in the
+  first place — `body.error.message` read `undefined` on all six.
+  
+  `@objectstack/plugin-hono-server` — the adapter's own refusals, the answer any
+  host using it as its transport gets for an unmatched request or a handler that
+  produced nothing:
+  
+  | status | was | now |
+  |:--|:--|:--|
+  | 404 unmatched path | `{ error: 'Not found' }` | `{ success: false, error: { code: 'ENDPOINT_NOT_FOUND', message: 'Not found' } }` |
+  | 405 method mismatch | `{ error, code, message, method, path, allowed }` | `{ success: false, error: { code: 'METHOD_NOT_ALLOWED', message, details: { method, path, allowed } } }` |
+  | 500 handler wrote nothing | `{ error: 'No response from handler' }` | `{ success: false, error: { code: 'INTERNAL_ERROR', message: 'No response from handler' } }` |
+  | 500 fallback threw | `{ error: 'Fallback handler failed' }` | `{ success: false, error: { code: 'INTERNAL_ERROR', message: 'Fallback handler failed' } }` |
+  
+  The 405 is the sharpest of the four: it already carried a real semantic code,
+  but placed it BESIDE `error` rather than inside it, so `body.error.code` read
+  `undefined` while `body.code` worked — the #7035 dialect. Its `code` **value**
+  is unchanged (`METHOD_NOT_ALLOWED`, a `StandardErrorCode` member); only its
+  position moved, along with the three context keys, which are now
+  `error.details` — the slot `ApiErrorSchema` declares for exactly that. The
+  `Allow` header is unchanged and remains the primary channel for it.
+  
+  `@objectstack/hono` — the shared `errorJson` helper wrote the HTTP **status**
+  into `error.code`, so every refusal from this mount shipped `error.code: 404`
+  or `500` where `ApiErrorSchema.code` declares a closed STRING vocabulary
+  (ADR-0112 D3/D4). It now derives the standard member for the status through
+  `resolveThrownHttpError` (`@objectstack/types`) — the one rule the REST and
+  dispatcher doors already read for this question, so this third door does not
+  become a fourth dialect. A 404 from this mount now carries
+  `error.code: 'RESOURCE_NOT_FOUND'`; the numeric status stays where it is
+  authoritative, on the response line.
+  
+  `@objectstack/cli` — the unbound-hostname 404 from `os serve`'s
+  `OS_ROOT_DOMAIN` guard answered
+  `{ error: 'environment_not_found', message, hostname }`: a bare-string error
+  with two stray top-level keys, and a lowercase code where error codes are
+  `SCREAMING_SNAKE`. It is now
+  `{ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND', message, details: { hostname } } }`.
+  The `Accept: text/html` branch still serves the styled 404 page, unchanged.
+  
+  **The cross-adapter reference implementation moved with it.**
+  `@objectstack/http-conformance`'s zero-dependency `NodeHttpServer` mirrors the
+  adapter's unmatched-request bodies byte-for-byte on purpose — the whole point
+  of that package is proving the transport port is free of framework-isms, and
+  `fallback-seam.conformance.test.ts` runs the same cases against both. Leaving
+  it behind would have made "both adapters agree" false in the suite that exists
+  to assert it.
+  
+  Every converted body is judged by `scripts/check-route-envelope.mjs`, whose
+  per-file counters for these three modules go to zero and are banked as
+  conformant. The literals are deliberately written INLINE at each `c.json(...)`
+  call rather than hoisted into shared constants: the gate reads the object
+  literal, and an identifier reads to it as a relayed body it must not police —
+  hoisting would have zeroed the counters by hiding the bodies from the scanner
+  instead of by conforming them.
+
+### Patch Changes
+
+- e374b4d: fix(metadata-protocol): arm the three `kernel:ready` platform-table migrations on a self-hosted boot, and keep the read-only CLI commands read-only (#9380)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) One new optional
+  declaration (`runPlatformMigrations`) added to three existing option bags and
+  one Zod boot config. Nothing authorable is renamed, retired or tombstoned, so
+  there is no conversion to register. The behavioural change is that three
+  migrations which never ran on a self-hosted install now run on its serving
+  boot. -->
+  
+  `assembleMetadataProtocol` arms three `kernel:ready` migrations — #5839's
+  `sys_view_definition` active-row index, #8629's `sys_setting` row-identity
+  index, and #8686's seed/API tenancy backfill — behind one gate whose own comment
+  states the intent: *"platform / standalone kernels own their local sys_metadata;
+  per-project (cloud) kernels source metadata from the control plane and must NOT
+  provision these tables locally."* So standalone was always meant to be on the
+  INSIDE of that gate.
+  
+  It never was. The gate **deduced** ownership from `environmentId === undefined`,
+  and `runtime/src/standalone-stack.ts` stamps `'proj_local'` on every boot — so
+  the block never ran on a self-hosted install at all. #8686's own header calls
+  its `kernel:ready` half the one that "repairs an install that is ALREADY in that
+  state, which covers every existing deployment"; on self-hosted it covered none,
+  and those installs kept minting duplicate business identifiers.
+  
+  **The fix is a declaration, not a wider deduction.** `environmentId` is a
+  row-scoping key, not a topology signal — the same lesson `authoringChannel`
+  already records one field above it in the same options bag. A new optional
+  `runPlatformMigrations` is threaded from the host that knows the answer down to
+  the one assembly both protocol mounts share:
+  
+  - `AssembleMetadataProtocolOptions` / `MetadataProtocolPluginOptions` /
+    `ObjectQLPluginOptions` gain `runPlatformMigrations?: boolean`;
+  - `createStandaloneStack` gains the same key and **defaults it to `true`** — a
+    standalone kernel owns its local platform tables, whatever environment id it
+    stamps rows with;
+  - the predicate is exported as `shouldRunPlatformMigrations(environmentId,
+    declared)` so the default lives in exactly one place.
+  
+  **Undeclared means unchanged.** The default is `environmentId === undefined`,
+  the historical deduction, so every caller that does not declare — including
+  cloud's per-project kernels (`createMetadataProtocolPlugin({ environmentId })`)
+  and the control-plane assembly (`createMetadataProtocolPlugin()`) — keeps
+  today's behaviour exactly.
+  
+  **The read-only contract is preserved, and not by keying on deferral.** The
+  CLI's one-shot boot funnel (`bootSchemaStack`) declares
+  `runPlatformMigrations: false` for every `os migrate *` / `os meta *` command.
+  Keying it on `deferSchemaDdl` would have covered only `os migrate plan` and
+  `os migrate duplicates`; `os migrate summary-nulls`, `value-shapes`,
+  `recorded-by`, `resume`, `files-to-references` and `os migrate meta` all boot
+  **non-deferred** and are still dry-run-by-default ("a dry run writes NOTHING"),
+  so that half would have quietly repaired rows behind a report. The serving boots
+  — `os dev`, `os serve`, `os start` — do not come through that funnel and take
+  the default, which is where an install now gets repaired.
+  
+  Proven on real kernels over a real SQLite file carrying the real #8686 damage,
+  not on the predicate: the serving boot merges the split counter and adopts the
+  movable seed row while leaving the colliding one reported-not-renumbered; the
+  deferred and non-deferred one-shot boots both leave the data untouched; and a
+  per-project kernel assembled cloud's way still repairs nothing.
+  `os migrate duplicates`' own byte-identical-after-run pin
+  (`duplicates.integration.test.ts`) still passes unchanged.
+- 189a732: `serve`: the cloud-connected marketplace arm now leaves a host config's own marketplace and cloud plugins alone.
+  
+  `objectstack serve` auto-wires `MarketplaceProxyPlugin`, `MarketplaceInstallLocalPlugin`, the same-origin cloud-connection surface and `RuntimeConfigPlugin` whenever a cloud URL resolves. Each of those four mounts is now guarded on whether the loaded host config already wired that surface — the same presence check the offline arm has carried since the install-local fix — so CLI auto-wiring is a fallback for hosts that wire nothing rather than a second opinion about a surface the host already composed.
+  
+  No behaviour changes for any current deployment: `Kernel.use()` keys plugins by `plugin.name` and the host's registration runs after the CLI's, so the host's instance already won by ordering. What changes is that it now wins by rule instead of by the relative position of two blocks that never referenced each other, and the CLI stops constructing four plugins it was about to discard. It becomes visible the moment a host passes an argument the CLI cannot — a private control plane, a custom install `storageDir`, a credential path, white-label branding.
+- 7337f30: chore(deps): production-dependency patch bumps from the weekly Dependabot group (#9212)
+  
+  Routine dependency-range refresh, no behavior change: `@oclif/core` 4.13.2→4.13.3,
+  `esbuild` 0.28.1→0.28.2 and `better-sqlite3` ^13.0.2→^13.0.3 (optional) on
+  `@objectstack/cli`; `mingo` 7.2.2→7.2.4 on `@objectstack/driver-memory`; `nanoid`
+  6.0.0→6.0.1 on `@objectstack/driver-mongodb`, `@objectstack/driver-sql`,
+  `@objectstack/driver-sqlite-wasm` and `@objectstack/driver-turso`, plus
+  `better-sqlite3` ^13.0.2→^13.0.3 (optional on `@objectstack/driver-sql`, peer on
+  `@objectstack/driver-turso`); `js-yaml` 5.2.2→5.2.3 on `@objectstack/metadata`;
+  `@noble/hashes` 2.2.0→2.3.0 and `jose` 6.2.5→6.2.8 on `@objectstack/plugin-auth`;
+  `nodemailer` 9.0.3→9.0.5 on `@objectstack/plugin-email`; `@hono/node-server`
+  2.0.12→2.1.1 and `hono` 4.12.34→4.13.2 on `@objectstack/plugin-hono-server`;
+  `pinyin-pro` 3.28.2→3.29.1 on `@objectstack/plugin-pinyin-search`; and
+  `@noble/ciphers` 2.2.0→2.3.0 on `@objectstack/service-settings`.
+  
+  Every entry above changed a `dependencies`, `optionalDependencies` or
+  `peerDependencies` range in the published manifest — the only kind of change
+  that reaches a consumer's install. The same Dependabot group also bumped
+  `devDependencies` on `@objectstack/hono`, `@objectstack/client`,
+  `@objectstack/core`, `@objectstack/plugin-sharing` and `@objectstack/spec`
+  (none consumer-facing), and touched the private `apps/docs`,
+  `examples/app-todo` and workspace-root manifests (none published) — none of
+  those get an entry here.
+- f21fe32: docs(cli): document the i18n merge consequence for a corrected source string (#9672)
+  
+  `os i18n extract` merges against committed bundles by default so a re-run never
+  wipes a hand translation, and `--fill=default` only fills gaps. That means a
+  source label/description that is later **corrected** does not propagate into a
+  locale that already holds a translation of the old text — a present-but-stale
+  string is not a gap, so it is left as-is. This was always the behaviour and
+  remains unchanged; it was simply undocumented where the next reader looks.
+  
+  Two places now say so: the merge-options comment in `os i18n extract`'s command
+  implementation, and the header comment written into every generated
+  `<locale>.objects.generated.ts` / `<locale>.metadata-forms.generated.ts` bundle.
+  Committed bundles across the repo are regenerated so their header matches the
+  new template (translated content is unchanged).
+  
+  `check:i18n`'s bundle-drift verdict still proves generated output matches the
+  schema; it does not compare a translated value against its source's meaning
+  (that remains an open appetite question, tracked separately — see #9672).
+- 10bbc19: fix(cli): `objectstack init` scaffolds now compile — templates author an OWD, and the scaffold self-test runs the author-time rules (#9666)
+  
+  `objectstack init my-app -t app --install` reported `✓ Scaffold validated`, and
+  the next command in the documented on-ramp, `npm run dev`, failed to compile:
+  
+  ```
+  ✗ Author-time rules failed (1 issue)
+  • object "my_app_item": custom object "my_app_item" declares no sharingModel (OWD)…
+    rule: security-owd-unset  at objects[0].sharingModel
+  ```
+  
+  The CLI's own shipped template was refused by the CLI's own shipped rule set, so
+  the dev server never started on a freshly generated project.
+  
+  Two halves:
+  
+  - **Templates author an OWD.** The `app` and `plugin` templates now declare
+    `sharingModel: 'private'` on the object they emit — the rule's own recommended
+    default and the ADR-0090 D1 baseline (absence is not a decision). A sweep of
+    every built-in template found `plugin` in the same state as the reported `app`;
+    `empty` emits no objects and was already clean.
+  - **`init`'s self-test got teeth.** It used to check only that the rendered config
+    loaded and carried a `manifest.namespace`, which is why a template that could
+    not compile shipped. It now runs the author-time rule registry over the
+    generated project and refuses to report success when any rule rejects it. The
+    rule set is the `build` one — the same set `os dev` reaches by spawning
+    `os compile` — so this is a shift-left, not a stricter bar: nothing that
+    compiles today stops compiling, and a broken template now fails at generation
+    time instead of at a user's first `dev`.
+  
+  `✓ Scaffold validated` still prints, and now names how many author-time rules
+  passed.
+- b882020: fix(cli): `os init` template descriptions no longer advertise metadata kinds they never emit (#9737)
+  
+  The `app` and `plugin` templates' `description` strings — shown by `printKV('Template', …)`
+  right after `os init -t <template>` runs, and mirrored in `content/docs/deployment/cli.mdx` —
+  claimed views, actions, and extensions that neither template's `srcFiles` map ever writes.
+  Both templates emit objects only (`src/objects/index.ts` + `src/objects/{namespace}_item.ts`).
+  
+  - `app`: `'Full application with objects, views, and actions'` → `'Full application with objects'`
+  - `plugin`: `'Reusable plugin with objects and extensions'` → `'Reusable plugin with objects'`
+  - `content/docs/deployment/cli.mdx`'s template table drops the same false `views` claim from the
+    `app` row.
+  
+  A new pin (`packages/cli/test/init.test.ts`) asserts every template's description only claims a
+  metadata kind (`objects`/`views`/`actions`/`extensions`) its `srcFiles` map actually has an entry
+  under, so a future template can't drift the same way.
+- 994e917: fix(cli): `os migrate meta --from N` can finally open the retired-key sources it exists to rewrite (#9418)
+  
+  The codemod refused its own input class. A retired authorable key is a
+  `retiredKey()` tombstone — `z.never()` carrying the upgrade prescription — so the
+  current schema does not strip it, it **rejects** it. And a real
+  `objectstack.config.ts` runs that schema itself: `os init` scaffolds
+  `export default defineStack({ … })`, larger projects spread `defineView` /
+  `defineAgent` / `defineFlow` across per-artifact modules, and every one of those
+  `define*` helpers is a `Schema.parse()`. The rejection therefore fired while the
+  config module was being **evaluated**, inside the load, before `os migrate meta`
+  reached its first conversion — the command exited 1 having rewritten nothing.
+  
+  The message it printed was the instruction that sent the author there. The
+  sentence "Run `os migrate meta --from <N>` to rewrite existing sources
+  automatically." ships **144 times across 39 files** under `packages/spec/src`, so the v17 upgrade path closed
+  a loop on itself: hit a retired key, get told to run the codemod, watch the
+  codemod refuse **because of** the retired key.
+  
+  **The fix is a tolerant load for that one command.** There was no CLI-side
+  validation step to reorder — the gate lives in the loaded module — so
+  `loadConfig()` gains an opt-in `authoredSource` mode that replaces each
+  `@objectstack/spec` entrypoint the config imports (the root **and** the subpaths
+  the example apps author through, `@objectstack/spec/ui`, `/ai`, `/data`, …) with
+  a generated shim. The shim re-exports the real module and wraps its `define*`
+  helpers as try-real-then-authored: the real helper runs first, and only when the
+  current schema refuses the artifact is it handed on **exactly as authored**, with
+  the swallowed verdict announced on stderr.
+  
+  Three properties keep this a restoration rather than a widening of what the
+  command accepts:
+  
+  - **A source that loads today loads identically** — the real helper still runs,
+    so its defaults and transforms still apply (`defineForm` still moves
+    `schemaId` into `data`, `defineStack` still merges actions into objects). Only
+    the sources that are refused today take the new path.
+  - **Validation is moved after the conversion, not skipped.** The command still
+    parses the **migrated** stack through `ObjectStackDefinitionSchema` and reports
+    `schemaValid`, so a source broken for reasons the chain cannot fix is still
+    reported as broken — after the codemod has done the part it can.
+  - **Every other command still hears the tombstone.** `os build`, `os validate`
+    and `os serve` keep the default strict load: the rejection is their upgrade
+    channel, and only the codemod is entitled to read past it. Pinned both ways.
+  
+  `os migrate meta --stored` was probed and is **not** affected: it never reads
+  `objectstack.config.ts` at all — it boots from the compiled artifact and replays
+  the chain over `sys_metadata` rows, and it already exits 0 in a project whose
+  config carries a retired key. The defect was the authored-source arm alone.
+  
+  The regression proof is shaped like a real project rather than like a test — the
+  retired keys are authored through `defineStack` **and** through helpers imported
+  from a spec subpath, which is where a tolerance scoped to `defineStack` alone
+  would still have refused. The suite that shipped alongside the defect could not
+  have caught it: its fixture is a bare `export default { … }` object literal, and
+  a bare literal is validated by nobody at load.
+- 07ad424: `os meta resync`: explain a nonzero skip count instead of leaving it to look like a no-op (#9184)
+  
+  `resynced 0 / skipped 8` is a **permanent, by-design** outcome on any install
+  created before #8692's forward-only ruling — the platform's own seeder wrote
+  the `'admin'` stamp those rows still carry, and #8692 deliberately never
+  migrates it (a stored `'admin'` cannot be told apart from a genuine Setup
+  takeover). The docblock half of this (#9130 / PR #9183) already explained it
+  in source; this is the half the operator actually sees, at the terminal,
+  without going looking:
+  
+  ```
+  ⚠ Left 8 set(s) untouched (admin- or package-owned).
+    Expected, not a failure — resync only reconciles platform-owned rows. A stored
+    'admin' stamp (or the legacy 'user' spelling) isn't always a deliberate Setup
+    takeover: on installs from before #8692, the platform's own seeded defaults
+    carry that same stamp, so a persistent skip count here can be permanent by
+    design. A package-owned row, by contrast, is always a deliberate override by
+    the package that owns it.
+  ```
+  
+  The new line fires on the same condition the skip-count summary itself
+  already used (`resyncSkipped > 0`) — a partial skip gets the same
+  explanation as a total one. `--json` output is unchanged; `resyncSkipped` is
+  already a plain number a script can act on without prose.
+  
+  While here, the skip-count summary's own wording is corrected: it read
+  `(admin- or package-owned override)`, uniformly claiming "override" for
+  both provenance classes. That is accurate for a package-owned row (always a
+  deliberate override, per the seeder's docblock) but was already the exact
+  false framing PR #9183 removed from the per-row log line for the
+  admin-owned case — a pre-#8692 seeded row was never overridden by anybody.
+  The summary now reads `(admin- or package-owned)`, and the new explanatory
+  line carries the nuance instead.
+- 49dba54: fix(cli): `os serve`'s ready banner no longer names a config file that was not read (#8978)
+  
+  On an `OS_ARTIFACT_URL` boot (#8368) the `objectstack.config.ts` in cwd is
+  deliberately never executed — the boot diagnostics say so — but the ready
+  banner's `Config:` row still printed it, because `relativeConfig` was derived
+  from `args.config` before the artifact-fallback branch was decided and handed
+  to `printServerReady` unconditionally. The plain artifact-fallback path (no
+  config authored, booting from the `<cwd>/dist/objectstack.json` convention or
+  `OS_ARTIFACT_PATH`) had the same defect one level worse: the row named a
+  config file that does not exist on disk at all.
+  
+  The banner is the surface an operator reads to answer "what is this container
+  actually running" — naming what did NOT boot points them at the wrong app.
+  
+  `serve` now reports the resolved artifact's already-redacted `display` string
+  in an `Artifact: … (OS_ARTIFACT_URL)` row when `OS_ARTIFACT_URL` pinned one,
+  omits the row on the other artifact-fallback paths (no safely-redacted value
+  is in hand there), and reports the authored config exactly as before on the
+  ordinary config-boot path.
+- dfedf88: `serve`: warn when the declared replica count exceeds the licensed node cap (#8504)
+  
+  The 2026-08-13 `max_nodes` ruling requires a licensed overflow to refuse the excess,
+  run up to the paid limit, and **warn loudly**. The gate learned to express the first
+  two — `admitted` / `refused` / `capped` — but the only program that consults it, `os
+  serve`, called it zero-arg and typed the result with a hand-written
+  `{ allowed, reason }` cast. So the partial-cap verdict was unreachable *and* unread:
+  the gate could say "3 admitted, 2 refused" and nothing rendered it.
+  
+  `serve` now passes the operator-declared `OS_CLUSTER_REPLICAS` into the gate and
+  emits an advisory on `capped`:
+  
+  ```
+  [cluster] licensed node cap exceeded: the licence admits 3 node(s), but
+  OS_CLUSTER_REPLICAS declares 5 — 2 beyond the cap.
+  [cluster] This cap is ADVISORY and is not enforced yet: nothing is refused, and all
+  5 replicas will still join the cluster.
+  [cluster] Reduce OS_CLUSTER_REPLICAS to 3, or raise the licensed node limit.
+  ```
+  
+  ⚠️ The wording is deliberately advisory. Enforcement needs an atomic slot claim
+  across replicas and is tracked separately; until it lands **nothing is actually
+  refused** — every replica computes the same verdict at boot and none can tell whether
+  it is one of the admitted ones, so all of them join. A message claiming "2 replicas
+  refused" would be false in exactly the declared-vs-delivered way this warning exists
+  to close.
+  
+  An outright `allowed: false` denial is untouched: it keeps reporting as a
+  single-node downgrade, and is deliberately not reported as a cap.
+- cb6c821: `objectstack serve` now registers `ObservabilityServicePlugin`, so the `observability:metrics` service actually resolves for every consumer that follows the canonical resolution chain.
+  
+  `serve.ts` built one metrics registry from `OS_OBS_EXPORTER` and threaded it into a single consumer (the dispatcher). Nothing in the repo registered the service itself, so the cache and storage adapters walked the documented chain — explicit option, then `observability:metrics`, then a no-op — and held a `NoopMetricsRegistry` in every shipped deployment, however `OS_OBS_EXPORTER` was set.
+  
+  The registry is now built once and registered as a service ahead of the transport, the dispatcher and the capability providers, because every consumer resolves the chain during its own `init()`. Measured on a booted showcase app with `OS_OBS_EXPORTER=console`: `storage_operations_total` and `storage_operation_duration_ms` now emit where they previously emitted nothing, and the cache adapter now holds the configured registry instead of the no-op. `http_requests_total` is unchanged — it was already armed transport-wide by the dispatcher through the `IHttpServer.afterResponse` seam, and the per-server latch keeps it at exactly one observer.
+  
+  Deployments that leave `OS_OBS_EXPORTER` unset or set to `noop` are unaffected: nothing is registered, and the transport still installs no per-request middleware.
+- a5d2593: test(cli): `os serve`'s unknown-hostname guard gets a test seam — the middleware, refusal included, is now reachable without booting a server (#9442)
+  
+  The `OS_ROOT_DOMAIN` guard was a plugin object literal built inside
+  `Serve.run()`, closing over its locals and installing itself on a `http.server`
+  service resolved from the plugin context. Nothing about it was exported or
+  constructible, so every branch — the health/readiness bypass whose own comment
+  says a 404 there "would kill the container", the reserved-subdomain and
+  `/_console` redirect branches, the `/_admin` and `/.well-known` pass-throughs,
+  the lazy env-registry read whose every failure mode falls through — had zero
+  regression coverage.
+  
+  It is now `createUnknownHostnameGuardPlugin()`, exported from `serve.ts` the way
+  its sibling helpers are, with `run()` calling it. Behaviour is unchanged: same
+  branches in the same order, same bodies, and `OS_CLOUD_URL` is still read per
+  request rather than captured at install time. What is new is a suite that mounts
+  the real middleware on a real Hono app and pins BOTH directions — every bypass
+  as an explicit pass-through, and the refusal by `error.code` **and** HTTP status
+  together.
+- 593c4bf: feat(spec): `storage` becomes the canonical `CoreServiceName` slot; `file-storage` stays a deprecated v17 alias (#9683)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A service-registry slot
+  name is not authorable metadata — nothing in a stack definition spells it — so
+  there is no conversion-layer entry to register. Compatibility is carried by the
+  enum keeping the old member and by @objectstack/service-storage registering the
+  same instance under both names; the alias retires through the standard
+  retirement flow at the next major. -->
+  
+  Maintainer ruling, 2026-08-18, verbatim: 「9683 file-storage 可以叫 storage」.
+  The `file-storage` slot was the only `CoreServiceName` member whose spelling
+  diverged from its documented accessor (`services.storage`), with no recorded
+  reason anywhere in the tree.
+  
+  - `CoreServiceName` gains `storage` as the canonical member; `file-storage`
+    stays an accepted, deprecated alias within v17 (it is a published enum
+    member — existing `getService('file-storage')` callers keep working).
+    `CORE_SERVICE_PROVIDER` and `ServiceRequirementDef` carry both.
+  - `@objectstack/service-storage` registers the **same instance** under both
+    names (the `http.server` / `http-server` pattern), pinned by an
+    alias-equivalence test.
+  - Every internal consumer resolves `storage`: the HTTP dispatcher, the email
+    plugin's attachment store, and `os migrate files-to-references`. Discovery
+    reports the service under the canonical `storage` key and mirrors the row
+    verbatim under the `file-storage` key for the alias's v17 lifetime, so
+    existing discovery readers (e.g. the console endpoint catalog) keep
+    working.
+  - Docs (`kernel/runtime-services`, `kernel/contracts`) now document the
+    canonical slot; a custom v17 provider for this slot should register both
+    names.
+- Updated dependencies [56656aa]
+- Updated dependencies [c9f5950]
+- Updated dependencies [d6e80b2]
+- Updated dependencies [07e630e]
+- Updated dependencies [66beee0]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [ca2e020]
+- Updated dependencies [720ee95]
+- Updated dependencies [e717ba1]
+- Updated dependencies [34392a1]
+- Updated dependencies [f287435]
+- Updated dependencies [e7bccaa]
+- Updated dependencies [2782805]
+- Updated dependencies [e43d63a]
+- Updated dependencies [08d6d3c]
+- Updated dependencies [e374b4d]
+- Updated dependencies [5047cb8]
+- Updated dependencies [ed4ca59]
+- Updated dependencies [1408fe3]
+- Updated dependencies [fe90efa]
+- Updated dependencies [445ae4d]
+- Updated dependencies [5aadce3]
+- Updated dependencies [f2920e1]
+- Updated dependencies [bcf2755]
+- Updated dependencies [a433122]
+- Updated dependencies [bc6434b]
+- Updated dependencies [96f397a]
+- Updated dependencies [9aa8890]
+- Updated dependencies [48032c9]
+- Updated dependencies [40d5b2d]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [03520eb]
+- Updated dependencies [8bbf459]
+- Updated dependencies [899052a]
+- Updated dependencies [2277443]
+- Updated dependencies [a751f7d]
+- Updated dependencies [eccb8b2]
+- Updated dependencies [650cd3d]
+- Updated dependencies [b735507]
+- Updated dependencies [91c6c28]
+- Updated dependencies [75b7c24]
+- Updated dependencies [cf0d902]
+- Updated dependencies [498f4e8]
+- Updated dependencies [cc5c07b]
+- Updated dependencies [caaae2c]
+- Updated dependencies [d5552ca]
+- Updated dependencies [c7655d4]
+- Updated dependencies [83fe945]
+- Updated dependencies [7f0cfdb]
+- Updated dependencies [d9813a9]
+- Updated dependencies [fc89098]
+- Updated dependencies [4c178c1]
+- Updated dependencies [13d7864]
+- Updated dependencies [8640fb2]
+- Updated dependencies [5c38492]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [3508678]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [04d03c3]
+- Updated dependencies [6a51704]
+- Updated dependencies [2d0af57]
+- Updated dependencies [2c570f3]
+- Updated dependencies [c1731d0]
+- Updated dependencies [c766ec3]
+- Updated dependencies [7337f30]
+- Updated dependencies [420804d]
+- Updated dependencies [8656d67]
+- Updated dependencies [177442d]
+- Updated dependencies [950bd94]
+- Updated dependencies [3043e98]
+- Updated dependencies [51a46a4]
+- Updated dependencies [c8e85fc]
+- Updated dependencies [3d61924]
+- Updated dependencies [5244fd7]
+- Updated dependencies [cbf4b40]
+- Updated dependencies [9c4d096]
+- Updated dependencies [86431f7]
+- Updated dependencies [716ac9b]
+- Updated dependencies [a38408a]
+- Updated dependencies [e9534a4]
+- Updated dependencies [7b3c033]
+- Updated dependencies [6feac91]
+- Updated dependencies [62b1427]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [b2789ad]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [27a567d]
+- Updated dependencies [4ea921c]
+- Updated dependencies [42b05af]
+- Updated dependencies [0ccea4a]
+- Updated dependencies [3ab2488]
+- Updated dependencies [2b292ce]
+- Updated dependencies [185c7bd]
+- Updated dependencies [abcf853]
+- Updated dependencies [14935ab]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [66dbec4]
+- Updated dependencies [6aceca9]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [45862a5]
+- Updated dependencies [79c46da]
+- Updated dependencies [1e050a5]
+- Updated dependencies [152bff8]
+- Updated dependencies [7ff3975]
+- Updated dependencies [fd6bdf8]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [24173e9]
+- Updated dependencies [818c27c]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [e0695b5]
+- Updated dependencies [01074e5]
+- Updated dependencies [7c3a7eb]
+- Updated dependencies [a9df51c]
+- Updated dependencies [b705a6c]
+- Updated dependencies [f8eb736]
+- Updated dependencies [11b779e]
+- Updated dependencies [ab8b10f]
+- Updated dependencies [4e71ae1]
+- Updated dependencies [73cfddf]
+- Updated dependencies [739fe5b]
+- Updated dependencies [20067c5]
+- Updated dependencies [bc03179]
+- Updated dependencies [d09d0fd]
+- Updated dependencies [5ed8ee6]
+- Updated dependencies [e783e16]
+- Updated dependencies [ff4ba6a]
+- Updated dependencies [f9d7acf]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [b537855]
+- Updated dependencies [2065e31]
+- Updated dependencies [ead96d0]
+- Updated dependencies [6cb88d9]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4dc8a61]
+- Updated dependencies [c15eb23]
+- Updated dependencies [4d47afe]
+- Updated dependencies [2a9752c]
+- Updated dependencies [b348ac2]
+- Updated dependencies [4fc4a3c]
+- Updated dependencies [b740440]
+- Updated dependencies [90a12fb]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [72050cc]
+- Updated dependencies [d70428a]
+- Updated dependencies [4dfa369]
+- Updated dependencies [9a56784]
+- Updated dependencies [c8806ae]
+- Updated dependencies [bb96297]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [44738f7]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [1408ae3]
+- Updated dependencies [5e2f594]
+- Updated dependencies [3b3f67d]
+- Updated dependencies [e2899f6]
+- Updated dependencies [bbd86ed]
+- Updated dependencies [7ff5aa2]
+- Updated dependencies [b6c7690]
+- Updated dependencies [2a6ebaf]
+- Updated dependencies [855591f]
+- Updated dependencies [17854cb]
+- Updated dependencies [e6e1de4]
+- Updated dependencies [6a12e5e]
+- Updated dependencies [3851f87]
+- Updated dependencies [09b880b]
+- Updated dependencies [c73eacd]
+- Updated dependencies [f8537df]
+- Updated dependencies [712e185]
+- Updated dependencies [d693ba1]
+- Updated dependencies [53fc099]
+- Updated dependencies [d2e6b1d]
+- Updated dependencies [88e1bac]
+- Updated dependencies [693c788]
+- Updated dependencies [0961065]
+- Updated dependencies [845e164]
+- Updated dependencies [2a29caa]
+- Updated dependencies [9e2e682]
+- Updated dependencies [09a6eee]
+- Updated dependencies [6f5a449]
+- Updated dependencies [8d017eb]
+- Updated dependencies [1a7f907]
+- Updated dependencies [0425db9]
+- Updated dependencies [cd455c8]
+- Updated dependencies [e1bb0ca]
+- Updated dependencies [05864fb]
+- Updated dependencies [4e3a4c3]
+- Updated dependencies [3b0b61c]
+- Updated dependencies [326f5de]
+- Updated dependencies [501ed0e]
+- Updated dependencies [f047810]
+- Updated dependencies [30d3752]
+- Updated dependencies [8914915]
+- Updated dependencies [b3de42c]
+- Updated dependencies [21995d7]
+- Updated dependencies [a4c11ad]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [499f55e]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [6a5e6ad]
+- Updated dependencies [30b1c63]
+- Updated dependencies [7fc01db]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [c86799f]
+- Updated dependencies [b030055]
+- Updated dependencies [2416dd5]
+- Updated dependencies [03fa4c9]
+- Updated dependencies [88ef34d]
+- Updated dependencies [990a893]
+- Updated dependencies [5989b0d]
+- Updated dependencies [19db5fa]
+- Updated dependencies [8f266f1]
+- Updated dependencies [b849e69]
+- Updated dependencies [add2d19]
+- Updated dependencies [5d4d20e]
+- Updated dependencies [2b9d33a]
+- Updated dependencies [ad217b1]
+- Updated dependencies [73010f1]
+- Updated dependencies [52182a6]
+- Updated dependencies [c07d6e8]
+- Updated dependencies [f01c0ee]
+- Updated dependencies [fab693b]
+- Updated dependencies [b53d38e]
+- Updated dependencies [71ac21c]
+- Updated dependencies [192213f]
+- Updated dependencies [42d8990]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [b5f6b26]
+- Updated dependencies [04f8fdb]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [b2a451f]
+- Updated dependencies [c25b2d5]
+- Updated dependencies [6158146]
+- Updated dependencies [84cb121]
+- Updated dependencies [ca19ee8]
+- Updated dependencies [147eadc]
+- Updated dependencies [0f59584]
+- Updated dependencies [f6c904a]
+- Updated dependencies [90417a8]
+- Updated dependencies [a675b4d]
+- Updated dependencies [b887013]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [159e299]
+- Updated dependencies [90c5285]
+- Updated dependencies [402c125]
+- Updated dependencies [7901b2d]
+- Updated dependencies [7c2f386]
+- Updated dependencies [56bca91]
+- Updated dependencies [52fbba6]
+- Updated dependencies [d5156b9]
+- Updated dependencies [75e66fc]
+- Updated dependencies [b3f9831]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [8a9e7f4]
+- Updated dependencies [3d0ded8]
+- Updated dependencies [a726154]
+- Updated dependencies [44bc51d]
+- Updated dependencies [bbbfcfc]
+- Updated dependencies [1258dca]
+- Updated dependencies [4639cec]
+- Updated dependencies [91c4ff5]
+- Updated dependencies [73cfddf]
+- Updated dependencies [a4acb8d]
+- Updated dependencies [d634e66]
+- Updated dependencies [682b86b]
+- Updated dependencies [6a1b45e]
+- Updated dependencies [b278695]
+- Updated dependencies [5126e79]
+  - @objectstack/spec@17.1.0
+  - @objectstack/platform-objects@17.1.0
+  - @objectstack/plugin-auth@17.1.0
+  - @objectstack/plugin-approvals@17.1.0
+  - @objectstack/types@17.1.0
+  - @objectstack/runtime@17.1.0
+  - @objectstack/plugin-security@17.1.0
+  - @objectstack/lint@17.1.0
+  - @objectstack/rest@17.1.0
+  - @objectstack/core@17.1.0
+  - @objectstack/metadata-protocol@17.1.0
+  - @objectstack/objectql@17.1.0
+  - @objectstack/plugin-audit@17.1.0
+  - @objectstack/plugin-email@17.1.0
+  - @objectstack/service-automation@17.1.0
+  - @objectstack/client@17.1.0
+  - @objectstack/driver-sql@17.1.0
+  - @objectstack/observability@17.1.0
+  - @objectstack/cloud-connection@17.1.0
+  - @objectstack/console@17.1.0
+  - @objectstack/service-datasource@17.1.0
+  - @objectstack/plugin-sharing@17.1.0
+  - @objectstack/plugin-hono-server@17.1.0
+  - @objectstack/driver-memory@17.1.0
+  - @objectstack/driver-mongodb@17.1.0
+  - @objectstack/driver-sqlite-wasm@17.1.0
+  - @objectstack/driver-turso@17.1.0
+  - @objectstack/metadata@17.1.0
+  - @objectstack/plugin-pinyin-search@17.1.0
+  - @objectstack/service-settings@17.1.0
+  - @objectstack/service-messaging@17.1.0
+  - @objectstack/mcp@17.1.0
+  - @objectstack/service-analytics@17.1.0
+  - @objectstack/service-storage@17.1.0
+  - @objectstack/service-package@17.1.0
+  - @objectstack/service-cache@17.1.0
+  - @objectstack/service-job@17.1.0
+  - @objectstack/plugin-webhooks@17.1.0
+  - @objectstack/account@17.1.0
+  - @objectstack/setup@17.1.0
+  - @objectstack/formula@17.1.0
+  - @objectstack/plugin-reports@17.1.0
+  - @objectstack/service-queue@17.1.0
+  - @objectstack/service-realtime@17.1.0
+  - @objectstack/service-sms@17.1.0
+  - @objectstack/trigger-api@17.1.0
+  - @objectstack/trigger-record-change@17.1.0
+  - @objectstack/trigger-schedule@17.1.0
+  - @objectstack/verify@17.1.0
+
 ## 17.0.0
 
 ### Major Changes

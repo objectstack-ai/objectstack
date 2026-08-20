@@ -3184,7 +3184,10 @@ export class AutomationEngine implements IAutomationService {
                 reentryHeld = true;
             }
 
-            // Validate node input schemas before execution
+            // Validate node input schemas before execution. [#9889] The same
+            // call sits in `executeWithoutRetry` — every retry attempt must be
+            // refused by the same guard that refused attempt 1; see the guard's
+            // own doc for the chokepoint contract.
             this.validateNodeInputSchemas(flow, variables);
 
             // DAG traversal execution
@@ -5257,6 +5260,18 @@ export class AutomationEngine implements IAutomationService {
     /**
      * Validate node input schemas before execution.
      * Checks that node config matches declared inputSchema if present.
+     *
+     * [#9889] The ONE definition-level input-schema chokepoint, called by BOTH
+     * attempt paths — `execute()` (attempt 1) and `executeWithoutRetry` (every
+     * retry attempt) — the same chokepoint discipline `seedRunVariables`
+     * carries for the variable environment (#9704). Its verdict is a pure
+     * function of the flow definition (`_variables` is deliberately unused),
+     * so a refusal on attempt 1 must hold on every attempt: when only
+     * `execute()` called it, `errorHandling.strategy: 'retry'` ran the very
+     * nodes attempt 1 refused to run. ⛔ A repair to the validation rules
+     * belongs HERE, in the shared method — re-inlining either caller's copy
+     * re-opens the execute/executeWithoutRetry drift this file has now paid
+     * for six times (#9378, #9415, #9414, #9510, #9704, #9889).
      */
     private validateNodeInputSchemas(flow: FlowParsed, _variables: Map<string, unknown>): void {
         for (const node of flow.nodes) {
@@ -6432,6 +6447,29 @@ export class AutomationEngine implements IAutomationService {
                 // for the reason the disabled exit above states.
                 return { success: false, code: 'FLOW_NO_START_NODE', error: 'Flow has no start node' };
             }
+
+            // [#9889] The SAME definition-level guard attempt 1 runs under —
+            // the sixth instance of this method drifting from `execute()`
+            // (#9378, #9415, #9414, #9510, #9704 before it), and the first
+            // that skipped a GUARD rather than an exit or the environment.
+            // Without this call, a flow whose node config violates its own
+            // declared `inputSchema` under `errorHandling.strategy: 'retry'`
+            // was refused on attempt 1 (the guard throws before any node
+            // executes) and then RUN FOR REAL on attempts 2..N, because the
+            // retry handoff lives in `execute()`'s catch and every retry
+            // attempt comes back through here — a refusal that holds only
+            // until the flow is retried, i.e. `retry` as a way past
+            // authoring-time validation. The guard's verdict is a pure
+            // function of the flow definition (`_variables` is unused), so
+            // re-running it cannot refuse anything attempt 1 would have
+            // allowed; the throw lands in this method's generic failure arm
+            // below, so each refused attempt still consumes retry budget and
+            // retry accounting is unchanged. Same chokepoint discipline as
+            // `seedRunVariables` (#9704): ONE method holds the rules, both
+            // attempt paths call it — `input-schema-retry-parity.test.ts`
+            // pins the per-attempt refusal so this call cannot be dropped
+            // silently.
+            this.validateNodeInputSchemas(flow, variables);
 
             await this.executeNode(startNode, flow, variables, runContext, steps);
 

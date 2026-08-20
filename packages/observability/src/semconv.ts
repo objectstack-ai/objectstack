@@ -19,14 +19,28 @@
  * stay in the deployment repo.
  */
 export const SEMCONV = {
-    // ── HTTP — emitted by `@objectstack/runtime`'s instrumentRouteHandler ──
-    /** Counter, labels: `method`, `route`, `status`. */
+    // ── HTTP — emitter differs per family, see each ────────────────────
+    /**
+     * Counter, labels: `method`, `route`, `status`. Emitted by the TRANSPORT
+     * through the `IHttpServer.afterResponse` seam (#9835), so it covers
+     * every inbound request on the server rather than only the routes the
+     * runtime dispatcher registers.
+     */
     httpRequestsTotal: 'http_requests_total',
-    /** Histogram (ms), labels: `method`, `route`. */
+    /**
+     * Histogram (ms), labels: `method`, `route`. Emitted by the TRANSPORT
+     * through the same seam (#9834). It measures the REQUEST as the transport
+     * sees it — first sight to the response existing, middleware chain and
+     * body parse included — not the handler's share of it.
+     */
     httpRequestDurationMs: 'http_request_duration_ms',
     /**
-     * Counter, labels: `method`, `route`. Incremented when an
-     * in-flight handler throws after the response is sent.
+     * Counter, labels: `method`, `route`. Incremented when an in-flight
+     * handler throws after the response is sent. Emitted by
+     * `@objectstack/runtime`'s `instrumentRouteHandler`, and NOT movable to
+     * the seam above as-is: the observation carries a status but no throw
+     * signal, so a transport-side emitter would count a different population
+     * (#9834 records the fork).
      */
     httpRequestErrorsTotal: 'http_request_errors_total',
 
@@ -39,11 +53,41 @@ export const SEMCONV = {
     storageErrorsTotal: 'storage_errors_total',
 
     // ── Cache — emitted by `@objectstack/service-cache` adapters ──
-    /** Counter, labels: `adapter` (`memory`|`redis`), `result` (`hit`|`miss`). */
+    // Uniform emitter; what varies is who CONSULTS the service — see below.
+    /**
+     * Counter, labels: `adapter` (`memory`|`redis`), `result` (`hit`|`miss`).
+     *
+     * ⚠️ A flat zero means "NO CONFIGURED CONSUMER", not "no cache activity",
+     * and — unlike the HTTP families above — it is NOT an instrumentation gap.
+     * The adapters hold the host's registry and count every call they receive
+     * (#9832 wired that; #9951 pins it), so a zero here is TRUE. What it fails
+     * to communicate is WHY.
+     *
+     * The why: nothing consults the `cache` service unconditionally. Every
+     * production consumer is a rate-limit / budget counter store, and each is
+     * gated on a declaration somebody has to write — better-auth's per-IP
+     * counters (`rate_limit_max` / `rate_limit_window_seconds` in auth
+     * settings), the dispatcher's inbound limiter and its declarative
+     * per-endpoint buckets (an armed `rateLimit` budget; with none declared
+     * the dispatcher registers no limiter at all), and the per-number OTP send
+     * budget (an SMS send path). A default install declares none of them, so
+     * this counter stays at 0 while the server handles traffic normally.
+     *
+     * ⇒ Read a flat `cache_*` as a question about CONFIGURATION, never as a 0%
+     * hit rate or a broken adapter. Before trusting a cache hit-rate panel,
+     * confirm at least one consumer above is actually armed.
+     */
     cacheLookupsTotal: 'cache_lookups_total',
-    /** Counter, labels: `adapter`, `op` (`set`|`delete`|`clear`). */
+    /**
+     * Counter, labels: `adapter`, `op` (`set`|`delete`|`clear`). Same
+     * "zero = no configured consumer" reading as `cacheLookupsTotal` above.
+     */
     cacheWritesTotal: 'cache_writes_total',
-    /** Counter, labels: `adapter`, `op`, `errorClass`. */
+    /**
+     * Counter, labels: `adapter`, `op`, `errorClass`. Same "zero = no
+     * configured consumer" reading as `cacheLookupsTotal` above — a zero is
+     * "nothing was asked of the cache", not "every call succeeded".
+     */
     cacheErrorsTotal: 'cache_errors_total',
 
     // ── Background jobs — emitted by `@objectstack/runtime`'s AppPlugin ──

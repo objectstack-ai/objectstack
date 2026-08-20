@@ -535,7 +535,7 @@ describe('ObjectQL Engine', () => {
             await engine.insert('task', { title: 'x' }, { context: { userId: 'u1', tenantId: 'org_1' } as any });
 
             // Blessed name carries the org; the deprecated `tenantId` alias was
-            // removed in v11 (#3290) and must no longer be emitted.
+            // removed in v16 (#3290) and must no longer be emitted.
             expect(session.organizationId).toBe('org_1');
             expect(session.tenantId).toBeUndefined();
             // `ctx.user` shortcut carries the same org for zero-relearning filtering.

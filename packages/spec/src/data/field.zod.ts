@@ -1548,6 +1548,7 @@ export const Field = {
   boolean: (config: FieldInput = {}) => ({ type: 'boolean', ...config } as const),
   date: (config: FieldInput = {}) => ({ type: 'date', ...config } as const),
   datetime: (config: FieldInput = {}) => ({ type: 'datetime', ...config } as const),
+  time: (config: FieldInput = {}) => ({ type: 'time', ...config } as const),
   currency: (config: FieldInput = {}) => ({ type: 'currency', ...config } as const),
   percent: (config: FieldInput = {}) => ({ type: 'percent', ...config } as const),
   url: (config: FieldInput = {}) => ({ type: 'url', ...config } as const),

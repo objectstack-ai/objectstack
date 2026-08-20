@@ -41,37 +41,52 @@
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 
 /**
- * This package is CJS-typed (no `"type": "module"` — it publishes
- * `dist/index.js` as CommonJS), so `module: NodeNext` forbids `import.meta`
- * here. Walk up from the CWD instead, which works wherever vitest is invoked
- * from.
+ * Seeded from `__dirname`, not from a `findUp` walk of `process.cwd()`, and not
+ * from `dirname(fileURLToPath(import.meta.url))`. Both halves of that choice are
+ * load-bearing — the same pair `managed-extension-fields.test.ts` and
+ * `platform-objects/src/managed-api-method-affordance-sweep.test.ts` state for
+ * their sibling repo-wide walks:
+ *
+ *  - `import.meta` is a TS1470 here. This package is CJS-typed (no
+ *    `"type": "module"` — it publishes `dist/index.js` as CommonJS), so under
+ *    `module: NodeNext` the meta-property is an error however well it runs under
+ *    vitest, and this package's test layer IS in front of tsc through the
+ *    `@objectstack/plugin-auth` TEST_DEBT entry in `check-type-check-coverage.mjs`.
+ *    `__dirname` type-checks under the package's own config and is defined at
+ *    runtime by vitest's transform.
+ *  - `check:cross-package-test-inputs` detects an escaping read STATICALLY, by
+ *    resolving the seed expression. A `findUp` walk from `process.cwd()` is not a
+ *    spelling it resolves — `process.cwd()` appears nowhere in that detector — so
+ *    the two cross-package directory reads at the bottom of this file yielded no
+ *    flag and therefore no declaration, SILENTLY. Measured before this change:
+ *    `--list-escapes` named only `managed-extension-fields.test.ts` for
+ *    plugin-auth, and `@objectstack/plugin-auth#test`'s turbo input hash
+ *    (`1bf3935543ab055b`) did not move when `packages/runtime/src` changed — so a
+ *    runtime-only diff that reinstated the package-root import replayed a cached
+ *    green over the very scan that catches it (#7802's shape, #10029).
+ *
+ * Deriving the roots any other way puts this file back in that blind spot.
  */
-function findUp(predicate: (dir: string) => boolean, what: string): string {
-  let dir = process.cwd();
-  for (;;) {
-    if (predicate(dir)) return dir;
-    const parent = dirname(dir);
-    if (parent === dir) throw new Error(`could not locate ${what}`);
-    dir = parent;
-  }
-}
+const HERE = __dirname;
+/** …/packages/plugins/plugin-auth/src → the package root, then the repo root. */
+const PKG = resolve(HERE, '..');
+const REPO = resolve(HERE, '../../../..');
 
-const PKG = findUp((dir) => {
-  const manifest = join(dir, 'package.json');
-  if (!existsSync(manifest)) return false;
-  const { name } = JSON.parse(readFileSync(manifest, 'utf8')) as { name?: string };
-  return name === '@objectstack/plugin-auth';
-}, 'the @objectstack/plugin-auth package root');
+const SRC = HERE;
 
-const REPO = findUp(
-  (dir) => existsSync(join(dir, 'pnpm-workspace.yaml')),
-  'the workspace root (pnpm-workspace.yaml)',
-);
-
-const SRC = join(PKG, 'src');
+/**
+ * The two consumer packages the root-import scan at the bottom of this file
+ * walks. Bound here, by name, so the gate can ROSTER them: these two paths are
+ * `@objectstack/plugin-auth`'s declared cross-package radius in
+ * `scripts/check-cross-package-test-inputs.mjs`, and the matching
+ * `$TURBO_ROOT$` entries under `@objectstack/plugin-auth#test` in `turbo.json`
+ * are what make this task's cache hash move when either directory changes.
+ */
+const RUNTIME_SRC = resolve(REPO, 'packages/runtime/src');
+const SERVICE_SMS_SRC = resolve(REPO, 'packages/services/service-sms/src');
 
 /**
  * Strip comments before scanning. The distinction this file turns on — a
@@ -280,12 +295,31 @@ describe('@objectstack/plugin-auth — ./rate-limit-storage stays free of better
     // that package. Scanned by directory rather than by filename so moving a
     // consumer file does not quietly retire the check.
     const COUNTER_SYMBOLS = /\b(incrementFixedWindow|createLazyCounterStore|InProcessCounterStore|CounterStore|FixedWindowCount|LazyCounterStoreOptions)\b/;
-    const roots = ['packages/runtime/src', 'packages/services/service-sms/src'];
+    // Each root is bound by NAME above and handed to `readdirSync` by that name,
+    // rather than looped over as `join(REPO, root)` with `root` an array element.
+    // That is not a style preference: `check:cross-package-test-inputs` learns a
+    // DIRECTORY input only when a directory-read consumes an expression it can
+    // resolve, and its own header lists "a directory read whose path is only a
+    // loop variable" among the shapes that yield no name. Written as a loop the
+    // two globs below would be declared but UNHELD — nothing would fail if a
+    // later edit deleted them, which is the #9763 failure mode (prose holding a
+    // radius) one level up. Written this way the gate rosters both directories
+    // and fails if the declaration stops covering them.
+    expect(
+      existsSync(RUNTIME_SRC),
+      'packages/runtime/src — consumer directory moved; re-point this check',
+    ).toBe(true);
+    expect(
+      existsSync(SERVICE_SMS_SRC),
+      'packages/services/service-sms/src — consumer directory moved; re-point this check',
+    ).toBe(true);
     const offenders: string[] = [];
-    for (const root of roots) {
-      const abs = join(REPO, root);
-      expect(existsSync(abs), `${root} — consumer directory moved; re-point this check`).toBe(true);
-      for (const entry of readdirSync(abs, { recursive: true, withFileTypes: true })) {
+    const trees = [
+      readdirSync(RUNTIME_SRC, { recursive: true, withFileTypes: true }),
+      readdirSync(SERVICE_SMS_SRC, { recursive: true, withFileTypes: true }),
+    ];
+    for (const entries of trees) {
+      for (const entry of entries) {
         if (!entry.isFile() || !entry.name.endsWith('.ts')) continue;
         const file = join(entry.parentPath, entry.name);
         for (const m of stripComments(readFileSync(file, 'utf8')).matchAll(FROM)) {

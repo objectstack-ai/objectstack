@@ -38,6 +38,8 @@ import { createDispatcherPlugin } from './dispatcher-plugin.js';
  * `toBe(1)` now pins the retirement). §5 pins the `IHttpServer.afterResponse`
  * contract seam (#9835) on the same booted composition: the ruled successor
  * that makes the observation point transport-agnostic instead of Hono-only.
+ * §6 pins the duration histogram over the same seam (#9834) — the p95 half of
+ * the same operator guidance, which #9835 left behind.
  *
  * ## Why the composition is shaped this way
  *
@@ -804,11 +806,17 @@ describe('#9835 §5 — the `afterResponse` contract seam, on the real booted co
         expect(observed).toHaveLength(3);
     }, 30_000);
 
-    it('keeps the dispatcher-side signals the transport does not emit: duration histogram + X-Request-Id', async () => {
-        // Only the COUNTER moved to the transport seam. The per-route wrapper
-        // still owns request-id echo and `http_request_duration_ms` — gating
-        // those on the seam would have silently dropped them (#9833 named
-        // them as the non-separable remainder).
+    it('keeps the dispatcher-side signals the transport does not emit: X-Request-Id, and the duration series stays single-emitter', async () => {
+        // Written for #9835, when the COUNTER alone had moved and the wrapper
+        // still owned the histogram. #9834 moved the histogram to the same
+        // seam, so the emitter behind `durations` changed — the ASSERTION did
+        // not, and must not: `toBe(1)` is the de-duplication guard, and this
+        // composition hands ONE registry to both layers, so a wrapper copy
+        // left un-gated shows up here as 2 (the #9833 distortion).
+        //
+        // Request-id echo is still the wrapper's alone: the transport seam
+        // emits no header, so gating it would silently drop it (#9833 named
+        // it as part of the non-separable remainder).
         const metrics = new InMemoryMetricsRegistry();
         const { kernel, baseUrl } = await bootMeasurementKernel(metrics);
         const res = await fetch(`${baseUrl}${DISPATCHER_PROBE}`);
@@ -819,5 +827,98 @@ describe('#9835 §5 — the `afterResponse` contract seam, on the real booted co
             (s) => s.name === RUNTIME_METRICS.httpRequestDurationMs && s.labels.route === DISPATCHER_PROBE,
         );
         expect(durations.length).toBe(1);
+    }, 30_000);
+});
+
+/**
+ * §6 — `http_request_duration_ms` on the transport seam (#9834).
+ *
+ * #9835 moved ONLY `http_requests_total` to the transport, so the p95-latency
+ * half of the operator guidance kept #9650's blind spot: a dashboard drew
+ * request volume for `/api/v1/*` next to a latency panel with no series for
+ * it. The worse reading is the p95 that IS drawn — computed from dispatcher
+ * routes only and presented as the server's.
+ *
+ * The mechanism is the one #9835 proved out on the counter, replicated per
+ * family: a `Symbol.for` first-wins latch on the arming side, and
+ * `emitHttpRequestDurationMs: !transportCountsRequests` on the dispatcher's
+ * per-route wrapper. The dispatcher's `toBe(1)` below is the de-duplication
+ * assertion — two live emitters on one route is the #9833 distortion, and it
+ * is the failure this composition (ONE registry handed to both layers) is
+ * built to expose.
+ *
+ * ⚠️ The observation window CHANGES with the emitter, and that is a value
+ * shift an operator can see: the wrapper timed `await handler(req, res)`
+ * (handler latency), the transport times its own `use('*')` around
+ * `await next()` — the middleware chain and body parse included. Transport
+ * timing is a superset, so the series can only move up. Recorded here
+ * because it is the one thing about this change a dashboard notices.
+ */
+describe('#9834 §6 — the duration histogram reaches every inbound surface, exactly once', () => {
+    const durations = (metrics: InMemoryMetricsRegistry, route: string) =>
+        metrics.histogramValues(RUNTIME_METRICS.httpRequestDurationMs, { route });
+
+    it('the auth raw-app mount and the REST RouteManager mount now have a latency series', async () => {
+        const metrics = new InMemoryMetricsRegistry();
+        const { kernel, baseUrl } = await bootMeasurementKernel(metrics);
+        await fetch(`${baseUrl}${DISPATCHER_PROBE}`);
+        await fetch(`${baseUrl}${AUTH_PROBE}`, { method: 'POST' });
+        await fetch(`${baseUrl}${REST_PROBE}`);
+        await kernel.shutdown();
+
+        // The two surfaces the card is about — both were EMPTY before this
+        // change, which is the p95 hole in executable form.
+        expect(durations(metrics, `${AUTH_BASE}/*`).length).toBe(1);
+        expect(durations(metrics, REST_PROBE).length).toBe(1);
+        // Positive control + de-duplication in one: the dispatcher's own
+        // route was already covered, and must still be observed exactly ONCE
+        // now that the transport owns the family.
+        expect(durations(metrics, DISPATCHER_PROBE).length).toBe(1);
+    }, 30_000);
+
+    it('labels the histogram by PATTERN with the declared {method,route} label set', async () => {
+        const metrics = new InMemoryMetricsRegistry();
+        const { kernel, baseUrl } = await bootMeasurementKernel(metrics);
+        await fetch(`${baseUrl}/api/v1/data/abc123`);
+        await kernel.shutdown();
+
+        // One series per mount, never one per record id.
+        expect(durations(metrics, '/api/v1/data/abc123')).toEqual([]);
+        const rows = metrics.samples.filter(
+            (s) =>
+                s.kind === 'histogram' &&
+                s.name === RUNTIME_METRICS.httpRequestDurationMs &&
+                s.labels.route === REST_PARAM_ROUTE,
+        );
+        expect(rows.length).toBe(1);
+        expect(rows[0].labels).toEqual({ method: 'GET', route: REST_PARAM_ROUTE });
+        expect(rows[0].value).toBeGreaterThanOrEqual(0);
+    }, 30_000);
+
+    it('a host that wires metrics ONLY on the dispatcher gets the latency series too', async () => {
+        // The wiring the production-readiness docs demonstrate — the same
+        // asymmetry #9835 fixed for the counter.
+        const metrics = new InMemoryMetricsRegistry();
+        const kernel = new LiteKernel();
+        kernel.use(new HonoServerPlugin({ port: 0, cors: false })); // no registry here
+        kernel.use(authLikePlugin());
+        kernel.use(restLikePlugin());
+        kernel.use(
+            createDispatcherPlugin({
+                prefix: '/api/v1',
+                securityHeaders: false,
+                observability: { metrics },
+            } as any),
+        );
+        await kernel.bootstrap();
+        const httpServer = kernel.getService<IHttpServer>('http.server');
+        const baseUrl = `http://127.0.0.1:${httpServer.getPort!()}`;
+
+        await fetch(`${baseUrl}${AUTH_PROBE}`, { method: 'POST' });
+        await fetch(`${baseUrl}${REST_PROBE}`);
+        await kernel.shutdown();
+
+        expect(durations(metrics, `${AUTH_BASE}/*`).length).toBe(1);
+        expect(durations(metrics, REST_PROBE).length).toBe(1);
     }, 30_000);
 });

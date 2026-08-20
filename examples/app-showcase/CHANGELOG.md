@@ -1,5 +1,249 @@
 # @objectstack/example-showcase
 
+## 0.3.15
+
+### Patch Changes
+
+- 06f9848: Land the showcase seed fixtures the platform checklist could not run without (#9308)
+  
+  Three capabilities the platform ships had no fixture anywhere in the reference app, so the
+  checklist items covering them were not failing — they were unrunnable. Each is closed here
+  with the smallest stock addition that makes it observable, and with the negative control
+  left intact.
+  
+  **A second, actually loginable member.** The demo personas (Mei Phone the submitter, Ada
+  Auditor the sole `auditor`) have existed as `sys_user` rows since #3409/#3411, and neither
+  could sign in — so every item needing two acting identities was stuck: per-group 会签 needs
+  the two groups decided by two different people, submitter-side viewer gating needs the
+  submitter looking at their own request, and an out-of-office delegation is only falsifiable
+  when the delegate holds a separate token. The non-obvious half is why a password hash was
+  never enough: better-auth 1.7 keys accounts on `(issuer, providerAccountId)`, so a
+  credential row carrying any other issuer is invisible to sign-in, which then fails
+  `INVALID_EMAIL_OR_PASSWORD` behind a "User not found" warn pointing at the user row rather
+  than at the account. `seed-approval-demo.ts` now provisions the credential account through
+  better-auth's own `$context` — its hasher, its `internalAdapter.createAccount` — and READS
+  the issuer off the dev admin's own credential row instead of re-spelling a constant
+  `plugin-auth` owns, so the two cannot drift. Dev-only by construction: the bootstrap runs
+  only where the dev admin exists, and that admin is hard-gated on `NODE_ENV=development`.
+  
+  **An object that opts into `publicSharing`.** No stock object declared it, so
+  `POST /share-links` answered 422 `SHARING_NOT_ENABLED` for every showcase object and the
+  whole downstream half of link sharing — resolve, redaction, the audience and password
+  gates, fail-closed revoke — was unreachable. `showcase_client_brief` opts in with
+  `redactFields`, an expiry cap and an `eligibility` predicate, and the seed carries both a
+  `published` brief (mint-eligible) and a `draft` one (refused `RECORD_NOT_ELIGIBLE`) so the
+  predicate is falsifiable and not merely satisfied. Every other object still declines the
+  opt-in, which is what keeps the per-object 422 a real control.
+  
+  **A `readable: false` FLS grant.** The app governed the three `showcase_project` budget
+  figures with `readable: true, editable: false` — the WRITE half of field-level security —
+  and authored no read-withheld grant at all, leaving `plugin-security`'s field masker with
+  no stock fixture. `showcase_client_liaison` is that grant, on the same three fields, so the
+  two sets read side by side as the two halves of one mechanism. All three figures move
+  together because `budget_remaining` is a formula over `budget - spent` and masking one
+  leaks it back through arithmetic.
+  
+  Downstream reconciliations, each deliberate: `access-matrix.json` gains two rows and moves
+  none; the persona × CRUD sweep's census follows the matrix (50/50 → 54/54, arithmetic
+  recorded at the assertion) and its fixture maps learn the new object; the position count
+  pin follows the new position. The five checklist items whose `knownGaps` this closes are
+  revised in the same change — gap text kept, marked closed-by-fixture, `revision` bumped,
+  `history` appended.
+- b0fa4fc: Guard the showcase's authored action predicates against the sparse action face (#8990)
+  
+  Every record-scoped `visible` / `disabled` predicate in `app-showcase` now carries the
+  `has()` guard the sparse action face requires, closing the remainder of #8990 in this
+  repo. A row action's predicate binds a LIST ROW carrying only the view's `$select`
+  projection, and CEL aborts with `No such key` on a column that row never projected —
+  fail-closed, so the button silently is not offered.
+  
+  Measured against the running app's own payloads: 40 of the 53 predicates in
+  `predicate-matrix.action.ts` aborted on a default-list row before this change and 0 do
+  after, while every verdict on a record-detail binding is unchanged — the Full-vs-Minimal
+  contrast the fixture exists to demonstrate is preserved exactly.
+  
+  The guard is minimal per predicate rather than blanket: `has()` alone where the read is
+  only compared by `==` / `!=` (CEL compares heterogeneously and answers `false` rather
+  than faulting), the full `has(x) && x != null` conjunction only where an operand can
+  fault — traversal, method call, ordering, arithmetic, `in`, or a bare `!`.
+  
+  The teaching surfaces move with the code, since they quote it: `content/docs/ui/actions.mdx`
+  (whose `visible: '!record.done'` was the exact negation shape that faults on a NULL
+  column), `quick-start.mdx` and `build-with-claude-code.mdx`.
+- 4012a70: Retire the showcase sharing rules no gate could consult; re-home the position/compound demo (#9237)
+  
+  Booting `examples/app-showcase` logged two WARNs per boot — `SharingServicePlugin: boot
+  rule backfill failed for rule` for `share_open_tasks_with_manager` and
+  `share_red_projects_with_execs`. Both sat on objects declaring
+  `sharingModel: 'public_read_write'`, where sharing has nothing left to widen, so
+  `assertNotInertGrant` (ADR-0111 D7) refused every grant they reconciled. A third rule,
+  `share_high_value_red_projects_with_managers`, was in exactly the same state and produced
+  no diagnostic at all: its compound condition matched no seeded row, so `reconcile` never
+  reached `grant` and never threw.
+  
+  `showcase_project` and `showcase_task` are `public_read_write` by deliberate ADR-0090 D1
+  declaration and that OWD is load-bearing beyond the security demo, so no rule can ever take
+  effect there. ADR-0049 enforce-or-remove leaves one honest move, and all three are removed
+  rather than re-homed onto another public object — the shape the previous repair took, which
+  moved the inertness instead of removing it.
+  
+  The two capabilities they carried are kept: a `position` recipient and a compound CEL
+  condition (ADR-0058 D3) now live on `share_key_account_qualified_contacts_with_managers`,
+  targeting `showcase_contact` (OWD `private`, and the `showcase_manager` set grants it
+  `allowRead` — the object-level bit a share row still needs). The seeded contacts
+  demonstrate the AND in both directions: rows satisfying either clause alone are not
+  shared.
+  
+  `inert-wirings.test.ts` gains the guard that fails the build on the next such declaration,
+  in both of its shapes — a rule anchored where the OWD leaves nothing to widen, and a rule
+  whose audience holds no `allowRead` on the object it shares.
+- Updated dependencies [56656aa]
+- Updated dependencies [07e630e]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [ca2e020]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [e43d63a]
+- Updated dependencies [e374b4d]
+- Updated dependencies [a433122]
+- Updated dependencies [bc6434b]
+- Updated dependencies [96f397a]
+- Updated dependencies [9aa8890]
+- Updated dependencies [48032c9]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [8bbf459]
+- Updated dependencies [2277443]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [5c38492]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [3508678]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [6a51704]
+- Updated dependencies [2c570f3]
+- Updated dependencies [c766ec3]
+- Updated dependencies [7337f30]
+- Updated dependencies [420804d]
+- Updated dependencies [c8e85fc]
+- Updated dependencies [3d61924]
+- Updated dependencies [5244fd7]
+- Updated dependencies [cbf4b40]
+- Updated dependencies [9c4d096]
+- Updated dependencies [86431f7]
+- Updated dependencies [716ac9b]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [b2789ad]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [6aceca9]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [1e050a5]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [e0695b5]
+- Updated dependencies [01074e5]
+- Updated dependencies [7c3a7eb]
+- Updated dependencies [a9df51c]
+- Updated dependencies [11b779e]
+- Updated dependencies [ab8b10f]
+- Updated dependencies [739fe5b]
+- Updated dependencies [20067c5]
+- Updated dependencies [e783e16]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [4fc4a3c]
+- Updated dependencies [90a12fb]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [72050cc]
+- Updated dependencies [d70428a]
+- Updated dependencies [9a56784]
+- Updated dependencies [c8806ae]
+- Updated dependencies [bb96297]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [3b3f67d]
+- Updated dependencies [e2899f6]
+- Updated dependencies [17854cb]
+- Updated dependencies [3851f87]
+- Updated dependencies [09b880b]
+- Updated dependencies [d2e6b1d]
+- Updated dependencies [0961065]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [05864fb]
+- Updated dependencies [30d3752]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [7fc01db]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [c86799f]
+- Updated dependencies [990a893]
+- Updated dependencies [5989b0d]
+- Updated dependencies [19db5fa]
+- Updated dependencies [2b9d33a]
+- Updated dependencies [ad217b1]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [44bc51d]
+- Updated dependencies [73cfddf]
+- Updated dependencies [a4acb8d]
+- Updated dependencies [d634e66]
+- Updated dependencies [682b86b]
+- Updated dependencies [6a1b45e]
+  - @objectstack/spec@17.1.0
+  - @objectstack/runtime@17.1.0
+  - @objectstack/driver-sql@17.1.0
+  - @objectstack/cloud-connection@17.1.0
+  - @objectstack/service-datasource@17.1.0
+  - @objectstack/connector-mcp@17.1.0
+  - @objectstack/connector-openapi@17.1.0
+  - @objectstack/connector-rest@17.1.0
+  - @objectstack/connector-slack@17.1.0
+
 ## 0.3.14
 
 ### Patch Changes

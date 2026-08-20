@@ -1,5 +1,303 @@
 # @objectstack/metadata-core
 
+## 17.1.0
+
+### Patch Changes
+
+- b6c7690: fix(rest): org-overridable metadata is served back by every `/meta` read door, not just persisted (#9454)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key is
+  added, renamed, retired or tombstoned. One new exported predicate in
+  `metadata-core` (`organizationIdForMetaRead`), one widened optional request
+  member on an existing protocol method (`getMetaItemCached`'s `organizationId`),
+  and caller-side threading in `packages/rest`. The accept/reject behaviour of
+  every write door is unchanged — this card is read-side only. -->
+  
+  A runtime `PUT` of an org-overridable metadata type — `view`, `dashboard`,
+  `report`, `translation`, `email_template` — answered **200** with a receipt
+  reporting `state: 'active'` plus a version and sequence number, **persisted the
+  row with its `organization_id`**, and was then served back by **nothing**: the
+  direct `GET` answered 404, the scoped listing was unchanged, the unfiltered
+  listing was missing it, and the browser rendered an empty view or "Dashboard Not
+  Found". The platform reported success in the same breath as not delivering the
+  work, which is declared ≠ enforced in the direction hardest for an author to
+  notice — the write path says everything worked.
+  
+  **The write door was correct as-is.** The row really is persisted, so the
+  receipt is truthful; this was persisted-but-not-served, never a silent write
+  no-op. **The overlay-resolution layer was correct too**, and type-agnostic:
+  `getMetaItem` resolves `(orgId ? findOverlay(orgId) : undefined) ??
+  findOverlay(null)`, `getMetaItems` unions both scopes under org-wins precedence,
+  and `getMetaItemLayered` even reports `overlayScope`. The defect was that the
+  REST read doors **never stated the scope**, so every one of them asked for the
+  env-wide partition and the org partition was never consulted.
+  
+  **The repair is one registry-derived predicate, threaded at the read doors.**
+  `organizationIdForMetaRead` joins `organizationIdForMetaWrite` in
+  `metadata-core`, deriving from the same `allowOrgOverride` registry flag, so
+  read scope and write scope cannot drift and a registry entry flipping the flag
+  moves both doors together. It is threaded through the **already-memoised**
+  `resolveExecCtx`, so no new per-request organization resolution is introduced.
+  
+  ⛔ **Not a bare `ctx?.tenantId` at each site**, and the reason is measurable
+  rather than stylistic: deployments predating the #6190 ruling hold **phantom
+  org-scoped rows for types the registry declares non-overridable** (the runtime
+  used to stamp `organization_id` on every type). Boot hydration deliberately
+  walks past those rows, so they are dead. A read door naming the org for *every*
+  type would resolve them again — serving, on the read side, a document that
+  vanishes at the next restart.
+  
+  **`getMetaItemCached` gains an `organizationId` member** — it was the only meta
+  read verb that could not express one, having hard-coded a two-key delegation to
+  `getMetaItem`. The organization is also folded into its **ETag**. The mechanism
+  differs from `locale` and the difference is stated rather than glossed: `locale`
+  is invisible to the hash (the body is translated after the validator runs), so
+  folding it in was the only way it could vary the validator at all, whereas the
+  org-resolved document *is* the thing hashed. No cache leak is claimed — the
+  directive is `private, no-cache` and there is no server-side cache entry keyed by
+  type+name. It is folded in because that makes scope a **declared** property of
+  the validator instead of an emergent property of the body.
+  
+  **Both REST branches are fixed, which is the half-fix this card could easily
+  have shipped instead.** `view` and `dashboard` share one mechanism but reach it
+  through two different arms: `view` takes the cached arm (`getMetaItemCached`),
+  while `dashboard` bypasses the cache via `isDashboardType` and takes the
+  uncached arm. Both omitted the org, so a fix applied to one arm would have
+  fixed exactly one type while the receipt kept claiming success for the other.
+  The scope is now resolved **above** the fork, so the two arms cannot disagree.
+  
+  The regression proof drives real REST routes against a real protocol over a stub
+  engine — write-then-read agreement on **one boot**, for all five types, through
+  both arms. Its most important assertions are the ones that do **not** merely
+  check the item comes back: an org-less caller and a **second organization** must
+  each be refused it. An org-blind overlay fallback would satisfy every other
+  assertion in the file while matching an arbitrary tenant's row.
+- 845e164: fix(metadata-protocol): a package publish refused by the namespace-prefix rule now leaves an audit row per violation (#8595)
+  
+  `publishPackageDrafts` refuses a whole batch pre-flight when an object draft's
+  name is missing its package namespace prefix (ADR-0028). That refusal returns
+  ABOVE the batch's `engine.transaction()`, so it reached neither the post-commit
+  `allowed` rows nor the rollback handler's `batch_aborted` row: it wrote nothing
+  to `sys_metadata_audit` at all. The compliance consequence is the defect — a
+  package rejected for a bad object name was **indistinguishable in the trail from
+  a package nobody ever pressed Publish on**, so a compliance query could not tell
+  a refused publish from one that never happened.
+  
+  Each violation now leaves its own `publish` / `denied` row keyed on the
+  offending draft's `(type, name)` — the tuple `auditMetaItem` reads, so the
+  refusal is visible on that item's own audit-log tab via
+  `GET /api/v1/meta/:type/:name/audit`. The row carries the violated rule
+  (`namespace_prefix`) as its `code`, and the rule's actionable message as `note`.
+  Rows are keyed on the draft's own organization scope, matching the promoted
+  rows: an env-wide draft audits env-wide even when the publishing session carries
+  an active org.
+  
+  One row per violation rather than one per batch: a pre-flight refusal names N
+  violating items and no single causal one, so a batch-level row would have had to
+  mint a synthetic identity — exactly what the `batch_aborted` row declines to do
+  for its own unattributable case.
+- 1a7f907: fix(metadata): a package publish refuses a draft stored under a non-canonical metadata type, and the ADR-0010 audit writer asserts its `type` instead of folding it (#8908)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is
+  renamed, retired or tombstoned — no spec key changes shape, so there is no
+  conversion to register. Two accept sets are narrowed at runtime (the batch
+  publish's pre-flight, and `recordMetadataAudit`'s `type` argument), and two
+  error codes are added to the ADR-0112 ledger. The rows this refuses are
+  pre-#7894 residue that no current writer can mint. -->
+  
+  **Two tightenings, one card, because they are the same defect at two layers.**
+  
+  `publishPackageDrafts` reads `sys_metadata` rows **at rest**, so #7894's `/meta`
+  boundary fold never reached it. `promoteDraftForPublish` folds the stored
+  spelling through `PLURAL_TO_SINGULAR` — the *manifest-collection* map, which
+  legitimately omits types that are not stack collections. For those the fold is a
+  **no-op**: the lookup key equals the stored spelling, the draft resolves, and the
+  publish mints an ACTIVE row in the namespace `PUT /meta/field/…` answers
+  403 NOT_OVERRIDABLE for. Measured on the card with the real repository over a
+  stub engine:
+  
+  ```
+  publishPackageDrafts({ packageId: 'app.demo' })
+    → { success: true, publishedCount: 1, published: [{ type: 'fields', name: 'legacy_field' }] }
+  active row: { type: 'fields', name: 'legacy_field', package_id: 'app.demo' }
+  audit row:  { type: 'fields', name: 'legacy_field', outcome: 'allowed', code: 'ok' }
+  ```
+  
+  Every registry read and every compliance query on `field` misses an item the
+  platform just reported as published — the #4432 shadowing shape, minted at
+  publish time instead of at the URL, and the last route by which a pre-#7894 row
+  could be re-promoted rather than migrated.
+  
+  **1. The publish refuses it, at the pre-flight, batch-atomically.** Same shape as
+  the ADR-0028 namespace-prefix gate that already stands there: found before
+  anything is promoted, failing the whole batch (`publishedCount: 0`,
+  `published: []`) rather than publishing the healthy siblings around it, with one
+  audit row per violation. The refusal names the row, names the canonical type, and
+  states the re-author path; `failed[].code` is the new
+  `STORED_TYPE_NOT_CANONICAL`, and the audit column's spelling is
+  `stored_type_not_canonical`.
+  
+  The rule is **derived, not a list**: a spelling the platform's URL/registry map
+  folds elsewhere *and* the manifest map leaves unchanged. Against the real maps
+  that is **six** spellings — `fields`, `seeds`, `external_catalogs`,
+  `externalCatalogs`, `translations`, `email_templates` — where the card named
+  four; the last two would have been missing from any hand-written list, and a
+  newly declared type that never reaches the manifest map is covered on the day it
+  is declared. A manifest-**present** plural (`objects`) is deliberately *not* in
+  the class: it is already fail-closed at the promote (`NO_DRAFT`, batch aborted)
+  and keeps that verdict.
+  
+  ⛔ Deliberately **not** included: migrating the row (a `_migrate-stored` /
+  boot-reconciliation conversion). That was the other option on the card and is
+  explicitly unruled — it stays available as a follow-up with its own appetite.
+  
+  **2. `recordMetadataAudit` refuses a non-canonical `type` (`AUDIT_TYPE_NOT_CANONICAL`)
+  instead of folding it.** The writer used to open with
+  `type: PLURAL_TO_SINGULAR[entry.type] ?? entry.type` — a lenient consumer, and a
+  **tolerant-and-incomplete** one: the fold read the same manifest map, so the
+  compliance trail came out canonical for the 29 types that never needed it and
+  non-canonical for exactly the ones that did. Ruled the same direction as the
+  refusal above: **fold at the boundary, assert at the writer.** Every call site
+  that builds a row out of an at-rest `type` — all of them on
+  `publishPackageDrafts` — now folds with `canonicalMetaType`; the `/meta` routes
+  were already canonical by the time they got there. The throw sits **outside** the
+  writer's best-effort `try`, because inside it the method's own `catch` would
+  degrade the assert into a `console.warn`.
+  
+  The assert cannot refuse a canonical type (no canonical spelling folds
+  elsewhere — 33 of 33, measured) nor a plugin-registered or otherwise
+  unrecognised kind (`canonicalMetaType` is the identity for anything the static
+  map does not carry), so it narrows the accept set without closing it.
+  
+  **Reachability was enumerated before the assert landed**, as the ruling required:
+  `recordMetadataAudit` is private to `protocol.ts` with 11 call sites, `sys_metadata`
+  rows have exactly one producer in the repository (`saveMetaItem` → `repo.put`,
+  post-fold), and no current write path can mint a non-canonical stored type. The
+  only non-canonical types that ever reached an audit write came from the batch
+  publish's at-rest rows, which is what the boundary folds now cover.
+  
+  Also fixed, as a consequence of that fold rather than as a separate change: on
+  the batch route `getEffectiveLock`'s overlay limb was queried with the raw stored
+  spelling, so an ADR-0010 `_lock` carried by the canonical active row was looked
+  up under a `type` no row has and came back `'none'` — the verdict "the author
+  declared no protection". That is the batch twin of the hole #8769 closed on
+  `publishMetaItem`.
+- 7fc01db: REST `/meta` write doors now carry the caller's organization, so audit rows are no longer stamped environment-wide
+  
+  `PUT /meta/:type/:name` (both arities), `DELETE /meta/:type/:name`,
+  `POST /meta/:type/:name/publish` and `POST /meta/:type/:name/rollback` passed no
+  organization, so every `sys_metadata_audit` row a REST-authored metadata write produced was
+  stamped `organization_id: null`. Composed with the scoped audit read shipped alongside it —
+  which returns own-org rows **plus** environment-wide ones, a limb that is required rather
+  than optional — that left every REST-authored audit row readable by every tenant, carrying
+  its `actor`, `note`, `lock_state` and `request_id`. The read side could not close this: the
+  rows were genuinely unscoped, so no filter could separate them.
+  
+  The organization is taken from the execution context these doors already resolve, and is
+  threaded through `organizationIdForMetaWrite` — the same registry-derived predicate the
+  runtime `/metadata` dispatcher uses. Types the registry declares `allowOrgOverride: true`
+  (`view`, `dashboard`, `report`, `translation`, `email_template`) now scope both the overlay
+  row and its audit row to the caller's organization; every other type continues to write
+  environment-wide, because its write genuinely is environment-wide and the protocol refuses
+  an org-scoped write for it. `null` is now reserved for writes that really are
+  environment-wide.
+  
+  Two behaviour changes ride along, both required for the fix to be usable rather than
+  separate improvements: `publish` and `rollback` resolve their row through the organization,
+  so scoping the save without scoping them would have broken the draft → publish loop; and
+  `GET /meta/:type/:name/published` is now organization-scoped (organization-first, then
+  environment-wide), without which it would answer 404 for an item the same caller had just
+  published through the same transport.
+  
+  `organizationIdForMetaWrite` / `declaresOrgOverride` moved from `@objectstack/runtime` into
+  `@objectstack/metadata-core` so both doors share one implementation — `@objectstack/rest`
+  cannot import from `runtime`, which depends on it. Runtime behaviour is unchanged.
+- Updated dependencies [56656aa]
+- Updated dependencies [07e630e]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [420804d]
+- Updated dependencies [716ac9b]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [11b779e]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [e2899f6]
+- Updated dependencies [3851f87]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [30d3752]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [44bc51d]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+  - @objectstack/spec@17.1.0
+
 ## 17.0.0
 
 ### Major Changes

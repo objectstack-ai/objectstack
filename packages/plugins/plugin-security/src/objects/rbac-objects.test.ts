@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { SysPosition, SysPermissionSet, SysCapability, defaultPermissionSets } from './index.js';
+import { SysPosition, SysPermissionSet, SysCapability, SysUserPermissionSet, SysUserPosition, defaultPermissionSets } from './index.js';
 
 /**
  * RBAC object + default-permission-set assertions. Moved here with the objects
@@ -266,5 +266,27 @@ describe('sys_capability — ADR-0066 D1 capability registry', () => {
     // spelling that was the defect. Full contract in
     // `sys-capability.organization-unique.test.ts`.
     expect(nameIdx?.unique).toBe('organization');
+  });
+});
+
+describe('sys_user_permission_set — `delegated_from` is retired (#9730, ADR-0049)', () => {
+  it('no longer declares `delegated_from` — the runtime delegation gate never read it here', () => {
+    // Maintainer ruling 2026-08-18 (REMOVE): the delegation gate's
+    // `isDelegationWrite` is structurally scoped to `sys_user_position`, so on
+    // this object the column was declared and data-door-writable while no
+    // runtime consumer read it — authoring-lint-only enforcement on a security
+    // object. Re-declaring the key here without a runtime reader in the same
+    // change is the exact defect the ruling removed; this pin makes that
+    // re-growth loud.
+    expect(SysUserPermissionSet.fields).not.toHaveProperty('delegated_from');
+  });
+
+  it('the ADR-0091 D3 declaration on the sibling `sys_user_position` is untouched', () => {
+    // The ruling removes the UNENFORCED half only. Position-table delegation
+    // stays declared AND enforced (delegated-admin gate, explain engine, lint).
+    const f: any = (SysUserPosition.fields as any).delegated_from;
+    expect(f).toBeDefined();
+    expect(f.type).toBe('lookup');
+    expect(f.reference).toBe('sys_user');
   });
 });

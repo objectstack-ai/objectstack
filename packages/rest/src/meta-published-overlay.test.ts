@@ -425,7 +425,10 @@ describe('[#8278] what the overlay consult must NOT change', () => {
         expect(res.body).toEqual({
             error: {
                 code: 'NOT_IMPLEMENTED',
-                message: 'metadata.getPublished() is not available in this kernel',
+                // [#8297] Reworded to state the TRUE post-#8278 condition — this
+                // arm is reached only after a null overlay consult, so it no
+                // longer means "this kernel cannot answer /published" at all.
+                message: 'Nothing is runtime-published for this item, and this kernel has no code/package store (metadata.getPublished() is not available).',
             },
         });
     }, 60_000);

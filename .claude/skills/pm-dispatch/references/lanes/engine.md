@@ -1,8 +1,7 @@
 # 车道岗位说明:domain:engine(references/lanes —— 座位贴指针指向本文件)
 
-岗位说明(范围 / 常设承诺 / 席内判断)版本化于此,升级走技能 PR;现值状态(当前
-PM、继承台账、热文件串行队)恒在座位贴,⛔ 不迁入本文件。本车道 2026-08-19 由
-engine-core + metadata + drivers 三车道合并而成(裁决引文在 SKILL.md 域车道表)。
+岗位说明版本化于此,升级走技能 PR;现值状态恒在座位贴,⛔ 不迁入本文件。本车道
+2026-08-19 由 engine-core+metadata+drivers 合并(裁决引文在 SKILL.md 域车道表)。
 
 ## 范围
 
@@ -19,6 +18,7 @@ engine-core + metadata + drivers 三车道合并而成(裁决引文在 SKILL.md 
 
 ## 常设承诺
 
+- **每轮巡检第一判据**:先读半状态巡查锚(`half-state-patrol.yml` 置顶 issue)点名本道卡/PR/座位贴的 H 行,逐行认领或处置,再做其余判据;锚行未处置 ⛔ 不开新派发。
 - **投入冻结随包不随车道**:维护者 2026-08-05 对 `driver-memory` /
   `driver-mongodb` 族的投入冻结继续有效;能穿过冻结的形状是「消除静默失败模式」与
   清账/对齐既有能力,形如**能力投资**的卡派发前须取裁决;`formula` / `driver-sql`

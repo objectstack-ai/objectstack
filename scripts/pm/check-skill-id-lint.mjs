@@ -54,6 +54,27 @@ export const SCAN_ROOT = '.claude/skills/pm-dispatch';
 export const EXTRA_FILES = ['.claude/agents/os-dev.md', 'AGENTS.md'];
 export const ID_PATTERN = /#[0-9]{3,}/g;
 
+/**
+ * The repo-ROOT files above, declared for `scripts/pm/dispatch-gates.mjs`
+ * (#9979, applying #9964's pattern).
+ *
+ * That tool derives a card's gate list from the path literals in each gate's
+ * own source, and "looks like a path" there means "carries a separator". Both
+ * of the constants above satisfy that except `AGENTS.md` — a repo-root FILE has
+ * no separator to be found by — so this gate contributed hints for its skill
+ * tree and its os-dev.md twin, and an AGENTS.md card derived it not at all.
+ * `<file>/**` is the form that reaches one: the extractor accepts it, and
+ * `collapseHint` reduces it back to `AGENTS.md` and to nothing else. Nothing in
+ * the tree lives under `AGENTS.md/`, so it claims no directory and no
+ * same-named file inside one (`examples/AGENTS.md` stays out).
+ *
+ * ⚠️ Provenance, NOT a lookup key. `run` opens every path in `EXTRA_FILES`;
+ * the glob spelling appearing there would send this gate looking for a file
+ * that does not exist — red under the cannot-read rule, for a file that is
+ * fine. The self-test pins both halves.
+ */
+export const ROOT_FILE_WATCH_HINTS = ['AGENTS.md/**'];
+
 // Exact-count legacy waiver (see header): pass iff count === legacy || count === 0.
 export const LEGACY_EXACT = new Map([]);
 
@@ -156,6 +177,17 @@ function selfTest() {
     ['red message names the standard', verdictFor('x.md', 2).msg.includes('self-contained'), true],
     ['placeholders stay legal', ('#<n> #N epic:#<n> #12 #34'.match(ID_PATTERN) ?? []).length, 0],
     ['real IDs match', ('see #4650 and #12345'.match(ID_PATTERN) ?? []).length, 2],
+    // The dispatch-gates declaration (#9979). Enforcement cannot hold any of
+    // these: the declaration is read by another tool entirely, so a wrong or
+    // missing entry runs perfectly green here and shows up only as a dev
+    // dispatched on an AGENTS.md card with this gate absent from the brief.
+    ['every separator-less scanned file declares a root-file watch hint', EXTRA_FILES.filter((f) => !f.includes('/')).every((f) => ROOT_FILE_WATCH_HINTS.includes(`${f}/**`)), true],
+    ['and the declaration names no file this gate does not scan', ROOT_FILE_WATCH_HINTS.every((h) => EXTRA_FILES.includes(h.replace(/\/\*+$/, ''))), true],
+    ['AGENTS.md is the root file it declares', ROOT_FILE_WATCH_HINTS.includes('AGENTS.md/**'), true],
+    // Provenance, never a lookup key: `run` opens every EXTRA_FILES entry, so
+    // the glob form appearing there would make this gate read a path that does
+    // not exist — red on a missing input, for a file that is fine.
+    ['the declared form is NOT an EXTRA_FILES entry', EXTRA_FILES.some((f) => ROOT_FILE_WATCH_HINTS.includes(f)), false],
   ];
   let failed = 0;
   for (const [name, actual, expected] of cases) {

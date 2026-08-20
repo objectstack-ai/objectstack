@@ -1,5 +1,445 @@
 # @objectstack/cloud-connection
 
+## 17.1.0
+
+### Minor Changes
+
+- e0695b5: fix(cloud-connection): the four mutating `install-local` routes require the `manage_metadata` capability, and the `x-user-id` header fallback is gone (#8976)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Four route handlers gain
+  a capability gate, one identity resolver is replaced by the shared one, plus one
+  new test file and a shared test fixture. No authorable property is added,
+  renamed, retired or tombstoned, so there is no conversion to register. The
+  behavioural change is that four package-install doors stop accepting callers who
+  hold no authoring capability, and stop accepting a bare identity header. -->
+  
+  **BREAKING for any integration that installs, uninstalls, reseeds or purges a
+  local marketplace package with a principal holding no authoring capability — and
+  for anything that identified itself to these routes with an `x-user-id` header.**
+  Landing after the v17.0.0 cut, so it ships as `minor` under the lockstep
+  launch-window convention.
+  
+  `MarketplaceInstallLocalPlugin`'s `requireAuthenticatedUser` asked one question —
+  "is there a session?" — and it was the only check on all four mutating routes:
+  
+  - `POST /api/v1/marketplace/install-local` — accepts an **inline manifest**,
+    hot-registers its objects into the shared registry, runs `syncSchemas()`
+    against the shared database, writes the install ledger and runs seed data;
+  - `DELETE /api/v1/marketplace/install-local/:manifestId`;
+  - `POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data`;
+  - `POST /api/v1/marketplace/install-local/:manifestId/purge-sample-data`.
+  
+  It also ended in a fallback that trusted a bare **`x-user-id` request header**,
+  commented as being "for cases where auth is disabled (e.g. test stubs)".
+  
+  **Measured through the composed plugin, to the point the state actually changes**
+  — `manifest.register()`, `objectql.syncSchemas()`, the ledger file on disk,
+  `SeedLoaderService.load()`, `driver.delete()`. All three principal shapes were
+  indistinguishable, and every effect fired for every one of them:
+  
+  | principal | install | reseed | purge | uninstall |
+  |:--|:--|:--|:--|:--|
+  | bare `x-user-id` header, **no session** | **200** | **200** | **200** | **200** |
+  | authenticated, **no** `manage_metadata` | **200** | **200** | **200** | **200** |
+  | authenticated, `manage_metadata` | 200 | 200 | 200 | 200 |
+  
+  Nothing downstream refused any of it. The first row is the sharper half: with no
+  session store consulted first, a caller who could reach the port completed a
+  full schema-mutating install and had `installedBy` recorded as a string of their
+  own choosing.
+  
+  **Severity by deployment shape.** Metadata is environment-scoped rather than
+  org-scoped, so Layer 0's tenant wall does not reach these writes: on the walled
+  multi-org EE shape this is a cross-tenant write channel — any signed-up user of
+  any customer organization could mutate the schema every other tenant runs on,
+  and `organization_admin` deliberately withholds `manage_metadata` precisely
+  because a tenant administrator is not supposed to. It also nullified the
+  already-implemented cloud-side ruling that AI `build` be structurally closed on
+  that shape: closing the build agent while this route stayed open closed the
+  front door and left the loading dock unlocked. On a single-org self-host the
+  severity is genuinely lower — every user is one tenant's — but "any employee
+  with a login can alter the schema and run seed data" still contradicts the
+  operator-action framing, and the header fallback admitted callers with no login
+  at all. The measurements above are code-path measurements through a composed
+  host, not an exploit demonstrated against a running deployment.
+  
+  **The fix.** All four routes now resolve identity **and** capability through
+  `resolveAuthzContext` — the platform's single authorization resolver
+  (`@objectstack/core`) — and demand ADR-0066 D1's `manage_metadata`, the same key
+  the `/meta` write doors carry (#6603, and #8919 for the promotion verbs). A
+  caller with no resolvable principal gets `401 UNAUTHENTICATED`; an authenticated
+  caller without the capability gets `403 FORBIDDEN` naming the capability they
+  need. The refusal is issued before any work, so a refused caller cannot probe
+  what is installed through a downstream error. Service and operator tokens are
+  exempt exactly as elsewhere, with no special case: an API key resolves through
+  the same resolver to its owner's real grants.
+  
+  **The `x-user-id` fallback is removed, not mode-gated.** It carried no mode flag
+  to gate it to, and it was the last `x-user-id` trust left in `packages/**`
+  source — the two sibling raw-route surfaces that carried the identical line had
+  it *removed* in favour of this same resolver rather than restricted
+  (`plugin-sharing`'s share-link routes, `service-settings`' settings routes). The
+  one first-party caller of these routes, `os package install`, signs in for a
+  real better-auth session cookie and never sent the header.
+  
+  The plugin's mount stays **unconditional** (cloud#1287 moved it out of the
+  `marketplaceUrl` ternary so air-gapped boxes stop 404ing). This is authorization
+  on the routes, not un-mounting the plugin.
+  
+  **Anti-drift.** `marketplace-install-local-capability-enumeration.test.ts`
+  derives the mutating routes from the plugin's own route table and compares them
+  against a declared list, so a new mutating install-local route fails the build
+  until it is enumerated and its refusal cases run. Each refusal asserts the
+  ADR-0112 envelope (`code` **and** `status`) *and* that no registry, schema,
+  ledger, seed or delete effect fired — a gate that answers 403 after
+  `syncSchemas()` has run is still the bug.
+  
+  Two existing suites whose names read as authorization coverage —
+  `marketplace-install-local-posture-gate.test.ts` (the ADR-0120 D5e ceremony,
+  which the caller satisfies from their own request body) and
+  `marketplace-install-local-tenancy-posture.test.ts` (which selects a seeding
+  path) — now open with an explicit statement of what they do **not** cover and
+  name the file that does, backed by an assertion that the named file exists so
+  the correction cannot rot into a wrong answer. Neither test was weakened.
+- 01074e5: fix(cloud-connection): the `install-local` listing requires an authenticated principal, and narrows `installedBy` / `storageDir` to `manage_metadata` holders (#9011)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) One route handler gains an
+  authorization gate and a caller-dependent response projection, one 401 envelope is
+  extracted into a shared seam, plus one new test file. No authorable property is added,
+  renamed, retired or tombstoned, so there is no conversion to register. The behavioural
+  change is that one package-inventory read stops answering anonymous callers, and stops
+  serving two operator-grade fields to callers who hold no authoring capability. -->
+  
+  **BREAKING for any consumer that reads this route anonymously — it now answers `401`
+  — and for any authenticated non-operator consumer that reads `installedBy` or
+  `storageDir` from it.** Landing after the v17.0.0 cut, so it ships as `minor` under the
+  lockstep launch-window convention.
+  
+  `GET /api/v1/marketplace/install-local` — the console's Setup → "Installed Apps" list —
+  called **no** identity resolution whatsoever. `handleList`'s first statement read the
+  ledger. After #8976 capability-gated the four mutating doors on this surface, this was
+  the only anonymous door left on it: not a weaker gate, the absence of one, so any caller
+  who could reach the port received `200` and the complete payload.
+  
+  **What was disclosed.** Per ledger entry: `packageId`, `versionId`, `manifestId`,
+  `version`, `installedAt`, `installedBy`, `withSampleData`; once per response: `items`,
+  `total`, `storageDir`.
+  
+  - `installedBy` is a **platform user id**, and the listing enumerates them across every
+    install.
+  - `storageDir` is an **absolute filesystem path on the host** (#6721 put it on the wire
+    deliberately, for a *signed-in* CLI operator who cannot see the remote host's disk).
+  - The inventory itself is a version-level software bill of materials for the deployment
+    — which packages, at which versions, installed when.
+  
+  On the walled multi-org EE shape the inventory and the installer identities are
+  cross-tenant information, for the same reason #8976's write channel was: metadata is
+  environment-scoped, not org-scoped, so Layer 0's tenant wall does not scope this read
+  either. Severity is nonetheless lower than #8976's: this is read-only disclosure, not a
+  write channel. The measurement is a code-path measurement through a composed host, not
+  an exploit demonstrated against a running deployment.
+  
+  **The fix — authenticated floor plus field narrowing** (maintainer ruling 2026-08-16):
+  
+  | caller | status | `items` / `total` | `installedBy` | `storageDir` |
+  |:--|:--|:--|:--|:--|
+  | anonymous | **401 `UNAUTHENTICATED`** | — | — | — |
+  | authenticated, **no** `manage_metadata` | 200 | served | **omitted** | **omitted** |
+  | authenticated, `manage_metadata` | 200 | served | served | served |
+  
+  Splitting the payload rather than gating it whole is the point: "which packages are
+  installed here" and "who installed them and where they live on this host" are genuinely
+  different sensitivities. Demanding `manage_metadata` for the whole read would have
+  withdrawn a console page that ships to non-operator users today, and an authenticated
+  floor alone would have left the user ids and the host path on the wire for every signed-in
+  account.
+  
+  The two narrowed keys are **omitted, not nulled** — `null` would be a claim about the
+  ledger ("installed by nobody") instead of a fact about the caller. The console already
+  renders the "installed by" line conditionally and never reads `storageDir`, so a narrowed
+  caller sees the same list minus that one line.
+  
+  Identity is resolved by the **same** `resolveInstallPrincipal` the four mutating doors use
+  — `resolveAuthzContext`, the platform's single authorization resolver — not a second
+  session read; two auth mechanisms in one file is how the next gap gets created, and this
+  file has already produced one. The 401 envelope is extracted into one
+  `refuseUnauthenticated` seam shared by all five routes, so a client branching on
+  `UNAUTHENTICATED` never has to learn which door it knocked on. The read door inherits
+  #8976's removal of the `x-user-id` fallback: a bare header is still anonymous.
+  
+  **No new capability is minted** (#8919 discipline) — the narrowing reuses
+  `manage_metadata`, matching the `/meta` precedent. The plugin's mount stays
+  **unconditional** (cloud#1287 moved it out of the `marketplaceUrl` ternary so air-gapped
+  boxes stop 404ing); the answer to an unauthorized read is a refusal, never an absent
+  route, and the enumeration suite still asserts the GET is mounted.
+  
+  **Pinned.** `marketplace-install-local-list-posture.test.ts` pins all three rows above and
+  states, in its own docblock, that it is the file which answers "is the listing gated?" —
+  the sibling `capability-enumeration` suite answers that only for the mutating doors and
+  deliberately filters the GET out. The non-operator row is pinned in **both** directions
+  (the inventory is present *and* the two fields are absent), because asserting only the
+  absences would keep passing if that caller were refused outright — the option the ruling
+  rejected. The refusal asserts the ADR-0112 envelope (`code` **and** `status`) and that it
+  is issued **before** the ledger is read, so a refused caller cannot probe what is installed
+  through timing or a storage error.
+- 990a893: fix(runtime-config): `OS_PRODUCT_STAGE` / `branding.stage` actually reaches `/api/v1/runtime/config`, so the documented preview-badge switch stops being a no-op (#9252)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) One constructor option
+  and one optional response key are ADDED; nothing authorable is renamed, retired
+  or tombstoned, and no stored `sys_metadata` shape changes. There is no
+  conversion to register. -->
+  
+  Running `examples/app-showcase` with `OS_PRODUCT_STAGE=ga objectstack dev` left
+  the Console's "Preview" chip on screen. `RuntimeConfigPlugin` never emitted
+  `branding.stage`, so objectui's `PreviewBadge` — which reads exactly that key —
+  never saw the value, and the switch objectui's app-shell README presents as the
+  operational way to hide the badge did nothing at all.
+  
+  **Nobody implemented it, in either distribution.** The card guessed the knob was
+  "honored only by the cloud distribution"; measured with a control first, so the
+  zeros are a reading rather than a broken search:
+  
+  | probe | result |
+  |---|---|
+  | `OS_PRODUCT_STAGE`, framework repo-wide | 0 hits |
+  | `OS_PRODUCT_STAGE` / `branding.stage` / `PlatformStage`, cloud repo-wide | 0 hits |
+  | control: `OS_PRODUCT_NAME`, cloud repo | 9 hits |
+  | control: files mentioning `branding`, cloud repo | 18 files |
+  
+  So this is the declared-but-unenforced trap in its purest form: a documented
+  operator knob with no producer anywhere. Emitting the key restores an
+  already-declared contract rather than widening a surface — no request that is
+  accepted today becomes rejected, or vice versa.
+  
+  **Resolved in the plugin, not threaded through the CLI.** Both halves of the
+  documented interface name this plugin (`OS_PRODUCT_STAGE` **or**
+  `new RuntimeConfigPlugin({ stage })`), every sibling branding key already
+  resolves `config.X ?? OS_X` in the same constructor, and — decisively — the
+  card's own repro constructs its **own** `RuntimeConfigPlugin` in
+  `examples/app-showcase/objectstack.config.ts`, which wins over the CLI's by
+  plugin name. A value threaded through `Serve.RUNTIME_CONFIG_OPTIONS` would have
+  left the reported repro still broken. The cloud distribution inherits the fix
+  for free: its `RuntimeConfigPlugin` extends this one and spreads its config into
+  `super()`, so there is one mechanism answering this question, not two.
+  
+  **The value space is closed** — `'preview' | 'beta' | 'ga'`, mirroring the
+  `PlatformStage` union the Console branches on (exported as `PlatformStage`). An
+  unrecognised value is refused and named in a mount-time `warn` listing the
+  accepted spellings, never forwarded: the SPA discards off-contract values
+  anyway, so a passthrough would recreate this bug's exact shape — an operator
+  sets the knob, nothing happens, nothing is said.
+  
+  **Unset stays absent.** No `stage` key at all, rather than an empty string or a
+  default invented server-side, so the Console keeps applying its own documented
+  `'preview'` default and nothing that works today changes. The regression proof
+  asserts that direction on **key presence** (`hasOwnProperty`), not
+  `toBeUndefined()` — `{ stage: undefined }` satisfies the latter while being a
+  present property that survives `structuredClone` and shows up in `Object.keys`.
+
+### Patch Changes
+
+- 2277443: fix(cloud-connection,service-automation): stop two plugin classes renaming themselves in the shipped build, and enforce the class-name identity limb against `Ctor.name` (#8645)
+  
+  `Serve.providesCapability` (`packages/cli/src/commands/serve.ts`) decides whether a
+  host already supplied a capability's provider by comparing, by equality, both a
+  loaded plugin's `name` and its `constructor.name` against a declared identity
+  list. Every identity registry in that file therefore declares two spellings per
+  provider — the registered `plugin.name` id and the exported class name — and the
+  class-name spelling is a claim about the **built** artifact.
+  
+  **Measured against the built packages, two of the 27 declared class-name
+  identities matched nothing at all:**
+  
+  ```
+  MISMATCH CAPABILITY_PROVIDERS.automation   declared=AutomationServicePlugin  runtime=_AutomationServicePlugin
+  MISMATCH Serve.MARKETPLACE_PROXY_IDENTITIES declared=MarketplaceProxyPlugin  runtime=_MarketplaceProxyPlugin
+  ```
+  
+  Both classes referenced themselves **by name inside their own body** —
+  `MarketplaceProxyPlugin.prototype.version` building the outbound proxy
+  User-Agent, and a `private static` backoff helper called from an instance method
+  in the automation plugin. esbuild rewrites such a class into
+  `var X = class _X { … _X … }` so the inner reference binds to the class binding
+  rather than the outer `var`, and the emitted class reports `_X` as its `.name`.
+  
+  There was no user-visible impact, because every guard naming these plugins also
+  declares the registered id, which the instance carries as a plain field no
+  bundler touches. What was dead is the **redundancy**: a guard running on one
+  limb it does not know it is running on is one rename away from failing open —
+  and failing open here means silently mounting a second instance over a host's
+  own.
+  
+  Both source idioms are replaced with module-scope declarations, so the shipped
+  classes keep their names. The marketplace proxy's self-reference was also
+  reading a field that was never there (`version` is an instance field, so
+  `prototype.version` was always `undefined`): its outbound `User-Agent` announced
+  the `?? '1.0.0'` fallback on every request and now announces the plugin's real
+  version, `1.1.0`.
+  
+  The enforcement half lives in `packages/cli/test/serve-capability-identity.test.ts`:
+  every declared class-name identity, across `CAPABILITY_PROVIDERS` and the four
+  marketplace identity lists, is now compared to the runtime `Ctor.name` of the
+  export it names, and must satisfy `providesCapability` through the class-name
+  limb alone. The `*_IDENTITIES` statics are re-derived from `Serve` itself, so a
+  fifth list cannot be added without being enumerated. #8357's local
+  "modulo one leading underscore" accommodation is retired rather than left as a
+  third spelling of the same rule.
+- 7c3a7eb: Marketplace install-local now registers the per-organization seed replayer alongside its dataset merge, so organizations founded after an install are no longer empty.
+  
+  Installing a package merged its `data` blocks onto the kernel's shared `seed-datasets` service but never registered the `seed-replayer` service that consumes them. That replayer is registered in `AppPlugin`'s seeder path, so a host runtime declaring no seed data of its own — `objects: []`, no `data`, which is exactly the shape a marketplace install targets — ended up with datasets present and no replayer. On a walled (`isolated` / `group`) deployment the org-scoping middleware then found the datasets, found no replayer, and did nothing: every organization founded after the install received zero rows of the installed app, while the installer's own organization looked correct because it had been seeded inline at install time.
+  
+  `applySideEffects` now calls the runtime's `registerSeedReplayerOnce` next to the merge, on both the install and the rehydrate path. Registration is register-once by construction, so a host that already has a replayer keeps it and is unaffected; the incumbent re-reads the same shared list and replays the newly installed datasets too.
+- d2e6b1d: Cloud-connection refusals now emit the response envelope they declare.
+  
+  Eleven error exits on `/api/v1/cloud-connection/*` answered with
+  `error: { code }` and no `message`. `ApiErrorSchema.message` is REQUIRED, so
+  `body.error.message` read `undefined` on the wire for every one of them — the
+  Console had already grown the accommodation that produces, displaying
+  `body?.error?.message ?? body?.error?.code` and so showing a machine code to a
+  human. All eleven now carry a readable message; no status and no code changed.
+  
+  `POST /api/v1/cloud-connection/bind/poll` additionally stamped the UPSTREAM
+  RFC 8628 spelling (`expired_token`, `access_denied`, …) straight into
+  `error.code`, which is a closed ADR-0112 vocabulary — so that body failed its
+  own contract. The wire change, for anyone branching on it:
+  
+      before:  { success: false, data: { pending: false },
+                 error: { code: "expired_token" } }
+      after:   { success: false, data: { pending: false },
+                 error: { code: "DEVICE_CODE_FAILED",
+                          declaredCode: "expired_token",
+                          message: "Device authorization failed: expired_token" } }
+  
+  Nothing is lost: the verbatim upstream spelling now rides `declaredCode`, the
+  open producer-authored channel ADR-0112 declares for a code the serving side's
+  ledger does not know. Read `error.declaredCode` where you previously read
+  `error.code` for the RFC 8628 value; `error.code` is now the registered member,
+  which is what a consumer branching on platform conditions should key on.
+- Updated dependencies [56656aa]
+- Updated dependencies [07e630e]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [ca2e020]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [2782805]
+- Updated dependencies [e43d63a]
+- Updated dependencies [e374b4d]
+- Updated dependencies [a433122]
+- Updated dependencies [bc6434b]
+- Updated dependencies [96f397a]
+- Updated dependencies [9aa8890]
+- Updated dependencies [48032c9]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [6a51704]
+- Updated dependencies [2d0af57]
+- Updated dependencies [c766ec3]
+- Updated dependencies [420804d]
+- Updated dependencies [c8e85fc]
+- Updated dependencies [3d61924]
+- Updated dependencies [5244fd7]
+- Updated dependencies [716ac9b]
+- Updated dependencies [a38408a]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [b2789ad]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [27a567d]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [6aceca9]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [1e050a5]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [24173e9]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [f8eb736]
+- Updated dependencies [11b779e]
+- Updated dependencies [739fe5b]
+- Updated dependencies [20067c5]
+- Updated dependencies [e783e16]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [4fc4a3c]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [e2899f6]
+- Updated dependencies [17854cb]
+- Updated dependencies [3851f87]
+- Updated dependencies [09b880b]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [e1bb0ca]
+- Updated dependencies [30d3752]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [7fc01db]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [c86799f]
+- Updated dependencies [5989b0d]
+- Updated dependencies [19db5fa]
+- Updated dependencies [2b9d33a]
+- Updated dependencies [ad217b1]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [402c125]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [44bc51d]
+- Updated dependencies [bbbfcfc]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+  - @objectstack/spec@17.1.0
+  - @objectstack/types@17.1.0
+  - @objectstack/runtime@17.1.0
+  - @objectstack/core@17.1.0
+
 ## 17.0.0
 
 ### Minor Changes

@@ -648,10 +648,17 @@ const opportunities = await engine.find('opportunity', {
 > tests the *resolved* behavior, so it cannot tell the two apart: writing
 > `set_null` explicitly on a required lookup does not opt out of the refusal,
 > and it does not change the outcome in any way. `cascade` and `restrict` are
-> the two values that are honored as written. On a `multiple: true` required
-> lookup the refusal comes first as well, before the member-removal rule below
-> applies — so the parent delete is refused even when the child's set holds
-> other members.
+> the two values that are honored as written.
+>
+> On a `multiple: true` required lookup the escalation is judged **per row**,
+> after the referencing rows are known — because `set_null` there removes only
+> the deleted **member** (see the member-removal rule above), and a required
+> set is only violated when nothing is left. A row that still holds another
+> member is written its remainder and the parent delete goes through; a row the
+> removal would EMPTY keeps the refusal, since `[]` does not satisfy `required`
+> on a multi-value field. When both kinds of row reference the record, the
+> delete is refused and `dependentCount` counts only the rows that would have
+> been emptied.
 >
 > On `master_detail` the same reading applies from the other side: `restrict`
 > is the only value that deviates from `cascade`, so an explicit

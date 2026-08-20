@@ -207,7 +207,7 @@ client.data.find('project_task', { /* query */ });
 **Cause:** The record has dependent child records via a `lookup` or `master_detail` field, and that field resolves to `restrict`. Two routes get there:
 
 1. The field declares `deleteBehavior: 'restrict'`.
-2. The field is a `required: true` lookup whose behavior is `set_null`. A required foreign key cannot be cleared, so `set_null` is escalated to `restrict` — including when `set_null` is written out explicitly, and including a `required: true` lookup with `multiple: true`. Check the refusal's `developerMessage`: the escalated route says `(<field> is required, so it cannot be cleared)`.
+2. The field is a `required: true` lookup whose behavior is `set_null`. A required foreign key cannot be cleared, so `set_null` is escalated to `restrict` — including when `set_null` is written out explicitly. On a `multiple: true` required lookup the escalation is judged per referencing row, because `set_null` removes only the deleted member there: rows that keep another member are updated, and the delete is refused only over the rows the removal would leave EMPTY (`dependentCount` counts just those). Check the refusal's `developerMessage`: the escalated route says `(<field> is required, so it cannot be cleared)`.
 
 **Fix:**
 1. Delete or reassign the dependent records first

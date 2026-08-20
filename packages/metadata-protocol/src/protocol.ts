@@ -3225,6 +3225,67 @@ export interface UninstallCleanupOutcome {
 }
 
 /**
+ * [#9960] The declared REQUEST shape of
+ * {@link ObjectStackProtocolImplementation.deletePackage} — the ONE statement
+ * of this verb's contract, imported by every seam that speaks it.
+ *
+ * WHY IT IS NAMED. `deletePackage` has no `packages/spec` declaration (it is
+ * absent from `PackageProtocol`), and until this type existed its shape was
+ * stated THREE times, differently, by the three modules that share the seam:
+ * an inline structural type on the method below; a narrower restatement on
+ * `PackageRoutesOptions.protocol.deletePackage` in `@objectstack/rest`, which
+ * named neither `organizationId` nor `keepData`; and no type at all in the
+ * dispatcher twin (`packages/runtime/src/domains/packages.ts`), which reached
+ * the verb through `(protocol as any)` and routinely sent exactly the two keys
+ * the REST restatement could not express. Naming the shape once, HERE at the
+ * producer, is what makes the other two seams compile-checked against the
+ * contract instead of each against its own copy.
+ *
+ * ⛔ Deliberately NOT declared in `packages/spec`: minting protocol surface for
+ * a verb with zero external consumers is declare-and-maintain the platform has
+ * not asked for. Should an external consumer ever appear, the spec declaration
+ * is its own card for the spec seat, not a rider on a typing convergence.
+ *
+ * `organizationId` is the load-bearing member. The tenant-scope gate in
+ * `deletePackage` refuses a call naming neither it nor `allTenants`
+ * (`TENANT_SCOPE_REQUIRED`, 400 — #7780), so it is precisely the key whose
+ * presence decides an uninstall's blast radius, and it was the key the REST
+ * seam's own type had no word for.
+ */
+export interface DeletePackageRequest {
+    packageId: string;
+    /**
+     * Scope the uninstall to ONE organization's rows (#7705). Omitted together
+     * with `allTenants` ⇒ refused, never inferred as "every tenant" (#7780).
+     */
+    organizationId?: string;
+    /** DECLARE a cross-tenant uninstall. Never deduced from an absent org (#7780). */
+    allTenants?: boolean;
+    actor?: string;
+    /** Remove the metadata but PRESERVE each object's physical table. */
+    keepData?: boolean;
+}
+
+/**
+ * [#9960] The declared RESPONSE shape of
+ * {@link ObjectStackProtocolImplementation.deletePackage}, stated once for the
+ * same reason as {@link DeletePackageRequest}.
+ *
+ * `deleted` is part of it. The REST seam's restatement omitted that member
+ * entirely, so a caller reading the option's type was told this verb reports
+ * only a COUNT of what it removed — while the producer has always returned the
+ * per-item list beside it.
+ */
+export interface DeletePackageResponse {
+    success: boolean;
+    deletedCount: number;
+    failedCount: number;
+    deleted: Array<{ type: string; name: string; state: string }>;
+    failed: Array<{ type: string; name: string; error: string; code?: string }>;
+    cleanups: UninstallCleanupOutcome[];
+}
+
+/**
  * Post-persistence metadata-mutation notification (#2588). Emitted by
  * `saveMetaItem` / `publishMetaItem` / `deleteMetaItem` AFTER the write
  * landed. `type` is the singular metadata type name. Subscribe via
@@ -3823,6 +3884,14 @@ export class ObjectStackProtocolImplementation implements
          * which is one limb of the #6285 refusal combination.
          */
         organizationId?: string | null;
+        /**
+         * [#9612] The package this write belongs to (`saveMetaItem`'s
+         * `packageId`, or the promoted draft row's). It decides the CLOSURE the
+         * write is judged against — see {@link resolveWritePackageScope}.
+         * Absent, unknown to the registry, or the `sys_metadata` overlay
+         * sentinel ⇒ nothing is narrowed.
+         */
+        packageId?: string | null;
     }): RuntimeAuthoringIssue[] {
         // [#6710] The ADR-0005 carve-out, now DECLARED instead of inferred.
         //
@@ -3909,6 +3978,11 @@ export class ObjectStackProtocolImplementation implements
         // dangling (see RuntimeStackContext.datasets).
         const datasets = listCollection('dataset', 'datasets');
 
+        // [#9612] The closure this write is judged against. Resolved from the
+        // package registry — the impure read — and handed to the pure gate as
+        // an argument, the same shape `orgWallEnforced` uses below.
+        const packageScope = this.resolveWritePackageScope(evt.packageId);
+
         const verdict = evaluateRuntimeAuthoringGate({
             type: singular,
             name: evt.name,
@@ -3918,11 +3992,95 @@ export class ObjectStackProtocolImplementation implements
             permissions,
             books,
             datasets,
+            ...(packageScope !== undefined ? { packageScope } : {}),
             ...(evt.organizationId !== undefined ? { organizationId: evt.organizationId } : {}),
             orgWallEnforced: this.orgWallEnforced(),
         });
         if (verdict.error) throw verdict.error;
         return verdict.advisories;
+    }
+
+    /**
+     * [#9612] The package closure a write is judged against, or `undefined`
+     * when the gate must keep receiving the whole tenant.
+     *
+     * ## What it computes
+     *
+     * `{ packageId, dependencies }` where `dependencies` is the TRANSITIVE
+     * closure of the written package's declared `manifest.dependencies`. The
+     * lint gate then keeps an object when it belongs to one of those packages,
+     * is a platform/system object, or carries no package provenance at all
+     * (`narrowObjectsToPackageClosure`).
+     *
+     * ## Why it can be exact rather than an estimate
+     *
+     * A package's declared dependencies bound what it MAY reference. So the
+     * set of objects a package write can legitimately resolve against is a
+     * DECLARED fact the platform already stores, not something the gate has to
+     * infer from the body it is judging. That is the whole reason the
+     * maintainer's ruling picks the package as the validation unit
+     * (「客户开发开发,校验是否也应该基于软件包」) rather than "whatever this
+     * rule can be proven to reach", which would be a second opinion per rule.
+     *
+     * ## Every way this returns `undefined`, and why that direction is safe
+     *
+     * - no package id on the write (a bare tenant overlay row);
+     * - the `sys_metadata` sentinel, which marks a rehydrated overlay row and
+     *   is not a package id (`registry.ts` reads it the same way);
+     * - **the registry cannot produce the package** — so its dependency
+     *   declaration cannot be read, and an undeclared bound is not a bound;
+     * - the registry has no `getPackage` at all (a metadata-only test double),
+     *   or throws.
+     *
+     * In every one of those the gate receives the WHOLE collection and behaves
+     * exactly as it did before this change. ⛔ There is deliberately no branch
+     * that narrows on a guess and no branch that skips rules: the failure
+     * direction is more validation input, never less. A "skip when N is large"
+     * fast path is the fail-open at scale this card was explicitly forbidden to
+     * build (#9798 declared-but-unenforced, #9261 an outage read as emptiness,
+     * ADR-0110 D3 — a miss and a fault are different facts).
+     */
+    private resolveWritePackageScope(
+        packageId: string | null | undefined,
+    ): { packageId: string; dependencies: string[] } | undefined {
+        if (typeof packageId !== 'string' || packageId === '' || packageId === 'sys_metadata') return undefined;
+        try {
+            const registry = this.engine.registry as
+                | { getPackage?: (id: string) => { manifest?: unknown } | undefined }
+                | undefined;
+            if (typeof registry?.getPackage !== 'function') return undefined;
+            // The written package itself must be readable: its manifest is the
+            // ONLY declaration of what it may reference, and narrowing without
+            // it would be narrowing on nothing.
+            if (!registry.getPackage(packageId)) return undefined;
+
+            const dependencies = new Set<string>();
+            const frontier = [packageId];
+            while (frontier.length > 0) {
+                const current = frontier.pop() as string;
+                const manifest = registry.getPackage(current)?.manifest as
+                    | { dependencies?: Record<string, unknown> }
+                    | undefined;
+                const declared = manifest?.dependencies;
+                if (!declared || typeof declared !== 'object') continue;
+                for (const dep of Object.keys(declared)) {
+                    // A dependency the registry cannot resolve is still IN the
+                    // closure: the package declared it, so an object stamped
+                    // with it is reachable by declaration. Only the transitive
+                    // walk stops there — `getPackage` returns undefined and the
+                    // loop above simply contributes nothing further.
+                    if (dep === packageId || dependencies.has(dep)) continue;
+                    dependencies.add(dep);
+                    frontier.push(dep);
+                }
+            }
+            return { packageId, dependencies: [...dependencies] };
+        } catch {
+            // Context gathering must never fail a write (the same contract
+            // `listCollection` above holds). An unreadable registry means an
+            // unnarrowed gate, not a refused publish.
+            return undefined;
+        }
     }
 
     /**
@@ -12903,6 +13061,11 @@ export class ObjectStackProtocolImplementation implements
             // it simply never travelled to the gate, which is the whole reason
             // the "platform-level flow" limb could not be judged before.
             organizationId: request.organizationId ?? null,
+            // [#9612] Which package this write belongs to — the unit the gate
+            // now judges it against. Same story as the line above: the request
+            // has carried it all along, it just never reached the gate. Null
+            // (a bare tenant overlay) narrows nothing.
+            packageId: request.packageId ?? null,
         });
 
         // Pre-persistence authoring gate (#3050): a domain plugin may veto the
@@ -14107,6 +14270,23 @@ export class ObjectStackProtocolImplementation implements
                 // it the draft door would be a bypass for this refusal alone,
                 // which is the exact hole #4463 D1 closed for the other 26.
                 organizationId: orgId,
+                // [#9612] The package binding the CALLER stated for this
+                // promotion — the same value threaded into `repo.promoteDraft`
+                // below, so the gate and the write resolve the draft under one
+                // key rather than two. `publishPackageDrafts` states it (a
+                // package publish, which is exactly the write this card is
+                // about); bare `publishMetaItem` names no package and so
+                // narrows nothing, which is the correct answer rather than a
+                // gap — a promotion whose package is unstated has no declared
+                // dependency set to bound it.
+                //
+                // ⚠️ Deliberately NOT read off `draftForGate`: `rowToItem`
+                // projects `sys_metadata` into a `MetadataItem`, which carries
+                // no package id at all, so a read from there would be
+                // silently `undefined` on every path — narrowing that never
+                // fires while looking like it does. Filed rather than widened
+                // here, because `MetadataItem` is a `packages/spec` contract.
+                ...(request.packageId !== undefined ? { packageId: request.packageId } : {}),
             })
             : [];
 
@@ -15376,20 +15556,7 @@ export class ObjectStackProtocolImplementation implements
      * so each object's table is torn down once. Per-item failures are collected
      * without aborting the rest.
      */
-    async deletePackage(request: {
-        packageId: string;
-        organizationId?: string;
-        allTenants?: boolean;
-        actor?: string;
-        keepData?: boolean;
-    }): Promise<{
-        success: boolean;
-        deletedCount: number;
-        failedCount: number;
-        deleted: Array<{ type: string; name: string; state: string }>;
-        failed: Array<{ type: string; name: string; error: string; code?: string }>;
-        cleanups: UninstallCleanupOutcome[];
-    }> {
+    async deletePackage(request: DeletePackageRequest): Promise<DeletePackageResponse> {
         // [#7780] A cross-tenant uninstall must be DECLARED, never inferred from
         // an absent parameter. Maintainer ruling (2026-08-12):
         // 跨租户卸载必须显式声明,缺省缺参永远不等于「全部租户」.

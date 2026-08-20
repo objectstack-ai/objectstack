@@ -1,5 +1,76 @@
 # @objectstack/plugin-pinyin-search
 
+## 17.1.0
+
+### Patch Changes
+
+- 7337f30: chore(deps): production-dependency patch bumps from the weekly Dependabot group (#9212)
+  
+  Routine dependency-range refresh, no behavior change: `@oclif/core` 4.13.2→4.13.3,
+  `esbuild` 0.28.1→0.28.2 and `better-sqlite3` ^13.0.2→^13.0.3 (optional) on
+  `@objectstack/cli`; `mingo` 7.2.2→7.2.4 on `@objectstack/driver-memory`; `nanoid`
+  6.0.0→6.0.1 on `@objectstack/driver-mongodb`, `@objectstack/driver-sql`,
+  `@objectstack/driver-sqlite-wasm` and `@objectstack/driver-turso`, plus
+  `better-sqlite3` ^13.0.2→^13.0.3 (optional on `@objectstack/driver-sql`, peer on
+  `@objectstack/driver-turso`); `js-yaml` 5.2.2→5.2.3 on `@objectstack/metadata`;
+  `@noble/hashes` 2.2.0→2.3.0 and `jose` 6.2.5→6.2.8 on `@objectstack/plugin-auth`;
+  `nodemailer` 9.0.3→9.0.5 on `@objectstack/plugin-email`; `@hono/node-server`
+  2.0.12→2.1.1 and `hono` 4.12.34→4.13.2 on `@objectstack/plugin-hono-server`;
+  `pinyin-pro` 3.28.2→3.29.1 on `@objectstack/plugin-pinyin-search`; and
+  `@noble/ciphers` 2.2.0→2.3.0 on `@objectstack/service-settings`.
+  
+  Every entry above changed a `dependencies`, `optionalDependencies` or
+  `peerDependencies` range in the published manifest — the only kind of change
+  that reaches a consumer's install. The same Dependabot group also bumped
+  `devDependencies` on `@objectstack/hono`, `@objectstack/client`,
+  `@objectstack/core`, `@objectstack/plugin-sharing` and `@objectstack/spec`
+  (none consumer-facing), and touched the private `apps/docs`,
+  `examples/app-todo` and workspace-root manifests (none published) — none of
+  those get an entry here.
+- Updated dependencies [2f65b1b]
+- Updated dependencies [2782805]
+- Updated dependencies [e43d63a]
+- Updated dependencies [e374b4d]
+- Updated dependencies [a751f7d]
+- Updated dependencies [eccb8b2]
+- Updated dependencies [650cd3d]
+- Updated dependencies [b735507]
+- Updated dependencies [91c6c28]
+- Updated dependencies [2d0af57]
+- Updated dependencies [a38408a]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [27a567d]
+- Updated dependencies [79c46da]
+- Updated dependencies [7ff3975]
+- Updated dependencies [24173e9]
+- Updated dependencies [f8eb736]
+- Updated dependencies [4e71ae1]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4dfa369]
+- Updated dependencies [5e2f594]
+- Updated dependencies [855591f]
+- Updated dependencies [cd455c8]
+- Updated dependencies [e1bb0ca]
+- Updated dependencies [326f5de]
+- Updated dependencies [21995d7]
+- Updated dependencies [6a5e6ad]
+- Updated dependencies [b2a451f]
+- Updated dependencies [ff08691]
+- Updated dependencies [402c125]
+- Updated dependencies [7c2f386]
+- Updated dependencies [8a9e7f4]
+- Updated dependencies [3d0ded8]
+- Updated dependencies [bbbfcfc]
+- Updated dependencies [1258dca]
+- Updated dependencies [4639cec]
+- Updated dependencies [91c4ff5]
+- Updated dependencies [682b86b]
+- Updated dependencies [6a1b45e]
+  - @objectstack/types@17.1.0
+  - @objectstack/core@17.1.0
+  - @objectstack/objectql@17.1.0
+
 ## 17.0.0
 
 ### Patch Changes

@@ -407,6 +407,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.package-closure-gate.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.package-closure-gate.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.package-publish-audit-rows.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1027,6 +1037,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/admin-revoke-user-session-match-guard.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/admin-revoke-user-session-match-guard.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/auth-manager.jwt-eddsa-fallback.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1072,6 +1092,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/organization-add-member.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/organization-add-member.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/remove-member-permission-guard.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1088,6 +1118,16 @@
     },
     {
       "file": "packages/plugins/plugin-auth/src/remove-user-atomicity.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/revoke-session-match-guard.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/revoke-session-match-guard.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -1378,6 +1418,16 @@
     },
     {
       "file": "packages/rest/src/public-form-routes.stored-row.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/rest-batch-endpoint.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/rest-batch-endpoint.test.ts",
       "verb": "update",
       "pinned": 1
     },

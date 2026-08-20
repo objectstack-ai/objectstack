@@ -6,6 +6,13 @@ import { ApiErrorSchema } from '@objectstack/spec/api';
 import type { ConnectorDescriptor } from '@objectstack/spec/integration';
 import type { IAuthService, IAutomationService } from '@objectstack/spec/contracts';
 
+// [#10126] Pay the first transform of these dist-resolved workspace deps at MODULE
+// LOAD. Each is reached below through a dynamic `import()` inside an `it()` body or a
+// hook -- both of which vitest clocks, while collection is clocked against nothing. See
+// `scripts/check-test-source-alias.mjs` (the clocked-window rule) and #10115 / PR #10120,
+// where the same shape cost 30 ejected merge-queue builds in one night.
+import '@objectstack/metadata-protocol';
+
 /**
  * [#4127] Mock-shape guard: every key must be a method the contract DECLARES.
  *
@@ -3965,7 +3972,7 @@ describe('HttpDispatcher — action body ctx.user identity (#2701)', () => {
     expect(user.permissions).toEqual(['convert_lead']);
     expect(user.email).toBe('rep@acme.test');
     // #3280 made `organizationId` the blessed name; the `tenantId` alias was
-    // removed in v11 (#3290) and must no longer be emitted on ctx.user.
+    // removed in v16 (#3290) and must no longer be emitted on ctx.user.
     expect(user.organizationId).toBe('org_acme');
     expect(user.tenantId).toBeUndefined();
   });

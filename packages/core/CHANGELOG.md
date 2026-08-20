@@ -1,5 +1,543 @@
 # @objectstack/core
 
+## 17.1.0
+
+### Minor Changes
+
+- 2782805: feat(security): the REST 401 anonymous-deny body carries `code: "UNAUTHENTICATED"` alongside the existing `error` / `message` keys (#9487)
+  
+  Every other REST error family answers `{ error, code }`, with the machine code
+  in `code` — the 401 family was the one outlier, answering
+  `{ error: "UNAUTHENTICATED", message }` with no `code` key at all. A client
+  keying on `body.code` (the shape the other families teach, and the first read
+  of `@objectstack/client`'s `err.code`) read `undefined` for every
+  authentication failure.
+  
+  `ANONYMOUS_DENY_BODY` now carries `code: "UNAUTHENTICATED"` as well.
+  **Additive only** (maintainer-ruled): no key is removed or moved — `error`
+  keeps holding the same code value it always has, so every existing reader
+  keeps working. The wire effect surfaces through `@objectstack/rest`'s
+  `enforceAuth`, which writes this constant verbatim on every `/data`, `/meta`
+  and `/reports` 401. This does not settle ADR-0112 D5 (flat vs nested envelope
+  convergence); both declared envelope families are unchanged in kind.
+- e43d63a: feat(identity): API keys are minted against the minter's active organization, and carry it into the request (#8287)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) One additive column on
+  an `isSystem` object declaring `protection: { lock: 'full' }`, which tenants
+  cannot author, so there is no consumer metadata to migrate and nothing
+  authorable is renamed, retired or tombstoned — no conversion to register. The
+  behavioural change is that a minted key now carries an organization, that a key
+  which cannot carry one is refused under the posture where it could never read
+  anything, and that an ex-member's key stops authenticating. -->
+  
+  On a deployment running `OS_TENANCY_POSTURE=isolated`, a minted API key could
+  read **nothing at all**. `sys_api_key` carried no organization column, so key
+  authentication established a user but no active organization — and the
+  `isolated` Layer 0 wall is `organization_id = activeOrganizationId`, which with
+  no active organization matches no row. Every organization-scoped read answered
+  `200` with `total 0` while the console went on offering minting, so a tenant
+  admin could mint a valid-looking secret and discover only at call time that it
+  read nothing. (There was no cross-tenant leak — the failure was in the other
+  direction.)
+  
+  **The column was absent by an inherited rule, not by oversight.**
+  `resolveInjectedSystemColumns` injects `organization_id` into every registered
+  object *except* `managedBy: 'better-auth'` ones, and `sys_api_key` carries that
+  flag — even though better-auth's `apiKey` plugin is not loaded and the table is
+  hand-rolled ObjectStack. So the fix needs the declaration *and* the ADR-0105 D7
+  extension-field registration to stay consistent. The read side, by contrast,
+  was **already wired**: `resolveApiKeyPrincipal` already read an organization
+  into `tenantId` and `resolveAuthzContext` already adopted it — it was reading a
+  column no mint path ever wrote.
+  
+  **What changes**
+  
+  - `sys_api_key` declares `active_organization_id` (+ index, and the column is
+    shown in the "My Keys" and "All" list views, because the card's complaint was
+    a credential whose reach its owner could not see).
+  - `POST /api/v1/keys` **inherits** the caller's active organization — there is
+    deliberately no org parameter and no cross-org key — and **re-checks the
+    caller's `sys_member` membership at mint time**, honouring ADR-0091 validity
+    windows. Under a walled posture it refuses (400) rather than minting a key
+    with no organization, and refuses (403) for an organization the caller is not
+    a member of. The mint response echoes the organization the key is pinned to.
+  - The verifier reads **one spelling** (Prime Directive #12): the
+    `row.organization_id ?? row.organizationId` chain it used to carry was a
+    consumer-side tolerance for a producer that did not exist.
+  - An **ex-member's key fails closed at verify time** — no principal, not a
+    degrade to a user-only principal, which would resurrect the same
+    `200 + total 0` silent-empty. Checked at verify rather than by revoking on
+    membership loss, because membership ends through many paths (better-auth org
+    endpoints, SCIM, a direct `sys_member` delete, a lapsing validity window) and
+    a hook must catch every one or it silently misses. It costs **zero extra
+    queries**: the resolver has already read `sys_member` for this user.
+  - **Pre-existing org-less keys are never backfilled** — that would silently
+    upgrade credentials minted under a different promise. They keep working under
+    `single` (no wall) and under `group` (whose wall derives from the owner's
+    memberships independently of the active organization, so they already work
+    there), and are **refused under `isolated`**, where they are provably dead
+    today.
+  
+  **The column is deliberately named `active_organization_id`, not
+  `organization_id`** — the `sys_session` spelling, for the same concept: the
+  organization a credential makes *active*. `objectHasOrgIdField` tests for the
+  literal `organization_id`, and Layer 0 exempts objects without it, so the other
+  name would have made `sys_api_key` itself org-walled. Both walled postures
+  exclude NULL, so every pre-existing org-less row would have vanished from its
+  **own owner's** "My Keys" list while, under `group`, continuing to
+  authenticate — a live credential nobody could see or revoke, which is a fresh
+  instance of the very class this change removes.
+- a38408a: fix(core): both kernels agree that a duplicate plugin registration OVERWRITES, and say so out loud (#9864)
+  
+  Registering two plugins under the same `name` used to mean two different things
+  depending on which kernel was running:
+  
+  | kernel | behaviour before |
+  |---|---|
+  | `ObjectKernel` (what `os serve` runs) | accepted and overwrote, with **no check and no distinguishing log line** — `Plugin registered: <name>@<version>` printed twice, reading as two plugins running |
+  | `LiteKernel` (tests, serverless, edge) | threw `[Kernel] Plugin '<name>' already registered` |
+  
+  Under the maintainer's ruling (2026-08-19, option B) both kernels now apply one
+  declared contract: **duplicate registration by `name` overwrites — last-one-wins
+  — and emits a `warn` naming the plugin and both versions.**
+  
+  ```
+  WARN Plugin superseded: 'com.objectstack.audit' — the later registration (v2.0.0)
+       REPLACED the earlier one (v1.0.0). Only the later instance is initialized and
+       started; the earlier one is discarded without ever running init(). Duplicate
+       registration by name is last-one-wins on both kernels by declared contract
+       (#9864) — register the plugin once if that is not what you meant.
+  ```
+  
+  **This declares and warns about behaviour that already shipped; it does not fix a
+  user-visible bug.** The overwrite is load-bearing today — it is exactly what lets
+  a stack's own `plugins` entry supersede a plugin the CLI auto-registered earlier
+  in the same boot (`AuditPlugin`, #9863) — and every boot path that worked before
+  works the same way now. What changes is that the behaviour is declared, audible,
+  and pinned against **both** kernels
+  (`packages/core/src/plugin-registration.contract.test.ts`) rather than being an
+  accident of whichever kernel a reader happened to open. This was the fourth
+  measured instance of one contract implemented twice across the two kernels
+  (#5170, #5282, #8357 adjacent).
+  
+  **What this changes for a caller**
+  
+  - `LiteKernel.use()` no longer throws on a duplicate name. FROM: catch
+    `[Kernel] Plugin '<name>' already registered` to detect a double registration.
+    TO: there is no throw to catch — a duplicate is a `warn` and the later instance
+    wins. Code that registered a plugin twice and relied on the refusal should
+    register it once instead.
+  - `ObjectKernel` emits one `warn` where it previously emitted nothing, and
+    **suppresses** its `Plugin registered:` line for the superseding registration,
+    so the count of those lines equals the number of plugins that actually boot.
+  - The level is part of the contract: `warn`, never `info`. The CLI's default
+    kernel level is `warn`, and its boot-quiet window replays `warn` while
+    discarding in-window `info` — an `info` notice would be invisible on exactly
+    the boot path where this was measured.
+  
+  **Measured, not assumed:** the displaced instance holds nothing that needs
+  teardown. Registration is legal only while the kernel is `idle`, so a supersede
+  can only ever displace a plugin that has never been initialized; `init()`,
+  `start()` and `destroy()` all run later, over a registry the displaced entry has
+  already left. `PluginLoader.loadPlugin()` — which `ObjectKernel` runs first — is
+  pure validation plus a name-keyed map write of its own, and invokes nothing on
+  the plugin. Calling `destroy()` on the displaced instance would be the bug, not
+  the fix: it is the paired teardown for an `init()` that never ran.
+- 5f5e234: fix(security): `sys_permission_set.active` and `sys_position.active` now actually stop granting access (#8613)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is
+  added, renamed or retired. `active` is a ROW property of a `sys_permission_set`
+  / `sys_position` record, not a key on `PermissionSetSchema` (which is a strict
+  object in `packages/spec` and deliberately declares no such key — see
+  `permission-set-projection.ts`'s ROW_STATE_COLUMNS). No spec schema, export or
+  stored metadata shape changes, so there is no conversion to register and no
+  tombstone to write. The change is a runtime predicate at the authorization
+  resolution seam; the remedy for an affected deployment is operational
+  (re-activate rows that were switched off), not a metadata migration. -->
+  
+  **BREAKING for deployments that already switched a permission set or position
+  off.** Both objects ship a Deactivate action whose confirmation dialog promises,
+  in all four locales, that access stops:
+  
+  > Deactivate this permission set? Existing assignments stay in place but stop
+  > granting access until re-activated.
+  > Deactivate this position? Users keep their assignment but the position stops
+  > granting permissions until re-activated.
+  
+  Nothing read the column. Measured on the real resolver: a position seeded
+  `active: false` still granted its permission sets, and a permission set seeded
+  `active: false` still returned `posture: PLATFORM_ADMIN` with its system
+  permissions. Deactivation moved a badge in Setup and nothing else — while the
+  admin who had just revoked a compromised or over-broad grant was told the
+  opposite, and whose likely next step was therefore *not* the action that would
+  have worked (delete the set, or remove the assignments).
+  
+  **What changes at runtime.** `resolveAuthzContext` / `resolveUserAuthzGrants`
+  (`@objectstack/core`) — the single seam every transport resolves authorization
+  through — now drop a deactivated row **before** any derivation:
+  
+  - a deactivated `sys_position` no longer contributes its
+    `sys_position_permission_set` grants, and its name leaves `positions` (so the
+    name-reuse path cannot resolve the same grant one layer down);
+  - a deactivated `sys_permission_set` contributes no name, no
+    `system_permissions`, no `tab_permissions`, **and no `PLATFORM_ADMIN`
+    posture** — the flag is applied before the posture is derived, not after;
+  - the `plugin-security` DB loader applies the same predicate, which is what
+    judges a set reached by NAME through an active position of the same name.
+  
+  Both tables were already read at that seam, so this costs **zero new hot-path
+  queries**.
+  
+  **⚠️ Read this before upgrading.** Any `sys_permission_set` or `sys_position`
+  row currently carrying `active: false` **stops granting the moment this
+  lands** — on live data, with no migration step to notice. That is the correct
+  direction (it is what the dialog said when someone clicked Deactivate), but on
+  an installation that used the switch believing it was inert it is a real
+  revocation. Before upgrading, list the deactivated rows and re-activate any that
+  are still meant to grant:
+  
+  ```
+  GET /api/v1/data/sys_permission_set?filters=[["active","=",false]]
+  GET /api/v1/data/sys_position?filters=[["active","=",false]]
+  ```
+  
+  A row whose `active` column is **absent or NULL** is unaffected: the predicate
+  is "explicitly deactivated", never "explicitly active", so rows that predate the
+  column keep granting exactly as before.
+  
+  **Break-glass, closed in the same change** (`@objectstack/plugin-auth`).
+  Enforcing the flag opened a one-click, installation-wide lockout: deactivating
+  `admin_full_access` un-makes every platform admin at once, through a payload
+  that touches neither `name` nor any identity table, and re-activating requires
+  the permission the click just took away (the seeders deliberately never
+  reconcile `active`, so no restart restores it). The last-administrator guard now
+  judges that write like the delete and rename spellings it already refused, and
+  an environment whose break-glass set is *already* off is read as emptied rather
+  than as a bootstrap window — so it does not silently disarm the guard for every
+  other identity write. Re-activation itself stays permitted, or the refusal would
+  have no way out from inside the product.
+- f8eb736: feat(security): bind the break-glass standing-key lists to what the authz resolver actually reads — the correspondence stops being prose (#8734)
+  
+  `plugin-auth`'s last-administrator guard (ADR-0024 D5.2) decides whether a
+  pending write can empty the administrator population by testing the payload
+  against three standing-key lists (`MEMBER_STANDING_KEYS`,
+  `GRANT_STANDING_KEYS`, `PERMISSION_SET_STANDING_KEYS`). A payload touching none
+  of them is skipped without any reads — so a column `resolveAuthzContext` starts
+  reading that a list omits is a write class the guard **silently stops judging**,
+  on the one path whose failure mode is an installation-wide administrator lockout
+  with no in-product recovery.
+  
+  Nothing bound the two together. The correspondence lived in a comment, and it
+  had already gone false once: #6084 wrote — naming `active` explicitly — that
+  everything a permission-set write touches other than `name` is invisible to "who
+  is an administrator". That was true when written; #8613 made `active` a
+  resolution-time predicate and the sentence became false. Nothing mechanical
+  would have caught it, because the guard's own tests stay green precisely when
+  the guard is never consulted.
+  
+  **The mechanism is two links, and the first one is a measurement.**
+  
+  - `@objectstack/core` now exports `ADMIN_STANDING_SURFACE` — declared beside the
+    resolver, listing every table the administrator-derivation path reads, each
+    classified `derives` or `reads-only` with its reason, and for the deriving
+    tables every column read. It is asserted **equal** to what the real
+    `resolveAuthzContext` reads, observed at runtime through a recording engine
+    that records every property access and every `where` key per table. Observation
+    rather than source extraction because the reads that matter have moved into
+    helpers: `active` is read by `isRowActive(row)` and the ADR-0091 window bounds
+    by `isGrantActive(row, now)`, neither named at the resolver's own call site —
+    the exact shape #8613 had.
+  
+  - `@objectstack/plugin-auth` now exports its standing-key lists plus
+    `STANDING_KEYS_BY_TABLE` and `STANDING_KEY_EXCLUSIONS`, and a gate requires
+    every column of that measured surface to have an answer: it is standing-bearing
+    (in a list) or it is excluded with the reason it cannot empty the administrator
+    population. There is no third state — the third state is what `active` was
+    between #6084 and #8613.
+  
+  So a resolver change that starts reading a new column fails at the first link
+  until the declaration is updated, and at the second until the guard has an
+  explicit answer for it. Landing #8613 green would have required writing down that
+  deactivating `admin_full_access` cannot empty the administrator population —
+  which is false, and which is what the old comment asserted by accident.
+  
+  **No guard behaviour changes.** Every list keeps exactly the values it had; the
+  gate is one-directional by construction (it can only ever demand that the guard
+  judges *more*), because the other direction would put pressure on a break-glass
+  guard to fire less often.
+  
+  The table-level half is covered too: a resolver that started deriving
+  administrator standing from a **new** table is invisible to any column-set
+  comparison, since the table is absent from both sides — so the surface enumerates
+  every table the path reads, and an unclassified one fails.
+
+### Patch Changes
+
+- 7ff3975: feat(spec): `IHttpServer` gains an optional `afterResponse` response-observing
+  hook so HTTP metrics are transport-agnostic instead of Hono-only (#9835)
+  
+  The contract addition (additive — a new optional member plus the
+  `HttpResponseObservation` / `HttpResponseObserver` types and the reserved
+  `UNMATCHED_ROUTE_PATTERN` label): a transport invokes each registered observer
+  exactly once per answered request with `{ method, routePattern, status,
+  elapsedMs }`, after the response exists — the observation point the `use()`
+  middleware contract cannot express (it runs before dispatch and never sees a
+  status). `routePattern` is REQUIRED to be the registered route pattern
+  (`/api/v1/data/:id`), never the concrete path, so no adapter re-decides metric
+  cardinality. Optionality is feature-detected runtime-real
+  (`typeof server.afterResponse === 'function'`); a transport that does not
+  implement the seam reports **no** HTTP metrics — zero there means "not
+  instrumented", never "no traffic".
+  
+  Implementations and consumers in the same change:
+  
+  - `@objectstack/plugin-hono-server`: `HonoHttpServer` implements the seam (the
+    ruled #9650 raw-app middleware becomes its delivery path — same reach,
+    including `getRawApp()` mounts and middleware-refused 429s); unrouted
+    requests are now labelled with the reserved `unmatched` pattern (previously
+    they could surface as `/*`).
+  - `@objectstack/observability`: new `armHttpRequestCounter(server, metrics)`
+    arms the `http_requests_total` counter through the seam at most once per
+    server (first caller wins), which is what makes "exactly one counter per
+    server" structural.
+  - `@objectstack/runtime`: the dispatcher offers its `observability.metrics`
+    registry to the seam (a host that wires only the dispatcher now counts every
+    inbound surface) and suppresses its own per-route copy of
+    `http_requests_total` when the transport implements the seam — retiring the
+    #9833 double count. Request-id echo, the duration histogram, the error
+    counter and the error reporter are unchanged.
+  - `@objectstack/http-conformance`: `NodeHttpServer` implements the seam, and a
+    new cross-adapter conformance suite locks the semantics for both adapters.
+  - `@objectstack/core`: re-exports the new contract types/constant.
+- 24173e9: fix(rest): read an offset-free import cell in the business timezone, not the host `TZ` (#8485)
+  
+  `parseDateCell` ended in `new Date(s)`. A spreadsheet cell like
+  `2026-08-01 06:00:00` carries no offset, so ECMAScript resolves it against the
+  **process** timezone, and the instant bulk import stored became a property of
+  the deployment host:
+  
+  ```
+  TZ=Asia/Shanghai → 2026-07-31T22:00:00.000Z
+  TZ=UTC           → 2026-08-01T06:00:00.000Z
+  ```
+  
+  Same file, same tenant, same cell — eight hours apart, decided by a setting
+  nobody authoring the spreadsheet can see, and never consulting the business
+  timezone the route had already resolved one frame up
+  (`ExecutionContext.timezone`, the platform-default → global → tenant cascade).
+  
+  Since the export renders `datetime` cells in that business timezone (#8373), the
+  advertised export → edit in a spreadsheet → re-import round trip was lossless
+  only where the host `TZ` happened to equal the business zone. `import-coerce.ts`
+  opens by calling itself "the inverse of `export-format.ts`"; it now is one, and
+  the regression proof asserts inverse-ness on the **pair** — every fixture under
+  a host `TZ` deliberately different from the business timezone, because a test
+  that runs only under a matching `TZ` cannot fail.
+  
+  **An offset-free datetime cell is now read in the caller's business timezone**,
+  through `@objectstack/core`'s new `zonedWallClockToUtcMs` — the DST-safe wall
+  clock → instant primitive that `zonedDateStartToUtcMs` (the date-bucket drill
+  path) is now the midnight special case of. One implementation of zone
+  arithmetic, `Intl` offsets from the platform tz database, never hand-rolled;
+  generalising the existing one rather than hand-rolling a second in `rest` is
+  what keeps the export and import halves of this seam from drifting apart again.
+  Two wall clocks are not a bijection with instants, and both degenerate DST
+  readings resolve to the earlier candidate instant — a gap reading lands just
+  before the gap, an ambiguous reading on its first occurrence (pinned, measured).
+  
+  Three things deliberately do **not** move:
+  
+  - **A cell that carries an explicit offset** (`…Z`, `…+08:00`) already names one
+    instant and is honoured exactly as written. This change affects naive cells
+    only.
+  - **The date-only fast path stays UTC.** `YYYY-MM-DD` is UTC per ECMAScript and
+    a `date` is a timezone-naive calendar day (ADR-0053); sweeping it into the
+    zoned handling to make the code look uniform would silently re-time every
+    date-only import to fix nothing.
+  - **No timezone resolved ⇒ UTC**, never the process clock. That is the fallback
+    the export's cell path takes in the same case, so the round trip stays exact
+    for deployments that configure no zone — and a process-`TZ` fallback would
+    preserve the defect for exactly the deployments that cannot see it. This is
+    the one **behaviour change for existing deployments**: a host with a non-UTC
+    `TZ` and no resolved business timezone previously read naive cells in the host
+    clock and now reads them as UTC. An explicitly resolved `'UTC'` is a resolved
+    zone, not a missing one.
+  
+  Two adjacent legs of the same defect, both on the naive-cell path:
+  
+  - **A naive cell landing in a `date` or `time` field** now takes the typed
+    components verbatim (`2026-08-01 06:00:00` → `2026-08-01` / `06:00:00`).
+    Those branches also read the process clock, so a host east of the cell stored
+    the *previous calendar day* for a `date` column.
+  - **An xlsx date cell.** An Excel serial date carries no timezone; ExcelJS
+    materialises it as a `Date` whose UTC components are the sheet's wall clock,
+    and `import-prepare.ts` rendered it with `toISOString()` — stamping a `Z` the
+    file never had. That fabricated offset then outranked the business timezone by
+    the very carve-out above, so every real date cell in a user-authored workbook
+    imported as UTC whatever the tenant's zone. It now flattens to the same
+    offset-free `YYYY-MM-DD HH:mm:ss` a CSV export writes, which is what that
+    function's contract already claimed to produce.
+- e1bb0ca: fix(qa): `HttpTestAdapter` resolves the Data Protocol mount from the server's `/discovery`, and falls back to the convention loudly (#7983)
+  
+  The record-shaped `os test` action types (`create_record`, `read_record`,
+  `update_record`, `delete_record`, `query_records`) built their URLs from the
+  **defaults** of `RestApiConfigSchema.apiPath` and
+  `CrudEndpointsConfigSchema.dataPrefix`, because the adapter is handed an origin
+  and nothing else. A deployment that moved the mount got a 404 that reads like the
+  suite author's own URL mistake rather than a platform limitation.
+  
+  The adapter now asks the server, following the `getRoute` precedent in
+  `@objectstack/client`: **one memoised `GET {apiBase}/discovery` per run** (`os
+  test` builds one adapter for the whole run), addressing whatever `routes.data`
+  advertises, with the schema-derived convention as the fallback. Measured on a
+  booted stack (REST route generator + dispatcher bridge), before and after:
+  
+  | deployment | before | after |
+  |---|---|---|
+  | stock | created | created |
+  | `crud.dataPrefix: '/objects'` | `HTTP Error 404` | created |
+  | `api.apiPath: '/api/2026-01'` | `HTTP Error 404` | `HTTP Error 404`, now naming the mount |
+  
+  The `apiPath` row is **not** closed, and the reason is structural: `apiPath`
+  moves the base that `/discovery` is itself mounted under, so the document that
+  would name the new mount sits behind the prefix that is missing. The one
+  discovery document at a fixed path does not rescue it — `/.well-known/objectstack`
+  advertises the **dispatcher's** `${prefix}/data`, measured as `/api/v1/data`
+  under all three configs above — so it is deliberately not probed: trusting it
+  would attach a false provenance ("discovery told us") to the same 404.
+  
+  Instead that case degrades loudly. Falling back to the convention prints a
+  warning naming the mount it will address, the probe that failed and the remedy,
+  and every 404/405 from a record action now carries the mount it addressed and
+  where that mount came from. `api_call` is unchanged, issues no probe, and remains
+  the escape hatch for a host the probe cannot reach.
+- 402c125: fix(objectql): a temporal filter comparand the platform cannot interpret is refused at the engine door instead of answering 200 with zero rows (#8690)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is
+  renamed, retired or tombstoned — no spec schema is touched at all. The change
+  is a new runtime refusal at the engine's filter collection point, plus the
+  routing decline that stops the raw-SQL analytics path bypassing it. -->
+  
+  A `datetime` / `date` / `time` field filtered with a bare string the platform
+  cannot read — `last_30_days`, `not-a-date-at-all` — was bound **as written**
+  all the way to the driver, where the comparison is false for every row. The
+  caller received `HTTP 200`, an empty result set, and nothing to indicate the
+  filter was meaningless. An unknown `{placeholder}` in the same position was
+  already refused loudly (`FILTER_TOKEN_UNKNOWN` / 400, listing the resolvable
+  tokens), so one API answered two shapes of unusable comparand two different
+  ways.
+  
+  It is concretely reachable rather than theoretical: `last_7_days` /
+  `last_30_days` / `last_90_days` are **declared preset names** in the dashboard
+  schema. The shipped console lowers them to `{N_days_ago}` macros before they
+  reach the API, so the console path was always safe — but a saved report, an
+  integration, an MCP client or an AI-authored query sends the preset name itself
+  and got a silent zero. An empty chart is the hardest failure to debug: it is
+  indistinguishable from "there is genuinely no data".
+  
+  Such a comparand is now refused at the ObjectQL engine's single filter
+  collection point, with `code: 'INVALID_FILTER'` and `status: 400`, naming the
+  field, the value, the key path and the spellings that would work. That seam is
+  the one place holding the caller's comparand and the field's **declared type**
+  at the same moment, and every verb (`find` / `findOne` / `count` / `aggregate`
+  / `update` / `delete`) and both filter spellings (the array sugar and the
+  lowered condition) pass through it, so all four backends inherit one answer
+  rather than four. `NativeSQLStrategy` additionally **declines** such a query so
+  the raw-SQL analytics path falls through to that door instead of binding the
+  value into its own statement.
+  
+  Deliberately unchanged, each by ruling: a `{placeholder}` keeps its existing
+  refusal one layer down (the door runs before token resolution and steps around
+  them, so `{30_days_ago}` still resolves normally); non-string comparands are
+  untouched (a number is epoch milliseconds, a `Date` is an instant); and the
+  **empty string** keeps today's behaviour exactly — it binds as `''` and matches
+  every non-null row, which is a separate question that remains its own card.
+- Updated dependencies [56656aa]
+- Updated dependencies [07e630e]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [420804d]
+- Updated dependencies [716ac9b]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [11b779e]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [e2899f6]
+- Updated dependencies [3851f87]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [30d3752]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [44bc51d]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+  - @objectstack/spec@17.1.0
+
 ## 17.0.0
 
 ### Major Changes

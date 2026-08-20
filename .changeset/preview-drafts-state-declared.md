@@ -1,6 +1,0 @@
----
-"@objectstack/spec": minor
-"@objectstack/rest": patch
----
-
-Declare the draft-visibility switches on the meta-read request schemas, exactly where the implementation enforces them (#9741, maintainer ruling 2026-08-18): `GetMetaItemsRequestSchema` gains `previewDrafts?: boolean`, and `GetMetaItemRequestSchema` gains `state?: 'active' | 'draft'` plus `previewDrafts?: boolean`. Both members are draft-visibility switches only — declaration ≠ authorization: ADR-0106 masking is unaffected, and draft access stays admin-gated upstream. The cached and layered read requests deliberately declare neither (their implementations enforce neither). `environmentId` stays OUT of the protocol request shape by explicit ruling — it is the transport-level multi-kernel routing key, recorded schema-side as a decision rather than an omission. The REST meta-read doors (list, cached and uncached single-item, layered) drop their `as any` request casts: each request literal now compiles against the declared spec shape, with the transport-level `environmentId` carried by a typed transport envelope (`TransportScopedMetaRequest`) instead of a cast. Accept-set widening catch-up on the declared surface; zero runtime behaviour change.

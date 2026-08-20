@@ -1,5 +1,519 @@
 # @objectstack/plugin-audit
 
+## 17.1.0
+
+### Minor Changes
+
+- 7901b2d: feat(spec): stamp-only `tenancy.organizationField` — audit rows can follow the record's organization on objects that must stay unwalled (#8778, closes the #8707 remainder)
+  
+  The platform had one answer to "what is this object WALLED by"
+  (`tenancy.tenantField`) and no answer to "which column says who this row is
+  ABOUT". For ordinary objects the two coincide; for credential tables they
+  deliberately do not — `sys_api_key` records the organization a key
+  authenticates into under `active_organization_id` precisely so the credential
+  table is not org-walled (#8287). #8777's schema-resolved audit stamping could
+  therefore reach every shipped object except the one that motivated it, and
+  revocation rows on `sys_api_key` kept stamping the revoker's organization.
+  
+  `TenancyConfigSchema` now accepts an optional `organizationField` — a
+  READ-NEUTRAL, STAMP-ONLY declaration (maintainer-ruled option A on #8778):
+  
+  - The audit writer's `resolveRecordOrganizationField` consults it first, ahead
+    of the ADR-0066 `enabled: false` opt-out — an author declaring it on an
+    unwalled object is stating exactly that the audit trail should follow the
+    record's own organization even though no wall does. It is honoured only when
+    the object really has the field (the #5315 guard `tenantField` carries).
+  - No read path reads it: `applyTenantScope`, `injectTenantOnInsert`,
+    `computeTenantLayer0Filter` and `resolveInjectedSystemColumns` are all
+    measured blind to it, and that read-neutrality is pinned by tests beside
+    each. Declaring it never walls an object and never hides rows.
+  - ⛔ Scope pin from the ruling: this is ONE stamp-only key, not the opening
+    move of a general field-roles mechanism. A consumer other than audit
+    stamping needs its own ruling before reading it.
+  
+  `sys_api_key` now declares
+  `tenancy: { enabled: false, organizationField: 'active_organization_id' }`,
+  so revoking another user's key from a different active organization lands the
+  audit row behind the wall of the KEY's organization — where the tenant admin
+  who can act on it reads it. The `enabled: false` is measured
+  behavior-identical to the previous absent block for this object on every read
+  path (injection bails on `managedBy: 'better-auth'` first; the SQL driver's
+  tenant field resolves null either way; Layer 0 is exempt either way; the
+  memory/mongo boot guards count only an explicit `enabled: true`).
+- 4639cec: **Behaviour change:** an unscoped `multi: true` UPDATE of `sys_comment` is now refused, where it previously succeeded for a caller entitled to every row (#9974).
+  
+  This is not the restoration of a guard that used to work — it is a deliberate narrowing of what the engine accepts, ruled by the maintainer on 2026-08-19. If you issue `ql.update('sys_comment', data, { multi: true })` with **no `where` at all**, that call works today and will start failing with `RECORD_NOT_ACCESSIBLE` / 403. **The fix at the call site is to say which rows you mean** — pass a `where`. The explicit match-all `where: {}` is still accepted and still authorizes every matched row individually; only an *absent* or `null` predicate is refused.
+  
+  Why the accept set narrowed rather than the declaration: `resolveTargetRows` has declared this refusal for both write verbs since #4630, but on update it could only ever fire by accident — when the sweep happened to touch a row the caller lacked rights to, and then with a per-row message (`Cannot update comment c2: …`) naming a row rather than the shape. A caller who owned every row had the whole table rewritten, and a zero-match probe resolved silently. A guard that fires by accident reads as enforcement while enforcing nothing. The ruling weighed recoverability: a delete leaves a trace of who removed what, an overwrite leaves none — the old value is gone on the spot with nothing to restore from — and a forgotten `where` is the mistake generated code makes most often.
+  
+  **Engine (`@objectstack/objectql`).** #9719's opt-in whole-operation dispatch now covers `beforeUpdate`'s predicate path as well as `beforeDelete`'s, and the registration flag is **renamed** `dispatchUnscopedMultiDelete` → **`dispatchUnscopedMultiWrite`** (one flag generalized to both events rather than a second flag; it is per-registration and per-event, so a delete-only guard still says "delete only" by declaring it on `beforeDelete` alone). Declaring it on any other event is still refused at registration time. Binding `input.id` on the whole-operation context is refused on both verbs (`HookTargetRebindError`, path `unscoped-multi`), and the error now names the caller's event.
+  
+  **Blast radius.** The dispatch is delivered ONLY to registrations that declare the flag, so `sys_comment` is the only object whose update accept set changes; every other object's unscoped `multi: true` update behaves exactly as before. `sys_attachment` keeps its delete-only declaration and is unaffected on update. A repo-wide structural sweep of 4 663 source files found no in-tree caller — none in `examples/`, none in the dogfood apps, none in `packages/` source — that issues an unscoped `multi: true` update against a declaring object.
+  
+  **`@objectstack/service-storage`** is a rename-only follow: its `sys_attachment` guard declares the renamed flag on the same event, with the same behaviour.
+- 5126e79: Record-view auditing: `sys_audit_log` can now answer "who viewed which record"
+  
+  `sys_audit_log` covered writes only, so the question every regulated-industry
+  security review opens with — *who viewed this customer record, and when?* — had
+  no answer short of custom work. The ledger now has a `read` action, its writer,
+  and the `record_views` list view that surfaces it.
+  
+  Scope is deliberately narrow (maintainer ruling 2026-08-16):
+  
+  - **Record-detail views only.** A read qualifies when it materialized one record
+    and its predicate pinned the primary key — the shape `GET /data/:object/:id`
+    produces. List and search reads are not audited.
+  - **Per-object opt-in, closed.** Nothing is recorded until a deployment names the
+    objects: `new AuditPlugin({ readAudit: { objects: ['contact', 'account'] } })`.
+    There is no global switch and no exception list, and an empty opt-in registers
+    no hook at all, so the default posture costs a read nothing.
+  - **Batched off the request path.** The hook buffers and returns; rows are
+    persisted on a later tick, size- or timer-triggered, and flushed on shutdown.
+    Each row keeps the instant the record was VIEWED, not the instant its batch
+    drained.
+  
+  The row records who, what and when — never field values. Read auditing runs
+  inside the security middleware, ahead of its field masking, so the record it sees
+  is pre-mask; copying values in would mint a plaintext copy of exactly what
+  field-level security withholds, in the table compliance staff are granted broad
+  access to.
+  
+  Two boundaries are declared rather than left to be discovered: a system-elevated
+  read (`api.sudo()`, formula recomputes, roll-ups) writes no row, and neither does
+  a read with no principal to name.
+
+### Patch Changes
+
+- 1408fe3: fix(audit): audit rows are stamped from the record's own organization, not the actor's active one (#8707)
+  
+  `sys_audit_log` / `sys_activity` rows took their organization from
+  `sess.tenantId ?? recordOrgId` — the ACTING session's active organization in
+  preference to the organization of the record the row is about. A write
+  performed from a session whose active organization differs from the record's
+  therefore landed the audit row behind the wrong tenant's wall: unreadable to
+  the tenant admin it concerns, and readable by an organization with no claim to
+  the record. That is the invisible-audit-row defect the record-side fallback was
+  added to prevent, one layer down, and the maintainer's ruling on #8287 settles
+  it the other way — the stamp comes from the row's own organization.
+  
+  The precedence is now `recordOrgId ?? sess.tenantId`. The RLS fallback is
+  preserved unchanged: an audit row must never be written with a NULL
+  organization, so the acting session's tenant still answers whenever the record
+  has no organization of its own (single-tenant stacks, platform-global objects,
+  a NULL column), and the record's organization still answers on the two cases
+  the fallback was written for — background/sudo paths with no `tenantId`, and
+  better-auth's `activeOrganizationId` cache miss right after sign-in.
+  
+  Which column carries a record's organization is now resolved from the
+  REGISTERED SCHEMA rather than the hard-coded `organization_id` literal, with
+  the same precedence `SqlDriver.computeTenantField` already applies: an ADR-0066
+  `tenancy.enabled: false` opt-out resolves to no organization at all (so a
+  platform-global object's audit trail is not scoped into one tenant and hidden
+  from the platform admin who acted), then a declared `tenancy.tenantField` when
+  the object really has that field, then the canonical injected
+  `organization_id`.
+  
+  Most deployments see no change: under the `isolated` posture the Layer 0 wall
+  makes a cross-organization write of a walled object impossible, so the two
+  sides agree by construction. The behaviour changes under the `group` and
+  `shared` postures, and on system paths that write another organization's row
+  while carrying a session.
+  
+  Not addressed here: `sys_api_key.active_organization_id` is still not
+  reachable by this resolver, so revocation rows on that object continue to fall
+  back to the actor's organization. Its column is deliberately not the object's
+  tenant-scope column and must not become one, so closing that half needs a
+  read-neutral, stamp-only organization declaration in `packages/spec`. #8707
+  remains open for it.
+- fe90efa: fix(audit): the NULL-tenant guard on audit rows reads the session key the engine actually emits (#9516)
+  
+  `writeAudit`'s organization fallback read `sess.tenantId`. That key does not
+  exist on the hook session: `ObjectQL.buildSession` constructs it as an object
+  literal with a fixed key set (`userId`, `organizationId`, `positions`,
+  `accessToken`, plus conditional flags) and no spread, and the deprecated
+  `session.tenantId` alias (#3280) was removed repo-wide in the v11 major
+  (#3290). The arm therefore resolved to `undefined`, which made the guard it
+  belongs to unable to fire.
+  
+  That guard is load-bearing. Its own comment states the consequence: an audit
+  row must never be written with `organization_id = NULL`, or the SecurityPlugin's
+  RLS predicate hides it from everyone forever while the write reports success.
+  The two cases the fallback covers are exactly the ones where the record cannot
+  supply an organization — an object with no organization column at all
+  (single-tenant stacks, ADR-0066 platform-global objects) and a row whose
+  organization column is NULL or empty. On both, the row was stamped
+  `organization_id: null` and became permanently invisible in the audit log UI.
+  Nothing reported it: every `sys_audit_log` field is `readonly: true` so
+  `validateRecord` skips it, and the write path is wrapped in swallow-and-report.
+  
+  Both readers of the removed alias in this package now read
+  `sess.organizationId`. Precedence is unchanged at both sites: the audited
+  record's own organization still wins over the acting session (#8707, honouring
+  the ruling on #8287), and the `@mention` notification scope stays session-first
+  — #8707's reasoning is about an audit row read through the record's tenant
+  wall, which a notification is not, so only the key changed there.
+  
+  Deployments on a single-tenant stack, and any multi-tenant deployment auditing
+  a platform-global object or a row with an empty organization column, stop
+  accumulating audit rows that no one can read. Rows already written with a NULL
+  organization are not repaired by this change.
+- c7655d4: Restore the #4630 unscoped multi-delete refusal on `sys_comment` through the wired engine.
+  
+  `ObjectQL.delete('sys_comment', { multi: true })` with no `where` at all silently deleted
+  every comment the caller was entitled to, instead of being refused outright as declared.
+  The per-row dispatch contract (#5038/#5574) binds `input.id` on every `beforeDelete`
+  dispatch of a predicate delete, so the guard always took its by-id branch — and a
+  zero-match predicate dispatched nothing at all, so the guard never ran.
+  
+  The `sys_comment` access-hook registration now declares `dispatchUnscopedMultiDelete`
+  (the engine mechanism added in #9719), so the whole-operation context reaches the handler
+  once, before any row is resolved, zero-match included. An unscoped `multi: true` delete of
+  comments is now refused with `RECORD_NOT_ACCESSIBLE` / 403. Scoped deletes are unaffected:
+  by id, by a real `where`, and the match-all `where: {}` all behave exactly as before —
+  only an absent or `null` predicate is refused.
+  
+  The unscoped multi-**update** half of the same guard is unchanged and still not reachable
+  through the wire; it is tracked as its own decision card (#9974).
+- e9534a4: A durability failure reported to a logger without `error` is no longer lost
+  
+  Six degradation reports — a lost `sys_audit_log` row (CRUD, auth-event and
+  read-audit writers), a stranded `sys_email` row, and the two permission-set
+  metadata backfill failures — were spelled `logger?.error?.(…)`. `error` is
+  declared OPTIONAL on those sinks, and an optional call emits nothing at all when
+  the method is absent: a host injecting a `{ info, warn }` logger received no
+  report whatsoever, on exactly the paths whose whole point is that nothing else
+  looks broken afterwards.
+  
+  Each now reaches for `error` and falls back to `warn`, never to silence. The
+  message, its consequence and its fix are identical on both channels; only the
+  level degrades, and only when the sink cannot do better.
+  
+  `AuthEventAuditLogger` additionally declares the `warn?` method it needs for
+  that fallback, matching `ReadAuditLogger`, which always had it. The addition is
+  optional, so no existing sink stops satisfying the interface.
+- b348ac2: Published README documents the record-view audit surface that actually shipped
+  
+  The README was corrected against the shipped surface before record-view auditing landed,
+  so it still told readers that "reads and views are not on the ledger" and that the plugin
+  takes no configuration. Both became false when the `read` action, its writer and the
+  `record_views` list view merged. This is a docs-only change; it needs a version bump
+  because the README is in the package's published `files` array, and a correction with no
+  release never reaches the npm package page at all.
+  
+  What the page now documents, each point verified against the source rather than against a
+  description of it:
+  
+  - the `read` action and its writer, in the action table and in the shipped list views;
+  - the per-object opt-in as what it is — an **install-time list** passed to the plugin
+    constructor (`new AuditPlugin({ readAudit: { objects: [...] } })`), explicitly **not** an
+    `enable.auditReads` object-metadata key. A declarable key can be set on an object in a
+    deployment that never installs the plugin, producing metadata that reads as audited and
+    writes nothing, which is the exact class of claim this page was corrected to remove;
+  - the three settings the plugin forwards, and the one writer knob (`maxBufferedEvents`) it
+    does not, which is reachable only by calling `installReadAuditWriter` directly;
+  - the record-detail discriminator that keeps list and search reads out of scope, including
+    the `$or` / `$not` refusal and the AND-composed predicate the security middleware leaves
+    behind;
+  - batched writes off the request path, the view-instant `created_at`, and the two loud
+    once-only failure postures (buffer overflow, failed ledger write);
+  - the two declared boundaries — a system-elevated read and a read with no principal both
+    write no row;
+  - that no field values are recorded, and therefore that the ledger cannot answer what a
+    viewer actually saw;
+  - that the shipped `record_views` view carries an `ip_address` column which is always empty
+    on a `read` row, because no read-path writer stamps it.
+  
+  Record-view auditing adds no enterprise dependency: this package's declared edition is
+  `open`, and the opt-in is ordinary plugin configuration. The two enterprise-dependent
+  behaviours already annotated on the page — the hierarchy resolver and the archive
+  datasource — are unchanged.
+- bbd86ed: Attachment access hooks: read the caller's org under the blessed `organizationId` name
+  
+  `callerContext()` in the `sys_attachment` access kit built its fallback
+  execution envelope from `session.tenantId` — an alias removed from the
+  hook/action session surface in v11 (#3290). `HookContextSchema` strips a
+  `tenantId` key and the engine's `buildSession` only ever emits
+  `organizationId`, so on every call that reached the session fallback (no
+  execution context riding along) the envelope handed to
+  `ISharingService.canEdit` carried **no organization at all**. Parent-record
+  access for attachments was therefore evaluated without the caller's active
+  org on that path. It now reads `session.organizationId`, matching the
+  `sys_comment` kit, which already did.
+  
+  The `sys_comment` kit's own `callerContext()` had the same read as a dead
+  first arm (`s.tenantId ?? s.organizationId`); the arm is removed. That half
+  is behaviour-neutral — the fallback already carried the value.
+  
+  Both kits gain coverage of the session-fallback path in both directions: the
+  blessed name is read, and a stray removed-alias key does not become the org.
+- d693ba1: Published README points at the `services.audit` reference again, in the form a published reader can follow (#9589)
+  
+  PR #9531 dropped this README's "See Also" pointer to the runtime-services audit
+  page because the page was measured wrong — it documented `record()` /
+  `'set' | 'reset'` (the settings sink) as if that were the `audit` slot. PR #9587
+  rewrote the page around the real slot, so the reason for the omission has stopped
+  holding, and the link is restored.
+  
+  It is restored because the page carries three things this README deliberately
+  does not, each verified against the page as it stands on `main` rather than
+  against the PR title that rewrote it:
+  
+  - **the failure posture of the slot itself** — `recordAuthEvent` never throws; a
+    failed ledger insert is reported at `error` level once per process and then
+    drops to `debug`, the row is lost and nothing retries it, and the call silently
+    no-ops when no data engine resolves or when `userId` is absent. This README
+    documents the *record-view batcher's* two failure postures, which are a
+    different code path; it says nothing about this one.
+  - **the event's field-by-field shape** — that `userId` must be a real `sys_user`
+    id, that `sessionId` lands on `record_id` with `object_name` fixed to
+    `sys_session`, that `organizationId` stamps the tenant columns and an unstamped
+    row is one non-administrator members can never see, and that `context` is
+    serialized into `metadata`. This README states the slot's interface and its
+    closed `'login' | 'logout'` action union, and deliberately stops there.
+  - **the settings-sink disambiguation** — that `SettingsAuditSink.record()` is
+    never registered as or resolved from this slot, and that
+    `getService('audit').record({ ... })` therefore fails with a `TypeError`.
+  
+  The restored line is **not** the line #9531 removed. That one read
+  `[Audit Logging Best Practices](/content/docs/kernel/runtime-services/audit-service.mdx)`
+  — a label describing a best-practices guide the page has never been, and a
+  repo-path-rooted URL that resolves for neither of this README's published
+  audiences. A README in the package's `files` array is rendered on npm and on
+  GitHub, where a root-relative href resolves against `npmjs.com` / `github.com`,
+  not against the docs site. The replacement uses the absolute
+  `https://docs.objectstack.ai/docs/...` form that `create-objectstack`'s published
+  READMEs already use, and its annotation states what the page adds — so the next
+  author weighing the same omission can check the justification instead of
+  reconstructing it.
+  
+  The one pre-existing site-root-relative docs link in this same file
+  (`/docs/permissions/permission-sets#access-depth...`, added by the same PR) is
+  converted to the same absolute form. Its target page and heading anchor both
+  exist; only the spelling was unfollowable off the docs site.
+- 53fc099: docs(plugin-audit): the published README stops documenting an `auditService` API, a row shape and an action vocabulary that do not exist (#9517)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Documentation only. No
+  authorable property is added, renamed, retired or tombstoned; no schema, type or
+  runtime behaviour changes. The only edited artifact is the package README, which
+  ships in the package's `files` array. -->
+  
+  `packages/plugins/plugin-audit/README.md` is in the package's published `files`
+  array and `private` is unset, so it is **what the npm package page renders**. It
+  documented an API surface with no implementation anywhere in the repo, under a
+  banner claiming SOC 2 / HIPAA / GDPR readiness.
+  
+  **Measured against `origin/main` before anything was rewritten**, and the drift
+  was wider than the ledger of it:
+  
+  - **Every `auditService.*` method the README called is absent from the repo** —
+    `getFailedActions`, `logAdminAction`, `logDataAccess`, and also
+    `getRecordHistory`, `getUserActivity`, `searchLogs`, `getRecordSnapshot`,
+    `generateReport`, `archiveLogs`, `purgeLogs`, `logDataDeletion`,
+    `logDataExport`. Twelve methods, zero implementations. A reader following the
+    README wrote code that could not compile.
+  - **`PluginAudit` does not exist**, and neither does the `.configure({...})`
+    static it was called through — no class in this repo exposes one. The export is
+    `AuditPlugin`, a `Plugin` class registered as `kernel.use(new AuditPlugin())`
+    and taking **no configuration at all**. The documented config object
+    (`trackObjects`, `trackFields`, `retentionDays`, `autoArchive`, `excludeUsers`,
+    `trackSystemEvents`) was fabricated in full.
+  - **`IAuditService` is not in `@objectstack/spec/contracts`** — the README's
+    "Contract Implementation" section named an interface the spec has never
+    declared.
+  - **The row shape was not the shipped one.** The README declared `timestamp`,
+    `userName`, `userEmail`, `recordName`, `changes`, `sessionId`, `status` and
+    `errorMessage`. `sys_audit_log` declares none of them.
+  - **The action values were outside the enum.** `'insert'`, `'auth:login'`,
+    `'security:password_reset'`, `'workflow:approval'` and `'user_role_change'` are
+    not forms this object accepts; the namespaced-colon spelling never was one.
+  - **The object name was wrong** — `audit_log`, not `sys_audit_log`.
+  - **The REST namespace does not exist.** Six `/api/v1/audit/*` routes were
+    documented; the object declares `apiMethods: ['get', 'list']` and is read over
+    the ordinary object API.
+  
+  The compliance paragraph is **deleted, not softened or relocated**: a
+  regulatory-readiness claim is a company-level statement needing an accountable
+  owner, and it does not belong in a package README. The three external
+  SOC 2 / GDPR / HIPAA links that existed only to support that framing are gone
+  with it.
+  
+  The replacement documents only what the code can be pointed at: the real exports;
+  the real `sys_audit_log` columns; the seven-value action enum **with the writer
+  for each value**, so a reader can check any row of it; the credential masking on
+  `old_value` / `new_value`; and the coverage model, which is
+  **all objects minus an exclusion list** rather than the fabricated per-object
+  `trackObjects` config — subtraction, because the object universe is open and an
+  enumerated allow list would silently stop auditing everything registered after
+  boot.
+  
+  Three things are now stated that the old README obscured, all of them gaps a
+  reader could otherwise mistake for coverage:
+  
+  - **reads and views are not on the ledger** — no writer emits a read action;
+  - **failed operations are not on the ledger** — there is no success/failure
+    column, and the writers fire only on `after*` events, i.e. only on operations
+    that succeeded, so `getFailedActions`-style "security monitoring" had no
+    mechanism behind it in the first place;
+  - **`ip_address` / `user_agent` are populated on auth events only** — the
+    record-level writer does not stamp them, so a null client fingerprint on a CRUD
+    row does not mean the request had none.
+  
+  Two dependency boundaries are **named with their degraded behaviour** rather than
+  left silent, following the `access-recipes.mdx` pattern: hierarchy-relative
+  permission scopes need `@objectstack/security-enterprise` and **fail closed to
+  `own`** without it, so a grant written to let managers read their reports' audit
+  rows shows them only their own on an open build; and `lifecycle.archive` needs a
+  registered `archive` datasource, **failing closed to retention** without one —
+  nothing is ever deleted and the table grows, which is the safe direction for a
+  ledger but not the documented one.
+- b3de42c: fix(audit): `record_views` list view drops its always-empty `ip_address` column, replaced with `actor` (#9539)
+  
+  `sys_audit_log`'s `record_views` list view (the "who viewed this record" screen, #8992)
+  declared an `ip_address` column, but `buildRow` in `read-audit.ts` never stamps that key
+  on a `read` row — client-fingerprint fields are populated on auth events only. The column
+  was structurally empty on every row this view can ever show, which on a compliance
+  surface reads as "we captured the fingerprint and this request had none" rather than
+  "not captured" — the same 审计面宁窄勿谎 (narrow-not-untruthful) defect class #7675 /
+  #8147 / #8315 retired from this object's `action` enum, one layer down on a column.
+  
+  Replaced with `actor`, which the read writer DOES stamp on every row and which attributes
+  a service principal (`svc:<name>`) that `user_id` structurally cannot hold. Pinned by
+  `sys-audit-log-record-views-columns.test.ts`, which derives the read writer's actually-
+  stamped key set from a real engine run rather than a hand-copied list, so the class can't
+  regrow silently.
+  
+  Maintainer ruling 2026-08-18 + triage auto-adjudication 2026-08-19 (both Option 1).
+  Stamping viewer IP (Option 2) was explicitly NOT commissioned in this change.
+- Updated dependencies [56656aa]
+- Updated dependencies [c9f5950]
+- Updated dependencies [d6e80b2]
+- Updated dependencies [07e630e]
+- Updated dependencies [66beee0]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [2782805]
+- Updated dependencies [e43d63a]
+- Updated dependencies [e374b4d]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [03520eb]
+- Updated dependencies [a751f7d]
+- Updated dependencies [eccb8b2]
+- Updated dependencies [650cd3d]
+- Updated dependencies [b735507]
+- Updated dependencies [91c6c28]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [420804d]
+- Updated dependencies [716ac9b]
+- Updated dependencies [a38408a]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [24173e9]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [f8eb736]
+- Updated dependencies [11b779e]
+- Updated dependencies [4e71ae1]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [4dfa369]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [5e2f594]
+- Updated dependencies [e2899f6]
+- Updated dependencies [855591f]
+- Updated dependencies [3851f87]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [e1bb0ca]
+- Updated dependencies [326f5de]
+- Updated dependencies [30d3752]
+- Updated dependencies [21995d7]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [6a5e6ad]
+- Updated dependencies [30b1c63]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [04f8fdb]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [b2a451f]
+- Updated dependencies [6158146]
+- Updated dependencies [84cb121]
+- Updated dependencies [ca19ee8]
+- Updated dependencies [a675b4d]
+- Updated dependencies [b887013]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [402c125]
+- Updated dependencies [7901b2d]
+- Updated dependencies [7c2f386]
+- Updated dependencies [56bca91]
+- Updated dependencies [b3f9831]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [8a9e7f4]
+- Updated dependencies [3d0ded8]
+- Updated dependencies [44bc51d]
+- Updated dependencies [1258dca]
+- Updated dependencies [4639cec]
+- Updated dependencies [91c4ff5]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+- Updated dependencies [682b86b]
+- Updated dependencies [6a1b45e]
+  - @objectstack/spec@17.1.0
+  - @objectstack/platform-objects@17.1.0
+  - @objectstack/core@17.1.0
+  - @objectstack/objectql@17.1.0
+
 ## 17.0.0
 
 ### Major Changes

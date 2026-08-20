@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/plugin-dev",
-  "version": "17.0.0",
+  "version": "17.1.0",
   "license": "Apache-2.0",
   "description": "Development Assembly Plugin for ObjectStack — wires the real platform stack for zero-config local development",
   "main": "dist/index.js",

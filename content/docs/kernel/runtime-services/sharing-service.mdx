@@ -95,7 +95,7 @@ export async function mayEditContract(
     userId: session.userId,
     // The execution context names the org `tenantId`; a session exposes the
     // same value as `organizationId` (the `session.tenantId` alias was removed in
-    // v11, #3290).
+    // v16, #3290).
     tenantId: session.organizationId,
     positions: session.positions,
   });

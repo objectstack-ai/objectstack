@@ -132,10 +132,21 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync, readdirSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import {
+  readFileSync,
+  readdirSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  realpathSync,
+  symlinkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import process from 'node:process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   anyConfigExtractsMetadataForms,
   findExtractConfigs,
@@ -729,12 +740,14 @@ export function runnableInvocation({ check, filter, direct }) {
  * (`packages/spec/src/index.ts`) goes from 7 matched families to 34. That is
  * the "22 leads is the same as none" failure in the header, bought wholesale.
  *
- * What stays out of reach, deliberately: a population that is a top-level FILE
- * (`README.md`, `ARCHITECTURE.md` — the rest of `check-doc-anchors`' corpus).
- * A bare filename carries no separator either, and accepting one would admit
- * every `package.json` / `turbo.json` / `tsconfig.json` basename a gate joins
- * with a package directory — the same explosion, one class over. A miss there
- * costs one card one CI round; that is the side this file errs on.
+ * What stays out of reach, deliberately: a top-level FILE named as a bare
+ * LITERAL (`README.md`). A bare filename carries no separator either, and
+ * accepting one would admit every `package.json` / `turbo.json` /
+ * `tsconfig.json` basename a gate joins with a package directory — the same
+ * explosion, one class over. A miss there costs one card one CI round; that is
+ * the side this file errs on. What is refused is the literal, never the file:
+ * a gate whose population really is a root file reaches it through the escape
+ * hatch below, and several now do.
  *
  * Re-measured (#9964) on 114 families x 6326 tracked files, narrowing that
  * admission to bare `*.md` literals naming a real tracked root file makes the
@@ -1784,8 +1797,11 @@ export function residueLines({ discovered, matched, undetermined, silent, unfilt
       ` · ${silent} silent (their sources name paths, none of which cover yours).`,
     '  A `silent` verdict is this derivation\'s weakest claim, not a clearance, and there are two ways to earn it that have' +
       ' nothing to do with your paths: a gate that computes its own population and names only its baseline artifact scores' +
-      ' silent for every card in the tree, and so does one whose population is a top-level FILE (`README.md`) — a literal' +
-      ' with no path separator is refused as too generic, so the gate reads your file while naming nothing that can match it.',
+      ' silent for every card in the tree, and so does one whose population is a repo-root FILE it spells as a bare' +
+      ' filename — a literal with no path separator is refused as too generic, so the gate reads your file while naming' +
+      ' nothing that can match it. That second one is escapable, and gates have escaped it: a gate whose population really' +
+      ' is a root file reaches it by declaring the subtree spelling (`AGENTS.md/**`), after which it is no longer silent' +
+      " for that file. hintCovers' docblock carries the measurement and what the refusal buys.",
     `  ${unfiltered} of the ${discovered} sit only in workflows that declare no pull_request path filter — CI schedules those on` +
       ' EVERY pull request, so no path derivation can narrow them and their verdict above is about relevance, never schedule.',
     `  ${unreachable} of the ${discovered} declare a population that reaches NOTHING in the tree, swept over ${swept} tracked file(s) —` +
@@ -2618,8 +2634,10 @@ function selfTest() {
   t('a declared subtree does not reach a sibling root', !hintCovers('content/**', 'contentious/x.md'));
   // A top-level FILE stays out of reach on purpose: accepting a bare filename
   // would admit every `package.json` basename a gate joins with a package dir.
-  // Pinned so the loss reads as a decision, not an oversight — it is the rest
-  // of check-doc-anchors' corpus (README.md, ARCHITECTURE.md).
+  // Pinned so the loss reads as a decision, not an oversight. What is refused
+  // is the LITERAL, never the file — a gate whose population really is a root
+  // file reaches it by declaring the subtree spelling, which is what the
+  // rootFileDeclarations cases below pin.
   t('a bare top-level FILE name is refused, the decided loss', !hintCovers('README.md', 'README.md'));
 
   // The three live declarations the refusal used to swallow, read from the real
@@ -2679,6 +2697,76 @@ function selfTest() {
   t('and claims no other repo-root file', !lineRatchetHints.some((h) => hintCovers(h, 'README.md')));
   t('nor a same-named file inside a directory', !lineRatchetHints.some((h) => hintCovers(h, 'examples/AGENTS.md')));
   t('a bare top-level file literal is still no hint at all', extractWatchHints("const F = 'README.md';").length === 0);
+
+  // The rest of that class (#9979). The ratchet above was one of SIX families
+  // whose population genuinely includes a repo-root instruction file; the other
+  // five were measured still invisible, so an AGENTS.md card derived ONE gate
+  // out of six and a README.md / ARCHITECTURE.md card derived NONE at all —
+  // while `check:doc-anchors` is REQUIRED in lint.yml and is this repo's only
+  // fragment coverage. Each declares the subtree spelling in its own source.
+  //
+  // Read from the real gates, not fixtures: what is pinned is that the tree
+  // still HAS the declarations. If one of these gates stops reading its root
+  // file, delete its case with the declaration — never keep a case green by
+  // re-pointing it at a gate that never read the file.
+  const rootFileDeclarations = [
+    ['the pm skill-id lint', 'scripts/pm/check-skill-id-lint.mjs', 'AGENTS.md'],
+    ['the governed-merge register', 'scripts/pm/check-governed-merges.mjs', 'AGENTS.md'],
+    ['the governed-merge register (CLAUDE.md half)', 'scripts/pm/check-governed-merges.mjs', 'CLAUDE.md'],
+    ['the governed-prose gate', 'scripts/pm/check-governed-prose.mjs', 'AGENTS.md'],
+    ['the docs-audit scope gate', 'scripts/docs-audit/check-audit-scope.mjs', 'AGENTS.md'],
+    ['the required-context pin', 'scripts/check-required-contexts.mjs', 'AGENTS.md'],
+    ['the doc-anchors gate', 'scripts/check-doc-anchors.mjs', 'README.md'],
+    ['the doc-anchors gate (ARCHITECTURE.md half)', 'scripts/check-doc-anchors.mjs', 'ARCHITECTURE.md'],
+  ];
+  for (const [what, gate, rootFile] of rootFileDeclarations) {
+    const gateHints = extractWatchHints(readFileSync(join(ROOT, gate), 'utf8'));
+    t(`${what} reaches the repo-root file it declares (${rootFile})`, gateHints.some((h) => hintCovers(h, rootFile)));
+    // The negative half, and the reason each of these is a DECLARATION rather
+    // than an extractor change: a declaration must buy its own file and NOT the
+    // bare-`*.md` class the extractor still refuses. `examples/AGENTS.md` is
+    // the live specimen — a real tracked file, same basename, not read by any
+    // of these gates (check-governed-merges' own near-miss case names it).
+    t(`${what} claims no same-named file inside a directory`, !gateHints.some((h) => hintCovers(h, `examples/${rootFile}`)));
+  }
+  // …and the root files stay separated from each other: the governed-merge
+  // register is the only one of the six that declares two, and nothing here may
+  // reach a root file its gate does not read.
+  const proseHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/pm/check-governed-prose.mjs'), 'utf8'));
+  t('a one-root declaration does not reach the other root file', !proseHints.some((h) => hintCovers(h, 'CLAUDE.md')));
+  const anchorRootHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-doc-anchors.mjs'), 'utf8'));
+  t('and the doc-anchors pair claims neither instruction file', !anchorRootHints.some((h) => hintCovers(h, 'AGENTS.md') || hintCovers(h, 'CLAUDE.md')));
+
+  // The DIRECTORY half of the same class (#10107). A gate whose population is a
+  // top-level DIRECTORY spelled as a bare word is invisible for the same reason
+  // a root file is — `looksPathy` finds no separator, so the extractor builds no
+  // hint at all — and it is the more expensive half, because the word names a
+  // whole subtree rather than one file. `check:role-word` walks
+  // `['content/docs', 'skills']`: the first is a hint, the second was nothing,
+  // so a skills-only card derived the content half and scored this gate
+  // `silent`. PR #10038 paid for it — a green local union, then
+  // `role-word count grew 2 → 3` in CI. It declares the subtree spelling now.
+  //
+  // Read from the real gate, not a fixture: what is pinned is that the tree
+  // still HAS the declaration. If this gate stops walking that root, delete the
+  // declaration and these cases together — never keep them green by re-pointing
+  // at a gate that never read it.
+  const roleWordHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-role-word.mjs'), 'utf8'));
+  t('the role-word ratchet reaches the published skills catalog it declares', roleWordHints.some((h) => hintCovers(h, 'skills/objectstack-platform/SKILL.md')));
+  t('and still reaches the content half it always named', roleWordHints.some((h) => hintCovers(h, 'content/docs/deployment/cli.mdx')));
+  // The negative halves, and the reason this is a DECLARATION and not an
+  // extractor change. `.claude/skills/` is the live specimen: a real tracked
+  // tree whose last segment IS the declared root, which this gate does not walk
+  // — a widened extractor accepting the bare word `skills` would not tell them
+  // apart, and the collapsed subtree does.
+  t('and claims nothing under the internal .claude skills tree it never walks', !roleWordHints.some((h) => hintCovers(h, '.claude/skills/pm-dispatch/SKILL.md')));
+  t('nor a package source file', !roleWordHints.some((h) => hintCovers(h, 'packages/spec/src/index.ts')));
+  t('nor the sibling FILE beside the content root', !roleWordHints.some((h) => hintCovers(h, 'content/docs.site.json')));
+  // The pair that makes the declaration worth having: the bare word this gate
+  // actually spells in its ROOTS array stays refused, so the coverage above is
+  // bought by the declaration and by nothing else.
+  t('the bare root word the gate spells in ROOTS is still refused as too generic', !hintCovers('skills', 'skills/objectstack-platform/SKILL.md'));
+  t('while the declared subtree covers that same path', hintCovers('skills/**', 'skills/objectstack-platform/SKILL.md'));
 
   // ── A trailing sentence period is not part of the path (#8534, half two) ──
   //
@@ -3360,6 +3448,18 @@ function selfTest() {
   t('the residue summary states each bucket', residue.some((l) => l.includes('35 undetermined')) && residue.some((l) => l.includes('55 silent')));
   t('the residue summary points at the flag that lists the unplaced families', residue.some((l) => l.includes('--residue') && l.includes('90')));
   t('the residue summary names NO gate — the property the deleted prose lacked', !/check:[\w:-]+/.test(residue.join('\n')));
+  // The same rot, one noun over (#10012). The top-level-FILE clause used to
+  // illustrate the unreachable class with `README.md`, which was honest until
+  // that gate declared `README.md/**` — after which the sentence offered, as
+  // its example of a population nothing can reach, the one root file in this
+  // repo that a card DOES derive. A specimen here is a claim about the tree
+  // that this function has no way to keep true; the escape hatch is the half
+  // that cannot go stale, because it restates the rule rather than the tree.
+  // The first pin holds only the literal that actually rotted — a future
+  // specimen spelled some other way would slip it, which is why the second
+  // pin, that the durable half is present at all, is the load-bearing one.
+  t('the residue names no repo-root file as an unreachable specimen', !residue.join('\n').includes('README.md'));
+  t('and states the escape hatch instead, which restates the rule and cannot rot', residue.some((l) => l.includes('subtree spelling')));
   t('the residue summary still names the convention KINDS it derives', residue.some((l) => l.includes('adds or edits a test file')));
   // The schedule half (#9171). The count is the size of the answer this
   // derivation cannot give — families CI runs on every PR — and printing it is
@@ -3628,6 +3728,81 @@ function selfTest() {
     rmSync(gitTmp, { recursive: true, force: true });
   }
 
+  // ── The entry guard (#9757) ───────────────────────────────────────────────
+  //
+  // Both directions are measured by really spawning node, because the guard's
+  // own failure direction is silent in BOTH of them. If the predicate wrongly
+  // answered false, every CLI mode would print nothing and exit 0, and
+  // `check:pm-dispatch-gates` — which holds the child's exit status only —
+  // would report that no-op as a pass. If it wrongly answered true, the defect
+  // this guard exists to remove is simply still here. Reasoning about argv
+  // cannot tell those apart on the invocation forms that actually occur; a
+  // child process can.
+  const SELF = fileURLToPath(import.meta.url);
+  t('the entry predicate answers true for this module named by its own path', invokedAs(SELF, SELF));
+  t('and for the same file named relatively from the repo root, as the gate spells it', invokedAs(join(ROOT, 'scripts/pm/dispatch-gates.mjs'), SELF));
+  t('a different file in the same directory is not this module', !invokedAs(join(ROOT, 'scripts/pm/check-dispatch-gates.mjs'), SELF));
+  t('an absent argv[1] is not this module — the `node --eval` importer', !invokedAs(undefined, SELF) && !invokedAs('', SELF));
+
+  const entryTmp = mkdtempSync(join(tmpdir(), 'dispatch-gates-entry-'));
+  try {
+    // RUN DIRECTLY the modes must all still reach their branches. `--tier`
+    // stands in for every one of them: the guard is a SINGLE site wrapping the
+    // whole chain, so a form that reaches this branch reaches `--self-test`
+    // too — and spawning `--self-test` from inside `--self-test` would recurse.
+    const direct = spawnSync(process.execPath, [SELF, '--tier', 'packages/spec/src/data/filter.zod.ts'], {
+      encoding: 'utf8',
+      cwd: ROOT,
+    });
+    t(
+      'invoked directly, --tier still answers rather than exiting 0 in silence',
+      direct.status === 0 && (direct.stdout ?? '').trim().length > 0,
+    );
+
+    // REACHED THROUGH A SYMLINK — the form a plain path equality gets wrong.
+    // Node resolves the link for the module graph, so `import.meta.url` names
+    // the real file while argv[1] names the link. Under the precedent's
+    // one-comparison spelling this run goes inert, exit 0, no output: the
+    // false-green the gate cannot see.
+    const link = join(entryTmp, 'linked-dispatch-gates.mjs');
+    symlinkSync(SELF, link);
+    const viaLink = spawnSync(process.execPath, [link, '--tier', 'packages/spec/src/data/filter.zod.ts'], {
+      encoding: 'utf8',
+      cwd: ROOT,
+    });
+    t(
+      'invoked through a symlink to this file, --tier still answers',
+      viaLink.status === 0 && (viaLink.stdout ?? '').trim().length > 0,
+    );
+    t('and it answers the SAME thing as the direct invocation', (viaLink.stdout ?? '') === (direct.stdout ?? ''));
+
+    // IMPORTED the module must do nothing at all. The importer's argv carries
+    // this tool's own flags on purpose: that is the shape that fired an
+    // unrelated file's assertions inside the importer's self-test.
+    const consumer = join(entryTmp, 'consumer.mjs');
+    const REACHED = 'CONSUMER-REACHED function function function';
+    writeFileSync(
+      consumer,
+      `const m = await import(${JSON.stringify(pathToFileURL(SELF).href)});\n` +
+        `console.log('CONSUMER-REACHED', typeof m.maskComments, typeof m.isExtractConfigPath, typeof m.deriveTier);\n`,
+    );
+    const imported = spawnSync(process.execPath, [consumer, '--self-test', '--tier', 'packages/spec/src/index.ts'], {
+      encoding: 'utf8',
+      cwd: entryTmp,
+    });
+    t(
+      'imported, the importer reaches its own first statement and the re-exports are there',
+      imported.status === 0 && (imported.stdout ?? '').trim() === REACHED,
+    );
+    t('imported, this module prints nothing of its own on either stream', (imported.stderr ?? '').trim() === '');
+    t(
+      "imported by a consumer whose own argv says --self-test, THIS file's self-test does not fire",
+      !(imported.stdout ?? '').includes('dispatch-gates self-test:'),
+    );
+  } finally {
+    rmSync(entryTmp, { recursive: true, force: true });
+  }
+
   let failed = 0;
   for (const [name, cond] of cases) {
     if (!cond) failed++;
@@ -3640,58 +3815,120 @@ function selfTest() {
   console.log(`✓ dispatch-gates self-test: ${cases.length} cases pass.`);
 }
 
-const argvPaths = process.argv.slice(2).filter((a) => !a.startsWith('--'));
-const wantsChanged = process.argv.includes('--changed');
-if (process.argv.includes('--self-test')) {
-  selfTest();
-} else if (wantsChanged && argvPaths.length > 0) {
-  // The two input modes answer different questions and must never be blended:
-  // silently preferring one would make the other's arguments vanish without a
-  // word, which is the class of failure this whole file is about.
-  console.error('dispatch-gates: --changed derives the paths itself — do not pass paths with it.');
-  process.exit(2);
-} else {
-  let paths;
-  if (argvPaths.length > 0) {
-    paths = argvPaths.map((p) => p.replace(/^\.\//, ''));
-  } else {
-    // No paths: derive them. This is the dev-side form — "the gates my ACTUAL
-    // diff implicates" — and it is the default because the caller-supplied
-    // list was the thing getting it wrong (#9320). `--changed` spells the same
-    // thing out for a caller that would rather say it than imply it.
-    let derived;
-    try {
-      derived = changedPathsFromGit();
-    } catch (err) {
-      console.error(`dispatch-gates: could not derive the change set — ${err.message}`);
-      console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] [--tier] [<path> ...] | --changed | --self-test');
-      process.exit(2);
-    }
-    if (derived.paths.length === 0) {
-      // An empty derivation is an input problem far more often than an answer,
-      // and "no gates" is the most expensive thing this tool could say wrongly
-      // (#4690: an unreadable input must never look like an empty answer).
-      console.error(
-        `dispatch-gates: this branch changes nothing against '${derived.base}' (merge base ${derived.mergeBase.slice(0, 9)}) — ` +
-          'nothing to derive. On the base branch already, or in the wrong checkout? Pass explicit paths to ask about a hypothetical surface.',
-      );
-      process.exit(2);
-    }
-    for (const line of derivationProvenance(derived)) console.error(line);
-    console.error('');
-    paths = derived.paths;
-  }
+// ── CLI ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Is `entryArg` — a `process.argv[1]` — this very module?
+ *
+ * Exported so the predicate the entry guard stands on is pinned by cases rather
+ * than trusted by reading. Its failure direction is SILENT: an `invokedDirectly`
+ * that wrongly answered `false` would turn every mode of this tool into a no-op
+ * that prints nothing and exits 0, and `check:pm-dispatch-gates` holds the
+ * child's exit STATUS only (see that gate's header) — so the no-op would report
+ * as a pass, which is the silent-success direction this tree treats as worse
+ * than no check at all.
+ *
+ * Two comparisons, because node resolves symlinks for the module graph but
+ * leaves `process.argv[1]` as the caller typed it. The plain `resolve` equality
+ * is the spelling of the landed precedent one file over
+ * (`scripts/pm/check-governed-merges.mjs`, whose header carries this shape's
+ * incident history). The realpath comparison is the half that keeps a checkout
+ * REACHED THROUGH A SYMLINK from reading as "imported": `import.meta.url` would
+ * name the real file while `argv[1]` named the link, the equality would answer
+ * false, and the tool would go quietly inert for whoever ran it that way. It
+ * falls back to `false` rather than throwing — an unreadable entry path is not
+ * this module.
+ */
+export function invokedAs(entryArg, selfPath) {
+  if (!entryArg) return false;
+  const entry = resolve(entryArg);
+  const self = resolve(selfPath);
+  if (entry === self) return true;
   try {
-    // `--tier` answers the claim-time question alone: it reads no workflow and
-    // no check script, so it still answers on a tree where the gate derivation
-    // cannot run — and a claim comment is written before any of that matters.
-    if (process.argv.includes('--tier')) {
-      for (const line of tierLines(deriveTier(paths))) console.log(line);
-    } else {
-      derive(paths, { showResidue: process.argv.includes('--residue') });
-    }
-  } catch (err) {
-    console.error(`dispatch-gates: derivation failed — ${err.message}`);
+    return realpathSync(entry) === realpathSync(self);
+  } catch {
+    return false;
+  }
+}
+
+const invokedDirectly = invokedAs(process.argv[1], fileURLToPath(import.meta.url));
+
+/**
+ * Executed only as a CLI. Importing this module must have NO side effect.
+ *
+ * Everything above this line is exported — the two re-export blocks with their
+ * stated rationales, and the derivation functions the self-test drives — and
+ * none of it was reachable while this dispatch ran at module top level. An
+ * `import { maskComments } from './dispatch-gates.mjs'` ran the TOOL against the
+ * IMPORTER's argv and cwd, and on most paths reached `process.exit(2)` before
+ * the importer's own first statement: measured here, a bare consumer printed
+ * this tool's "nothing to derive" refusal and exited 2, its own `console.log`
+ * never having run. On the other branch it is worse than an exit — a consumer
+ * running its own `--self-test` fired all of THIS file's assertions inside it,
+ * printing a second summary line and putting an unrelated file's failures on
+ * the importer's exit code. That is the same defect PR #9897 fixed in
+ * `check-governed-merges.mjs` at 77 assertions; this file carries it at 334. A
+ * self-test is a mode of the file being RUN, never a side effect of importing
+ * it, and a shared module that exits on import is a shared module nobody can
+ * share.
+ *
+ * The guard is ONE site wrapping the whole chain, not a condition repeated per
+ * branch: a branch added inside it later cannot forget to carry it.
+ */
+if (invokedDirectly) {
+  const argvPaths = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+  const wantsChanged = process.argv.includes('--changed');
+  if (process.argv.includes('--self-test')) {
+    selfTest();
+  } else if (wantsChanged && argvPaths.length > 0) {
+    // The two input modes answer different questions and must never be blended:
+    // silently preferring one would make the other's arguments vanish without a
+    // word, which is the class of failure this whole file is about.
+    console.error('dispatch-gates: --changed derives the paths itself — do not pass paths with it.');
     process.exit(2);
+  } else {
+    let paths;
+    if (argvPaths.length > 0) {
+      paths = argvPaths.map((p) => p.replace(/^\.\//, ''));
+    } else {
+      // No paths: derive them. This is the dev-side form — "the gates my ACTUAL
+      // diff implicates" — and it is the default because the caller-supplied
+      // list was the thing getting it wrong (#9320). `--changed` spells the same
+      // thing out for a caller that would rather say it than imply it.
+      let derived;
+      try {
+        derived = changedPathsFromGit();
+      } catch (err) {
+        console.error(`dispatch-gates: could not derive the change set — ${err.message}`);
+        console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] [--tier] [<path> ...] | --changed | --self-test');
+        process.exit(2);
+      }
+      if (derived.paths.length === 0) {
+        // An empty derivation is an input problem far more often than an answer,
+        // and "no gates" is the most expensive thing this tool could say wrongly
+        // (#4690: an unreadable input must never look like an empty answer).
+        console.error(
+          `dispatch-gates: this branch changes nothing against '${derived.base}' (merge base ${derived.mergeBase.slice(0, 9)}) — ` +
+            'nothing to derive. On the base branch already, or in the wrong checkout? Pass explicit paths to ask about a hypothetical surface.',
+        );
+        process.exit(2);
+      }
+      for (const line of derivationProvenance(derived)) console.error(line);
+      console.error('');
+      paths = derived.paths;
+    }
+    try {
+      // `--tier` answers the claim-time question alone: it reads no workflow and
+      // no check script, so it still answers on a tree where the gate derivation
+      // cannot run — and a claim comment is written before any of that matters.
+      if (process.argv.includes('--tier')) {
+        for (const line of tierLines(deriveTier(paths))) console.log(line);
+      } else {
+        derive(paths, { showResidue: process.argv.includes('--residue') });
+      }
+    } catch (err) {
+      console.error(`dispatch-gates: derivation failed — ${err.message}`);
+      process.exit(2);
+    }
   }
 }

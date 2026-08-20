@@ -43,6 +43,13 @@ import { createDefaultHostConfig, resolveDefaultArtifactPath } from './default-h
 // config that resolution reads correctly.
 import { appDefaultPermissionSetName, appSecurityPluginOptions } from '@objectstack/plugin-security';
 
+// [#10126] Pay the first transform of these dist-resolved workspace deps at MODULE
+// LOAD. Each is reached below through a dynamic `import()` inside an `it()` body or a
+// hook -- both of which vitest clocks, while collection is clocked against nothing. See
+// `scripts/check-test-source-alias.mjs` (the clocked-window rule) and #10115 / PR #10120,
+// where the same shape cost 30 ejected merge-queue builds in one night.
+import '@objectstack/service-datasource';
+
 // A minimal `objectstack build` artifact carrying an app-declared default
 // profile with a hierarchy read scope, an add-on permission set, app roles,
 // plus the metadata the path already surfaced (objects/requires/manifest).

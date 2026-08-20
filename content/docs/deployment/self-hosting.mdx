@@ -73,7 +73,7 @@ docker run -p 8080:8080 \
   -e OS_DATABASE_URL="postgres://user:pass@db-host:5432/myapp" \
   -e OS_AUTH_SECRET \
   -e OS_SECRET_KEY \
-  ghcr.io/objectstack-ai/objectstack:17.0.0
+  ghcr.io/objectstack-ai/objectstack:17.1.0
 ```
 
 (`OS_ARTIFACT_PATH` also accepts an `https://` URL, so the artifact can come
@@ -91,7 +91,7 @@ docker run -p 8080:8080 \
   -e OS_ARTIFACT_URL="https://releases.example.com/hotcrm-2.2.2.json#sha256=<64 hex chars>" \
   -e OS_DATABASE_URL="postgres://user:pass@db-host:5432/myapp" \
   -e OS_AUTH_SECRET -e OS_SECRET_KEY \
-  ghcr.io/objectstack-ai/objectstack:17.0.0
+  ghcr.io/objectstack-ai/objectstack:17.1.0
 ```
 
 Both schemes work: `https://…` is fetched at boot, `file:///…` is read directly
@@ -142,7 +142,7 @@ COPY . .
 RUN npx os build              # → dist/objectstack.json
 
 # ── Runtime: the official ObjectStack runtime image ──────────────────
-FROM ghcr.io/objectstack-ai/objectstack:17.0.0
+FROM ghcr.io/objectstack-ai/objectstack:17.1.0
 COPY --from=build --chown=node:node /app/dist/objectstack.json /srv/app/objectstack.json
 ```
 
@@ -160,7 +160,7 @@ image)? The official image is nothing more than:
 
 ```dockerfile title="Dockerfile (self-built runtime, equivalent)"
 FROM node:22-slim
-RUN npm install -g @objectstack/cli@17.0.0
+RUN npm install -g @objectstack/cli@17.1.0
 
 WORKDIR /srv/app
 RUN chown node:node /srv/app

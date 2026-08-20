@@ -458,12 +458,27 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
     );
 
     const undocumentedDelegation = {
-      object: 'sys_user_permission_set',
-      records: [{ user_id: 'u1', permission_set: 'billing', delegated_from: 'u2' }],
+      // sys_user_position — the ONLY table the D3 rule covers since #9730
+      // retired `delegated_from` from sys_user_permission_set.
+      object: 'sys_user_position',
+      records: [{ user_id: 'u1', position: 'billing_approver', delegated_from: 'u2' }],
     };
     const delegatedReal = runRuntimeAuthoringRules({ type: 'seed', item: undocumentedDelegation });
     expect(delegatedReal.errors.map((f) => f.rule)).toEqual([SECURITY_DELEGATION_MISSING_REASON]);
     expect(delegatedReal.errors[0].severity).toBe('error');
+
+    // [#9730] The retired half, pinned at the same real gate: a
+    // sys_user_permission_set seed carrying the retired `delegated_from` key
+    // draws NO D3 finding — the column does not exist on that table any more,
+    // and the lint no longer implies it does. (The stale key itself is refused
+    // downstream by the engine's schema preflight as an undeclared field.)
+    const retiredKeyOnPermissionSet = {
+      object: 'sys_user_permission_set',
+      records: [{ user_id: 'u1', permission_set: 'billing', delegated_from: 'u2' }],
+    };
+    const retiredReal = runRuntimeAuthoringRules({ type: 'seed', item: retiredKeyOnPermissionSet });
+    expect(retiredReal.errors).toEqual([]);
+    expect(retiredReal.advisories).toEqual([]);
 
     // The pre-#7576 spelling, shown to be the inert state it was: the seed
     // lands on a key no rule reads, and the gate reports a clean write.
@@ -481,8 +496,9 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
       records: [{ user_id: 'u1', position: 'field_ops', valid_until: '2099-01-01T00:00:00Z' }],
     };
     const cleanDelegation = {
-      object: 'sys_user_permission_set',
-      records: [{ user_id: 'u1', permission_set: 'billing', delegated_from: 'u2', reason: 'vacation stand-in' }],
+      // sys_user_position: the one table delegation rows live on since #9730.
+      object: 'sys_user_position',
+      records: [{ user_id: 'u1', position: 'field_ops', delegated_from: 'u2', valid_until: '2099-01-01T00:00:00Z', reason: 'vacation stand-in' }],
     };
     for (const item of [cleanGrant, cleanDelegation]) {
       const real = runRuntimeAuthoringRules({ type: 'seed', item });

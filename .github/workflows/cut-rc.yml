@@ -17,34 +17,44 @@ name: Cut RC
 #
 # WHAT THIS SOLVES THAT `release.yml` CANNOT
 # ------------------------------------------
-# Cutting an rc through the standing "Version Packages" PR (#6208) requires the
-# objectui pin to be fresh at the moment of the cut, and `check:objectui-pin-fresh`
-# judges the pin against a MOVING objectui `main`. On a busy day that is a race the
-# cutter cannot win: rc.6 was chased across four pin-bump laps
-# (8aad9fd -> 9b9fa49 -> cfeb378 -> 1b6188d -> bcd3e02), every lap overtaken before
-# its CI finished, and finishing would have needed ~40 minutes of coordinated
-# freezes across two repositories. The version PR itself is force-refreshed on
-# every main push, so its CI can never converge while main is busy.
+# The standing "Version Packages" PR (#6208) is force-refreshed on every push to
+# main, so its CI can never converge while main is busy — on a repo with ~18
+# merges a working day, cutting through it means asking two repositories to hold
+# still. rc.6 was chased across four pin-bump laps
+# (8aad9fd -> 9b9fa49 -> cfeb378 -> 1b6188d -> bcd3e02), every lap overtaken
+# before its CI finished, and finishing would have needed ~40 minutes of
+# coordinated freezes.
 #
-# The fix is not more discipline, it is a SNAPSHOT. This lane resolves objectui
-# `main` HEAD exactly once, records the objectstack `main` sha it checked out, and
-# does every downstream step against those two frozen values. Both repositories may
-# keep moving freely for the whole run.
+# The fix is not more discipline, it is a SNAPSHOT: this lane records the
+# objectstack `main` sha it checked out and does every downstream step against
+# that one frozen value. main may keep moving freely for the whole run.
 #
-# WHY NOT `check:objectui-pin-fresh` HERE (and why that is not a hole)
-# -------------------------------------------------------------------
-# That script asks "is the pin equal to objectui main RIGHT NOW", which is a
-# liveness question, and liveness is precisely what a snapshot gives up on purpose.
-# Calling it here would re-introduce the race the whole lane exists to remove: a
-# single objectui merge mid-run would fail a cut that is otherwise perfect.
+# THE objectui PIN IS AN INPUT HERE, NEVER A DECISION (#10134)
+# ------------------------------------------------------------
+# Maintainer ruling, 2026-08-20, verbatim and untranslated:
 #
-# What this lane asserts instead is pin SELF-CONSISTENCY — `.objectui-sha` equals
-# the sha THIS run resolved and bumped to. #3340's actual invariant is "everything
-# shipped is covered by the changeset record", and that stays true by construction:
-# the bump changeset covers OLD_PIN..OBJECTUI_SHA, and objectui commits landing past
-# the snapshot are simply the next release's record, not a gap in this one.
-# `scripts/check-objectui-pin-fresh.mjs` is UNCHANGED and still enforces on the GA
-# path in `release.yml` — this lane adds a route, it does not relax a gate.
+#   > objectui 每次 pin 的时候，对应的 changeset 应该带过来，但是发版本的时候不需要去
+#   > 扫描 objectui 仓库的最新版
+#   >
+#   > 更新到哪个版本是 objectstack 的 issue 自己决定的
+#
+# So this lane READS `.objectui-sha` and builds against it. It does not resolve
+# objectui `main`, does not compare the pin to anything in another repo, and does
+# not move the pin. The pin moves only on a manual bump PR whose target revision
+# was decided in an objectstack issue (#10129 is the pattern).
+#
+# ⛔ Do not re-add a currency check here or anywhere on a release path. It is not
+# that liveness is expensive — it is that "the pin is behind objectui main" is
+# not a defect. #3340's actual invariant is "everything published is covered by
+# the changeset record", and `scripts/bump-objectui.sh` +
+# `scripts/objectui-changeset-digest.mjs` deliver it at BUMP time by carrying
+# objectui's own changesets across OLD..NEW. That carry-over is the mechanism;
+# scanning objectui mid-release was a second, redundant attempt at the same goal
+# that additionally reached into another repo to second-guess a decision.
+#
+# CONSEQUENCE, STATED PLAINLY: an rc ships whatever console the committed pin
+# names. If the pin is old, the rc's frontend is old, and nothing here will warn
+# about it. That is the design, not an oversight — the pin is a decision.
 #
 # SCOPE — rc PRERELEASES ONLY
 # ---------------------------
@@ -71,9 +81,9 @@ on:
       version:
         description: >-
           The EXPECTED resulting version, e.g. 17.0.0-rc.6 — what the version pass
-          should compute after this run's pin bump, not what main carries now.
-          Typing it is the human confirmation the 2026-08-07 ruling requires: the
-          run fails before anything irreversible if the computed version differs.
+          should compute from the changesets pending on main, not what main carries
+          now. Typing it is the human confirmation the 2026-08-07 ruling requires:
+          the run fails before anything irreversible if the computed version differs.
         required: true
         type: string
       dry_run:
@@ -236,60 +246,59 @@ jobs:
           echo "main currently carries @objectstack/cli@${CURRENT}; this run must compute ${REQUESTED}."
 
       # ────────────────────────────────────────────────────────────────────────
-      # THE SNAPSHOT, HALF 2 — objectui, resolved EXACTLY ONCE.
+      # THE objectui HALF — READ FROM THE COMMITTED PIN, NOT RESOLVED (#10134).
       #
-      # Everything downstream reads $OBJECTUI_SHA, never `main` again. This single
-      # line is what ends the pin-chasing treadmill: objectui may merge freely for
-      # the rest of the run and this cut neither notices nor cares.
+      # `.objectui-sha` is the whole input. Everything downstream reads
+      # $OBJECTUI_SHA, which is that file and nothing else, so objectui may merge
+      # freely for the rest of the run and this cut neither notices nor cares —
+      # not because a snapshot froze a moving target, but because the target was
+      # never objectui `main`. See "THE objectui PIN IS AN INPUT HERE" up top.
       # ────────────────────────────────────────────────────────────────────────
-      - name: Resolve objectui main HEAD (once)
+      - name: Read the committed objectui pin
         run: |
-          # Network failure is NEVER green — the rule check-objectui-pin-fresh.mjs
-          # states for the same lookup. An unresolvable remote fails the cut.
-          if ! OUT="$(git ls-remote https://github.com/objectstack-ai/objectui.git refs/heads/main 2>&1)"; then
-            echo "::error::could not reach objectstack-ai/objectui to resolve main: ${OUT}"
-            exit 1
-          fi
-          OBJECTUI_SHA="$(printf '%s\n' "$OUT" | awk 'NR==1{print $1}')"
+          # Shape-checked, not trusted: `.objectui-sha` is hand-edited by
+          # bump-objectui.sh and by humans, and a truncated or empty file would
+          # otherwise surface much later as an unhelpful clone/build failure.
+          OBJECTUI_SHA="$(tr -d '[:space:]' < .objectui-sha)"
           if ! printf '%s' "$OBJECTUI_SHA" | grep -qE '^[0-9a-f]{40}$'; then
-            echo "::error::git ls-remote returned no usable sha for objectui refs/heads/main (got '${OBJECTUI_SHA}'). Refusing to cut against an unknown frontend revision."
+            echo "::error::.objectui-sha does not contain a 40-hex commit id (got '${OBJECTUI_SHA}'). Refusing to cut against an unreadable frontend revision."
             exit 1
           fi
           echo "OBJECTUI_SHA=${OBJECTUI_SHA}" >> "$GITHUB_ENV"
-          echo "objectui snapshot: ${OBJECTUI_SHA} (main HEAD at $(date -u +%FT%TZ)); objectui may move freely from here."
+          echo "objectui pin (committed, NOT resolved): ${OBJECTUI_SHA}. This cut ships the console at that revision, however old it is — moving the pin is a separate, deliberate PR."
 
-      - name: Clone objectui at full depth
+      - name: Clone objectui at full depth, at the pin
         run: |
           OBJECTUI_ROOT="${RUNNER_TEMP}/objectui"
-          # FULL clone, not shallow, and this is a measured requirement rather
-          # than caution: scripts/objectui-changeset-digest.mjs walks
-          # OLD_PIN..OBJECTUI_SHA to build the @objectstack/console changeset, and
-          # it exits 2 on a range it cannot walk. bump-objectui.sh degrades to a
-          # tip-subject-only changeset in that case — a DEGRADED release record
-          # that still exits 0. A shallow clone would therefore cost the cut its
-          # frontend history without failing (#4731's whole lesson).
+          # FULL clone, not shallow, and still a measured requirement rather than
+          # caution. Two reasons, both surviving #10134:
+          #   - the check below asks whether the PIN is a real, reachable commit
+          #     of objectui main; a tip-only shallow clone cannot answer that and
+          #     would answer "no" for every pin older than the tip;
+          #   - build-console.sh builds from THIS clone (it honours
+          #     $OBJECTUI_ROOT) by adding a worktree at the pin, which needs the
+          #     pin's tree present.
+          # The #4731 lesson — a degraded changeset record and a complete one look
+          # alike, so never let history quietly go missing — now applies on the
+          # bump PR, which is where objectui-changeset-digest.mjs walks OLD..NEW.
           git clone --no-tags https://github.com/objectstack-ai/objectui.git "$OBJECTUI_ROOT"
           echo "OBJECTUI_ROOT=${OBJECTUI_ROOT}" >> "$GITHUB_ENV"
 
-          # The snapshot sha must be IN the clone. It normally is (the clone is a
-          # superset of the ls-remote moment); it is absent only if objectui
-          # rewrote main in between, which is exactly when continuing would pin a
-          # revision nobody can resolve later.
+          # The pin must be IN the clone. Still a real failure mode, and the only
+          # objectui-side one left: a pin taken from a branch that never merged,
+          # or a main that was rewritten, names a revision nobody can resolve
+          # later — and the cut would publish a console built from it.
           if ! git -C "$OBJECTUI_ROOT" cat-file -e "${OBJECTUI_SHA}^{commit}" 2>/dev/null; then
-            echo "::error::objectui ${OBJECTUI_SHA} is not present in a fresh full clone of main — main was rewritten mid-run. Re-dispatch."
+            echo "::error::the committed pin ${OBJECTUI_SHA} is not present in a fresh full clone of objectui main. It names a revision that is not reachable from main (unmerged branch, or main was rewritten). Fix .objectui-sha in its own PR; do not cut against it."
             exit 1
           fi
 
-          OLD_PIN="$(tr -d '[:space:]' < .objectui-sha)"
-          if git -C "$OBJECTUI_ROOT" cat-file -e "${OLD_PIN}^{commit}" 2>/dev/null; then
-            AHEAD="$(git -C "$OBJECTUI_ROOT" rev-list --count "${OLD_PIN}..${OBJECTUI_SHA}")"
-            echo "objectui pin ${OLD_PIN:0:12} -> ${OBJECTUI_SHA:0:12} (${AHEAD} commit(s)); range is walkable, the changeset digest will be complete."
-          else
-            # Not fatal — bump-objectui.sh has a labelled degraded path — but it
-            # must never pass unremarked, because a degraded changeset and a
-            # complete one look alike in the release record.
-            echo "::warning::the current pin ${OLD_PIN:0:12} is not reachable in this objectui clone, so the console changeset will take bump-objectui.sh's DEGRADED path (tip subject only). The release record for this range will be incomplete — check the emitted .changeset/console-*.md before approving the publish."
-          fi
+          # Detach the clone AT THE PIN so nothing downstream can accidentally
+          # read a working tree that is objectui main. build-console.sh builds
+          # from its own worktree at the pin regardless; this makes the intent
+          # true of the clone itself rather than incidental.
+          git -C "$OBJECTUI_ROOT" checkout --detach --quiet "$OBJECTUI_SHA"
+          echo "objectui clone detached at ${OBJECTUI_SHA:0:12}."
 
       # ────────────────────────────────────────────────────────────────────────
       # Toolchain. Mirrors release.yml's publish job step for step.
@@ -350,38 +359,21 @@ jobs:
         run: pnpm exec turbo run build --filter=@objectstack/client... --filter=@objectstack/spec... --concurrency=4
 
       # ────────────────────────────────────────────────────────────────────────
-      # PIN BUMP — at the snapshot sha, never at "whatever main is now".
+      # ⛔ NO PIN BUMP HAPPENS HERE (#10134).
+      #
+      # This lane used to run `bash scripts/bump-objectui.sh "$OBJECTUI_SHA"` and
+      # then assert `.objectui-sha` equalled the sha it had just written — an
+      # assertion that was trivially true, and that existed only because the sha
+      # came from outside the repo. Both are gone: the pin is committed input, so
+      # there is nothing to bump to and nothing to reconcile.
+      #
+      # The `@objectstack/console` changeset for a pin range is emitted by the
+      # manual bump PR, which is the only place the pin moves. A cut therefore
+      # publishes a console the release record already describes, or it publishes
+      # the same console as last time — never a console nobody wrote a record for.
       # ────────────────────────────────────────────────────────────────────────
-      - name: Bump the objectui pin to the snapshot
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 
-          # The sha is passed EXPLICITLY. With no argument bump-objectui.sh pins
-          # the local checkout's HEAD (#7308 note 1) — which here is objectui main
-          # as of clone time, i.e. stale-by-construction the moment objectui
-          # merges anything. Passing $OBJECTUI_SHA is what makes this a snapshot.
-          #
-          # This commits, or exits 0 saying "already at <sha>" when objectui has
-          # not moved since the last cut. Both are correct; the assert below is
-          # what decides, not whether a commit happened.
-          bash scripts/bump-objectui.sh "$OBJECTUI_SHA"
-
-      # THE pin assertion for this lane — self-consistency, deliberately NOT
-      # liveness. See "WHY NOT check:objectui-pin-fresh HERE" in the header. Do not
-      # replace this with `pnpm check:objectui-pin-fresh`: that would fail this cut
-      # for any objectui merge landing during the run, which is the exact race the
-      # snapshot exists to remove.
-      - name: Assert the pin equals this run's snapshot
-        run: |
-          PINNED="$(tr -d '[:space:]' < .objectui-sha)"
-          if [ "$PINNED" != "$OBJECTUI_SHA" ]; then
-            echo "::error::.objectui-sha is ${PINNED} but this run snapshotted objectui at ${OBJECTUI_SHA}. The bump did not take effect; refusing to build a console the release record does not describe."
-            exit 1
-          fi
-          echo "pin is self-consistent at ${PINNED} — everything published by this run is covered by the changeset record for OLD_PIN..${PINNED:0:12} (#3340)."
-
-      - name: Build the vendored Console SPA at the new pin
+      - name: Build the vendored Console SPA at the committed pin
         run: pnpm objectui:build
 
       - name: Verify the Console dist stamp matches the pin
@@ -389,9 +381,18 @@ jobs:
 
       # ────────────────────────────────────────────────────────────────────────
       # ADR-0082 D4 declaration-parity ratchet — the mandatory SECOND HALF of
-      # every pin move (#5960). The pin bump is this ratchet's only trigger, which
-      # is precisely why it belongs on this lane: cut-rc is now a route that moves
-      # the pin, so a cut that skipped it would be a pin move with no ratchet.
+      # every pin move (#5960), run here against the pin as COMMITTED.
+      #
+      # ⚠️ Since #10134 this lane no longer moves the pin, so this is no longer
+      # "the second half of a move this run performed" — the move, and the
+      # ratchet that belongs to it, happen on the manual bump PR. Kept anyway,
+      # and deliberately: the ratchet is an on-demand gate by decision (ADR-0082
+      # addendum), which means "unrun" is its live failure mode, and a bump PR
+      # that skipped it leaves a divergence that reaches a release unnoticed.
+      # This is the last place before publish that can still say so. It writes to
+      # a gitignored path and asserts against the committed baseline, so it adds
+      # no file to the version commit; on a pin that already ratcheted it simply
+      # passes.
       #
       # Installing a Playwright browser is fine HERE. The #5960 ruling that keeps
       # the ratchet off CI is about not putting an objectui build plus a browser
@@ -412,7 +413,7 @@ jobs:
           fi
           pnpm --dir "$BUILD_ROOT" exec playwright install chromium-headless-shell
 
-      - name: 'Declaration-parity ratchet at the new pin (ADR-0082 D4)'
+      - name: 'Declaration-parity ratchet at the committed pin (ADR-0082 D4)'
         run: pnpm sdui:manifest
 
       # ────────────────────────────────────────────────────────────────────────
@@ -424,17 +425,25 @@ jobs:
       # are audits that always exit 0, and `--audit-stock` says in its own header
       # that a non-zero exit there would make it a gate, which it is not). So the
       # honest base here is $SNAPSHOT_SHA, and the diff they judge is this run's
-      # OWN contribution: the @objectstack/console changeset the pin bump just
-      # emitted. That is a real gate, not a formality — the digest resolves its
-      # bump level from objectui's declarations, so an objectui `major` would
-      # otherwise promote all ~70 packages, and a digest bug emitting empty
-      # frontmatter would stall the release silently and greenly (#4898).
+      # OWN contribution.
+      #
+      # ⚠️ Since #10134 that contribution is EMPTY by design — the lane no longer
+      # bumps the pin, so it emits no @objectstack/console changeset of its own,
+      # and these three assert exactly that. They are kept rather than deleted for
+      # two reasons: "this cut introduces nothing before versioning" is a real
+      # invariant to hold (it is what makes the allowlist assertion below a
+      # statement about `pnpm run version` alone), and each still runs its
+      # `--self-test`, so a broken gate is caught here rather than on the PR that
+      # broke it. The risk they used to cover on this lane — an objectui `major`
+      # promoting all ~70 packages, or a digest bug emitting empty frontmatter and
+      # stalling the release silently and greenly (#4898) — now lands on the
+      # manual bump PR, which is where the digest runs and where these same gates
+      # judge a non-empty diff.
       #
       # $SNAPSHOT_SHA is a pinned sha, which #6129 warns against — but that warning
       # is about pr-automation.yml's FROZEN `base.sha`, a value that goes stale as
-      # main moves under a PR. Here the snapshot is by construction the parent of
-      # the commit being judged, so it IS the merge base, and it cannot go stale
-      # because the run created the commit on top of it moments ago.
+      # main moves under a PR. Here the snapshot is by construction the checkout
+      # this run is judging, so it IS the merge base and cannot go stale.
       # ────────────────────────────────────────────────────────────────────────
       - name: Gate — Changesets "fixed" group covers every public package
         run: node scripts/check-changeset-fixed.mjs
@@ -562,8 +571,16 @@ jobs:
           REQUESTED: ${{ inputs.version }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          # Collapse the pin-bump commit (if bump-objectui.sh made one) back into
-          # the index, so bump + version become one commit on top of the snapshot.
+          # The committer identity. It used to be set by the pin-bump step, which
+          # #10134 deleted; `actions/checkout` does not set one, so `git commit`
+          # below would fail with "empty ident name" without this.
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          # Structural guarantee that the version commit's parent is the snapshot.
+          # Since #10134 no step before this one commits anything, so this is a
+          # no-op in the normal case — kept because it is what makes "one commit
+          # on top of the snapshot" true by construction rather than by review.
           git reset --soft "$SNAPSHOT_SHA"
 
           # The doc surfaces `sync-docs-image-tags.mjs` rewrites, read from the same
@@ -633,7 +650,7 @@ jobs:
           # which would land verbatim in the commit body.
           git commit -q \
             -m "chore(release): ${REQUESTED}" \
-            -m "objectui pin -> ${OBJECTUI_SHA}" \
+            -m "objectui pin (unchanged by this cut): ${OBJECTUI_SHA}" \
             -m "cut from ${SNAPSHOT_SHA} by ${GITHUB_ACTOR} via cut-rc (#7447)"
 
           COMMIT_SHA="$(git rev-parse HEAD)"
@@ -647,7 +664,7 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| objectstack snapshot | \`${SNAPSHOT_SHA}\` |"
-            echo "| objectui snapshot | \`${OBJECTUI_SHA}\` |"
+            echo "| objectui pin (committed) | \`${OBJECTUI_SHA}\` |"
             echo "| version commit | \`${COMMIT_SHA}\` |"
             echo "| files in commit | ${COUNT} |"
             echo "| dry run | ${DRY_RUN} |"
@@ -674,7 +691,7 @@ jobs:
             echo "# cut-rc dry run — ${REQUESTED}"
             echo
             echo "- objectstack snapshot: ${SNAPSHOT_SHA}"
-            echo "- objectui snapshot:    ${OBJECTUI_SHA}"
+            echo "- objectui pin:         ${OBJECTUI_SHA} (committed, unchanged)"
             echo "- version commit:       $(git rev-parse HEAD)"
             echo
             echo "Nothing was pushed and nothing was published."

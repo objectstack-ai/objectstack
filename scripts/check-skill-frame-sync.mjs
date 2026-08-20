@@ -854,7 +854,8 @@ function main() {
 // freshness gate's `import { COPIES, AXIS_MAP, analyzeCopy }` (#5866) would run
 // this whole gate — and its `process.exit(1)` — as an import side effect. Same
 // idiom as scripts/objectui-changeset-digest.mjs, which is imported the same way
-// by scripts/check-objectui-pin-fresh.mjs.
+// by scripts/objectui-range.mjs (and was by check-objectui-pin-fresh.mjs, until
+// #10134 deleted it — the idiom is what carries over, not the importer).
 if (resolve(process.argv[1] ?? '') === resolve(fileURLToPath(import.meta.url))) {
   main();
 }

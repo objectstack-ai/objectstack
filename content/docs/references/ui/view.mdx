@@ -1000,6 +1000,7 @@ This schema accepts one of the following structures:
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 | **isPinned** | `boolean` | optional | Studio round-trip: view pinned in the switcher (per-user state, written by the console — not authored). |
 | **sortOrder** | `integer` | optional | Studio round-trip: position within the switcher (per-user state, written by the console — not authored). |
+| **columnState** | `{ order?: string[]; widths?: Record<string, number> }` | optional | Studio round-trip: per-user column order/widths (runtime-only state, written by the console grid — not authored). #9933 |
 
 ---
 
@@ -1029,6 +1030,7 @@ This schema accepts one of the following structures:
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 | **isPinned** | `boolean` | optional | Studio round-trip: view pinned in the switcher (per-user state, written by the console — not authored). |
 | **sortOrder** | `integer` | optional | Studio round-trip: position within the switcher (per-user state, written by the console — not authored). |
+| **columnState** | `{ order?: string[]; widths?: Record<string, number> }` | optional | Studio round-trip: per-user column order/widths (runtime-only state, written by the console grid — not authored). #9933 |
 
 ---
 

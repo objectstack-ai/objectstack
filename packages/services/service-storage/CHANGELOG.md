@@ -1,5 +1,188 @@
 # @objectstack/service-storage
 
+## 17.1.0
+
+### Patch Changes
+
+- bbd86ed: Attachment access hooks: read the caller's org under the blessed `organizationId` name
+  
+  `callerContext()` in the `sys_attachment` access kit built its fallback
+  execution envelope from `session.tenantId` — an alias removed from the
+  hook/action session surface in v11 (#3290). `HookContextSchema` strips a
+  `tenantId` key and the engine's `buildSession` only ever emits
+  `organizationId`, so on every call that reached the session fallback (no
+  execution context riding along) the envelope handed to
+  `ISharingService.canEdit` carried **no organization at all**. Parent-record
+  access for attachments was therefore evaluated without the caller's active
+  org on that path. It now reads `session.organizationId`, matching the
+  `sys_comment` kit, which already did.
+  
+  The `sys_comment` kit's own `callerContext()` had the same read as a dead
+  first arm (`s.tenantId ?? s.organizationId`); the arm is removed. That half
+  is behaviour-neutral — the fallback already carried the value.
+  
+  Both kits gain coverage of the session-fallback path in both directions: the
+  blessed name is read, and a stray removed-alias key does not become the org.
+- 593c4bf: feat(spec): `storage` becomes the canonical `CoreServiceName` slot; `file-storage` stays a deprecated v17 alias (#9683)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A service-registry slot
+  name is not authorable metadata — nothing in a stack definition spells it — so
+  there is no conversion-layer entry to register. Compatibility is carried by the
+  enum keeping the old member and by @objectstack/service-storage registering the
+  same instance under both names; the alias retires through the standard
+  retirement flow at the next major. -->
+  
+  Maintainer ruling, 2026-08-18, verbatim: 「9683 file-storage 可以叫 storage」.
+  The `file-storage` slot was the only `CoreServiceName` member whose spelling
+  diverged from its documented accessor (`services.storage`), with no recorded
+  reason anywhere in the tree.
+  
+  - `CoreServiceName` gains `storage` as the canonical member; `file-storage`
+    stays an accepted, deprecated alias within v17 (it is a published enum
+    member — existing `getService('file-storage')` callers keep working).
+    `CORE_SERVICE_PROVIDER` and `ServiceRequirementDef` carry both.
+  - `@objectstack/service-storage` registers the **same instance** under both
+    names (the `http.server` / `http-server` pattern), pinned by an
+    alias-equivalence test.
+  - Every internal consumer resolves `storage`: the HTTP dispatcher, the email
+    plugin's attachment store, and `os migrate files-to-references`. Discovery
+    reports the service under the canonical `storage` key and mirrors the row
+    verbatim under the `file-storage` key for the alias's v17 lifetime, so
+    existing discovery readers (e.g. the console endpoint catalog) keep
+    working.
+  - Docs (`kernel/runtime-services`, `kernel/contracts`) now document the
+    canonical slot; a custom v17 provider for this slot should register both
+    names.
+- 1258dca: Restore the #4757 unscoped multi-delete refusal on `sys_attachment` through the wired engine (#9719).
+  
+  `ObjectQL.registerHook` gains an opt-in `dispatchUnscopedMultiDelete` declaration (valid on `beforeDelete` registrations only — anything else is refused at registration): when a `multi: true` delete arrives with no `where` at all (absent or `null`), the engine's predicate path dispatches the whole-operation context ONCE to declaring registrations — before any matched row is resolved, zero-match included — so a guard about the operation's shape can refuse it. Binding `input.id` on that context is refused (`HookTargetRebindError`, path `'unscoped-multi'`). Undeclared registrations, scoped deletes (including the match-all `where: {}`), and by-id deletes see no new dispatch.
+  
+  The `sys_attachment` access guard declares the flag, so its documented refusal of a predicate-less multi-delete fires again with its declared envelope (`ATTACHMENT_DELETE_DENIED`, HTTP 403): since the per-row dispatch contract (#5038/#5574) that branch was unreachable, and a predicate-less `multi: true` delete quietly removed every row the caller happened to be entitled to. System-context and context-less programmatic deletes bypass the guard exactly as before.
+- 4639cec: **Behaviour change:** an unscoped `multi: true` UPDATE of `sys_comment` is now refused, where it previously succeeded for a caller entitled to every row (#9974).
+  
+  This is not the restoration of a guard that used to work — it is a deliberate narrowing of what the engine accepts, ruled by the maintainer on 2026-08-19. If you issue `ql.update('sys_comment', data, { multi: true })` with **no `where` at all**, that call works today and will start failing with `RECORD_NOT_ACCESSIBLE` / 403. **The fix at the call site is to say which rows you mean** — pass a `where`. The explicit match-all `where: {}` is still accepted and still authorizes every matched row individually; only an *absent* or `null` predicate is refused.
+  
+  Why the accept set narrowed rather than the declaration: `resolveTargetRows` has declared this refusal for both write verbs since #4630, but on update it could only ever fire by accident — when the sweep happened to touch a row the caller lacked rights to, and then with a per-row message (`Cannot update comment c2: …`) naming a row rather than the shape. A caller who owned every row had the whole table rewritten, and a zero-match probe resolved silently. A guard that fires by accident reads as enforcement while enforcing nothing. The ruling weighed recoverability: a delete leaves a trace of who removed what, an overwrite leaves none — the old value is gone on the spot with nothing to restore from — and a forgotten `where` is the mistake generated code makes most often.
+  
+  **Engine (`@objectstack/objectql`).** #9719's opt-in whole-operation dispatch now covers `beforeUpdate`'s predicate path as well as `beforeDelete`'s, and the registration flag is **renamed** `dispatchUnscopedMultiDelete` → **`dispatchUnscopedMultiWrite`** (one flag generalized to both events rather than a second flag; it is per-registration and per-event, so a delete-only guard still says "delete only" by declaring it on `beforeDelete` alone). Declaring it on any other event is still refused at registration time. Binding `input.id` on the whole-operation context is refused on both verbs (`HookTargetRebindError`, path `unscoped-multi`), and the error now names the caller's event.
+  
+  **Blast radius.** The dispatch is delivered ONLY to registrations that declare the flag, so `sys_comment` is the only object whose update accept set changes; every other object's unscoped `multi: true` update behaves exactly as before. `sys_attachment` keeps its delete-only declaration and is unaffected on update. A repo-wide structural sweep of 4 663 source files found no in-tree caller — none in `examples/`, none in the dogfood apps, none in `packages/` source — that issues an unscoped `multi: true` update against a declaring object.
+  
+  **`@objectstack/service-storage`** is a rename-only follow: its `sys_attachment` guard declares the renamed flag on the same event, with the same behaviour.
+- Updated dependencies [56656aa]
+- Updated dependencies [c9f5950]
+- Updated dependencies [d6e80b2]
+- Updated dependencies [07e630e]
+- Updated dependencies [66beee0]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [2782805]
+- Updated dependencies [e43d63a]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [03520eb]
+- Updated dependencies [899052a]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [2d0af57]
+- Updated dependencies [420804d]
+- Updated dependencies [716ac9b]
+- Updated dependencies [a38408a]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [27a567d]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [1e050a5]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [24173e9]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [f8eb736]
+- Updated dependencies [11b779e]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [e2899f6]
+- Updated dependencies [3851f87]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [e1bb0ca]
+- Updated dependencies [30d3752]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [04f8fdb]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [6158146]
+- Updated dependencies [84cb121]
+- Updated dependencies [ca19ee8]
+- Updated dependencies [a675b4d]
+- Updated dependencies [b887013]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [402c125]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [b3f9831]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [44bc51d]
+- Updated dependencies [bbbfcfc]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+  - @objectstack/spec@17.1.0
+  - @objectstack/platform-objects@17.1.0
+  - @objectstack/types@17.1.0
+  - @objectstack/core@17.1.0
+  - @objectstack/observability@17.1.0
+
 ## 17.0.0
 
 ### Major Changes

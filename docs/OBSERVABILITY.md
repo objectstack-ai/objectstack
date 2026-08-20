@@ -9,15 +9,24 @@
 `createDispatcherPlugin` automatically instruments every route it mounts with:
 
 - **Request id** propagation: honors incoming `X-Request-Id` (or mints `req_<uuid>`); echoes on the response.
-- **`http_request_duration_ms{method,route}`** histogram (handler latency).
 - **`http_request_errors_total{method,route}`** counter (incremented on thrown errors).
 - **Error reporting** for 5xx (handler-thrown or via `errorResponseBase` side channel).
 
-**`http_requests_total{method,route,status}`** (1 per request) is emitted at the
-**transport**, through the `IHttpServer.afterResponse` observation seam — so it
-counts *every* inbound request on the server (auth, REST data API, raw-app
-mounts, requests a middleware refused with 429), not only the routes the
-dispatcher registers. The `route` label is always the registered **pattern**
+**`http_requests_total{method,route,status}`** (1 per request) and
+**`http_request_duration_ms{method,route}`** are emitted at the **transport**,
+through the `IHttpServer.afterResponse` observation seam — so they cover
+*every* inbound request on the server (auth, REST data API, raw-app mounts,
+requests a middleware refused with 429), not only the routes the dispatcher
+registers. That is what keeps the two derived signals below consistent with
+each other: a 5xx-rate panel and a p95-latency panel drawn over the same
+traffic.
+
+> **⚠️ `http_request_duration_ms` measures the REQUEST, not the handler.** It
+> used to be emitted by the dispatcher's per-route wrapper and timed
+> `await handler(req, res)`; it is now the transport's `elapsedMs` — from the
+> transport first seeing the request to the response existing, so the
+> middleware chain and body parse are included. Samples can only move UP.
+> Compare p95 across that boundary deliberately. The `route` label is always the registered **pattern**
 (`/api/v1/data/:id`), never the concrete path; requests no route matched are
 labelled `unmatched`. Exactly one counter is armed per server (first wiring
 wins), so handing one registry to both the transport plugin and the dispatcher
@@ -68,6 +77,32 @@ RUNTIME_METRICS.httpRequestsTotal       // 'http_requests_total'
 RUNTIME_METRICS.httpRequestDurationMs   // 'http_request_duration_ms'
 RUNTIME_METRICS.httpRequestErrorsTotal  // 'http_request_errors_total'
 ```
+
+### `cache_*` — a flat zero means "no configured consumer"
+
+The `@objectstack/service-cache` adapters emit `cache_lookups_total`,
+`cache_writes_total` and `cache_errors_total` (declared in `SEMCONV`, from
+`@objectstack/observability`) on every call the `cache` service receives. The
+adapters pick the host's metrics registry up automatically, so the emission
+path is live as soon as `ObservabilityServicePlugin` is registered.
+
+> **⚠️ A flat `cache_*` in a default install is CORRECT, not a blind spot —
+> but it does not mean what a cache panel implies.** Nothing consults the
+> `cache` service unconditionally: every production consumer is a rate-limit
+> or budget counter store, each gated on a declaration somebody has to write
+> — better-auth's per-IP counters (`rate_limit_max` /
+> `rate_limit_window_seconds` in auth settings), the dispatcher's inbound
+> rate limiter and its declarative per-endpoint buckets (an armed `rateLimit`
+> budget; with none declared the dispatcher registers no limiter at all), and
+> the per-number OTP send budget (reached only on an SMS send). Declare none
+> of them and `cache_lookups_total` stays at 0 while the server handles
+> traffic normally.
+>
+> So read a zero here as a question about **configuration**, never as a 0%
+> hit rate or a broken adapter. This is the mirror image of the HTTP note
+> above: there, zero means "not instrumented"; here, zero is a true count of
+> a service nothing asked anything of. Before trusting a cache hit-rate
+> panel, confirm at least one consumer above is actually armed.
 
 ### Prometheus adapter (prom-client)
 
@@ -367,6 +402,10 @@ countServerTiming('db', queryMs, 'queries'); // → db;dur=<sum>;desc="<n> queri
 - [ ] Verified `http_requests_total{status="5xx"}` increments when an
       endpoint deliberately throws.
 - [ ] Verified `http_request_duration_ms` histogram has non-empty buckets.
+- [ ] If a `cache_*` panel or alert is wired: confirmed at least one cache
+      consumer is armed (an auth `rate_limit_*` setting, a dispatcher or
+      endpoint `rateLimit` budget, or the SMS OTP path). Otherwise a flat
+      `cache_lookups_total` is the expected reading, not a fault to chase.
 - [ ] `errorReporter` adapter configured and at least one synthetic 5xx
       reaches your APM dashboard.
 - [ ] Verified 4xx does **not** flood the APM.

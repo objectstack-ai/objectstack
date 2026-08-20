@@ -448,7 +448,7 @@ export class RecordChangeTrigger implements FlowTrigger {
             // duplicate of what the engine now resolves authoritatively. The
             // engine elevates only for `runAs:'system'`. The hook session exposes
             // the active org as `organizationId` (the deprecated `session.tenantId`
-            // alias was removed in v11, #3290); it feeds the automation context's
+            // alias was removed in v16, #3290); it feeds the automation context's
             // driver-layer `tenantId` field unchanged.
             ...(session.organizationId ? { tenantId: session.organizationId } : {}),
             // Expose the record as params too, so flows with named `isInput`

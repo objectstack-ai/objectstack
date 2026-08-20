@@ -54,6 +54,7 @@ import {
     declaresServerFault,
     resolveThrownHttpError,
     demotedDeclaredCode,
+    declaredUserMessage,
     INTERNAL_ERROR_MESSAGE,
 } from '@objectstack/types';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
@@ -412,8 +413,54 @@ function missingRelationIsObject(raw: string, object: string | undefined): boole
  * "[Security] Access denied: operation 'insert' on object 'sys_user' is
  * not permitted …" — trips the `'<obj>' … not` substring check and
  * returns a misleading 404.
+ *
+ * [#9934] The exported face is a WRAPPER: classification happens in
+ * {@link classifyDataError} below (this docblock's subject, byte-for-byte the
+ * old `mapDataError`), and the wrapper then rides the producer's declared
+ * `userMessage` onto whatever body classification chose — see
+ * {@link withDeclaredUserMessage} for the rule and its one deliberate
+ * asymmetry.
  */
 export function mapDataError(error: any, object?: string): { status: number; body: Record<string, unknown> } {
+    return withDeclaredUserMessage(error, classifyDataError(error, object));
+}
+
+/**
+ * [#9934] Carry a producer-marked user-facing refusal text onto a classified
+ * wire body — the REST door's half of the objectui#5210 ruling (producer-side
+ * opt-in; the console render half is objectui's).
+ *
+ * The rule is deliberately BRANCH-AGNOSTIC: whatever envelope classification
+ * chose — the structured-code 403s, the declared-status passthrough (the
+ * measured exit for an engine hook's refusal, #7525), the sandbox unwrap's
+ * 400, even the sanitised fault terminals — a `userMessage` the producer
+ * declared on the thrown error reaches the body verbatim (truncated at the
+ * same {@link CLIENT_MESSAGE_MAX} bound as the 4xx `error` text, by the same
+ * argument: #5423's truncate-never-replace). One sentence, no branch table,
+ * status-agnostic by construction, which is what the ruling asked the marking
+ * to be.
+ *
+ * Why riding it across the FAULT terminals is safe rather than a #5437/#7543
+ * regression: those disciplines withhold text the producer never addressed to
+ * the caller — driver prose, a crash's `TypeError: …`. `userMessage` is the
+ * opposite by construction: it exists on an error only because an author
+ * deliberately wrote user-facing text onto it (`declaredUserMessage` answers
+ * `undefined` for everything else — platform and driver code never sets the
+ * field), so carrying it discloses nothing that was not authored for exactly
+ * this audience. A genuine crash carries no marking and its envelope is
+ * byte-identical to before. The one thing the marking never does is move the
+ * STATUS or the `code` — a marked crash is still the sanitised 500.
+ */
+function withDeclaredUserMessage(
+    error: any,
+    mapped: { status: number; body: Record<string, unknown> },
+): { status: number; body: Record<string, unknown> } {
+    const userMessage = declaredUserMessage(error);
+    if (userMessage === undefined) return mapped;
+    return { status: mapped.status, body: { ...mapped.body, userMessage: truncateClientMessage(userMessage) } };
+}
+
+function classifyDataError(error: any, object?: string): { status: number; body: Record<string, unknown> } {
     // Referential-integrity restrict on delete → 409 with the dependent count.
     // Surfaced FIRST so the structured fields survive the generic catch-alls.
     if (error?.code === 'DELETE_RESTRICTED') {
@@ -573,15 +620,41 @@ export function mapDataError(error: any, object?: string): { status: number; bod
         // [#7543] …but only when the body REPORTED something. A body that
         // CRASHED arrives here too, and its `TypeError: not a function` is an
         // internal fault, not a business message — see
-        // {@link isScriptFaultMessage}.
+        // {@link isScriptFaultMessage}. Deliberately FIRST: a crash outranks
+        // everything else about the error, including a stray declared
+        // `status` — a `TypeError` carrying one stays the sanitised 500.
         if (isScriptFaultMessage(error.innerMessage)) return UNCLASSIFIED_FAULT();
-        return {
-            status: 400,
-            body: {
-                error: error.innerMessage,
-                ...(object ? { object } : {}),
-            },
-        };
+        // [#9967] A body that NAMES its own HTTP status is asking to be served
+        // with it — the same #7867 rule `domains/actions.ts` applies on the
+        // custom-action route. The QuickJS side-channel carries a body-thrown
+        // error's declared `status` out of the VM onto `SandboxError.status`,
+        // and this branch used to answer 400 unconditionally, so a deliberate
+        // `e.status = 403` was dead on arrival at this door while the actions
+        // door honoured it — the #7525/#8016 door-disagreement shape, one
+        // branch earlier. The read is {@link declaredHttpStatus}: the same
+        // both-spellings 400-599 band as the passthrough below, so a nonsense
+        // or out-of-band status is not a declaration and the undeclared
+        // default stays exactly the 400-with-verbatim-message the dogfood
+        // pins (`hook-error-format.dogfood.test.ts`) require.
+        const declared = declaredHttpStatus(error);
+        if (declared === undefined || declared < 500) {
+            return {
+                status: declared ?? 400,
+                body: {
+                    error: error.innerMessage,
+                    ...(object ? { object } : {}),
+                },
+            };
+        }
+        // A declared SERVER-band status is not a business refusal addressed to
+        // the caller in its own words — it is a producer-declared server
+        // fault, and this file already has exactly one arm for that: the
+        // declared-status passthrough below, whose 5xx half keeps the status
+        // and withholds the prose unconditionally (#5582). Fall through to it
+        // rather than duplicating the arm here — one condition, one wire
+        // answer. (The structured `code` branches in between keep outranking
+        // the passthrough for this producer exactly as they do for every
+        // other — the #7525 §5 pins.)
     }
     // [#3770] Object does not exist — thrown by the protocol's registry gate
     // (`assertObjectRegistered`, which covers every data entry point) and by
@@ -1352,14 +1425,19 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
         // {@link thrownCodeFields}. This arm's old gate was bare truthiness, so
         // it also admitted a non-string `code`; that limb is gone with the
         // narrowing, and the four flat arms now ask one question.
+        // [#9934] Both passthrough arms ride a producer-declared `userMessage`
+        // onto the body, the same rule as the exported `mapDataError` wrapper —
+        // see {@link withDeclaredUserMessage}. On the 5xx arm the PROSE is
+        // still withheld (#5437); the marked channel is authored user text, not
+        // the message being withheld, so carrying it is not a re-opening.
         if (error.status >= 500) {
-            return {
+            return withDeclaredUserMessage(error, {
                 status: error.status,
                 body: {
                     error: INTERNAL_ERROR_MESSAGE,
                     ...thrownCodeFields(error, error.status),
                 },
-            };
+            });
         }
         // [#5423] 4xx keeps the bound as a TRUNCATION, not a replacement: a 4xx
         // message is addressed TO the caller and is the remedy. Unchanged by
@@ -1368,14 +1446,14 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
             ? 'Request failed'
             : truncateClientMessage(error.message);
         // [#9232] Narrowed, same as the three arms above.
-        return {
+        return withDeclaredUserMessage(error, {
             status: error.status,
             body: {
                 error: safeMsg,
                 ...thrownCodeFields(error, error.status),
                 ...(Array.isArray(error.issues) ? { issues: error.issues } : {}),
             },
-        };
+        });
     }
     return mapDataError(error, object);
 }

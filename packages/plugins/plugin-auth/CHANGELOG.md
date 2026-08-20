@@ -1,5 +1,716 @@
 # Changelog
 
+## 17.1.0
+
+### Minor Changes
+
+- e43d63a: feat(identity): API keys are minted against the minter's active organization, and carry it into the request (#8287)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) One additive column on
+  an `isSystem` object declaring `protection: { lock: 'full' }`, which tenants
+  cannot author, so there is no consumer metadata to migrate and nothing
+  authorable is renamed, retired or tombstoned — no conversion to register. The
+  behavioural change is that a minted key now carries an organization, that a key
+  which cannot carry one is refused under the posture where it could never read
+  anything, and that an ex-member's key stops authenticating. -->
+  
+  On a deployment running `OS_TENANCY_POSTURE=isolated`, a minted API key could
+  read **nothing at all**. `sys_api_key` carried no organization column, so key
+  authentication established a user but no active organization — and the
+  `isolated` Layer 0 wall is `organization_id = activeOrganizationId`, which with
+  no active organization matches no row. Every organization-scoped read answered
+  `200` with `total 0` while the console went on offering minting, so a tenant
+  admin could mint a valid-looking secret and discover only at call time that it
+  read nothing. (There was no cross-tenant leak — the failure was in the other
+  direction.)
+  
+  **The column was absent by an inherited rule, not by oversight.**
+  `resolveInjectedSystemColumns` injects `organization_id` into every registered
+  object *except* `managedBy: 'better-auth'` ones, and `sys_api_key` carries that
+  flag — even though better-auth's `apiKey` plugin is not loaded and the table is
+  hand-rolled ObjectStack. So the fix needs the declaration *and* the ADR-0105 D7
+  extension-field registration to stay consistent. The read side, by contrast,
+  was **already wired**: `resolveApiKeyPrincipal` already read an organization
+  into `tenantId` and `resolveAuthzContext` already adopted it — it was reading a
+  column no mint path ever wrote.
+  
+  **What changes**
+  
+  - `sys_api_key` declares `active_organization_id` (+ index, and the column is
+    shown in the "My Keys" and "All" list views, because the card's complaint was
+    a credential whose reach its owner could not see).
+  - `POST /api/v1/keys` **inherits** the caller's active organization — there is
+    deliberately no org parameter and no cross-org key — and **re-checks the
+    caller's `sys_member` membership at mint time**, honouring ADR-0091 validity
+    windows. Under a walled posture it refuses (400) rather than minting a key
+    with no organization, and refuses (403) for an organization the caller is not
+    a member of. The mint response echoes the organization the key is pinned to.
+  - The verifier reads **one spelling** (Prime Directive #12): the
+    `row.organization_id ?? row.organizationId` chain it used to carry was a
+    consumer-side tolerance for a producer that did not exist.
+  - An **ex-member's key fails closed at verify time** — no principal, not a
+    degrade to a user-only principal, which would resurrect the same
+    `200 + total 0` silent-empty. Checked at verify rather than by revoking on
+    membership loss, because membership ends through many paths (better-auth org
+    endpoints, SCIM, a direct `sys_member` delete, a lapsing validity window) and
+    a hook must catch every one or it silently misses. It costs **zero extra
+    queries**: the resolver has already read `sys_member` for this user.
+  - **Pre-existing org-less keys are never backfilled** — that would silently
+    upgrade credentials minted under a different promise. They keep working under
+    `single` (no wall) and under `group` (whose wall derives from the owner's
+    memberships independently of the active organization, so they already work
+    there), and are **refused under `isolated`**, where they are provably dead
+    today.
+  
+  **The column is deliberately named `active_organization_id`, not
+  `organization_id`** — the `sys_session` spelling, for the same concept: the
+  organization a credential makes *active*. `objectHasOrgIdField` tests for the
+  literal `organization_id`, and Layer 0 exempts objects without it, so the other
+  name would have made `sys_api_key` itself org-walled. Both walled postures
+  exclude NULL, so every pre-existing org-less row would have vanished from its
+  **own owner's** "My Keys" list while, under `group`, continuing to
+  authenticate — a live credential nobody could see or revoke, which is a fresh
+  instance of the very class this change removes.
+- 5f5e234: fix(security): `sys_permission_set.active` and `sys_position.active` now actually stop granting access (#8613)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is
+  added, renamed or retired. `active` is a ROW property of a `sys_permission_set`
+  / `sys_position` record, not a key on `PermissionSetSchema` (which is a strict
+  object in `packages/spec` and deliberately declares no such key — see
+  `permission-set-projection.ts`'s ROW_STATE_COLUMNS). No spec schema, export or
+  stored metadata shape changes, so there is no conversion to register and no
+  tombstone to write. The change is a runtime predicate at the authorization
+  resolution seam; the remedy for an affected deployment is operational
+  (re-activate rows that were switched off), not a metadata migration. -->
+  
+  **BREAKING for deployments that already switched a permission set or position
+  off.** Both objects ship a Deactivate action whose confirmation dialog promises,
+  in all four locales, that access stops:
+  
+  > Deactivate this permission set? Existing assignments stay in place but stop
+  > granting access until re-activated.
+  > Deactivate this position? Users keep their assignment but the position stops
+  > granting permissions until re-activated.
+  
+  Nothing read the column. Measured on the real resolver: a position seeded
+  `active: false` still granted its permission sets, and a permission set seeded
+  `active: false` still returned `posture: PLATFORM_ADMIN` with its system
+  permissions. Deactivation moved a badge in Setup and nothing else — while the
+  admin who had just revoked a compromised or over-broad grant was told the
+  opposite, and whose likely next step was therefore *not* the action that would
+  have worked (delete the set, or remove the assignments).
+  
+  **What changes at runtime.** `resolveAuthzContext` / `resolveUserAuthzGrants`
+  (`@objectstack/core`) — the single seam every transport resolves authorization
+  through — now drop a deactivated row **before** any derivation:
+  
+  - a deactivated `sys_position` no longer contributes its
+    `sys_position_permission_set` grants, and its name leaves `positions` (so the
+    name-reuse path cannot resolve the same grant one layer down);
+  - a deactivated `sys_permission_set` contributes no name, no
+    `system_permissions`, no `tab_permissions`, **and no `PLATFORM_ADMIN`
+    posture** — the flag is applied before the posture is derived, not after;
+  - the `plugin-security` DB loader applies the same predicate, which is what
+    judges a set reached by NAME through an active position of the same name.
+  
+  Both tables were already read at that seam, so this costs **zero new hot-path
+  queries**.
+  
+  **⚠️ Read this before upgrading.** Any `sys_permission_set` or `sys_position`
+  row currently carrying `active: false` **stops granting the moment this
+  lands** — on live data, with no migration step to notice. That is the correct
+  direction (it is what the dialog said when someone clicked Deactivate), but on
+  an installation that used the switch believing it was inert it is a real
+  revocation. Before upgrading, list the deactivated rows and re-activate any that
+  are still meant to grant:
+  
+  ```
+  GET /api/v1/data/sys_permission_set?filters=[["active","=",false]]
+  GET /api/v1/data/sys_position?filters=[["active","=",false]]
+  ```
+  
+  A row whose `active` column is **absent or NULL** is unaffected: the predicate
+  is "explicitly deactivated", never "explicitly active", so rows that predate the
+  column keep granting exactly as before.
+  
+  **Break-glass, closed in the same change** (`@objectstack/plugin-auth`).
+  Enforcing the flag opened a one-click, installation-wide lockout: deactivating
+  `admin_full_access` un-makes every platform admin at once, through a payload
+  that touches neither `name` nor any identity table, and re-activating requires
+  the permission the click just took away (the seeders deliberately never
+  reconcile `active`, so no restart restores it). The last-administrator guard now
+  judges that write like the delete and rename spellings it already refused, and
+  an environment whose break-glass set is *already* off is read as emptied rather
+  than as a bootstrap window — so it does not silently disarm the guard for every
+  other identity write. Re-activation itself stays permitted, or the refusal would
+  have no way out from inside the product.
+- f8eb736: feat(security): bind the break-glass standing-key lists to what the authz resolver actually reads — the correspondence stops being prose (#8734)
+  
+  `plugin-auth`'s last-administrator guard (ADR-0024 D5.2) decides whether a
+  pending write can empty the administrator population by testing the payload
+  against three standing-key lists (`MEMBER_STANDING_KEYS`,
+  `GRANT_STANDING_KEYS`, `PERMISSION_SET_STANDING_KEYS`). A payload touching none
+  of them is skipped without any reads — so a column `resolveAuthzContext` starts
+  reading that a list omits is a write class the guard **silently stops judging**,
+  on the one path whose failure mode is an installation-wide administrator lockout
+  with no in-product recovery.
+  
+  Nothing bound the two together. The correspondence lived in a comment, and it
+  had already gone false once: #6084 wrote — naming `active` explicitly — that
+  everything a permission-set write touches other than `name` is invisible to "who
+  is an administrator". That was true when written; #8613 made `active` a
+  resolution-time predicate and the sentence became false. Nothing mechanical
+  would have caught it, because the guard's own tests stay green precisely when
+  the guard is never consulted.
+  
+  **The mechanism is two links, and the first one is a measurement.**
+  
+  - `@objectstack/core` now exports `ADMIN_STANDING_SURFACE` — declared beside the
+    resolver, listing every table the administrator-derivation path reads, each
+    classified `derives` or `reads-only` with its reason, and for the deriving
+    tables every column read. It is asserted **equal** to what the real
+    `resolveAuthzContext` reads, observed at runtime through a recording engine
+    that records every property access and every `where` key per table. Observation
+    rather than source extraction because the reads that matter have moved into
+    helpers: `active` is read by `isRowActive(row)` and the ADR-0091 window bounds
+    by `isGrantActive(row, now)`, neither named at the resolver's own call site —
+    the exact shape #8613 had.
+  
+  - `@objectstack/plugin-auth` now exports its standing-key lists plus
+    `STANDING_KEYS_BY_TABLE` and `STANDING_KEY_EXCLUSIONS`, and a gate requires
+    every column of that measured surface to have an answer: it is standing-bearing
+    (in a list) or it is excluded with the reason it cannot empty the administrator
+    population. There is no third state — the third state is what `active` was
+    between #6084 and #8613.
+  
+  So a resolver change that starts reading a new column fails at the first link
+  until the declaration is updated, and at the second until the guard has an
+  explicit answer for it. Landing #8613 green would have required writing down that
+  deactivating `admin_full_access` cannot empty the administrator population —
+  which is false, and which is what the old comment asserted by accident.
+  
+  **No guard behaviour changes.** Every list keeps exactly the values it had; the
+  gate is one-directional by construction (it can only ever demand that the guard
+  judges *more*), because the other direction would put pressure on a break-glass
+  guard to fire less often.
+  
+  The table-level half is covered too: a resolver that started deriving
+  administrator standing from a **new** table is invisible to any column-set
+  comparison, since the table is absent from both sides — so the surface enumerates
+  every table the path reads, and an unclassified one fails.
+
+### Patch Changes
+
+- c9f5950: fix(security): `sys_account`'s OAuth access/refresh/id tokens stop serializing on the data API — `internal: true`, with better-auth's readback seam widened to cover them (#7987)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Three field-level flags
+  added to one existing declaration, plus a rename and a widening of a
+  plugin-internal helper module (`session-token-readback.ts` →
+  `internal-field-readback.ts`, not an exported surface of the package). Nothing
+  authorable is renamed, retired or tombstoned, so there is no conversion to
+  register. The behavioural change is that three columns holding someone else's
+  live bearer credentials stop being returned on the generic data path, while
+  better-auth's own token routes keep working. -->
+  
+  `sys_account.access_token`, `.refresh_token` and `.id_token` hold each user's
+  **live third-party OAuth credentials** — the tokens ObjectStack received from
+  Google, GitHub or an OIDC IdP — in cleartext (better-auth's
+  `account.encryptOAuthTokens` is not set, so `setTokenUtil` stores them
+  verbatim). They were plain `Field.textarea` on an object declaring
+  `apiEnabled: true, apiMethods: ['get','list']`.
+  
+  **Both personas were measured leaking, on a real booted stack** (`bootStack(showcaseStack)`,
+  in-process HTTP + sqlite-wasm), with a planted token on a member's account row:
+  
+  - **admin**, `GET /data/sys_account/{another user's account id}` — 200, that
+    member's `refresh_token` verbatim, plus `access_token` and `id_token`;
+  - **member**, `GET /data/sys_account` (self-scoped by the `sys_account_self` RLS
+    policy) — 200, their **own** `refresh_token` verbatim.
+  
+  The member arm is the one this object does not share with its `sys_session`
+  sibling (#7823), and it is the sharper of the two: it converts a short-lived,
+  revocable ObjectStack session bearer into a **long-lived third-party refresh
+  token that this platform cannot revoke at all**. Neither collector reached these
+  columns — the engine's credential mask collects by field TYPE (`textarea` is
+  neither `secret` nor `password`) *and* exempts objects with
+  `managedBy: 'better-auth'`, which this object is.
+  
+  **The fix is three declarations plus one widening**, inheriting #7823's shape
+  rather than inventing a second mechanism:
+  
+  - the three columns are declared `internal: true` — the opt-in, type-independent
+    flag minted by #7728 meaning *the declared value is never returned on the
+    generic data path*. Storage, filtering and indexing are untouched: the strip
+    runs on rows the driver has already produced.
+  - better-auth **reads these back off adapter result rows** — measured, and the
+    risk this card was parked on: `internalAdapter.findAccounts(userId)` issues a
+    `findMany` with no projection, and `/get-access-token`, `/account-info` and
+    `/refresh-token` then read `account.refreshToken` / `.accessToken` /
+    `.idToken` off those rows. The read strip alone would answer
+    `REFRESH_TOKEN_NOT_FOUND` (400) and hand back an empty access token. So the
+    existing readback seam in `@objectstack/plugin-auth` — which already recovered
+    `sys_session.token` through `Engine.resolveInternalField` (#8118's privileged
+    batch accessor) — is widened to cover these three columns and renamed
+    accordingly. No engine carve-out, no second accessor.
+  
+  **Not retyped, deliberately.** `Field.secret()` would route better-auth's own
+  writes through the engine's encrypt-on-write path, placing the engine between
+  better-auth and its own adapter. `Field.password()` is inert here for the two
+  reasons above.
+  
+  **`password` / `previous_password_hashes` are deliberately out of scope** —
+  they are better-auth one-way hashes (ADR-0100's third channel), not reversible
+  outbound credentials, and the readback seam refuses to touch them.
+  
+  The regression proof drives both directions: the fixture PLANTS real token
+  values and re-reads them out of storage through the privileged accessor before
+  asserting anything (so "absent from the response" cannot pass vacuously), then
+  pins that the values are still on disk, still usable as a server-side predicate,
+  and that password sign-in — which reads a `sys_account` row back through the
+  same seam on every request — still works.
+- d6e80b2: fix(security): `sys_account.password` and `previous_password_hashes` stop serializing on the data API — `internal: true`, with the raw-engine readers converted to the privileged accessor (#8676)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Two field-level flags
+  added to one existing declaration, plus one new export on a plugin-internal
+  helper module (`internal-field-readback.ts`, not an exported surface of the
+  package). Nothing authorable is renamed, retired or tombstoned, so there is no
+  conversion to register. The behavioural change is that two columns holding
+  one-way password hashes stop being returned on the generic data path, while the
+  ADR-0069 D1 reuse ring and better-auth's sign-in verifier keep reading them
+  through the engine's privileged accessor. -->
+  
+  `sys_account.password` (the credential hash) and `previous_password_hashes` (the
+  ADR-0069 D1 reuse-prevention ring) serialized on `/api/v1/data/sys_account`,
+  which declares `apiEnabled: true, apiMethods: ['get','list']` — to an **admin
+  for every user's row**, and to a **member for their own** (the
+  `sys_account_self` RLS policy grants `select` on `user_id == current_user.id`).
+  
+  These are one-way hashes, not reversible outbound credentials — which is why
+  #7987 correctly refused to bundle them with the OAuth tokens. But a served
+  password hash is an offline-cracking target, and `previous_password_hashes`
+  multiplies it by the history ring while its own declaration says it is *never
+  exposed in UI*. This is the disposition #7728 already reached for
+  `sys_api_key.key`, which was **also** a stored hash and was still ruled unfit to
+  serialize through the API face.
+  
+  Neither credential collector could reach them: `collectMaskedReadFields` keys on
+  the field **TYPE** (`secret` / `password`) *and* exempts objects declaring
+  `managedBy: 'better-auth'`, which this object is — while these columns are
+  `text` / `textarea`. Two independent barriers, both missing.
+  
+  **The fix is two declarations plus two recovery seams**, and the second seam is
+  the part a bare flag would have missed:
+  
+  - both columns are declared `internal: true` — the opt-in, type-independent flag
+    from #7728 meaning *the declared value is never returned on the generic data
+    path*. Storage, filtering and indexing are untouched: the strip runs on rows
+    the driver has already produced.
+  - **better-auth's adapter readers** are recovered by the existing per-object
+    readback table, widened with `password`: the sign-in verifier compares against
+    the hash on the row `internalAdapter.findCredentialAccount(userId)` returns,
+    so the strip alone would break password sign-in for every user.
+  - **plugin-auth's own RAW-engine readers** are recovered by a new seam in the
+    same module, `recoverInternalFieldsForSystemRead`. This is the half that makes
+    the flag safe: the readback table is imported by exactly one file
+    (better-auth's storage adapter), so it cannot reach a caller that reads the
+    engine directly — and the engine's strip has **no `isSystem` carve-out** by
+    #7728's design. Measured against a real ObjectQL engine: the reuse ring's
+    `findOne` returns `{"id":"a1"}` for a query that names both columns in an
+    explicit projection under `context: { isSystem: true }`.
+  
+    Left unrecovered, `assertPasswordNotReused` would become a **silent no-op** —
+    its comparison list empties, the loop never runs, `PASSWORD_REUSE` is never
+    thrown, and its own `catch { return undefined }` means nothing announces it.
+    The ADR-0069 D1 control would report success while accepting every reused
+    password. Its unit tests would have stayed green throughout, because they use
+    fake engines that never apply the strip.
+  
+  **No ADR-0100 guard change, and none was needed.** `Engine.resolveInternalField`
+  has exactly one predicate — `internal === true` — so flagging the columns makes
+  them legitimately dereferenceable through the privileged accessor. The ADR-0100
+  sentence in its refusal message is prose explaining why a *non-flagged* field has
+  other channels, not a second predicate; the guard stays exactly as selective as
+  it was, and a non-flagged column on the same object is still refused with
+  `INVALID_FIELD` / 400.
+  
+  Regression proof drives both directions on a real booted stack: both columns are
+  absent for both personas — including a caller who spells them out in `?select=` —
+  while the values remain on disk and reachable through the privileged accessor,
+  password sign-in still works, and the reuse ring still grows across a password
+  change on every transport lane.
+- e717ba1: fix(plugin-auth): the four `/admin/sso/*` bridges now run the inline ADR-0068 platform-admin gate before delegating into better-auth (#9653)
+  
+  `POST /api/v1/auth/admin/sso/{register, register-saml, request-domain-verification, verify-domain}` used to hand the raw request straight to their bridge function, resting authorization entirely on the delegated better-auth endpoints. They now run the same shared platform-admin judge their `/admin/` siblings carry (`platform-admin-gate.ts`), before anything else:
+  
+  - **anonymous caller → `401 UNAUTHENTICATED`** (previously the capability error: e.g. `404 SSO_REGISTER_FAILED` on a stock boot, which collapsed "not signed in" into "registration failed");
+  - **authenticated non-platform-admin → `403 PERMISSION_DENIED`** — this includes org owners/admins, who are not platform admins under ADR-0068; previously, with SSO enabled, the register bridges admitted them (and better-auth's own `/sso/register` admits any authenticated user for an org-less registration — measured on the installed `@better-auth/sso` 1.7.1);
+  - **platform admin → unchanged**: the request delegates into better-auth exactly as before, so all inner gates and hooks still run.
+  
+  Registering an identity provider is a platform-operator action (ADR-0068 D4). The accept set only tightens; no successful flow for a platform admin changes.
+- 445ae4d: fix(auth): auth emails follow the deployment locale — all five remaining templates localized, and every send names a locale (#8195)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable property is
+  added, renamed, retired or tombstoned. This adds locale ROWS to templates that
+  already exist (the `sys_email_template` shape is unchanged — `(name, locale)` was
+  always its key), plus one new public method on `AuthManager` and one new
+  plugin-layer read. Nothing existing changes spelling, so there is no conversion
+  to register. -->
+  
+  Outbound auth mail was English-only on a platform that supports four locales and
+  whose UI already switches between them. Two facts made every non-`en-US` template
+  row unreachable through the platform's own send path:
+  
+  - **no auth send named a locale** — all five `sendTemplate` calls in
+    `auth-manager.ts` omitted it, so `EmailService`'s ladder resolved
+    `DEFAULT_TEMPLATE_LOCALE` (`en-US`) every time;
+  - **only one auth template had non-`en-US` rows at all** —
+    `auth.email_change_notice` shipped four locales with #8019; the other five were
+    `en-US`-only.
+  
+  Both halves land together, and that is the substance of the fix rather than its
+  packaging. Shipping the resolution alone was measured to be **worse than the
+  English status quo**: the ladder falls back to the **en-US row body** on a miss
+  while `const locale = preferred || row.locale` still hands the caller's locale to
+  the render filters — so a zh-CN deployment would have received English prose
+  carrying zh-CN-formatted dates and numbers *inside a single message*, which is
+  precisely the artefact the row-locale authority (#7801) exists to prevent.
+  
+  **Templates.** `auth.password_reset`, `auth.verify_email`, `auth.magic_link`,
+  `auth.invitation` and `auth.two_factor_otp` each gain `zh-CN`, `ja-JP` and
+  `es-ES` rows — 15 new rows, seeded through `BUILTIN_AUTH_TEMPLATES` so they are
+  selectable rather than merely exported. Each localized row also carries a
+  localized **footer**: `wrap()` supplies an English one by default, so a row that
+  forgets it renders fluently translated prose under an English sign-off.
+  
+  **Resolution.** Per the maintainer ruling of 2026-08-13, the recipient locale is
+  the **deployment default**, read from `II18nService.getDefaultLocale()` and
+  resolved at the plugin layer — `AuthPlugin` pushes it into
+  `AuthManager.setDefaultEmailLocale()` on `kernel:ready`, exactly as it already
+  pushes the auth **SMS** locale (#2815). `Accept-Language` is rejected: auth mail
+  is routinely sent outside the triggering request (invitations, admin-initiated
+  resets), so a per-device header is the wrong authority. A per-user
+  `sys_user.locale` column is deferred until there is measured pull for one; when
+  it arrives it layers on top of this as an override.
+  
+  **One spelling gap had to be bridged**, and it is measured rather than assumed:
+  `getDefaultLocale()` carries the message-**catalog** language, whose English
+  spelling is the bare `en` (`FileI18nAdapter`: `options.defaultLocale ?? 'en'`),
+  while template rows are keyed `en-US` and `SendTemplateInput.locale` is
+  documented as matched exactly, with "no language-only prefix matching". Passed
+  through raw, the commonest deployment of all would miss every row and lean on the
+  en-US fallback while telling the render filters `en`. `normalizeAuthEmailLocale`
+  therefore promotes a **bare language subtag** to the regional row the platform
+  ships (`en` ⇒ `en-US`, `zh` ⇒ `zh-CN`, …) and passes everything else through
+  untouched — an unshipped regional tag such as `en-GB` or `fr-FR` may well be a
+  tenant's own overlay row, and swallowing it would re-create this very bug for the
+  fifth locale onward.
+  
+  **Nothing changes for an unconfigured deployment.** With no i18n service
+  registered, or none declaring `getDefaultLocale`, no `locale` key is passed at
+  all and the ladder resolves its documented `en-US` default exactly as before.
+- 03520eb: deps(auth): the better-auth family moves off the `1.7.0-rc.2` prerelease onto stable `^1.7.1` (#3002)
+  
+  `@objectstack/plugin-auth` shipped with **exact pins on a release candidate** —
+  `better-auth`, `@better-auth/core`, `@better-auth/oauth-provider` and
+  `@better-auth/sso` all at `1.7.0-rc.2`. That pin was never housekeeping debt: it was
+  the remediation for **GHSA-p2fr-6hmx-4528** (`@better-auth/oauth-provider`) and
+  **GHSA-j8v8-g9cx-5qf4** (`@better-auth/scim`, high — account/provider takeover), both
+  patched only in `>=1.7.0-beta.4`, so there was no stable line to move to. Upstream has
+  now shipped one: `npm view <pkg> dist-tags` reports `latest: 1.7.1` for every family
+  member. The declarations become `^1.7.1`, which is what a downstream
+  `npx create-objectstack` install now resolves.
+  
+  **`@better-auth/scim` deliberately stays at `1.7.0-rc.1`.** Measured against the
+  published stable tarball rather than assumed: `@better-auth/scim@1.7.1` ships the rc.2
+  **rewrite** — no `scimProvider` model, no generate-token endpoint, and six replacement
+  models (`scimUser`, `scimGroup`, `scimGroupMember`, `scimSubject`,
+  `scimConnectionBinding`, `scimIdentityTombstone`). Adopting it is a feature migration
+  (ADR-0071, tracked separately), not a version bump. The hold stays security-clean: rc.1
+  is above the advisory's fix floor, `pnpm audit --audit-level=high` is green, and rc.1's
+  peer ranges accept the stable 1.7.1 core the rest of the family resolves to.
+  
+  **Three pieces of upstream drift are absorbed here, and one of them was a live
+  sign-in outage waiting to happen.**
+  
+  `1.7.0-rc.2` renamed the account model's `accountId` field to `providerAccountId`;
+  **stable 1.7.0/1.7.1 renamed it back to `accountId`**, keeping the new required
+  `issuer`. Carrying the rc.2 spelling into the stable line left the field unmapped, so
+  better-auth's adapter asked for a column named `accountId` and **every sign-up answered
+  500** — `Unknown field 'accountId' on object 'sys_account'`. The `account_id` column
+  itself never changed and no data moves; only the camelCase key does. The same rename
+  reaches `@objectstack/client`: `auth.accounts.list()` (better-auth's `/list-accounts`)
+  returns `accountId`, and its declared response type said `providerAccountId`. If you
+  read that field off the client's typed response, rename it.
+  
+  `@better-auth/oauth-provider` 1.7.1's client model writes three fields the platform
+  object did not answer for. `applicationType` is the OIDC spelling of what rc.2 called
+  `type`, so it maps onto the **existing** `type` column and no data moves;
+  `clientDiscoveryId` and `clientCredentialsScopes` are genuinely new and are now
+  declared on `sys_oauth_application` as `client_discovery_id` and
+  `client_credentials_scopes`. Without them, dynamic client registration
+  (`POST /oauth2/register`) fails at the driver.
+  
+  Two endpoints are newly mounted by the auth catch-all and are now ledgered:
+  `POST /oauth2/end-session` and `POST /oauth2/end-session/confirm` — the POST form of
+  OIDC RP-initiated logout, whose `GET` counterpart was already published.
+  
+  **Nothing here needs an action on upgrade.** The new columns are additive and optional,
+  and the field rename is internal to how the plugin talks to better-auth — with the one
+  exception of the `@objectstack/client` response type named above.
+- 7337f30: chore(deps): production-dependency patch bumps from the weekly Dependabot group (#9212)
+  
+  Routine dependency-range refresh, no behavior change: `@oclif/core` 4.13.2→4.13.3,
+  `esbuild` 0.28.1→0.28.2 and `better-sqlite3` ^13.0.2→^13.0.3 (optional) on
+  `@objectstack/cli`; `mingo` 7.2.2→7.2.4 on `@objectstack/driver-memory`; `nanoid`
+  6.0.0→6.0.1 on `@objectstack/driver-mongodb`, `@objectstack/driver-sql`,
+  `@objectstack/driver-sqlite-wasm` and `@objectstack/driver-turso`, plus
+  `better-sqlite3` ^13.0.2→^13.0.3 (optional on `@objectstack/driver-sql`, peer on
+  `@objectstack/driver-turso`); `js-yaml` 5.2.2→5.2.3 on `@objectstack/metadata`;
+  `@noble/hashes` 2.2.0→2.3.0 and `jose` 6.2.5→6.2.8 on `@objectstack/plugin-auth`;
+  `nodemailer` 9.0.3→9.0.5 on `@objectstack/plugin-email`; `@hono/node-server`
+  2.0.12→2.1.1 and `hono` 4.12.34→4.13.2 on `@objectstack/plugin-hono-server`;
+  `pinyin-pro` 3.28.2→3.29.1 on `@objectstack/plugin-pinyin-search`; and
+  `@noble/ciphers` 2.2.0→2.3.0 on `@objectstack/service-settings`.
+  
+  Every entry above changed a `dependencies`, `optionalDependencies` or
+  `peerDependencies` range in the published manifest — the only kind of change
+  that reaches a consumer's install. The same Dependabot group also bumped
+  `devDependencies` on `@objectstack/hono`, `@objectstack/client`,
+  `@objectstack/core`, `@objectstack/plugin-sharing` and `@objectstack/spec`
+  (none consumer-facing), and touched the private `apps/docs`,
+  `examples/app-todo` and workspace-root manifests (none published) — none of
+  those get an entry here.
+- 5ed8ee6: Platform admins can ban and unban users again.
+  
+  `POST /api/v1/auth/admin/ban-user` and `POST /api/v1/auth/admin/unban-user` are
+  now served by ObjectStack with the ADR-0068 platform-admin gate instead of
+  better-auth's `admin` plugin, which authorizes on the legacy
+  `user.role === 'admin'` scalar that ADR-0068 D2 stopped synthesizing. On any
+  deployment with the admin plugin on (SCIM forces it, ADR-0071) the `sys_user`
+  Ban / Unban actions returned `403 YOU_ARE_NOT_ALLOWED_TO_BAN_USERS` for every
+  platform admin; they now succeed, and refuse a plain member with
+  `403 PERMISSION_DENIED` and an anonymous caller with `401 UNAUTHENTICATED`.
+  
+  The break-glass guard that refuses to ban the last local-password login is
+  unchanged and still applies.
+- 2a6ebaf: feat(plugin-auth): mount `POST /api/v1/auth/organization/add-member` — platform-admin-gated wrapper over better-auth's server-only `auth.api.addMember` (#9941)
+  
+  better-auth (1.7.1 installed; already true on 1.7.0-rc.2) declares `addMember`
+  with **no HTTP path** — server-only — so the catch-all never mounted
+  `POST /organization/add-member`, yet the `sys_member` **Add Member** toolbar
+  action has always targeted exactly that URL and answered 404. On a multi-org
+  posture that 404 was a hard blocker: `admin/create-user`'s reconciler resolves
+  no target org under the org wall by design, generic `sys_member` CRUD is
+  suppressed (ADR-0010 full lock), and the invite flow needs an email round-trip
+  phone-number-only users cannot complete — leaving **no UI path at all** to
+  attach an existing user to an organization.
+  
+  What ships:
+  
+  - `auth-plugin.ts` now mounts the route ahead of the catch-all, wrapping the
+    vendor's own `auth.api.addMember` (its already-a-member pre-check, membership
+    limit, team resolution and hooks all stay the vendor's — nothing is
+    re-adjudicated, and no `sys_member` row is written directly).
+  - **Admit set: platform admin only** (the shared ADR-0068 gate,
+    `platform-admin-gate.ts`). Anonymous → `401 UNAUTHENTICATED`; any signed-in
+    non-platform-admin — including org owners/admins — → `403 PERMISSION_DENIED`
+    (ADR-0112 envelope). The vendor endpoint performs no authorization of its own
+    (server-only = trusted caller), which is why the gate is not negotiable.
+  - Request headers are forwarded, so an omitted `organizationId` defaults to the
+    caller's active organization — the behaviour the action metadata documents.
+  - The route is ledgered in `auth-route-ledger.ts` (`source: 'objectstack'`,
+    `disposition: 'server-only'` — no SDK method builds this URL; the metadata
+    action posts it directly), and the stale `adopt-membership.ts` claim that
+    named the vendor path as mounted now describes the real shape.
+  
+  The `sys_member` action metadata itself is untouched: its target was correct
+  all along — the route underneath it now exists.
+- 03fa4c9: `POST /api/v1/auth/revoke-session` no longer reports success when it revokes nothing. A request whose `token` does not identify a session belonging to the caller now answers `404` with error code `RESOURCE_NOT_FOUND`, instead of `200 { status: true }` over a skipped delete. A token that matches nothing and a token that belongs to another user answer identically, so the refusal discloses no session-existence information. Requests that do identify the caller's own session are unchanged and still answer `200 { status: true }`.
+- b5f6b26: `POST /api/v1/auth/admin/revoke-user-session` no longer reports success when it revoked nothing. When the supplied `sessionToken` does not identify any live session — including a session that was already revoked — the endpoint now answers `404` with error code `RESOURCE_NOT_FOUND` (ADR-0112 envelope) instead of `200 { "success": true }` over a delete that removed no record. The refusal is only ever given to callers who pass the admin plugin's own `session: ["revoke"]` permission check; unauthenticated and unauthorized callers keep the previous `401`/`403` answers byte-for-byte, so no session-existence information is exposed below the permission line. A revoke that does identify a live session still answers `200 { "success": true }` and tombstones the session with reason `admin`, unchanged.
+- 04f8fdb: fix(platform-objects): drop the dead `mapId` ("Map: User ID claim") param from `register_sso_provider` — the OIDC subject claim is not configurable (#8222)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) One action PARAM is
+  removed from a UI action declaration, plus the generated i18n entries that
+  carried its label/helpText. `params` are the form fields an `type: 'api'` action
+  collects for its request body — not an authorable metadata property, not a field,
+  not a stored column, so there is nothing to tombstone and no conversion to
+  register. No stored `sys_sso_provider` row changes shape: the param was only ever
+  a transient form input, and since #8193/#8221 the bridge has not forwarded it to
+  better-auth at all. The runtime accept set does not move. -->
+  
+  The `register_sso_provider` action on `sys_sso_provider` offered an optional
+  **"Map: User ID claim"** text field (`mapId`), with helpText reading *"Optional.
+  ID-token claim mapped to the user ID. Defaults to `sub`."*
+  
+  **That capability no longer exists.** It was retired upstream in
+  `@better-auth/sso@1.7.0-rc.2`:
+  
+  - `oidcConfig.mapping` is a `z.strictObject` whose members are
+    `{ email, emailVerified?, name, image?, extraFields? }` — there is no `id`;
+  - the federated subject is hard-wired to the OIDC `sub` claim
+    (`id: readStringClaim(rawUserInfo, "sub")` and `id: idToken.sub`), then
+    cross-checked (`id_token_subject_missing`,
+    `id_token_userinfo_subject_mismatch`);
+  - `extraFields` is not an escape hatch — it is spread **before** `id` in the
+    profile literal, so an `extraFields.id` is overwritten by `sub` before anything
+    reads it.
+  
+  `1.6.20` did honour `mapping.id` (`id: rawUserInfo[mapping.id || "sub"]`); the
+  version bump deleted the member.
+  
+  So the field's only accepted values were "empty" and the `sub` it already
+  defaulted to. #8193 (PR #8221) stopped the bridge emitting the retired key and —
+  rather than accept a value it would silently discard — made a non-`sub` value
+  answer `INVALID_REQUEST`. That left the last half of the problem: **the form
+  still advertised a free-form optional field that 400s on anything meaningful.**
+  Removing it restores declared = enforced. Nothing else about registration moves:
+  the runtime accept set is unchanged, and a registration that never sent `mapId`
+  behaves exactly as before.
+  
+  `mapEmail` and `mapName` are untouched — they map to live `oidcMappingSchema`
+  members and are still honoured.
+  
+  **The bridge-side guard in `plugin-auth`'s `register-sso-provider.ts` is kept**,
+  and its refusal test with it. The admin form was only one caller: a direct API
+  client, a script, or a stale cached console bundle can still put `mapId` on the
+  wire, and telling those callers plainly still beats discarding the value in
+  silence. Only the guard's doc comment changed, to stop describing `mapId` as a
+  field the form sends.
+  
+  The generated translation bundles (`*.objects.generated.ts`, all four locales)
+  were **regenerated**, not hand-edited, so the retired label disappears from every
+  locale rather than lingering as a stale entry.
+- Updated dependencies [56656aa]
+- Updated dependencies [c9f5950]
+- Updated dependencies [d6e80b2]
+- Updated dependencies [07e630e]
+- Updated dependencies [66beee0]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [e7bccaa]
+- Updated dependencies [2782805]
+- Updated dependencies [e43d63a]
+- Updated dependencies [5047cb8]
+- Updated dependencies [ed4ca59]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [03520eb]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [2d0af57]
+- Updated dependencies [c766ec3]
+- Updated dependencies [420804d]
+- Updated dependencies [51a46a4]
+- Updated dependencies [716ac9b]
+- Updated dependencies [a38408a]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [27a567d]
+- Updated dependencies [42b05af]
+- Updated dependencies [3ab2488]
+- Updated dependencies [2b292ce]
+- Updated dependencies [185c7bd]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [66dbec4]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [45862a5]
+- Updated dependencies [79c46da]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [24173e9]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [f8eb736]
+- Updated dependencies [11b779e]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [b537855]
+- Updated dependencies [2065e31]
+- Updated dependencies [6cb88d9]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4dc8a61]
+- Updated dependencies [4d47afe]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [e2899f6]
+- Updated dependencies [b6c7690]
+- Updated dependencies [e6e1de4]
+- Updated dependencies [6a12e5e]
+- Updated dependencies [3851f87]
+- Updated dependencies [2a29caa]
+- Updated dependencies [9e2e682]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [e1bb0ca]
+- Updated dependencies [30d3752]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [499f55e]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [7fc01db]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [8f266f1]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [04f8fdb]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [6158146]
+- Updated dependencies [84cb121]
+- Updated dependencies [ca19ee8]
+- Updated dependencies [a675b4d]
+- Updated dependencies [b887013]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [402c125]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [b3f9831]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [44bc51d]
+- Updated dependencies [bbbfcfc]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+  - @objectstack/spec@17.1.0
+  - @objectstack/platform-objects@17.1.0
+  - @objectstack/types@17.1.0
+  - @objectstack/rest@17.1.0
+  - @objectstack/core@17.1.0
+
 ## 17.0.0
 
 ### Major Changes

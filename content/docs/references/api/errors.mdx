@@ -42,6 +42,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +43 more>` | ✅ | Machine-readable error code |
 | **message** | `string` | ✅ | Human-readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934) — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution (#3821). |
 | **category** | `Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'server' \| 'external' \| 'maintenance'>` | optional | Error category |
 | **httpStatus** | `number` | optional | HTTP status code |
 | **retryable** | `boolean` | optional (default: `false`) | Whether the request can be retried |
@@ -136,7 +137,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `false` | ✅ | Always false for error responses |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; message: string; category?: Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| …>; httpStatus?: number; … }` | ✅ | Error details |
+| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; message: string; userMessage?: string; category?: Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| …>; … }` | ✅ | Error details |
 | **meta** | `{ timestamp?: string; requestId?: string; traceId?: string }` | optional | Response metadata |
 
 

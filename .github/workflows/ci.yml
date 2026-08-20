@@ -38,6 +38,9 @@ jobs:
       docs: ${{ steps.changes.outputs.docs || 'true' }}
       core: ${{ steps.changes.outputs.core || 'true' }}
       console: ${{ steps.changes.outputs.console || 'true' }}
+      # Gates the `test` job ONLY, ORed with `core` — see the `scripts`
+      # filter below and the `test` job's `if:` (#9829).
+      scripts: ${{ steps.changes.outputs.scripts || 'true' }}
       # ── THE FILTER CONTRACT, both halves (#4928) ──────────────────────────
       #
       # Half 1 is the `|| 'true'` above: when in doubt, RUN EVERYTHING. It
@@ -107,6 +110,30 @@ jobs:
               - 'scripts/console-spec-probes.mjs'
               - 'scripts/assert-console-spec-injection.mjs'
               - '.github/workflows/ci.yml'
+            # Test inputs that live OUTSIDE every package (#9829). Packages whose
+            # suites read across their own boundary declare that radius in
+            # scripts/check-cross-package-test-inputs.mjs, and turbo.json mirrors each
+            # as a `$TURBO_ROOT$/…` input. SIX of those declarations are rooted at
+            # `scripts/` — @objectstack/spec (`scripts/**`), @objectstack/cli,
+            # @objectstack/metadata-protocol and create-objectstack (five single
+            # files) — and the step that pulls those packages back into the affected
+            # set, `--union-into` in the `test` job below, is a step INSIDE that job.
+            # So on a `scripts/`-only diff `core` was false, the job never started,
+            # the union never ran, and the declarations bought nothing at PR time:
+            # the merge queue was the first signal, which is the #7802 failure this
+            # whole mechanism exists to prevent. Measured with picomatch, the matcher
+            # dorny/paths-filter uses: a diff confined to
+            # `scripts/sync-template-versions.mjs` yields core=false.
+            #
+            # Deliberately a SEPARATE output rather than a widening of `core`,
+            # because it gates ONE job — the `test` job ORs it with `core`, while
+            # Build Core, Dogfood and Temporal Conformance stay filtered exactly as
+            # they are today. `scripts/**` rather than the six declared paths: the
+            # narrower filter does not exist while @objectstack/spec declares
+            # `scripts/**`, and a hand-kept list of script paths is the failure mode
+            # #7802 recorded ("a list you must remember to update").
+            scripts:
+              - 'scripts/**'
 
   test:
     # Sharded 3-way BY PACKAGE: a core-touching PR ran the affected suite
@@ -129,8 +156,11 @@ jobs:
     name: Test Core (${{ matrix.shard }}/3)
     needs: filter
     # "Skip only when the filter EXPLICITLY said no core paths changed" — see
-    # THE FILTER CONTRACT on the filter job's outputs (#4928).
-    if: ${{ !cancelled() && needs.filter.outputs.core != 'false' }}
+    # THE FILTER CONTRACT on the filter job's outputs (#4928). `scripts` is ORed
+    # in, never ANDed: two independent reasons to run this job, and it skips only
+    # when BOTH filters explicitly said false, so the contract's "when in doubt,
+    # RUN EVERYTHING" posture is unchanged (#9829).
+    if: ${{ !cancelled() && (needs.filter.outputs.core != 'false' || needs.filter.outputs.scripts != 'false') }}
     runs-on: ubuntu-latest
     # Backstop only — the stall guard on the test steps is the primary
     # detector for a #4250-style hang and fires well before this. 30 min is
@@ -1355,11 +1385,19 @@ jobs:
   # 2026-08-18 (#9533) found it had never landed there, and the row was dropped
   # rather than left claiming otherwise — see that file's TOMBSTONE for the full
   # provenance. So a red here does NOT block a merge, and renaming this job no
-  # longer turns anything red. The name is still load-bearing PROSE in four
-  # places that tell it apart from `Console Pin Freshness`
-  # (docs/releases-maintenance.md, packages/console/README.md,
-  # scripts/check-objectui-pin-fresh.mjs, .github/workflows/objectui-pin-freshness.yml);
-  # renaming it silently falsifies all four.
+  # longer turns anything red. The name is still load-bearing PROSE that renaming
+  # this job silently falsifies — docs/releases-maintenance.md and
+  # packages/console/README.md both describe the pin flow by this name (#9793
+  # tracks the missing pin for job names that are not required contexts).
+  #
+  # ⚠️ It used to need telling apart from a same-shaped sibling, `Console Pin
+  # Freshness`, which asked whether the pin was CURRENT. That gate is gone
+  # (#10134, 2026-08-20 ruling: which objectui revision we pin is a decision
+  # recorded in an objectstack issue, never derived from objectui `main`). This
+  # gate's question is unaffected and it stays: does the PINNED SHA still BUILD.
+  # ⛔ Do not read the sibling's deletion as licence to rebuild one under this
+  # name — see scripts/check-required-contexts.mjs for why that name in
+  # particular must stay out of any required set.
   console-pin:
     name: Console Pin Gate
     needs: filter

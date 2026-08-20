@@ -609,7 +609,7 @@ describe('HookContextSchema', () => {
     });
 
     // #3280 made `organizationId` the blessed developer-facing name; the
-    // `tenantId` alias was removed from this surface in v11 (#3290). A stray
+    // `tenantId` alias was removed from this surface in v16 (#3290). A stray
     // `tenantId` key is now stripped by the schema rather than surfaced.
     it('exposes session.organizationId and no longer carries the removed tenantId alias (#3290)', () => {
       const context = HookContextSchema.parse({
@@ -676,7 +676,7 @@ describe('HookContextSchema', () => {
         },
         session: {
           userId: 'user_123',
-          // `session.tenantId` was removed in v11 (#3280/#3290); the blessed
+          // `session.tenantId` was removed in v16 (#3280/#3290); the blessed
           // developer-facing name is `organizationId`. This fixture kept
           // spelling the retired alias for two majors because nothing
           // type-checked it — vitest only sees `HookContextSchema.parse`,

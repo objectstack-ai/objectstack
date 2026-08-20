@@ -9,8 +9,8 @@
  *   node scripts/check-required-contexts.mjs --self-test   # verify the checker itself
  *   node scripts/check-required-contexts.mjs --verify-required-set
  *                                       # report-only live ruleset diff (#9642)
- *   NODE_OPTIONS=--use-env-proxy node scripts/check-required-contexts.mjs --verify-required-set
- *                                       # the same, from an agent container
+ *                                       # ⛔ NOT runnable from a dev seat — see
+ *                                       #    "Where the live half can run" below
  *
  * ## The defect
  *
@@ -52,8 +52,9 @@
  *      an advisory gate wearing a required gate's name;
  *   6. its workflow carries a `merge_group:` trigger. Without it the queue
  *      build never produces the context and the whole queue stalls waiting for
- *      it (#5617's audit lists `Console Pin Freshness` as exactly this shape:
- *      a file whose own comment invites required-ization it cannot survive);
+ *      it (#5617's audit named `Console Pin Freshness` as exactly this shape at
+ *      the time of the audit; that workflow has since been deleted outright —
+ *      see the ⛔ exclusion note below, which outlives it);
  *   7. its workflow's `pull_request:` trigger exists and carries no `paths:` /
  *      `paths-ignore:`, and, if it names `types:` at all, that list is a
  *      superset of GitHub's default `[opened, synchronize, reopened]`. A
@@ -97,7 +98,10 @@
  *     the same path plus /{id}, answer HTTP 200 to an ordinary agent seat.
  *     Their price is `X-Accepted-GitHub-Permissions: metadata=read` — the
  *     baseline every token carries, and not one of the 17 a workflow can toggle
- *     because it cannot be given up. The required SET is readable.
+ *     because it cannot be given up. The required SET is readable — by a token
+ *     that reaches api.github.com at all, which a DEV SEAT does not (see
+ *     "Where the live half can run" at `--verify-required-set` below; that is a
+ *     transport fact about the container, not a permission this repo grants).
  *
  * Measured 2026-08-18 (#9642): one ruleset, `main`, id 12119582, enforcement
  * `active`, repository-sourced — `includes_parents=true` returns that one and
@@ -173,7 +177,7 @@
  * below, with the decision in judgeInstructionSurfaces.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -191,8 +195,17 @@ import { fileURLToPath } from 'node:url';
  *
  * ⛔ Names the #5617 audit ruled must STAY OUT of the required set, recorded so
  * a later reader does not enroll them here by symmetry: `Console Pin Freshness`
- * (no `merge_group` trigger — required-izing it deadlocks the queue, and that
- * file's own comment invites it), `Spec property liveness` (PR-side `paths:`,
+ * (the audit's stated reason was "no `merge_group` trigger — required-izing it
+ * deadlocks the queue, and that file's own comment invites it". ⚠️ Two things
+ * happened to that reason and neither reopens the question: #6121 added the
+ * trigger, which #6991 recorded as making the stated reason stale; then #10134
+ * DELETED the workflow, the script and the `package.json` entry outright, so no
+ * check-run of this name reports at all — the 2026-08-20 ruling is that which
+ * objectui revision we pin is a decision taken in an objectstack issue, never
+ * derived from objectui `main`, so there is no currency question for a gate to
+ * ask. This entry STAYS for a reason the deletion CREATES: it is now the only
+ * thing standing between a future author and rebuilding a same-named gate and
+ * enrolling it here), `Spec property liveness` (PR-side `paths:`,
  * so PRs touching no spec/docs sit pending forever), `Validate Package
  * Dependencies` (both faults), `Check PR Size` / `Auto Label` / `Check
  * Changeset` (the `labeled` event republishes the same context as `skipped`,
@@ -250,18 +263,23 @@ import { fileURLToPath } from 'node:url';
  * these `name:` literals, and still publish these check-runs on every PR that
  * trips their filter. They lost REQUIRED status, which is a different fact.
  * Ledgering them anyway was measured before it was rejected (2026-08-18):
- * `docs/releases-maintenance.md` names `Console Pin Gate` 2× in correct,
- * current prose that exists to keep it apart from `Console Pin Freshness`, so
+ * `docs/releases-maintenance.md` names `Console Pin Gate` in correct, current
+ * prose describing what still checks the pin, so
  * the row reds the scan there and prints the diagnostic "a seat following this
  * text looks for a check-run that no longer reports" — false, about prose that
  * is right. Budgeting around it would only arm the trap for the next author
  * who legitimately names the live job.
  *
  * ⚠️ The cost of the drop, stated rather than discovered later: these two
- * `name:` literals are now pinned by NOTHING, while five places still refer to
- * the jobs by name (`docs/releases-maintenance.md`, `packages/console/README.md`,
- * `scripts/check-objectui-pin-fresh.mjs`, `.github/workflows/objectui-pin-freshness.yml`
- * and lint.yml's cross-reference). Renaming either job no longer detaches a
+ * `name:` literals are now pinned by NOTHING, while prose elsewhere still refers
+ * to the jobs by name — `docs/releases-maintenance.md`,
+ * `packages/console/README.md` and lint.yml's cross-reference among them. This
+ * list read FIVE until #10134 deleted `scripts/check-objectui-pin-fresh.mjs` and
+ * `.github/workflows/objectui-pin-freshness.yml`, both of which named
+ * `Console Pin Gate` only to tell it apart from `Console Pin Freshness`; the
+ * recorded debt shrank by two and did not close. ⚠️ It was never asserted by
+ * anything either way, so read it as examples and never as a census — the same
+ * trap the `carries` note below is about. Renaming either job no longer detaches a
  * required gate — that is the whole point — but it does silently falsify that
  * prose. Filed as its own card rather than solved here, since a pin for
  * "contract job names that are not required contexts" is a new mechanism and
@@ -459,6 +477,29 @@ export const INSTRUCTION_SURFACES = [
   { file: 'docs/launch-readiness.md', mustName: [] },
   { file: 'docs/releases-maintenance.md', mustName: [] },
 ];
+
+/**
+ * The repo-ROOT surface above, declared for `scripts/pm/dispatch-gates.mjs`
+ * (#9979, applying #9964's pattern).
+ *
+ * That tool derives a card's gate list from the path literals in each gate's
+ * own source, and "looks like a path" there means "carries a separator". Four
+ * of the five surfaces have one; `AGENTS.md` does not, because a repo-root FILE
+ * has no separator to be found by — so an AGENTS.md card derived this gate not
+ * at all, while that surface is the one carrying `mustName` for all six
+ * required contexts (widened 2→6 by the #9677 ruling). Editing the merge-queue
+ * paragraph there is precisely how this gate goes red, and it was reachable
+ * only by judgment.
+ *
+ * `<file>/**` is the form that reaches a root file: the extractor accepts it,
+ * and `collapseHint` reduces it back to that one path and to nothing else.
+ *
+ * ⚠️ Provenance, NOT a lookup key. `scanInstructionSurfaces` opens every
+ * surface `file`; the glob spelling appearing there would send this gate
+ * reading a path that does not exist — and a surface it cannot read is a hard
+ * failure here by design (#4690). The self-test pins both halves.
+ */
+export const ROOT_FILE_WATCH_HINTS = ['AGENTS.md/**'];
 
 /**
  * Former required-context names — permanent history, append-only. A row is
@@ -966,14 +1007,42 @@ export async function scanInstructionSurfaces(
  * Settings entry. A required check that reddened on registry-vs-settings
  * disagreement would therefore be red on precisely the PR carrying the repo
  * half, and could not go green before merging: it would deadlock the sitting it
- * claims to protect, the same way required-izing `Console Pin Freshness`
- * deadlocks the queue. Report-only is not timidity here, it is the only shape
+ * claims to protect, the same way required-izing a context with no `merge_group`
+ * trigger — the `Console Pin Freshness` shape — deadlocks the queue. Report-only
+ * is not timidity here, it is the only shape
  * that does not self-block.
  *
  * The posture is `check-governed-merges.mjs`'s, verbatim in behaviour: a
  * completed sweep exits 0 whether it found 0 or 40 disagreements, and a
  * non-zero exit classifies the ENVIRONMENT, not the tree. Unreachable prints
  * NOT VERIFIED and exits 2; it is never a pass (#4690).
+ *
+ * ## Where the live half can run — NOT from a dev seat (#9678)
+ *
+ * ⛔ A `NOT VERIFIED` here on an agent session container is the ENVIRONMENT,
+ * never the tree and never this registry. Do not chase it, do not "fix" it, and
+ * do not conclude from it that the ruleset is unreadable — that inference, from
+ * a different cause, is exactly what #9642 had to retire. Re-measured
+ * 2026-08-19 from a dev seat, both documented spellings:
+ *
+ *   node scripts/check-required-contexts.mjs --verify-required-set
+ *       -> NOT VERIFIED — GET /repos/objectstack-ai/objectstack answered 401
+ *   NODE_OPTIONS=--use-env-proxy node ... --verify-required-set
+ *       -> NOT VERIFIED — GET /repos/objectstack-ai/objectstack answered 403
+ *
+ * The 401 is the #7412 proxy trap (Node's global fetch does not read
+ * HTTPS_PROXY on its own), and `renderRequiredSetUnverified` says so. The 403
+ * is the finding: with the documented remedy applied, the seat's own egress
+ * policy refuses api.github.com. The proxy hint correctly goes SILENT once the
+ * flag is set, so what a dev actually sees is a bare 403 with no explanation of
+ * its seat class — hence this paragraph. Two seat classes, both dead ends;
+ * there is no third spelling that works from here.
+ *
+ * The standing caller is therefore `.github/workflows/required-set-patrol.yml`
+ * (#9678), where a runner reaches the API directly with the workflow's own
+ * GITHUB_TOKEN — no proxy env and no `--use-env-proxy` needed. It is scheduled,
+ * report-only and ⛔ never a required context; the "live mode stays OFF the
+ * required path" block in `--self-test` pins that from this side.
  *
  * ## Both directions are reported, because they are different defects
  *
@@ -1124,7 +1193,7 @@ export function renderRequiredSetReport(verdict) {
   }
 
   if (verdict.advisory.length === 0 && verdict.unpinned.length === 0 && !verdict.noEnforcingRuleset && !verdict.noRequiredChecksRule) {
-    lines.push('', '  ✅  the live required set and this registry agree in both directions.');
+    lines.push('', `  ${REQUIRED_SET_CLEAN_MARK}  the live required set and this registry agree in both directions.`);
   }
   return lines.join('\n');
 }
@@ -1161,6 +1230,25 @@ export function renderRequiredSetUnverified(reason, env = process.env) {
 export const EXIT_SWEPT = 0;
 /** Could not read the live set — classifies the environment, never the tree. */
 export const EXIT_ENVIRONMENT = 2;
+
+/**
+ * The standing caller for the live mode (#9678) — scheduled, report-only, and
+ * ⛔ never a required context. Named here rather than only in a comment so the
+ * self-test can assert the caller EXISTS and that nothing else runs the flag.
+ * Repo-root-relative to `.github/workflows/`.
+ */
+export const PATROL_WORKFLOW = 'required-set-patrol.yml';
+
+/**
+ * The clean mark a COMPLETED sweep renders when the two lists agree in both
+ * directions, and the exact character the patrol keys its drift annotation on.
+ * One constant rather than two copies: the workflow reads this out of the
+ * rendered report, so a silent divergence between "what the report prints" and
+ * "what the caller looks for" would turn every drift finding into a green tick.
+ * Every non-agreeing reading withholds it, so the patrol annotates on ABSENCE —
+ * which fails toward a false alarm, never a false all-clear.
+ */
+export const REQUIRED_SET_CLEAN_MARK = '✅';
 
 function requiredSetApiContext(env) {
   return {
@@ -1821,6 +1909,32 @@ async function selfTest() {
     judgeSurfaces({ surfaces: [] }).problems.some((p) => p.includes('scan set is empty')),
     'an empty scan set ⇒ red, never a silent tick (#4690)',
   );
+
+  // ── the dispatch-gates declaration (#9979) ───────────────────────────────
+  //
+  // Enforcement cannot hold any of these: the declaration is read by another
+  // tool entirely, so a wrong or missing entry runs perfectly green here and
+  // shows up only as a dev dispatched on an AGENTS.md card with this gate
+  // absent from the brief — on the surface that carries `mustName` for all six
+  // required contexts.
+  assert(
+    INSTRUCTION_SURFACES.map((s) => s.file)
+      .filter((f) => !f.includes('/'))
+      .every((f) => ROOT_FILE_WATCH_HINTS.includes(`${f}/**`)),
+    'every separator-less instruction surface declares a root-file watch hint (#9979)',
+  );
+  assert(
+    ROOT_FILE_WATCH_HINTS.every((h) => INSTRUCTION_SURFACES.some((s) => s.file === h.replace(/\/\*+$/, ''))),
+    'and the declaration names no file this gate does not scan (#9979)',
+  );
+  assert(ROOT_FILE_WATCH_HINTS.join(',') === 'AGENTS.md/**', 'AGENTS.md is the root surface it declares (#9979)');
+  // Provenance, never a lookup key: `scanInstructionSurfaces` opens every
+  // surface `file`, so the glob form appearing there would read a missing file
+  // — a hard failure here by design.
+  assert(
+    !INSTRUCTION_SURFACES.some((s) => ROOT_FILE_WATCH_HINTS.includes(s.file)),
+    'the declared form is NOT an INSTRUCTION_SURFACES file (#9979)',
+  );
   assert(
     judgeSurfaces({ files: new Map() }).problems.filter((p) => p.includes('was never read')).length ===
       INSTRUCTION_SURFACES.length,
@@ -2028,6 +2142,63 @@ async function selfTest() {
     assert(
       !Object.values(pkgJson.scripts ?? {}).some((s) => typeof s === 'string' && s.includes('--verify-required-set')),
       'wiring: no package script runs the live read — a `check:*` script is how a thing reaches the required job (#9642)',
+    );
+
+    // ── …and the standing caller it DOES have (#9678) ─────────────────────
+    //
+    // The two assertions above are absences, and an absence cannot tell "kept
+    // deliberately off the required path" apart from "wired nowhere at all" —
+    // which is what this mode actually was for its whole first life: a sweep
+    // whose only scheduled caller was its own offline self-test. So the caller
+    // is pinned as a PRESENCE too, in the same block, and the whole
+    // .github/workflows tree is swept rather than the two files `sources`
+    // carries: a second caller appearing in some third workflow is exactly the
+    // thing the absences above are guarding against, and they cannot see it.
+    const workflowDir = join(root, '.github', 'workflows');
+    const callers = readdirSync(workflowDir)
+      .filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'))
+      .filter((f) => /--verify-required-set/.test(uncommentedYaml(readFileSync(join(workflowDir, f), 'utf8'))));
+    assert(
+      callers.join(',') === PATROL_WORKFLOW,
+      `wiring: exactly one workflow runs the live read and it is ${PATROL_WORKFLOW} — found [${callers.join(', ')}] (#9678)`,
+    );
+
+    // Read defensively and turn "missing" into a NAMED assertion rather than an
+    // uncaught ENOENT. Measured under reverse verification: deleting the patrol
+    // made this block throw mid-self-test, so the `callers` failure above was
+    // recorded and never printed and every later assertion never ran — a stack
+    // trace where the gate's own authored verdict belongs (#4690's family). The
+    // downstream cases each carry `patrolPresent` for the same reason: on an
+    // absent file `!/merge_group/` is vacuously true, which is a false green
+    // about a workflow that does not exist.
+    const patrolPath = join(workflowDir, PATROL_WORKFLOW);
+    const patrolPresent = existsSync(patrolPath);
+    assert(patrolPresent, `wiring: the standing caller .github/workflows/${PATROL_WORKFLOW} is missing — the live mode is wired nowhere again (#9678)`);
+    const patrolYaml = patrolPresent ? uncommentedYaml(readFileSync(patrolPath, 'utf8')) : '';
+    // The mechanical proxy for "never required". Assertion 6 of this pin is
+    // that every required context's workflow carries `merge_group:` — without
+    // one, the queue build never produces the context and the whole queue
+    // stalls waiting for it. A patrol that declares no merge_group trigger
+    // therefore CANNOT be validly required-ized, and required-izing it anyway
+    // wedges the queue rather than deadlocking a rename two-step quietly.
+    assert(
+      patrolPresent && !/^\s{0,4}merge_group\s*:/m.test(patrolYaml),
+      `wiring: ${PATROL_WORKFLOW} must declare no merge_group trigger — a workflow without one deadlocks the queue if it is ever required-ized (#9678)`,
+    );
+    assert(
+      !REQUIRED_CONTEXTS.some((entry) => entry.workflow === PATROL_WORKFLOW),
+      `wiring: no REQUIRED_CONTEXTS row may name ${PATROL_WORKFLOW} — the patrol is report-only by construction (#9678)`,
+    );
+    // The patrol reads its drift signal out of the CLEAN MARK this file
+    // renders, so the coupling is pinned from the side that owns the string.
+    // The rendering itself is pinned in both directions above ('agreement in
+    // both directions renders as the clean case' / 'the unprotected reading
+    // never renders as the clean case'); this asserts the caller still reads
+    // the same character. A rendering change costs the patrol a FALSE ALARM,
+    // never a false all-clear — it annotates on the mark's ABSENCE.
+    assert(
+      patrolPresent && patrolYaml.includes(REQUIRED_SET_CLEAN_MARK),
+      `wiring: ${PATROL_WORKFLOW} must key its drift annotation on the clean mark ${REQUIRED_SET_CLEAN_MARK} this file renders (#9678)`,
     );
   }
 

@@ -29,6 +29,18 @@ import { readSingleQueryValue, repeatedQueryParamMessage } from './query-multipl
 // while this file keeps compiling green. Same discipline as the sibling
 // meta-read doors in `rest-server.ts` (#9805 / #9741).
 import type { GetMetaItemsRequest, GetMetaItemsResponse } from '@objectstack/spec/api';
+// [#9960] The declared uninstall shapes for the `protocol.deletePackage` seam
+// below, imported from the PRODUCER for the same reason the meta-read shapes
+// above come from the spec: so this module's idea of the request/response is
+// the one statement of that contract rather than a local restatement the
+// producer can drift away from while this file keeps compiling green. There is
+// no spec shape to import for this verb — `deletePackage` is deliberately
+// undeclared in `packages/spec` (zero external consumers, #9960) — so the
+// producer's own exported type IS the contract. Type-only: no runtime import of
+// `@objectstack/metadata-protocol` exists here, and this package still does not
+// depend on it at run time (see `query-multiplicity.ts` and `rest-server.ts`,
+// which duck-type the same seam for exactly that reason).
+import type { DeletePackageRequest, DeletePackageResponse } from '@objectstack/metadata-protocol';
 
 /**
  * [#7033 / #7023] The authorization gate for the REST package transport.
@@ -250,16 +262,25 @@ export interface PackageRoutesOptions {
      * tolerates — a behaviour question, deliberately not answered here.
      */
     getMetaItems?(req: GetMetaItemsRequest): Promise<GetMetaItemsResponse>;
-    // [#7780] `allTenants` is the explicit carrier for cross-tenant uninstall
-    // semantics; the protocol refuses a call that names neither it nor an
-    // `organizationId` (`TENANT_SCOPE_REQUIRED`, 400).
-    deletePackage?(req: { packageId: string; actor?: string; allTenants?: boolean }): Promise<{
-      success: boolean;
-      deletedCount: number;
-      failedCount: number;
-      failed: Array<{ type: string; name: string; error: string; code?: string }>;
-      cleanups: Array<{ name: string; success: boolean; removed: number; error?: string }>;
-    }>;
+    /**
+     * [#7780] `allTenants` is the explicit carrier for cross-tenant uninstall
+     * semantics; the protocol refuses a call that names neither it nor an
+     * `organizationId` (`TENANT_SCOPE_REQUIRED`, 400).
+     *
+     * [#9960] Request/response are the PRODUCER's declared shapes. The local
+     * restatement they replace named neither `organizationId` nor `keepData`
+     * and omitted `deleted` from the response — so the one key that decides an
+     * uninstall's blast radius had no word for it here, while the dispatcher
+     * twin sent that key on every org-scoped call. The member stays OPTIONAL
+     * and the call site below keeps its `typeof … === 'function'`
+     * feature-detection: the `protocol` service slot is deliberately
+     * uncontracted (`ServiceSlotContracts`), the spec's own `PackageProtocol`
+     * does not declare this verb at all, and registrants that carry no
+     * `deletePackage` are real — so requiring the member here would change what
+     * this seam tolerates, which is a behaviour question this card does not
+     * answer.
+     */
+    deletePackage?(req: DeletePackageRequest): Promise<DeletePackageResponse>;
   };
   /**
    * [#7033 / #7023] Resolve the caller's execution context for a package route
@@ -327,6 +348,47 @@ export type _PinGetMetaItemsResponseIsSpecDeclared = Pinned<
  */
 export type _PinGetMetaItemsStaysOptional = Pinned<
   undefined extends NonNullable<PackageRoutesOptions['protocol']>['getMetaItems'] ? true : false
+>;
+
+/**
+ * [#9960] The same three pins for the `protocol.deletePackage` seam, and for
+ * the same reason — with one difference worth stating: `getMetaItems` above is
+ * pinned to the SPEC's declared shapes, while this verb has no spec
+ * declaration, so the producer (`@objectstack/metadata-protocol`) is the
+ * contract these pin against. That is the adjudicated shape of #9960, not an
+ * oversight: declaring a protocol verb for a surface with zero external
+ * consumers is a spec-seat decision nobody has asked for.
+ *
+ * WHAT THEY CATCH: that this option's request/response are still the producer's
+ * types rather than a hand-rolled restatement of them. Exact equality, not
+ * mutual assignability — the shape this card removed (`{ packageId; actor?;
+ * allTenants? }`) is assignable to `DeletePackageRequest` in one direction, so
+ * an assignability check would have passed on the very divergence that made
+ * `organizationId` and `keepData` unsayable here.
+ *
+ * They live in compiled source, not a `*.test.ts`, for the reason spelled out
+ * above the `getMetaItems` pins: this package's `tsconfig.json` excludes its
+ * test files, so a type-level assertion written there is compiled by nothing.
+ */
+type DeclaredDeletePackage = NonNullable<NonNullable<PackageRoutesOptions['protocol']>['deletePackage']>;
+
+/** The REQUEST type is exactly the producer's `DeletePackageRequest`. */
+export type _PinDeletePackageRequestIsProducerDeclared = Pinned<
+  ExactlyEqual<Parameters<DeclaredDeletePackage>[0], DeletePackageRequest>
+>;
+
+/** The RESPONSE type is exactly the producer's `DeletePackageResponse`. */
+export type _PinDeletePackageResponseIsProducerDeclared = Pinned<
+  ExactlyEqual<Awaited<ReturnType<DeclaredDeletePackage>>, DeletePackageResponse>
+>;
+
+/**
+ * The member stays OPTIONAL — see the option's own note. This pin fails if a
+ * later edit quietly makes it required, which would turn a protocol registrant
+ * without the verb from a supported shape into a type error.
+ */
+export type _PinDeletePackageStaysOptional = Pinned<
+  undefined extends NonNullable<PackageRoutesOptions['protocol']>['deletePackage'] ? true : false
 >;
 
 /**

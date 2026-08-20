@@ -1,5 +1,219 @@
 # @objectstack/plugin-webhooks
 
+## 17.1.0
+
+### Patch Changes
+
+- 90417a8: chore(plugin-webhooks): `sys_webhook` declares its data-API exposure explicitly — recording the posture, not narrowing it (#9756)
+  
+  `sys_webhook` shipped with no `enable` block at all, so it kept the full default
+  data API. Three cards each noticed and each named the narrowing as the next
+  step — #7799 (the signing secret), #7986 (the custom headers), #8025 option 2
+  (the URL) — and each assumed a later one would write the line. None did, and the
+  last of them closed `completed` with the line still unwritten. The posture was
+  never a judgement; it was a default nobody had written down.
+  
+  It is written down now:
+  
+  ```ts
+  enable: { apiMethods: ['get', 'list', 'create', 'update', 'delete', 'bulk'] }
+  ```
+  
+  **The effective surface is unchanged, and that is the honest headline.** The set
+  is derived from a census of who actually reaches the object, taken before
+  anything was edited:
+  
+  | consumer | reaches it through | needs |
+  |:---|:---|:---|
+  | Setup/Studio console — `nav_webhooks`, four list views, `userActions` create/edit/delete | REST `/api/v1/data/sys_webhook` (gated) | `get` `list` `create` `update` `delete` |
+  | Operator predicate write — "deactivate every webhook on an object" (#4639) | REST `updateMany`/`deleteMany` (gated on `bulk`) | `bulk` |
+  | `AutoEnqueuer`, `bootstrapDeclaredWebhooks`, the provenance stamp, `redeliver-guard`, the secret sweep | `engine.*` and lifecycle hooks — ObjectQL directly, which never consults `enable.apiMethods` | ungated |
+  
+  Every primitive is required by a real consumer, so the set is all six — whose
+  operation closure is what the absent block already produced. Nothing that was
+  reachable becomes unreachable, and `/me/permissions` reports the identical
+  `apiOperations` array. No caller needs to change anything.
+  
+  ⛔ **Do not read this as the read-surface narrowing those three cards asked
+  for.** It is not one, and `apiMethods` cannot be one here: `url` (#8025 —
+  won't-fix on masking, because the URL is the routing key an operator must be
+  able to see, search, sort and edit) and a legacy row's un-migrated
+  `definition_json.headers` (#7986 — still read, and warned about, by
+  `readLegacyHeaders`) are served by `get`/`list`, which is exactly what the admin
+  console requires. Any set that removes them removes the admin surface too. The
+  sibling `sys_http_delivery` can hold `['get','list']` because it is engine-owned
+  and never authored; `sys_webhook` is a first-class admin authoring surface.
+  
+  The equality above is pinned in `sys-webhook-api-exposure.test.ts` rather than
+  left as a claim, so a later change that does move the surface has to say so.
+- b278695: fix(webhooks): refuse a malformed `sys_webhook.headers_secret` at the write door instead of at the next delivery (#8566)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is
+  renamed, retired or tombstoned. This adds a runtime validation hook on one
+  plugin-owned object's existing column; the authoring envelope
+  (`webhook.zod.ts`), the field declaration and every stored shape are untouched.
+  The accept-set narrows, but only over values that were already unusable at
+  delivery time (see below), so there is no configuration for a migration to
+  prescribe a rewrite of. -->
+  
+  `sys_webhook.headers_secret` is a `Field.secret()` whose plaintext is **not** an
+  opaque blob: it is a serialized header map with a required shape — a flat JSON
+  object of string values — and `parseStoredHeaders` is its only reader. Nothing
+  validated that shape on the way in. The ordinary data API accepted any string,
+  encrypted it like any other secret, minted a real `sys_secret` row, and left the
+  column holding a perfectly valid `secret:` ref that read back as the mask with
+  `active: true`.
+  
+  Measured on a real engine through `engine.update()` — the ordinary data API, no
+  privileged access — every one of these was **accepted** and is a value the
+  plugin can never use: `{}`, `[]`, `{"X-Count": 5}`, a nested object, and
+  `{X-Team: crm}` (a typo). The field is directly admin-authorable and its own
+  description instructs the author to type a JSON object into it, which makes a
+  typo the *expected* failure rather than an exotic one.
+  
+  **This is not an exposure fix and must not be read as one.** #8558/#8565 already
+  closed the consumer half: a webhook whose stored header map does not come back
+  as a flat string map parks the subscription and reports at `error`, rather than
+  delivering header-less with a valid signature. Nothing leaks, and nothing is
+  silently lost today. What this changes is **when the author finds out** — at the
+  write door where they typed it, instead of at the next matching record change,
+  an unbounded time later and in a different surface.
+  
+  **What is refused:** a `headers_secret` plaintext that does not parse back as a
+  flat JSON object of string values with at least one entry, with a located
+  ADR-0112 `VALIDATION_ERROR` / 400 naming `sys_webhook.headers_secret`, quoting
+  the shape the field's own description asks for, and diagnosing the specific
+  spelling (invalid JSON / an array / an empty object / which key's value is not a
+  string). ⛔ The message never echoes the rejected value — this column carries
+  credentials, and quoting the input would print an `Authorization: Bearer …` into
+  logs and error bodies, re-opening in the diagnostic exactly the exposure #7986
+  moved this field onto the encrypted channel to close. It names header *keys* and
+  value *types* only.
+  
+  **What stays accepted, byte for byte:** every valid flat string map (as JSON
+  text, or as an authored object the engine serializes into the same form); `null`
+  to clear; an omitted key to leave the stored value unchanged; and an **echoed
+  read-mask**, so the ordinary Setup-form round-trip (GET a row, edit an unrelated
+  field, PATCH it back) is untouched. `""` is deliberately passed through to
+  #8559's `EmptyCredentialWriteError` rather than re-refused here — one door, one
+  owner, one message.
+  
+  **Where it runs, and why that is the whole mechanism:** a `beforeInsert` /
+  `beforeUpdate` hook on `sys_webhook`, bound by `WebhookOutboxPlugin` before its
+  first seeded write. It has to run *before* the engine's `encryptSecretFields` —
+  one step later the plaintext is gone and the column holds an opaque ref, so a
+  validator behind it would have nothing left to validate. The suite measures that
+  ordering rather than asserting it: every refusal pins that **no `sys_secret`
+  cipher row was minted**, which is only true if the gate ran first.
+  
+  A hook rather than checks on the plugin's own write paths
+  (`bootstrapDeclaredWebhooks` / `headersPatch` / the migration sweep), because a
+  direct `PATCH /api/v1/data/sys_webhook` goes through none of them and that is
+  the measured trigger. Those paths inherit the validation through the hook and
+  deliberately carry no second check.
+  
+  A general `secret`-channel plaintext validator — letting any `secret`-typed
+  field declare its own plaintext shape — is the principled generalization and is
+  recorded as the **promotion path**, not built here: it becomes the shape the
+  moment a second shaped-plaintext `secret` field exists (maintainer ruling
+  2026-08-13; one consumer does not justify a general capability).
+- Updated dependencies [56656aa]
+- Updated dependencies [07e630e]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [2782805]
+- Updated dependencies [e43d63a]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [420804d]
+- Updated dependencies [716ac9b]
+- Updated dependencies [a38408a]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [24173e9]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [f8eb736]
+- Updated dependencies [11b779e]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [44738f7]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [e2899f6]
+- Updated dependencies [3851f87]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [e1bb0ca]
+- Updated dependencies [30d3752]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [402c125]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [44bc51d]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+  - @objectstack/spec@17.1.0
+  - @objectstack/core@17.1.0
+  - @objectstack/service-messaging@17.1.0
+
 ## 17.0.0
 
 ### Minor Changes

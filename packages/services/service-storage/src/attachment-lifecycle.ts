@@ -44,13 +44,15 @@ export interface AttachmentLifecycleEngine {
       object?: string;
       packageId?: string;
       /**
-       * [#9719] Opt-in: the engine ALSO dispatches this handler once with the
-       * whole-operation context when a `multi: true` delete carries no `where`
-       * at all — before any row is resolved. The #4757 unscoped-multi-delete
-       * refusal in `attachment-access-hooks.ts` declares it; nothing else here
-       * does. `beforeDelete` registrations only.
+       * [#9719, both write verbs since #9974] Opt-in: the engine ALSO
+       * dispatches this handler once with the whole-operation context when a
+       * `multi: true` write carries no `where` at all — before any row is
+       * resolved. The #4757 unscoped-multi-delete refusal in
+       * `attachment-access-hooks.ts` declares it on its `beforeDelete`
+       * registration; nothing else here does, and no attachment guard declares
+       * it on update. `beforeUpdate` / `beforeDelete` registrations only.
        */
-      dispatchUnscopedMultiDelete?: boolean;
+      dispatchUnscopedMultiWrite?: boolean;
     },
   ): void;
   /** Onion-model data middleware (runs for find/findOne/count/aggregate AND

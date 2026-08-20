@@ -729,18 +729,32 @@ const TEST_DEBT = {
       + '(#5278 option A).',
   },
   '@objectstack/plugin-auth': {
-    errors: 110,
-    note: 'TS2493 x42 (tuple index out of range), TS18048 x24, TS2740 x19, TS2322 x11, TS2532 x9, '
-      + 'TS2339 x8, TS2741 x8. Lowered 131 -> 111 at b16dcb45 (#7888); the intermediate 108 in this PR\'s '
-      + 'first commit was measured at b5e09b21 and was already stale when the merge queue built it -- the '
-      + 'package took +3 inside the hour, which is the same "a ledger number is a number about a moment" '
-      + 'race that kicked #5278 three times, and 111 is the merge-queue run\'s own re-measure on the ref '
-      + 'this PR actually lands on. Composition below predates both and is NOT re-tallied at 111. '
-      + 'Measured 124 -> 129 (5ab08428, composition unchanged in shape) -> 131 (e8db1a230). Half of the '
-      + 'latest +2 is a TS2554 in src/last-admin-guard.test.ts, a file added by #5941 / PR #5993 '
-      + '(the break-glass delete guard); the other 1 landed in a file that already existed and is not '
-      + 'attributed further. 64 of the 131 sit in src/auth-manager.test.ts, 22 in '
-      + 'src/admin-import-users.test.ts and 18 in src/admin-user-endpoints.test.ts.',
+    errors: 109,
+    note: 'RE-TALLIED from tsc at the 109 below (measured on this branch over base e717ba111), so the '
+      + 'composition, the per-file split and the total are one measurement rather than a rescale: '
+      + 'TS2493 x42 (tuple index out of range), TS18048 x24, TS2322 x11, TS2532 x9, TS2339 x8, '
+      + 'TS2345 x5, TS2554 x3, TS2741 x3, TS7006 x2, TS2769 x1, TS6133 x1. 44 of the 109 sit in '
+      + 'src/auth-manager.test.ts, 22 in src/admin-import-users.test.ts, 18 in '
+      + 'src/admin-user-endpoints.test.ts and 12 in src/auth-plugin.test.ts. What this replaces is '
+      + 'worth one sentence, because it is the #7038 shape and not an arithmetic slip: the old tally '
+      + 'was taken at 131, said so, and named TS2740 x19 and TS2741 x8 -- TS2740 has since gone to '
+      + 'zero outright and TS2741 stands at 3, so no rescale of it could have been right. '
+      + 'History, still true: measured 124 -> 129 (5ab08428, composition unchanged in shape) -> 131 '
+      + '(e8db1a230). Lowered 131 -> 111 at b16dcb45 (#7888); the intermediate 108 in that PR\'s first '
+      + 'commit was measured at b5e09b21 and was already stale when the merge queue built it -- the '
+      + 'package took +3 inside the hour, the same "a ledger number is a number about a moment" race '
+      + 'that kicked #5278 three times, so 111 was the merge-queue run\'s own re-measure on the ref '
+      + 'that PR actually landed on. Of the +2 that had made 131, half is a TS2554 in '
+      + 'src/last-admin-guard.test.ts, a file added by #5941 / PR #5993 (the break-glass delete '
+      + 'guard); the other 1 landed in a file that already existed and is not attributed further. '
+      + 'Then 111 -> 110 in PR #10013 -- the number moved and this note did not, which is how a '
+      + 'composition written at 131 was still sitting over an entry reading 110. '
+      + '110 -> 109 here (#9694): src/managed-extension-fields.test.ts held the package\'s only '
+      + 'TS1470 -- an `import.meta.url` seed in a package that is CJS-typed and therefore forbids '
+      + 'the meta-property under module: NodeNext -- and now seeds from `__dirname`, which '
+      + 'type-checks here AND is one of the two seeds check:cross-package-test-inputs recognises, so '
+      + 'that file\'s repo-wide *.object.ts walk stays visible to the gate holding plugin-auth\'s '
+      + 'declared input radius. It contributes nothing to this pile any more.',
   },
   '@objectstack/mcp': {
     errors: 53,

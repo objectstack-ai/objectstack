@@ -4,6 +4,13 @@ import { describe, it, expect } from 'vitest';
 import stack from '../objectstack.config.js';
 import { PipelineDashboard } from '../src/dashboards/pipeline.dashboard.js';
 
+// [#10126] Pay the first transform of these dist-resolved workspace deps at MODULE
+// LOAD. Each is reached below through a dynamic `import()` inside an `it()` body or a
+// hook -- both of which vitest clocks, while collection is clocked against nothing. See
+// `scripts/check-test-source-alias.mjs` (the clocked-window rule) and #10115 / PR #10120,
+// where the same shape cost 30 ejected merge-queue builds in one night.
+import '@objectstack/spec/ui';
+
 describe('app-crm minimal metadata bundle', () => {
   it('exposes the expected manifest', () => {
     // `manifest` is optional on the stack bundle type; this example always

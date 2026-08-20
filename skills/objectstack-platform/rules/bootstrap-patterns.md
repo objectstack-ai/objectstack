@@ -4,9 +4,27 @@ Guide for bootstrapping ObjectStack projects with defineStack().
 
 ## Basic Stack Configuration
 
-There is **no `driver:` key** on `defineStack()` — unknown keys are silently
-stripped by strict parsing, so a `driver:` entry is a no-op. Drivers are
-plugins: wrap them in `DriverPlugin` and put them in `plugins:`.
+There is **no `driver:` key** on `defineStack()`. Drivers are plugins: wrap
+them in `DriverPlugin` and put them in `plugins:`.
+
+A `driver:` entry is **not** a harmless no-op. The top level of a stack
+definition rejects undeclared keys, so the stack does not load:
+
+```
+defineStack validation failed (1 issue):
+
+  ✗ (root): Unrecognized key(s) on this stack definition: `driver`. …
+    The declared keys are enumerated by `ObjectStackDefinitionSchema`
+    (@objectstack/spec, stack.zod.ts) and in the stack-definition
+    reference docs.
+```
+
+TypeScript refuses it earlier still, at compile time:
+
+```
+error TS2353: Object literal may only specify known properties,
+and 'driver' does not exist in type 'ObjectStackDefinitionInput'.
+```
 
 The `manifest` requires `id`, `version`, `type`, and `name`
 (`ManifestSchema` is strict — a missing required field throws at
@@ -66,12 +84,12 @@ There are no `@objectstack/adapter-*` packages.
 
 ## Incorrect vs Correct
 
-### ❌ Incorrect — `driver:` Key (Silently Stripped)
+### ❌ Incorrect — `driver:` Key (Rejected at Load)
 
 ```typescript
 export default defineStack({
   manifest: { id: 'com.example.app', version: '1.0.0', type: 'app', name: 'App' },
-  driver: new DriverPlugin(new InMemoryDriver()),  // ❌ Not a defineStack key — no-op
+  driver: new DriverPlugin(new InMemoryDriver()),  // ❌ Not a defineStack key — defineStack throws
   objects: [/* ... */],
 });
 ```

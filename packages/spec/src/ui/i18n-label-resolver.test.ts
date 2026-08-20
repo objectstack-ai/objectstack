@@ -218,7 +218,13 @@ const PARITY_VECTORS: readonly ParityVector[] = [
   { limb: 'converged: empty map + prototype-named locale ⇒ a genuine miss', label: {}, locale: 'constructor', pick: '' },
   {
     limb: 'converged: an OWN key really named like a prototype member is still the author\'s key',
-    label: { constructor: 'Ctor', en: 'Sales' },
+    // Out-of-contract input, like the non-string-value vectors below:
+    // `constructor` (11 letters) was never a key `InlineLocaleMapSchema`
+    // accepts — it type-checked only while the emitted type erased to
+    // `Record<string, string>` (#9925). The resolver's defensive own-property
+    // behaviour on it is exactly what this vector pins, so the cast states
+    // what was always true rather than weakening anything.
+    label: { constructor: 'Ctor', en: 'Sales' } as unknown as I18nLabel,
     locale: 'constructor',
     pick: 'Ctor',
   },

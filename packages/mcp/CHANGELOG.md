@@ -1,5 +1,272 @@
 # @objectstack/plugin-mcp-server
 
+## 17.1.0
+
+### Minor Changes
+
+- 20067c5: fix(runtime,mcp,service-datasource): the #6504 consumer sweep — three list consumers stop making claims a known-partial read cannot support (#6504)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable surface is
+  added, renamed, retired or tombstoned. Two package-local host-wiring interfaces
+  gain OPTIONAL members (`DatasourceAdminServiceConfig.countBoundObjectsDiagnosed`,
+  `McpDataBridge.listObjectsDiagnosed`); `packages/spec` is untouched, since
+  `IMetadataService.listDiagnosed` — the contract this consumes — landed in PR
+  #7721. -->
+  
+  `IMetadataService.listDiagnosed?(type)` (PR #7721) lets a plural read say whether
+  its answer can be trusted as complete. This is the consumer half: the callers
+  that were restating a possibly-short listing as a fact about the environment.
+  
+  Each consumer was qualified individually, per PR #6051's discipline, and most
+  were left alone — a caller publishing a snapshot with no count has nothing to
+  mis-state. Three make a claim, and each now withholds exactly that claim while
+  still serving everything it could read:
+  
+  - **`removeDatasource` no longer deletes on a bound-object count it could not
+    take completely.** The guard `if (bound > 0) throw` is the only thing standing
+    in front of an irreversible delete that also unbinds the datasource's secret,
+    and its input is derived from the metadata service's object listing. During a
+    loader outage that listing goes silently short, and the worst value is the
+    benign one: `0` reads exactly like "nothing is bound", so the guard OPENED.
+    It now refuses with `SERVICE_UNAVAILABLE` / 503 — a dependency outage the
+    operator can retry, not a client error — and the record, its credential and
+    its pool all survive.
+  - **The MCP `list_objects` tool stops publishing `totalCount` on a known-partial
+    listing.** This is the same claim PR #7721 removed from the
+    `objectstack://objects` resource, on the other MCP primitive: same payload
+    shape, different door, never covered. A degraded read now serves the same
+    objects with `totalCount` **absent** and `partial` / `returnedCount` /
+    `warning` plus the 503 envelope in its place, so a client reading the total
+    gets `undefined` rather than a believable wrong integer. Both bridges
+    implement it — stdio (`@objectstack/mcp`) and HTTP (`@objectstack/runtime`) —
+    because a completeness claim must not depend on which transport a client
+    connected over.
+  - **The ADR-0015 §5.2 boot gate stops announcing an all-clear over a sweep it
+    could not complete.** It validated whatever `listObjects()` returned and then
+    logged *all federated objects match their remote schema*, with a count.
+    Federated objects behind an unreadable loader were never validated, so
+    `onMismatch: 'fail'` could not have fired for them. The gate now warns that
+    the swept set was incomplete and names what it did validate. ⛔ It does **not**
+    abort boot on a degraded metadata read: turning a transient outage into a
+    refusal to start would be a new failure mode bought with a diagnosis fix.
+  
+  Every new member is optional in the same way `listDiagnosed` itself is: a host
+  whose metadata service predates the verdict behaves exactly as it did before,
+  and a service without it reports nothing degraded — precisely what it could
+  express.
+
+### Patch Changes
+
+- ff4ba6a: fix(mcp): the skill prompt bridge reads the protocol's merged metadata listing, so a runtime `PUT /api/v1/meta/skill/<name>` reaches MCP prompts (#8328)
+  
+  The bridge read `IMetadataService.list('skill')` — one layer below where the
+  `sys_metadata` overlay merge happens — so an override returned 200 and never
+  reached the prompt surface while `GET /api/v1/meta/skill` served it. The
+  long-lived (stdio) server's bridge now takes its items from the protocol's
+  `getMetaItems` when the host can supply it, and keeps the #6504 completeness
+  verdict by asking `listDiagnosed` for it alongside. A host assembled without the
+  metadata protocol reads exactly as before, and a merged read that throws does not
+  fall back to the un-merged listing.
+- f9d7acf: docs(mcp): rewrite the published README to the shipped host-extension surface (#9579)
+  
+  `packages/mcp/README.md` is in the package's `files` array with `private` unset,
+  so it is the page npm renders. It told the reader to extend the server
+  imperatively at six call sites:
+  
+  ```ts
+  kernel.getService('mcp').registerTool(calculateRevenueTool);
+  kernel.getService('mcp').registerResource({ … });
+  kernel.getService('mcp').registerPrompt({ … });
+  ```
+  
+  `MCPServerRuntime` has never had any of those members. Measured against the
+  built `dist/index.d.ts`, a consumer who copies those lines gets three
+  `TS2339 Property … does not exist on type 'MCPServerRuntime'`. The receiver is a
+  local variable, so `check:published-readme-exports` is structurally blind to
+  them — both of its halves key on a name the fence *imported*, and this one is
+  neither imported nor a bare identifier.
+  
+  Ruled 2026-08-18: **document the shipped surface; do not grow the API to match
+  the docs.** So the imperative narrative is gone and the page now documents what
+  actually ships — the bridge methods (`bridgeTools`, `bridgeDataTools`,
+  `bridgeResources`, `bridgePrompts`), `handleHttpRequest` / `renderSkill`, and the
+  exported `registerObjectTools` / `registerActionTools` / `registerSkillPrompts`
+  helpers driving an `McpServer`. Every row is probed against the built type entry
+  the `exports` map resolves, and the page's one host-extension example compiles
+  clean against it.
+  
+  Neighbouring fabrications the audit turned up, all corrected in the same pass —
+  each of them was reachable only through prose or an unimported receiver, which is
+  why nothing had read them:
+  
+  - **A tool family that does not exist.** The page listed
+    `objectstack_find` / `objectstack_findOne` / `objectstack_create` /
+    `objectstack_update` / `objectstack_delete` / `objectstack_describeObject` /
+    `objectstack_listObjects` / `objectstack_listFields` as "auto-registered". No
+    such tool name occurs anywhere in the repo. The real names are the
+    `list_objects` … `run_action` set the page listed separately, one section down.
+  - **`aggregate_records` was missing** from the list that *was* correct, along
+    with the fact that it registers only when the bridge implements `aggregate`.
+  - **Resource URIs were wrong in both directions.** The page taught
+    `objectstack://objects/{name}/records` (no such resource) and
+    `objectstack://objects/{name}/{id}` (real shape is
+    `…/{name}/records/{id}`), and omitted `objectstack://objects` and
+    `objectstack://metadata/types` entirely.
+  - **The advertised capability block was invented.** It claimed
+    `tools.listChanged`, `resources.subscribe`, `resources.listChanged`,
+    `prompts.listChanged` and `experimental.streaming`. The server hand-declares
+    only `logging`; everything else is *derived* from what was actually registered,
+    which is the ADR-0076 D12 contract the README was contradicting. The
+    "Streaming Support" feature bullet and the streaming-resource example went with
+    it — neither names anything that ships.
+  - **The stdio transport could not be started by following the page.** Neither
+    `OS_MCP_STDIO_ENABLED` nor `OS_MCP_STDIO_API_KEY` was documented, and stdio
+    auto-start refuses to boot without the key (ADR-0101, fail-closed). The three
+    client config blocks now carry both. The Debugging section also taught
+    `OS_MCP_SERVER_ENABLED=true` as the stdio switch, which is the deprecated path
+    that logs a warning.
+  - **A broken relative link.** `../../spec/src/ai/` resolves above the repo root
+    from `packages/mcp/`; the target is `../spec/src/ai/`.
+  
+  Docs only — no runtime code changed, and no API was added. `registerTool` /
+  `registerResource` / `registerPrompt` remain unbuilt by ruling; a future
+  imperative API is its own card on measured pull.
+- cd455c8: docs: four published READMEs stop documenting symbols and call sites that do not exist (#9544)
+  
+  All four packages ship `README.md` in their `files` array with `private` unset, so these
+  are the pages npm renders. Each finding was re-measured against the **built `.d.ts`**, not
+  against source, because that is what a consumer resolves through the `exports` map.
+  
+  - **`@objectstack/driver-sql`** — `import type { IDriver } from '@objectstack/spec'` named
+    a type that exists **nowhere in the repository** (0 hits across every package's `src`
+    and `dist`). The real contract is `IDataDriver` on `@objectstack/spec/contracts` — the
+    one `SqlDriver` actually declares (`export class SqlDriver implements IDataDriver`). The
+    adjacent operation list was corrected too: the method is `create`, not `insert`.
+  
+  - **`@objectstack/mcp`** — `DriverSql` has never existed (the export is `SqlDriver`), and
+    the README then called `DriverSql.configure({...})` on it. Renaming alone would have
+    been wrong twice over: `SqlDriver` has **no static `configure` either**, and `driver:`
+    is not a key of `defineStack` at all. The example now declares a datasource the way the
+    shipped templates do. `MCPServerPlugin.configure({...})` — five call sites — becomes
+    `new MCPServerPlugin({...})`, the form the class's own JSDoc and every in-repo caller
+    use. The documented options block claimed `serverName`, `autoRegisterTools`,
+    `autoExposeObjects`, `enableStreaming`, `port` and `debug`; the real
+    `MCPServerPluginOptions` is `name`, `version`, `transport`, `autoStart`, `instructions`,
+    and the env switches are named instead.
+  
+  - **`@objectstack/objectql`** — `registerObject` is an **instance** method, so
+    `SchemaRegistry.registerObject(...)` on the class could never run. The example now
+    reaches it through the engine's registry and states the real parameter order
+    (`schema, packageId, namespace?`).
+  
+  - **`@objectstack/spec`** — the protocol package's own front page imported
+    `MCPServerConfigSchema` from `@objectstack/spec/ai`, which exports `MCPServerRefSchema`.
+    A rename by itself would have swapped a broken import for a broken **parse**: the
+    documented payload was built for a schema that does not exist, and
+    `MCPServerRefSchema.safeParse` rejects it (`transport` is an enum of
+    `stdio | http | websocket`, not an object, and `endpoint` is required and was absent).
+    The example is now a payload that parses green, and the page says plainly that tools,
+    resources and prompts are derived from metadata at runtime rather than authored there.
+- Updated dependencies [56656aa]
+- Updated dependencies [07e630e]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [2782805]
+- Updated dependencies [e43d63a]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [2d0af57]
+- Updated dependencies [420804d]
+- Updated dependencies [716ac9b]
+- Updated dependencies [a38408a]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [27a567d]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [24173e9]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [f8eb736]
+- Updated dependencies [11b779e]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [e2899f6]
+- Updated dependencies [3851f87]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [e1bb0ca]
+- Updated dependencies [30d3752]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [402c125]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [44bc51d]
+- Updated dependencies [bbbfcfc]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+  - @objectstack/spec@17.1.0
+  - @objectstack/types@17.1.0
+  - @objectstack/core@17.1.0
+  - @objectstack/formula@17.1.0
+
 ## 17.0.0
 
 ### Minor Changes

@@ -12,6 +12,15 @@ import { Runtime } from './runtime.js';
 import { DefaultDatasourcePlugin } from './default-datasource-plugin.js';
 import { AppPlugin } from './app-plugin.js';
 
+// [#10126] Pay the first transform of these dist-resolved workspace deps at MODULE
+// LOAD. Each is reached below through a dynamic `import()` inside an `it()` body or a
+// hook -- both of which vitest clocks, while collection is clocked against nothing. See
+// `scripts/check-test-source-alias.mjs` (the clocked-window rule) and #10115 / PR #10120,
+// where the same shape cost 30 ejected merge-queue builds in one night.
+import '@objectstack/driver-sqlite-wasm';
+import '@objectstack/objectql';
+import '@objectstack/service-datasource';
+
 const BOOT_TIMEOUT = 60_000;
 const ENV = 'OS_ALLOW_DRIVER_CONNECT_FAILURE';
 

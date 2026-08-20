@@ -21,8 +21,8 @@ regenerate.
 | Measure | Value |
 |---|---|
 | Triaged directories | 5 |
-| Object sites in them | 444 |
-| Still-open (strip) sites | 123 |
+| Object sites in them | 445 |
+| Still-open (strip) sites | 124 |
 | Files carrying at least one | 22 |
 
 Remaining strip sites by class:
@@ -31,7 +31,7 @@ Remaining strip sites by class:
 |---|---|
 | authorable — the ruling's forced scope | 1 |
 | unresolved — needs a per-schema verdict | 0 |
-| wire / open — out of forced scope | 118 |
+| wire / open — out of forced scope | 119 |
 | no door — no carrier, ADR-0049 territory | 3 |
 | no gate — carrier live, no parse | 0 |
 | covered — no carrier, no parse, guarded at every consumer | 1 |
@@ -44,12 +44,12 @@ The `strict` column is the one the campaign schedules against; it counts both th
 
 | Dir | Sites | strict | passthrough | catchall | strip |
 |---|---|---|---|---|---|
-| `ui/` | 176 | 165 | 5 | 0 | 6 |
+| `ui/` | 177 | 165 | 5 | 0 | 7 |
 | `data/` | 156 | 74 | 1 | 0 | 81 |
 | `automation/` | 65 | 42 | 0 | 0 | 23 |
 | `security/` | 20 | 7 | 0 | 0 | 13 |
 | `studio/` | 27 | 27 | 0 | 0 | 0 |
-| **total** | **444** | **315** | **6** | **0** | **123** |
+| **total** | **445** | **315** | **6** | **0** | **124** |
 
 ## File-level triage — site counts
 
@@ -75,9 +75,9 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `responsive.zod.ts` | 4 |
 | `sharing.zod.ts` | 1 |
 | `theme.zod.ts` | 6 |
-| `view.zod.ts` | 56 |
+| `view.zod.ts` | 57 |
 | `widget.zod.ts` | 1 |
-| **total** | **176** |
+| **total** | **177** |
 
 ### `data/` — sites
 
@@ -156,21 +156,21 @@ over it is here.
 
 ### `ui/` — open
 
-**6 strip of 176**, in 4 file(s).
+**7 strip of 177**, in 4 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
 | `action-params.zod.ts` | 1 | 1 |
 | `app.zod.ts` | 1 | 18 |
-| `view.zod.ts` | 3 | 56 |
+| `view.zod.ts` | 4 | 57 |
 | `widget.zod.ts` | 1 | 1 |
-| **total** | **6** | **176** |
+| **total** | **7** | **177** |
 
 | Bucket | Sites |
 |---|---|
 | authorable — the ruling's forced scope | 1 |
 | unresolved — needs a per-schema verdict | 0 |
-| wire / open — out of forced scope | 3 |
+| wire / open — out of forced scope | 4 |
 | no door — no carrier, ADR-0049 territory | 1 |
 | no gate — carrier live, no parse | 0 |
 | covered — no carrier, no parse, guarded at every consumer | 1 |

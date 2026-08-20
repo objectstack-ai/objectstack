@@ -1,0 +1,207 @@
+name: Required-Set Patrol
+
+# The standing caller for
+# `node scripts/check-required-contexts.mjs --verify-required-set` (#9678).
+#
+# ## Why a workflow, and not "a seat should run it"
+#
+# `--verify-required-set` (#9642) diffs this repo's REQUIRED_CONTEXTS registry
+# against the LIVE ruleset's required set, in both directions:
+#
+#   A. a registry row whose context is absent from the live set — the gate
+#      family that row names is advisory RIGHT NOW, with no signal anywhere.
+#      #5617 verbatim: PR #5584 merged with its gate-carrying job red for 19
+#      minutes because that job was not in the required set at all.
+#   B. a live required context with no registry row — renaming that job detaches
+#      its gate silently, which is the defect check-required-contexts exists for.
+#
+# It shipped with no standing caller, so the only thing CI ran was its OFFLINE
+# self-test: the mechanism existed and measured nothing. A sweep whose value is
+# realized only when something runs it on a schedule, with nothing on a
+# schedule, is the `check-half-states.mjs` shape verbatim — an alarm added to a
+# script nobody runs is still silence, and half-state-patrol.yml exists because
+# that cost a shift's worth of unnoticed findings.
+#
+# "Some seat should run it" also keeps not happening for a MEASURED reason
+# rather than a discipline one. Re-measured 2026-08-19 from a dev session
+# container, both spellings the script documents:
+#
+#   node scripts/check-required-contexts.mjs --verify-required-set
+#       -> NOT VERIFIED, GET /repos/... answered HTTP 401  (exit 2)
+#   NODE_OPTIONS=--use-env-proxy node ... --verify-required-set
+#       -> NOT VERIFIED, GET /repos/... answered HTTP 403  (exit 2)
+#
+# i.e. the documented proxy remedy is not enough: the seat's egress policy
+# refuses api.github.com outright. The seats that would notice drift are exactly
+# the ones that cannot measure it, so the caller had to move somewhere the
+# transport prerequisite is actually met. A GitHub Actions runner reaches the
+# API directly with the workflow's own GITHUB_TOKEN — no proxy env, no
+# `--use-env-proxy`; the read's whole price is `metadata=read`, which every
+# token carries and none can give up.
+#
+# ## Where the report lands, and why nowhere else
+#
+# The run log and the run's STEP SUMMARY, and nothing else. Deliberately not an
+# issue:
+#
+#   - a NEW tracker is refused outright — this repo has one board, and a per-run
+#     comment stream or a fresh anchor is a second one that nobody prunes;
+#   - the EXISTING anchor (#9857) is owned end-to-end by half-state-patrol.yml,
+#     whose generator rewrites that body whole every run. A second writer would
+#     make each patrol silently discard the other's findings.
+#
+# What that costs is honestly stated: a completed sweep that FINDS drift exits 0
+# and shows a green check in the Actions list, so the drift is one click deep.
+# The `::warning::` annotation below is what keeps it from being invisible —
+# annotations render on the run list itself. Routing findings to a durable
+# surface (the PM round report, a rotating anchor) is a governed-surface change
+# and is not this workflow's to make.
+#
+# ## Report-only, and the one thing that is NOT report-only
+#
+# ⛔ This workflow is NEVER a required context and must never become one.
+# That is structural, not squeamish: the settings half of any required-set
+# change is maintainer-only and lands AFTER the merge (the #9325 two-step), so a
+# blocking version would be red on precisely the PR carrying the repo half and
+# could not go green before merging — it would deadlock the sitting it claims to
+# protect. The script's own header argues this at length, and
+# check-required-contexts' self-test pins it from this side too: it asserts that
+# this is the ONLY workflow running the flag, that this file declares no
+# `merge_group:` trigger (a workflow without one deadlocks the queue the moment
+# it is required-ized — assertion 6 of the pin), and that no REQUIRED_CONTEXTS
+# row names this file.
+#
+# So FINDINGS never fail anything: a completed sweep exits 0 whether it found 0
+# or 40 disagreements, and this job never writes a label, an issue or a state.
+#
+# The job DOES fail when the sweep could not RUN, or when its report could not
+# be DELIVERED. That is not a gate on the repo; it is the patrol reporting its
+# own death. `NOT VERIFIED` is not a pass and not a failure of the tree (#4690):
+# exit 2 classifies the ENVIRONMENT, and a patrol that quietly stops reading
+# would leave a run history of green checks that reads exactly like a clean
+# required set. Failing costs nobody a PR — this workflow gates no branch and
+# blocks no queue.
+
+on:
+  schedule:
+    # Twice a day, twelve hours apart, at :23 past the hour.
+    #
+    # The live required set is changed by hand, by the maintainer, a few times a
+    # month at most — detection latency of half a day is already two orders of
+    # magnitude better than the status quo (never), and the #5617 incident it
+    # guards against sat undetected for days. The minute is offset off the top
+    # of the hour on purpose: scheduled workflows queue behind everyone else's
+    # :00 cron, and this sweep shares the core API quota with the loop's hot
+    # path.
+    - cron: '23 4,16 * * *'
+  workflow_dispatch: {}
+  # Changes to the patrol or to the sweep it calls get exercised before they
+  # merge — the same posture as half-state-patrol.yml. The transport, the flags
+  # and the rendering are proven on a real runner rather than argued about; this
+  # job publishes no required context, so a red here blocks nothing.
+  pull_request:
+    paths:
+      - 'scripts/check-required-contexts.mjs'
+      - '.github/workflows/required-set-patrol.yml'
+
+# Least privilege. The sweep is read-only against the API by construction and
+# this job writes no issue, no label and no comment, so `contents: read` is the
+# whole grant — the ruleset read's documented price is `metadata=read`, which is
+# below anything a workflow can toggle.
+permissions:
+  contents: read
+
+# One patrol at a time; a scheduled run overlapping a manual dispatch would burn
+# two readings of the same set for one report.
+concurrency:
+  group: required-set-patrol-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    # ⛔ This name is NOT a required context and must never be added to the
+    # ruleset — see the header. It is deliberately not registered in
+    # REQUIRED_CONTEXTS, and check-required-contexts' self-test asserts so.
+    name: Live required-set sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # No `pnpm install`: the live mode imports nothing outside node: builtins
+      # and global fetch. Installing the workspace would buy nothing and would
+      # give a scheduled patrol a lockfile it could fail on.
+      #
+      # No NODE_OPTIONS=--use-env-proxy either, and that is not an omission: a
+      # runner reaches api.github.com directly. The flag exists for agent
+      # session containers, where it is necessary but (measured, #9678) still
+      # not sufficient — that is why this caller lives here and not there.
+      - name: Run the live required-set sweep
+        id: sweep
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          node scripts/check-required-contexts.mjs --verify-required-set \
+            > "$RUNNER_TEMP/required-set.md" 2> "$RUNNER_TEMP/required-set.err"
+          code=$?
+          set -e
+          # Captured with NO pipe in between. `cmd | tail` would report the
+          # PIPE's status — `tail` essentially never fails, so a swept run and
+          # an unreadable one both read as 0, and the exit split (0 swept / 2
+          # environment) is the entire classification this patrol delivers.
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "check-required-contexts --verify-required-set exited $code"
+          cat "$RUNNER_TEMP/required-set.err" >&2 || true
+
+      - name: Publish the sweep to the run summary
+        # Always: this IS the delivery, on every trigger. A run whose summary is
+        # empty because an earlier step died is itself the signal.
+        if: always()
+        run: |
+          {
+            echo "### Required-set patrol — sweep exit ${{ steps.sweep.outputs.exit_code }}"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/required-set.md" 2>/dev/null || echo '(no report produced)'
+            cat "$RUNNER_TEMP/required-set.err" 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Annotate a completed sweep that found drift
+        # A finding is NOT a failure (see the header) — but a green check that
+        # hides one is the #4690 shape with a tick on it, so a completed sweep
+        # that did not render its clean mark gets an annotation on the run list.
+        #
+        # The marker is the script's own `✅ the live required set and this
+        # registry agree in both directions.` line, and its ABSENCE is what is
+        # read: every non-agreeing reading the script can produce (direction A,
+        # direction B, a dry-run ruleset, no enforcing ruleset at all) withholds
+        # that line, and check-required-contexts' self-test pins both directions
+        # of that rendering — including this workflow's dependence on it by
+        # name. Erring this way is deliberate: a rendering change costs a FALSE
+        # ALARM, never a false all-clear.
+        if: steps.sweep.outputs.exit_code == '0'
+        run: |
+          if grep -qF '✅' "$RUNNER_TEMP/required-set.md"; then
+            echo "::notice::required-set sweep: the live required set and REQUIRED_CONTEXTS agree in both directions."
+          else
+            echo "::warning::required-set sweep found a registry-vs-live DISAGREEMENT. Nothing is blocked and nothing is judged — read this run's summary. Direction A (a registry row that is not live) is the maintainer's to resolve; direction B (a live context with no row) is a dev's."
+          fi
+
+      - name: Fail the run if the sweep could not run
+        # LAST, on purpose: the summary carries the classified output BEFORE the
+        # job goes red, so the run that raised the alarm also holds the reason.
+        #
+        # Findings are NOT a failure condition and never reach here: exit 0 with
+        # 40 disagreements is a successful patrol.
+        if: steps.sweep.outputs.exit_code != '0'
+        run: |
+          echo "::error::check-required-contexts --verify-required-set exited ${{ steps.sweep.outputs.exit_code }} — the standing patrol did not read the live required set. NOT VERIFIED is not a clean reading (#4690); see this run's summary."
+          exit 1

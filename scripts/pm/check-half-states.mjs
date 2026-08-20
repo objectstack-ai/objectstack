@@ -72,9 +72,16 @@
  *   H3  `pm:queue` + `pm:dispatched` both present — reads as available to the
  *       queue view and in-flight to the lane view; neither is trustworthy
  *       (#5925 2026-08-09 correction, the measured specimen).
- *   H4  `pm:blocked` without a `Blocked-by:` body line — the machine half of
- *       the label is the body line; without it the unlock sweep can never
- *       return the card (state model, label discipline).
+ *   H4  `pm:blocked` with a `Blocked-by:` line in NEITHER channel — body nor
+ *       comment. The machine half of the label is that line; without it the
+ *       unlock sweep can never return the card (state model, label
+ *       discipline). It reads TWO channels because seats write two: the MCP
+ *       body-escaping hazard (#8813) makes a body rewrite the riskier write,
+ *       so the line is deliberately parked in a comment — 26 of 40 blocked
+ *       cards were body-clean at the 2026-08-19 census, and a body-only read
+ *       reported every one of them as having left the machine nothing. Either
+ *       channel discharges the duty; the finding names both so a reader knows
+ *       which one to fix (#8941, and the #9948 gauge-recalibration ruling).
  *   H5  `pm:seat` sticker whose title/assignee pair is out of sync — the
  *       seat-sticker protocol makes 标题、assignee、正文 a same-write triple:
  *       a title claiming 🟢 <login> must have that login as assignee; a title
@@ -171,6 +178,16 @@
  *       unblocker the selection order cannot see. Report-only, and pointedly
  *       so: the producer is the triage sweep's derivation pass, so the remedy
  *       is always a derivation that runs, never a label written from here.
+ *       The index it reads is the UNION of both channels (body ∪ comment),
+ *       for the same reason H4 reads both — and here the cost of reading one
+ *       was measured: #9465 and #9968 were reported stale while their
+ *       dependents (#9709/#9828 and #9969/#9652) stated the wait in comments.
+ *       That is the 「量具错位」 the 2026-08-19 ruling on #9948 named — 「修量
+ *       具而非追假 stale」 — and both shapes are regression pins now. The two
+ *       directions treat an INCOMPLETE index differently on purpose: stale is
+ *       a claim about absent evidence and is suspended when any gated comment
+ *       fetch failed, while missing is a claim about evidence in hand and
+ *       cannot be manufactured by reading more. See the predicate.
  *       Both directions were non-empty at the reading this item landed on
  *       (2026-08-19, 234 open cards, 17 `Blocked-by:` body lines): ONE stale
  *       card and FIVE missing ones, with not a single coherent pairing on the
@@ -184,6 +201,64 @@
  *       now says so on the anchor, by name. Deliberately not an alarm and
  *       deliberately unconditional — see the rationale on the predicate for
  *       why this one carries no threshold constant.
+ *   H16 an OPEN, non-draft PR sitting in a MERGE CONFLICT
+ *       (`mergeable_state` = `dirty`) past the threshold — the one board state
+ *       no instrument here could express before it (devx incident,
+ *       maintainer-approved 2026-08-19, verbatim: 「同意你的建议」). A conflict
+ *       is not a red check: it starts no CI run, raises no event, and turns no
+ *       check-run red, so every signal a patrol reads by proxy keeps reporting
+ *       health — and when auto-merge is ARMED the PR additionally reads as
+ *       "the queue is handling it" (H12's own reading, correct there and
+ *       exactly wrong here). The measured specimen hung ~4h with nobody aware.
+ *       The incident's lesson, verbatim: 「一个无法表达某状态的仪器,会把它报成
+ *       它能表达的最近状态。」 — which is what H1–H15 were doing to this state.
+ *       Two consequences shape the item. It is the only one needing a per-PR
+ *       GET (`mergeable_state` is absent from the `/pulls` LIST payload and
+ *       lives on the single-PR endpoint alone), taken for CANDIDATES only and
+ *       never fatal to the sweep. And it deliberately does NOT read
+ *       `auto_merge` in the finding-reducing direction H12 does: auto-merge
+ *       does not resolve conflicts, so an armed dirty PR is the disease, not a
+ *       handler. `unknown`/null readings are SKIPPED and never vouched for —
+ *       GitHub computes mergeability asynchronously, so that reading is the
+ *       platform saying "ask again later", not a state to name.
+ *
+ * ## H17 — the one item here that is NOT an invariant
+ *
+ *   H17 the on-hold TRIGGER-FILE INDEX — an inventory SECTION, not a
+ *       predicate, and the only thing in this file that can never produce a
+ *       finding. Each row is an open `pm:on-hold` card and the repo-relative
+ *       files its hold comment(s) or body name as opportunistic-restart
+ *       triggers. A card appearing in it is a hold in perfectly good standing;
+ *       the row exists so a dispatching seat can intersect its file surface
+ *       against the board's held cards by GLANCING at the anchor it already
+ *       reads at the top of every round.
+ *
+ *       It is here because that intersection was measured NOT RUNNING (#10034,
+ *       2026-08-19): across six cards the named trigger files were touched
+ *       NINETEEN times and the rider was carried ZERO times. The mechanism is
+ *       real and maintainer-accepted (2026-08-11), but it existed only as a
+ *       remembered protocol step — in SKILL.md and in the hold comments
+ *       themselves — and a written step nobody executes is worse than none,
+ *       because holds are PRICED assuming it runs.
+ *
+ *       ⛔ Why it is NOT in `dispatch-gates.mjs`, where the intersection is
+ *       actually wanted: that script runs in a seat container, whose live
+ *       GitHub read is 403 — the same transport fact this file's prerequisite
+ *       classifier exists to name. Building the intersection there would
+ *       re-create the disease one layer down: a second mechanism that cannot
+ *       execute. The patrol runs on a runner where the transport prerequisite
+ *       is met, so it gathers and renders; the seat reads. No new seat-side
+ *       dependency, and the behaviour closes through a surface that already
+ *       has a standing caller.
+ *
+ *       Extraction is deterministic and refuses to guess: a closed set of
+ *       anchor terms (`H17_TRIGGER_ANCHOR_TERMS`, derived from a nine-card
+ *       census) plus the canonical `Restart-touch:` channel locate the clause,
+ *       and every candidate token is validated against `git ls-files`.
+ *       Anything unverifiable is DROPPED, so the index under-reports and never
+ *       invents — a fabricated row would send a seat to intersect against a
+ *       path that does not exist, and that intersection would silently never
+ *       hit, which is the original defect wearing a new mask.
  *
  * ## The close mechanism, measured (#8293)
  *
@@ -398,6 +473,7 @@
  */
 
 import process from 'node:process';
+import { execFileSync } from 'node:child_process';
 
 const OWNER_REPO = process.env.PM_SWEEP_REPO ?? 'objectstack-ai/objectstack';
 const API = 'https://api.github.com';
@@ -429,10 +505,164 @@ export function h3QueueAndDispatched(issue) {
   return labels.includes('pm:queue') && labels.includes('pm:dispatched');
 }
 
-export function h4BlockedNoBlockedBy(issue) {
-  const labels = labelNames(issue);
-  if (!labels.includes('pm:blocked')) return false;
-  return !/^\s*Blocked-by:\s*\S/m.test(issue.body ?? '');
+// ---------------------------------------------------------------------------
+// The `Blocked-by:` COMMENT channel — read by H4 and by the H14 index alike.
+//
+// ## Stated boundary: no read-closure cut-off, because REST carries none
+//
+// The seat-post protocol's read-closure rule is 「只读晚于正文最后编辑时间的
+// 评论」 — comments NEWER than the body's last edit — on the stated ground that
+// 「两个时刻都是平台盖章的硬读数,比对即得」. One of those two stamps is not
+// available here. A comment's `created_at` is on every row, but an ISSUE's
+// body-edit time is on no REST payload at all: the issues API carries
+// `created_at`/`updated_at` only, body edit history lives behind GraphQL
+// `userContentEdits`, and this file is REST-only by a standing operational
+// note (the loop's hot path stays on the core quota). The issue timeline
+// endpoint does not record body edits either.
+//
+// So the cut-off is NOT implemented, rather than implemented against a proxy.
+// The one proxy in reach — `updated_at` — is worse than nothing: it bumps when
+// a comment is POSTED, so "newer than the body's last edit" would be false for
+// every comment ever written, and the fallback would read nothing while
+// looking like it read. A check that cannot fail is the shape this file exists
+// to catch, not to add.
+//
+// Reading the whole first page instead errs in ONE direction, and it is the
+// safe one. Extra evidence can only ADD `Blocked-by:` edges: it can clear an
+// H4 row (the duty really was discharged, in the other channel) and it can
+// clear an H14 stale row (something really is waiting), which is the
+// recalibration #9948 ruled for. What it cannot do is invent a card's silence.
+// The residual cost is a genuinely OBSOLETE comment edge — a line written, then
+// the body rewritten to drop the dependency — which needs the source card to
+// still be open, still labelled, and still body-clean; in that state the source
+// card is itself mis-stated, and surfacing its edge is not the worse error.
+// The seat rule's own rationale (「评论无界增长」, a token tax) does not bite
+// here either: the fetch is gated to a bounded candidate set and capped at one
+// page, the same trade H2, H16 and H17 make.
+// ---------------------------------------------------------------------------
+
+/**
+ * Is there a machine-readable `Blocked-by:` line in this text?
+ *
+ * H4's original presence test, extracted verbatim so the BODY channel's
+ * behaviour is byte-identical to what it always was, and so the COMMENT
+ * channel asks the same question of the same shape rather than a second,
+ * subtly different one.
+ *
+ * A presence test, deliberately, and NOT `blockedByTargets(...).length > 0`:
+ * the two readers of this line answer different questions and must keep
+ * doing so. H4 asks 「did the author leave the machine anything at all」 —
+ * `Blocked-by: TBD` and `Blocked-by: objectstack-ai/objectui#4356` both
+ * discharge the duty — while the index asks 「which LOCAL open card does this
+ * wait on」 and correctly extracts nothing from either. Collapsing them would
+ * make H4 fire on a card whose cross-repo blocker is stated perfectly well.
+ */
+export function hasBlockedByLine(text) {
+  return /^\s*Blocked-by:\s*\S/m.test(text ?? '');
+}
+
+/**
+ * Which cards are worth a `Blocked-by:` comment fetch.
+ *
+ * Exported for the same reason `h17NeedsComments` and `h16NeedsDetail` are: a
+ * policy that decides what gets READ AT ALL is where a silent hole would live,
+ * so it is pinned by the self-test rather than buried in the sweep loop.
+ *
+ * Gated on a CLEAN BODY first, then on state:
+ *
+ *   - `pm:blocked` — the population H4 judges, and the edge SOURCES the index
+ *     is missing (a seat parks the line in a comment; the body stays clean).
+ *   - `pm:blocking` — the population H14's stale direction judges. Their own
+ *     comments matter as index sources too: a `pm:blocking` card that is
+ *     itself waiting on another `pm:blocking` card contributes the very edge
+ *     that defends that other card from a stale verdict.
+ *
+ * A card whose body already carries the line is never fetched: its duty is
+ * discharged in the channel the machinery already reads, and the census bound
+ * this gate exists to honour (~2/3 of blocked cards are body-clean) is exactly
+ * the complement.
+ */
+export function needsBlockedByComments(issue) {
+  if (hasBlockedByLine(issue?.body)) return false;
+  const labels = labelNames(issue ?? {});
+  return labels.includes('pm:blocked') || labels.includes('pm:blocking');
+}
+
+/**
+ * Every `Blocked-by:` ref carried by a card's comments, in order.
+ *
+ * The comment channel read the way the INDEX reads it — `blockedByTargets`
+ * per comment body, this file's one parser for the line, so cross-repo and
+ * self-reference filtering downstream behave identically whichever channel a
+ * ref arrived in.
+ */
+export function commentBlockedByTargets(commentBodies) {
+  const out = [];
+  for (const body of commentBodies ?? []) out.push(...blockedByTargets(body));
+  return out;
+}
+
+/**
+ * H4 — null when clean, else the finding sentence.
+ *
+ * ## Two channels, one duty (#8941 / #10061)
+ *
+ * The label's machine half is a `Blocked-by:` line, and the reason it must
+ * exist is the unlock sweep: without one, nothing can ever return the card.
+ * But seats deliberately park that line in a COMMENT rather than the body —
+ * the MCP body-escaping hazard (#8813) makes a body rewrite the riskier
+ * write — and 26 of 40 blocked cards measured on 2026-08-19 were body-clean
+ * for exactly that reason. Reading the body alone reported every one of them
+ * as a card that had left the machine nothing, which is false: the duty was
+ * met, in the other channel. So a comment carrying the line CLEARS H4, and the
+ * finding sentence names both channels so a reader can tell which one to fix.
+ *
+ * ## Three input states, never two (#4690)
+ *
+ * `commentBodies` distinguishes them deliberately:
+ *
+ *   - `undefined` — the channel was not consulted (a caller reading bodies
+ *     only). The sentence claims nothing about comments, and this is exactly
+ *     the pre-#10061 reading, preserved rather than silently upgraded.
+ *   - `null` — consulted and UNREADABLE. The row still FIRES, because going
+ *     quiet here would make a transport failure shrink the patrol below where
+ *     it stood before the fallback existed; the sentence says the second
+ *     channel could not be read instead of asserting that it is empty.
+ *   - `string[]` — read. Both channels judged, for real.
+ *
+ * The unreadable case fires where H14's stale direction goes QUIET on the same
+ * failure, and the asymmetry is deliberate, not an inconsistency. H4's remedy
+ * is "add a line" — idempotent, cheap, and harmless if a comment already had
+ * one. H14-stale's remedy is "drop a label the selection order depends on" —
+ * destructive, and the measured false positive this whole fallback exists to
+ * end. An unreadable reading must surface on the cheap side and must never
+ * drive the expensive one.
+ */
+export function h4BlockedNoBlockedBy(issue, commentBodies) {
+  if (!labelNames(issue).includes('pm:blocked')) return null;
+  if (hasBlockedByLine(issue.body)) return null;
+  const remedy =
+    ' The unlock sweep greps this literal line, so without it in SOME channel nothing can ' +
+    'ever return this card to the queue — the block outlives its blocker in silence.';
+  if (commentBodies === undefined) {
+    return '`pm:blocked` without a `Blocked-by:` body line.' + remedy;
+  }
+  if (commentBodies === null) {
+    return (
+      '`pm:blocked` without a `Blocked-by:` body line, and this card\'s comment thread could ' +
+      'NOT be read this sweep — so the second channel (a `Blocked-by:` line parked in a comment, ' +
+      'which is how most blocked cards on this board state it) is unjudged, not empty. Read the ' +
+      'thread by hand before acting: an unreadable channel is not an absent one (#4690).' + remedy
+    );
+  }
+  if (commentBodies.some((body) => hasBlockedByLine(body))) return null;
+  return (
+    '`pm:blocked` with a `Blocked-by:` line in NEITHER channel — not in the body, and not in any ' +
+    'comment on the thread (both were read). Either channel discharges the duty: seats park the ' +
+    'line in a comment on purpose, because rewriting a body through the MCP escaping hazard ' +
+    '(#8813) is the riskier write. So this is not a formatting nit — no machine reader anywhere ' +
+    'knows what this card is waiting for.' + remedy
+  );
 }
 
 // H5 returns null (in sync), a string naming the desync, or undefined when the
@@ -543,8 +773,22 @@ function partOfRe() {
  *
  * Lines are replaced by empty strings rather than deleted so that nothing is
  * spliced together across a stripped block into an accidental match.
+ *
+ * ## `{ inline: false }` — the same fence parser, opposite need (H17)
+ *
+ * H17 reads the INSIDE of inline spans: a hold comment names its trigger files
+ * as backticked repo-relative paths, so blanking spans would delete the entire
+ * signal. It still wants fenced blocks gone, and for the same reason H7 does —
+ * a hold comment routinely quotes `git grep` output and file:line evidence
+ * inside a fence, and those are citations, not triggers (measured on #8656,
+ * whose fenced block lists three `packages/spec/src/**` paths that are prose
+ * evidence for the card and name no trigger at all).
+ *
+ * So the option exists rather than a second fence parser: one fence-closing
+ * rule, read two ways, and neither reader can drift from the other. The
+ * default is unchanged, so every existing caller keeps byte-identical output.
  */
-export function stripMarkdownCode(body) {
+export function stripMarkdownCode(body, { inline = true } = {}) {
   const out = [];
   let fence = null;
   for (const line of String(body ?? '').split('\n')) {
@@ -560,7 +804,7 @@ export function stripMarkdownCode(body) {
       out.push('');
       continue;
     }
-    out.push(line.replace(/`+[^`\n]*`+/g, ' '));
+    out.push(inline ? line.replace(/`+[^`\n]*`+/g, ' ') : line);
   }
   return out.join('\n');
 }
@@ -1006,14 +1250,38 @@ export function blockedByTargets(body) {
  * @param {{ number: number, body?: string }[]} issues — OPEN issues only. The
  *   index's whole meaning is "open cards that are waiting", so the caller's
  *   listing is what bounds it; a closed dependent must not hold a label alive.
- * @param {{ repo?: string }} [options] — `owner/repo`, defaulting to the swept one.
+ * ## Two channels, UNIONED — never a priority order (#10061)
+ *
+ * `options.comments` supplies, per source card number, the comment bodies the
+ * sweep's gated fallback read. Refs found there are added to the refs found in
+ * the body; neither channel wins, because both are real. A card whose body
+ * says `Blocked-by: #A` and whose comment says `Blocked-by: #B` is waiting on
+ * BOTH, and a priority order would silently drop one of two live dependencies
+ * — the same class of loss as reading the body alone, just rarer.
+ *
+ * Dedup is per (target, source) as before, so a card naming one target in both
+ * channels is listed once. Cross-repo and self-reference filtering is applied
+ * to comment-borne refs identically: the ref is filtered by what it SAYS, and
+ * the channel it arrived in changes nothing about that.
+ *
+ * A source card absent from the map contributes its body only — which is every
+ * card the gate did not select, and is why the map is a bound on cost rather
+ * than a change of meaning.
+ *
+ * @param {{ repo?: string, comments?: Map<number, string[]> }} [options] —
+ *   `repo` is `owner/repo`, defaulting to the swept one.
  */
 export function buildBlockingIndex(issues, options = {}) {
   const ownerRepo = options.repo ?? OWNER_REPO;
   const bareRepo = ownerRepo.split('/').pop();
+  const comments = options.comments ?? null;
   const index = new Map();
   for (const issue of issues ?? []) {
-    for (const { repo, number } of blockedByTargets(issue.body)) {
+    const refs = [
+      ...blockedByTargets(issue.body),
+      ...commentBlockedByTargets(comments?.get?.(issue.number)),
+    ];
+    for (const { repo, number } of refs) {
       if (repo !== null && repo !== ownerRepo && repo !== bareRepo) continue;
       if (number === issue.number) continue;
       const deps = index.get(number) ?? [];
@@ -1037,15 +1305,42 @@ export const BLOCKING_DEPENDENT_LIST_CAP = 5;
 /**
  * H14 — null when the cache agrees with the index, else the finding sentence.
  *
+ * ## The two directions do NOT owe the index the same completeness (#10061)
+ *
+ * They make opposite claims, so an INCOMPLETE index endangers exactly one:
+ *
+ *   - STALE ("nothing targets it") is a claim about ABSENT evidence. Every
+ *     edge the sweep failed to read is a card that might be pointing at this
+ *     one, so an index with any unread source cannot support the claim at all.
+ *     `options.indexComplete === false` therefore silences this direction —
+ *     unreadable evidence is not absent evidence (#4690), and the remedy this
+ *     row prescribes (drop a label the selection order ranks second only to
+ *     `priority:p0`) is destructive enough that a guess is worse than silence.
+ *     The summary line's `comment fallback read on X of Y` is what states the
+ *     gap, exactly as H16's and H17's `read X of Y` do for theirs.
+ *   - MISSING ("targeted, but the label never landed") is a claim about
+ *     evidence IN HAND. Reading more sources can only ADD edges, never remove
+ *     one, so an incomplete index cannot manufacture this row. It stays live
+ *     regardless — going quiet there would trade a real finding for nothing.
+ *
+ * This is the recalibration #9948 ruled for on 2026-08-19 (「修量具而非追假
+ * stale」): the measured false stales #9465 and #9968 were both cards whose
+ * dependents state the wait in a COMMENT, and both are pinned in the self-test.
+ *
  * @param {object} issue — an OPEN issue.
  * @param {Map<number, number[]>} index — from `buildBlockingIndex`.
+ * @param {{ indexComplete?: boolean }} [options] — `false` when any gated
+ *   comment fetch failed, i.e. the index is known to be missing edges.
  */
-export function h14BlockingCacheIncoherent(issue, index) {
+export function h14BlockingCacheIncoherent(issue, index, options = {}) {
   const carries = labelNames(issue).includes('pm:blocking');
   const dependents = index?.get?.(issue.number) ?? [];
+  const indexComplete = options.indexComplete ?? true;
   if (carries && dependents.length === 0) {
+    if (!indexComplete) return null;
     return (
-      '`pm:blocking` carried while NO open card\'s `Blocked-by:` body line targets it — a stale ' +
+      '`pm:blocking` carried while NO open card\'s `Blocked-by:` line — body OR comment — targets ' +
+      'it, judged against the full two-channel index — a stale ' +
       'derived cache. The label is not a state a seat sets: the triage sweep derives it from the ' +
       '`Blocked-by:` reverse index, and the lane selection order ranks it second only to ' +
       '`priority:p0`. So a stale one is worse than an absent one — it boosts a card nothing depends ' +
@@ -1059,7 +1354,8 @@ export function h14BlockingCacheIncoherent(issue, index) {
     const named = shown.map((n) => `#${n}`).join(', ');
     const more = dependents.length > shown.length ? ` +${dependents.length - shown.length} more` : '';
     return (
-      `targeted by ${dependents.length} open card(s)' \`Blocked-by:\` body line (${named}${more}) but ` +
+      `targeted by ${dependents.length} open card(s)' \`Blocked-by:\` line, body or comment ` +
+      `(${named}${more}), but ` +
       'NOT carrying `pm:blocking` — a real unblocker the selection order cannot see. The label is ' +
       'the derived cache that makes a card outrank everything but `priority:p0`; without it this ' +
       'card competes on age alone while the cards waiting on it cannot start. Report-only: the ' +
@@ -1137,6 +1433,510 @@ export function h15OldestUnclaimedBlocking(issues, nowMs = Date.now()) {
 }
 
 // ---------------------------------------------------------------------------
+// H16 — an open, non-draft PR stuck in a merge conflict (devx incident,
+// maintainer-approved 2026-08-19: 「同意你的建议」).
+//
+// The first item whose input the sweep cannot get from a listing: everything
+// above reads rows the label/PR/merged passes already fetched, while
+// `mergeable_state` exists only on the single-PR endpoint. The gathering
+// policy that keeps that affordable is `h16NeedsDetail`, below, and it is
+// pinned in the self-test for the same reason `needsRepoProbe` is — a policy
+// that decides what gets READ AT ALL is where a silent hole would live.
+// ---------------------------------------------------------------------------
+
+/**
+ * H16 threshold — the window a normal conflict resolution gets before the
+ * conflict counts as STUCK.
+ *
+ * ## Which timestamp this ages, and why (the honest part)
+ *
+ * A merge conflict has NO timestamp of its own. `mergeable_state` is a verdict
+ * about the PR as it stands at the moment of the read; neither the PR row nor
+ * any listing this sweep makes records WHEN the PR became `dirty`. So the age
+ * read here is the PR's `updated_at` — the last time anything touched the PR —
+ * used as a PROXY, on the reading the incident supports: a freshly-pushed
+ * dirty PR is being worked (its author is mid-resolution), while a dirty PR
+ * nothing has touched for hours is one nobody has noticed.
+ *
+ * The proxy's error direction, stated here rather than discovered later: a
+ * conflict created MINUTES ago on a PR last touched hours ago flags at once,
+ * because `updated_at` measures silence on the PR and not the age of the
+ * conflict — and the usual cause (`main` advancing under an open PR) does not
+ * touch the PR row at all, so it does not bump the clock. That over-reports in
+ * exactly one shape and under-reports in none, which is the direction this
+ * file keeps everywhere: a report-only row whose remedy is identical either
+ * way (merge base, resolve) costs its reader one glance, while the opposite
+ * bias is the silence the incident is made of.
+ *
+ * ⛔ It must not be "fixed" by dating the conflict from a per-PR timeline
+ * fetch. That is an extra request per candidate to sharpen a report-only row,
+ * and this sweep declines that trade everywhere else it arises — H15 declines
+ * it by name for the age of a label. The proxy is named in the finding text so
+ * the reader knows which quantity they are being shown.
+ *
+ * ## Why 2h
+ *
+ * Conflicts on this board are overwhelmingly created by `main` advancing under
+ * an open PR (~18 merges on a working day), not by authors writing
+ * incompatible code, so resolution is mechanical — merge `main`, fix the
+ * overlap, push — and a lane PM's landing window turns over far faster than
+ * that. 2h leaves a normal resolution a full window while catching the
+ * measured incident (~4h unnoticed) at roughly half its life. It matches
+ * `DOMAIN_HALF_STATE_STALE_HOURS` for the same underlying reason rather than
+ * by coincidence: both measure a loop that should already have turned over,
+ * not intake latency.
+ */
+export const MERGE_CONFLICT_STALE_HOURS = 2;
+
+/**
+ * The card(s) a stuck PR is holding up, so the row names the delivery and not
+ * only the branch. Read with H7's code-stripped extractors, exactly as H8
+ * reads delivery: `Fixes #N` (any closing keyword bound to `#N`) or
+ * `Part of #N` — both mean "this card is waiting on this PR", which is the
+ * question a reader of a stuck-conflict row is actually asking. A body that
+ * merely QUOTES either spelling in backticks names nothing (#8293 reading 4).
+ *
+ * Returns numbers in ascending order; an empty array when the body declares no
+ * card, which is a normal shape (not every PR carries one) and is why the
+ * finding text appends the clause only when it is non-empty.
+ */
+export function h16HeldCards(body) {
+  const out = new Set();
+  for (const n of closingKeywordTargets(body).keys()) out.add(Number(n));
+  for (const n of partOfTargets(body)) out.add(Number(n));
+  return [...out].sort((a, b) => a - b);
+}
+
+/**
+ * Whether this PR is worth spending a per-PR GET on — the gathering policy,
+ * separate from the verdict and exported so the self-test can pin the one
+ * property that matters: it must never be NARROWER than the predicate, or the
+ * sweep would silently stop being able to find rows H16 would have flagged.
+ *
+ * It answers from the LIST row alone, using the halves of the predicate that
+ * do not need `mergeable_state`: non-draft, not merged, and either aged past
+ * the threshold or carrying a timestamp that cannot be read. So the request
+ * count is bounded by the STUCK population rather than the open one — the same
+ * candidate-gating idiom as H2's comment fetch, which is confined to the cards
+ * H2 can actually judge.
+ *
+ * An unreadable `updated_at` is a candidate deliberately: the predicate treats
+ * it as a finding rather than as fresh (#4690), so a gate that skipped it here
+ * would drop exactly the row the predicate promises to surface.
+ *
+ * `changeset-release/*` is deliberately NOT excluded, unlike in H12. There the
+ * Version Packages PR would flag on every sweep BY DESIGN (born ready, never
+ * armed, the maintainer's alone to merge). A dirty one is nothing of the kind:
+ * it is regenerated from `main` on every push, so it has no normal state in
+ * which it sits conflicted for hours — if it ever does, that is a real finding
+ * about the release bot, not a false positive to suppress.
+ */
+export function h16NeedsDetail(pr, nowMs = Date.now()) {
+  if (!pr || pr.draft !== false || pr.merged_at) return false;
+  const updated = Date.parse(pr.updated_at ?? '');
+  if (!Number.isFinite(updated)) return true;
+  return (nowMs - updated) / 3_600_000 > MERGE_CONFLICT_STALE_HOURS;
+}
+
+/**
+ * Whether the H16 detail pass failed as a TRANSPORT rather than leaving a
+ * bounded gap — the #4690 judgement at row granularity, pure so the self-test
+ * pins it (the sweep loop that consumes it is a thin `for`, deliberately).
+ *
+ * The distinction it draws is the whole posture. "Some candidates unread" is a
+ * gap the report states out loud (the summary line's `read X of Y`) and the
+ * rest of the sweep is still worth printing — every other item's findings are
+ * already gathered. "No candidate readable at all" is not a bounded gap: it is
+ * a sweep whose H16 pass examined nothing while printing as though it had, and
+ * a quiet H16 section is then indistinguishable from a board with no
+ * conflicts. That one must surface as the prerequisite failure it is.
+ *
+ * Zero candidates is NOT a failure: a board where nothing was stale enough to
+ * be worth a request is a real, clean reading, and treating it as a transport
+ * fault would fail the sweep on the healthiest possible board.
+ */
+export function h16DetailPassUnreadable(candidates, probed) {
+  return (candidates ?? 0) > 0 && (probed ?? 0) === 0;
+}
+
+/**
+ * H16 — null when clean, else the finding sentence. Takes the SINGLE-PR
+ * payload (the listing row carries no `mergeable_state`).
+ *
+ * ## The readings that are skips, not findings
+ *
+ * GitHub computes mergeability ASYNCHRONOUSLY. A read taken while that
+ * background job is still running answers `unknown` (with `mergeable` null),
+ * which is neither "clean" nor "dirty" — it is no reading at all. Only the
+ * literal `dirty` fires: an unknown is skipped in SILENCE, never vouched for
+ * and never guessed, which is this file's standing narrowness discipline (the
+ * transport classifier's refusal to name what it cannot name, same posture).
+ *
+ * That is the one place H16 departs from the #4690 direction the aged items
+ * take, and the asymmetry is deliberate rather than an inconsistency: an
+ * unreadable `updated_at` is a value that SHOULD have been readable and whose
+ * absence hides a real card, while `unknown` is the platform correctly saying
+ * "ask again later" — firing on it would put a row on the anchor for every PR
+ * whose mergeability happened to be cold at sweep time, which is noise that
+ * would bury the real rows. The timestamp half keeps the #4690 direction
+ * unchanged (an unreadable `updated_at` still flags).
+ *
+ * Drafts are out of scope (parked deliberately, H12's reading), and a row
+ * without a real `draft` field is out of scope too — this predicate must not
+ * flag a shape it cannot read.
+ *
+ * ## Why `auto_merge` is NOT read here, unlike H12
+ *
+ * H12 treats armed auto-merge as finding-REDUCING: the queue machinery holds
+ * the PR, so someone is handling it. H16 must not, and that is the whole
+ * incident — the measured specimen sat dirty with auto-merge ARMED, and the
+ * arming is precisely what made every proxy signal read healthy while nothing
+ * at all was happening. Auto-merge does not resolve conflicts: a PR armed
+ * while dirty simply never lands. Here the armed state is evidence OF the
+ * disease, never of a handler, and the self-test pins that in both directions.
+ */
+export function h16StuckMergeConflict(pr, nowMs = Date.now()) {
+  if (!pr || pr.draft !== false || pr.merged_at) return null;
+  if (pr.mergeable_state !== 'dirty') return null;
+  const updated = Date.parse(pr.updated_at ?? '');
+  const ageHours = Number.isFinite(updated) ? (nowMs - updated) / 3_600_000 : null;
+  if (ageHours !== null && ageHours <= MERGE_CONFLICT_STALE_HOURS) return null;
+  const reading =
+    ageHours === null
+      ? 'an unreadable `updated_at` (which must not read as fresh)'
+      : `untouched for ~${Math.round(ageHours)}h (threshold ${MERGE_CONFLICT_STALE_HOURS}h)`;
+  const held = h16HeldCards(pr.body);
+  const holding =
+    held.length === 0
+      ? ''
+      : `, holding ${held.length === 1 ? 'card' : 'cards'} ${held.map((n) => `#${n}`).join(', ')}`;
+  return (
+    `open, non-draft and in MERGE CONFLICT (\`mergeable_state: dirty\`), ${reading}${holding} — a ` +
+    'conflict starts no CI run, raises no event and turns no check red, so every proxy signal ' +
+    'keeps reading healthy (armed auto-merge included: it does NOT resolve conflicts, and a PR ' +
+    'armed while dirty simply never lands). The owning lane PM merges `main` into the branch, ' +
+    'resolves it, and re-arms afterwards. Age is the PR\'s `updated_at`, not the conflict\'s: a ' +
+    'conflict carries no timestamp of its own, and base advancing does not touch the PR row.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H17 — the on-hold TRIGGER-FILE INDEX. Not a predicate: an inventory.
+//
+// ## What it is for (#10034, measured 0-for-19)
+//
+// The opportunistic-restart mechanism is a maintainer-accepted design
+// (2026-08-11): a hold comment names the FILES whose next edit should wake the
+// card, and a dispatching seat is supposed to intersect its dispatch's file
+// surface against those lists before dispatching. The audit that produced this
+// item measured the intersection never running in any lane: across six cards
+// the named trigger files were touched NINETEEN times and the rider was
+// carried ZERO times. The mechanism existed in SKILL.md and in hold comments;
+// no seat's loop executed it.
+//
+// The fix is not another written protocol step. It is to put the list where
+// the seat is already looking: the patrol anchor, which the dispatch protocol
+// now makes the first thing read each round. This section renders card → files
+// so the intersection is a GLANCE at a rendered table rather than a
+// remembered procedure over 79 hold comments nobody opens.
+//
+// ## Why it lives on the PATROL side and not in `dispatch-gates.mjs`
+//
+// The obvious shape — teach the dispatch gate to grep hold comments — cannot
+// run where the dispatch gate runs. A seat container's live GitHub read is 403
+// (the repo-scoped transport fact this whole file's prerequisite classifier
+// exists to name), so an intersection built into `dispatch-gates.mjs` would be
+// a second mechanism that never executes: exactly the disease, re-created one
+// layer down. The patrol runs on a GitHub Actions runner where the transport
+// prerequisite is met, so the gathering happens there and the seat reads the
+// rendered result. Zero new runtime dependency on the seat side.
+//
+// ## REPORT-ONLY, and more strictly than the predicates above
+//
+// Every H1–H16 row is an assertion that something is WRONG. An H17 row asserts
+// nothing of the kind: a hold naming trigger files is a hold in perfectly good
+// standing. So this item writes no label, has no staleness threshold, and can
+// never produce a finding — it is inventory, rendered next to the findings
+// because that is the page the reader already opens. The only bound in it is a
+// RENDER budget (`H17_INDEX_ROW_CAP`), which is the same class of constant as
+// `MARKDOWN_BODY_BUDGET` and not a judgement about the board.
+//
+// ## The extraction is deterministic, and drops what it cannot verify
+//
+// ⛔ No fuzzy parsing, and no LLM in the loop. Two stages, both closed:
+//
+//   1. ANCHOR. A line qualifies only if it carries one of a closed set of
+//      terms (`H17_TRIGGER_ANCHOR_TERMS`) or is a canonical `Restart-touch:`
+//      line. Everything else in the comment is ignored, however path-shaped.
+//   2. VALIDATE. Every candidate token is checked against `git ls-files`. A
+//      token that is not a TRACKED FILE is DROPPED — never guessed at, never
+//      normalised into something that would match. This is what makes the
+//      index safe to render without review: a wrong row would send a seat to
+//      intersect against a path that does not exist, and the intersection
+//      would silently never hit.
+//
+// The census that produced the term set is in `H17_TRIGGER_ANCHOR_TERMS`.
+// ---------------------------------------------------------------------------
+
+/**
+ * The closed set of anchor terms, matched case-insensitively as substrings of
+ * a single line. Derived from a read of nine open/just-released `pm:on-hold`
+ * cards (2026-08-19, #10034's measurement round) — seven of which carry a
+ * trigger-file clause, and all seven of those are covered here:
+ *
+ *   `trigger file`  — #8897 (`**Trigger file: \`…\`**`), #8984
+ *                     (`Restart condition (named trigger files)`), #9139
+ *                     (`**Trigger files** (opportunistic-restart clause)`),
+ *                     #8662 (`**Opportunistic trigger files**`), #8883
+ *                     (`**Restart condition (trigger files):**`)
+ *   `opportunistic` — #8656 (`3. **opportunistic:** any PR already editing …`),
+ *                     #9139, #8662
+ *   `restart condition` — #8331 (`Named restart conditions: ① …`), #8883,
+ *                     #8984, #8662
+ *
+ * ⛔ `rider` is deliberately NOT in the set, though it is the mechanism's own
+ * name. It is the word the AUDIT and RELEASE comments use ("the armed rider
+ * fired three times without being carried — PRs #9869, #9990 and #10005 all
+ * touched `.github/workflows/lint.yml`"), so admitting it would harvest the
+ * post-mortem prose of holds that are no longer held, as though the file were
+ * still a live trigger. Measured on #8331's release comment, which contains a
+ * tracked path and names no trigger at all.
+ *
+ * The two cards in the sample with NO trigger clause (#9707, #9276 — both
+ * `Restart-when: closed …#N` holds) match no term and correctly contribute no
+ * row. That is the negative half of the census, and it is pinned in the
+ * self-test.
+ */
+export const H17_TRIGGER_ANCHOR_TERMS = ['trigger file', 'opportunistic', 'restart condition'];
+
+/**
+ * The CANONICAL machine-readable channel this index also reads, proposed by
+ * #10034 and not yet adopted anywhere on the board.
+ *
+ * Same discipline as `Blocked-by:` (H4) and `Restart-when:` (H9): a
+ * case-sensitive literal at the start of a line, ONE path per line, so the
+ * value needs no parsing at all. Today it matches ZERO live cards, and that is
+ * the intended state — the mechanism precedes the convention deliberately, so
+ * that the day a hold is written with `Restart-touch:` lines the index already
+ * reads them and no second change is owed. The prose-anchor extraction above
+ * is what serves the 79 holds written before it exists.
+ *
+ * Fresh regex per call: a shared module-level `/g` literal is a `lastIndex`
+ * bug waiting for the next reader (the same note `closingKeywordRe` carries).
+ */
+export function restartTouchRe() {
+  return /^[ \t]*(?:>[ \t]*)*(?:[-*+][ \t]+)?Restart-touch:[ \t]*(\S[^\n]*)$/gm;
+}
+
+/**
+ * How far past an anchor line the list scan will follow.
+ *
+ * Two of the seven measured clauses put their paths in a bulleted list UNDER
+ * the anchor sentence (#8984's three docs pages, #8662's two gate files)
+ * rather than on the anchor line itself, so the scan has to cross into the
+ * list — and once it does, something has to stop it from swallowing an entire
+ * card body when an anchor term happens to appear above a long unrelated list.
+ *
+ * The longest measured trigger list is 3 items. 12 leaves 4× headroom while
+ * bounding the blast radius of a stray anchor to a dozen lines. It is a
+ * PARSING bound, not a threshold on board state: nothing about the board
+ * changes what it means, and no row is suppressed by it that a hold author
+ * could not fix by writing a shorter list.
+ */
+export const H17_LIST_SCAN_LIMIT = 12;
+
+/**
+ * The rendered-row cap, and the reason it is a budget rather than a judgement.
+ *
+ * The index is reserved OUT of `MARKDOWN_BODY_BUDGET` before the findings rows
+ * are laid out, so that it can never be silently truncated away by a noisy
+ * board — but the reservation itself has to be bounded, or a pathological run
+ * could starve the findings list to render inventory. At the measured rate (7
+ * of 79 open holds carry a clause) 40 is ~5× headroom. An overflow is
+ * ANNOUNCED, never silent (#4690).
+ */
+export const H17_INDEX_ROW_CAP = 40;
+
+/** Is this line a markdown list item (the shape a trigger list is written in)? */
+function isListItemLine(line) {
+  return /^[ \t]{0,6}(?:[-*+]|\d{1,2}[.)])[ \t]+\S/.test(line);
+}
+
+/**
+ * Every backticked span on one line, unwrapped and trimmed.
+ *
+ * Backticks are the ONLY delivery shape read, and that narrowness is the
+ * precision. All seven measured clauses backtick their paths; admitting bare
+ * prose tokens would mean deciding whether `rest-server.ts` in a sentence is a
+ * trigger or a mention, which is the LLM-grade judgement this item refuses to
+ * make. A hold that names its trigger without backticks contributes no row and
+ * is invisible here — a stated boundary, and the argument for the
+ * `Restart-touch:` convention rather than a reason to widen the parser.
+ */
+function backtickedSpans(line) {
+  return [...String(line ?? '').matchAll(/`([^`\n]+)`/g)].map((m) => m[1].trim());
+}
+
+/**
+ * Stage 1 — the candidate tokens a text declares as trigger files, BEFORE any
+ * validation. Exported so the self-test can pin the anchor/continuation rules
+ * separately from the tracked-file oracle, which needs a checkout.
+ *
+ * Reads fenced blocks out (citations, not triggers) and inline spans IN (the
+ * signal itself) — the `{ inline: false }` half of `stripMarkdownCode`.
+ *
+ * The continuation rule, in the shape the measurement forced: from an anchor
+ * line, harvest that line's spans, then — allowing at most ONE blank line, as
+ * markdown requires before a list — consume the consecutive list block that
+ * follows, up to `H17_LIST_SCAN_LIMIT` items. A blank line AFTER the list has
+ * started ends it, so the scan cannot rejoin the prose on the far side.
+ *
+ * ## The under-report this leaves, found while reverse-verifying
+ *
+ * A path on a WRAPPED continuation line — the author hard-wrapped the clause
+ * and the path landed on the next source line, which is neither the anchor nor
+ * a list item — is not harvested. All seven measured clauses put the path on
+ * the anchor line or in a list item, because GitHub comment bodies are written
+ * as long unwrapped source lines, so the shape is currently hypothetical. It
+ * is recorded rather than fixed: widening the scan to "any following line"
+ * would re-admit the prose this bounds away, and the error direction here is
+ * the one this whole item keeps — a missing row costs a seat the intersection
+ * it would have got anyway before #10034, while a wrong row sends it to
+ * intersect against a file nobody nominated.
+ *
+ * @param {string} text an issue body or a single comment body
+ * @returns {string[]} raw candidate tokens, in document order, not deduped
+ */
+export function h17TriggerFileCandidates(text) {
+  const stripped = stripMarkdownCode(text, { inline: false });
+  const lines = stripped.split('\n');
+  const out = [];
+
+  // The canonical channel first — a whole-line value, so no span is needed and
+  // a bare (unbackticked) path is accepted here and ONLY here.
+  for (const m of stripped.matchAll(restartTouchRe())) {
+    out.push(m[1].trim().replace(/^`+|`+$/g, '').trim());
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const lower = lines[i].toLowerCase();
+    if (!H17_TRIGGER_ANCHOR_TERMS.some((term) => lower.includes(term))) continue;
+    out.push(...backtickedSpans(lines[i]));
+
+    let j = i + 1;
+    let blanks = 0;
+    let started = false;
+    let taken = 0;
+    while (j < lines.length && taken < H17_LIST_SCAN_LIMIT) {
+      const line = lines[j];
+      if (line.trim() === '') {
+        if (started) break;
+        if (++blanks > 1) break;
+        j++;
+        continue;
+      }
+      if (!isListItemLine(line)) break;
+      out.push(...backtickedSpans(line));
+      started = true;
+      taken++;
+      j++;
+    }
+  }
+  return out;
+}
+
+/**
+ * Stage 2 — candidates from every text of one card, validated against the
+ * tracked-file set and returned sorted and deduped.
+ *
+ * `isTracked` is injected rather than read here so the whole extraction stays
+ * pure and the self-test can drive it with a fixture set instead of a
+ * checkout. A token the oracle does not recognise is DROPPED in silence: the
+ * measured decoys are `Field` and `FIXTURE_CAPTURED_NEGATED` (backticked
+ * identifiers sitting inside real trigger clauses on #8656 and #8662) and
+ * `scripts/check-type-check-coverage.mjs:1679` (a real path with a line suffix
+ * — tracked as a file, NOT as that token, so the suffix form correctly fails).
+ * Each of those is a row this index would otherwise have rendered wrong.
+ *
+ * @param {string[]} texts card body plus every hold-comment body
+ * @param {(path: string) => boolean} isTracked
+ * @returns {string[]}
+ */
+export function h17TriggerFiles(texts, isTracked) {
+  const found = new Set();
+  for (const text of texts ?? []) {
+    for (const token of h17TriggerFileCandidates(text)) {
+      if (token && isTracked(token)) found.add(token);
+    }
+  }
+  return [...found].sort();
+}
+
+/**
+ * The gathering policy — which cards are worth a comment fetch.
+ *
+ * Open `pm:on-hold` cards ONLY, which is exactly the population the index
+ * describes. The same candidate-gating idiom as H2's comment fetch and H16's
+ * detail GET: the request count is bounded by the population the item can
+ * actually speak about, never by the open board. Exported for the same reason
+ * `h16NeedsDetail` is — a policy that decides what gets READ AT ALL is where a
+ * silent hole would live.
+ */
+export function h17NeedsComments(issue) {
+  return labelNames(issue).includes('pm:on-hold');
+}
+
+/**
+ * Build the rendered index rows from cards already in hand.
+ *
+ * Cards contributing no validated path are omitted entirely rather than
+ * rendered empty: a hold with no trigger clause is the normal majority shape
+ * (2 of the 9 measured, and most of the 79 on the board), and printing 70
+ * empty rows would bury the handful that carry the signal this section exists
+ * to deliver.
+ *
+ * @param {Array<{ issue: object, texts: string[] }>} entries
+ * @param {(path: string) => boolean} isTracked
+ * @returns {Array<{ issue: object, files: string[] }>} ascending by number
+ */
+export function h17IndexRows(entries, isTracked) {
+  const rows = [];
+  for (const { issue, texts } of entries ?? []) {
+    const files = h17TriggerFiles(texts, isTracked);
+    if (files.length > 0) rows.push({ issue, files });
+  }
+  return rows.sort((a, b) => (a.issue?.number ?? 0) - (b.issue?.number ?? 0));
+}
+
+/**
+ * The tracked-file oracle. Returns a Set, or `null` when it could not be read.
+ *
+ * `-z` rather than plain `ls-files`: git QUOTES paths containing non-ASCII or
+ * special bytes in the default output ("packages/\303\251.ts"), and a quoted
+ * form would never match the token a hold comment backticks — silently
+ * dropping exactly the paths hardest to notice missing. The NUL-separated form
+ * is byte-exact.
+ *
+ * An EMPTY result reads as unavailable, not as "nothing is tracked". The
+ * difference is the whole #4690 posture at oracle granularity: an empty set
+ * would validate away every candidate and render a confidently empty index —
+ * the shape indistinguishable from a board where no hold names a trigger file,
+ * which is the silence this item exists to end.
+ */
+function readTrackedFiles() {
+  try {
+    const out = execFileSync('git', ['ls-files', '-z'], {
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    const set = new Set(out.split('\0').filter(Boolean));
+    return set.size > 0 ? set : null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -1175,16 +1975,118 @@ export function isLoudFinding(message) {
  * clean" and "nothing was swept", and it carries the report-only contract so
  * a reader who sees only this line cannot mistake it for a gate verdict.
  *
- * @param {{ repo: string, issues: number, unscoped: number, prs: number, merged: number }} counts
+ * H16's two numbers are here for a reason the other counts do not have: it is
+ * the only item whose input can fail PER ROW. A detail GET that fails leaves
+ * that PR unjudged and the sweep still prints — correctly, since every other
+ * item's findings are already gathered — so without these numbers a pass that
+ * read nothing would be indistinguishable from a board with no conflicts. That
+ * is the #4690 shape at row granularity, and the pair (`read X of Y`) is what
+ * makes it visible. `??  0` rather than required: a caller assembling counts
+ * without them still renders a sentence, never the string `undefined`.
+ *
+ * @param {{ repo: string, issues: number, unscoped: number, prs: number,
+ *   merged: number, conflictProbed?: number, conflictCandidates?: number,
+ *   holdProbed?: number, holdCandidates?: number, fallbackProbed?: number,
+ *   fallbackCandidates?: number }} counts
  * @param {number} findingCount
  */
 export function summaryLine(counts, findingCount) {
+  const probed = counts.conflictProbed ?? 0;
+  const candidates = counts.conflictCandidates ?? 0;
+  const held = counts.holdProbed ?? 0;
+  const holdCandidates = counts.holdCandidates ?? 0;
+  // The third `read X of Y` pair, and the one with a consequence the other two
+  // do not have: a shortfall here does not merely leave rows out, it SILENCES
+  // H14's stale direction (see the predicate). A reader seeing a quiet stale
+  // section needs this number to tell "the cache is coherent" from "the sweep
+  // declined to judge it".
+  const fbProbed = counts.fallbackProbed ?? 0;
+  const fbCandidates = counts.fallbackCandidates ?? 0;
   return (
     `check-half-states: swept ${counts.issues} open pm-/p0-labeled issue(s), ${counts.unscoped} open ` +
     `issue(s) in the unscoped pass (H13–H15), ${counts.prs} open PR(s) ` +
+    `(merge state read on ${probed} of ${candidates} H16 candidate(s)) ` +
     `and ${counts.merged} recently-merged PR(s) in ${counts.repo} — ${findingCount} half-state(s) found. ` +
+    `Hold comments read on ${held} of ${holdCandidates} H17 candidate(s). ` +
+    `\`Blocked-by:\` comment fallback read on ${fbProbed} of ${fbCandidates} candidate(s)` +
+    `${fbProbed < fbCandidates ? " — H14's stale direction is SUSPENDED for this sweep (the index is known incomplete)" : ''}. ` +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
+}
+
+/**
+ * The H17 section, in either medium — one builder so the two renderers can
+ * never drift on WHAT the index says, only on how it is marked up.
+ *
+ * Returns `[]` when no index was supplied at all, which keeps every existing
+ * two-argument call byte-identical: a caller that does not gather the index
+ * gets the report it always got, rather than a section claiming an empty
+ * board.
+ *
+ * The three states it can be in are deliberately distinguishable, because two
+ * of them look identical if you let them (#4690):
+ *
+ *   - oracle unreadable  → says so, loudly, and claims nothing about holds
+ *   - read, nothing found → says the holds were READ and name no tracked file
+ *   - read, rows          → the index
+ *
+ * @param {{ rows: Array<{issue: object, files: string[]}>, candidates?: number,
+ *   probed?: number, tracked?: number|null }} [index]
+ * @param {{ markdown?: boolean }} [options]
+ */
+export function renderTriggerIndex(index, { markdown = false } = {}) {
+  if (!index) return [];
+  const rows = index.rows ?? [];
+  const probed = index.probed ?? 0;
+  const candidates = index.candidates ?? 0;
+  const read = `read on ${probed} of ${candidates} open \`pm:on-hold\` card(s)`;
+  const head = markdown
+    ? ['### On-hold trigger-file index (H17)', '']
+    : ['', 'On-hold trigger-file index (H17)'];
+
+  if (index.tracked == null) {
+    head.push(
+      `⚠️ The tracked-file oracle (\`git ls-files\`) could not be read, so NO candidate path was ` +
+        `validated and this index is EMPTY BY FAILURE, not by finding. Run the patrol from inside a ` +
+        `checkout. (${read}.)`,
+    );
+    return head;
+  }
+
+  const intro =
+    `Before dispatching, intersect your dispatch's file surface against this list and NAME any card ` +
+    `it hits in the dispatch brief. These are the trigger files open holds declare — the ` +
+    `opportunistic-restart mechanism (maintainer-accepted 2026-08-11) whose intersection was ` +
+    `measured at 0-for-19 while it lived only as a remembered protocol step (#10034). Report-only: ` +
+    `a card here is a hold in good standing, never a finding. Extraction is deterministic — every ` +
+    `path shown is a tracked file; anything unverifiable was dropped rather than guessed, so this ` +
+    `list under-reports and never invents. (${read}; ${index.tracked} tracked file(s) in the oracle.)`;
+  head.push(intro, '');
+
+  if (rows.length === 0) {
+    head.push(
+      markdown
+        ? '_No open hold names a tracked trigger file. The holds were READ — this is a clean reading, not an unread one._'
+        : '  (no open hold names a tracked trigger file — read, not unread)',
+    );
+    return head;
+  }
+
+  const shown = rows.slice(0, H17_INDEX_ROW_CAP);
+  for (const { issue, files } of shown) {
+    if (markdown) {
+      head.push(
+        `- [#${issue.number}](${issue.html_url}) — ${files.map((f) => `\`${f}\``).join(', ')}`,
+      );
+    } else {
+      head.push(`  #${issue.number} ${files.join(', ')}`, `     ${issue.html_url}`);
+    }
+  }
+  if (rows.length > shown.length) {
+    const omitted = `… ${rows.length - shown.length} further card(s) omitted at the H17_INDEX_ROW_CAP render budget; the full list is in the workflow run log.`;
+    head.push(markdown ? `- _${omitted}_` : `  ${omitted}`);
+  }
+  return head;
 }
 
 /**
@@ -1192,11 +2094,19 @@ export function summaryLine(counts, findingCount) {
  * format switch existed. Findings arrive already sorted by issue number and
  * that order is kept: a terminal has no fold, so there is nothing for a
  * priority sort to buy here, and changing it would churn every seat's habit.
+ *
+ * The H17 index sits BETWEEN the findings and the summary line, which is the
+ * one placement the terminal medium allows: the summary sentence must stay the
+ * last line of the report (it is what a seat reads off the bottom of a scroll,
+ * and the self-test pins it there), while the index must not be separated from
+ * the rows by it. In the anchor body the ordering question resolves differently
+ * — see `renderMarkdown`.
  */
-export function renderPlain(findings, counts) {
+export function renderPlain(findings, counts, options = {}) {
   const lines = findings.map(
     ([issue, code, msg]) => `  ${code} #${issue.number} ${msg}\n     ${issue.html_url}`,
   );
+  lines.push(...renderTriggerIndex(options.triggerIndex, { markdown: false }));
   lines.push(summaryLine(counts, findings.length));
   return lines.join('\n');
 }
@@ -1271,19 +2181,30 @@ export function renderMarkdown(findings, counts, options = {}) {
 
   head.push(`**${summaryLine(counts, rows.length)}**`, '');
 
+  // The H17 index is built BEFORE the findings are laid out and appended
+  // AFTER them: findings are alarms and keep the top of the body, while the
+  // index is the reference a dispatching seat reads on purpose. Building it
+  // first is what lets its length be RESERVED out of the budget below, so a
+  // noisy board can never truncate the index away — the trim then falls on
+  // finding rows, which announce their own omission and are recoverable from
+  // the run log. An index silently missing from the anchor would restore
+  // exactly the 0-for-19 silence this section exists to end.
+  const indexBlock = renderTriggerIndex(options.triggerIndex, { markdown: true });
+  const indexText = indexBlock.length > 0 ? `\n\n${indexBlock.join('\n')}` : '';
+
   if (rows.length === 0) {
     head.push(
       '✅ No half-states found in this sweep. This line means the board was READ and is clean — a sweep' +
         ' that could not RUN replaces this whole body with a prerequisite/failure report instead, so a' +
         ' green anchor is never the sound of a broken sweeper.',
     );
-    return head.join('\n');
+    return `${head.join('\n')}${indexText}`;
   }
 
   head.push('### Findings', '', '');
   const body = head.join('\n');
   const rendered = [];
-  let used = body.length;
+  let used = body.length + indexText.length;
   for (let i = 0; i < rows.length; i++) {
     const [issue, code, msg] = rows[i];
     const line = `- **${code}** [#${issue.number}](${issue.html_url}) — ${msg}`;
@@ -1297,7 +2218,7 @@ export function renderMarkdown(findings, counts, options = {}) {
     rendered.push(line);
     used += line.length + 1;
   }
-  return `${body}${rendered.join('\n')}`;
+  return `${body}${rendered.join('\n')}${indexText}`;
 }
 
 /**
@@ -1785,9 +2706,10 @@ function reportPrerequisiteNotMet(v, options = {}) {
   const nothing =
     swept === 0
       ? [
-          `  Nothing was swept: no issue was listed and no predicate (H1–H15) ran, so this`,
-          `  result says NOTHING about whether the board carries half-states. It is not a`,
-          `  clean board and it is not a dirty one — it is no reading at all.`,
+          `  Nothing was swept: no issue was listed, no predicate (H1–H16) ran, and the H17`,
+          `  trigger-file index gathered nothing, so this result says NOTHING about whether the`,
+          `  board carries half-states. It is not a clean board and it is not a dirty one — it`,
+          `  is no reading at all.`,
         ]
       : [
           `  Nothing was judged: the transport failed after ${swept} issue(s) had been listed,`,
@@ -1853,8 +2775,20 @@ async function sweep(options = {}) {
   const seenPrs = new Map();
   const seenMerged = new Map();
   const seenUnscoped = new Map();
+  // H16's per-row fetch is the one input that can fail partially, so its
+  // tally rides out of the sweep and into the summary line (see `summaryLine`).
+  const stats = {
+    conflictCandidates: 0,
+    conflictProbed: 0,
+    fallbackCandidates: 0,
+    fallbackProbed: 0,
+  };
+  // H17's gathering rides out of the sweep the same way, because it has the
+  // same per-row failure mode as H16's detail pass and therefore owes the
+  // summary line the same `read X of Y`.
+  const hold = { entries: [], candidates: 0, probed: 0 };
   try {
-    await sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped);
+    await sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, stats, hold);
   } catch (err) {
     err.sweptSoFar = seen.size + seenPrs.size + seenMerged.size + seenUnscoped.size;
     throw err;
@@ -1867,11 +2801,27 @@ async function sweep(options = {}) {
     unscoped: seenUnscoped.size,
     prs: seenPrs.size,
     merged: seenMerged.size,
+    conflictCandidates: stats.conflictCandidates,
+    conflictProbed: stats.conflictProbed,
+    holdCandidates: hold.candidates,
+    holdProbed: hold.probed,
+    fallbackCandidates: stats.fallbackCandidates,
+    fallbackProbed: stats.fallbackProbed,
+  };
+  // The oracle is read ONCE per sweep, after gathering: it is a local
+  // `git ls-files`, not a request, and every candidate token is checked
+  // against the same reading so the index cannot be internally inconsistent.
+  const tracked = readTrackedFiles();
+  const triggerIndex = {
+    rows: h17IndexRows(hold.entries, (path) => (tracked ? tracked.has(path) : false)),
+    candidates: hold.candidates,
+    probed: hold.probed,
+    tracked: tracked ? tracked.size : null,
   };
   console.log(
     options.format === 'markdown'
-      ? renderMarkdown(findings, counts, { provenance: options.provenance })
-      : renderPlain(findings, counts),
+      ? renderMarkdown(findings, counts, { provenance: options.provenance, triggerIndex })
+      : renderPlain(findings, counts, { triggerIndex }),
   );
 }
 
@@ -1924,10 +2874,49 @@ async function listAllOpenIssues() {
   return out;
 }
 
-async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped) {
+async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, stats = {}, hold = null) {
   for (const label of ['pm:dispatched', 'pm:queue', 'pm:blocked', 'pm:seat', 'pm:on-hold', 'priority:p0']) {
     for (const issue of await listIssues(label)) seen.set(issue.number, issue);
   }
+
+  // At most ONE comment fetch per card, shared by the two items that need the
+  // thread: H2 reads it for the claim marker, H17 for trigger clauses. Without
+  // the memo a card carrying both `pm:dispatched` (assigned) and `pm:on-hold`
+  // — itself an H3-adjacent half-state, so exactly the card most likely to be
+  // on the board — would be fetched twice per sweep for no new information.
+  const commentCache = new Map();
+  const commentsFor = async (issue) => {
+    if (commentCache.has(issue.number)) return commentCache.get(issue.number);
+    const rows = await rest(`/repos/${OWNER_REPO}/issues/${issue.number}/comments?per_page=100`);
+    const bodies = rows.map((c) => c.body ?? '');
+    commentCache.set(issue.number, bodies);
+    return bodies;
+  };
+  let lastHoldError = null;
+
+  // The `Blocked-by:` comment fallback (#8941 / #10061). Same shared cache, so
+  // a card that is `pm:blocked` AND assigned AND on hold still costs ONE fetch
+  // across H2, H17 and this. `comments` holds what was read; `unreadable` holds
+  // the cards whose fetch failed — the two are kept apart on purpose, because
+  // "read, and it carries nothing" and "could not be read" are the pair this
+  // whole item exists to stop conflating.
+  const fallback = { comments: new Map(), unreadable: new Set() };
+  let lastFallbackError = null;
+  const gatherBlockedByComments = async (issue) => {
+    if (fallback.comments.has(issue.number) || fallback.unreadable.has(issue.number)) return;
+    stats.fallbackCandidates = (stats.fallbackCandidates ?? 0) + 1;
+    try {
+      const bodies = await commentsFor(issue);
+      stats.fallbackProbed = (stats.fallbackProbed ?? 0) + 1;
+      fallback.comments.set(issue.number, bodies);
+    } catch (err) {
+      lastFallbackError = err;
+      fallback.unreadable.add(issue.number);
+    }
+  };
+  /** What H4 gets for a card: `undefined` unconsulted, `null` unreadable, else the bodies. */
+  const fallbackFor = (issue) =>
+    fallback.unreadable.has(issue.number) ? null : fallback.comments.get(issue.number);
 
   for (const issue of seen.values()) {
     const labels = labelNames(issue);
@@ -1937,9 +2926,14 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped) {
     if (h3QueueAndDispatched(issue)) {
       findings.push([issue, 'H3', '`pm:queue` and `pm:dispatched` both present']);
     }
-    if (h4BlockedNoBlockedBy(issue)) {
-      findings.push([issue, 'H4', '`pm:blocked` without a `Blocked-by:` body line']);
-    }
+    // H4 — judged across BOTH channels. The fetch is gated by
+    // `needsBlockedByComments`, so it costs a request only for the body-clean
+    // cards whose verdict it can actually change (~2/3 of the blocked
+    // population by the 2026-08-19 census); a card whose body already carries
+    // the line is answered without touching the network, exactly as before.
+    if (needsBlockedByComments(issue)) await gatherBlockedByComments(issue);
+    const unblockedByNothing = h4BlockedNoBlockedBy(issue, fallbackFor(issue));
+    if (unblockedByNothing) findings.push([issue, 'H4', unblockedByNothing]);
     const restartless = h9OnHoldNoRestartWhen(issue);
     if (restartless) findings.push([issue, 'H9', restartless]);
     const staleP0 = h10StaleUnclaimedP0(issue);
@@ -1960,11 +2954,41 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped) {
       // comment is posted at claim time, so on a healthy card it is early in
       // the thread; a >100-comment card with a late claim shows up as a
       // finding the patrol then reads by hand.
-      const comments = await rest(`/repos/${OWNER_REPO}/issues/${issue.number}/comments?per_page=100`);
-      if (h2AssigneeNoClaimComment(issue, comments.map((c) => c.body))) {
+      const comments = await commentsFor(issue);
+      if (h2AssigneeNoClaimComment(issue, comments)) {
         findings.push([issue, 'H2', 'assignee set but no claim comment on the thread']);
       }
     }
+
+    // H17 — the trigger-file index. Gathering only: the card's own body plus
+    // its hold comments, kept for the pure extraction the renderers consume.
+    // Fetched for open `pm:on-hold` cards ONLY (`h17NeedsComments`), which is
+    // the population the index speaks about, and never for the other label
+    // pages — the same candidate-gating trade H2 and H16 make.
+    //
+    // A failed fetch leaves ONE card out of the index and must not fail the
+    // sweep: every other item's findings are already gathered and worth
+    // printing, and the summary line's `read X of Y` is what states the gap.
+    if (hold && h17NeedsComments(issue)) {
+      hold.candidates += 1;
+      try {
+        const comments = await commentsFor(issue);
+        hold.probed += 1;
+        hold.entries.push({ issue, texts: [issue.body ?? '', ...comments] });
+      } catch (err) {
+        lastHoldError = err;
+      }
+    }
+  }
+
+  // …but if NO hold comment could be read at all, the index would render as
+  // "no open hold names a trigger file" — which is the 0-for-19 silence with a
+  // green face on it. That is the transport, not a clean board (#4690), so it
+  // is rethrown for the outer net to re-probe and classify. The predicate is
+  // H16's by name because that is where this judgement is documented; the
+  // shape is identical and deliberately shared rather than re-derived.
+  if (hold && h16DetailPassUnreadable(hold.candidates, hold.probed)) {
+    throw lastHoldError;
   }
 
   // H7 + H12 — the PR side. Listed straight from `/pulls` rather than filtered
@@ -1978,6 +3002,42 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped) {
     if (contradiction) findings.push([pr, 'H7', contradiction]);
     const orphan = h12OrphanLanding(pr);
     if (orphan) findings.push([pr, 'H12', orphan]);
+  }
+
+  // H16 — the only predicate here whose input no listing carries:
+  // `mergeable_state` lives on the single-PR endpoint alone. One GET per
+  // CANDIDATE (the gathering policy is `h16NeedsDetail`, which answers from
+  // the list row already in hand), so the cost is bounded by the stuck
+  // population rather than the open one, and only PRs this sweep already
+  // listed are ever fetched.
+  //
+  // A failed detail GET must NOT fail the sweep: every other item's findings
+  // are already gathered and are worth printing, and one unreadable PR is an
+  // unclassified row like any other unreadable reading here — it drops out of
+  // H16 and the summary line's `read X of Y` is what says so.
+  //
+  // But if NOTHING could be read, that is the transport rather than a clean
+  // board (#4690), so the last error is rethrown for the outer net to re-probe
+  // and classify. The distinction is the whole posture: "some rows unread" is
+  // a bounded gap the report states, while "no row readable" is a sweep whose
+  // H16 pass silently examined nothing and would otherwise print as quiet.
+  let lastDetailError = null;
+  for (const pr of seenPrs.values()) {
+    if (!h16NeedsDetail(pr)) continue;
+    stats.conflictCandidates = (stats.conflictCandidates ?? 0) + 1;
+    let detail;
+    try {
+      detail = await rest(`/repos/${OWNER_REPO}/pulls/${pr.number}`);
+    } catch (err) {
+      lastDetailError = err;
+      continue;
+    }
+    stats.conflictProbed = (stats.conflictProbed ?? 0) + 1;
+    const stuck = h16StuckMergeConflict(detail);
+    if (stuck) findings.push([pr, 'H16', stuck]);
+  }
+  if (h16DetailPassUnreadable(stats.conflictCandidates, stats.conflictProbed)) {
+    throw lastDetailError;
   }
 
   // H8 — one bounded merged-PR listing (window note at the helper), matched
@@ -2008,9 +3068,29 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped) {
   // cards of any label at all (so they can miss the evidence). No extra fetch:
   // the bodies are already in hand, which is exactly the "derived from the same
   // body reads the sweep already performs" this pair was specified as.
-  const blockingIndex = buildBlockingIndex(unscoped);
+  //
+  // …with ONE fetching pass in front of it, and it has to be here rather than
+  // in the label loop above: `pm:blocking` is not one of the labels that loop
+  // lists, so those cards are first visible in this listing. The gate is the
+  // same one H4 used, the cache is the same, and a card already gathered above
+  // is a no-op — so the union of the two passes is still at most one request
+  // per card.
   for (const issue of unscoped) {
-    const incoherent = h14BlockingCacheIncoherent(issue, blockingIndex);
+    if (needsBlockedByComments(issue)) await gatherBlockedByComments(issue);
+  }
+  // Total failure is the transport, not a board where no card parks the line
+  // in a comment — the same #4690 judgement H16 and H17 make, and the same
+  // predicate, deliberately shared rather than re-derived. A PARTIAL shortfall
+  // is a bounded gap: it stays, and it costs H14's stale direction (below)
+  // plus a summary-line clause, rather than the sweep.
+  if (h16DetailPassUnreadable(stats.fallbackCandidates, stats.fallbackProbed)) {
+    throw lastFallbackError;
+  }
+
+  const blockingIndex = buildBlockingIndex(unscoped, { comments: fallback.comments });
+  const indexComplete = fallback.unreadable.size === 0;
+  for (const issue of unscoped) {
+    const incoherent = h14BlockingCacheIncoherent(issue, blockingIndex, { indexComplete });
     if (incoherent) findings.push([issue, 'H14', incoherent]);
   }
 
@@ -2049,9 +3129,59 @@ function selfTest() {
   t('H2: blockquoted prose containing claim -> still a finding', h2AssigneeNoClaimComment(issue(['pm:dispatched'], ['os-help']), ['> the next seat should claim: only after the ruling lands']), true);
   t('H3: both queue labels -> finding', h3QueueAndDispatched(issue(['pm:queue', 'pm:dispatched'])), true);
   t('H3: dispatched alone -> clean', h3QueueAndDispatched(issue(['pm:dispatched'])), false);
-  t('H4: blocked without body line -> finding', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting on upstream')), true);
-  t('H4: blocked with Blocked-by line -> clean', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'Blocked-by: #123')), false);
-  t('H4: unblocked card is out of scope', h4BlockedNoBlockedBy(issue([], [], '')), false);
+  // H4 — the label gate and the BODY channel, unchanged by the two-channel
+  // read: a caller that does not consult comments gets the reading it always
+  // got, and the sentence it gets claims nothing about a channel nobody read.
+  t('H4: blocked without body line -> finding', typeof h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting on upstream')), 'string');
+  t('H4: blocked with Blocked-by line -> clean', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'Blocked-by: #123')), null);
+  t('H4: unblocked card is out of scope', h4BlockedNoBlockedBy(issue([], [], '')), null);
+  t('H4: …and an unconsulted comment channel is not claimed as empty', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting on upstream')).includes('NEITHER channel'), false);
+  t('H4: the body-only sentence still names the unlock sweep as the stake', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting on upstream')).includes('unlock sweep greps'), true);
+
+  // H4 — the COMMENT channel (#8941 / #10061). Four shapes, positive and
+  // negative, plus the unreadable one that is neither.
+  t('H4: body clean but a comment carries the line -> clean', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting on upstream'), ['triage note', 'Blocked-by: #9465']), null);
+  t('H4: body line AND a comment line (the union shape) -> clean', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'Blocked-by: #123'), ['Blocked-by: #9465']), null);
+  t('H4: neither channel -> finding', typeof h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting on upstream'), ['triage note', 'graded p2']), 'string');
+  t('H4: …and the sentence names BOTH channels', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), ['nothing here']).includes('NEITHER channel'), true);
+  t('H4: …and says a comment discharges the duty too', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), ['nothing here']).includes('Either channel discharges'), true);
+  t('H4: an empty comment thread is a real reading, not an unconsulted one', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), []).includes('NEITHER channel'), true);
+  // Unreadable is neither of the two: the row FIRES (a transport failure must
+  // not shrink the patrol below its pre-fallback reach) and says why.
+  t('H4: an UNREADABLE comment thread still fires', typeof h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), null), 'string');
+  t('H4: …but never claims the second channel is empty', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), null).includes('NEITHER channel'), false);
+  t('H4: …and says the thread could not be read', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), null).includes('could'), true);
+  t('H4: …citing the unreadable-is-not-absent rule', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), null).includes('#4690'), true);
+  // A comment line clears H4 whatever the ref says: H4's question is "did the
+  // author leave the machine anything", which a cross-repo blocker answers.
+  t('H4: a cross-repo comment line still discharges the duty', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), ['Blocked-by: objectstack-ai/objectui#4356']), null);
+  t('H4: a valueless comment line does NOT (nothing follows the key)', typeof h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), ['Blocked-by:']), 'string');
+  t('H4: a mid-sentence mention in a comment is not a line', typeof h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), ['seats park the Blocked-by: #1 line in comments']), 'string');
+  t('H4: the label gate outranks the comment channel', h4BlockedNoBlockedBy(issue(['pm:queue'], [], 'waiting'), ['nothing']), null);
+
+  // The real measured comment, byte-for-byte from #9828's triage backfill —
+  // the shape the fallback exists to read (a `Blocked-by:` line on its own,
+  // wrapped in ordinary prose above and below).
+  const liveBackfillComment =
+    'Triage backfill (machine-readable index line; the prose "Unblock when: epic #9465 completes" ' +
+    'was invisible to the unlock scan\'s grep):\n\nBlocked-by: #9465\n\nNo state change — the epic ' +
+    'is still open (4/5 sub-issues done); this line only makes the existing wait scannable.';
+  t('H4: the measured #9828 backfill comment clears the card', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'body carries no line'), [liveBackfillComment]), null);
+
+  // The gathering policy — what gets READ AT ALL.
+  t('gate: a body-clean pm:blocked card is a candidate', needsBlockedByComments(issue(['pm:blocked'], [], 'no line here')), true);
+  t('gate: a body-clean pm:blocking card is a candidate', needsBlockedByComments(issue(['pm:blocking'], [], 'no line here')), true);
+  t('gate: a pm:blocked card whose body already carries the line is NOT', needsBlockedByComments(issue(['pm:blocked'], [], 'Blocked-by: #1')), false);
+  t('gate: a pm:blocking card whose body already carries the line is NOT', needsBlockedByComments(issue(['pm:blocking'], [], 'Blocked-by: #1')), false);
+  t('gate: an ordinary queued card buys no fetch', needsBlockedByComments(issue(['pm:queue'], [], 'no line here')), false);
+  t('gate: an on-hold card buys no fetch from THIS item', needsBlockedByComments(issue(['pm:on-hold'], [], 'no line here')), false);
+  t('gate: a missing issue does not crash', needsBlockedByComments(undefined), false);
+
+  // The comment-side ref extractor — the index's reader of the same channel.
+  t('commentBlockedByTargets: one line across two comments', commentBlockedByTargets(['prose', 'Blocked-by: #7']).map((r) => r.number).join(','), '7');
+  t('commentBlockedByTargets: refs from several comments accumulate', commentBlockedByTargets(['Blocked-by: #7', 'Blocked-by: #8']).map((r) => r.number).join(','), '7,8');
+  t('commentBlockedByTargets: no comments at all', commentBlockedByTargets(undefined).length, 0);
+  t('commentBlockedByTargets: a cross-repo ref keeps its qualifier for filtering', commentBlockedByTargets(['Blocked-by: objectstack-ai/objectui#4356'])[0].repo, 'objectstack-ai/objectui');
   t('H5: 🟢 login matching assignee -> clean', h5SeatStickerDesync(issue(['pm:seat'], ['os-zhuang'], '', '[PM seat] domain:devx — 🟢 os-zhuang')), null);
   t('H5: 🟢 login without assignee -> finding', typeof h5SeatStickerDesync(issue(['pm:seat'], [], '', '[PM seat] domain:devx — 🟢 os-zhuang')), 'string');
   t('H5: ⏳ vacant with assignee -> finding', typeof h5SeatStickerDesync(issue(['pm:seat'], ['os-help'], '', '[PM seat] domain:cli — ⏳ vacant')), 'string');
@@ -2499,6 +3629,20 @@ function selfTest() {
   t('index: an empty listing is an empty index', idx([]).size, 0);
   t('index: a missing listing does not crash', buildBlockingIndex(undefined).size, 0);
 
+  // The comment channel in the index — a UNION with the body, never a priority
+  // order (#10061).
+  const idxc = (issues, comments) =>
+    buildBlockingIndex(issues, { repo: 'objectstack-ai/objectstack', comments: new Map(comments) });
+  t('index: a comment-only edge is a real edge', idxc([carded(9828, ['pm:blocked'], 'body has no line')], [[9828, ['Blocked-by: #9465']]]).get(9465).join(','), '9828');
+  t('index: body and comment edges UNION rather than override', idxc([carded(10, [], 'Blocked-by: #5')], [[10, ['Blocked-by: #6']]]).get(5).join(',') + '|' + idxc([carded(10, [], 'Blocked-by: #5')], [[10, ['Blocked-by: #6']]]).get(6).join(','), '10|10');
+  t('index: the same target in both channels is listed once', idxc([carded(10, [], 'Blocked-by: #5')], [[10, ['Blocked-by: #5']]]).get(5).join(','), '10');
+  t('index: two comments naming two targets both land', [...idxc([carded(10, [], '')], [[10, ['Blocked-by: #5', 'Blocked-by: #6']]]).keys()].sort((a, b) => a - b).join(','), '5,6');
+  t('index: a cross-repo ref in a COMMENT is dropped like a body one', idxc([carded(7917, [], '')], [[7917, ['Blocked-by: objectstack-ai/objectui#4356']]]).has(4356), false);
+  t('index: a self-reference in a COMMENT is dropped too', idxc([carded(5, [], '')], [[5, ['Blocked-by: #5']]]).has(5), false);
+  t('index: comments for a card not in the listing contribute nothing', idxc([carded(10, [], '')], [[99, ['Blocked-by: #5']]]).size, 0);
+  t('index: an absent comments map leaves the body reading untouched', buildBlockingIndex([carded(10, [], 'Blocked-by: #5')], { repo: 'objectstack-ai/objectstack' }).get(5).join(','), '10');
+  t('index: an empty comment list for a card is harmless', idxc([carded(10, [], 'Blocked-by: #5')], [[10, []]]).get(5).join(','), '10');
+
   // Direction A — the label carried with nothing targeting it.
   t('H14-A: pm:blocking with nothing targeting it -> finding', typeof h14BlockingCacheIncoherent(carded(7276, ['pm:queue', 'pm:blocking']), idx([])), 'string');
   t('H14-A: …and it names the stale-cache reading', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])).includes('stale derived cache'), true);
@@ -2561,6 +3705,70 @@ function selfTest() {
   t('H14 reverse-verify: #2657 (blocked on two CLOSED cards) -> clean', h14BlockingCacheIncoherent(carded(2657, ['pm:blocked']), liveIdx), null);
   t('H14 reverse-verify: an ordinary open card -> clean', h14BlockingCacheIncoherent(carded(9913, ['pm:queue', 'repo:cloud']), liveIdx), null);
 
+  // -- H14 + the comment channel: the two MEASURED false stales (#10061) -----
+  //
+  // Both were reported stale on 2026-08-19 by a body-only index while their
+  // dependents stated the wait in comments. The comment bodies below are the
+  // real ones from those threads, trimmed to the load-bearing lines. These are
+  // regression pins: a body-only index makes each of the two "-> stale" rows
+  // pass and each of the two "-> clean" rows fail.
+  const falseStaleSources = [
+    // #9465 (epic, `pm:blocking`): both dependents are body-clean.
+    carded(9709, ['pm:blocked'], 'Card body: add the console-injection guard to release.yml.'),
+    carded(9828, ['pm:blocked'], 'Card body: cut-rc.yml points a curator at an expired deadline.'),
+    // #9968 (decision card, `pm:blocking`): same shape.
+    carded(9969, ['pm:blocked'], 'Card body: consumerless vendor `/admin/` surface posture.'),
+    carded(9652, ['pm:blocked'], 'Card body: set-role veto tension in the same vendor-admin family.'),
+  ];
+  const falseStaleComments = new Map([
+    [9709, ['First-touch grading (triage seat): promoted out of `finding` -> `pm:blocked`, type Task.\n\nBlocked-by: #9465\n\nPremise re-checked on current values.']],
+    [9828, [liveBackfillComment]],
+    [9969, ['Triage: graded `pm:blocked` · `domain:services` · type Task, blocked behind the family decision.\n\nBlocked-by: #9968\n']],
+    [9652, ['Triage: same family as #9968; the ruling there sets this one.\n\nBlocked-by: #9968\n']],
+  ]);
+  const bodyOnlyIdx = idx(falseStaleSources);
+  const unionIdx = buildBlockingIndex(falseStaleSources, {
+    repo: 'objectstack-ai/objectstack',
+    comments: falseStaleComments,
+  });
+  const epic9465 = carded(9465, ['domain:devx', 'pm:epic', 'pm:blocking']);
+  const decision9968 = carded(9968, ['pm:decision', 'pm:blocking']);
+  // The defect, pinned: this is what the body-only index reported.
+  t('H14 false-stale: #9465 reads STALE against a body-only index', h14BlockingCacheIncoherent(epic9465, bodyOnlyIdx)?.includes('stale derived cache'), true);
+  t('H14 false-stale: #9968 reads STALE against a body-only index', h14BlockingCacheIncoherent(decision9968, bodyOnlyIdx)?.includes('stale derived cache'), true);
+  // The fix: the same two cards against the two-channel index.
+  t('H14 false-stale: #9465 is CLEAN once comment edges are read', h14BlockingCacheIncoherent(epic9465, unionIdx), null);
+  t('H14 false-stale: #9968 is CLEAN once comment edges are read', h14BlockingCacheIncoherent(decision9968, unionIdx), null);
+  t('H14 false-stale: …because #9709 and #9828 both point at #9465', unionIdx.get(9465).join(','), '9709,9828');
+  t('H14 false-stale: …and #9969 and #9652 both point at #9968', unionIdx.get(9968).join(','), '9969,9652');
+  // Direction B rides the same union: a comment-only edge is enough to call a
+  // card an invisible unblocker.
+  t('H14-B: a comment-only edge produces a missing-cache row', h14BlockingCacheIncoherent(carded(9465, ['domain:devx']), unionIdx)?.includes('#9709'), true);
+  t('H14-B: …and the sentence names the channel pair', h14BlockingCacheIncoherent(carded(9465, ['domain:devx']), unionIdx).includes('body or comment'), true);
+  t('H14-A: …the stale sentence names both channels too', h14BlockingCacheIncoherent(epic9465, bodyOnlyIdx).includes('body OR comment'), true);
+
+  // -- H14 under an INCOMPLETE index (a gated comment fetch failed) ----------
+  //
+  // Asymmetric on purpose: stale is a claim about ABSENT evidence and must not
+  // be made from an index known to be missing edges (#4690); missing is a
+  // claim about evidence in hand, which reading more sources can only add to.
+  t('H14-A: stale is SUSPENDED when the index is known incomplete', h14BlockingCacheIncoherent(epic9465, bodyOnlyIdx, { indexComplete: false }), null);
+  t('H14-A: …and still fires when the index is complete', typeof h14BlockingCacheIncoherent(epic9465, bodyOnlyIdx, { indexComplete: true }), 'string');
+  t('H14-A: …and completeness defaults to true for body-only callers', typeof h14BlockingCacheIncoherent(epic9465, bodyOnlyIdx), 'string');
+  t('H14-B: missing SURVIVES an incomplete index', h14BlockingCacheIncoherent(carded(9465, ['domain:devx']), unionIdx, { indexComplete: false })?.includes('#9709'), true);
+  t('H14-B: …and an earned label stays clean either way', h14BlockingCacheIncoherent(epic9465, unionIdx, { indexComplete: false }), null);
+
+  // The summary line carries the third `read X of Y` pair, and says out loud
+  // when the shortfall cost H14 its stale direction.
+  const fbCounts = (fallbackProbed, fallbackCandidates) => ({
+    repo: 'objectstack-ai/objectstack', issues: 1, unscoped: 1, prs: 0, merged: 0,
+    fallbackProbed, fallbackCandidates,
+  });
+  t('summary: the fallback pair is reported', summaryLine(fbCounts(24, 26), 3).includes('comment fallback read on 24 of 26 candidate(s)'), true);
+  t('summary: a shortfall announces the suspended stale direction', summaryLine(fbCounts(24, 26), 3).includes('stale direction is SUSPENDED'), true);
+  t('summary: a complete pass says nothing about suspension', summaryLine(fbCounts(26, 26), 3).includes('SUSPENDED'), false);
+  t('summary: absent fallback counts still render a sentence', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('comment fallback read on 0 of 0'), true);
+
   // -- H15: oldest unclaimed `pm:blocking` (selection-order visibility) -------
   const blockingCard = (number, { assignees = [], created = daysAgo(3) } = {}) => ({
     ...issue(['pm:blocking', 'pm:queue'], assignees),
@@ -2607,13 +3815,374 @@ function selfTest() {
   t('H15 reverse-verify: …the same card unassigned DOES produce the row', h15OldestUnclaimedBlocking([live7276([])], Date.parse('2026-08-19T09:00:00Z')).issue.number, 7276);
   t('H15 reverse-verify: …and its measured age', h15OldestUnclaimedBlocking([live7276([])], Date.parse('2026-08-19T09:00:00Z')).message.includes('open ~220h'), true);
 
+  // -- H16: open non-draft PR stuck in a merge conflict (2026-08-19 incident) --
+  // The single-PR payload shape, since `mergeable_state` is absent from the
+  // listing rows this sweep otherwise runs on.
+  const conflictPr = ({
+    draft = false,
+    mergeable_state = 'dirty',
+    auto_merge = null,
+    updated = hoursAgo(4),
+    body = '',
+    head = { ref: 'claude/issue-1-x' },
+    merged_at = null,
+  } = {}) => ({ draft, mergeable_state, auto_merge, head, body, updated_at: updated, merged_at });
+
+  t('H16: dirty beyond the threshold -> finding', typeof h16StuckMergeConflict(conflictPr(), NOW), 'string');
+  t('H16: …and the finding names the threshold', h16StuckMergeConflict(conflictPr(), NOW).includes(`${MERGE_CONFLICT_STALE_HOURS}h`), true);
+  t('H16: …and names the platform state it read', h16StuckMergeConflict(conflictPr(), NOW).includes('mergeable_state: dirty'), true);
+  t('H16: …and prescribes the merge-and-resolve remedy', h16StuckMergeConflict(conflictPr(), NOW).includes('merges `main` into the branch'), true);
+  // The proxy must be DECLARED in the row, not silently substituted: a reader
+  // shown "~4h" has to know it is silence on the PR, not the conflict's age.
+  t('H16: …and declares the age is the PR\'s updated_at, not the conflict\'s', h16StuckMergeConflict(conflictPr(), NOW).includes("Age is the PR's `updated_at`, not the conflict's"), true);
+  t('H16: dirty within the threshold -> clean (a fresh push is mid-resolution)', h16StuckMergeConflict(conflictPr({ updated: hoursAgo(1) }), NOW), null);
+  t('H16: exactly at the threshold -> clean (strictly beyond fires)', h16StuckMergeConflict(conflictPr({ updated: hoursAgo(MERGE_CONFLICT_STALE_HOURS) }), NOW), null);
+  t('H16: draft is out of scope however old (parked deliberately)', h16StuckMergeConflict(conflictPr({ draft: true, updated: hoursAgo(200) }), NOW), null);
+  t('H16: a clean PR is silent', h16StuckMergeConflict(conflictPr({ mergeable_state: 'clean', updated: hoursAgo(200) }), NOW), null);
+  // GitHub computes mergeability asynchronously: `unknown` is the platform
+  // saying "ask again later", so it is SKIPPED rather than vouched for or
+  // guessed — the one place H16 departs from the #4690 direction, on purpose.
+  t('H16: unknown is skipped, never reported', h16StuckMergeConflict(conflictPr({ mergeable_state: 'unknown', updated: hoursAgo(200) }), NOW), null);
+  t('H16: a null mergeable_state is skipped too', h16StuckMergeConflict(conflictPr({ mergeable_state: null, updated: hoursAgo(200) }), NOW), null);
+  // The wiring hazard this pins: a LIST row carries no `mergeable_state` at
+  // all, and feeding one here must skip rather than throw or flag. The summary
+  // line's `read X of Y` is what would expose that mistake in the live sweep.
+  t('H16: a listing row (no mergeable_state key) is skipped', h16StuckMergeConflict({ draft: false, merged_at: null, updated_at: hoursAgo(200) }, NOW), null);
+  // Every other non-dirty verdict is someone else's business: `behind` is the
+  // queue's to rebuild and `blocked` is a required check or a review, both of
+  // which DO produce a signal a patrol can already see.
+  t('H16: behind is not a conflict', h16StuckMergeConflict(conflictPr({ mergeable_state: 'behind', updated: hoursAgo(200) }), NOW), null);
+  t('H16: blocked is not a conflict', h16StuckMergeConflict(conflictPr({ mergeable_state: 'blocked', updated: hoursAgo(200) }), NOW), null);
+  t('H16: missing draft field is out of scope', h16StuckMergeConflict({ mergeable_state: 'dirty', updated_at: hoursAgo(50) }, NOW), null);
+  t('H16: merged row is out of scope', h16StuckMergeConflict(conflictPr({ merged_at: '2026-08-15T10:00:00Z', updated: hoursAgo(50) }), NOW), null);
+  // #4690 direction, same as H10/H11/H12/H13: unreadable must not read as fresh.
+  t('H16: unreadable updated_at -> finding, not fresh', typeof h16StuckMergeConflict(conflictPr({ updated: 'not-a-date' }), NOW), 'string');
+  t('H16: absent updated_at -> finding, not fresh', typeof h16StuckMergeConflict(conflictPr({ updated: undefined }), NOW), 'string');
+
+  // THE incident property: armed auto-merge must not quiet this row. H12 reads
+  // `auto_merge` as finding-reducing and is right to; here the arming is what
+  // made every proxy signal read healthy while the PR went nowhere.
+  t('H16: armed auto-merge does NOT suppress the row', typeof h16StuckMergeConflict(conflictPr({ auto_merge: { merge_method: 'squash' } }), NOW), 'string');
+  t('H16: …and the row says auto-merge does not resolve conflicts', h16StuckMergeConflict(conflictPr({ auto_merge: { merge_method: 'squash' } }), NOW).includes('does NOT resolve conflicts'), true);
+  // The contrast that makes the divergence deliberate rather than an oversight:
+  // one PR row, two predicates, opposite readings of the same armed field.
+  t('H16: …while H12 stays clean on that same armed PR (the divergence is by design)', h12OrphanLanding(conflictPr({ auto_merge: { merge_method: 'squash' }, updated: hoursAgo(50) }), NOW), null);
+
+  // The held-card clause — the row names the delivery, not only the branch.
+  t('H16: a `Fixes #N` body names the card it is holding', h16StuckMergeConflict(conflictPr({ body: 'Fixes #9763\n\nsome prose' }), NOW).includes('holding card #9763'), true);
+  t('H16: `Part of #N` counts as held too (H8\'s reading of delivery)', h16StuckMergeConflict(conflictPr({ body: 'Part of #9652' }), NOW).includes('holding card #9652'), true);
+  t('H16: two cards are pluralised and listed in order', h16StuckMergeConflict(conflictPr({ body: 'Fixes #9961\nFixes #9936' }), NOW).includes('holding cards #9936, #9961'), true);
+  t('H16: a body with no card carries no holding clause', h16StuckMergeConflict(conflictPr({ body: 'no card here' }), NOW).includes('holding'), false);
+  // #8293 reading 4 carries over: a body QUOTING the spelling names nothing.
+  t('H16: a backticked `Fixes #N` is not a held card', h16HeldCards('the dispatch asked for `Fixes #8284`').length, 0);
+  t('H16: h16HeldCards de-duplicates and sorts', h16HeldCards('Fixes #30\nPart of #12\nFixes #30').join(','), '12,30');
+  t('H16: h16HeldCards on an absent body does not crash', h16HeldCards(undefined).length, 0);
+
+  // -- H16 gathering policy: `h16NeedsDetail` --------------------------------
+  // Pinned for the reason `needsRepoProbe` is: a policy deciding what gets READ
+  // AT ALL is where a silent hole would live. THE property is that it can never
+  // be narrower than the predicate — anything H16 could flag must be fetched.
+  t('H16 gate: an aged non-draft PR is a candidate', h16NeedsDetail(conflictPr({ updated: hoursAgo(4) }), NOW), true);
+  t('H16 gate: a fresh PR is not worth a request', h16NeedsDetail(conflictPr({ updated: hoursAgo(1) }), NOW), false);
+  t('H16 gate: exactly at the threshold is not a candidate (matches the predicate)', h16NeedsDetail(conflictPr({ updated: hoursAgo(MERGE_CONFLICT_STALE_HOURS) }), NOW), false);
+  t('H16 gate: a draft is never fetched', h16NeedsDetail(conflictPr({ draft: true, updated: hoursAgo(200) }), NOW), false);
+  t('H16 gate: a merged row is never fetched', h16NeedsDetail(conflictPr({ merged_at: '2026-08-15T10:00:00Z', updated: hoursAgo(200) }), NOW), false);
+  t('H16 gate: missing draft field is never fetched', h16NeedsDetail({ updated_at: hoursAgo(200), merged_at: null }, NOW), false);
+  // The unreadable timestamp MUST be fetched: the predicate promises to surface
+  // it, so a gate that skipped it would drop the row it promises.
+  t('H16 gate: an unreadable updated_at IS a candidate (the predicate flags it)', h16NeedsDetail(conflictPr({ updated: 'not-a-date' }), NOW), true);
+  t('H16 gate: an absent updated_at IS a candidate', h16NeedsDetail(conflictPr({ updated: undefined }), NOW), true);
+  t('H16 gate: an absent row is not a candidate', h16NeedsDetail(undefined, NOW), false);
+  // The Version Packages PR is NOT excluded here, unlike in H12: it is
+  // regenerated from `main` on every push, so a dirty one is a real finding
+  // about the release bot rather than a by-design false positive.
+  t('H16 gate: a changeset-release head is still a candidate (unlike H12)', h16NeedsDetail(conflictPr({ head: { ref: 'changeset-release/main' }, updated: hoursAgo(200) }), NOW), true);
+  t('H16: …and a dirty Version Packages PR really does flag', typeof h16StuckMergeConflict(conflictPr({ head: { ref: 'changeset-release/main' }, updated: hoursAgo(200) }), NOW), 'string');
+  // The never-narrower invariant, asserted over the whole fixture table rather
+  // than case by case: for every row the predicate flags, the gate must fetch.
+  const h16Rows = [
+    conflictPr(),
+    conflictPr({ updated: 'not-a-date' }),
+    conflictPr({ updated: undefined }),
+    conflictPr({ auto_merge: { merge_method: 'squash' } }),
+    conflictPr({ head: { ref: 'changeset-release/main' }, updated: hoursAgo(200) }),
+    conflictPr({ body: 'Fixes #1' }),
+    conflictPr({ updated: hoursAgo(1) }),
+    conflictPr({ draft: true }),
+    conflictPr({ mergeable_state: 'clean' }),
+    conflictPr({ merged_at: '2026-08-15T10:00:00Z' }),
+  ];
+  t(
+    'H16 gate: never narrower than the predicate (every flagged row is fetched)',
+    h16Rows.every((row) => h16StuckMergeConflict(row, NOW) === null || h16NeedsDetail(row, NOW)),
+    true,
+  );
+
+  // -- H16 detail-pass failure posture (#4690 at row granularity) ------------
+  // A partial read is a bounded gap the summary line states; a total one is a
+  // transport failure wearing a quiet H16 section, and must surface as such.
+  t('H16 pass: some candidates unread is a bounded gap, not a transport failure', h16DetailPassUnreadable(5, 3), false);
+  t('H16 pass: exactly one read out of many is still a real reading', h16DetailPassUnreadable(9, 1), false);
+  t('H16 pass: NO candidate readable is a transport failure', h16DetailPassUnreadable(4, 0), true);
+  // The healthiest possible board — nothing stale enough to be worth a request
+  // — must not fail the sweep.
+  t('H16 pass: zero candidates is a clean reading, never a failure', h16DetailPassUnreadable(0, 0), false);
+  t('H16 pass: absent counters degrade to a clean reading', h16DetailPassUnreadable(undefined, undefined), false);
+
+  // -- H16 incident fixture: PR #9826, the measured specimen -----------------
+  // The devx incident this item exists for: a conflict that hung ~4h while
+  // auto-merge was armed, and not one of H1–H15 could express the state.
+  //
+  // ⚠️ The `dirty` reading is the INCIDENT's, recorded on the card — not a
+  // live reading. Measured again here on 2026-08-19 while implementing H16,
+  // that PR answered `mergeable_state: "blocked"`: the conflict had since been
+  // resolved. Pinned as a historical shape deliberately, and said so here so
+  // nobody "verifies" this fixture against a live PR that no longer carries
+  // it. Body `Fixes #9763` is from the same live read.
+  const pr9826 = conflictPr({
+    body: 'Fixes #9763. Sub-issue of #9747 (the meta-card), in its **fails toward FALSE GREEN** half.',
+    auto_merge: { merge_method: 'squash' },
+    updated: hoursAgo(4),
+    head: { ref: 'claude/issue-9763-literal-collector-spellings' },
+  });
+  t('H16 incident: the #9826 shape is a finding', typeof h16StuckMergeConflict(pr9826, NOW), 'string');
+  t('H16 incident: …fires despite auto-merge being armed', h16StuckMergeConflict(pr9826, NOW).includes('MERGE CONFLICT'), true);
+  t('H16 incident: …and names the card it was holding', h16StuckMergeConflict(pr9826, NOW).includes('holding card #9763'), true);
+  t('H16 incident: …at its measured ~4h age', h16StuckMergeConflict(pr9826, NOW).includes('untouched for ~4h'), true);
+  t('H16 incident: …and the sweep would have spent a request on it', h16NeedsDetail(pr9826, NOW), true);
+  // The counterfactual that makes the fixture mean something: at the moment
+  // the conflict appeared, the same PR was silent — the threshold is what
+  // separates "being worked" from "stuck", and 4h is well past it.
+  t('H16 incident: …while one hour in, the same PR was correctly silent', h16StuckMergeConflict({ ...pr9826, updated_at: hoursAgo(1) }, NOW), null);
+
+  // -- H17: the on-hold trigger-file index (#10034) --------------------------
+  // Every fixture below is a VERBATIM excerpt from a real hold comment or card
+  // body, read on 2026-08-19 while measuring the census that produced
+  // `H17_TRIGGER_ANCHOR_TERMS`. Invented shapes would prove nothing here: the
+  // whole question this item had to answer first was whether hold comments
+  // have a greppable shape at all, and the answer is a fact about these nine
+  // cards, not about a format anyone designed.
+  //
+  // The tracked-file oracle is a fixture set, so the extraction is pinned
+  // without a checkout — and the DROP behaviour is pinned with it, because
+  // "what this refuses to emit" is the property that makes the index safe to
+  // render unreviewed.
+  const TRACKED = new Set([
+    '.github/workflows/lint.yml',
+    'packages/rest/src/rest-server.ts',
+    'packages/spec/src/data/field.zod.ts',
+    'content/docs/ui/setup-app.mdx',
+    'content/docs/automation/hook-bodies.mdx',
+    'content/docs/kernel/index.mdx',
+    'scripts/check-durability-degradation-log-level.mjs',
+    'packages/lint/src/data-model-rules.ts',
+    'packages/lint/src/validate-security-posture.test.ts',
+    'scripts/check-where-matcher-conformance.mjs',
+    'scripts/where-matcher-conformance.baseline.json',
+    'scripts/check-type-check-coverage.mjs',
+    'packages/spec/src/contracts/data-driver.ts',
+  ]);
+  const tracked = (p) => TRACKED.has(p);
+  const files = (text) => h17TriggerFiles([text], tracked).join('|');
+
+  // Shape A — anchor and path on ONE line, prose form. #8331's hold comment.
+  const c8331 =
+    'Named restart conditions: ① #8330 merged AND the next queued card that already touches ' +
+    '`.github/workflows/lint.yml` — devx seat: name this card in that dispatch brief as a declared ' +
+    'rider (comment-or-removal, dev decides against the card\'s trade-off analysis); ② the gate\'s ' +
+    'filters and the workflow step\'s filters are ever observed to diverge.';
+  t('H17 #8331: `restart condition` anchor + inline path -> the path', files(c8331), '.github/workflows/lint.yml');
+
+  // Shape B — a bolded `Restart condition (trigger files):` label. #8883.
+  const c8883 =
+    '- **Restart condition (trigger files):** after PR #8887 (the #8850 extraction) is MERGED, the ' +
+    'next dispatched card whose surface includes `packages/rest/src/rest-server.ts` metadata-endpoints ' +
+    'region carries item 1 (the JSDoc header) as a declared rider.';
+  t('H17 #8883: `trigger files` anchor -> the path', files(c8883), 'packages/rest/src/rest-server.ts');
+
+  // Shape C — an `opportunistic:` numbered item, with a backticked IDENTIFIER
+  // on the same line. `Field` is not a tracked file and must be dropped: this
+  // is the decoy that proves the oracle is doing work rather than decorating.
+  const c8656 =
+    '3. **opportunistic:** any PR already editing the `Field` builder object in ' +
+    '`packages/spec/src/data/field.zod.ts` — closing the gap there is a cheap declared rider.';
+  t('H17 #8656: `opportunistic` anchor -> only the tracked path', files(c8656), 'packages/spec/src/data/field.zod.ts');
+  t('H17 #8656: …and the backticked identifier `Field` is dropped, not guessed at', files(c8656).includes('Field'), false);
+
+  // Shape D — anchor sentence, then an IMMEDIATE bullet list. #8984.
+  const c8984 =
+    '**Restart condition (named trigger files)**: the next PR touching any of\n' +
+    '- `content/docs/ui/setup-app.mdx`\n' +
+    '- `content/docs/automation/hook-bodies.mdx`\n' +
+    '- `content/docs/kernel/index.mdx`\n' +
+    '\n' +
+    'carries the relabel as a **declared rider**.';
+  t(
+    'H17 #8984: anchor + immediate bullet list -> all three paths',
+    files(c8984),
+    'content/docs/automation/hook-bodies.mdx|content/docs/kernel/index.mdx|content/docs/ui/setup-app.mdx',
+  );
+  t('H17 #8984: …and the prose after the blank line is not rejoined', files(c8984).includes('rider'), false);
+
+  // Shape E — an explicit `Trigger file:` label inside a numbered item. #8897.
+  const c8897 =
+    '1. **Trigger file: `scripts/check-durability-degradation-log-level.mjs`** — any card or PR ' +
+    'editing this file (including the #8901 design work) must decide options 1/2/3 in the same change.\n' +
+    '2. Any seam reporting through an injected receiver goes red with a "silent" message.';
+  t('H17 #8897: `Trigger file:` label -> the path', files(c8897), 'scripts/check-durability-degradation-log-level.mjs');
+
+  // Shape F — two paths on one anchor line, in a card BODY rather than a
+  // comment. #9139, which carries zero comments: the body channel is not
+  // optional, and reading only comments would have missed this card entirely.
+  const b9139 =
+    '- **Trigger files** (opportunistic-restart clause): `packages/lint/src/data-model-rules.ts` and ' +
+    '`packages/lint/src/validate-security-posture.test.ts` — any dispatch whose file surface ' +
+    'intersects them must name this card.';
+  t(
+    'H17 #9139: two paths on one anchor line (from the card BODY) -> both',
+    files(b9139),
+    'packages/lint/src/data-model-rules.ts|packages/lint/src/validate-security-posture.test.ts',
+  );
+
+  // Shape G — anchor, BLANK LINE, then the list; and a third bullet that is
+  // prose naming a backticked fixture CONSTANT. #8662, the second decoy.
+  const c8662 =
+    '**Opportunistic trigger files** (per the hold discipline — a restart condition nobody can see is ' +
+    'not a condition). Name this card in the dispatch order of any card whose file surface intersects:\n' +
+    '\n' +
+    '- `scripts/check-where-matcher-conformance.mjs`\n' +
+    '- `scripts/where-matcher-conformance.baseline.json`\n' +
+    '- the `FIXTURE_CAPTURED_NEGATED` self-test fixture\n';
+  t(
+    'H17 #8662: anchor, blank line, then the list -> both tracked paths',
+    files(c8662),
+    'scripts/check-where-matcher-conformance.mjs|scripts/where-matcher-conformance.baseline.json',
+  );
+  t('H17 #8662: …and the backticked constant is dropped', files(c8662).includes('FIXTURE'), false);
+
+  // The NEGATIVE half of the census — the two sampled holds with no trigger
+  // clause. Their exits are `Restart-when: closed …#N`, which H9 already
+  // judges; H17 must contribute no row for them, or the index would tell a
+  // dispatching seat to intersect against files nobody nominated.
+  const c9276 =
+    'Restart-when: closed objectstack-ai/objectstack#5499\n\n' +
+    '(Earlier restart is legitimate only if the freeze ruling is narrowed on #5499 to exclude ' +
+    'storage-contract normalization — that is a maintainer note to record there, not a seat call.)';
+  t('H17 #9276: a `Restart-when: closed` hold names no trigger file', files(c9276), '');
+  t(
+    'H17 #9707: a card-closure hold names no trigger file either',
+    files('**Card status:** `pm:on-hold`, restart-when **objectui#5266 lands** — at which point the residual should be re-measured.'),
+    '',
+  );
+
+  // ⛔ `rider` is not an anchor term, and this is the specimen that decided it:
+  // #8331's RELEASE comment is post-mortem prose about a hold that is no
+  // longer held, and it contains a tracked path. Admitting `rider` would have
+  // rendered a dead trigger as a live one.
+  const release8331 =
+    'Hold released → `pm:queue` (triage seat, rider-clause audit): the armed rider fired three times ' +
+    'without being carried — PRs #9869, #9990 and #10005 all touched `.github/workflows/lint.yml` ' +
+    'after the rider armed (verified on origin/main; `refreshBuiltClosure()` confirmed at ' +
+    '`scripts/check-type-check-coverage.mjs:1679`).';
+  t('H17: a release/audit comment saying "rider" is NOT an anchor', files(release8331), '');
+  // …and the same line's `path:line` citation form must fail validation even
+  // when something else on the line does anchor it.
+  t(
+    'H17: a `path:line` citation is not a tracked file and is dropped',
+    files(`**Trigger file:** see \`scripts/check-type-check-coverage.mjs:1679\``),
+    '',
+  );
+
+  // Fenced blocks are citations, not triggers — #8656's evidence block lists
+  // real `packages/spec/**` paths that nominate nothing.
+  //
+  // ⚠️ The fixture QUOTES ANOTHER CARD'S CLAUSE inside the fence, and that
+  // detail is load-bearing. Written first with only #8656's verbatim
+  // `path:line` citations, this case passed with fence-stripping ENTIRELY
+  // REMOVED: the `:234` suffix makes that token fail the tracked-file check on
+  // its own, so the test was measuring the ORACLE while vouching for a fence
+  // parser it never exercised. A bare path in a fence does not exercise it
+  // either — nothing unbackticked is ever harvested from prose. The shape that
+  // actually needs the strip is the one these threads are full of: a comment
+  // quoting a PRIOR comment wholesale, anchor term and backticks included.
+  // Without the strip, the quoting card inherits a trigger file it never
+  // nominated, and the index sends a seat to intersect on the wrong card.
+  const fenced =
+    '**Restart condition**: unchanged. For reference, #8656 reads:\n\n' +
+    '```\n' +
+    '3. **opportunistic:** any PR already editing the `Field` builder object in `packages/spec/src/data/field.zod.ts` — a cheap declared rider.\n' +
+    '```\n';
+  t('H17: a clause quoted inside a fenced block is not harvested', files(fenced), '');
+  t(
+    'H17: …but stripMarkdownCode({inline:false}) still keeps inline spans',
+    stripMarkdownCode('a `packages/rest/src/rest-server.ts` b', { inline: false }).includes('rest-server'),
+    true,
+  );
+  t(
+    'H17: …and the default (inline:true) is unchanged for every existing caller',
+    stripMarkdownCode('a `Fixes #1` b').includes('#1'),
+    false,
+  );
+
+  // The canonical `Restart-touch:` channel — zero live matches today by
+  // design, so these are the only cases that exercise it.
+  t('H17 Restart-touch: a bare path on the canonical line is read', files('Restart-touch: packages/rest/src/rest-server.ts'), 'packages/rest/src/rest-server.ts');
+  t('H17 Restart-touch: a backticked value is read too', files('Restart-touch: `.github/workflows/lint.yml`'), '.github/workflows/lint.yml');
+  t('H17 Restart-touch: a bulleted canonical line is read', files('- Restart-touch: packages/spec/src/data/field.zod.ts'), 'packages/spec/src/data/field.zod.ts');
+  t('H17 Restart-touch: an UNTRACKED value is dropped, never emitted', files('Restart-touch: packages/gone/removed.ts'), '');
+  // Case-sensitive like `Blocked-by:` and `Restart-when:`: a lowercase variant
+  // is a line the machinery cannot see, and must not be quietly accepted.
+  t('H17 Restart-touch: the lowercase spelling is NOT the channel', files('restart-touch: packages/rest/src/rest-server.ts'), '');
+
+  // Continuation bounds.
+  t(
+    'H17 continuation: prose immediately after the anchor stops the scan',
+    files('**Trigger files**: as follows.\nThis paragraph mentions `packages/rest/src/rest-server.ts` in passing.'),
+    '',
+  );
+  t(
+    'H17 continuation: two blank lines before a list stop the scan',
+    files('**Trigger files**:\n\n\n- `packages/rest/src/rest-server.ts`'),
+    '',
+  );
+  const longList = `**Trigger files**:\n${Array.from({ length: 20 }, (_, i) => `- item ${i}`).join('\n')}\n- \`packages/rest/src/rest-server.ts\``;
+  t('H17 continuation: the scan stops at H17_LIST_SCAN_LIMIT', files(longList), '');
+  t('H17_LIST_SCAN_LIMIT is the documented parsing bound', H17_LIST_SCAN_LIMIT, 12);
+
+  // Multi-text merge: body + comments are one card's evidence, deduped and
+  // sorted. A path named in both the body and a comment is ONE row entry.
+  t(
+    'H17: body and comments merge, dedupe and sort into one list',
+    h17TriggerFiles([b9139, c8331, '**Trigger files**: `.github/workflows/lint.yml`'], tracked).join('|'),
+    '.github/workflows/lint.yml|packages/lint/src/data-model-rules.ts|packages/lint/src/validate-security-posture.test.ts',
+  );
+
+  // The gathering policy — the same "must never be narrower than the thing it
+  // feeds" property `h16NeedsDetail` is pinned for.
+  t('H17 gating: an open pm:on-hold card is a candidate', h17NeedsComments(issue(['pm:on-hold'])), true);
+  t('H17 gating: a queued card is not', h17NeedsComments(issue(['pm:queue', 'domain:devx'])), false);
+  t('H17 gating: a dispatched card is not', h17NeedsComments(issue(['pm:dispatched'])), false);
+  t('H17 gating: a hold carrying other labels is still a candidate', h17NeedsComments(issue(['bug', 'pm:on-hold', 'domain:engine'])), true);
+
+  // Row assembly: cards with no validated path are omitted entirely (the
+  // majority shape — most of the 79 open holds name no file), and rows sort by
+  // number so the anchor body diffs cleanly run to run.
+  const card = (number, texts) => ({ issue: { number, html_url: `https://example.test/${number}` }, texts });
+  const rows17 = h17IndexRows(
+    [card(9139, [b9139]), card(9276, [c9276]), card(8331, [c8331])],
+    tracked,
+  );
+  t('H17 rows: a hold naming nothing is omitted, not rendered empty', rows17.length, 2);
+  t('H17 rows: …and rows ascend by card number', rows17.map((r) => r.issue.number).join(','), '8331,9139');
+  t('H17 rows: …carrying the validated files', rows17[1].files.join('|'), 'packages/lint/src/data-model-rules.ts|packages/lint/src/validate-security-posture.test.ts');
+
   // -- report rendering, both media (#9844) ---------------------------------
   // The standing caller writes the markdown into a pinned issue body, so the
   // properties pinned here are the ones a broken body would cost: the plain
   // output must not have moved, the loud rows must outrank truncation, the
   // trim must announce itself, and a mistyped --format must be loud.
   const finding = (number, code, msg) => [{ number, html_url: `https://example.test/${number}` }, code, msg];
-  const counts = { repo: 'o/r', issues: 3, unscoped: 4, prs: 5, merged: 6 };
+  const counts = { repo: 'o/r', issues: 3, unscoped: 4, prs: 5, merged: 6, conflictCandidates: 2, conflictProbed: 2 };
   const quietRow = finding(200, 'H2', 'assignee set but no claim comment on the thread');
   const loudRow = finding(900, 'H13', `${P0_SUSPECT_MARKER} the card self-declares P0. base sentence.`);
 
@@ -2633,6 +4202,14 @@ function selfTest() {
   t('plain: preserves the caller\'s order, applying no priority sort', renderPlain([loudRow, quietRow], counts).indexOf('#900') < renderPlain([loudRow, quietRow], counts).indexOf('#200'), true);
   t('plain: …and the markdown renderer on the same input DOES sort loud first', renderMarkdown([quietRow, loudRow], counts).indexOf('#900') < renderMarkdown([quietRow, loudRow], counts).indexOf('#200'), true);
   t('summaryLine: names what was READ, not only what was found', summaryLine(counts, 0).includes('swept 3 open pm-/p0-labeled issue(s)'), true);
+  // H16's pair is the row-granular half of the same #4690 property: a detail
+  // pass that read NOTHING must not be indistinguishable from a board with no
+  // conflicts, so the sentence carries `read X of Y` rather than only findings.
+  t('summaryLine: reports the H16 detail reads, not only the H16 findings', summaryLine(counts, 0).includes('merge state read on 2 of 2 H16 candidate(s)'), true);
+  t('summaryLine: …and a partial read says so', summaryLine({ ...counts, conflictProbed: 1 }, 0).includes('read on 1 of 2'), true);
+  // Counts assembled without the pair still render a sentence, never `undefined`.
+  t('summaryLine: absent H16 counts degrade to 0, never to undefined', summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 1 }, 0).includes('read on 0 of 0'), true);
+  t('summaryLine: …and never prints the string undefined', summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 1 }, 0).includes('undefined'), false);
 
   // The loudness contract between H13 and the renderer — one constant, two
   // readers. If the prefix ever drifts, this pair fails rather than the alarm
@@ -2664,6 +4241,16 @@ function selfTest() {
   // class, and a coherence or visibility row must never outrank it at the fold.
   t('loudness: an H14 row is not loud', isLoudFinding(h14Row[2]), false);
   t('loudness: an H15 row is not loud', isLoudFinding(h15Row[2]), false);
+
+  // H16 is an ordinary row in BOTH media too — report-only and NOT loud, as
+  // the card requires: the P0-SUSPECT band stays H13's self-declared-emergency
+  // class, which must keep outranking a conflict row at the fold.
+  const h16Row = finding(9826, 'H16', h16StuckMergeConflict(pr9826, NOW));
+  t('plain: an H16 row renders in the standard two-line shape', renderPlain([h16Row], counts).startsWith('  H16 #9826 open, non-draft and in MERGE CONFLICT'), true);
+  t('plain: …and carries the PR URL on the second line', renderPlain([h16Row], counts).includes('\n     https://example.test/9826'), true);
+  t('markdown: an H16 row renders as a link row like every other', renderMarkdown([h16Row], counts).includes('- **H16** [#9826](https://example.test/9826) — '), true);
+  t('loudness: an H16 row is not loud', isLoudFinding(h16Row[2]), false);
+  t('markdown: a loud H13 row still sorts above an H16 row', renderMarkdown([h16Row, loudRow], counts).indexOf('#900') < renderMarkdown([h16Row, loudRow], counts).indexOf('#9826'), true);
   t('markdown: a loud H13 row still sorts above an H14 row', renderMarkdown([h14Row, loudRow], counts).indexOf('#900') < renderMarkdown([h14Row, loudRow], counts).indexOf('#7276'), true);
 
   // A clean board says it was READ. The #4690 direction, restated in the one
@@ -2689,6 +4276,71 @@ function selfTest() {
   t('provenance: absent leaves the swept line alone', renderMarkdown([], counts).includes('_Swept ') && !renderMarkdown([], counts).includes(' · undefined'), true);
   t('provenance: present is stamped after the timestamp', renderMarkdown([], counts, { provenance: 'run 7' }).includes(' · run 7_'), true);
   t('markdown: the sweep timestamp is the patrol heartbeat', renderMarkdown([], counts, { sweptAt: new Date('2026-08-19T06:00:00Z') }).includes('_Swept 2026-08-19T06:00:00.000Z'), true);
+
+  // -- H17 section rendering, both media (#10034) ---------------------------
+  // The section has three states and two of them read identically if you are
+  // careless, so each is pinned by the sentence that distinguishes it.
+  const idxRows = [
+    { issue: { number: 8331, html_url: 'https://example.test/8331' }, files: ['.github/workflows/lint.yml'] },
+    { issue: { number: 9139, html_url: 'https://example.test/9139' }, files: ['packages/lint/src/data-model-rules.ts', 'packages/lint/src/validate-security-posture.test.ts'] },
+  ];
+  const triggerIdx = { rows: idxRows, candidates: 79, probed: 79, tracked: 6360 };
+  // Absent index -> byte-identical to the report this script always printed.
+  t('H17 render: no index supplied renders no section at all', renderTriggerIndex(undefined).length, 0);
+  t('H17 render: …so a two-argument renderPlain is unchanged', renderPlain([quietRow], counts).endsWith('not a gate verdict.'), true);
+  // Present index, plain medium.
+  const plainIdx = renderPlain([quietRow], counts, { triggerIndex: triggerIdx });
+  t('H17 plain: the section is titled and present', plainIdx.includes('On-hold trigger-file index (H17)'), true);
+  t('H17 plain: a row lists card and files', plainIdx.includes('  #9139 packages/lint/src/data-model-rules.ts, packages/lint/src/validate-security-posture.test.ts'), true);
+  t('H17 plain: …with the card URL on its own line', plainIdx.includes('\n     https://example.test/9139'), true);
+  // The placement constraint the terminal medium imposes: the summary sentence
+  // stays LAST, and the index sits above it rather than after it.
+  t('H17 plain: the summary sentence is still the last line', plainIdx.endsWith('not a gate verdict.'), true);
+  t('H17 plain: …and the index sits above it', plainIdx.indexOf('On-hold trigger-file index') < plainIdx.indexOf('check-half-states: swept'), true);
+  // Markdown medium.
+  const mdIdx = renderMarkdown([quietRow], counts, { triggerIndex: triggerIdx });
+  t('H17 markdown: the section renders as a heading', mdIdx.includes('### On-hold trigger-file index (H17)'), true);
+  t('H17 markdown: a row is a link plus backticked paths', mdIdx.includes('- [#8331](https://example.test/8331) — `.github/workflows/lint.yml`'), true);
+  t('H17 markdown: the section sits BELOW the findings', mdIdx.indexOf('### Findings') < mdIdx.indexOf('### On-hold trigger-file index'), true);
+  t('H17 markdown: the intro states the measured failure it exists to end', mdIdx.includes('0-for-19'), true);
+  t('H17 markdown: …and says it is report-only, not a finding', mdIdx.includes('a card here is a hold in good standing, never a finding'), true);
+  t('H17 markdown: …and declares that it under-reports rather than invents', mdIdx.includes('under-reports and never invents'), true);
+  // A clean board still gets the index: an empty FINDINGS list is exactly the
+  // run on which a dispatching seat has nothing else to read.
+  t('H17 markdown: a findings-clean sweep still renders the index', renderMarkdown([], counts, { triggerIndex: triggerIdx }).includes('### On-hold trigger-file index'), true);
+  // Read-and-empty vs oracle-unreadable — the #4690 pair.
+  const emptyIdx = renderMarkdown([], counts, { triggerIndex: { rows: [], candidates: 79, probed: 79, tracked: 6360 } });
+  t('H17 empty: says the holds were READ', emptyIdx.includes('this is a clean reading, not an unread one'), true);
+  t('H17 empty: …and does not claim an oracle failure', emptyIdx.includes('EMPTY BY FAILURE'), false);
+  const noOracle = renderMarkdown([], counts, { triggerIndex: { rows: idxRows, candidates: 79, probed: 79, tracked: null } });
+  t('H17 no-oracle: says the index is empty BY FAILURE', noOracle.includes('EMPTY BY FAILURE, not by finding'), true);
+  t('H17 no-oracle: …and renders no row, so nothing unvalidated leaks out', noOracle.includes('#8331'), false);
+  // The partial-read gap is stated, never implied.
+  t('H17 partial: a partial hold read says so', renderMarkdown([], counts, { triggerIndex: { rows: [], candidates: 79, probed: 12, tracked: 10 } }).includes('read on 12 of 79'), true);
+  // Budget: the index is RESERVED, so a board noisy enough to truncate the
+  // findings list still carries the index — the property that keeps the
+  // 0-for-19 silence from coming back through the renderer.
+  const manyRows = Array.from({ length: 400 }, (_, i) => finding(1000 + i, 'H1', 'x'.repeat(400)));
+  const crowded = renderMarkdown(manyRows, counts, { triggerIndex: triggerIdx });
+  t('H17 budget: a truncated findings list still announces its trim', crowded.includes('further row(s) omitted'), true);
+  t('H17 budget: …and the index survives the trim', crowded.includes('### On-hold trigger-file index'), true);
+  // The budget, not the hard cap: reserving the index is what keeps the body
+  // under MARKDOWN_BODY_BUDGET. Asserting only ISSUE_BODY_LIMIT would pass
+  // even with the reservation removed (the index is ~1.5 KB and the two
+  // numbers are 5.5 KB apart), i.e. it would pin nothing.
+  t('H17 budget: …and the whole body stays inside the render budget', crowded.length <= MARKDOWN_BODY_BUDGET, true);
+  t('H17 budget: …which the hard cap also bounds', crowded.length <= ISSUE_BODY_LIMIT, true);
+  // The index's own overflow announces itself rather than truncating silently.
+  const overflow = renderTriggerIndex(
+    { rows: Array.from({ length: H17_INDEX_ROW_CAP + 3 }, (_, i) => ({ issue: { number: i, html_url: 'u' }, files: ['f'] })), candidates: 1, probed: 1, tracked: 1 },
+    { markdown: true },
+  ).join('\n');
+  t('H17 budget: an over-cap index announces the omission', overflow.includes('3 further card(s) omitted'), true);
+  t('H17 budget: …and renders exactly the cap', overflow.split('\n').filter((l) => /^- \[?#?\d/.test(l)).length, H17_INDEX_ROW_CAP);
+  // The summary line's H17 half, mirroring the H16 `read X of Y` discipline.
+  t('summaryLine: reports the H17 hold-comment reads', summaryLine({ ...counts, holdCandidates: 79, holdProbed: 79 }, 0).includes('Hold comments read on 79 of 79 H17 candidate(s)'), true);
+  t('summaryLine: …and a partial hold read says so', summaryLine({ ...counts, holdCandidates: 79, holdProbed: 12 }, 0).includes('read on 12 of 79'), true);
+  t('summaryLine: absent H17 counts degrade to 0, never to undefined', summaryLine(counts, 0).includes('Hold comments read on 0 of 0'), true);
 
   // Usage. A mistyped --format must be a loud non-zero exit, never a silent
   // fallback that lands terminal lines in an issue body looking like a report.

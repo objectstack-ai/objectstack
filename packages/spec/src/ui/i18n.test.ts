@@ -65,6 +65,16 @@ describe('I18nLabelSchema', () => {
     // Rejected for the RIGHT reason: `defaultValue` is not a locale tag, not
     // merely "the value is an object" (which the string branch would say).
     expect(JSON.stringify(r.error?.issues)).toContain('invalid_key');
+
+    // Property order must not matter (#9925 — the runtime twin of the
+    // compile-time pins in `i18n.label-type-assertions.ts`; objectui#5303
+    // measured both orders on its side).
+    const flipped = I18nLabelSchema.safeParse({
+      defaultValue: 'Task List',
+      key: 'views.task_list.label',
+    });
+    expect(flipped.success).toBe(false);
+    expect(JSON.stringify(flipped.error?.issues)).toContain('invalid_key');
   });
 
   it('still rejects the retired i18n object with params', () => {

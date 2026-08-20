@@ -795,9 +795,20 @@ describe('Field Factory Helpers', () => {
 
     it('should create email field', () => {
       const emailField = Field.email({ label: 'Email Address' });
-      
+
       expect(emailField.type).toBe('email');
       expect(emailField.label).toBe('Email Address');
+    });
+
+    it('should create time field (#8656)', () => {
+      const timeField = Field.time({ label: 'Time' });
+
+      expect(timeField.type).toBe('time');
+      expect(timeField.label).toBe('Time');
+      expect(() => FieldSchema.parse(timeField)).not.toThrow();
+      // Clause-2 pin: the builder must produce exactly the literal form an
+      // author could already write today — no accept-set change.
+      expect(timeField).toEqual({ type: 'time', label: 'Time' });
     });
   });
 

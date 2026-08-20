@@ -1329,30 +1329,48 @@ export interface HookEntry {
   priority: number;
   packageId?: string;
   /**
-   * [#9719] Opt-in: ALSO dispatch this handler ONCE with the whole-operation
-   * context when a predicate (`multi: true`) delete arrives with no caller
-   * predicate at all (`options.where` absent or `null`) — BEFORE any matched
-   * row is resolved.
+   * [#9719, widened to `beforeUpdate` by #9974] Opt-in: ALSO dispatch this
+   * handler ONCE with the whole-operation context when a predicate
+   * (`multi: true`) WRITE arrives with no caller predicate at all
+   * (`options.where` absent or `null`) — BEFORE any matched row is resolved.
    *
    * Why the extra dispatch exists: since #5038/#5574 the predicate path
-   * dispatches `beforeDelete` per matched row, with `input.id` bound — so a
-   * guard that refuses the OPERATION SHAPE (the #4757 unscoped-multi-delete
-   * refusal on `sys_attachment`) never saw the shape it guards: the by-id
-   * branch of the handler shadowed it on every dispatch, and a zero-match
-   * unscoped delete dispatched nothing at all. "Nothing to authorize" and
-   * "nothing was ever queried" are different verdicts, so the shape check
-   * cannot ride the per-row fan-out; it needs the one dispatch that happens
-   * regardless of what the predicate matches.
+   * dispatches `beforeUpdate` / `beforeDelete` per matched row, with
+   * `input.id` bound — so a guard that refuses the OPERATION SHAPE (the #4757
+   * unscoped-multi-delete refusal on `sys_attachment`, the #4630 one on
+   * `sys_comment`) never saw the shape it guards: the by-id branch of the
+   * handler shadowed it on every dispatch, and a zero-match unscoped write
+   * dispatched nothing at all. "Nothing to authorize" and "nothing was ever
+   * queried" are different verdicts, so the shape check cannot ride the
+   * per-row fan-out; it needs the one dispatch that happens regardless of what
+   * the predicate matches.
+   *
+   * ## Why it covers both write verbs
+   *
+   * #9719 shipped it on `beforeDelete` only, and refused it elsewhere, because
+   * extending it to `beforeUpdate`'s predicate path changes what the engine
+   * ACCEPTS on the far hotter update path — a product-behaviour decision, not
+   * drift. That decision was taken (#9974, maintainer ruling 2026-08-19,
+   * option A) on the recoverability asymmetry: a delete leaves a trace of who
+   * removed what, an overwrite leaves none — the old value is gone on the spot
+   * with nothing to restore from — and a forgotten `where` is the mistake
+   * generated code makes most often. So the LESS guarded verb was the one
+   * whose failure is LESS recoverable. One flag now covers both, rather than a
+   * `dispatchUnscopedMultiUpdate` sibling: the flag is already per-REGISTRATION
+   * and per-EVENT, so "delete only" (#4757's `sys_attachment` guard, which
+   * declares no update refusal) is still said exactly — by declaring it on the
+   * `beforeDelete` registration and not on an update one.
    *
    * Deliberately a REGISTRATION declaration, not an engine-wide rule: the
    * engine stays neutral (no behaviour change for objects whose guards do not
-   * declare it — generalizing the refusal is a separate product decision), and
-   * the policy — who is refused, with what error — stays in the ONE handler
-   * that already declares and tests it. Valid on `beforeDelete` registrations
-   * only ({@link assertValidUnscopedMultiDeleteFlag}); dispatched by
-   * {@link ObjectQL.dispatchUnscopedMultiDeleteHooks}.
+   * declare it — generalizing the refusal to every guarded object is a
+   * separate product decision), and the policy — who is refused, with what
+   * error — stays in the ONE handler that already declares and tests it. Valid
+   * on `beforeUpdate` / `beforeDelete` registrations only
+   * ({@link assertValidUnscopedMultiWriteFlag}); dispatched by
+   * {@link ObjectQL.dispatchUnscopedMultiWriteHooks}.
    */
-  dispatchUnscopedMultiDelete?: boolean;
+  dispatchUnscopedMultiWrite?: boolean;
   /**
    * Original metadata-form `Hook` definition this entry was bound from
    * (when registered via `bindHooksToEngine`). Pure code-paths that call
@@ -1580,27 +1598,41 @@ function assertHookScopeNotSelfCancelling(
 }
 
 /**
- * [#9719] Registration-time refusal for {@link HookEntry.dispatchUnscopedMultiDelete}
- * on any event other than `beforeDelete`.
- *
- * The flag is consumed by exactly one dispatch site — `ObjectQL.delete()`'s
- * predicate branch — so on every other event it would register "successfully"
- * and never fire: ADR-0078's silently inert declaration, the same shape the
- * two scope asserts above refuse. Statically decidable, so refused at the
- * door rather than warned about. (Extending the whole-operation dispatch to
- * `beforeUpdate`'s predicate path would be a product-behaviour decision of its
- * own, not a widening to make this assert quieter.)
+ * [#9719, widened by #9974] The events whose predicate branch actually reads
+ * {@link HookEntry.dispatchUnscopedMultiWrite}. Declared as data beside the
+ * assert so the refusal message and the accept set cannot drift apart, and so
+ * adding a third verb is one edit rather than a rule to restate.
  */
-function assertValidUnscopedMultiDeleteFlag(
-  dispatchUnscopedMultiDelete: boolean | undefined,
+const UNSCOPED_MULTI_WRITE_EVENTS = ['beforeUpdate', 'beforeDelete'] as const;
+
+/**
+ * [#9719, widened by #9974] Registration-time refusal for
+ * {@link HookEntry.dispatchUnscopedMultiWrite} on any event whose dispatch
+ * never reads it.
+ *
+ * The flag is consumed by exactly two dispatch sites — the predicate branches
+ * of `ObjectQL.update()` and `ObjectQL.delete()` — so on every other event it
+ * would register "successfully" and never fire: ADR-0078's silently inert
+ * declaration, the same shape the two scope asserts above refuse. Statically
+ * decidable, so refused at the door rather than warned about.
+ *
+ * ⚠️ The accept set widened by RULING, not to make the assert quieter: until
+ * #9974 this refused `beforeUpdate` too, and its comment named that as "a
+ * product-behaviour decision of its own". The decision was taken (option A,
+ * 2026-08-19), so `beforeUpdate` is now a declared reader — and every OTHER
+ * event is still refused on exactly the original grounds.
+ */
+function assertValidUnscopedMultiWriteFlag(
+  dispatchUnscopedMultiWrite: boolean | undefined,
   event: string,
 ): void {
-  if (!dispatchUnscopedMultiDelete || event === 'beforeDelete') return;
+  if (!dispatchUnscopedMultiWrite) return;
+  if ((UNSCOPED_MULTI_WRITE_EVENTS as readonly string[]).includes(event)) return;
   throw new Error(
-    `[ObjectQL] Hook '${event}' declares \`dispatchUnscopedMultiDelete\`, which only the `
-    + "'beforeDelete' dispatch reads — on this event the flag would register successfully and "
-    + 'then never fire (ADR-0078: no silently inert declaration). Register the guard on '
-    + "'beforeDelete', or drop the flag.",
+    `[ObjectQL] Hook '${event}' declares \`dispatchUnscopedMultiWrite\`, which only the `
+    + `${UNSCOPED_MULTI_WRITE_EVENTS.map((e) => `'${e}'`).join(' / ')} dispatches read — on this `
+    + 'event the flag would register successfully and then never fire (ADR-0078: no silently '
+    + 'inert declaration). Register the guard on one of those events, or drop the flag.',
   );
 }
 
@@ -2154,11 +2186,12 @@ export class ObjectQL implements IObjectQLEngine {
     priority?: number;
     packageId?: string;
     /**
-     * [#9719] Opt-in whole-operation dispatch for an UNSCOPED predicate
-     * delete (`multi: true`, no `where`) — see {@link HookEntry.dispatchUnscopedMultiDelete}.
-     * Valid on `beforeDelete` registrations only.
+     * [#9719, widened by #9974] Opt-in whole-operation dispatch for an
+     * UNSCOPED predicate write (`multi: true`, no `where`) — see
+     * {@link HookEntry.dispatchUnscopedMultiWrite}. Valid on `beforeUpdate` /
+     * `beforeDelete` registrations only.
      */
-    dispatchUnscopedMultiDelete?: boolean;
+    dispatchUnscopedMultiWrite?: boolean;
     /** Original metadata Hook definition (set by `bindHooksToEngine`). */
     meta?: any;
     /** Stable name from metadata (set by `bindHooksToEngine`). */
@@ -2173,8 +2206,8 @@ export class ObjectQL implements IObjectQLEngine {
     assertValidHookObject(options?.object, event);
     // [#6573] Two well-formed faces that cancel out (`'account'` minus `'account'`).
     assertHookScopeNotSelfCancelling(options?.object, options?.excludeObjects, event);
-    // [#9719] The unscoped-multi-delete flag on an event whose dispatch never reads it.
-    assertValidUnscopedMultiDeleteFlag(options?.dispatchUnscopedMultiDelete, event);
+    // [#9719/#9974] The unscoped-multi-write flag on an event whose dispatch never reads it.
+    assertValidUnscopedMultiWriteFlag(options?.dispatchUnscopedMultiWrite, event);
     // [#3195] Guard against enum-vs-dispatch drift: a hook on an event the
     // engine never triggers would register "successfully" and then silently
     // never fire. Warn loudly rather than swallow it. Not a hard reject — a
@@ -2197,7 +2230,7 @@ export class ObjectQL implements IObjectQLEngine {
       excludeObjects: options?.excludeObjects,
       priority: options?.priority ?? 100,
       packageId: options?.packageId,
-      dispatchUnscopedMultiDelete: options?.dispatchUnscopedMultiDelete,
+      dispatchUnscopedMultiWrite: options?.dispatchUnscopedMultiWrite,
       meta: options?.meta,
       hookName: options?.hookName,
     });
@@ -2658,22 +2691,36 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
-   * [#9719] The whole-operation `beforeDelete` dispatch for an UNSCOPED
-   * predicate delete — `multi: true` with no caller predicate at all
-   * (`options.where` absent or `null`) — delivered ONLY to registrations that
-   * declared {@link HookEntry.dispatchUnscopedMultiDelete}.
+   * [#9719, widened to `beforeUpdate` by #9974] The whole-operation
+   * `beforeUpdate` / `beforeDelete` dispatch for an UNSCOPED predicate write —
+   * `multi: true` with no caller predicate at all (`options.where` absent or
+   * `null`) — delivered ONLY to registrations that declared
+   * {@link HookEntry.dispatchUnscopedMultiWrite} on `event`.
    *
    * ## Why this dispatch exists
    *
    * The per-row contract (#5038 / #5574) made the operation's SHAPE invisible
-   * to `beforeDelete` handlers on the predicate path: every per-row context
-   * arrives with `input.id` bound, and a zero-match predicate dispatches
-   * nothing at all ([D1]). A guard whose rule is about the shape — #4757's
-   * "refuse a predicate-less multi-delete outright, regardless of what it
-   * matches" on `sys_attachment` — therefore could not fire through the wired
-   * engine: with rows matched its by-id branch shadowed the check, and with
-   * none matched it never ran. Both limbs need a dispatch that happens BEFORE
-   * the matched-row read, keyed on the operation's shape alone.
+   * to `before*` handlers on the predicate path: every per-row context arrives
+   * with `input.id` bound, and a zero-match predicate dispatches nothing at
+   * all ([D1]). A guard whose rule is about the shape — #4757's "refuse a
+   * predicate-less multi-delete outright, regardless of what it matches" on
+   * `sys_attachment`, and #4630's twin on `sys_comment` — therefore could not
+   * fire through the wired engine: with rows matched its by-id branch shadowed
+   * the check, and with none matched it never ran. Both limbs need a dispatch
+   * that happens BEFORE the matched-row read, keyed on the operation's shape
+   * alone.
+   *
+   * ## Why one helper, both verbs
+   *
+   * The update half was measured as a PARTIAL guard rather than a total
+   * fail-open (#9974): an unscoped `multi: true` update was refused only when
+   * it happened to sweep a row the caller lacked rights to — the per-row gate
+   * catching the shape by accident — and resolved silently when the caller was
+   * entitled to every row, zero-match included. A guard that fires by accident
+   * reads as enforcement while enforcing nothing, which is why the ruling
+   * closed it rather than narrowing the declaration. `event` is the ONLY thing
+   * that differs between the two verbs here, so it is a parameter and not a
+   * second copy of this method.
    *
    * ## What the handler receives
    *
@@ -2690,10 +2737,11 @@ export class ObjectQL implements IObjectQLEngine {
    * ## Deliberately opt-in
    *
    * Undeclared registrations see NO new dispatch: generalizing an unscoped-
-   * multi-delete refusal to every guarded object is a product decision this
-   * mechanism does not take (objectstack#9719's ruling commissions the
-   * `sys_attachment` restoration only). The engine stays neutral; the policy —
-   * who is refused, with which error — lives in the declaring handler.
+   * multi-write refusal to every guarded object is a product decision this
+   * mechanism does not take (#9719 commissions the `sys_attachment`
+   * restoration, #9974 the `sys_comment` update half — neither commissions an
+   * engine-wide rule). The engine stays neutral; the policy — who is refused,
+   * with which error — lives in the declaring handler.
    *
    * ## The id slot is not a lever here either
    *
@@ -2703,14 +2751,15 @@ export class ObjectQL implements IObjectQLEngine {
    * context would retarget nothing — refused rather than ignored, the same
    * rule as D4 and #6752 (`HookTargetRebindError`, path `'unscoped-multi'`).
    */
-  private async dispatchUnscopedMultiDeleteHooks(
+  private async dispatchUnscopedMultiWriteHooks(
+    event: 'beforeUpdate' | 'beforeDelete',
     object: string,
     batchCtx: HookContext,
   ): Promise<void> {
-    const entries = this.hooks.get('beforeDelete');
+    const entries = this.hooks.get(event);
     if (!entries || entries.length === 0) return;
     const flagged = entries.filter(
-      (entry) => entry.dispatchUnscopedMultiDelete && hookMatchesObject(entry, object),
+      (entry) => entry.dispatchUnscopedMultiWrite && hookMatchesObject(entry, object),
     );
     if (flagged.length === 0) return;
     // Mirrors `triggerHooks`' opt-out rule: `skipAutomations` suppresses only
@@ -2737,7 +2786,7 @@ export class ObjectQL implements IObjectQLEngine {
     if (observed !== undefined) {
       throw new HookTargetRebindError({
         object,
-        event: 'beforeDelete',
+        event,
         path: 'unscoped-multi',
         expectedId: undefined,
         observedId: observed,
@@ -2906,7 +2955,7 @@ export class ObjectQL implements IObjectQLEngine {
       // active org (matches the `organization_id` column, `current_user`
       // RLS shape, and seed rows). It comes from `execCtx.tenantId`, which the
       // kernel resolves from `session.activeOrganizationId`. The deprecated
-      // `session.tenantId` alias (#3280) was removed here in v11 (#3290) — the
+      // `session.tenantId` alias (#3280) was removed here in v16 (#3290) — the
       // driver-layer `execCtx.tenantId` knob is a separate axis and stays.
       organizationId: execCtx.tenantId,
       positions: execCtx.positions,
@@ -9545,6 +9594,37 @@ export class ObjectQL implements IObjectQLEngine {
                    `(the predicate branch was reached without the #2982 seed).`,
                );
            }
+           // [#9974] The unscoped-multi shape check, BEFORE the matched-row
+           // read — `delete()`'s twin (#9719), verbatim in condition, slot and
+           // placement, because the two branches answer the same question about
+           // the same caller options and a second reading of "unscoped" is how
+           // the verbs would drift apart.
+           //
+           // A `multi: true` update carrying no caller predicate at all
+           // dispatches ONCE, whole-operation-shaped, to the registrations that
+           // declared for it — so a shape-of-the-operation refusal (#4630's on
+           // `sys_comment`) fires regardless of what the predicate would match,
+           // zero rows included.
+           //
+           // ⚠️ This is a BEHAVIOUR CHANGE on the accept set, ruled for
+           // deliberately (#9974, option A, 2026-08-19), not a restoration: an
+           // unscoped multi-update by a caller entitled to every matched row
+           // used to succeed and rewrite the whole table. It now refuses IF the
+           // object's guard declares the flag — an overwrite leaves no trace
+           // and no pre-image to restore from, where a delete at least leaves
+           // one, so the verb whose failure is less recoverable was the one
+           // left less guarded. Objects with no declaring guard are untouched.
+           //
+           // Read from the caller's RAW options — the same slot the handler
+           // contract reads (`input.options.where`, hook.zod.ts's upper-bound
+           // rule) — never from the AST, which middleware may have narrowed and
+           // only ever narrows. `where: {}` is a REAL (match-all) query and
+           // stays on the per-row authorize path; only an absent or `null`
+           // predicate is unscoped.
+           const rawWhere = (hookContext.input.options as { where?: unknown } | undefined)?.where;
+           if (rawWhere === undefined || rawWhere === null) {
+               await this.dispatchUnscopedMultiWriteHooks('beforeUpdate', object, hookContext);
+           }
            const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
            readPriorRows = async () => {
                if (!priorRowsRead) {
@@ -10392,6 +10472,30 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#9688] What a `multiple: true` reference slot holds once the deleted
+   * record's membership is removed — the ONE computation behind both the
+   * per-row `required` judgement in {@link ObjectQL.cascadeDeleteRelations}
+   * and the `set_null` write that judgement gates.
+   *
+   * One function rather than two readings that happen to match, because the
+   * judgement decides whether the write may run at all: a predicate computing
+   * the remainder differently could clear a delete and then have the write
+   * land the empty required set the judgement exists to refuse — or refuse a
+   * delete whose write would have produced a perfectly legal non-empty set.
+   *
+   * `String(v) !== String(id)` is the same reading
+   * {@link ObjectQL.storedReferenceIncludes} applies when narrowing
+   * `dependents`, so the member removed is exactly the member that made the
+   * row a dependent. A non-array value is normalized to the array spelling
+   * rather than dismissed, for the same reason the narrowing compares it: an
+   * off-shape bare scalar in a `multiple: true` slot is still a reference.
+   */
+  private static remainderAfterMemberRemoval(stored: unknown, id: string | number): unknown[] {
+    const current: unknown[] = Array.isArray(stored) ? stored : [stored];
+    return current.filter((v) => String(v) !== String(id));
+  }
+
+  /**
    * Apply referential delete behavior for relations pointing AT this record,
    * before it is removed. For every registered object with a `master_detail`
    * or `lookup` field referencing `object`, honor the field's `deleteBehavior`:
@@ -10408,8 +10512,12 @@ export class ObjectQL implements IObjectQLEngine {
    * lifecycle); `lookup` defaults to `set_null` — except a `set_null` default
    * on a REQUIRED lookup escalates to `restrict` (you can't null a NOT NULL
    * FK; restricting with a clear dependent-count message beats a misleading
-   * "<field> is required" 400 from the child). Only runs for single-id
-   * deletes — multi/predicate deletes skip cascade (logged).
+   * "<field> is required" 400 from the child) — and on a `multiple: true`
+   * required lookup that escalation is decided per ROW after the dependents
+   * probe (#9688): a row that keeps another member takes the member removal,
+   * a row the removal would EMPTY keeps the refusal, and the refusal counts
+   * only those rows. Only runs for single-id deletes — multi/predicate
+   * deletes skip cascade (logged).
    */
   private async cascadeDeleteRelations(
     object: string,
@@ -10490,29 +10598,42 @@ export class ObjectQL implements IObjectQLEngine {
         // escalation is a property of the RESOLVED behavior plus `required`,
         // not of what the author typed.
         //
-        // It also runs BEFORE the `multiValued` branch below and keys on
-        // `required` alone, so a `multiple: true` required lookup is refused
-        // even when the child's set holds other members and member removal
-        // would leave it non-empty — a state the #9447 ruling accepts.
-        // Measured, pinned as current behaviour, and carded separately rather
-        // than changed here. What justifies refusing is the paragraph above,
-        // not the validator's tolerance: the escalation refuses THIS relation
-        // before its own set_null write runs, so the caller is told
+        // [#9688] The rationale above is also what BOUNDS the escalation, and
+        // on a `multiple: true` field it does not reach every row. The
+        // set_null limb there does not clear the slot: since #9438 it removes
+        // the deleted MEMBER and writes the remainder. So "a cleared required
+        // FK trips the child's validator" is true of exactly one case — the
+        // row whose set the removal would EMPTY, since `[]` is what the #9447
+        // ruling (maintainer, 2026-08-18) says violates `required` on a
+        // multi-value field, and what the record validator has rejected since
+        // #9476. A row that still holds another live member is written a
+        // NON-EMPTY set, which `required` accepts and no validator objects
+        // to; refusing its parent's delete was broader than the contract, and
+        // refused it citing a failure that could not have happened.
+        //
+        // Emptiness is a property of a ROW, not of the field — and no row has
+        // been read at this point. So the multi-value half of the escalation
+        // is DEFERRED to just after the dependents probe (search
+        // `requiredSetNull` below), where the rows are known and exactly
+        // narrowed. The single-valued half stays here and is unchanged:
+        // clearing a scalar FK always writes `null`, so its premise needs no
+        // row to hold.
+        //
+        // The deferral changes WHEN the decision is made, never who it is
+        // reported to: a row that does keep the refusal still refuses THIS
+        // relation before its own set_null write runs, so the caller is told
         // `DELETE_RESTRICTED` about the record it asked to delete, instead of
-        // the child's own `required` 400 — which names a field that is not on
-        // that record's object at all. The predecessor of this comment rested
-        // it on `[]` still satisfying `required` in the record validator,
-        // which made this refusal the only thing between an emptied required
-        // set and a silent write; #9476 landed and `[]` is rejected there now
-        // too, so the refusal is no longer that last guard. It is the one that
-        // fires early, against the right record.
-        if (behavior === 'set_null' && fdef.required === true) {
+        // the child's own `required` 400 naming a field that is not on that
+        // record's object at all.
+        //
+        // [#9362] `multiValued` is declared here rather than at the probe
+        // because the probe's filter spelling, the set_null write below and
+        // — since #9688 — this escalation all turn on it.
+        const multiValued = fdef.multiple === true;
+        const requiredSetNull = behavior === 'set_null' && fdef.required === true;
+        if (requiredSetNull && !multiValued) {
           behavior = 'restrict';
         }
-
-        // [#9362] Declared here rather than at the probe because BOTH the
-        // set_null write below and the probe's filter spelling turn on it.
-        const multiValued = fdef.multiple === true;
 
         let dependents: any[];
         try {
@@ -10569,6 +10690,36 @@ export class ObjectQL implements IObjectQLEngine {
           );
         }
         if (!dependents || dependents.length === 0) continue;
+
+        // [#9688] The deferred half of the required escalation, decided per
+        // ROW now that the rows are read and exactly narrowed — every row
+        // here genuinely holds `id`, so its remainder is its set minus that
+        // one member.
+        //
+        // The emptiness question is asked through
+        // `remainderAfterMemberRemoval`, which is the SAME computation the
+        // set_null write below performs. One function, two call sites, so the
+        // judgement cannot predict a shape the write would not produce: a
+        // predicate that computed the remainder even slightly differently
+        // could clear the delete and then let the write land the very `[]`
+        // this judgement exists to prevent.
+        //
+        // ANY row that would be emptied refuses the WHOLE delete — a delete
+        // either happens or it does not, and a partial cascade is not on
+        // offer. `dependents` is reduced to those rows first, because every
+        // number the refusal reports reads it: `dependentCount`, the
+        // localized message's `count`, and the developerMessage. Counting the
+        // rows this delete no longer refuses over is the second defect the
+        // card names, and it is fixed by the same statement.
+        if (requiredSetNull && multiValued) {
+          const emptied = dependents.filter(
+            (row) => ObjectQL.remainderAfterMemberRemoval(row?.[fieldName], id).length === 0,
+          );
+          if (emptied.length > 0) {
+            behavior = 'restrict';
+            dependents = emptied;
+          }
+        }
 
         if (behavior === 'restrict') {
           // [#7307] TWO messages, two audiences — because this error has two
@@ -10657,16 +10808,15 @@ export class ObjectQL implements IObjectQLEngine {
               // written as `[]`, which `Array.prototype.filter` already
               // yields, never `null`.
               //
-              // `String(v) !== String(id)` is the same reading
-              // `storedReferenceIncludes` applies when narrowing `dependents`
-              // above, so the member removed here is exactly the member that
-              // made this row a dependent. An off-shape bare scalar in a
-              // `multiple: true` slot is normalized to the array spelling by
-              // this write, for the same reason the narrowing compares it
-              // rather than dismissing it.
-              const stored = dep?.[fieldName];
-              const current: unknown[] = Array.isArray(stored) ? stored : [stored];
-              const next = current.filter((v) => String(v) !== String(id));
+              // [#9688] The remainder is computed by
+              // `remainderAfterMemberRemoval`, which the per-row required
+              // judgement above calls on the same row: this write is only
+              // reached for a row that judgement measured as keeping at least
+              // one other member, and the two must agree by construction.
+              // The reading it applies — `String(v) !== String(id)`, and an
+              // off-shape bare scalar normalized to the array spelling — is
+              // documented there.
+              const next = ObjectQL.remainderAfterMemberRemoval(dep?.[fieldName], id);
               await this.update(childName, { id: depId, [fieldName]: next }, { context: referentialCtx } as any);
             } else {
               await this.update(childName, { id: depId, [fieldName]: null }, { context: referentialCtx } as any);
@@ -10996,9 +11146,10 @@ export class ObjectQL implements IObjectQLEngine {
         // the AST, which middleware may have narrowed and only ever narrows.
         // `where: {}` is a REAL (match-all) query and stays on the per-row
         // authorize path; only an absent or `null` predicate is unscoped.
+        // `update()`'s predicate branch carries the identical check (#9974).
         const rawWhere = (hookContext.input.options as { where?: unknown } | undefined)?.where;
         if (rawWhere === undefined || rawWhere === null) {
-          await this.dispatchUnscopedMultiDeleteHooks(object, hookContext);
+          await this.dispatchUnscopedMultiWriteHooks('beforeDelete', object, hookContext);
         }
         // [#5038/#5574] Read the doomed rows ONCE, before they are gone — the
         // only moment their pre-image exists — and serve BOTH phases from it

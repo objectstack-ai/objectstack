@@ -1,5 +1,1408 @@
 # @objectstack/runtime
 
+## 17.1.0
+
+### Minor Changes
+
+- 2f65b1b: `error.code` is a closed vocabulary at every door (#9106, maintainer ruling
+  2026-08-16): the runtime dispatcher's thrown-error exits
+  (`HttpDispatcher.errorFromThrown`, `dispatcher-plugin`'s `errorResponseBase`,
+  `endpoint-executor`'s `endpointErrorAnswer` — the actions door among them) now
+  serve the narrowed `code` the shared resolver (`resolveThrownHttpError`,
+  `@objectstack/types`) has always computed, exactly as the REST door has since
+  #8016. A thrown code that is not a member of `StandardErrorCode ∪
+  ERROR_CODE_LEDGER` no longer reaches `error.code`.
+  
+  It is not dropped: `ApiErrorSchema` declares a new optional `declaredCode`
+  field — the open, author-authored channel — and the demoted spelling rides
+  there. Presence means demotion: the field is absent whenever the producer's
+  code is a vocabulary member (it is already in `error.code`) or the producer
+  declared none. The #7867 sandbox passthrough capability is preserved — a
+  metadata app's own thrown `.code` still crosses the QuickJS boundary and still
+  reaches the wire.
+  
+  For a metadata app that throws its own code (e.g.
+  `Object.assign(new Error('pick another'), { code: 'DUPLICATE' })` in an action
+  body) and reads it back from an actions-door failure:
+  
+  - FROM: `error.code === 'DUPLICATE'`
+  - TO: `error.code` is the closed member the status derives (e.g.
+    `VALIDATION_ERROR` on a 400) and `error.declaredCode === 'DUPLICATE'`.
+    One-line fix: branch on `error.declaredCode` for app-specific spellings;
+    branch on `error.code` for platform conditions.
+  
+  Platform producers are unaffected: every registered code reaches `error.code`
+  verbatim, as before (post-#8846 the dispatcher-vocabulary gate holds that set
+  registered). Measured before landing (the ruling's binding precondition): no
+  existing consumer of the actions door branches on author-authored strings in
+  `error.code`.
+  
+  `@objectstack/types` adds `demotedDeclaredCode(thrown)` — the one definition of
+  "which spelling a boundary surfaces beside the closed `code`".
+- ca2e020: `POST /api/v1/actions/:object/:action` answers the flow-dispatch status table instead of one blanket `400 FLOW_FAILED` (#9446).
+  
+  **What a caller sees differently.** A `type: 'flow'` action whose dispatch is REFUSED no longer reports a failed run. Three answers changed:
+  
+  | the flow behind the action | before | now |
+  |---|---|---|
+  | is not registered | `400` `FLOW_FAILED` | `404` `RESOURCE_NOT_FOUND` |
+  | is switched off | `400` `FLOW_FAILED` | `409` `FLOW_DISABLED` |
+  | has no `start` node | `400` `FLOW_FAILED` | `422` `FLOW_NO_START_NODE` |
+  | ran and was rejected | `400` `FLOW_FAILED` | `400` `FLOW_FAILED` (unchanged) |
+  
+  These are the same four rows `POST /api/v1/automation/:name/trigger` has answered since #9378 + #9415, and they now come from one shared definition both doors read, so the two cannot drift apart again.
+  
+  **Behaviourally breaking for a caller that branches on the status or the code.** Every one of these was a `400` before, so a caller treating `400` as "the run failed" was being told something false in three of the four cases: nothing had dispatched and no node had executed. A client that lumps all four together keeps working — they are all still refusals, all still `success: false` with no inner envelope — but one that reports "the flow failed" on a `400` should now distinguish. **Retry semantics differ per row**, which is the practical reason to: `409 FLOW_DISABLED` is reversible operational state (enable the flow and the identical request succeeds), while `404` and `422 FLOW_NO_START_NODE` are authoring defects that no retry fixes. `400 FLOW_FAILED` remains terminal, exactly as the console already treats it.
+  
+  **Unchanged on purpose.** A successful run still answers `200` with the single `data` wrap (#3962). The `400 FLOW_FAILED` message keeps its existing wording (`Flow '<target>' failed: …`), which names the flow the action dispatches — the trigger route's URL carries that name and this route's does not. A `success: false` result the automation engine did not classify still refuses with `400 FLOW_FAILED` rather than falling back to `200 {success:true,data:{success:false}}` — the double envelope #3962 removed from this route.
+  
+  **Not in scope.** Declared endpoints (`type: 'flow'` endpoints, `endpoint-executor.ts`) still answer `200` for every outcome. That door converges in its own change (#9462), where the envelope flip is a breaking change for consumers of the current double envelope and is sequenced against them.
+- e43d63a: feat(identity): API keys are minted against the minter's active organization, and carry it into the request (#8287)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) One additive column on
+  an `isSystem` object declaring `protection: { lock: 'full' }`, which tenants
+  cannot author, so there is no consumer metadata to migrate and nothing
+  authorable is renamed, retired or tombstoned — no conversion to register. The
+  behavioural change is that a minted key now carries an organization, that a key
+  which cannot carry one is refused under the posture where it could never read
+  anything, and that an ex-member's key stops authenticating. -->
+  
+  On a deployment running `OS_TENANCY_POSTURE=isolated`, a minted API key could
+  read **nothing at all**. `sys_api_key` carried no organization column, so key
+  authentication established a user but no active organization — and the
+  `isolated` Layer 0 wall is `organization_id = activeOrganizationId`, which with
+  no active organization matches no row. Every organization-scoped read answered
+  `200` with `total 0` while the console went on offering minting, so a tenant
+  admin could mint a valid-looking secret and discover only at call time that it
+  read nothing. (There was no cross-tenant leak — the failure was in the other
+  direction.)
+  
+  **The column was absent by an inherited rule, not by oversight.**
+  `resolveInjectedSystemColumns` injects `organization_id` into every registered
+  object *except* `managedBy: 'better-auth'` ones, and `sys_api_key` carries that
+  flag — even though better-auth's `apiKey` plugin is not loaded and the table is
+  hand-rolled ObjectStack. So the fix needs the declaration *and* the ADR-0105 D7
+  extension-field registration to stay consistent. The read side, by contrast,
+  was **already wired**: `resolveApiKeyPrincipal` already read an organization
+  into `tenantId` and `resolveAuthzContext` already adopted it — it was reading a
+  column no mint path ever wrote.
+  
+  **What changes**
+  
+  - `sys_api_key` declares `active_organization_id` (+ index, and the column is
+    shown in the "My Keys" and "All" list views, because the card's complaint was
+    a credential whose reach its owner could not see).
+  - `POST /api/v1/keys` **inherits** the caller's active organization — there is
+    deliberately no org parameter and no cross-org key — and **re-checks the
+    caller's `sys_member` membership at mint time**, honouring ADR-0091 validity
+    windows. Under a walled posture it refuses (400) rather than minting a key
+    with no organization, and refuses (403) for an organization the caller is not
+    a member of. The mint response echoes the organization the key is pinned to.
+  - The verifier reads **one spelling** (Prime Directive #12): the
+    `row.organization_id ?? row.organizationId` chain it used to carry was a
+    consumer-side tolerance for a producer that did not exist.
+  - An **ex-member's key fails closed at verify time** — no principal, not a
+    degrade to a user-only principal, which would resurrect the same
+    `200 + total 0` silent-empty. Checked at verify rather than by revoking on
+    membership loss, because membership ends through many paths (better-auth org
+    endpoints, SCIM, a direct `sys_member` delete, a lapsing validity window) and
+    a hook must catch every one or it silently misses. It costs **zero extra
+    queries**: the resolver has already read `sys_member` for this user.
+  - **Pre-existing org-less keys are never backfilled** — that would silently
+    upgrade credentials minted under a different promise. They keep working under
+    `single` (no wall) and under `group` (whose wall derives from the owner's
+    memberships independently of the active organization, so they already work
+    there), and are **refused under `isolated`**, where they are provably dead
+    today.
+  
+  **The column is deliberately named `active_organization_id`, not
+  `organization_id`** — the `sys_session` spelling, for the same concept: the
+  organization a credential makes *active*. `objectHasOrgIdField` tests for the
+  literal `organization_id`, and Layer 0 exempts objects without it, so the other
+  name would have made `sys_api_key` itself org-walled. Both walled postures
+  exclude NULL, so every pre-existing org-less row would have vanished from its
+  **own owner's** "My Keys" list while, under `group`, continuing to
+  authenticate — a live credential nobody could see or revoke, which is a fresh
+  instance of the very class this change removes.
+- e374b4d: fix(metadata-protocol): arm the three `kernel:ready` platform-table migrations on a self-hosted boot, and keep the read-only CLI commands read-only (#9380)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) One new optional
+  declaration (`runPlatformMigrations`) added to three existing option bags and
+  one Zod boot config. Nothing authorable is renamed, retired or tombstoned, so
+  there is no conversion to register. The behavioural change is that three
+  migrations which never ran on a self-hosted install now run on its serving
+  boot. -->
+  
+  `assembleMetadataProtocol` arms three `kernel:ready` migrations — #5839's
+  `sys_view_definition` active-row index, #8629's `sys_setting` row-identity
+  index, and #8686's seed/API tenancy backfill — behind one gate whose own comment
+  states the intent: *"platform / standalone kernels own their local sys_metadata;
+  per-project (cloud) kernels source metadata from the control plane and must NOT
+  provision these tables locally."* So standalone was always meant to be on the
+  INSIDE of that gate.
+  
+  It never was. The gate **deduced** ownership from `environmentId === undefined`,
+  and `runtime/src/standalone-stack.ts` stamps `'proj_local'` on every boot — so
+  the block never ran on a self-hosted install at all. #8686's own header calls
+  its `kernel:ready` half the one that "repairs an install that is ALREADY in that
+  state, which covers every existing deployment"; on self-hosted it covered none,
+  and those installs kept minting duplicate business identifiers.
+  
+  **The fix is a declaration, not a wider deduction.** `environmentId` is a
+  row-scoping key, not a topology signal — the same lesson `authoringChannel`
+  already records one field above it in the same options bag. A new optional
+  `runPlatformMigrations` is threaded from the host that knows the answer down to
+  the one assembly both protocol mounts share:
+  
+  - `AssembleMetadataProtocolOptions` / `MetadataProtocolPluginOptions` /
+    `ObjectQLPluginOptions` gain `runPlatformMigrations?: boolean`;
+  - `createStandaloneStack` gains the same key and **defaults it to `true`** — a
+    standalone kernel owns its local platform tables, whatever environment id it
+    stamps rows with;
+  - the predicate is exported as `shouldRunPlatformMigrations(environmentId,
+    declared)` so the default lives in exactly one place.
+  
+  **Undeclared means unchanged.** The default is `environmentId === undefined`,
+  the historical deduction, so every caller that does not declare — including
+  cloud's per-project kernels (`createMetadataProtocolPlugin({ environmentId })`)
+  and the control-plane assembly (`createMetadataProtocolPlugin()`) — keeps
+  today's behaviour exactly.
+  
+  **The read-only contract is preserved, and not by keying on deferral.** The
+  CLI's one-shot boot funnel (`bootSchemaStack`) declares
+  `runPlatformMigrations: false` for every `os migrate *` / `os meta *` command.
+  Keying it on `deferSchemaDdl` would have covered only `os migrate plan` and
+  `os migrate duplicates`; `os migrate summary-nulls`, `value-shapes`,
+  `recorded-by`, `resume`, `files-to-references` and `os migrate meta` all boot
+  **non-deferred** and are still dry-run-by-default ("a dry run writes NOTHING"),
+  so that half would have quietly repaired rows behind a report. The serving boots
+  — `os dev`, `os serve`, `os start` — do not come through that funnel and take
+  the default, which is where an install now gets repaired.
+  
+  Proven on real kernels over a real SQLite file carrying the real #8686 damage,
+  not on the predicate: the serving boot merges the split counter and adopts the
+  movable seed row while leaving the colliding one reported-not-renumbered; the
+  deferred and non-deferred one-shot boots both leave the data untouched; and a
+  per-project kernel assembled cloud's way still repairs nothing.
+  `os migrate duplicates`' own byte-identical-after-run pin
+  (`duplicates.integration.test.ts`) still passes unchanged.
+- a433122: **BREAKING** — `POST /api/v1/automation/:name/runs/:runId/resume` refuses a request
+  body carrying an unknown top-level key. The resume body's outer envelope is now a
+  closed set: exactly `inputs`, `variables`, `output`, `branchLabel`.
+  
+  Until now the route read the keys it knows and silently ignored the rest, so a body
+  like `{"nodeId":"ask","values":{...}}` — no key of which the route reads — answered
+  HTTP 200 `success:true` with the screen submission treated as empty: the run
+  completed and the submitted value never reached the flow. A caller that guessed
+  `values` for the key the route spells `inputs` got silence instead of a correction.
+  
+  What changes on the wire:
+  
+  - **A body with any unknown top-level key ⇒ `400` with `error.code:
+    'VALIDATION_FAILED'`.** The message names the offending key(s) and the accepted
+    set; `error.details.fields[]` carries one `unknown_field` entry per offending key.
+    The request never reaches the flow engine, the suspension is untouched, and the
+    same request with a corrected body is expected to succeed — this refusal sits on
+    the retryable side beside `INVALID_SIGNAL` and `INVALID_SCREEN_INPUT`, and is
+    deliberately not `FLOW_FAILED` (which the console treats as terminal, because it
+    means the engine consumed the suspension and the run actually ran).
+  - **Unchanged:** a body made only of accepted keys behaves exactly as before,
+    including an empty body (a legal empty submission for a screen whose declared
+    fields are all optional). The signal is still assembled field-by-field — never a
+    body spread — so the service-authority marker stays unforgeable.
+  
+  Any client already sending only the documented keys is unaffected. A client sending
+  extra keys alongside a correct `inputs` now gets the located 400 above instead of
+  having the extras silently dropped.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) retires no metadata surface: no Zod schema, no authorable key, no stored sys_metadata row changes shape, so `objectstack migrate meta` has nothing to rewrite and no ledger entry can be written for it. What changes is which HTTP request bodies one route accepts, and the only channel that reaches those callers is this changeset itself. -->
+- bc6434b: **BREAKING** — `POST /api/v1/automation/:name/runs/:runId/resume` answers real HTTP
+  status codes for a failed run instead of HTTP 200 wrapping an inner `{success: false}`.
+  
+  Until now a screen flow driven to a server-side node failure answered:
+  
+  ```
+  HTTP 200
+  {"success":true,"data":{"success":false,"error":"Node 'create_opportunity' failed: …"}}
+  ```
+  
+  The run genuinely failed; the transport reported success. A scripted or integration
+  caller that branches on the HTTP status alone read a failed run as a successful one.
+  This applies to the resume route the ruling for `/actions` (business failures must not
+  ride HTTP 200 inside a double envelope), which every other automation refusal on this
+  route already followed.
+  
+  What changes on the wire:
+  
+  - **A run that resumed and then failed ⇒ `400` with `error.code: 'FLOW_FAILED'`.** The
+    node failure stays the human-readable `error.message`. The flow author's own
+    `errorMessage` travels in `error.details.errorMessage` — one documented location, the
+    same one the console reads — and the run's per-node `summary` in
+    `error.details.summary`. `durationMs` is no longer carried on this response.
+  - **A stale suspension ⇒ `404`.** The flow the run belongs to was deregistered, or the
+    node it was parked on was edited away under a live pause. Nothing ran and the pause can
+    never continue, so this is reported as terminal rather than as a business rejection.
+    The engine now classifies both cases as `RUN_NOT_FOUND`; the message names which one.
+  - **Unchanged:** every refusal that leaves the suspension intact keeps its own code and
+    stays retryable — `PERMISSION_DENIED` (403), `INVALID_SIGNAL` /
+    `INVALID_SCREEN_INPUT` (400), `RESUME_IN_PROGRESS` (409), `STORE_UNAVAILABLE` (503) —
+    and a resume that pauses again still answers 200 with the next screen.
+  
+  **`@objectstack/client`:** `client.automation.resume()` and
+  `client.project(id).automation.resume()` now **reject** on a failed run instead of
+  resolving with `{success: false, error, summary}` — the SDK throws on every non-2xx
+  before unwrapping. Callers that inspected the resolved value must move to a `catch`:
+  
+  ```ts
+  try {
+    await client.automation.resume(flow, runId, { inputs });
+  } catch (err: any) {
+    err.code;                   // 'FLOW_FAILED' (400) — the run ran and failed
+    err.httpStatus;             // 400 | 404 | 403 | 409 | 503
+    err.message;                // the node failure, verbatim
+    err.details?.errorMessage;  // the flow author's own message, when the flow declares one
+  }
+  ```
+  
+  Raw-HTTP callers that treated `2xx` as success and never opened the inner envelope now
+  see the failure they were already being told about, one level up.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) retires no metadata surface: no Zod schema, no authorable key, no stored sys_metadata row changes shape, so `objectstack migrate meta` has nothing to rewrite and no ledger entry can be written for it. What changes is an HTTP status plus an SDK method's promise contract, and the only channel that reaches those consumers is this changeset itself. -->
+- 96f397a: **BREAKING** — `POST /api/v1/automation/:name/runs/:runId/resume` refuses an accepted
+  key carrying a value of the wrong TYPE, and refuses a request body that is not a JSON
+  object. This is the value axis of the closed envelope the same route already applies to
+  its KEYS.
+  
+  Until now the route type-guarded each accepted key and silently skipped whatever failed
+  the guard, so `{"inputs":"a string"}` passed the closed key set (the key IS accepted),
+  lost its value, and answered HTTP 200 `success:true` with the submission treated as
+  empty: the run completed and the caller was told its screen input landed when nothing
+  did. Identical for `{"output":42}`, `{"branchLabel":7}`, a JSON string/number/boolean
+  body, and an empty-array body.
+  
+  What changes on the wire:
+  
+  - **`inputs` / `variables` / `output` must each be a JSON object ⇒ anything else is
+    `400` with `error.code: 'VALIDATION_FAILED'`.** `error.details.fields[]` carries one
+    `invalid_type` entry per offending key, and both the entry and the message name the
+    key and the expected type (plus the type actually received). `null` and an array are
+    refused too — the engine's `ResumeSignal` contract types these as
+    `Record<string, unknown>`, which excludes both, and an array used to be forwarded to a
+    service whose own contract rejects it.
+  - **`branchLabel` must be a JSON string ⇒ anything else is the same located `400`.**
+  - **A body that is not a JSON object ⇒ the same `400`, located at `(body)`**, naming the
+    accepted keys. That covers a JSON string, number or boolean body, and an array —
+    including the empty array, which previously slipped past the key check because it has
+    no keys to be unknown.
+  - Every refusal happens **before** the flow engine is consulted, so the suspension is
+    untouched and the same request with a corrected body is expected to succeed. Like the
+    unknown-key refusal it sits on the retryable side beside `INVALID_SIGNAL` and
+    `INVALID_SCREEN_INPUT`, and is deliberately not `FLOW_FAILED` (which the console
+    treats as terminal, because it means the engine consumed the suspension and ran).
+  - **Unchanged:** every submission that was already well-typed behaves exactly as before,
+    with byte-identical arguments at the service — all four accepted keys, the `variables`
+    alias, `inputs` winning when both are sent, empty objects, an empty-string
+    `branchLabel`, and the bodyless resume (`{}` / absent / `null` body), which stays a
+    legal empty submission. The inner bag is still forwarded verbatim for the engine to
+    judge — reserved-name and declared-field verdicts did not move into the transport. The
+    signal is still assembled field-by-field, never a body spread, so the
+    service-authority marker stays unforgeable.
+  
+  A key spelled with an `undefined` value counts as absent rather than mis-shaped:
+  `JSON.stringify` drops such a key, so no HTTP caller can produce one, and the in-process
+  spelling `{ inputs: maybeUndefined }` means "no inputs".
+  
+  Any client already sending well-typed values is unaffected. A client sending a
+  mis-shaped value now gets the located 400 above instead of a 200 reporting success on a
+  submission that was thrown away.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) retires no metadata surface: no Zod schema, no authorable key, and no stored sys_metadata row changes shape, so `objectstack migrate meta` has nothing to rewrite and no ledger entry can be written for it. What changes is which HTTP request bodies one route accepts, and the only channel that reaches those callers is this changeset itself — the same disposition its sibling closed-key-set change carried. -->
+- 9aa8890: **BREAKING** — the automation `trigger` routes now answer **409** for a disabled
+  flow and **422** for a flow whose definition has no start node, instead of HTTP
+  200 wrapping an inner `{success: false}`.
+  
+  This finishes the migration the previous release started. That changeset flipped
+  two of the four outcomes and said of the other two:
+  
+  > **Also unchanged, pending a ruling:** a DISABLED flow and one with no start
+  > node still answer 200 with the inner failure. Both are exits that never
+  > dispatched anything, and telling them apart needs a producer-side
+  > classification the closed `AutomationResult.code` union cannot yet express.
+  
+  That is the paragraph this change resolves. The union was widened deliberately —
+  two new members, with measured need — rather than the transport guessing from
+  message text or re-implementing the engine's enable-state policy.
+  
+  `POST /api/v1/automation/:name/trigger` and the legacy
+  `POST /api/v1/automation/trigger/:name` now answer, in full:
+  
+  | Status | `error.code` | The run |
+  |:---|:---|:---|
+  | `404` | — | never dispatched: no such flow |
+  | `409` | `FLOW_DISABLED` | never dispatched: the flow is switched off |
+  | `422` | `FLOW_NO_START_NODE` | never dispatched: the definition has no `start` node |
+  | `400` | `FLOW_FAILED` | RAN, and was rejected |
+  | `200` | — | succeeded, or PAUSED at a screen node — a pause is not a failure |
+  
+  The three refusals report no run because none exists: no node executed and
+  nothing was written. Only `400` describes a run, and only it carries
+  `error.details.summary` / `error.details.errorMessage`.
+  
+  Why two statuses and not one: a disabled flow is reversible operational state —
+  enable it and the identical request succeeds, which is what `409` means. A flow
+  with no start node cannot be executed as stored, and no retry helps, which is
+  what `422` means. Collapsing them would tell an operator to flip a switch that
+  will not help.
+  
+  **`@objectstack/spec`:** `AutomationResult.code` gains `'FLOW_DISABLED'` and
+  `'FLOW_NO_START_NODE'`. The union stays closed; these are trigger-time refusals
+  classified *before* dispatch, documented as a group distinct from the existing
+  resume-refusal members. Both are registered in the ADR-0112 error-code ledger.
+  
+  **`@objectstack/service-automation`:** `execute()` stamps the matching `code` on
+  its disabled-flow and no-start-node exits. They continue to carry **no**
+  `status` — that absence is what lets a transport tell a never-dispatched exit
+  from a run that dispatched and failed (`status: 'failed'`) without inspecting
+  `summary`, `durationMs` or the message.
+  
+  **`@objectstack/client`:** `client.automation.trigger()`, `.execute()` and
+  `client.project(id).automation.execute()` already rejected on a failed run;
+  they now reject with these two additional classifications, so a caller can tell
+  "enable the flow and retry" from "the flow definition is broken":
+  
+  ```ts
+  try {
+    await client.automation.execute(flow, { params });
+  } catch (err: any) {
+    err.httpStatus;   // 409 | 422 | 400 | 404
+    err.code;         // 'FLOW_DISABLED' | 'FLOW_NO_START_NODE' | 'FLOW_FAILED'
+  }
+  ```
+  
+  Callers that branch only on `FLOW_FAILED` keep working for the case they
+  handle, but will no longer see these two refusals under it — they arrive with
+  their own codes, which is the point.
+  
+  Not affected, and deliberately so: `POST /api/v1/actions/...` with a
+  `type: 'flow'` action, and metadata-declared `type: 'flow'` endpoints. Both
+  dispatch the same flow through a different door with its own response
+  conventions, and whether they should inherit this table is tracked separately.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) retires no metadata surface: no Zod schema, no authorable key, and no stored sys_metadata row changes shape, so `objectstack migrate meta` has nothing to rewrite and no ledger entry could be written for it. What changes is an HTTP status plus two new members of a runtime result type, and the channel that reaches those consumers is this changeset plus the compiler. -->
+- 48032c9: **BREAKING** — both automation `trigger` routes answer real HTTP status codes for a flow
+  that ran and failed, instead of HTTP 200 wrapping an inner `{success: false}`.
+  
+  This is the second and wider half of the migration the resume route shipped in the same
+  release (#8684, merged 2026-08-17): one SDK-visible behaviour change, one migration note.
+  The resume flip touched the screen-flow runner; this one touches the door every app
+  dispatches flows through.
+  
+  Until now a flow driven to a node failure answered:
+  
+  ```
+  HTTP 200
+  {"success":true,"data":{"success":false,"error":"Node 'create_opportunity' failed: …"}}
+  ```
+  
+  The run genuinely failed; the transport reported success. A scripted or integration caller
+  that branches on the HTTP status alone read a failed run as a successful one. This applies
+  the `/actions` ruling (business failures must not ride HTTP 200 inside a double envelope)
+  to `POST /api/v1/automation/:name/trigger` and to the legacy
+  `POST /api/v1/automation/trigger/:name` — the shape `client.automation.trigger()` calls.
+  Both doors answer through one mapper, so they cannot drift.
+  
+  What changes on the wire:
+  
+  - **A flow that ran and then failed ⇒ `400` with `error.code: 'FLOW_FAILED'`.** The node
+    failure stays the human-readable `error.message`. The flow author's own `errorMessage`
+    travels in `error.details.errorMessage` — one documented location, the same one the
+    console reads — and the run's per-node accounting in `error.details.summary`. A flow
+    whose `errorHandling.strategy` is `retry` answers the same way once its attempts are
+    exhausted. `durationMs` is no longer carried on this response.
+  - **A flow name the deployment does not hold ⇒ `404`,** answered before anything is
+    dispatched, through the same registry probe `POST /:name/toggle` and `GET /:name` use.
+  - **Unchanged:** a successful run still answers 200 with its result, and a run that PAUSED
+    at a `screen` node still answers 200 with the next screen — a pause is not a failure.
+  - **Also unchanged, pending a ruling:** a DISABLED flow and one with no start node still
+    answer 200 with the inner failure. Both are exits that never dispatched anything, and
+    telling them apart needs a producer-side classification the closed
+    `AutomationResult.code` union cannot yet express. Tracked on #9378.
+  
+  **`@objectstack/service-automation`:** `execute()` now stamps `status: 'failed'` on the
+  results of runs that dispatched and were rejected — the same lifecycle verdict it already
+  writes to the run log. Its never-dispatched exits carry no `status`, which is what lets a
+  transport answer the two classes differently without inspecting the result's internals.
+  
+  **`@objectstack/client`:** `client.automation.trigger()`, `client.automation.execute()` and
+  `client.project(id).automation.execute()` now **reject** on a failed run instead of
+  resolving with `{ success: false, error }` — the SDK throws on every non-2xx before
+  unwrapping. Callers that inspected the resolved value must move to a `catch`:
+  
+  ```ts
+  try {
+    await client.automation.execute(flow, { params });
+  } catch (err: any) {
+    err.code;                   // 'FLOW_FAILED' (400) — the run ran and failed
+    err.httpStatus;             // 400 | 404
+    err.message;                // the node failure, verbatim
+    err.details?.errorMessage;  // the flow author's own message, when the flow declares one
+    err.details?.summary;       // which node failed
+  }
+  ```
+  
+  Raw-HTTP callers that treated `2xx` as success and never opened the inner envelope now see
+  the failure they were already being told about, one level up.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) retires no metadata surface: no Zod schema, no authorable key, no stored sys_metadata row changes shape, so `objectstack migrate meta` has nothing to rewrite and no ledger entry can be written for it. What changes is an HTTP status plus an SDK method's promise contract, and the only channel that reaches those consumers is this changeset itself. -->
+- 6a51704: fix(runtime): a declared `type: 'flow'` endpoint answers the #9378 flow-dispatch status table, from the one shared definition (#9462)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable
+  changes: no spec schema, no metadata key, no stored `sys_metadata` shape. The
+  change is which HTTP status and `error.code` one transport seam writes for a
+  flow dispatch that was refused or failed, so `objectstack migrate meta` has
+  nothing it could rewrite and there is no conversion-layer entry to register. The
+  existing declaration for such an endpoint is byte-for-byte valid before and
+  after. -->
+  
+  **BREAKING** for any caller that reads a declared endpoint's flow result out of
+  the response body instead of the HTTP status.
+  
+  `POST /api/v1/apps/<namespace>/<subpath>` with `type: 'flow'` used to answer
+  `200` for every outcome, with the raw engine result in `data` — so a flow that
+  was disabled, had no start node, could not be found, or ran and was rejected all
+  reached the caller as `{"success":true,"data":{"success":false,…}}`. That is the
+  double envelope #3962 removed from `POST /api/v1/actions/:object/:action`, and
+  it was still standing on the surface an app publishes as its own public API: a
+  client branching on the HTTP status read every one of those failures as a
+  success.
+  
+  It now answers the same four rows the other two flow doors answer, read from the
+  one shared definition in `packages/runtime/src/flow-dispatch-status.ts` rather
+  than from a third private copy of the rule:
+  
+  | engine exit | reality | the endpoint answers |
+  |:---|:---|:---|
+  | flow not found | never dispatched | `404` |
+  | flow disabled | never dispatched | `409` `FLOW_DISABLED` |
+  | flow has no start node | never dispatched | `422` `FLOW_NO_START_NODE` |
+  | ran and was rejected | ran, rejected | `400` `FLOW_FAILED` |
+  
+  What a caller sees differently:
+  
+  - **A failed or refused flow is now a 4xx.** The body is the platform's declared
+    error envelope, `{"success":false,"error":{"code","message","httpStatus"}}`;
+    there is no inner `data.success` left to read. A caller that already branched
+    on the status now sees the failure it was previously told was a success; a
+    caller that branched on `data.success` gets the same fact from `error.code`.
+  - **A `400` carries the run's own artefacts** in `error.details`
+    (`errorMessage`, `summary`), exactly as `POST /api/v1/automation/:name/trigger`
+    carries them. The three never-dispatched rows carry neither, because no run
+    happened to describe.
+  - **A successful run is unchanged** — still `200` with the result in `data`.
+  - **An `outputMapping` declaration is no longer applied to a failure.** The
+    projection was already restricted to answers with a status below 400, so the
+    refusal rows fall outside it by the rule that was already written. This closes
+    a real hole: an `outputMapping` used to be applied to the `200`-wrapped failure
+    body and could present a refused dispatch as data.
+  - Both policy behaviours keyed on the same test move with it: `cacheTtl`'s
+    `Cache-Control` no longer rides a flow failure, and the `rateLimit` /
+    `authRequired` chain is untouched — it runs before execution either way.
+  
+  This is the third and last door of the #9446 ruling (maintainer, 2026-08-18,
+  verbatim 「同意」: the status table is a property of the flow-dispatch CONTRACT,
+  not of the trigger route). All three doors now read one definition, and the
+  suite asserts that by driving the same engine result through all three and
+  comparing.
+- b2789ad: feat(security): the endpoint-route 401 anonymous-deny body carries `code: "UNAUTHENTICATED"` alongside the existing `error` / `message` keys (#9823)
+  
+  Service-declared endpoint routes (`RouteDefinition` emitted via hooks, e.g.
+  `buildAIRoutes()` — any route whose `auth` is not explicitly `false`) answered
+  an anonymous caller `401 { error, message }` with no `code` key: the
+  `mountRouteOnServer` 401 arm wrote an inline copy of the flat deny body, so
+  the #9487 constant change (`@objectstack/core`'s `ANONYMOUS_DENY_BODY`) never
+  reached it, and through `@objectstack/client` a caller's `err.code` stayed
+  `undefined` for exactly these 401s.
+  
+  The arm now writes the shared `ANONYMOUS_DENY_BODY` / `ANONYMOUS_DENY_STATUS`
+  verbatim, so the body gains `code: "UNAUTHENTICATED"` and this seam can no
+  longer drift from the constant it was copied from. **Additive only**
+  (maintainer-ruled on #9487): no key is removed or moved — `error` keeps
+  holding the same code value it always has, so every existing reader keeps
+  working. This does not settle ADR-0112 D5 (flat vs nested envelope
+  convergence, #9559); the envelope family of this arm is unchanged in kind.
+- 6aceca9: feat(runtime): a flow ACTION that ran and failed now carries the flow author's `errorMessage` and the run `summary` in `error.details` at the `/actions` door (#9585)
+  
+  Dispatching a flow through `POST /api/v1/actions/:object/:action` (a `type: 'flow'`
+  action — the documented way to expose a flow on a record page) answered `400
+  FLOW_FAILED` with only the raw engine error. The trigger door
+  (`POST /api/v1/automation/:name/trigger`) additionally ships two things in
+  `error.details` of the ADR-0112 envelope: `errorMessage` — the failure text the
+  flow's AUTHOR wrote for exactly this case (`flow.errorMessage`, the single field
+  the console reads, objectui `flowResponse.ts`) — and `summary`, the run's
+  per-node accounting that says WHICH node failed. At the action door the author's
+  text was declared-but-never-delivered.
+  
+  Maintainer ruling (2026-08-19, Option B on #9585): `dispatchFlowAction` now
+  throws a typed refusal carrier (`FlowActionRefusal`) on the ran-and-failed row,
+  and the `/actions` handler recognises it ahead of its generic catch, serving
+  `errorMessage` and `summary` exactly as the trigger door does — same field
+  names, same source, pinned door-against-door so the two cannot drift apart
+  again. Bounded deliberately:
+  
+  - the shared `resolveThrownHttpError` (`@objectstack/types`) stays untouched —
+    its closed `details` list remains the rule for every other thrower; no
+    general "any throw declares wire payload" widening;
+  - only the ran-and-failed row carries the artefacts — a never-dispatched
+    refusal (404 / 409 `FLOW_DISABLED` / 422 `FLOW_NO_START_NODE`) has no run to
+    report and ships neither, at both doors;
+  - a caller that does not recognise the carrier (the MCP `run_action` bridge)
+    serves exactly the previous answer — the carrier stamps `status`, `code` and
+    `message` identically to the plain throw it replaces;
+  - no new schema keys; both doors keep agreeing on `400 FLOW_FAILED`.
+- 20067c5: fix(runtime,mcp,service-datasource): the #6504 consumer sweep — three list consumers stop making claims a known-partial read cannot support (#6504)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable surface is
+  added, renamed, retired or tombstoned. Two package-local host-wiring interfaces
+  gain OPTIONAL members (`DatasourceAdminServiceConfig.countBoundObjectsDiagnosed`,
+  `McpDataBridge.listObjectsDiagnosed`); `packages/spec` is untouched, since
+  `IMetadataService.listDiagnosed` — the contract this consumes — landed in PR
+  #7721. -->
+  
+  `IMetadataService.listDiagnosed?(type)` (PR #7721) lets a plural read say whether
+  its answer can be trusted as complete. This is the consumer half: the callers
+  that were restating a possibly-short listing as a fact about the environment.
+  
+  Each consumer was qualified individually, per PR #6051's discipline, and most
+  were left alone — a caller publishing a snapshot with no count has nothing to
+  mis-state. Three make a claim, and each now withholds exactly that claim while
+  still serving everything it could read:
+  
+  - **`removeDatasource` no longer deletes on a bound-object count it could not
+    take completely.** The guard `if (bound > 0) throw` is the only thing standing
+    in front of an irreversible delete that also unbinds the datasource's secret,
+    and its input is derived from the metadata service's object listing. During a
+    loader outage that listing goes silently short, and the worst value is the
+    benign one: `0` reads exactly like "nothing is bound", so the guard OPENED.
+    It now refuses with `SERVICE_UNAVAILABLE` / 503 — a dependency outage the
+    operator can retry, not a client error — and the record, its credential and
+    its pool all survive.
+  - **The MCP `list_objects` tool stops publishing `totalCount` on a known-partial
+    listing.** This is the same claim PR #7721 removed from the
+    `objectstack://objects` resource, on the other MCP primitive: same payload
+    shape, different door, never covered. A degraded read now serves the same
+    objects with `totalCount` **absent** and `partial` / `returnedCount` /
+    `warning` plus the 503 envelope in its place, so a client reading the total
+    gets `undefined` rather than a believable wrong integer. Both bridges
+    implement it — stdio (`@objectstack/mcp`) and HTTP (`@objectstack/runtime`) —
+    because a completeness claim must not depend on which transport a client
+    connected over.
+  - **The ADR-0015 §5.2 boot gate stops announcing an all-clear over a sweep it
+    could not complete.** It validated whatever `listObjects()` returned and then
+    logged *all federated objects match their remote schema*, with a count.
+    Federated objects behind an unreadable loader were never validated, so
+    `onMismatch: 'fail'` could not have fired for them. The gate now warns that
+    the swept set was incomplete and names what it did validate. ⛔ It does **not**
+    abort boot on a degraded metadata read: turning a transient outage into a
+    refusal to start would be a new failure mode bought with a diagnosis fix.
+  
+  Every new member is optional in the same way `listDiagnosed` itself is: a host
+  whose metadata service predates the verdict behaves exactly as it did before,
+  and a service without it reports nothing degraded — precisely what it could
+  express.
+- 5989b0d: feat(runtime): the dispatcher's two discovery bodies join the response envelope (#9813)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Additive wire change:
+  `GET /.well-known/objectstack` (always dispatcher-owned) and the REST-less
+  fallback `GET {prefix}/discovery` gain `success: true` beside the existing
+  `data` key — nothing authorable and no key is renamed, retired or removed, so
+  there is no conversion to register. Every measured reader (`@objectstack/client`
+  `connect()`'s `body.data || body`, the QA http-adapter's `'routes' in body`
+  discriminator, objectui's `typeof body.success === 'boolean' && 'data' in body`
+  unwrap) resolves the new shape to the same document. -->
+  
+  `GET /.well-known/objectstack` and the REST-less fallback `GET {prefix}/discovery`
+  answered `{ data: {discovery} }` with no `success` flag — one key short of the
+  declared `BaseResponseSchema` envelope. They now answer
+  `{ success: true, data: {discovery} }`.
+  
+  This inherits the #9436 maintainer ruling (2026-08-18, option A) on the hono
+  adapter's identical discovery bodies, with its reason intact: machine-read
+  discovery surfaces — SDK `connect()` fallback probes, codegen, AI clients — are
+  the envelope's core constituency, and the migration is one additive key. It is
+  deliberately not #9389's pre-auth exemption, which is a closed list of SPA-read
+  shell-bootstrap surfaces these bodies are not on. Readers that unwrapped
+  `body.data` keep working unchanged; envelope-aware readers that discriminate on
+  `success` now unwrap these routes correctly.
+
+### Patch Changes
+
+- 7c9c1dd: The batch publish response is declared (#9406). `POST /packages/:id/publish-drafts` (Studio's "publish whole app") now has a spec contract behind it: `PublishPackageDraftsResponseSchema` in `@objectstack/spec/api` declares the full wire payload — `success` / `publishedCount` / `failedCount` / `published[]` (each element with its ADR-0008 `version` OCC token and the optional omitted-when-empty `advisories` from #9343) / `failed[]` / `seedApplied` / `materializeApplied` / `commitId`, plus the REST door's own receipts (`unhiddenApps` / `unhideError` / `rebindError`) — the #5745/#7294 "declared = returned" discipline carried to the batch door, with the two pin suites mirroring the single door's pair (spec-side declaration pins plus producer- and route-side conformance gates). `probes` is deliberately opaque in the declaration per the #9406 ruling: the key is declared and carried through verbatim, but its inner `BuildProbeReport` shape is staged until a consumer needs a field of it. `@objectstack/client`'s `packages.publishDrafts` now resolves `PublishPackageDraftsResponse` instead of `any`, and the runtime route ledger names the schema. Additive declaration of an existing wire face — no response bytes change.
+- c766ec3: refactor(metadata-protocol,rest,runtime): one declared shape for the `protocol.deletePackage` seam, imported by both doors (#9960)
+  
+  `deletePackage` had **three** independent statements of its own contract, and
+  they did not agree:
+  
+  | site | what it said |
+  |---|---|
+  | `packages/metadata-protocol/src/protocol.ts` (the producer) | an inline structural type on the method — `packageId`, `organizationId?`, `allTenants?`, `actor?`, `keepData?` |
+  | `packages/rest/src/package-routes.ts` (direct-mount option) | `{ packageId; actor?; allTenants? }` — named **neither** `organizationId` **nor** `keepData`, and its response omitted `deleted` |
+  | `packages/runtime/src/domains/packages.ts` (dispatcher twin) | nothing at all — it reached the verb through `(protocol as any)` |
+  
+  The twin routinely sent exactly the two keys the REST option's type could not
+  express, and the only reason that was not a compile error was the cast.
+  
+  `organizationId` is the member that makes this load-bearing rather than
+  cosmetic: the protocol refuses a call naming neither it nor `allTenants`
+  (`TENANT_SCOPE_REQUIRED`, 400), so it is precisely the key whose presence
+  decides an uninstall's blast radius — and it was the key one of the two doors
+  had no word for.
+  
+  **What changes:** `DeletePackageRequest` and `DeletePackageResponse` are
+  declared once at the producer and exported from `@objectstack/metadata-protocol`
+  (the only user-visible half of this change — two additive type exports); both
+  consumers import them, and the `as any` seam is gone. `@objectstack/rest` also
+  gains three compile-time pins over its option, in compiled source rather than a
+  test file, so a later hand-rolled restatement fails `tsc` instead of drifting
+  green.
+  
+  **What does not change:** nothing about what the verb accepts or returns. The
+  members are identical to the ones the implementation already had, the live call
+  sites send the same keys, and the emitted JavaScript of both consumers is
+  unchanged. The member stays optional at both seams and the runtime's
+  `typeof … === 'function'` capability probe stays — the `protocol` service slot
+  is deliberately uncontracted, the spec's `PackageProtocol` does not declare this
+  verb, and registrants carrying no `deletePackage` are real.
+  
+  No `packages/spec` declaration: minting protocol surface for a verb with zero
+  external consumers is a spec-seat decision nobody has asked for.
+- c8e85fc: fix(tooling): `check:dispatcher-error-vocabulary` reports lowercase codes and the two stamp positions it could not see — a live 403 had been invisible to both vocabulary gates (#9460)
+  
+  The gate's published bound said it scanned "only SCREAMING_SNAKE literals", and
+  handed lowercase to `check:error-code-casing`. Half of that delegation was real
+  and half was a hole, and the hole is where `plugin-security`'s live 403
+  `owd_widening_forbidden` sat through two ADR-0112 sweeps: both gates read the
+  file, both reported nothing, each leaving it to the other.
+  
+  **The card's premise was that the scan's patterns are case-sensitive. They are
+  not** — the literal shapes already matched `[A-Za-z]`. Two explicit filters
+  dropped the value after the match, and the producer was invisible for a
+  different reason entirely, so the prescribed one-line widening would not have
+  found it. Measured before changing anything: reporting every lowercase stamp
+  took the scan from 12 sites to 94, and **all 82 new findings were D6/D6b/D6c
+  neighbours or Zod's own issue codes** — it would have called
+  `ctx.addIssue({ code: 'custom' })` an unregistered ObjectStack error code.
+  
+  So lowercase is now reported **except** in the two positions where
+  `check:error-code-casing` reads the identical characters (`code: 'x'`,
+  `.code = 'x'`). There the delegation is genuine: that gate carries the
+  D6/D6b/D6c discrimination this one does not have. Everywhere else — a constant,
+  a template, a helper parameter — there is no quoted literal at the stamp site
+  for a `code`-anchored pattern to match, that gate is structurally blind, and
+  dropping the value reported it to nobody. What is measured is now "outside the
+  vocabulary **and** unowned by the gate we delegate lowercase to", never "is it
+  SCREAMING_SNAKE".
+  
+  Three stamp positions the scan could not see, all of them widenings:
+  
+  - **`codehelper`** — a file declares one factory and throws through it
+    everywhere (`postureError(code, message)`, `makeError(status, code, message)`,
+    a `constructor(code, message)`). The stamp `(err as any).code = code` knows
+    the token `code` but not the value; the call site knows the value and never
+    writes the token. Every pattern in **both** gates anchors on that token. The
+    join is the parameter, so its **index** names the argument to read — derived,
+    never assumed to be zero, because two live helpers put `code` second and a
+    first-argument rule reads a number and an English sentence as error codes.
+  - **`assignconst`** — `err.code = DENY_CODE`, the assign position's constant
+    sibling. #9223 closed exactly this gap for object literals; the assign
+    position kept it.
+  - **`assign`** with a cast on the left. The old anchor demanded a bare
+    identifier where `(err as any).code = 'X'` puts a `)`.
+  
+  The scan goes from 12 classified sites to 18, and from 0 to 2 codes awaiting a
+  ledger entry — the ratchet moving in the direction it exists to move.
+  `FLOW_CONVERSION_CONFLICT` (a live 409 from the metadata write path) and
+  `owd_widening_forbidden` are recorded as `pending-registration`; four
+  `MigrationJournalRefusal` codes are `boot-refusal` (their only consumers are two
+  CLI commands, no HTTP boundary). ⛔ No allowlist entry, no narrowed pattern, no
+  raised ceiling: **registering or renaming a code stays the `packages/spec`
+  lane's call**, and these rows record the measurement rather than prescribing the
+  remedy.
+- 3d61924: fix(runtime): a `PUT /meta/:type/:name` with a falsy body is refused instead of being answered as a READ (#8842)
+  
+  The http-dispatcher's metadata save branch opened `if (method === 'PUT' && body)`.
+  The `&& body` conjunct was not a guard — it was a hole. Every path inside that
+  block returns (including the terminal `501`), so a falsy body did not merely skip
+  the write: execution continued past the whole save block into the read `try`
+  below, which resolved the type and answered the ordinary metadata **read**.
+  
+  A caller who asked to write received what looks like a successful read. No
+  status, header or field distinguished it from a real write acknowledgement —
+  the shape "Absence must be loud" exists to prevent. The `manage_metadata`
+  capability gate, which is the first thing the save branch does, was skipped
+  entirely for such a request as well. (Not an escalation: the request was answered
+  by the read path, which runs the same ADR-0106 mask a plain `GET` runs, and
+  nothing was written. Skipping a write gate on a request that performs no write
+  grants nothing — the defect is the lie, not a privilege.)
+  
+  **Reachable from an ordinary client, measured rather than read.** The host that
+  mounts this dispatcher path is the Hono adapter's catch-all, which builds the
+  body as `await c.req.json().catch(() => ({}))`. That `.catch` covers a parse
+  *failure* — an empty body or garbage lands on `{}` — but not a *successful*
+  parse of a falsy JSON value. Driven against a real Hono app, a `PUT` with
+  `content-type: application/json` and a payload of `null`, `false`, `0` or `""`
+  each arrive at the dispatcher falsy.
+  
+  **The fix matches the sibling transport rather than inventing a second answer.**
+  `packages/rest`'s `PUT /meta/:type/:name` already folds `req.body ?? {}` and
+  proceeds into the save unconditionally, so its bodyless writes are refused
+  downstream by the per-type schema with `422 INVALID_METADATA`. The dispatcher now
+  does the same: the branch keys off the method alone, and a nullish body folds to
+  `{}`. Two doors onto one `saveMetaItem` disagreeing about what a bodyless
+  metadata write means was the actual defect.
+  
+  What callers see instead of a spurious read:
+  
+  - holding `manage_metadata` → `422 INVALID_METADATA` from the per-type schema,
+    with the structured `issues` the Studio form reads;
+  - not holding it → `403 PERMISSION_DENIED` from the capability gate, which now
+    runs on this request at all.
+  
+  A `PUT` carrying a real body is untouched — it saves exactly as before, and the
+  body still reaches the writer verbatim.
+- 5244fd7: The dispatcher's two write-less-transport fallbacks for streamed results now implement the IHttpResponse streaming contract's own prescription (#3607, ADR-0076 OQ#10): when a transport's response object lacks the optional `write`/`end` streaming surface, the SSE frames are buffered and delivered through `send()` under the streaming headers, byte-identical to what a streaming transport would have written. Previously the route-wrapper fallback answered a bare JSON `{ events }` body no SSE reader could decode, and the dispatch-result writer fell through to serializing the stream descriptor itself — collapsing its `events` AsyncIterable to `{}` and losing every event silently under HTTP 200. Both branches are reachable only through an externally supplied `Runtime({ server })` transport without streaming support; callers of such compositions that parse the streamed and buffered bodies with the same SSE reader now decode identical frames from either.
+- 79c46da: feat(contract): a hook refusal can mark its message user-facing — `userMessage`, the producer-side opt-in channel (#9934, producer half of objectui#5210)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Purely additive: one
+  new OPTIONAL field on the two error-envelope schemas, a new shared reader in
+  @objectstack/types, and passthrough plumbing at the boundaries. Nothing
+  authorable is renamed, retired, aliased or tombstoned, so there is no
+  conversion to register. Unmarked errors produce byte-identical wire bodies. -->
+  
+  The console form deliberately discards the server `message` on 403 and
+  substitutes a generic string — the recorded #3821 fix for platform diagnostics
+  leaking to end users. That substitution also suppressed every deliberate,
+  localized refusal an application hook author wrote (11 real hook guards in the
+  objectui#5210 report), and incentivized misusing 400 for permission refusals.
+  The maintainer-accepted ruling (2026-08-19, option 1): give the AUTHOR a
+  producer-side way to mark a refusal message user-facing, once, at the contract
+  level — status-agnostic, with #3821 preserved by construction for everything
+  unmarked.
+  
+  **The marking**: set `userMessage` (non-empty string) on the thrown error at
+  throw time. It is a text-carrying field, not a boolean beside `message` — the
+  mark and the marked text are one value, so no boundary that rewraps or
+  substitutes `message` can promote platform prose into the marked channel, and
+  platform/driver code never sets it.
+  
+  - `@objectstack/spec`: `ApiErrorSchema.userMessage` and
+    `EnhancedApiErrorSchema.userMessage` (optional, additive).
+  - `@objectstack/types`: `declaredUserMessage(error)` — the ONE "is this
+    marked?" read (non-empty string, nothing invented) — and
+    `ThrownHttpError.userMessage` on `resolveThrownHttpError`.
+  - `@objectstack/rest`: `mapDataError` / `resolveErrorResponse` ride a declared
+    marking onto whatever envelope classification chose (flat body top-level
+    `userMessage`, truncated at the same #5423 bound as the 4xx message).
+  - `@objectstack/runtime`: the QuickJS side-channel carries `userMessage`
+    across the sandbox boundary (both directions, joining `code`/`fields`/
+    `status`), and the dispatcher door emits it as a declared sibling in the
+    nested envelope.
+  - `@objectstack/client`: the SDK attaches `err.userMessage` from both wire
+    dialects, so a UI renders it verbatim when present and keeps its generic
+    substitution when absent.
+  
+  The consumer half — the console form rendering a marked message instead of the
+  generic `form.noPermissionToSave` — is objectui#5210.
+- 1e050a5: fix(observability): emit `http_request_duration_ms` from the transport seam, so
+  p95 latency sees every inbound surface instead of dispatcher routes only
+  (#9834)
+  
+  #9835 moved `http_requests_total` to the `IHttpServer.afterResponse` seam and
+  stopped there, which left the two derived signals the operator guidance names
+  inconsistent with each other: 5xx rate covered auth's `getRawApp()` mount and
+  the REST data API, while p95 latency still saw only the routes the dispatcher's
+  own `Proxy` wrapped. A missing latency panel is at least loud; the worse
+  reading is the p95 that IS drawn, computed from dispatcher routes only and
+  presented as the server's.
+  
+  - `@objectstack/observability`: new `armHttpRequestDurationHistogram(server,
+    metrics)`, the duration family's counterpart to `armHttpRequestCounter` —
+    same `afterResponse` seam, its own `Symbol.for` first-wins latch, so a host
+    that armed one family can still arm the other. `ArmHttpMetricResult` is the
+    family-neutral spelling of the result union; `ArmHttpRequestCounterResult`
+    stays as an alias.
+  - `@objectstack/plugin-hono-server`: `installHttpMetricsSeam` arms both
+    families, so the transport owns every transport-observable HTTP metric in the
+    shipped composition rather than splitting ownership across layers.
+  - `@objectstack/runtime`: the dispatcher offers its registry to the histogram
+    seam as well, and `instrumentRouteHandler` gains
+    `emitHttpRequestDurationMs` (default `true`) — passed `false` exactly when
+    the transport implements the seam, which is what keeps the dispatcher's own
+    routes at ONE observation instead of reintroducing the #9833 double count one
+    family over.
+  
+  **⚠️ The observation window changes with the emitter.** The per-route wrapper
+  timed `await handler(req, res)` — handler latency. The transport times from
+  first seeing the request to the response existing, so the middleware chain and
+  body parse are now included and samples can only move UP. This is the number a
+  latency panel should show (the request's latency, not one layer's share of it),
+  but it is a visible shift in an existing series: compare p95 across the upgrade
+  boundary deliberately. Documented in `docs/OBSERVABILITY.md` and the
+  production-readiness guide.
+  
+  `http_request_errors_total` is deliberately NOT moved. The observation carries
+  no throw signal — only `{method, routePattern, status, elapsedMs}` — so a
+  transport-side emitter would have to key off a status class, which counts a
+  different population than "the handler threw". That is a semantics decision,
+  recorded on #9834 rather than guessed at here; the counter stays ungated on
+  every transport and keeps its documented meaning.
+- 7ff3975: feat(spec): `IHttpServer` gains an optional `afterResponse` response-observing
+  hook so HTTP metrics are transport-agnostic instead of Hono-only (#9835)
+  
+  The contract addition (additive — a new optional member plus the
+  `HttpResponseObservation` / `HttpResponseObserver` types and the reserved
+  `UNMATCHED_ROUTE_PATTERN` label): a transport invokes each registered observer
+  exactly once per answered request with `{ method, routePattern, status,
+  elapsedMs }`, after the response exists — the observation point the `use()`
+  middleware contract cannot express (it runs before dispatch and never sees a
+  status). `routePattern` is REQUIRED to be the registered route pattern
+  (`/api/v1/data/:id`), never the concrete path, so no adapter re-decides metric
+  cardinality. Optionality is feature-detected runtime-real
+  (`typeof server.afterResponse === 'function'`); a transport that does not
+  implement the seam reports **no** HTTP metrics — zero there means "not
+  instrumented", never "no traffic".
+  
+  Implementations and consumers in the same change:
+  
+  - `@objectstack/plugin-hono-server`: `HonoHttpServer` implements the seam (the
+    ruled #9650 raw-app middleware becomes its delivery path — same reach,
+    including `getRawApp()` mounts and middleware-refused 429s); unrouted
+    requests are now labelled with the reserved `unmatched` pattern (previously
+    they could surface as `/*`).
+  - `@objectstack/observability`: new `armHttpRequestCounter(server, metrics)`
+    arms the `http_requests_total` counter through the seam at most once per
+    server (first caller wins), which is what makes "exactly one counter per
+    server" structural.
+  - `@objectstack/runtime`: the dispatcher offers its `observability.metrics`
+    registry to the seam (a host that wires only the dispatcher now counts every
+    inbound surface) and suppresses its own per-route copy of
+    `http_requests_total` when the transport implements the seam — retiring the
+    #9833 double count. Request-id echo, the duration histogram, the error
+    counter and the error reporter are unchanged.
+  - `@objectstack/http-conformance`: `NodeHttpServer` implements the seam, and a
+    new cross-adapter conformance suite locks the semantics for both adapters.
+  - `@objectstack/core`: re-exports the new contract types/constant.
+- e783e16: fix(runtime): the HTTP MCP prompt bridge reads the merged skill listing, so a runtime meta PUT finally reaches `/api/v1/mcp` (#8726)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) One consumer moves up a
+  layer — from `IMetadataService.list('skill')` to the protocol's `getMetaItems`.
+  No authorable key is added, renamed, retired or tombstoned, and no stored shape
+  changes, so there is no conversion to register. -->
+  
+  `PUT /api/v1/meta/skill/{name}` with `{active:true}` returned 200 and the flip
+  was **not** reflected over MCP prompts. This is the second of the two skill
+  reads behind that symptom, and the one #8328's own three-step reproduction
+  actually runs through.
+  
+  The two surfaces read different layers:
+  
+  - **stdio** (long-lived server, `packages/mcp` → `bridgePrompts`) — fixed by
+    PR #8724.
+  - **HTTP** `/api/v1/mcp`, built **per request** by `packages/runtime`
+    (`domains/mcp.ts` → `buildMcpBridge.listSkills`) — this change. It read
+    `metadataService.list('skill')`, the registry/loader listing, one layer
+    **below** where any `sys_metadata` overlay merging happens. So the overlay row
+    the PUT wrote was never seen, while `GET /api/v1/meta/skill` served it
+    correctly from the merged read: two surfaces, one skill name, two answers.
+  
+  The read now goes through the protocol layer's `getMetaItems`, per the
+  maintainer's ruling on #8328 (2026-08-13, option 3) — and ⛔ **not** by pushing
+  the overlay merge down into `MetadataService.list()` for every consumer, which
+  is a wider contract change archived unscheduled as #8722.
+  
+  **Resolved per request, on the same per-environment seam `getMeta()` already
+  uses** — never captured once at boot, which on a multi-tenant host would serve
+  one environment's overlay rows to every other one. Pinned by two
+  multi-environment tests.
+  
+  **⛔ No fallback to the un-merged listing when the merged read throws.** That
+  would answer registry rows in the shape of merged ones — this exact defect,
+  restored silently at the moment the overlay store is unreadable, which is
+  precisely when an overlay is most likely to be the thing being missed. The
+  throw travels to the MCP client instead. Structural absence is treated as the
+  different thing it is: a host assembled without the metadata protocol has no
+  merged read to offer, so it keeps the registry listing unchanged, including the
+  load-bearing `?? []` for a host with no metadata service at all.
+  
+  **#6504's completeness verdict is added here rather than preserved** — unlike
+  the stdio bridge, this read never had a diagnosed wrapper, so a known-partial
+  skill surface presented as a complete one. The verdict is asked of
+  `IMetadataService.listDiagnosed` directly rather than taken from the merged
+  read, because `getMetaItems` swallows a MetadataService read failure into its
+  own `catch` and reports a merged list either way. It is reported at `warn`
+  (functional degradation: the prompt surface is visibly smaller than the
+  environment declares), and a verdict probe that itself fails is reported as
+  "could not be determined" rather than failing a read whose items succeeded.
+- 4fc4a3c: **`DELETE` / `PATCH` / `POST` on the dispatcher's `/metadata/:type/:name` are refused with `405` instead of being answered as reads.**
+  
+  The `parts.length >= 2` block carried exactly one method-sensitive branch — the `PUT` save — and the read that followed it had no method guard, so every other verb fell into it and was served the ordinary metadata read. `DELETE` was the sharpest case: a caller asking to delete a metadata item received `200` plus the item document, which is indistinguishable from a successful destructive call, while nothing was deleted and `protocol.deleteMetaItem` was never invoked. No status, header or field separated any of those answers from a real `GET`.
+  
+  The block now answers `405 METHOD_NOT_ALLOWED` with an `Allow: GET, HEAD, PUT` header naming what it serves, aligning it with every other route in the same file (which already guard their verb). `GET`, `HEAD` and `PUT` are unchanged, and a request that passes no method still defaults to the read.
+  
+  Note this narrows an accepted surface: a client that was relying on `DELETE`/`PATCH`/`POST` returning the document now gets a `405`. It never performed the operation the verb named — use `GET` to read, or `packages/rest`'s `DELETE /api/v1/meta/:type/:name` for a real metadata delete.
+- 17854cb: Correct the `owd_widening_forbidden` rationale in the dispatcher error-code ledger to the measured wire shape.
+  
+  The row's `why` claimed the refusal "reaches the wire verbatim" in a 403 body "whose `code` is this string". Since #9232 narrowed the flat REST door, it does not: the body carries `code: PERMISSION_DENIED` — the closed ADR-0112 member the status derives — and the gate's own lowercase spelling rides the open `declaredCode` sibling beside it, which is what `packages/rest/src/meta-object-owd-gate.test.ts` actually asserts. Prose only; the `pending-registration` verdict, the accept/reject set and every emitted body are unchanged.
+- 09b880b: Restate the `CodeVerdict.pending-registration` doc comment in `dispatcher-error-vocabulary.ts` in post-#9106 terms.
+  
+  The doc comment said the verdict "reaches a wire `error.code` verbatim" and "the body cannot parse" — both false since #9106 narrowed the dispatcher door: the unregistered spelling now rides the wire's `declaredCode` instead of `error.code`, so the body parses, and what an unswept producer loses instead is its semantic code, silently demoted off `error.code` until registered. The file's own module header and the gate script's header already said so; only the verdict doc comment was the holdout, and it is the classification guide a future `unclassified-site` finding gets picked from. Prose only — `verdict:` values, row data and the gate script are unchanged; `check:dispatcher-error-vocabulary` parses `verdict:` textually with comments masked, so no gate reads this text and no behaviour moves.
+- 7fc01db: REST `/meta` write doors now carry the caller's organization, so audit rows are no longer stamped environment-wide
+  
+  `PUT /meta/:type/:name` (both arities), `DELETE /meta/:type/:name`,
+  `POST /meta/:type/:name/publish` and `POST /meta/:type/:name/rollback` passed no
+  organization, so every `sys_metadata_audit` row a REST-authored metadata write produced was
+  stamped `organization_id: null`. Composed with the scoped audit read shipped alongside it —
+  which returns own-org rows **plus** environment-wide ones, a limb that is required rather
+  than optional — that left every REST-authored audit row readable by every tenant, carrying
+  its `actor`, `note`, `lock_state` and `request_id`. The read side could not close this: the
+  rows were genuinely unscoped, so no filter could separate them.
+  
+  The organization is taken from the execution context these doors already resolve, and is
+  threaded through `organizationIdForMetaWrite` — the same registry-derived predicate the
+  runtime `/metadata` dispatcher uses. Types the registry declares `allowOrgOverride: true`
+  (`view`, `dashboard`, `report`, `translation`, `email_template`) now scope both the overlay
+  row and its audit row to the caller's organization; every other type continues to write
+  environment-wide, because its write genuinely is environment-wide and the protocol refuses
+  an org-scoped write for it. `null` is now reserved for writes that really are
+  environment-wide.
+  
+  Two behaviour changes ride along, both required for the fix to be usable rather than
+  separate improvements: `publish` and `rollback` resolve their row through the organization,
+  so scoping the save without scoping them would have broken the draft → publish loop; and
+  `GET /meta/:type/:name/published` is now organization-scoped (organization-first, then
+  environment-wide), without which it would answer 404 for an item the same caller had just
+  published through the same transport.
+  
+  `organizationIdForMetaWrite` / `declaresOrgOverride` moved from `@objectstack/runtime` into
+  `@objectstack/metadata-core` so both doors share one implementation — `@objectstack/rest`
+  cannot import from `runtime`, which depends on it. Runtime behaviour is unchanged.
+- c86799f: fix(service-automation): a retry attempt that PAUSES is a durable pause, not a failed attempt — `executeWithoutRetry` gets the ADR-0019 suspend arm (#9510)
+  
+  `execute()`'s catch tests the suspend signal FIRST, and that arm is what makes
+  ADR-0019's durable pause work: it snapshots the live variables, calls
+  `persistSuspendedRun`, records a `paused` log entry and returns
+  `{ success: true, status: 'paused', runId }`.
+  
+  `executeWithoutRetry()` — the method `retryExecution` re-runs the flow through on
+  **every** retry attempt — had no such arm. A `FlowSuspendSignal` thrown on a
+  retry attempt fell into the generic failure path, and four things were lost at
+  once:
+  
+  1. `persistSuspendedRun` never ran, so **the continuation was never stored** and
+     the run could not be resumed by anyone, ever;
+  2. the run log recorded `failed` for a run that asked to pause;
+  3. the caller got `status: 'failed'`, with the suspend signal stringified into
+     `error` (`FlowSuspendSignal` is not an `Error`);
+  4. `retryExecution` reads only `result.success`, so the pause counted as one more
+     failed attempt: the loop burned the rest of the budget, and every further
+     attempt re-entered the pausing node and orphaned another suspension.
+  
+  Only a LATER attempt is exposed — `execute()` handles the first one correctly,
+  and a flow reaches `retryExecution` only after a failure. The reachable shape is
+  the ordinary one: `errorHandling.strategy: 'retry'` on a flow whose flaky
+  HTTP/connector call is followed by an `approval` or `screen` node.
+  
+  **⚠️ Runs already lost to this defect are NOT recoverable.** Nothing was written
+  for them — no `sys_automation_run` row, no in-memory suspension — so there is no
+  continuation to rehydrate and no repair, here or later, can bring one back. The
+  run log holds a `failed` entry naming the flow and the trigger; those runs have
+  to be triggered again. What this change fixes is every run from here on.
+  
+  **The repair is a restoration of a stated contract on a path that never got it,
+  not a new capability.** `AutomationResult.status: 'paused'` and ADR-0019 already
+  describe exactly this behaviour, and `execute()`'s own arm already implements it;
+  the retry path simply never received it. The alternative — refusing
+  `strategy: 'retry'` combined with a pausing node at authoring time — was
+  considered and rejected: it over-refuses (a pausing node can sit on a branch the
+  retrying path never reaches), under-refuses (a pausing node behind a runtime
+  condition is not statically decidable), and would ban the one combination authors
+  most reasonably reach for.
+  
+  **The cost, and what was done about it.** Lifting the arm makes `retryExecution`
+  able to return a NON-TERMINAL result, and both of its readers were taught the
+  third state explicitly rather than left to a branch that happens to fall through:
+  the retry loop returns a paused attempt because it PAUSED (tested on `status`,
+  before the `success` check that means "this attempt succeeded"), and the trigger
+  route answers it from its own arm. The retry accounting is untouched — a
+  genuinely failing attempt still consumes one, `maxRetries` still bounds the loop,
+  and the loop stops only because the attempt did not fail.
+  
+  **Both routes give one answer**, pinned as an equality rather than verified in
+  isolation: a pause on attempt 1 and a pause on attempt 3 produce the same engine
+  result and the same wire response, so no caller can tell which attempt paused.
+  
+  Two adjacent gaps were measured out of this work and filed rather than absorbed:
+  a retry attempt runs with a smaller variable environment than the first (#9704),
+  and a flow's declared retry policy stops applying once a run pauses (#9705) —
+  the latter being the measured answer to "what happens to the retry budget when a
+  paused run is resumed and then fails": neither inherited nor fresh, because the
+  resume path has no retry loop at all. Both are pinned as today's behaviour so
+  neither can change by accident.
+- 19db5fa: fix(runtime): `publish-drafts` no longer discloses driver or subscriber text on `unhideError` / `rebindError` (#8516)
+  
+  `POST /api/v1/packages/:id/publish-drafts` answered, on a **200**:
+  
+  ```json
+  { "success": true, "data": {
+    "unhideError": "SQLITE_ERROR: no such table: sys_metadata",
+    "rebindError": "TypeError: Cannot read properties of undefined (reading 'triggers') at AutomationPlugin.rebind (/srv/objectstack/packages/services/service-automation/dist/index.js:412:31)" } }
+  ```
+  
+  These are the two remaining producers on the response whose `seedApplied` field
+  #8443 converted — the ADR-0045 visibility flip and the `metadata:reloaded`
+  announce. Both ride a success body as **data**, so no HTTP boundary's 5xx
+  message withhold can reach them; the disclosure had to be closed at the
+  producer. Both were driven for real before being changed, and both reproduced.
+  
+  Both now follow the rule already in force next door: a caught sentence is
+  quoted only when the error **declared** itself a client-facing refusal (4xx
+  `status`, ADR-0112); anything else gets the stable sentence the field could
+  already carry, and the original goes to the server log. The rule is imported
+  from `@objectstack/metadata-protocol` (`clientFacingFailureText`), not restated
+  locally.
+  
+  **Both halves of the rule, because the two sites started in different states.**
+  The flip already logged its cause in full at `error` with an operator remedy, so
+  only its payload changed. The announce had **no log line at all** — withholding
+  alone would have converted an over-disclosure into a silent failure, so it gains
+  one at `warn`, naming the cause, the concrete consequence (a newly published
+  record-triggered flow does not bind its trigger until the process restarts) and
+  the fix (re-run the idempotent publish, or restart). `warn` rather than `error`
+  because nothing that claimed to persist failed to: the drafts are published and
+  the flip is stored, and an unbound trigger is AGENTS.md's own worked example of
+  a functional degradation — the level the sibling announce of this same event
+  already uses.
+  
+  **Authoring feedback is preserved, not blanked.** The flip's authored refusals
+  all declare 4xx (`ITEM_LOCKED`, `NOT_OVERRIDABLE`,
+  `OBJECT_OVERLAY_PACKAGE_MISMATCH`, …), so a locked or non-overridable app still
+  tells its publisher which app and why, verbatim — and the `unhiddenApps`
+  half-flip report beside it is untouched. A subscriber that declares a 4xx
+  refusal is quoted by the same positive list.
+- 2b9d33a: Stamp seeded rows with the install's organization so one object runs one autonumber scope (#8686)
+  
+  Seed writes and API writes disagreed about tenancy. Seed data is loaded during
+  app start, before any human user exists, so the seed loader had no organization
+  to stamp and its rows landed `organization_id = NULL`; API writes carried the
+  signed-in user's organization. The SQL driver keys its autonumber counter by
+  exactly that column (`__global__` when NULL), so a single object ran two
+  independent counters — and the uniqueness index is partitioned by the same key
+  (`COALESCE(organization_id, '__global__'), <field>`), so the duplicates the
+  second counter minted were invisible to the constraint. On a single-tenant
+  install seeded with `CASE-00001..38`, the first four API creates returned
+  `CASE-00001..4` again: four duplicated values on a field declared `unique`, with
+  201s and no warning.
+  
+  Seed writes now carry the organization the same way API writes do. The moment an
+  install's organization first exists, untenanted seed rows are adopted into it and
+  the `__global__` counter is merged into the organization-scoped one, so the
+  `__global__` pseudo-tenant stops acting as a peer of a real organization. Existing
+  installs are repaired by a one-shot boot-time backfill, guarded to single-tenant
+  installs; a multi-tenant install where a split is detected is never guessed at —
+  the backfill skips and logs the condition and the remedy. Business identifiers
+  that were already minted twice are reported for the operator, never silently
+  renumbered. Platform namespaces (`sys_`/`cloud_`/`ai_`) stay global, exactly as
+  the seed loader already treats them.
+- ad217b1: fix(metadata-protocol): compile the seed-tenancy backfill's statements for the connected dialect, so they run on MySQL (#9381)
+  
+  `seed-tenancy-backfill.ts` quoted every identifier the ANSI way (`"x"`) on every
+  dialect. MySQL does not run with `ANSI_QUOTES` — measured on a live MySQL 8.0.46,
+  whose `sql_mode` is
+  `ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION`,
+  and nothing in `driver-sql` sets one — so `"x"` is a string literal there and all
+  seven statements failed with `ER_PARSE_ERROR`. The repair for #8686 therefore
+  never ran on MySQL, silently: a migration must not fail a boot, so every call site
+  turns the failure into a warning and the symptom was a skipped repair in the log
+  rather than an error.
+  
+  The statements are now compiled for the driver actually connected, and the seam
+  carries the dialect with it (`resolveSeedTenancySeam` returns `{ exec, client }`;
+  `backfillSeedTenancy` takes that pair) so a caller cannot lose it. Two further
+  MySQL-only defects in the same statements, both measured on the same server, are
+  fixed with it: `last_value` is a reserved word on MySQL 8.0 and is now quoted
+  wherever it is unqualified, and the stamp's exclusion sub-SELECTs go through a
+  derived table because MySQL refuses `UPDATE t … (SELECT … FROM t)` with
+  `ER_UPDATE_TABLE_USED`. SQLite and PostgreSQL keep the exact ANSI spelling they
+  had (both re-verified live).
+  
+  `resolveSeedTenancyExec` stays exported and unchanged for callers that resolve the
+  dialect themselves; `backfillSeedTenancy` now takes the seam object instead of a
+  bare exec.
+- 593c4bf: feat(spec): `storage` becomes the canonical `CoreServiceName` slot; `file-storage` stays a deprecated v17 alias (#9683)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A service-registry slot
+  name is not authorable metadata — nothing in a stack definition spells it — so
+  there is no conversion-layer entry to register. Compatibility is carried by the
+  enum keeping the old member and by @objectstack/service-storage registering the
+  same instance under both names; the alias retires through the standard
+  retirement flow at the next major. -->
+  
+  Maintainer ruling, 2026-08-18, verbatim: 「9683 file-storage 可以叫 storage」.
+  The `file-storage` slot was the only `CoreServiceName` member whose spelling
+  diverged from its documented accessor (`services.storage`), with no recorded
+  reason anywhere in the tree.
+  
+  - `CoreServiceName` gains `storage` as the canonical member; `file-storage`
+    stays an accepted, deprecated alias within v17 (it is a published enum
+    member — existing `getService('file-storage')` callers keep working).
+    `CORE_SERVICE_PROVIDER` and `ServiceRequirementDef` carry both.
+  - `@objectstack/service-storage` registers the **same instance** under both
+    names (the `http.server` / `http-server` pattern), pinned by an
+    alias-equivalence test.
+  - Every internal consumer resolves `storage`: the HTTP dispatcher, the email
+    plugin's attachment store, and `os migrate files-to-references`. Discovery
+    reports the service under the canonical `storage` key and mirrors the row
+    verbatim under the `file-storage` key for the alias's v17 lifetime, so
+    existing discovery readers (e.g. the console endpoint catalog) keep
+    working.
+  - Docs (`kernel/runtime-services`, `kernel/contracts`) now document the
+    canonical slot; a custom v17 provider for this slot should register both
+    names.
+- Updated dependencies [56656aa]
+- Updated dependencies [c9f5950]
+- Updated dependencies [d6e80b2]
+- Updated dependencies [07e630e]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [e717ba1]
+- Updated dependencies [f287435]
+- Updated dependencies [e7bccaa]
+- Updated dependencies [2782805]
+- Updated dependencies [e43d63a]
+- Updated dependencies [e374b4d]
+- Updated dependencies [5047cb8]
+- Updated dependencies [ed4ca59]
+- Updated dependencies [445ae4d]
+- Updated dependencies [9aa8890]
+- Updated dependencies [40d5b2d]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [03520eb]
+- Updated dependencies [8bbf459]
+- Updated dependencies [899052a]
+- Updated dependencies [a751f7d]
+- Updated dependencies [eccb8b2]
+- Updated dependencies [650cd3d]
+- Updated dependencies [b735507]
+- Updated dependencies [91c6c28]
+- Updated dependencies [75b7c24]
+- Updated dependencies [cf0d902]
+- Updated dependencies [498f4e8]
+- Updated dependencies [cc5c07b]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [4c178c1]
+- Updated dependencies [13d7864]
+- Updated dependencies [8640fb2]
+- Updated dependencies [5c38492]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [3508678]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [2d0af57]
+- Updated dependencies [2c570f3]
+- Updated dependencies [c766ec3]
+- Updated dependencies [7337f30]
+- Updated dependencies [420804d]
+- Updated dependencies [8656d67]
+- Updated dependencies [177442d]
+- Updated dependencies [950bd94]
+- Updated dependencies [3043e98]
+- Updated dependencies [51a46a4]
+- Updated dependencies [cbf4b40]
+- Updated dependencies [9c4d096]
+- Updated dependencies [86431f7]
+- Updated dependencies [716ac9b]
+- Updated dependencies [a38408a]
+- Updated dependencies [e9534a4]
+- Updated dependencies [7b3c033]
+- Updated dependencies [6feac91]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [27a567d]
+- Updated dependencies [4ea921c]
+- Updated dependencies [42b05af]
+- Updated dependencies [0ccea4a]
+- Updated dependencies [3ab2488]
+- Updated dependencies [2b292ce]
+- Updated dependencies [185c7bd]
+- Updated dependencies [abcf853]
+- Updated dependencies [14935ab]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [66dbec4]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [45862a5]
+- Updated dependencies [79c46da]
+- Updated dependencies [1e050a5]
+- Updated dependencies [7ff3975]
+- Updated dependencies [fd6bdf8]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [24173e9]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [a9df51c]
+- Updated dependencies [f8eb736]
+- Updated dependencies [11b779e]
+- Updated dependencies [ab8b10f]
+- Updated dependencies [4e71ae1]
+- Updated dependencies [739fe5b]
+- Updated dependencies [20067c5]
+- Updated dependencies [bc03179]
+- Updated dependencies [5ed8ee6]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [b537855]
+- Updated dependencies [2065e31]
+- Updated dependencies [ead96d0]
+- Updated dependencies [6cb88d9]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4dc8a61]
+- Updated dependencies [c15eb23]
+- Updated dependencies [4d47afe]
+- Updated dependencies [2a9752c]
+- Updated dependencies [b740440]
+- Updated dependencies [90a12fb]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [72050cc]
+- Updated dependencies [d70428a]
+- Updated dependencies [4dfa369]
+- Updated dependencies [9a56784]
+- Updated dependencies [c8806ae]
+- Updated dependencies [bb96297]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [5e2f594]
+- Updated dependencies [3b3f67d]
+- Updated dependencies [e2899f6]
+- Updated dependencies [b6c7690]
+- Updated dependencies [2a6ebaf]
+- Updated dependencies [855591f]
+- Updated dependencies [e6e1de4]
+- Updated dependencies [6a12e5e]
+- Updated dependencies [3851f87]
+- Updated dependencies [c73eacd]
+- Updated dependencies [712e185]
+- Updated dependencies [693c788]
+- Updated dependencies [0961065]
+- Updated dependencies [845e164]
+- Updated dependencies [2a29caa]
+- Updated dependencies [9e2e682]
+- Updated dependencies [09a6eee]
+- Updated dependencies [6f5a449]
+- Updated dependencies [8d017eb]
+- Updated dependencies [1a7f907]
+- Updated dependencies [0425db9]
+- Updated dependencies [cd455c8]
+- Updated dependencies [e1bb0ca]
+- Updated dependencies [05864fb]
+- Updated dependencies [4e3a4c3]
+- Updated dependencies [3b0b61c]
+- Updated dependencies [326f5de]
+- Updated dependencies [30d3752]
+- Updated dependencies [8914915]
+- Updated dependencies [21995d7]
+- Updated dependencies [a4c11ad]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [499f55e]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [6a5e6ad]
+- Updated dependencies [30b1c63]
+- Updated dependencies [7fc01db]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [2416dd5]
+- Updated dependencies [03fa4c9]
+- Updated dependencies [88ef34d]
+- Updated dependencies [8f266f1]
+- Updated dependencies [add2d19]
+- Updated dependencies [5d4d20e]
+- Updated dependencies [2b9d33a]
+- Updated dependencies [ad217b1]
+- Updated dependencies [f01c0ee]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [b5f6b26]
+- Updated dependencies [04f8fdb]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [b2a451f]
+- Updated dependencies [c25b2d5]
+- Updated dependencies [147eadc]
+- Updated dependencies [0f59584]
+- Updated dependencies [f6c904a]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [159e299]
+- Updated dependencies [90c5285]
+- Updated dependencies [402c125]
+- Updated dependencies [7901b2d]
+- Updated dependencies [7c2f386]
+- Updated dependencies [56bca91]
+- Updated dependencies [52fbba6]
+- Updated dependencies [d5156b9]
+- Updated dependencies [75e66fc]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [8a9e7f4]
+- Updated dependencies [3d0ded8]
+- Updated dependencies [a726154]
+- Updated dependencies [44bc51d]
+- Updated dependencies [bbbfcfc]
+- Updated dependencies [1258dca]
+- Updated dependencies [4639cec]
+- Updated dependencies [91c4ff5]
+- Updated dependencies [73cfddf]
+- Updated dependencies [a4acb8d]
+- Updated dependencies [d634e66]
+- Updated dependencies [682b86b]
+- Updated dependencies [6a1b45e]
+  - @objectstack/spec@17.1.0
+  - @objectstack/plugin-auth@17.1.0
+  - @objectstack/types@17.1.0
+  - @objectstack/plugin-security@17.1.0
+  - @objectstack/rest@17.1.0
+  - @objectstack/core@17.1.0
+  - @objectstack/metadata-protocol@17.1.0
+  - @objectstack/objectql@17.1.0
+  - @objectstack/driver-sql@17.1.0
+  - @objectstack/observability@17.1.0
+  - @objectstack/service-datasource@17.1.0
+  - @objectstack/driver-memory@17.1.0
+  - @objectstack/driver-sqlite-wasm@17.1.0
+  - @objectstack/metadata@17.1.0
+  - @objectstack/metadata-core@17.1.0
+  - @objectstack/service-i18n@17.1.0
+  - @objectstack/formula@17.1.0
+  - @objectstack/service-cluster@17.1.0
+
 ## 17.0.0
 
 ### Major Changes

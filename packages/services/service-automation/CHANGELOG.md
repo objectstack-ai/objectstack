@@ -1,5 +1,711 @@
 # @objectstack/service-automation
 
+## 17.1.0
+
+### Minor Changes
+
+- bc6434b: **BREAKING** — `POST /api/v1/automation/:name/runs/:runId/resume` answers real HTTP
+  status codes for a failed run instead of HTTP 200 wrapping an inner `{success: false}`.
+  
+  Until now a screen flow driven to a server-side node failure answered:
+  
+  ```
+  HTTP 200
+  {"success":true,"data":{"success":false,"error":"Node 'create_opportunity' failed: …"}}
+  ```
+  
+  The run genuinely failed; the transport reported success. A scripted or integration
+  caller that branches on the HTTP status alone read a failed run as a successful one.
+  This applies to the resume route the ruling for `/actions` (business failures must not
+  ride HTTP 200 inside a double envelope), which every other automation refusal on this
+  route already followed.
+  
+  What changes on the wire:
+  
+  - **A run that resumed and then failed ⇒ `400` with `error.code: 'FLOW_FAILED'`.** The
+    node failure stays the human-readable `error.message`. The flow author's own
+    `errorMessage` travels in `error.details.errorMessage` — one documented location, the
+    same one the console reads — and the run's per-node `summary` in
+    `error.details.summary`. `durationMs` is no longer carried on this response.
+  - **A stale suspension ⇒ `404`.** The flow the run belongs to was deregistered, or the
+    node it was parked on was edited away under a live pause. Nothing ran and the pause can
+    never continue, so this is reported as terminal rather than as a business rejection.
+    The engine now classifies both cases as `RUN_NOT_FOUND`; the message names which one.
+  - **Unchanged:** every refusal that leaves the suspension intact keeps its own code and
+    stays retryable — `PERMISSION_DENIED` (403), `INVALID_SIGNAL` /
+    `INVALID_SCREEN_INPUT` (400), `RESUME_IN_PROGRESS` (409), `STORE_UNAVAILABLE` (503) —
+    and a resume that pauses again still answers 200 with the next screen.
+  
+  **`@objectstack/client`:** `client.automation.resume()` and
+  `client.project(id).automation.resume()` now **reject** on a failed run instead of
+  resolving with `{success: false, error, summary}` — the SDK throws on every non-2xx
+  before unwrapping. Callers that inspected the resolved value must move to a `catch`:
+  
+  ```ts
+  try {
+    await client.automation.resume(flow, runId, { inputs });
+  } catch (err: any) {
+    err.code;                   // 'FLOW_FAILED' (400) — the run ran and failed
+    err.httpStatus;             // 400 | 404 | 403 | 409 | 503
+    err.message;                // the node failure, verbatim
+    err.details?.errorMessage;  // the flow author's own message, when the flow declares one
+  }
+  ```
+  
+  Raw-HTTP callers that treated `2xx` as success and never opened the inner envelope now
+  see the failure they were already being told about, one level up.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) retires no metadata surface: no Zod schema, no authorable key, no stored sys_metadata row changes shape, so `objectstack migrate meta` has nothing to rewrite and no ledger entry can be written for it. What changes is an HTTP status plus an SDK method's promise contract, and the only channel that reaches those consumers is this changeset itself. -->
+- 9aa8890: **BREAKING** — the automation `trigger` routes now answer **409** for a disabled
+  flow and **422** for a flow whose definition has no start node, instead of HTTP
+  200 wrapping an inner `{success: false}`.
+  
+  This finishes the migration the previous release started. That changeset flipped
+  two of the four outcomes and said of the other two:
+  
+  > **Also unchanged, pending a ruling:** a DISABLED flow and one with no start
+  > node still answer 200 with the inner failure. Both are exits that never
+  > dispatched anything, and telling them apart needs a producer-side
+  > classification the closed `AutomationResult.code` union cannot yet express.
+  
+  That is the paragraph this change resolves. The union was widened deliberately —
+  two new members, with measured need — rather than the transport guessing from
+  message text or re-implementing the engine's enable-state policy.
+  
+  `POST /api/v1/automation/:name/trigger` and the legacy
+  `POST /api/v1/automation/trigger/:name` now answer, in full:
+  
+  | Status | `error.code` | The run |
+  |:---|:---|:---|
+  | `404` | — | never dispatched: no such flow |
+  | `409` | `FLOW_DISABLED` | never dispatched: the flow is switched off |
+  | `422` | `FLOW_NO_START_NODE` | never dispatched: the definition has no `start` node |
+  | `400` | `FLOW_FAILED` | RAN, and was rejected |
+  | `200` | — | succeeded, or PAUSED at a screen node — a pause is not a failure |
+  
+  The three refusals report no run because none exists: no node executed and
+  nothing was written. Only `400` describes a run, and only it carries
+  `error.details.summary` / `error.details.errorMessage`.
+  
+  Why two statuses and not one: a disabled flow is reversible operational state —
+  enable it and the identical request succeeds, which is what `409` means. A flow
+  with no start node cannot be executed as stored, and no retry helps, which is
+  what `422` means. Collapsing them would tell an operator to flip a switch that
+  will not help.
+  
+  **`@objectstack/spec`:** `AutomationResult.code` gains `'FLOW_DISABLED'` and
+  `'FLOW_NO_START_NODE'`. The union stays closed; these are trigger-time refusals
+  classified *before* dispatch, documented as a group distinct from the existing
+  resume-refusal members. Both are registered in the ADR-0112 error-code ledger.
+  
+  **`@objectstack/service-automation`:** `execute()` stamps the matching `code` on
+  its disabled-flow and no-start-node exits. They continue to carry **no**
+  `status` — that absence is what lets a transport tell a never-dispatched exit
+  from a run that dispatched and failed (`status: 'failed'`) without inspecting
+  `summary`, `durationMs` or the message.
+  
+  **`@objectstack/client`:** `client.automation.trigger()`, `.execute()` and
+  `client.project(id).automation.execute()` already rejected on a failed run;
+  they now reject with these two additional classifications, so a caller can tell
+  "enable the flow and retry" from "the flow definition is broken":
+  
+  ```ts
+  try {
+    await client.automation.execute(flow, { params });
+  } catch (err: any) {
+    err.httpStatus;   // 409 | 422 | 400 | 404
+    err.code;         // 'FLOW_DISABLED' | 'FLOW_NO_START_NODE' | 'FLOW_FAILED'
+  }
+  ```
+  
+  Callers that branch only on `FLOW_FAILED` keep working for the case they
+  handle, but will no longer see these two refusals under it — they arrive with
+  their own codes, which is the point.
+  
+  Not affected, and deliberately so: `POST /api/v1/actions/...` with a
+  `type: 'flow'` action, and metadata-declared `type: 'flow'` endpoints. Both
+  dispatch the same flow through a different door with its own response
+  conventions, and whether they should inherit this table is tracked separately.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) retires no metadata surface: no Zod schema, no authorable key, and no stored sys_metadata row changes shape, so `objectstack migrate meta` has nothing to rewrite and no ledger entry could be written for it. What changes is an HTTP status plus two new members of a runtime result type, and the channel that reaches those consumers is this changeset plus the compiler. -->
+- 48032c9: **BREAKING** — both automation `trigger` routes answer real HTTP status codes for a flow
+  that ran and failed, instead of HTTP 200 wrapping an inner `{success: false}`.
+  
+  This is the second and wider half of the migration the resume route shipped in the same
+  release (#8684, merged 2026-08-17): one SDK-visible behaviour change, one migration note.
+  The resume flip touched the screen-flow runner; this one touches the door every app
+  dispatches flows through.
+  
+  Until now a flow driven to a node failure answered:
+  
+  ```
+  HTTP 200
+  {"success":true,"data":{"success":false,"error":"Node 'create_opportunity' failed: …"}}
+  ```
+  
+  The run genuinely failed; the transport reported success. A scripted or integration caller
+  that branches on the HTTP status alone read a failed run as a successful one. This applies
+  the `/actions` ruling (business failures must not ride HTTP 200 inside a double envelope)
+  to `POST /api/v1/automation/:name/trigger` and to the legacy
+  `POST /api/v1/automation/trigger/:name` — the shape `client.automation.trigger()` calls.
+  Both doors answer through one mapper, so they cannot drift.
+  
+  What changes on the wire:
+  
+  - **A flow that ran and then failed ⇒ `400` with `error.code: 'FLOW_FAILED'`.** The node
+    failure stays the human-readable `error.message`. The flow author's own `errorMessage`
+    travels in `error.details.errorMessage` — one documented location, the same one the
+    console reads — and the run's per-node accounting in `error.details.summary`. A flow
+    whose `errorHandling.strategy` is `retry` answers the same way once its attempts are
+    exhausted. `durationMs` is no longer carried on this response.
+  - **A flow name the deployment does not hold ⇒ `404`,** answered before anything is
+    dispatched, through the same registry probe `POST /:name/toggle` and `GET /:name` use.
+  - **Unchanged:** a successful run still answers 200 with its result, and a run that PAUSED
+    at a `screen` node still answers 200 with the next screen — a pause is not a failure.
+  - **Also unchanged, pending a ruling:** a DISABLED flow and one with no start node still
+    answer 200 with the inner failure. Both are exits that never dispatched anything, and
+    telling them apart needs a producer-side classification the closed
+    `AutomationResult.code` union cannot yet express. Tracked on #9378.
+  
+  **`@objectstack/service-automation`:** `execute()` now stamps `status: 'failed'` on the
+  results of runs that dispatched and were rejected — the same lifecycle verdict it already
+  writes to the run log. Its never-dispatched exits carry no `status`, which is what lets a
+  transport answer the two classes differently without inspecting the result's internals.
+  
+  **`@objectstack/client`:** `client.automation.trigger()`, `client.automation.execute()` and
+  `client.project(id).automation.execute()` now **reject** on a failed run instead of
+  resolving with `{ success: false, error }` — the SDK throws on every non-2xx before
+  unwrapping. Callers that inspected the resolved value must move to a `catch`:
+  
+  ```ts
+  try {
+    await client.automation.execute(flow, { params });
+  } catch (err: any) {
+    err.code;                   // 'FLOW_FAILED' (400) — the run ran and failed
+    err.httpStatus;             // 400 | 404
+    err.message;                // the node failure, verbatim
+    err.details?.errorMessage;  // the flow author's own message, when the flow declares one
+    err.details?.summary;       // which node failed
+  }
+  ```
+  
+  Raw-HTTP callers that treated `2xx` as success and never opened the inner envelope now see
+  the failure they were already being told about, one level up.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) retires no metadata surface: no Zod schema, no authorable key, no stored sys_metadata row changes shape, so `objectstack migrate meta` has nothing to rewrite and no ledger entry can be written for it. What changes is an HTTP status plus an SDK method's promise contract, and the only channel that reaches those consumers is this changeset itself. -->
+- d31785f: feat(automation): flow `notify` nodes can reference an email template for localized delivery — `template` + `templateData` on `NotifyNodeConfig`, resolved by `(name, recipient locale)` at delivery time (#9205)
+  
+  Ruled 「立项，走 emailTemplates 路线」: instead of widening the `flows`
+  translation surface (whose guidance excludes notification text, #7646), a
+  `notify` node now bridges to the existing localized email-template subsystem.
+  
+  - **Spec** — `NotifyConfigSchema` gains `template` (a `sys_email_template`
+    name, read raw like `topic`/`channels`) and `templateData` (render context
+    for the template's `{{var}}` holes; values interpolate `{token}` templates
+    per run) as the localizable alternative to inline `title`/`message`. Inline
+    strings stay fully valid and byte-identical for existing flows — they are
+    the non-localizable path, and the describes now say so. A node carrying BOTH
+    paths, or `templateData` without `template`, or NEITHER path, is refused
+    loudly with the fix in the message (the `objectNavTargetExclusivity`
+    posture: unrepresentable over silent precedence).
+  - **service-automation** — the notify executor forwards the template
+    reference and its interpolated render context in the emit payload (the
+    outbox snapshots it onto each delivery row), and no longer demands an
+    inline title when a template is referenced.
+  - **service-messaging** — the email channel routes a template-carrying
+    delivery through `IEmailService.sendTemplate({ template, locale, data })`,
+    resolving the recipient locale per delivery: `payload.locale` if the
+    producer set one, else the deployment default
+    (`II18nService.getDefaultLocale()`, the #8195 ruled source), else
+    `sendTemplate`'s documented `en-US` ladder. Template-resolution failures
+    (`TEMPLATE_NOT_FOUND` / `TEMPLATE_INACTIVE` / `MISSING_VARIABLES`, and an
+    email service without `sendTemplate`) are graded `permanent` — dead
+    immediately with the code on the delivery row, instead of burning the retry
+    schedule on metadata that cannot fix itself.
+  
+  The inbox channel keeps its existing rendering (notification title/body,
+  falling back to the topic on the template path): it has no locale-capable
+  rendering seam to the email-template subsystem today, and that gap is
+  documented in the PR rather than papered over with a duplicated resolver.
+
+### Patch Changes
+
+- 5aadce3: fix(service-automation): a triggered run carries the flow author's `successMessage` / `errorMessage` — `execute()` and both retry exits, symmetric with `resume()` (#9414)
+  
+  `AutomationResult` declares `successMessage` / `errorMessage` as a general
+  terminal-result feature — *"Friendly terminal messages copied from the flow
+  definition (`flow.successMessage` / `flow.errorMessage`) … `successMessage` is
+  set on terminal success, `errorMessage` on failure."* One producer honoured it.
+  `resumeInternal` set both on its terminal returns; `execute()` set neither, on
+  either exit, and neither did `executeWithoutRetry` or `retryExecution`.
+  
+  So a flow's own words reached a caller **only if the run happened to pause and
+  be resumed**. A flow dispatched straight through
+  `POST /api/v1/automation/:name/trigger` — or the legacy `trigger/:name` that
+  `client.automation.trigger()` calls — carried nothing, though the flow declared
+  the text and the contract said it was set. One declaration, two behaviours
+  decided by *route* rather than by authoring.
+  
+  **The consumer was already there and already reading.** The trigger route
+  carries `errorMessage` into `error.details.errorMessage` (#9413), which is the
+  one place the console reads it from (objectui `flowResponse.ts`, #4899) — and on
+  the trigger path it was **always absent at the source**, so every non-screen flow
+  showed the raw node error instead of the sentence its author wrote.
+  
+  Four terminal exits now produce the pair, which is every exit a triggered run can
+  leave through:
+  
+  - `execute()` terminal success → `successMessage`; terminal failure →
+    `errorMessage`, **beside** the raw `error` rather than instead of it (the
+    transport folds `error` into the ADR-0112 message and carries the author's text
+    in `details`).
+  - `executeWithoutRetry()` — both exits. `retryExecution` returns this result
+    verbatim when a later attempt succeeds, so without it `successMessage` would
+    depend on *which attempt* happened to work.
+  - `retryExecution()`'s **exhausted** exit, which is a different exit from
+    `execute()`'s own failure return — a flow under `errorHandling.strategy:
+    'retry'` never reaches that one. A repair stopping at `execute()` would have
+    left the message missing for exactly the runs most likely to need it.
+  
+  **Nothing else gained a message, deliberately.** The paused return is not
+  terminal; the skip exits (`condition_not_met`, `reentrancy_loop_guard`) return
+  `success: true` for a run that executed no node; the never-dispatched exits
+  (flow not found / disabled / no start node) have no lifecycle verdict at all and
+  must not acquire a second channel implying one. Those boundaries are pinned, not
+  just described.
+  
+  No new keys and no contract edit — the pair was declared, documented and
+  consumed already; this is the production half catching up (ADR-0049
+  enforce-or-remove, restoration direction).
+- f2920e1: fix(service-automation): node input-schema validation now guards EVERY attempt of a retried flow, not only the first (#9889)
+  
+  Before this fix, `validateNodeInputSchemas` — the guard that refuses to run a
+  flow whose node `config` violates its own declared `inputSchema` — was called
+  only by `execute()` (attempt 1). Under `errorHandling.strategy: 'retry'`, the
+  guard's throw routed into `retryExecution`, and every retry attempt ran
+  through `executeWithoutRetry` with no guard at all: the nodes attempt 1
+  refused to run were executed for real, with the config the guard rejected. A
+  side-effecting node (a data write, an HTTP call, an email) behind a
+  mis-declared `inputSchema` was reachable simply by declaring `retry`.
+  
+  Now both attempt paths call the same guard, so flows that were previously
+  running on retry with a mis-declared `inputSchema` will be refused on every
+  attempt (`success: false`, `status: 'failed'`, with the guard's message).
+  Retry accounting is unchanged: each refused attempt still consumes retry
+  budget, and valid flows retry exactly as before. If a flow of yours starts
+  failing with `missing required input parameter` or `expected type ... but
+  got ...` after this release, it was already being refused on its first
+  attempt — fix the node's `config` to match its declared `inputSchema`.
+- bcf2755: `service-automation`'s README labels its two docs links with the pages they land on (#9668)
+  
+  Two entries in the README's See Also list named artifacts that are not what the link
+  resolves to. `Flow Builder Guide` lands on the Automation **section index**
+  (`content/docs/automation/index.mdx`, `title: Automation`); `Trigger Reference` lands on
+  the automation **schema** reference index (`content/docs/references/automation/index.mdx`,
+  `title: Automation Protocol`), which lists every automation schema — approval, flow,
+  state-machine, webhook and eleven more — not triggers. Both destinations resolve and both
+  are the right section-level target for a package README, so the mismatch is on the label
+  axis, not the destination axis, and only the labels changed.
+  
+  Each new label is the destination page's own `title` frontmatter, with a gloss compressed
+  from that page's own `description`, so the label is checkable against the page rather than
+  invented. **No URL changed**, and in particular the plausible-looking
+  `references/studio/flow-builder` was not adopted: it is a **Studio** reference, not the
+  automation service's.
+  
+  The third docs link in this README — `Flows`, at the end of the flow-node section — was
+  verified and left alone. It points at a specific page (`content/docs/automation/flows.mdx`,
+  `title: Flow Metadata`), and that page does carry the per-node `config` reference, loop and
+  parallel containers, subflows, waits and error handling that the sentence promises.
+  
+  Documentation only: no API, behaviour or type surface changes.
+- 2277443: fix(cloud-connection,service-automation): stop two plugin classes renaming themselves in the shipped build, and enforce the class-name identity limb against `Ctor.name` (#8645)
+  
+  `Serve.providesCapability` (`packages/cli/src/commands/serve.ts`) decides whether a
+  host already supplied a capability's provider by comparing, by equality, both a
+  loaded plugin's `name` and its `constructor.name` against a declared identity
+  list. Every identity registry in that file therefore declares two spellings per
+  provider — the registered `plugin.name` id and the exported class name — and the
+  class-name spelling is a claim about the **built** artifact.
+  
+  **Measured against the built packages, two of the 27 declared class-name
+  identities matched nothing at all:**
+  
+  ```
+  MISMATCH CAPABILITY_PROVIDERS.automation   declared=AutomationServicePlugin  runtime=_AutomationServicePlugin
+  MISMATCH Serve.MARKETPLACE_PROXY_IDENTITIES declared=MarketplaceProxyPlugin  runtime=_MarketplaceProxyPlugin
+  ```
+  
+  Both classes referenced themselves **by name inside their own body** —
+  `MarketplaceProxyPlugin.prototype.version` building the outbound proxy
+  User-Agent, and a `private static` backoff helper called from an instance method
+  in the automation plugin. esbuild rewrites such a class into
+  `var X = class _X { … _X … }` so the inner reference binds to the class binding
+  rather than the outer `var`, and the emitted class reports `_X` as its `.name`.
+  
+  There was no user-visible impact, because every guard naming these plugins also
+  declares the registered id, which the instance carries as a plain field no
+  bundler touches. What was dead is the **redundancy**: a guard running on one
+  limb it does not know it is running on is one rename away from failing open —
+  and failing open here means silently mounting a second instance over a host's
+  own.
+  
+  Both source idioms are replaced with module-scope declarations, so the shipped
+  classes keep their names. The marketplace proxy's self-reference was also
+  reading a field that was never there (`version` is an instance field, so
+  `prototype.version` was always `undefined`): its outbound `User-Agent` announced
+  the `?? '1.0.0'` fallback on every request and now announces the plugin's real
+  version, `1.1.0`.
+  
+  The enforcement half lives in `packages/cli/test/serve-capability-identity.test.ts`:
+  every declared class-name identity, across `CAPABILITY_PROVIDERS` and the four
+  marketplace identity lists, is now compared to the runtime `Ctor.name` of the
+  export it names, and must satisfy `providesCapability` through the class-name
+  limb alone. The `*_IDENTITIES` statics are re-derived from `Serve` itself, so a
+  fifth list cannot be added without being enumerated. #8357's local
+  "modulo one leading underscore" accommodation is retired rather than left as a
+  third spelling of the same rule.
+- 7ff5aa2: `sys_automation_run` resolves its organization from the DECLARED `AutomationContext.tenantId` and from no other spelling (cloud#1395).
+  
+  The suspended-run store read `context.organizationId ?? context.tenantId`. `AutomationContext` declares `tenantId` and not `organizationId`, and no producer writes the latter — `RecordChangeTrigger.buildContext` maps the hook session's organization onto `tenantId`, and the runtime's automation domain sets `tenantId` directly. The dead limb was not inert: the one test covering `sys_automation_run.organization_id` fed the phantom key, so the column's only coverage exercised a path production cannot reach and said nothing about the live one. The limb is removed, the fixture speaks the declared contract, and a test now asserts the absence so restoring the alias goes red.
+  
+  Both `sys_approval_request.organization_id` and `sys_automation_run.organization_id` now document the measured attribution defect this uncovered and the negative control that makes it a defect: on a walled single-database boot these two tables stored customer activity with no organization (27/27 and 31/31) while `sys_audit_log` (1669 rows) was correctly attributed on the same boot, because the audit writer resolves the organization from the record the row is ABOUT rather than from the acting context. The write-side repair is not in this change — which column a side-table row should follow is an open contract question, since the audit resolver is scope-pinned to audit stamping by the #8778 ruling. The current behaviour is pinned by test so the fix must promote the assertion rather than quietly satisfy it.
+- 0425db9: Published READMEs link to the docs site in the one form that works on npm, on GitHub and on the docs site (#9632)
+  
+  **Seven docs links in these READMEs pointed nowhere.** They were spelled as a repo
+  path rooted at `/` — `[Flows](/content/docs/automation/flows.mdx)` — and a README in a
+  package's `files` array with `private` unset is rendered on the **npm package page** and
+  on **GitHub**, not only in this repository. There a root-relative href resolves against
+  `npmjs.com` and `github.com` respectively. It was not a docs-site route either:
+  `apps/docs/lib/source.ts` mounts `loader({ baseUrl: '/docs' })` over `content/docs`, so
+  the route for that first link is `/docs/automation/flows`, and `apps/docs/redirects.mjs`
+  carries no `/content` source that would rescue the written form. Every target page
+  existed and every one of them was reachable — only the links were not.
+  
+  All seven now use the absolute form the repo had already established in
+  `create-objectstack`'s published READMEs: `https://docs.objectstack.ai/docs/...`, with
+  the path taken under `content/docs` and the page extension dropped, because the route
+  carries none. Each target was re-verified at the route level rather than as a file — the
+  two that named a **directory** (`/content/docs/automation/`,
+  `/content/docs/references/automation/`) resolve only because those directories carry an
+  `index.mdx`; a directory without one is a 404, not a section.
+  
+  **Two more links in the same class were converted in the same pass.**
+  `service-knowledge` and `knowledge-ragflow` pointed at
+  `../../../content/docs/protocol/knowledge.mdx`. Those relative paths do resolve on both
+  GitHub and npm, so they are a milder defect than the seven — but they land the reader on
+  **raw MDX source** instead of the rendered page. They now point at the rendered page as
+  well. `service-knowledge`'s link text changed with it: it was the source filename in a
+  code span, which stops being an honest label once the destination is the page.
+  
+  No API, behaviour or type surface changes — this is the published documentation these
+  packages ship.
+- f047810: fix(automation): evaluate a record-change flow's start condition on the re-entrant dispatch its own write causes — the loop-breaker goes back to being a backstop (#8689)
+  
+  A `record-after-update` flow whose start condition, **as authored, is false on the
+  flow's own write-back**, was still re-dispatched for the same record. Nothing ran
+  away — the engine's last-resort re-entrancy breaker caught it every time — but the
+  breaker was the *only* thing working, and its own WARN said so: *"Its start
+  condition did not suppress the re-fire."*
+  
+  **Which of the two candidate mechanisms — measured, not assumed.** The report named
+  two readings that need different repairs: the re-entrant dispatch *skips* condition
+  evaluation, or evaluation *runs but aborts* and the abort is counted as a fire.
+  Measured on a real booted kernel (ObjectQL + automation + record-change trigger on
+  better-sqlite3), a flow guarded on `record.status != "escalated"` whose data node
+  writes `status = "escalated"`:
+  
+  ```
+  dispatches for the record ........ 2   (the re-fire really happened)
+  start-condition evaluations ...... 1   (the FIRST dispatch only)
+  evaluations that threw ........... 0
+  loop-breaker WARNs for that id ... 1
+  ```
+  
+  Two dispatches, one evaluation, zero throws: the first reading is the true one, and
+  the second is falsified for this path. `AutomationEngine.execute()` checked the
+  re-entrancy breaker **before** the start-condition gate and returned there, so on the
+  one dispatch where an author's re-fire guard is load-bearing, the guard was never
+  consulted at all.
+  
+  **The fix is the ordering, not a stronger breaker.** The gate now runs first; the
+  breaker check moved below it. The re-entrant dispatch already carries the post-write
+  row, so the condition evaluates `false` and the flow is suppressed with
+  `condition_not_met` — by the guard its author wrote. Measured after the change on the
+  same harness: 2 dispatches, **2** evaluations (the second returning `false` against
+  `status = "escalated"`), **0** breaker WARNs, and the flow still fires and applies its
+  write exactly as before.
+  
+  The breaker is **unchanged in strength**, deliberately — making it catch more while
+  leaving evaluation broken would have been the wrong direction. A condition that is
+  genuinely true on re-entry (the 2026-07-06 shape: a `boolean` persists as integer `1`
+  on SQLite/libsql, and CEL `1 != true` is true, so `is_escalated != true` never trips)
+  still lands on the breaker, at the same depth, with the same WARN and the same skip
+  envelope. What changed is that reaching it now *means* something — the condition was
+  evaluated and returned true — so the WARN states that as fact instead of inferring it.
+  
+  Two consequences worth naming for anyone reading logs or run history:
+  
+  - flows whose re-fire guard was already correct stop producing the breaker WARN
+    entirely, and their re-entrant dispatch is now recorded as `condition_not_met`
+    rather than `reentrancy_loop_guard`;
+  - a run skipped by its condition, and a re-entrant dispatch refused by the breaker,
+    no longer release the re-entrancy key — only the run that took it does. Releasing a
+    key it never owned would have disarmed the breaker for the run still on the stack,
+    which is exactly the runaway the breaker exists to stop.
+  
+  The regression pins assert the reporter's own three-legged probe design together —
+  the flow actually fired, no breaker WARN carries that record's id, and the start
+  condition was **evaluated** at the re-fire against the post-write row and returned a
+  verdict rather than throwing. Asserting only "the flow terminated" would be vacuous
+  here: the breaker already made that true.
+- c86799f: fix(service-automation): a retry attempt that PAUSES is a durable pause, not a failed attempt — `executeWithoutRetry` gets the ADR-0019 suspend arm (#9510)
+  
+  `execute()`'s catch tests the suspend signal FIRST, and that arm is what makes
+  ADR-0019's durable pause work: it snapshots the live variables, calls
+  `persistSuspendedRun`, records a `paused` log entry and returns
+  `{ success: true, status: 'paused', runId }`.
+  
+  `executeWithoutRetry()` — the method `retryExecution` re-runs the flow through on
+  **every** retry attempt — had no such arm. A `FlowSuspendSignal` thrown on a
+  retry attempt fell into the generic failure path, and four things were lost at
+  once:
+  
+  1. `persistSuspendedRun` never ran, so **the continuation was never stored** and
+     the run could not be resumed by anyone, ever;
+  2. the run log recorded `failed` for a run that asked to pause;
+  3. the caller got `status: 'failed'`, with the suspend signal stringified into
+     `error` (`FlowSuspendSignal` is not an `Error`);
+  4. `retryExecution` reads only `result.success`, so the pause counted as one more
+     failed attempt: the loop burned the rest of the budget, and every further
+     attempt re-entered the pausing node and orphaned another suspension.
+  
+  Only a LATER attempt is exposed — `execute()` handles the first one correctly,
+  and a flow reaches `retryExecution` only after a failure. The reachable shape is
+  the ordinary one: `errorHandling.strategy: 'retry'` on a flow whose flaky
+  HTTP/connector call is followed by an `approval` or `screen` node.
+  
+  **⚠️ Runs already lost to this defect are NOT recoverable.** Nothing was written
+  for them — no `sys_automation_run` row, no in-memory suspension — so there is no
+  continuation to rehydrate and no repair, here or later, can bring one back. The
+  run log holds a `failed` entry naming the flow and the trigger; those runs have
+  to be triggered again. What this change fixes is every run from here on.
+  
+  **The repair is a restoration of a stated contract on a path that never got it,
+  not a new capability.** `AutomationResult.status: 'paused'` and ADR-0019 already
+  describe exactly this behaviour, and `execute()`'s own arm already implements it;
+  the retry path simply never received it. The alternative — refusing
+  `strategy: 'retry'` combined with a pausing node at authoring time — was
+  considered and rejected: it over-refuses (a pausing node can sit on a branch the
+  retrying path never reaches), under-refuses (a pausing node behind a runtime
+  condition is not statically decidable), and would ban the one combination authors
+  most reasonably reach for.
+  
+  **The cost, and what was done about it.** Lifting the arm makes `retryExecution`
+  able to return a NON-TERMINAL result, and both of its readers were taught the
+  third state explicitly rather than left to a branch that happens to fall through:
+  the retry loop returns a paused attempt because it PAUSED (tested on `status`,
+  before the `success` check that means "this attempt succeeded"), and the trigger
+  route answers it from its own arm. The retry accounting is untouched — a
+  genuinely failing attempt still consumes one, `maxRetries` still bounds the loop,
+  and the loop stops only because the attempt did not fail.
+  
+  **Both routes give one answer**, pinned as an equality rather than verified in
+  isolation: a pause on attempt 1 and a pause on attempt 3 produce the same engine
+  result and the same wire response, so no caller can tell which attempt paused.
+  
+  Two adjacent gaps were measured out of this work and filed rather than absorbed:
+  a retry attempt runs with a smaller variable environment than the first (#9704),
+  and a flow's declared retry policy stops applying once a run pauses (#9705) —
+  the latter being the measured answer to "what happens to the retry budget when a
+  paused run is resumed and then fails": neither inherited nor fresh, because the
+  resume path has no retry loop at all. Both are pinned as today's behaviour so
+  neither can change by accident.
+- b030055: fix(service-automation): a retry attempt now runs with the same variable environment as the first
+  
+  `executeWithoutRetry()` — the method the retry loop re-runs a flow through on every
+  attempt — seeded only the flow's declared variables and `$record`, while the first
+  attempt also binds `record` plus the triggering record's flattened fields, `previous`,
+  `$runId`, `$flowName` and `$flowLabel`. Every retry attempt therefore ran in a strictly
+  smaller environment than attempt 1.
+  
+  Because conditions are strict CEL, where reading an unbound name aborts the predicate
+  rather than yielding `false`, this was user-visible exactly where retry is most used —
+  `errorHandling.strategy: 'retry'` on a record-change flow:
+  
+  - a start condition or edge predicate reading `previous` (the create-vs-update
+    discriminator) aborted on the retry, so the retry failed for a reason the first attempt
+    never hit — reading as a flaky flow rather than a defect;
+  - a bare reference to a triggering-record field (`status`, `budget`) aborted for the same
+    reason;
+  - a pausing node (e.g. Approval) reached on a retry attempt saw no `$runId`, so the
+    external state it minted could not be mapped back to the run for resume (ADR-0019).
+  
+  Both methods now seed through one shared chokepoint. First-attempt behaviour is unchanged.
+- f01c0ee: docs: five published service READMEs stop documenting an API that does not exist (#9532)
+  
+  A version bump is the point, not a side effect: these five READMEs are in their
+  packages' `files` arrays with `private` unset, so they are the pages npm renders —
+  and a docs-only fix with no bump never reaches npm at all.
+  
+  Each of the five told a reader to an import of a `Service…` class from its own package
+  and call a static `.configure({...})` on it. Neither has ever existed: no class in
+  this repo exposes a static `configure`, and none of `ServiceAnalytics`,
+  `ServiceAutomation`, `ServiceCache`, `ServiceI18n` or `ServiceJob` is exported by
+  anything. A reader following any of them wrote code that could not compile. The real
+  entry point in every case is a kernel plugin constructed with `new`:
+  `AnalyticsServicePlugin`, `AutomationServicePlugin`, `CacheServicePlugin`,
+  `I18nServicePlugin`, `JobServicePlugin`.
+  
+  ⛔ A name swap alone would not have been enough, and the gate landed in #9546 is what
+  proves it: substituting the genuine class while keeping `.configure(...)` turns the
+  import finding into a call-site finding rather than into silence. Each README is
+  rewritten against the package's built type surface, and each package's entry is
+  deleted from `scripts/published-readme-exports.baseline.json` in the same change
+  (the baseline is reconciled in both directions, so a stale entry fails too).
+  
+  What was removed as fabricated, beyond the entry point:
+  
+  - **service-analytics** — a nine-endpoint REST surface (`/analytics/count`, `/sum`,
+    `/avg`, `/min`, `/max`, `/group-by`, `/time-series`, `/metrics`, `/metrics/:name`)
+    of which none exists; the real surface is `POST /analytics/query`,
+    `GET /analytics/meta`, `POST /analytics/sql` and `POST /analytics/dataset/query`.
+    Also removed: `defineMetric`, `getMetric`, `compare`, `funnel`,
+    `executeDashboard`, `invalidateCache`, and an `AnalyticsServiceConfig` block whose
+    four keys (`defaultDriver`, `enableCaching`, `cacheTTL`, `maxMemoryResults`) are
+    none of the real ones.
+  - **service-automation** — `executeFlow`/`getFlow`/`listFlows`/`getFlowHistory`/
+    `registerTrigger` as the contract (the real contract is `execute(flowName, context?)`
+    plus `listFlows()` and a set of optional members), and a five-endpoint REST list that
+    matches no mounted route. The flow-authoring half of that README was already accurate
+    and is kept.
+  - **service-cache** — `mget`/`mset`/`del`/`delPattern`/`namespace`/`ttl`/`expire`/
+    `persist`/`incr`/`incrby`/`decr`/`getOrSet`/`invalidateTag`/`resetStats`, none of
+    which exist; `ICacheService` has six members. `CacheStats.keys`/`hitRate` corrected to
+    `keyCount` (there is no `hitRate`), and `set(key, value, { ttl })` corrected to the
+    real positional `set(key, value, ttl?)` in seconds.
+  - **service-i18n** — an `await i18n.t('ns:key')` dialect with namespaces, plural
+    suffixes, `context`, `returnObjects`, `setLocale`/`getLocale`, `formatDate`/
+    `formatNumber`/`formatRelative`, `addLocale`/`removeLocale`/`reload`, `getCoverage`/
+    `getMissingKeys`, and a `{{lng}}/{{ns}}` file layout. The real `t()` is synchronous
+    and takes the locale positionally — `t(key, locale, params?)` — over one
+    `{locale}.json` file per locale. The `POST /i18n/translate` endpoint does not exist.
+  - **service-job** — `scheduleInterval`/`scheduleOnce`/`getJob`/`stopJob`/`resumeJob`/
+    `deleteJob`/`runNow`/`getJobHistory`/`clearHistory`/`getLastExecution`, and a
+    `schedule({ name, schedule, handler })` options-object call. The real `schedule` is
+    positional — `schedule(name, schedule, handler, options?)` — and returns `void`.
+    Retry defaults corrected to the enforced ones (`maxRetries: 0`,
+    `backoffMultiplier: 1`).
+  
+  Two capability claims are corrected rather than deleted, because the source is what
+  decides:
+  
+  - **service-cache** advertised Redis as production support. `RedisCacheAdapter` throws
+    `RedisCacheAdapter not yet implemented` from every method, and
+    `new CacheServicePlugin({ adapter: 'redis' })` throws during `init` rather than
+    falling back to memory. The README now says so at the top and points at registering
+    a custom `ICacheService` under the slot instead.
+  - **service-job**'s `adapter: 'interval'` stores cron registrations that never fire.
+    That is now stated in the adapter table rather than left for a reader to discover.
+  
+  No compliance claim (SOC 2 / HIPAA / GDPR or similar) was found in any of the five —
+  the shape that raised `plugin-audit`'s severity in #9517 is absent here.
+- Updated dependencies [56656aa]
+- Updated dependencies [07e630e]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [2782805]
+- Updated dependencies [e43d63a]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [420804d]
+- Updated dependencies [716ac9b]
+- Updated dependencies [a38408a]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [24173e9]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [f8eb736]
+- Updated dependencies [11b779e]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [e2899f6]
+- Updated dependencies [3851f87]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [e1bb0ca]
+- Updated dependencies [30d3752]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [402c125]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [44bc51d]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+  - @objectstack/spec@17.1.0
+  - @objectstack/core@17.1.0
+  - @objectstack/formula@17.1.0
+
 ## 17.0.0
 
 ### Major Changes

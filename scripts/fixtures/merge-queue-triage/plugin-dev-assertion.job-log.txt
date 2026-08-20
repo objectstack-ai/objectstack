@@ -1,0 +1,73 @@
+
+ RUN  v4.1.10 /home/user/objectstack-issue-10128/packages/plugins/plugin-dev
+
+ ❯ src/dev-plugin-security-enforcement-warning.test.ts (4 tests | 3 failed) 56ms
+     × bail #1 (no objectql/metadata service): the three init() handles resolve, `security` does not, and the warning fires 32ms
+     × bail #2 (engine cannot take middleware): same — handles present, no enforcement, warning fires 14ms
+     × does not fire when SecurityPlugin.start() completed and published the `security` service 6ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/dev-plugin-security-enforcement-warning.test.ts > [#10036] the "nothing is enforced" warning must fire when SecurityPlugin.start() bailed > bail #1 (no objectql/metadata service): the three init() handles resolve, `security` does not, and the warning fires
+AssertionError: SecurityPlugin.init() ran: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/dev-plugin-security-enforcement-warning.test.ts:86:89
+     84|
+     85|     // Precondition — the state really is the one the card describes.
+     86|     expect(registeredServices.has('security.permissions'), 'SecurityPl…
+       |                                                                                         ^
+     87|     expect(registeredServices.has('security.rls')).toBe(true);
+     88|     expect(registeredServices.has('security.fieldMasker')).toBe(true);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/dev-plugin-security-enforcement-warning.test.ts > [#10036] the "nothing is enforced" warning must fire when SecurityPlugin.start() bailed > bail #2 (engine cannot take middleware): same — handles present, no enforcement, warning fires
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/dev-plugin-security-enforcement-warning.test.ts:112:60
+    110|     await boot(ctx);
+    111|
+    112|     expect(registeredServices.has('security.permissions')).toBe(true);
+       |                                                            ^
+    113|     expect(registeredServices.has('security')).toBe(false);
+    114|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/dev-plugin-security-enforcement-warning.test.ts > [#10036] the "nothing is enforced" warning must fire when SecurityPlugin.start() bailed > does not fire when SecurityPlugin.start() completed and published the `security` service
+AssertionError: start() published the service: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/dev-plugin-security-enforcement-warning.test.ts:136:81
+    134|
+    135|     // Precondition — this really is the healthy state.
+    136|     expect(registeredServices.has('security'), 'start() published the …
+       |                                                                                 ^
+    137|     expect(registerMiddleware, 'enforcement middleware was installed')…
+    138|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 1 passed (4)
+   Start at  08:05:43
+   Duration  9.96s (transform 8.89s, setup 0ms, import 9.66s, tests 56ms, environment 0ms)
+

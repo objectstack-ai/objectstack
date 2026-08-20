@@ -204,6 +204,96 @@ describe('instrumentRouteHandler', () => {
             ).toBe(1);
         });
 
+        it('emitHttpRequestDurationMs: false suppresses ONLY the histogram — counter, error counter, reporter and request-id stay on (#9834)', async () => {
+            // The dispatcher passes this once the transport's afterResponse
+            // seam has the duration histogram armed on it. The counter is
+            // gated by its OWN flag, so a transport that owns one family and
+            // not the other is expressible — which is the whole reason the
+            // two flags are separate.
+            const clock = makeClock();
+            const wrapped = instrumentRouteHandler(
+                'GET',
+                '/health',
+                async () => {
+                    clock.advance(15);
+                },
+                { metrics, now: clock.now, emitHttpRequestDurationMs: false },
+            );
+            const res = makeRes();
+            await wrapped({ headers: {} }, res);
+            expect(
+                metrics.histogramValues('http_request_duration_ms', { route: '/health' }),
+            ).toEqual([]);
+            // Everything the transport seam does NOT emit survives the gate.
+            expect(
+                metrics.totalCounter('http_requests_total', { route: '/health' }),
+            ).toBe(1);
+            expect(res.headers['X-Request-Id']).toBeTruthy();
+
+            const throwing = instrumentRouteHandler(
+                'POST',
+                '/boom',
+                async () => {
+                    throw new Error('kaboom');
+                },
+                { metrics, errorReporter, emitHttpRequestDurationMs: false },
+            );
+            await expect(throwing({ headers: {} }, makeRes())).rejects.toThrow('kaboom');
+            // The error counter has NO transport-side emitter to defer to —
+            // the observation carries no throw signal — so it is ungated on
+            // every transport (#9834 reported that fork rather than moving it).
+            expect(
+                metrics.totalCounter('http_request_errors_total', { route: '/boom' }),
+            ).toBe(1);
+            expect(errorReporter.captured).toHaveLength(1);
+        });
+
+        it('emitHttpRequestDurationMs defaults to true — the legacy behavior for hook-less transports', async () => {
+            const clock = makeClock();
+            const wrapped = instrumentRouteHandler(
+                'GET',
+                '/legacy-timing',
+                async () => {
+                    clock.advance(4);
+                },
+                { metrics, now: clock.now },
+            );
+            await wrapped({ headers: {} }, makeRes());
+            expect(
+                metrics.histogramValues('http_request_duration_ms', { route: '/legacy-timing' }),
+            ).toEqual([4]);
+        });
+
+        it('the two gates are INDEPENDENT — both off leaves request-id, the error counter and the reporter', async () => {
+            const clock = makeClock();
+            const wrapped = instrumentRouteHandler(
+                'POST',
+                '/both-off',
+                async () => {
+                    clock.advance(3);
+                    throw new Error('still reported');
+                },
+                {
+                    metrics,
+                    errorReporter,
+                    now: clock.now,
+                    emitHttpRequestsTotal: false,
+                    emitHttpRequestDurationMs: false,
+                },
+            );
+            const res = makeRes();
+            await expect(wrapped({ headers: {} }, res)).rejects.toThrow('still reported');
+            expect(metrics.totalCounter('http_requests_total', { route: '/both-off' })).toBe(0);
+            expect(
+                metrics.histogramValues('http_request_duration_ms', { route: '/both-off' }),
+            ).toEqual([]);
+            expect(
+                metrics.totalCounter('http_request_errors_total', { route: '/both-off' }),
+            ).toBe(1);
+            expect(res.headers['X-Request-Id']).toBeTruthy();
+            expect(errorReporter.captured).toHaveLength(1);
+        });
+
         it('records the status as set by res.status() (e.g. 404)', async () => {
             const wrapped = instrumentRouteHandler(
                 'GET',

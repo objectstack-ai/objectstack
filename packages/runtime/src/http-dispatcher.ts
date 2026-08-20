@@ -783,9 +783,20 @@ export class HttpDispatcher {
         // and parses the body against `ApiErrorSchema`, which now PASSES for
         // every body this door emits — the "parse every body it emits" half.
         const declaredCode = demotedDeclaredCode(thrown);
+        // [#9934] The producer-side user-facing marking rides as a declared
+        // sibling of `code`/`message` (`ApiErrorSchema.userMessage`), exactly
+        // like `declaredCode` — the shared resolver already answered whether
+        // the throw declared one (`declaredUserMessage`'s non-empty-string
+        // rule), so this door and the REST door agree by construction. Note
+        // `this.error`'s 5xx leak-withholding touches only `message`; the
+        // marked channel is authored user text, never the withheld prose.
+        const extra = {
+            ...(declaredCode !== undefined ? { declaredCode } : {}),
+            ...(thrown.userMessage !== undefined ? { userMessage: thrown.userMessage } : {}),
+        };
         return this.error(
             thrown.message, thrown.status, thrown.details, thrown.code,
-            declaredCode !== undefined ? { declaredCode } : undefined,
+            Object.keys(extra).length > 0 ? extra : undefined,
         );
     }
 

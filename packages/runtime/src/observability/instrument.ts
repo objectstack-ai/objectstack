@@ -39,11 +39,33 @@ export interface InstrumentOptions {
      * TRANSPORT owns the counter for every inbound request — this wrapper's
      * copy would land on the same series under the same labels and count the
      * dispatcher's routes twice (the measured, per-surface distortion of
-     * #9833). Only the counter is gated: request-id echo, the duration
-     * histogram, the error counter and the error reporter are not emitted by
-     * the transport seam and always stay on.
+     * #9833).
      */
     emitHttpRequestsTotal?: boolean;
+    /**
+     * Whether this wrapper emits the `http_request_duration_ms` histogram for
+     * the wrapped route. Default `true` — the legacy behavior for transports
+     * that offer no better seam.
+     *
+     * Pass `false` when the transport under the route implements the
+     * `IHttpServer.afterResponse` seam AND the histogram was armed on it
+     * (`armHttpRequestDurationHistogram`, #9834): the same double-emission
+     * argument as {@link emitHttpRequestsTotal}, one family over.
+     *
+     * ⚠️ The two emitters do not time the same window. This wrapper times
+     * `await handler(req, res)` — handler latency. The transport times from
+     * first seeing the request to the response existing, so its samples
+     * include the middleware chain and body parse and can only be LARGER.
+     * Gating this flag therefore shifts an existing series upward as well as
+     * widening it to every inbound surface; that is the point of the move
+     * (the docs' p95 guidance wants the request's latency, not one layer's
+     * share of it), but it is a change a dashboard can see.
+     *
+     * NOT gated by either flag, on any transport: request-id echo, the error
+     * counter and the error reporter. The transport seam emits none of them —
+     * the observation carries no throw signal at all — so they always stay on.
+     */
+    emitHttpRequestDurationMs?: boolean;
 }
 
 /**
@@ -53,9 +75,11 @@ export interface InstrumentOptions {
  *   1. Resolve a request id from incoming `X-Request-Id` (or mint one).
  *   2. Set the request id on `req.requestId` and response header.
  *   3. Time the handler.
- *   4. Emit `http_requests_total{method,route,status}` counter (unless the
- *      transport owns it — see {@link InstrumentOptions.emitHttpRequestsTotal})
- *      and the `http_request_duration_ms{method,route}` histogram.
+ *   4. Emit the `http_requests_total{method,route,status}` counter and the
+ *      `http_request_duration_ms{method,route}` histogram — each unless the
+ *      transport owns that family (see
+ *      {@link InstrumentOptions.emitHttpRequestsTotal} and
+ *      {@link InstrumentOptions.emitHttpRequestDurationMs}).
  *   5. On thrown errors, emit `http_request_errors_total` and call
  *      `errorReporter.captureException` for 5xx.
  *   6. When the handler catches its own error and calls
@@ -77,6 +101,7 @@ export function instrumentRouteHandler(
     const requestIdHeader = opts.requestIdHeader ?? 'X-Request-Id';
     const now = opts.now ?? Date.now;
     const emitHttpRequestsTotal = opts.emitHttpRequestsTotal ?? true;
+    const emitHttpRequestDurationMs = opts.emitHttpRequestDurationMs ?? true;
 
     return async (req: any, res: any) => {
         const requestId = resolveRequestId(req?.headers, generateRequestId);
@@ -130,11 +155,17 @@ export function instrumentRouteHandler(
                     status: String(status),
                 });
             }
-            metrics.histogram(
-                RUNTIME_METRICS.httpRequestDurationMs,
-                elapsed,
-                { method, route },
-            );
+            // Gated (#9834): same ownership rule as the counter above, one
+            // family over — see
+            // `InstrumentOptions.emitHttpRequestDurationMs`, including why
+            // the transport's window is the wider one.
+            if (emitHttpRequestDurationMs) {
+                metrics.histogram(
+                    RUNTIME_METRICS.httpRequestDurationMs,
+                    elapsed,
+                    { method, route },
+                );
+            }
             // Side-channel: handler caught the error and called
             // errorResponseBase, which recorded the original error on
             // `res.__obsRecordedError`. Pick it up so 5xx still

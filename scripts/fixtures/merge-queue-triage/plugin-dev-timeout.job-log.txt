@@ -1,0 +1,69 @@
+
+ RUN  v4.1.10 /home/user/objectstack-issue-10128/packages/plugins/plugin-dev
+
+ ❯ src/dev-plugin-security-enforcement-warning.test.ts (4 tests | 4 failed) 29ms
+     × bail #1 (no objectql/metadata service): the three init() handles resolve, `security` does not, and the warning fires 14ms
+     × bail #2 (engine cannot take middleware): same — handles present, no enforcement, warning fires 3ms
+     × does not fire when SecurityPlugin.start() completed and published the `security` service 6ms
+     × stays silent when the operator disabled security explicitly 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/dev-plugin-security-enforcement-warning.test.ts > [#10036] the "nothing is enforced" warning must fire when SecurityPlugin.start() bailed > bail #1 (no objectql/metadata service): the three init() handles resolve, `security` does not, and the warning fires
+Error: Test timed out in 1ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/dev-plugin-security-enforcement-warning.test.ts:79:3
+     77|   // state the warning's own text describes.
+     78|
+     79|   it('bail #1 (no objectql/metadata service): the three init() handles…
+       |   ^
+     80|     const { ctx, registeredServices } = mockCtx();
+     81|     // No `objectql` service at all → SecurityPlugin.start() takes its…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/dev-plugin-security-enforcement-warning.test.ts > [#10036] the "nothing is enforced" warning must fire when SecurityPlugin.start() bailed > bail #2 (engine cannot take middleware): same — handles present, no enforcement, warning fires
+Error: Test timed out in 1ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/dev-plugin-security-enforcement-warning.test.ts:103:3
+    101|   });
+    102|
+    103|   it('bail #2 (engine cannot take middleware): same — handles present,…
+       |   ^
+    104|     const { ctx, registeredServices } = mockCtx();
+    105|     // An engine that resolves but has no `registerMiddleware` → Secur…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/dev-plugin-security-enforcement-warning.test.ts > [#10036] the "nothing is enforced" warning must fire when SecurityPlugin.start() bailed > does not fire when SecurityPlugin.start() completed and published the `security` service
+Error: Test timed out in 1ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/dev-plugin-security-enforcement-warning.test.ts:125:3
+    123|   });
+    124|
+    125|   it('does not fire when SecurityPlugin.start() completed and publishe…
+       |   ^
+    126|     const { ctx, registeredServices } = mockCtx();
+    127|     // An engine that CAN take middleware → start() runs to completion…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  src/dev-plugin-security-enforcement-warning.test.ts > [#10036] the "nothing is enforced" warning must fire when SecurityPlugin.start() bailed > stays silent when the operator disabled security explicitly
+Error: Test timed out in 1ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/dev-plugin-security-enforcement-warning.test.ts:142:3
+    140|   });
+    141|
+    142|   it('stays silent when the operator disabled security explicitly', as…
+       |   ^
+    143|     const { ctx } = mockCtx();
+    144|     await boot(ctx, { services: { security: false } });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed (4)
+   Start at  08:06:09
+   Duration  6.49s (transform 5.54s, setup 0ms, import 6.22s, tests 29ms, environment 0ms)
+

@@ -84,7 +84,10 @@ const REPO_ROOT = new URL('../../', import.meta.url);
 // quoted in the raising PR (see header).
 export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/SKILL.md', 682],
-  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 223],
+  // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
+  // 2026-08-20, quoted in the raising PR): three mandated conventions land in
+  // the runbook's triage sections. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 244],
   ['.claude/skills/pm-dispatch/references/platform-readings.md', 134],
   ['.claude/skills/pm-dispatch/references/review-checklist.md', 82],
   ['.claude/skills/pm-dispatch/references/landing-operations.md', 82],
@@ -111,7 +114,16 @@ export const CEILINGS = new Map([
   // file in the repo and had no ceiling — the hole the oversized 39-line
   // read-layer clause (compacted by #9715) entered through. Set at its line
   // count on `origin/main` after #9715 landed (headroom 0, same convention).
-  ['AGENTS.md', 958],
+  //
+  // 958 → 961 (#10126): the ONE raise this map has taken, by the header's own
+  // escape hatch. The queue-incident remediation adds a three-line convention to
+  // § Build & Test — clocked windows measure behaviour, never loading — and the
+  // section it joins had two lines of lossless rewrap headroom against a
+  // three-line cost, so it could not be paid for in place. Maintainer ruling
+  // 2026-08-20, verbatim and untranslated: 「A — 抬上限到 961 (Recommended)」
+  // (issue #10126, comment 5353111732). Headroom is 0 again by construction, and
+  // the next author needing a line is back to compressing.
+  ['AGENTS.md', 961],
 ]);
 
 /**

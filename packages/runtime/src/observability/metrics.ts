@@ -15,6 +15,8 @@ export {
     InMemoryMetricsRegistry,
     RUNTIME_METRICS,
     armHttpRequestCounter,
+    armHttpRequestDurationHistogram,
+    type ArmHttpMetricResult,
     type ArmHttpRequestCounterResult,
     type MetricsRegistry,
     type MetricSample,

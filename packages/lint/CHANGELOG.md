@@ -1,5 +1,627 @@
 # @objectstack/lint
 
+## 17.1.0
+
+### Minor Changes
+
+- 13d7864: Dashboard writes are now judged by `validateWidgetBindings` at the runtime publish gate (#7529). A dashboard widget bound to a dataset that resolves to nothing — previously a `200` on both save and publish, failing only as a runtime error on the live board — is refused at **publish** with a located 422 (`INVALID_METADATA`, the offending key path named). Drafts are unaffected: a draft may still hold a forward reference to a dataset not yet authored, and only the draft→active promotion runs the gate.
+  
+  Because rule surfaces are registered per-rule, all six of the rule's error-tier findings now gate a dashboard publish as one reference-integrity class: `widget-dataset-unknown`, `widget-dimension-unknown`, `widget-measure-unknown`, `chart-field-unknown`, `widget-legacy-analytics-unrenderable`, `dashboard-filter-field-unknown`. Warning-tier findings (`table-count-only`, `chart-config-missing`, …) ride the non-blocking `advisories` channel on the save response. Config-authored stacks are unaffected — `os validate` / `os build` / `os lint` already ran this rule; the newly gated population is exactly the `sys_metadata` overlay writes (Studio / REST `/meta` / MCP) that previously bypassed it.
+  
+  The per-write snapshot (`RuntimeStackContext`) now carries the live `datasets` collection so bindings resolve against the real dataset universe — without it every legitimate board would read as dangling. Existing stored rows are untouched (the gate blocks new publishes only), and `OS_ALLOW_UNLINTED_METADATA_WRITES=1` remains the migration-window escape hatch.
+- 8640fb2: `os validate`: a dashboard header `modal` action's target resolves against declared PAGES, only (#9013)
+  
+  `validateDashboardActionRefs` resolved an `actionType: 'modal'` header button's
+  `actionUrl` the way objectui's `DashboardView` used to dispatch it: a defined
+  action name, a bare object name, or the `<verb>_<object>` prefix form
+  (`create_`/`new_`/`add_`/`edit_`/`update_` + a defined object) all passed, and a
+  target naming a declared page ERRORED unless it collided with one of those.
+  
+  That mirror is gone. Maintainer ruling objectstack#6739-A (2026-08-09): a
+  `type: 'modal'` string target names a PAGE, only — the spec TSDoc, the published
+  docs and `defineStack`'s cross-reference walk already said so, and objectui#4764
+  / objectui#4782 retired the renderer's object fallback and `DashboardView`'s
+  second copy of the prefix convention (enumerated across both repos' corpora:
+  zero producers). After that, `os validate` blessed exactly the buttons the
+  runtime refuses — the false affordance the rule exists to eliminate — while
+  refusing the one shape the runtime serves.
+  
+  **BREAKING** accept-set change on the `os validate` gating tier (landing after
+  the v17.0.0 cut; the lockstep launch-window convention ships it as `minor`):
+  
+  - A `modal` header target naming a defined action, a bare object, or a
+    `<verb>_<object>` form now **fails** validation. Those buttons already
+    dispatch to a named refusal at runtime.
+  - A `modal` header target naming a declared page now **passes** — it was
+    wrongly refused before.
+  
+  ## FROM → TO
+  
+  ```ts
+  // before — passed validation; the runtime now refuses the click
+  header: {
+    actions: [{ label: 'New Deal', actionType: 'modal', actionUrl: 'create_opportunity' }],
+  }
+  
+  // after — name a declared page…
+  header: {
+    actions: [{ label: 'Intake', actionType: 'modal', actionUrl: 'deal_intake' }], // pages: [{ name: 'deal_intake' }]
+  }
+  // …or, to open an object's form, use the validated first-class shape
+  header: {
+    actions: [{ label: 'New Deal', actionType: 'form', actionUrl: 'opportunity.edit' }],
+  }
+  ```
+  
+  There is deliberately no automatic rewrite: a retired-shape target is a
+  name-shaped guess (`create_opportunity` names the page `create_opportunity`, or
+  it names nothing — the ruling explicitly declined keeping the prefix), and only
+  the author knows whether the button meant a page or an object form.
+  `objectstack migrate meta` surfaces the change as a structured TODO (semantic
+  entry `dashboard-header-modal-target-page-only`, protocol major 18).
+  
+  <!-- adr-0087: registered dashboard-header-modal-target-page-only -->
+- 8b9eba5: feat(spec): field-level `relatedListFilter` — a declarative default filter for auto-derived related lists (#8704)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Pure accept-set
+  widening: one new optional key joins the existing field-level related-list
+  family. Nothing is renamed, retired, narrowed or tombstoned, so there is no
+  conversion to register and no retirement registry entry. -->
+  
+  The field-level related-list family (`relatedList` / `relatedListTitle` /
+  `relatedListColumns`) gains its fourth member, `relatedListFilter` — closing the
+  gap where the only way to filter an auto-derived related list was to abandon the
+  auto-derived record page for a hand-written `record:related_list` page
+  (maintainer ruling 2026-08-15 on #8704).
+  
+  - **No new filter dialect**: the key carries the canonical Query-DSL
+    `FilterCondition` (the same authoring face as a query `where`, dataset scope
+    filters, and `summaryOperations.filter`). The FILTER-axis doors therefore
+    apply automatically — the schema door refuses bare date-range preset
+    comparands in ordering positions at parse (#8793), and the engine doors judge
+    the composed query at run time (`formula` keys refused `INVALID_FIELD`,
+    #8296).
+  - **Contract semantics, pinned**: the declared constraint is AND-composed with
+    the parent-relationship condition `{ [referenceField]: parentId }` — an
+    authored constraint, never a user-editable suggestion — and the related-list
+    tab badge count honors the same composed filter, so counts match visible
+    rows. Both clauses are normative in the key's contract text and pinned by
+    tests.
+  - **`@objectstack/lint`**: the shared authored-filter walk (`FILTER_KEYS`) now
+    recognizes `relatedListFilter`, extending the filter-token, empty-combinator
+    and preset-comparand rules to the new position.
+  
+  The consumption half (RecordDetailView auto-derivation + tab badge) is
+  objectui#4664, `Blocked-by:` this change; until it lands the key is ledgered
+  `planned` with an author warning.
+- a777944: feat(spec,lint): refuse a bare date-range preset name in an ordering filter comparand at publish time (#8793 — the ruled C half of #8690)
+  
+  **BREAKING** accept-set narrowing on a published authoring surface, landing
+  after the v17.0.0 cut (the lockstep launch-window convention ships it as
+  `minor`; the migration prescription is registered under protocol major 18).
+  
+  `last_7_days` / `last_30_days` / `last_90_days` and their ten calendar
+  siblings are real, declared preset names — for the dashboard date-filter
+  positions, where the console lowers them to `{date-macro}` bounds before any
+  query is sent. Authored as a bare filter comparand nothing resolves them:
+  measured on #8690, `$gte "last_30_days"` returned HTTP 200 with 0 of 51 rows
+  where `$gte "{30_days_ago}"` returned the 38 in-window. The engine now
+  refuses the bare name on a declared temporal field at query time
+  (`INVALID_FILTER` / 400, PR #8808 — the B half); this change is the
+  authoring-time half the same ruling shipped alongside it.
+  
+  **What is refused — ordering positions only, in all three authored filter
+  shapes:** a `$gt` / `$gte` / `$lt` / `$lte` comparand or `$between` endpoint
+  on every carrier of `FilterConditionSchema` (dashboard widget filter, dataset
+  filter, report `runtimeFilter`, page/component filter, rollup filter), a
+  `greater_than` / `less_than` / `before` / `after` / `between` view filter
+  rule value, and an ordering `[field, op, value]` filter triple (the latter
+  two via `@objectstack/lint`'s new gating rule `filter-preset-comparand`,
+  which also runs at the runtime publish gate for `dashboard` / `view` /
+  `object` / `page` / `flow` writes). The refusal names the offending value,
+  the position, and the exact `{date-macro}` window that works.
+  
+  **What stays accepted:** the preset names in the dashboard date-filter
+  positions (`dateRange.defaultRange`, a date global filter's `defaultValue`) —
+  the only positions any layer ever resolved them; equality and membership
+  comparands (`{ period: 'this_quarter' }`, `$in: [...]`) — a select/picklist
+  column legitimately stores colliding values, and the engine's field-typed
+  door already covers the temporal case; undeclared strings
+  (`'not-a-date-at-all'`) — the field-typed engine door owns those; and the
+  empty-string cell, which stays its own card by ruling.
+  
+  ## FROM → TO
+  
+  ```ts
+  // before — parsed green, returned a silent zero (or 400 at query time since #8808)
+  filter: { closed_at: { $gte: 'last_30_days' } }
+  
+  // after — rejected naming the window; write the date-macro spelling
+  filter: { closed_at: { $gte: '{30_days_ago}' } }
+  // calendar presets prescribe their pair:
+  filter: { closed_at: { $between: ['{week_start}', '{week_end}'] } }
+  ```
+  
+  `DATE_RANGE_PRESETS` moved to `@objectstack/spec/data`
+  (`data/date-range-presets.ts`) with `ui` re-exporting it, so both import
+  paths keep working; `DATE_RANGE_PRESET_MACRO_WINDOWS` (the per-preset macro
+  window table the refusals quote) and `isDateRangePresetName` are new exports.
+  
+  <!-- adr-0087: registered filter-preset-ordering-comparand-refused -->
+- 73cfddf: fix(lint): the ADR-0091 D3 "delegation row needs a reason" rule is scoped to `sys_user_position` (#9730)
+  
+  `delegated_from` was retired from `sys_user_permission_set` (ADR-0049
+  enforce-or-remove, maintainer ruling 2026-08-18), so the security-posture
+  lint's D3 dual-audit rule no longer reads the key on that table — linting a
+  retired column would imply it still exists, and on that table this rule was
+  the column's *only* enforcement, which is exactly the advisory-security shape
+  the ruling removed. A seed row that still carries the key is refused loudly
+  downstream by the engine's schema preflight (`400 INVALID_FIELD`).
+  
+  The D2 rule (a seed grant whose `valid_until` is already past or unparseable
+  is dead on arrival) still covers **both** grant tables — `valid_until` remains
+  declared and resolution-enforced on both. Only the two rules' object scopes
+  diverge; no rule id, severity or message changed.
+- 1408ae3: feat(lint): the five gating object rules cross the runtime publish gate — `object` writes are now judged by `validateFunctionalCompleteness`, `validateManagedApiMethods`, `lintAutonumberFormats`, `validateRuleCompilability` and `validateRuleSchemaFormats` (#4716)
+  
+  An `active`-state `object` save through `saveMetaItem` (Studio's field editor,
+  REST `/meta` item CRUD, an MCP/AI author) is now refused with the existing 422
+  `invalid_metadata` envelope when it carries a defect these five rules judge:
+  an inert `summary`/`lookup`/`select` shape, a managed-API verb the object's own
+  affordances refuse, an autonumber format referencing an unknown field, a
+  `format` regex or `json_schema` schema the runtime's own compilers reject, or a
+  `json_schema` `format` name ajv would silently drop. All five already gated
+  `os validate` / `os build` / `os lint`; the runtime door — the only door a
+  tenant overlay row has — ran none of them.
+  
+  Scope is deliberately the five **gating** rules only (the #4716 adjudication):
+  the six advisory-tier object rules stay off the runtime surface, so a clean
+  save's response is byte-identical and no new advisory volume reaches Studio's
+  designer. Draft saves are untouched (D1), stored rows keep being served
+  (ADR-0087 asymmetry — the gate's differential blames a write only for what it
+  adds), and `OS_ALLOW_UNLINTED_METADATA_WRITES=1` still degrades the refusal to
+  a loud log for migration windows.
+  
+  Boot-path note: the two schema-judging rules load ajv lazily, only when the
+  judged snapshot actually carries a `json_schema` validation — an ordinary
+  field edit still loads no compiler, which `runtime-lazy-deps.test.ts` now pins
+  as a three-tier contract (parsers never; ajv never without a schema; ajv
+  required, on demand, when one is present).
+- 6f5a449: The runtime publish gate judges a package write against that package's own closure (#9612)
+  
+  The gate handed every rule the tenant's **entire** `objects` collection on every
+  publish. That is the wrong validation unit, not merely a large one: a tenant
+  that has grown to hundreds of objects is many packages, and judging one
+  package's write against all of them asks a question nobody wanted answered.
+  Per the maintainer's ruling, the unit is now the package —
+  「客户开发开发,校验是否也应该基于软件包」·「当然这里面要考虑系统对象」.
+  
+  `buildRuntimeWriteSnapshots` accepts an optional `packageScope`
+  (`{ packageId, dependencies }`) and reduces `objects` to that closure:
+  
+  - the package being written;
+  - the transitive closure of its **declared** `manifest.dependencies` — a
+    package's declared dependencies bound what it may reference, so this is a set
+    the platform computes exactly rather than estimates;
+  - platform / system objects, **unconditionally** — a package legitimately
+    references `sys_*` objects it never declares, and a closure that dropped them
+    would report unresolved references that are not there;
+  - rows carrying no package provenance (tenant-authored overlays), because
+    nothing declares what they may reference and so nothing bounds them.
+  
+  `ObjectStackProtocolImplementation` resolves that scope from the package
+  registry and passes it through `evaluateRuntimeAuthoringGate`.
+  
+  **A write that names no package, or names one the registry cannot produce,
+  narrows nothing** and is judged exactly as before. That direction is the whole
+  design: an unresolvable package buys a write *more* validation input, never
+  less. There is no branch that skips rules, and none that skips them past a
+  size.
+  
+  One behaviour change follows from the unit being right: a **package-scoped**
+  write that references an object in a package it never declared a dependency on
+  is now judged against a closure that does not contain it, so the reference is
+  reported. That is the ruling's intended consequence — such a reference is not
+  resolvable by declaration — and it applies only to writes that state a package.
+  
+  Also exported: `narrowObjectsToPackageClosure` and the `RuntimePackageScope`
+  type from `@objectstack/lint` and `@objectstack/lint/runtime`, and
+  `isSystemObject` from the security-posture rule module so the closure and the
+  rules share one reading of what "system" means rather than two.
+- b849e69: fix(lint): ask the provenance question at the fifth blanket-`SYSTEM_FIELDS` read site — `searchableFields` (#8404)
+  
+  `validate-searchable-fields.ts` judged a declared `searchableFields` entry
+  against the object-independent `SYSTEM_FIELDS` union, exactly as the four
+  filter/page-binding rules did before #8340 wired them to the per-object index.
+  Both of its gates were correct about EXISTENCE and structurally blind to
+  PROVENANCE: `:345` keeps `searchable-field-unknown` silent for any name in the
+  union, and `resolveAllowedSet` goes further — it manufactures a stub meta for
+  such an entry so it survives the resolution's existence filter exactly as it
+  does at runtime.
+  
+  On an ADR-0015 `external` object the platform registers its injected anchors
+  (`owner_id`, `organization_id`, the audit family, …) and provisions no storage
+  behind them (#7865 / #8116), so:
+  
+  ```
+  searchableFields: ['name', 'owner_id']   // external object
+  ```
+  
+  linted clean, the stub kept the entry in the resolved allow-list, and the
+  view's `$searchFields` narrowing then scanned a column empty on every record —
+  #4830's own failure mode (a narrower search than declared, silently) reached by
+  a different route.
+  
+  A new `searchable-field-unprovisioned` rule now warns on such an entry, on the
+  object's own canonical set and on a list view's narrowing alike, reusing
+  `unprovisionedAnchorCause` / `unprovisionedAnchorHint` so the sentence matches
+  the four #8340 rules verbatim rather than becoming a second copy (#4830). WARN,
+  never gating, per #4330's cost asymmetry: the remote schema is not visible to
+  this pass, so the finding describes a degradation rather than a refusal.
+  
+  **The `:239` stub is KEPT.** It is not incidental — it is what makes the linter's
+  resolution agree with the runtime's, which resolves the declared branch against
+  the registry field map. Measured by disabling it: the existing "keeps runtime
+  parity when the object declares system columns searchable" test goes red
+  (`expected [] to have a length of 1 but got +0`), because the declaration
+  existence-filters to empty and resolution falls through to the auto-default.
+  Dropping it would have been a behaviour change dressed as a warning.
+  
+  The warning is emitted per declared entry in the checker's entry loop, never
+  inside `resolveAllowedSet` — that helper reads the OBJECT's declaration and runs
+  once per narrowing, so warning there would repeat one object-level fact for
+  every view and attribute it to the view's path.
+  
+  `checkSearchableFieldList` takes the index as an OPTIONAL trailing parameter,
+  the same shape #8340 gave `checkFieldRefs`: its absence means the caller did not
+  build the index and the provenance question goes unasked — the previous
+  behaviour, preserved for out-of-repo callers (cloud graph-lint, the AI authoring
+  path). Both in-repo callers pass it.
+- 71ac21c: feat(lint): a sharing rule anchored where sharing has nothing to widen is now an authoring-time error (#9698)
+  
+  `validateSharingRuleEnforceability` gains its second arm. It already judged a
+  sharing rule's `condition` against the compiler that lowers it; it now judges
+  the rule's `object` against the verdict that decides whether the grant can
+  exist at all.
+  
+  Two new `error` ids, both decidable from authored metadata before anything
+  boots, and both mirroring `SharingService.inertGrantReason` (ADR-0111 D7)
+  rather than modelling it:
+  
+  - **`sharing-rule-object-not-shareable`** — the anchor object's effective
+    sharing model is `public` (an explicit `sharingModel: 'public_read_write'`,
+    or no `sharingModel` on a system object, which ADR-0090 D1 resolves to
+    public). Sharing only ever WIDENS an OWD baseline, so on the widest baseline
+    there is nothing to widen.
+  - **`sharing-rule-object-controlled-by-parent`** — the anchor is a
+    master-detail detail, whose visibility is derived from its master
+    (ADR-0055). It gets its own id and its own fix-it ("share the master
+    record instead"), because `effectiveSharingModel` collapses it onto the same
+    `public` verdict while the correct repair is completely different.
+  
+  Both were previously accepted by `SharingRuleSchema`, accepted by `defineRule`,
+  seeded into `sys_sharing_rule`, and only then refused — once per boot, as a
+  WARN line inside the boot diagnostics block. That WARN is not a sufficient
+  diagnostic, and the reason is measured rather than argued: a rule whose criteria
+  match no seeded row never reaches `grant`, so it never throws and warns nothing
+  while being exactly as dead. The WARN is a function of the DATA; the defect is a
+  property of the DECLARATION.
+  
+  **Blast radius, measured through `objectstack build` before deciding the
+  severity:** 5 sharing rules are declared in this repo. 3 fire, all of them in
+  `examples/app-crm` — `share_high_value_opps_with_managers`,
+  `share_active_leads_with_manager` and `share_won_deal_activities`, anchored on
+  `crm_opportunity`, `crm_lead` and `crm_activity`, every one of them
+  `sharingModel: 'public_read_write'`. They have been failing their boot backfill
+  on every boot of that app since they were written, and they are removed here
+  under ADR-0049 enforce-or-remove — the same call #9237 made for the two
+  equivalent rules in `app-showcase`. The other 2 (app-showcase's, both on
+  `private` objects) stay silent, which is the direction that had to be proven
+  rather than hoped for.
+  
+  The CRM's smoke test used to assert that these rules existed and were of the
+  enforced `criteria` type. Both assertions passed while all three rules enforced
+  nothing, so the assertion is replaced by the property their greenness hid: no
+  declared rule may be anchored where sharing has nothing to widen.
+  
+  Deliberately NOT judged, because they are not decidable from authored metadata:
+  the `owner_id` arm (`owner_id` is injected by the schema registry, so asserting
+  it would fail every object that correctly does not declare it by hand), the
+  `bypassObjects` arm (plugin configuration, not stack metadata), and the
+  federated phantom-anchor arm (a provenance test over that same injected column).
+- 192213f: Three write-surface lint rules now ask provenance, not just membership, before exempting a system column (#8663).
+  
+  `validate-hook-body-writes`, `validate-action-body-writes` and `validate-flow-node-writes` share one `IMPLICIT_FIELDS` set, which is object-INDEPENDENT: it answers "could this name be implicitly writable somewhere", never "did the platform provision a column for it on THIS object". On an ADR-0015 `external` object those diverge — the registry injects `owner_id` / `organization_id` / the audit family onto a federated object exactly as onto a local one, but the remote database owns the schema and no column exists behind them.
+  
+  Each rule now emits a new advisory finding on that path instead of staying silent — `hook-body-write-unprovisioned-anchor`, `action-body-write-unprovisioned-anchor`, `flow-node-write-unprovisioned-anchor` — sharing the `unprovisionedAnchorCause` / `unprovisionedAnchorHint` wording the read-axis rules already use. All three are `warning`: the flow-node rule's existence finding still gates at `error`, and its provenance finding deliberately does not, because the claim is about a remote schema this repo cannot see.
+  
+  An author-DECLARED column of the same name is untouched — on a federated object it maps a remote column the author vouches for. `FlowNodeWriteSeverity` widens from `'error'` to `'error' | 'warning'` accordingly.
+- 42d8990: feat(lint): refuse a list-view `sort` that names a formula field, or no field at all, at authoring time (#9257)
+  
+  <!-- adr-0087: not-required (already-registered engine-find-formula-order-by-refused)
+  This rule refuses no shape the runtime accepts — it moves an EXISTING refusal
+  earlier. `engine-find-formula-order-by-refused` (semantic, protocol 17) already
+  registers the condition and carries the identical FROM → TO prescription
+  ("denormalise the value onto the object — a stored field, written when the
+  source changes — and sort by that", with `summary` explicitly unaffected); the
+  FROM → TO block below restates that entry's remedy for the list-view position
+  rather than prescribing a second, different one. The `sort-field-unknown` half
+  is covered by `assertSortFieldsExist` (#6994), a REST ingress refusal already
+  shipped. Nothing authorable is renamed, retired or tombstoned, and no
+  `sys_metadata` row changes shape, so there is no new conversion to register —
+  what changes is only WHEN the author is told. -->
+  
+  **BREAKING** accept-set narrowing on a published authoring surface, shipped as
+  `minor` under the same lockstep launch-window convention the sibling
+  `filter-preset-comparand` refusal used. Measured against the shipped corpus
+  before landing at `error`: **56 reachable `sort` declarations across
+  `examples/app-showcase`, `examples/app-crm`, `examples/app-todo` and
+  `packages/platform-objects`, 0 violations** — so this narrows the accept set
+  without failing any metadata that ships today.
+  
+  The SORT axis had a runtime refusal on both doors and no authoring gate. This
+  adds the missing half, which is the exact shape #6674 closed for the SEARCH
+  axis one axis over.
+  
+  **What was broken.** `ListViewSchema.sort` is
+  `z.union([z.string(), Array<{ field, order }>])`, so the field name is a bare
+  string and Zod validates only the shape. A list view authored with
+  `sort: 'expected_revenue desc'` — a `formula` field — validated, published, and
+  reported valid, then answered `400 INVALID_SORT` on **first load and every
+  load**: the declared sort is the view's initial fetch, not an optional
+  interaction, so the whole view fails with a status the author cannot connect to
+  the declaration. Both runtime doors already refuse it — `assertSortFieldsExist`
+  (`@objectstack/metadata-protocol`, #6994) at the REST ingress and
+  `assertOrderByIsMaterializable` (`@objectstack/objectql`, #7095) on the engine's
+  own boundary — and neither can reach the author.
+  
+  **What is refused**, at `error`, on every list-view sort a stack declares
+  (`objects[].listViews.*.sort`, `views[].list.sort`, `views[].listViews.*.sort`):
+  
+  - `sort-field-unknown` — the name resolves to no field on the bound object.
+    Judged on the head segment, matching the ingress gate's own rule so the two
+    doors cannot disagree about which names are unknown.
+  - `sort-field-unsortable` — the name is a real field whose type is **virtual**:
+    computed on read, no stored column, nothing for any driver to `ORDER BY`. An
+    unrefused sort on one returns `asc` and `desc` in byte-identical order.
+  
+  **What stays accepted, and this is the load-bearing half:** `summary` and
+  `autonumber` sorts. Virtuality is judged by `isVirtualSearchField` /
+  `SEARCH_VIRTUAL_TYPES` (`@objectstack/spec/data`), pinned to `formula` alone —
+  the same spec storage fact the search ingress gate, the engine's search
+  resolution and the FILTER axis' dotted-head classifier already read. It is
+  deliberately **not** the spec's `COMPUTED_VALUE_TYPES`: that set is the WRITE
+  contract ("never client-written") and gating a sort with it would refuse the two
+  types that sort correctly — `summary` is a `table.float` the engine maintains,
+  `autonumber` a `table.string` the engine assigns. Both directions are pinned by
+  test, and the predicate boundary itself is pinned alongside them so the two
+  "must not flag" cases cannot quietly stop meaning anything.
+  
+  Registry-injected system columns (`created_at`, `owner_id`, …) are skipped:
+  they are real at runtime, never appear in authored `fields`, and `created_at` is
+  the single most common ordering in the platform's own list views.
+  
+  ## FROM → TO
+  
+  ```ts
+  // before — parsed green, published, then 400 INVALID_SORT on every load
+  listViews: {
+    forecast: { type: 'grid', sort: [{ field: 'expected_revenue', order: 'desc' }] },
+  }
+  
+  // after — refused at authoring time, naming the field, the position and the fix
+  listViews: {
+    // denormalise the computed value onto a stored column and sort by that
+    forecast: { type: 'grid', sort: [{ field: 'expected_revenue_stored', order: 'desc' }] },
+  }
+  ```
+  
+  The rule joins `REFERENCE_INTEGRITY_RULES`, so it runs on `os validate`,
+  `os lint` and `os compile` at once rather than being wired per command.
+
+### Patch Changes
+
+- 34392a1: docs(lint): the `readonlyWhen` field-rule diagnostic no longer cites `ADR-0057 D10` (#9255)
+  
+  The author-visible consequence text for a faulting `readonlyWhen` predicate said
+  "Per ADR-0057 D10 the server is the one that decides". The rule it states is
+  correct and unchanged — the server locks the field while the form still renders
+  it editable — but the citation does not resolve: `D10` of the ERP-authorization
+  `ADR-0057` decides Setup-nav capability surfacing, and the other `ADR-0057`
+  (system data lifecycle) carries no D-numbered decisions at all. An author who
+  followed the anchor landed on an unrelated decision and had no way to tell
+  whether the code or their search was wrong.
+  
+  The diagnostic now states the rule on its own authority, which is where it
+  always rested. No behaviour, no message semantics and no rule changed — only
+  the traceability claim. Recording the rule as an actual decision is tracked
+  separately in #9628.
+- 62b1427: fix(lint): drop the `element:filter` entry from `COMPONENT_FIELD_SPECS` (#9220)
+  
+  The whole `element:filter` element retired at element grain (ADR-0049 — no
+  renderer ever shipped for it), so every `ElementFilterProps` key is a
+  `retiredKey()` tombstone and no spec-conformant page carries `fields` on it.
+  The field-binding rule's job (resolve a field NAME against the object) is not
+  the question a retired key raises: an authored key is already reported by name
+  with the element-retirement prescription through the #5068 props gate, and the
+  binding entry would only add a second finding about a key that no longer
+  exists — the #5775/#6629 residue class the package's own
+  `component-field-specs-liveness` gate refuses.
+- 818c27c: fix(lint): the three ADR-0120 uniqueness rules name the object in the `where` slot instead of repeating the config path (#9600)
+  
+  `AuthoringFinding` declares two location slots with different jobs — `where`
+  ("human-readable location", e.g. `object "leave_request"`) and `path` ("config
+  path", e.g. `objects[3].sharingModel`). Three registry adapters set the first
+  from the second (`where: f.path`), so every CLI command printed the same
+  positional string twice and the only human-readable slot said nothing the `at`
+  clause did not already say:
+  
+  ```
+  • objects[44].indexes[1]: "sys_account" declares index [provider_id, account_id] with bare `unique: true` …
+        rule: unique/unscoped-declared-index  at objects[44].indexes[1]
+  ```
+  
+  That index is a position in the MERGED object array, which appears in no file
+  the author wrote. `unique/unscoped-declared-index`, `unique/double-declaration`
+  and `unique/legacy-organization-composite` now spell it the way the rest of the
+  table does:
+  
+  ```
+  • object "sys_account" · index [provider_id, account_id]: "sys_account" declares index …
+        rule: unique/unscoped-declared-index  at objects[44].indexes[1]
+  ```
+  
+  An index is identified by its `name` when it has one, and otherwise by the
+  columns the author actually wrote (`· index [provider_id, account_id]`) — both
+  searchable in their source, which a bare ordinal is not.
+  
+  `where` is stated by the rule functions themselves rather than reconstructed in
+  the adapter, because only the rule still holds the object it walked. Their
+  return type is now `LocatedLintIssue` (a `LintIssue` with a REQUIRED `where`),
+  newly exported, so a fourth rule joining this family cannot reach the adapter
+  without one — a `f.where ?? f.path` fallback at the adapter would have let the
+  positional spelling ship again silently.
+  
+  Display text only, and the rules' population is unchanged: measured over the 45
+  object declarations `@objectstack/platform-objects` and
+  `@objectstack/metadata-core` ship, the registry produced 1050 findings from the
+  same 5 rules before and after, with the count of findings whose `where` was a
+  bare config path going 72 to 0. `path` is deliberately untouched and stays
+  positional — it is the slot that is supposed to be a config path, and the
+  runtime gate's `fingerprint` reads `where` and `path` together, so making
+  `where` more specific cannot merge two findings that were distinct.
+- e43b211: fix(spec): the retirement prescriptions state what `os migrate meta` actually does (#9529)
+  
+  Every `retiredKey()` prescription whose surface an ADR-0087 conversion covers
+  closed with a maintainer-ruled sentence (2026-08-09, #6856):
+  
+  > Run `os migrate meta --from N` to rewrite existing sources automatically.
+  
+  The command has never rewritten an authored source file. It replays the
+  conversion chain over the loaded stack **in memory**, prints the attributed
+  mechanical change list (`Applied N mechanical change(s)`, one line per site as
+  `path: from → to (conversionId)`), and writes exactly one file — the `--out`
+  JSON snapshot, when you ask for it. Every write site in
+  `packages/cli/src/commands/migrate/meta.ts` is that snapshot; there is no
+  `--write` / `--fix` / in-place flag. So an author who followed the prescription
+  got the chain replayed, a printed diff and optionally a JSON document in a shape
+  their per-artifact `.ts` modules are not written in — and then still edited every
+  file by hand, with nothing in the message saying so.
+  
+  Under the maintainer's ruling of 2026-08-18 the sentence is withdrawn in favour
+  of an honest one, class-wide:
+  
+  > Run `os migrate meta --from N` to list the mechanical edits for existing
+  > sources; apply them by hand.
+  
+  The partial-value conversions keep their two-clause shape, reworded the same way
+  (`… to list the mechanical edits for the \`1y\` case; the other durations are
+  reported for you to re-state.`). Behaviour is unchanged in both packages — this
+  is message text only, and no accept/reject verdict moves.
+  
+  The claim is withdrawn from every shipped site, not only the canonical sentence:
+  the variant phrasings in tombstone and conversion-registry prose ("rewrites
+  author sources", "rewrites it for you", "only `os migrate meta` rewrites
+  sources") go with it, as do the upgrade-path statements in the hand-written docs
+  (`upgrading.mdx` now carries the same "does not rewrite your source files" fact
+  the `objectstack-upgrade` skill already told operators). The class-wide pin
+  `packages/spec/src/shared/retired-key-migrate-sentence.test.ts` moves in
+  lockstep and now holds **both** directions: the new sentence is required where a
+  prescription names the command, and the withdrawn claim is a hard failure
+  wherever it reappears — including in a prescription that spells the bare command
+  without `--from N`, which the sentence-shape check alone would not have seen.
+  
+  The in-place AST codemod that would make the original claim true is commissioned
+  separately for v18 (#9591); when it lands, the sentence may be restored by
+  editing that one pin in the same PR.
+- Updated dependencies [56656aa]
+- Updated dependencies [07e630e]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [420804d]
+- Updated dependencies [716ac9b]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [11b779e]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [e2899f6]
+- Updated dependencies [3851f87]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [30d3752]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [44bc51d]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+  - @objectstack/spec@17.1.0
+  - @objectstack/formula@17.1.0
+  - @objectstack/sdui-parser@17.1.0
+
 ## 17.0.0
 
 ### Minor Changes

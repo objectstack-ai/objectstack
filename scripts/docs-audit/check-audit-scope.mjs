@@ -95,6 +95,26 @@ const REPO_ROOT = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: H
 
 const WORKFLOW_REL = '.claude/workflows/docs-accuracy-audit.js';
 const AGENTS_REL = 'AGENTS.md';
+
+/**
+ * `AGENTS_REL` above, declared for `scripts/pm/dispatch-gates.mjs` (#9979,
+ * applying #9964's pattern).
+ *
+ * That tool derives a card's gate list from the path literals in each gate's
+ * own source, and "looks like a path" there means "carries a separator".
+ * `WORKFLOW_REL` has one and reaches it; `AGENTS_REL` does not, because a
+ * repo-root FILE has no separator to be found by — so an AGENTS.md card
+ * derived this gate not at all, while `assertGuardrailAnchored` reddens on
+ * exactly the edit such a card is most likely to make (moving or rewording the
+ * RELEASE-OWNED guardrail row). `<file>/**` is the form that reaches a root
+ * file: the extractor accepts it, and `collapseHint` reduces it back to that
+ * one path.
+ *
+ * ⚠️ Provenance, NOT a lookup key. `assertGuardrailAnchored` opens
+ * `AGENTS_REL`; the glob spelling appearing there would send this gate reading
+ * a file that does not exist. The self-test pins both halves.
+ */
+export const ROOT_FILE_WATCH_HINTS = ['AGENTS.md/**'];
 const BEGIN = '// <generated:docs-audit-scope>';
 const END = '// </generated:docs-audit-scope>';
 
@@ -692,6 +712,15 @@ async function selfTest() {
     null,
     findGuardrailRow('| `content/docs/releases/` | generated | see the release process |'),
   );
+  // The dispatch-gates declaration (#9979). Enforcement cannot hold either of
+  // these: the declaration is read by another tool entirely, so a wrong or
+  // missing entry runs perfectly green here and shows up only as a dev
+  // dispatched on an AGENTS.md card with this gate absent from the brief.
+  check('the repo-root file this gate reads is declared for dispatch-gates', [`${AGENTS_REL}/**`], ROOT_FILE_WATCH_HINTS);
+  // Provenance, never a lookup key: `assertGuardrailAnchored` opens
+  // `AGENTS_REL`, so the glob form appearing there would read a missing file.
+  check('…and the declared form is not the path the gate opens', false, ROOT_FILE_WATCH_HINTS.includes(AGENTS_REL));
+
   throws(
     'a workflow without the prefix constant throws',
     () => parseReleaseOwnedPrefix('const ALL_HANDWRITTEN = []'),

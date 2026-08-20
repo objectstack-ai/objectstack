@@ -7,7 +7,7 @@ import type { AttachmentLifecycleEngine } from './attachment-lifecycle.js';
 
 const silentLogger = () => ({ info: vi.fn(), warn: vi.fn(), debug: vi.fn() });
 
-/** Capture the two registered hooks so tests can drive them directly. */
+/** Capture the three registered hooks so tests can drive them directly. */
 function install(opts: {
   attachments?: Array<Record<string, unknown>>;
   sharing?: AttachmentSharingLike | null;
@@ -32,6 +32,7 @@ function install(opts: {
   installAttachmentAccessHooks(engine, () => opts.sharing, silentLogger());
   return {
     beforeInsert: hooks.get('beforeInsert')!,
+    beforeUpdate: hooks.get('beforeUpdate')!,
     beforeDelete: hooks.get('beforeDelete')!,
   };
 }
@@ -59,6 +60,17 @@ const deleteCtx = (input: any, opts: { userId?: string; isSystem?: boolean; visi
   object: 'sys_attachment',
   event: 'beforeDelete',
   input: { ...input, options: { ...(input.options ?? {}), context: { userId: opts.userId, permissions: [] } } },
+  session: opts.isSystem ? { isSystem: true, userId: opts.userId } : opts.userId ? { userId: opts.userId } : undefined,
+  api: apiFor(opts.visible ?? []),
+});
+
+/** An update ctx: `input.id`/`input.options.where` name the target rows,
+ * `data` is the SET payload (the per-row dispatch binds `input.id`; the
+ * whole-operation dispatch carries neither id nor where). */
+const updateCtx = (input: any, data: any, opts: { userId?: string; isSystem?: boolean; visible?: string[] } = {}) => ({
+  object: 'sys_attachment',
+  event: 'beforeUpdate',
+  input: { ...input, data, options: { ...(input.options ?? {}), context: { userId: opts.userId, permissions: [] } } },
   session: opts.isSystem ? { isSystem: true, userId: opts.userId } : opts.userId ? { userId: opts.userId } : undefined,
   api: apiFor(opts.visible ?? []),
 });
@@ -210,11 +222,170 @@ describe('attachment access — beforeDelete (uploader or parent editor)', () =>
 });
 
 // ─────────────────────────────────────────────────────────────────────────
+// #10091 — beforeUpdate: uploader or parent editor, + the attach rule on a
+// re-point. The delete gate's rule applied to the verb that could otherwise
+// rewrite it away (the comment kit — derived from this one — has gated
+// update since #4630; the source kit was missing the limb its derivative
+// copied). Wire code is the STANDARD catalog member `RECORD_NOT_ACCESSIBLE`
+// (see UPDATE_DENY_CODE in the module), not an ATTACHMENT_* sibling.
+// ─────────────────────────────────────────────────────────────────────────
+describe('attachment access — beforeUpdate (uploader or parent editor, #10091)', () => {
+  const row = { id: 'a1', file_id: 'f1', parent_object: 'att_secret', parent_id: 'r1', uploaded_by: 'uploader' };
+
+  it('the uploader may update their attachment (no parent-edit consult)', async () => {
+    const canEdit = vi.fn(async () => false);
+    const { beforeUpdate } = install({ attachments: [row], sharing: { canEdit } });
+    await expect(
+      beforeUpdate(updateCtx({ id: 'a1' }, { description: 'mine' }, { userId: 'uploader' })),
+    ).resolves.toBeUndefined();
+    expect(canEdit).not.toHaveBeenCalled();
+  });
+
+  it('a non-uploader without parent edit is rejected (403 RECORD_NOT_ACCESSIBLE)', async () => {
+    const { beforeUpdate } = install({ attachments: [row], sharing: { canEdit: async () => false } });
+    await expect(
+      beforeUpdate(updateCtx({ id: 'a1' }, { description: 'x' }, { userId: 'stranger' })),
+    ).rejects.toMatchObject({
+      code: 'RECORD_NOT_ACCESSIBLE',
+      status: 403,
+      message: expect.stringContaining('Cannot update attachment a1'),
+      object: 'att_secret',
+    });
+  });
+
+  it("a parent editor may update another user's attachment", async () => {
+    const canEdit = vi.fn(async (object: string, recordId: string, ctx: any) => {
+      expect(object).toBe('att_secret');
+      expect(recordId).toBe('r1');
+      expect(ctx.userId).toBe('editor');
+      return true;
+    });
+    const { beforeUpdate } = install({ attachments: [row], sharing: { canEdit } });
+    await expect(
+      beforeUpdate(updateCtx({ id: 'a1' }, { description: 'moderated' }, { userId: 'editor' })),
+    ).resolves.toBeUndefined();
+  });
+
+  // The escalation the issue names, pinned shut: with no update gate a
+  // stranger could rewrite `uploaded_by` to themselves and then walk through
+  // the delete gate's uploader shortcut. The row rule refuses the WRITE, so
+  // what the payload tries to claim never matters.
+  it('a stranger cannot rewrite uploaded_by to capture the uploader shortcut', async () => {
+    const { beforeUpdate } = install({ attachments: [row], sharing: { canEdit: async () => false } });
+    await expect(
+      beforeUpdate(updateCtx({ id: 'a1' }, { uploaded_by: 'stranger' }, { userId: 'stranger' })),
+    ).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403 });
+  });
+
+  it('multi-update requires EVERY matched row to pass', async () => {
+    const rows = [
+      { ...row, id: 'a1', uploaded_by: 'me' },
+      { ...row, id: 'a2', uploaded_by: 'someone-else', parent_id: 'r2' },
+    ];
+    const { beforeUpdate } = install({ attachments: rows, sharing: { canEdit: async () => false } });
+    await expect(
+      beforeUpdate(
+        updateCtx({ options: { where: { parent_object: 'att_secret' }, multi: true } }, { description: 'x' }, { userId: 'me' }),
+      ),
+    ).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403 });
+  });
+
+  it('degrades to parent READ visibility when the sharing service is absent', async () => {
+    const { beforeUpdate } = install({ attachments: [row], sharing: null });
+    await expect(
+      beforeUpdate(updateCtx({ id: 'a1' }, { description: 'x' }, { userId: 'reader', visible: ['att_secret/r1'] })),
+    ).resolves.toBeUndefined();
+    await expect(
+      beforeUpdate(updateCtx({ id: 'a1' }, { description: 'x' }, { userId: 'reader', visible: [] })),
+    ).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403 });
+  });
+
+  it('bypasses for system context; ids naming no live row are not blocked', async () => {
+    const { beforeUpdate } = install({ attachments: [row], sharing: { canEdit: async () => false } });
+    await expect(
+      beforeUpdate(updateCtx({ id: 'a1' }, { description: 'x' }, { isSystem: true, userId: 'x' })),
+    ).resolves.toBeUndefined();
+    await expect(
+      beforeUpdate(updateCtx({ id: 'missing' }, { description: 'x' }, { userId: 'x' })),
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe('attachment access — beforeUpdate re-point (the attach rule on the NEW parent, #10091)', () => {
+  const row = { id: 'a1', file_id: 'f1', parent_object: 'att_secret', parent_id: 'r1', uploaded_by: 'uploader' };
+
+  it('re-pointing parent_id requires EDIT on the NEW parent (403 ATTACHMENT_PARENT_ACCESS)', async () => {
+    // The caller is the uploader, so the row rule passes without consulting
+    // sharing — the ONE canEdit call below is the attach rule on the target.
+    const canEdit = vi.fn(async () => false);
+    const { beforeUpdate } = install({ attachments: [row], sharing: { canEdit } });
+    await expect(
+      beforeUpdate(updateCtx({ id: 'a1' }, { parent_id: 'r2' }, { userId: 'uploader' })),
+    ).rejects.toMatchObject({
+      code: 'ATTACHMENT_PARENT_ACCESS',
+      status: 403,
+      message: expect.stringContaining('Cannot move attachment a1 to att_secret/r2'),
+      object: 'att_secret',
+    });
+    expect(canEdit).toHaveBeenCalledTimes(1);
+    expect(canEdit).toHaveBeenCalledWith('att_secret', 'r2', expect.objectContaining({ userId: 'uploader' }));
+  });
+
+  it('a partial re-point resolves the missing half from the row (parent_object from the row)', async () => {
+    const canEdit = vi.fn(async () => true);
+    const { beforeUpdate } = install({ attachments: [row], sharing: { canEdit } });
+    await expect(
+      beforeUpdate(updateCtx({ id: 'a1' }, { parent_id: 'r2' }, { userId: 'uploader' })),
+    ).resolves.toBeUndefined();
+    expect(canEdit).toHaveBeenCalledWith('att_secret', 'r2', expect.objectContaining({ userId: 'uploader' }));
+  });
+
+  it('writing the SAME parent back is not a re-point — no attach-rule consult', async () => {
+    const canEdit = vi.fn(async () => false);
+    const { beforeUpdate } = install({ attachments: [row], sharing: { canEdit } });
+    await expect(
+      beforeUpdate(
+        updateCtx({ id: 'a1' }, { parent_object: 'att_secret', parent_id: 'r1', description: 'x' }, { userId: 'uploader' }),
+      ),
+    ).resolves.toBeUndefined();
+    expect(canEdit).not.toHaveBeenCalled();
+  });
+
+  it('an unauthorizable target is refused, never left to validation (null / empty halves)', async () => {
+    const { beforeUpdate } = install({ attachments: [row], sharing: { canEdit: async () => true } });
+    await expect(
+      beforeUpdate(updateCtx({ id: 'a1' }, { parent_id: '' }, { userId: 'uploader' })),
+    ).rejects.toMatchObject({
+      code: 'ATTACHMENT_PARENT_ACCESS',
+      status: 403,
+      message: expect.stringContaining('does not name a record'),
+    });
+    await expect(
+      beforeUpdate(updateCtx({ id: 'a1' }, { parent_object: null }, { userId: 'uploader' })),
+    ).rejects.toMatchObject({ code: 'ATTACHMENT_PARENT_ACCESS', status: 403 });
+  });
+
+  it('degraded mode (no sharing): the NEW parent must be READ-visible to the caller', async () => {
+    const { beforeUpdate } = install({ attachments: [row], sharing: null });
+    await expect(
+      beforeUpdate(
+        updateCtx({ id: 'a1' }, { parent_id: 'r2' }, { userId: 'uploader', visible: ['att_secret/r1', 'att_secret/r2'] }),
+      ),
+    ).resolves.toBeUndefined();
+    await expect(
+      beforeUpdate(
+        updateCtx({ id: 'a1' }, { parent_id: 'r_hidden' }, { userId: 'uploader', visible: ['att_secret/r1'] }),
+      ),
+    ).rejects.toMatchObject({ code: 'ATTACHMENT_PARENT_ACCESS', status: 403 });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
 // #4757 through the WIRED engine (#9719)
 //
 // A real `ObjectQL` + in-memory driver + this module's installer — the exact
 // path `ql.delete('sys_attachment', …)` takes in production. The unscoped
-// refusal reaches the handler through the `dispatchUnscopedMultiDelete`
+// refusal reaches the handler through the `dispatchUnscopedMultiWrite`
 // whole-operation dispatch its registration declares; the per-row gate keeps
 // firing per matched row; the scoped paths keep resolving. Every refusal here
 // asserts the rows SURVIVED, because the defect this replaces was precisely a
@@ -232,6 +403,7 @@ const ATT_FIELDS = {
   parent_object: { name: 'parent_object', label: 'Parent Object', type: 'text' as const },
   parent_id: { name: 'parent_id', label: 'Parent Id', type: 'text' as const },
   uploaded_by: { name: 'uploaded_by', label: 'Uploaded By', type: 'text' as const },
+  description: { name: 'description', label: 'Description', type: 'text' as const },
 };
 const sysAttachmentObject = { name: 'sys_attachment', label: 'Attachment', fields: ATT_FIELDS };
 const attSecretObject = {
@@ -279,7 +451,14 @@ function makeWiredDriver() {
       storeFor(o).set(id, row);
       return row;
     },
-    async update() { return null; },
+    async update(o: string, id: string, data: Record<string, unknown>) {
+      const s = storeFor(o);
+      const row = s.get(String(id));
+      if (!row) return null;
+      const next = { ...row, ...data, id: row.id };
+      s.set(String(id), next);
+      return next;
+    },
     async delete(o: string, id: string) { return storeFor(o).delete(String(id)); },
     async count(o: string, ast: any) {
       return Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where)).length;
@@ -289,7 +468,11 @@ function makeWiredDriver() {
       for (const r of doomed) storeFor(o).delete(String(r.id));
       return doomed.length;
     },
-    async updateMany() { return 0; },
+    async updateMany(o: string, ast: any, data: Record<string, unknown>) {
+      const hit = Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where));
+      for (const r of hit) storeFor(o).set(String(r.id), { ...r, ...data, id: r.id });
+      return hit.length;
+    },
   };
   return d;
 }
@@ -435,6 +618,145 @@ describe('unscoped multi-delete (no id, no where) — #4757 through the wired en
 });
 
 // ─────────────────────────────────────────────────────────────────────────
+// #10091 through the WIRED engine — the update verb.
+//
+// Same rig as the #4757 block above, driving `ql.update('sys_attachment', …)`
+// end to end: the unscoped refusal reaches the handler through the
+// `dispatchUnscopedMultiWrite` declaration on the NEW `beforeUpdate`
+// registration (#9974 made the flag valid on both write verbs); the per-row
+// gate fires per matched row; scoped, entitled writes keep resolving. Every
+// refusal asserts the row VALUES survived — an overwrite leaves no pre-image,
+// so "the table still has N rows" alone proves nothing here.
+// ─────────────────────────────────────────────────────────────────────────
+
+const UNSCOPED_UPDATE_REFUSAL = expect.objectContaining({
+  code: 'RECORD_NOT_ACCESSIBLE',
+  status: 403,
+  // The first sentence IS the declared contract (mirrors #4757's delete
+  // refusal, standard catalog code per UPDATE_DENY_CODE's doc block).
+  message: expect.stringContaining('Refusing an unscoped multi-update of attachments'),
+});
+
+describe('unscoped multi-update (no id, no where) — #10091 through the wired engine', () => {
+  it('refuses `{ multi: true }` even when the caller is the uploader of EVERY matched row — and the values survive', async () => {
+    const { ql, driver } = await bootWired({
+      attachments: [wiredRow('a1', 'uploader'), wiredRow('a2', 'uploader', 'r2')],
+    });
+    await expect(
+      ql.update('sys_attachment', { description: 'swept' }, { multi: true, context: { userId: 'uploader' } } as any),
+    ).rejects.toEqual(UNSCOPED_UPDATE_REFUSAL);
+    const store = driver.stores.get('sys_attachment')!;
+    expect(store.get('a1')!.description).toBeUndefined();
+    expect(store.get('a2')!.description).toBeUndefined();
+  });
+
+  it('refuses an explicitly null `where` the same way', async () => {
+    const { ql, driver } = await bootWired({ attachments: [wiredRow('a1', 'uploader')] });
+    await expect(
+      ql.update('sys_attachment', { description: 'swept' }, { multi: true, where: null, context: { userId: 'uploader' } } as any),
+    ).rejects.toEqual(UNSCOPED_UPDATE_REFUSAL);
+    expect(driver.stores.get('sys_attachment')!.get('a1')!.description).toBeUndefined();
+  });
+
+  it('refuses on an EMPTY table — "nothing was ever queried" is not "nothing to authorize"', async () => {
+    const { ql } = await bootWired({ attachments: [] });
+    await expect(
+      ql.update('sys_attachment', { description: 'swept' }, { multi: true, context: { userId: 'uploader' } } as any),
+    ).rejects.toEqual(UNSCOPED_UPDATE_REFUSAL);
+  });
+
+  it('positive control: `where: {}` is a REAL match-all query and an entitled caller may sweep with it', async () => {
+    const { ql, driver } = await bootWired({ attachments: [wiredRow('a1', 'uploader')] });
+    await expect(
+      ql.update('sys_attachment', { description: 'swept' }, { multi: true, where: {}, context: { userId: 'uploader' } } as any),
+    ).resolves.toBeDefined();
+    expect(driver.stores.get('sys_attachment')!.get('a1')!.description).toBe('swept');
+  });
+
+  it('the per-row gate is a DIFFERENT refusal and still fires through the wire', async () => {
+    const { ql, driver } = await bootWired({
+      attachments: [wiredRow('a1', 'member'), wiredRow('a2', 'someone-else', 'r2')],
+      sharing: { canEdit: async () => false },
+    });
+    await expect(
+      ql.update('sys_attachment', { description: 'x' }, {
+        multi: true,
+        where: { parent_object: 'att_secret' },
+        context: { userId: 'member' },
+      } as any),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        code: 'RECORD_NOT_ACCESSIBLE',
+        status: 403,
+        message: expect.stringContaining('Cannot update attachment'),
+      }),
+    );
+    const store = driver.stores.get('sys_attachment')!;
+    expect(store.get('a1')!.description).toBeUndefined();
+    expect(store.get('a2')!.description).toBeUndefined();
+  });
+
+  it('scoped controls still pass and actually write: by id, and by a real `where`', async () => {
+    const byId = await bootWired({ attachments: [wiredRow('a1', 'uploader')] });
+    await expect(
+      byId.ql.update('sys_attachment', { id: 'a1', description: 'edited' }, { context: { userId: 'uploader' } } as any),
+    ).resolves.toBeDefined();
+    expect(byId.driver.stores.get('sys_attachment')!.get('a1')!.description).toBe('edited');
+
+    const byWhere = await bootWired({
+      attachments: [wiredRow('a1', 'uploader'), wiredRow('a2', 'uploader', 'r2')],
+    });
+    await expect(
+      byWhere.ql.update('sys_attachment', { description: 'batch' }, {
+        multi: true,
+        where: { uploaded_by: 'uploader' },
+        context: { userId: 'uploader' },
+      } as any),
+    ).resolves.toBeDefined();
+    expect(byWhere.driver.stores.get('sys_attachment')!.get('a1')!.description).toBe('batch');
+    expect(byWhere.driver.stores.get('sys_attachment')!.get('a2')!.description).toBe('batch');
+  });
+
+  it('re-pointing through the wire requires the attach rule on the NEW parent', async () => {
+    const canEdit = vi.fn(async (_o: string, recordId: string) => recordId !== 'r_hidden');
+    const { ql, driver } = await bootWired({
+      attachments: [wiredRow('a1', 'uploader')],
+      sharing: { canEdit },
+    });
+    // Uploader row rule passes without consulting sharing; the target does not.
+    await expect(
+      ql.update('sys_attachment', { id: 'a1', parent_id: 'r_hidden' }, { context: { userId: 'uploader' } } as any),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        code: 'ATTACHMENT_PARENT_ACCESS',
+        status: 403,
+        message: expect.stringContaining('Cannot move attachment a1 to att_secret/r_hidden'),
+      }),
+    );
+    expect(driver.stores.get('sys_attachment')!.get('a1')!.parent_id).toBe('r1');
+
+    await expect(
+      ql.update('sys_attachment', { id: 'a1', parent_id: 'r2' }, { context: { userId: 'uploader' } } as any),
+    ).resolves.toBeDefined();
+    expect(driver.stores.get('sys_attachment')!.get('a1')!.parent_id).toBe('r2');
+  });
+
+  it('still bypasses for system context and for context-less programmatic calls (unscoped shape included)', async () => {
+    const system = await bootWired({ attachments: [wiredRow('a1', 'someone')] });
+    await expect(
+      system.ql.update('sys_attachment', { description: 'sys' }, { multi: true, context: { isSystem: true } } as any),
+    ).resolves.toBeDefined();
+    expect(system.driver.stores.get('sys_attachment')!.get('a1')!.description).toBe('sys');
+
+    const bare = await bootWired({ attachments: [wiredRow('a1', 'someone')] });
+    await expect(
+      bare.ql.update('sys_attachment', { description: 'bare' }, { multi: true } as any),
+    ).resolves.toBeDefined();
+    expect(bare.driver.stores.get('sys_attachment')!.get('a1')!.description).toBe('bare');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
 // #7145 — what the gate FORWARDS to the sharing service
 //
 // The mirror of #7141 / PR #7143 for the attachment kit: `callerContext()`
@@ -518,6 +840,15 @@ const envelopeDeleteCtx = (input: any, exec: Record<string, unknown>) => ({
   api: apiFor([]),
 });
 
+/** An update ctx carrying an explicit execution envelope. */
+const envelopeUpdateCtx = (input: any, data: any, exec: Record<string, unknown>) => ({
+  object: 'sys_attachment',
+  event: 'beforeUpdate',
+  input: { ...input, data, options: { ...(input.options ?? {}), context: exec } },
+  session: { userId: exec.userId as string },
+  api: apiFor([]),
+});
+
 /** The deployment's `fallbackPermissionSet` (ADR-0056 D7: an app's `isDefault`
  * profile, else the built-in `member_default`). */
 const DEPLOYMENT_BASELINE_SET = 'app_default_profile';
@@ -596,6 +927,22 @@ describe('#7145 — caller envelope forwarded to the sharing gate', () => {
     const forwarded = canEdit.mock.calls[0]![2] as unknown as Record<string, unknown>;
     expect(forwarded).toEqual(DELEGATED_PRINCIPAL_FIELDS);
     for (const key of OPERATION_PRIVATE_KEYS) expect(forwarded).not.toHaveProperty(key);
+  });
+
+  it('beforeUpdate forwards the whole envelope MINUS the operation-private keys — on BOTH its call sites (#10091)', async () => {
+    // One update that exercises the row rule (caller is not the uploader)
+    // AND the re-point attach rule (parent_id changes): two canEdit calls,
+    // both reading the same callerContext() seam the other verbs pinned.
+    const canEdit = vi.fn(async (_o: string, _r: string, _c: any) => true);
+    const { beforeUpdate } = install({ attachments: [attRow], sharing: { canEdit } });
+    await beforeUpdate(envelopeUpdateCtx({ id: 'a1' }, { parent_id: 'r2' }, { ...DELEGATED_ENVELOPE }));
+
+    expect(canEdit).toHaveBeenCalledTimes(2); // row rule on r1, attach rule on r2
+    for (const call of canEdit.mock.calls) {
+      const forwarded = call[2] as unknown as Record<string, unknown>;
+      expect(forwarded).toEqual(DELEGATED_PRINCIPAL_FIELDS);
+      for (const key of OPERATION_PRIVATE_KEYS) expect(forwarded).not.toHaveProperty(key);
+    }
   });
 
   it('hands the service a COPY, so a callee stamping its own depth cannot write back', async () => {

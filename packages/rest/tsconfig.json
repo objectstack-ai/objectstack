@@ -2,8 +2,53 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": "./src",
-    "types": ["node"]
+    // [#9960] Widened from `./src` as a CONSEQUENCE of the `paths` rule below,
+    // not as a preference. Redirecting the producer's specifier to its source
+    // puts `packages/metadata-protocol/src/**` into this program, and `rootDir`
+    // is enforced over every program file even under `--noEmit`: measured here
+    // at 20 x `TS6059: File '.../packages/metadata-protocol/src/...' is not
+    // under 'rootDir'`, and with `rootDir` DELETED tsc infers one from this
+    // package's own inputs and reports the identical 20. `..` is the directory
+    // that genuinely contains every file in the program, which is what the
+    // diagnostic asks for. Emit is unaffected in everything that ships: this
+    // package builds with tsup (`tsup --config ../../tsup.config.ts`), which
+    // takes entry and out dir from that config, and `typecheck` passes
+    // `--noEmit`. The one script that emits through tsc is `dev` (`tsc -w`).
+    "rootDir": "..",
+    "types": ["node"],
+    // [#9960] `@objectstack/metadata-protocol` is type-imported by
+    // `src/package-routes.ts` (the declared `deletePackage` request/response
+    // shapes). Without this rule tsc resolves that specifier through the
+    // dependency's `exports` map — i.e. `dist/index.d.ts`, A BUILD ARTIFACT —
+    // so this package's `typecheck` would render a verdict about the last
+    // `pnpm build` rather than about the producer's source in the checkout.
+    // `check:type-source-resolution` refuses exactly that, and its header
+    // states why the dangerous case is a typecheck that PASSES.
+    //
+    // ONE rule, not two, and that is the predicate rather than a shortcut:
+    // `@objectstack/metadata-protocol` publishes a single entry point (its
+    // `exports` map has only `"."`), so there is no namespace subpath for a
+    // `@objectstack/metadata-protocol/*` rule to redirect. The gate judges
+    // rules INDIVIDUALLY against the specifiers actually imported and does not
+    // demand a block for imports that do not exist — a second rule here would
+    // point at files that are not on disk, which is worse than absent: a
+    // `paths` target that does not exist makes tsc fall back to node
+    // resolution, i.e. to `dist`, silently.
+    //
+    // ⛔ Never spell the key `@objectstack/metadata-protocol*` (star NOT
+    // preceded by a slash). That matches the bare name AND every subpath and
+    // folds them all onto one target; because the index re-exports most of the
+    // surface it does not crash, it type-checks against the wrong module and
+    // stays green. See `packages/qa/downstream-contract/tsconfig.json`, the
+    // repo's other `paths` block, for the measured version of that trap.
+    //
+    // No `lib` / `types` mirroring was needed, unlike that block: both packages
+    // extend the same root config and both already declare `types: ["node"]`,
+    // so the producer's source compiles under this package's environment with
+    // zero errors (measured: `tsc --noEmit` exit 0 over the merged program).
+    "paths": {
+      "@objectstack/metadata-protocol": ["../metadata-protocol/src/index.ts"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "**/*.spec.ts", "**/*.test.ts"]

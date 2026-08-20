@@ -173,6 +173,78 @@
 //     it silently to `dist/` — the vacuous-green direction this whole file
 //     exists to refuse.
 //
+// ── The clocked-window rule: pay the first load at module top (#10126) ──────
+//
+// The registry above names the deps a package's tests still resolve through
+// `dist/`. Loading one of those is not free — it is a cold vite transform of
+// that dependency's whole module graph — and WHERE a test pays it decides
+// whether the suite is measuring behaviour or measuring a compiler.
+//
+// `dev-plugin-security-enforcement-warning.test.ts` paid the
+// `@objectstack/plugin-security` transform inside a clocked window: first in
+// whichever `it()` ran first (3.1-3.6s idle on 4 vCPU, ~70% of the 5000ms
+// `testTimeout`), then — after a fix that only widened the window — inside a
+// `beforeAll` (`hookTimeout` 10000ms). On a merge-queue shard, which runs the
+// FULL suite where PR-side CI runs only the affected subset, the same load hit
+// 20.26s. Cost: `Test timed out in 5000ms` / `Hook timed out in 10000ms` on 30
+// queue builds in 24h, `main` frozen 2h+, three innocent PRs ejected, and the
+// first fix PR ejected twice by the very test it was fixing (#10115, PR #10120,
+// #10112).
+//
+// Every budget the cost is moved INTO can be exhausted by a heavier shard. The
+// fix is to move it OUT: a module-top `import '<specifier>'` is paid during
+// COLLECTION, and collection is clocked against nothing. Verified in PR #10120
+// against the installed runner rather than recalled — `@vitest/runner@4.1.10`
+// wraps exactly hooks and test bodies in `withTimeout(...)`, while
+// `collectTests()` awaits `runner.importFile(filepath, 'collect')` bare and
+// merely RECORDS `file.collectDuration` for reporters; and vitest offers exactly
+// three timeout knobs (`testTimeout`, `hookTimeout`, `teardownTimeout`), none of
+// which covers module loading.
+//
+// So: a test file that loads one of ITS package's unaliased specifiers through a
+// dynamic `import()` / `require()` **inside a function body** — an `it()`/`test()`
+// body, a `beforeAll`/`beforeEach`/`afterAll` hook, or any nested function —
+// with no module-scope load of the same specifier is a finding, reported against
+// the test file.
+//
+// The convention, in one sentence: **clocked windows measure behaviour, never
+// loading — a test that boots a real plugin chain pays its first load at module
+// top.** It is stated for authors in AGENTS.md § Build & Test, beside the sibling
+// test-gate conventions, and repeated in this gate's own failure text — where it
+// is pinned by a self-test assertion, so it cannot decay back into a comment that
+// no author tripping the rule ever reads.
+//
+// Getting it into that file took the one raise `scripts/pm/check-skill-line-
+// ratchet.mjs` has granted: AGENTS.md sat exactly on its shrink-only ceiling of
+// 958 with the sentence costing three lines and its section carrying two lines of
+// lossless rewrap headroom, so it could not be paid for in place. Maintainer
+// ruling 2026-08-20, verbatim and untranslated: 「A — 抬上限到 961 (Recommended)」.
+//
+// Boundaries, stated so they are not rediscovered as bugs:
+//
+//   - **Compliance is a MODULE-SCOPE load, which is wider than "a static
+//     import".** A static `import`/`export … from` is the spelling to write and
+//     the one the remedy prints. But a dynamic `import()` at module scope (top-
+//     level await) is paid during collection too, by the same measurement above,
+//     so flagging it would be inventing a failure. Both are accepted; a
+//     type-only clause is accepted as NEITHER, since it never resolves.
+//   - `typeof import('x')` is a TYPE QUERY, erased before anything loads. Never
+//     a finding, and never a compliance token either.
+//   - The population is the specifiers THIS package really resolves through
+//     `dist/` — the same measurement `KNOWN_UNALIASED_TEST_IMPORTS` mirrors, at
+//     specifier granularity. A dep already aliased to source still costs a
+//     transform, and paying it in a hook is still a bad idea; it is simply not
+//     what this gate measures, and widening the population is a different card.
+//   - "Inside a function body" is decided by a brace scanner over the source
+//     with comments and string/template/regex CONTENT masked out (the same
+//     `scanSource` projection the alias reader uses). It reads `=> {`, and a `)`
+//     that is not preceded by `if`/`for`/`while`/`switch`/`catch`/`with`/`await`,
+//     as opening a function body, walking back over a return-type annotation
+//     (`): Promise< T > {`) to find it. A brace it cannot classify reads as NOT a
+//     function — the silent direction, chosen because the loud one would fail
+//     tests over a parse this file cannot afford to get right (see `asPath` for
+//     why evaluating instead of reading was rejected).
+//
 // ── The registry, and why it is shaped like this ────────────────────────────
 //
 // `KNOWN_UNALIASED_TEST_IMPORTS` is the measured state of the repo on the day
@@ -209,7 +281,7 @@
 //   node scripts/check-test-source-alias.mjs --self-test
 
 import { readFileSync, readdirSync, statSync, existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { stripComments } from './js-comment-mask.mjs';
+import { stripComments, scanSource, blank } from './js-comment-mask.mjs';
 import { join, resolve, relative, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -591,6 +663,237 @@ function isTypeOnlyClause(clause) {
   return names.length > 0 && names.every((n) => /^type\s/.test(n));
 }
 
+// ── module-scope vs clocked-window load position (#10126) ───────────────────
+
+/**
+ * Keywords whose `(…)` is a control header rather than a parameter list, so the
+ * `{` after it opens a BLOCK and not a function body. `await` is here for
+ * `for await (const x of y) {`, whose `(` is preceded by that word.
+ */
+const CONTROL_HEADS = new Set(['if', 'for', 'while', 'switch', 'catch', 'with', 'await']);
+
+/** `typeof import('x')` — a type query, erased before anything resolves. */
+const TYPE_QUERY_BEFORE = /\btypeof\s*$/;
+
+/**
+ * Two same-length projections of one source, so a byte offset means the same
+ * thing in both: `commentsOnly` keeps every string intact (the import regex has
+ * to read the specifier), `codeOnly` masks literal CONTENT as well (the brace
+ * scanner must not count a `{` inside a string or a template).
+ */
+function maskedProjections(source) {
+  const { comment, literal } = scanSource(source);
+  const both = new Uint8Array(source.length);
+  for (let i = 0; i < source.length; i++) both[i] = comment[i] || literal[i] ? 1 : 0;
+  return { commentsOnly: blank(source, comment), codeOnly: blank(source, both) };
+}
+
+/**
+ * The `<` matching a closing `>`, for a return-type annotation. -1 if none.
+ *
+ * Balanced groups inside the argument list are jumped through `openOf` rather
+ * than scanned: `Promise< { app: A; wiring: B } >` carries both braces and
+ * semicolons, and a scanner that bailed on either read a real function signature
+ * as "not a function". Measured — that spelling is what
+ * `serve-marketplace-offline-runtime-config.test.ts` writes, and it was silently
+ * exempting the file until an ablation of this classifier surfaced it. Newlines
+ * are not a boundary either: these signatures routinely span lines.
+ */
+function matchingAngle(code, closeIndex, openOf) {
+  let depth = 0;
+  for (let i = closeIndex; i >= 0; i--) {
+    const c = code[i];
+    if (c === '>') {
+      if (i > 0 && code[i - 1] === '=') {
+        i--; // `=>` inside a function TYPE — an arrow, not a generic closer
+        continue;
+      }
+      depth++;
+      continue;
+    }
+    if (c === '<') {
+      depth--;
+      if (depth === 0) return i;
+      continue;
+    }
+    if (c === '}' || c === ']' || c === ')') {
+      const open = openOf.get(i);
+      if (open == null) return -1;
+      i = open;
+      continue;
+    }
+    if (c === ';' || c === '{' || c === '[' || c === '(') return -1;
+  }
+  return -1;
+}
+
+/**
+ * Does the `{` at `braceIndex` open a FUNCTION BODY (as opposed to a block, an
+ * object literal, a class/interface body, or a `case` label's block)?
+ *
+ * Answered from the text before it, in the masked projection: `=> {` is an arrow
+ * body; a `)` whose head word is not a control keyword is a parameter list; and
+ * a return-type annotation may sit between the two (`): void {`,
+ * `): Promise< T > {`, `): { ok: true } {`), so the walk steps back over one.
+ *
+ * `openOf` carries the `(`/`[`/`{` matching each closer, collected by the same
+ * forward pass that calls this — matching backwards would have to re-answer
+ * "is this quote inside a string" that the projection already answered.
+ */
+function opensFunctionBody(code, braceIndex, openOf) {
+  let j = braceIndex - 1;
+  const skipSpace = () => {
+    while (j >= 0 && /\s/.test(code[j])) j--;
+  };
+  skipSpace();
+  for (let guard = 0; guard < 8 && j >= 0; guard++) {
+    const c = code[j];
+    if (c === '>' && j > 0 && code[j - 1] === '=') return true; // `=> {`
+    if (c === ')') break;
+    if (c === '}' || c === ']') {
+      const open = openOf.get(j);
+      if (open == null) return false;
+      j = open - 1;
+      skipSpace();
+      continue;
+    }
+    if (c === '>') {
+      const open = matchingAngle(code, j, openOf);
+      if (open < 0) return false;
+      j = open - 1;
+      skipSpace();
+      continue;
+    }
+    if (c === ':') {
+      // The `:` introducing a return-type annotation, reached after stepping
+      // back over an object or array type (`): { ok: true } {`). A `case`/label
+      // colon falls out below, on the token in front of it.
+      j--;
+      skipSpace();
+      continue;
+    }
+    if (/[A-Za-z0-9_$]/.test(c)) {
+      while (j >= 0 && /[A-Za-z0-9_$.]/.test(code[j])) j--;
+      skipSpace();
+      // A return-type annotation is introduced by `:`. Anything else before the
+      // word means this brace is not a function body — `else {`, `try {`, a
+      // class body, an object literal.
+      if (j >= 0 && code[j] === ':') {
+        j--;
+        skipSpace();
+        continue;
+      }
+      return false;
+    }
+    return false;
+  }
+  if (j < 0 || code[j] !== ')') return false;
+  const open = openOf.get(j);
+  if (open == null) return false;
+  let k = open - 1;
+  while (k >= 0 && /\s/.test(code[k])) k--;
+  const end = k;
+  while (k >= 0 && /[A-Za-z0-9_$]/.test(code[k])) k--;
+  return !CONTROL_HEADS.has(code.slice(k + 1, end + 1));
+}
+
+/** `[start, end]` of every function body in the masked source, outermost first. */
+function functionBodyRanges(code) {
+  const ranges = [];
+  const stack = [];
+  const openOf = new Map();
+  const opens = { '(': [], '[': [], '{': [] };
+  for (let i = 0; i < code.length; i++) {
+    const c = code[i];
+    if (c === '(' || c === '[' || c === '{') {
+      opens[c].push(i);
+      if (c === '{') stack.push({ start: i, isFunction: opensFunctionBody(code, i, openOf) });
+      continue;
+    }
+    if (c === ')' || c === ']' || c === '}') {
+      const opener = c === ')' ? '(' : c === ']' ? '[' : '{';
+      const at = opens[opener].pop();
+      if (at != null) openOf.set(i, at);
+      if (c === '}') {
+        const frame = stack.pop();
+        if (frame && frame.isFunction) ranges.push([frame.start, i]);
+      }
+    }
+  }
+  return ranges;
+}
+
+/**
+ * Where this file pays each of its module loads.
+ *
+ * `moduleScope` is every specifier loaded during COLLECTION — a static import or
+ * a module-scope dynamic one; `clocked` is every dynamic load that sits inside a
+ * function body, with the line and the spelling the diagnostic quotes. Type-only
+ * clauses and `typeof import(…)` queries appear in neither: they never resolve.
+ */
+function moduleLoadSites(source) {
+  const { commentsOnly, codeOnly } = maskedProjections(source);
+  const ranges = functionBodyRanges(codeOnly);
+  const inFunction = (index) => ranges.some(([start, end]) => index > start && index < end);
+  const moduleScope = new Set();
+  const clocked = [];
+  IMPORT_PATTERNS.lastIndex = 0;
+  let match;
+  while ((match = IMPORT_PATTERNS.exec(commentsOnly))) {
+    const clause = match[1];
+    const spec = match[2] ?? match[3] ?? match[4] ?? match[5];
+    if (!spec) continue;
+    if (clause != null && isTypeOnlyClause(clause)) continue;
+    const dynamic = match[3] != null || match[4] != null;
+    if (!dynamic) {
+      moduleScope.add(spec);
+      continue;
+    }
+    // The pattern's leading `(?:^|[\s;{(=,])` eats one delimiter unless the match
+    // begins the file, so the keyword starts one character in.
+    const head = match.index + (/^[a-z]/.test(match[0]) ? 0 : 1);
+    if (TYPE_QUERY_BEFORE.test(codeOnly.slice(Math.max(0, head - 16), head))) continue;
+    if (!inFunction(head)) {
+      moduleScope.add(spec);
+      continue;
+    }
+    clocked.push({ spec, form: match[4] != null ? 'require' : 'import', line: lineOf(source, head) });
+  }
+  return { moduleScope, clocked };
+}
+
+function lineOf(source, index) {
+  let line = 1;
+  for (let i = 0; i < index && i < source.length; i++) if (source[i] === '\n') line++;
+  return line;
+}
+
+/**
+ * The clocked-window findings for one test file: a dynamic load of a specifier
+ * this package resolves through `dist/`, inside a function body, with no
+ * module-scope load of the same specifier anywhere in the file.
+ */
+function clockedWindowFindings(file, offendingSpecs) {
+  let source;
+  try {
+    source = readFileSync(file, 'utf8');
+  } catch {
+    return [];
+  }
+  if (!/\b(?:import|require)\s*\(/.test(source)) return [];
+  const { moduleScope, clocked } = moduleLoadSites(source);
+  const seen = new Set();
+  const findings = [];
+  for (const site of clocked) {
+    if (!offendingSpecs.has(site.spec)) continue;
+    if (moduleScope.has(site.spec)) continue;
+    if (seen.has(site.spec)) continue;
+    seen.add(site.spec);
+    findings.push(site);
+  }
+  return findings;
+}
+
 /**
  * `path -> specifiers`, for the whole process. Crossing the package boundary
  * means the SAME dependency source is walked once per consuming config — nine
@@ -705,7 +1008,7 @@ function testReachableWorkspaceImports(pkg, workspaceNames, crossInto) {
     }
   }
 
-  return { testCount: tests.length, imports, crossPackage };
+  return { testCount: tests.length, testFiles: tests, imports, crossPackage };
 }
 
 // ── vitest config alias reading ─────────────────────────────────────────────
@@ -1248,10 +1551,25 @@ function scan(root) {
       throughAFile.push({ spec, result: resolved.result, via });
     }
 
+    // The clocked-window rule (#10126), over the specifiers just measured as
+    // resolving through `dist/`. Deliberately downstream of that measurement:
+    // the population is not a second list to keep in step, it IS the list the
+    // registry mirrors, read at specifier granularity.
+    const offendingSpecs = new Set([...unaliasedSpecs.values()].flat().map((row) => row.spec));
+    const clockedLoads = [];
+    if (offendingSpecs.size > 0) {
+      for (const file of reachable.testFiles.sort()) {
+        for (const finding of clockedWindowFindings(file, offendingSpecs)) {
+          clockedLoads.push({ ...finding, file: relative(root, file) });
+        }
+      }
+    }
+
     packages.push({
       name: pkg.name,
       rel: pkg.rel,
       testCount: reachable.testCount,
+      clockedLoads,
       configPath: configPath ? relative(root, configPath) : null,
       unreadable,
       unaliased,
@@ -1377,6 +1695,24 @@ function check(root, registry) {
       failures.push(
         `${pkg.rel}: ${pkg.configPath} cannot be read statically (${pkg.unreadable}).\n` +
           '    This gate must be able to see every alias. Write them as literal entries in this file.',
+      );
+    }
+    for (const load of pkg.clockedLoads ?? []) {
+      failures.push(
+        `${load.file}:${load.line}: \`${load.form}('${load.spec}')\` is paid inside a function body — a CLOCKED window.\n` +
+          `    This file has no module-scope load of \`${load.spec}\`, and this package resolves that specifier\n` +
+          '    through `dist/`, so the first call transforms that dependency\'s whole module graph while a\n' +
+          "    `testTimeout` or `hookTimeout` is running. Measured on the incident this rule comes from: 3.1-3.6s\n" +
+          '    idle on 4 vCPU, 20.26s on a starved core — past every clock, including a hypothetical 30s.\n' +
+          '    THE CONVENTION: clocked windows measure behaviour, never loading — a test that boots a real\n' +
+          '    plugin chain pays its first load at module top.\n' +
+          '    Add a module-top side-effect import so the transform is paid during COLLECTION, which vitest\n' +
+          '    clocks against nothing (it clocks hooks and test bodies only):\n' +
+          `      import '${load.spec}';\n` +
+          '    Keep the dynamic call where it is — this only decides WHERE the first load is paid. Widening the\n' +
+          '    timeout instead relocates the cliff to the next heavier shard; the merge queue runs the full\n' +
+          '    suite where PR-side CI runs only the affected subset, so that shard is heavier than anything the\n' +
+          '    PR checks measure.',
       );
     }
     for (const trap of pkg.throughAFile) {
@@ -1824,6 +2160,128 @@ function buildFixtureTree() {
       '] } };\n',
   });
 
+  // ── (20-24) THE CLOCKED-WINDOW RULE (#10126) ──────────────────────────────
+  //
+  // `@fx/core` resolves to `dist/`, and none of these five aliases it, so every
+  // one of them is in the ledger. What separates them is WHERE the first load is
+  // paid: collection is unclocked, a hook or a test body is not.
+
+  // (20) violating, in the incident's own two shapes: a hook and a test body,
+  // with no module-scope load anywhere in the file. `import.meta` style, an
+  // arrow hook, a `function` test body and a nested helper are all here so the
+  // brace scanner is exercised on more than one spelling of "a function".
+  fixture(root, 'packages/clocked-load', {
+    'package.json': ARTIFACT_MANIFEST('@fx/clocked-load'),
+    'src/thing.test.ts':
+      "import { describe, it, beforeAll } from 'vitest';\n" +
+      'beforeAll(async () => {\n' +
+      "  await import('@fx/core');\n" +
+      '});\n' +
+      "describe('x', () => {\n" +
+      "  it('y', async function (): Promise<void> {\n" +
+      '    const load = async () => {\n' +
+      "      await import('@fx/core/logger');\n" +
+      '    };\n' +
+      '    await load();\n' +
+      '  });\n' +
+      '});\n',
+  });
+
+  // (21) THE BOTH-PRESENT LEG. The same dynamic call inside the same hook — but
+  // the module top already loaded the specifier, so the transform is paid during
+  // collection and the dynamic call is a registry lookup. Compliant, and the
+  // real remediation shape (PR #10120), so a reader that reports it has undone
+  // the fix rather than found a defect.
+  fixture(root, 'packages/clocked-load-paid', {
+    'package.json': ARTIFACT_MANIFEST('@fx/clocked-load-paid'),
+    'src/thing.test.ts':
+      "import { it } from 'vitest';\n" +
+      "import '@fx/core';\n" +
+      "it('y', async () => {\n" +
+      "  const mod = await import('@fx/core');\n" +
+      '  return mod;\n' +
+      '});\n',
+  });
+
+  // (22) THE DECOY. A dynamic import in a test body of a specifier that is NOT
+  // in this package's measured set — `@fx/source-only` resolves to source, so it
+  // is not a stale-able artifact and is not in the ledger. Flagging it would
+  // silently re-scope the rule from the registry's population to "every import
+  // anywhere", which is a different card.
+  fixture(root, 'packages/source-only', {
+    'package.json': JSON.stringify({ name: '@fx/source-only', exports: { '.': './src/index.ts' } }, null, 2),
+    'src/index.ts': 'export const so = 1;\n',
+  });
+  fixture(root, 'packages/clocked-decoy', {
+    'package.json': ARTIFACT_MANIFEST('@fx/clocked-decoy'),
+    'src/thing.test.ts':
+      "import { it } from 'vitest';\n" +
+      "import '@fx/core';\n" +
+      "it('y', async () => {\n" +
+      "  const a = await import('@fx/source-only');\n" +
+      "  const b = await import('./local.js');\n" +
+      "  const c = require('node:path');\n" +
+      '  return [a, b, c];\n' +
+      '});\n',
+    'src/local.ts': 'export const local = 1;\n',
+  });
+
+  // (23) MODULE SCOPE IS NOT ONLY A STATIC IMPORT. A top-level `await import()`
+  // — and one inside a top-level `if`/`try` block, which is still module scope —
+  // is paid during collection by the same measurement. Reporting these would be
+  // inventing a failure, and the brace scanner is what tells them from a hook.
+  fixture(root, 'packages/clocked-top-level-await', {
+    'package.json': ARTIFACT_MANIFEST('@fx/clocked-top-level-await'),
+    'src/thing.test.ts':
+      "import { it } from 'vitest';\n" +
+      "await import('@fx/core');\n" +
+      'if (process.env.X) {\n' +
+      "  await import('@fx/core/logger');\n" +
+      '}\n' +
+      "it('y', async () => {\n" +
+      "  const mod = await import('@fx/core');\n" +
+      "  const sub = await import('@fx/core/logger');\n" +
+      '  return [mod, sub];\n' +
+      '});\n',
+  });
+
+  // (24) A TYPE QUERY IS NOT A LOAD. `typeof import('x')` is erased before
+  // anything resolves, so it is neither a finding nor a compliance token — the
+  // shape `sys-metadata-repository.history-counters.test.ts` really writes.
+  // The dynamic call in the body is therefore still reported: the type query
+  // must not have quietly satisfied the rule.
+  fixture(root, 'packages/clocked-type-query', {
+    'package.json': ARTIFACT_MANIFEST('@fx/clocked-type-query'),
+    'src/thing.test.ts':
+      "import { it } from 'vitest';\n" +
+      "type Core = typeof import('@fx/core');\n" +
+      "it('y', async () => {\n" +
+      "  const mod: Core = await import('@fx/core');\n" +
+      '  return mod;\n' +
+      '});\n',
+  });
+
+  // (25) THE SIGNATURE THAT DEFEATED THE CLASSIFIER ONCE. A module-level helper
+  // called from test bodies, whose parameter list spans lines and whose return
+  // type is `Promise< { … } >` — braces, a semicolon and newlines all between
+  // the parameter list and the body `{`. A backward walk that bailed on any of
+  // the three read this as "not a function body" and exempted the file
+  // SILENTLY, which is how `serve-marketplace-offline-runtime-config.test.ts`
+  // sat green through the sweep this rule shipped with.
+  fixture(root, 'packages/clocked-typed-signature', {
+    'package.json': ARTIFACT_MANIFEST('@fx/clocked-typed-signature'),
+    'src/thing.test.ts':
+      "import { it } from 'vitest';\n" +
+      'async function boot(options: {\n' +
+      '  dir: string;\n' +
+      '  extra?: readonly unknown[];\n' +
+      '}): Promise<{ mod: object; dir: string }> {\n' +
+      "  const mod = await import('@fx/core');\n" +
+      '  return { mod, dir: options.dir };\n' +
+      '}\n' +
+      "it('y', async () => boot({ dir: '.' }));\n",
+  });
+
   return root;
 }
 
@@ -2078,6 +2536,93 @@ function selfTest() {
         (f) => f.includes('packages/latent-prefix-reached') && f.includes('ENOTDIR at run time') && !f.includes('Latent'),
       ),
       'a reached subpath lost rule 5\'s finding — the dedupe dropped the stronger of the two',
+    );
+
+    // ── the clocked-window rule (#10126) ──────────────────────────────────
+    //
+    // Observed failing and observed silent, one leg per boundary the header
+    // states. The `has`/`!has` helpers cannot serve the silent legs here: every
+    // one of these fixtures ALSO carries an unregistered ledger entry, so a bare
+    // package-name search matches for a reason that has nothing to do with this
+    // rule. Each silent assertion is therefore scoped to the rule's own sentence.
+    const clockedIn = (needle) =>
+      cross.failures.filter((f) => f.includes(needle) && f.includes('a CLOCKED window'));
+
+    // The hook shape — `beforeAll(async () => { await import(…) })`, the second
+    // of the two spellings that ejected PR #10120 from the merge queue.
+    expect(
+      clockedIn('packages/clocked-load/src/thing.test.ts:3').some((f) => f.includes("import('@fx/core')")),
+      'a dynamic import inside a `beforeAll` hook was not reported — the exact shape of the #10115 incident',
+    );
+    // …and the test-body shape, reached through a nested arrow inside an
+    // `async function (): Promise< T >` body, so the brace scanner is pinned on
+    // more than the one arrow spelling.
+    expect(
+      clockedIn('packages/clocked-load/src/thing.test.ts:8').some((f) => f.includes("import('@fx/core/logger')")),
+      'a dynamic import nested two functions deep inside an `it()` body went unseen — the brace scanner reads only `=> {`',
+    );
+    // Counted on the FULL path: `packages/clocked-load` is also a prefix of
+    // `packages/clocked-load-paid`, and a loose needle here reads that fixture's
+    // findings as this one's — measured, when an ablation of the compliance leg
+    // moved this count to 3 for a reason that was in the assertion, not the gate.
+    expect(
+      clockedIn('packages/clocked-load/src/thing.test.ts').length === 2,
+      'the clocked-window rule did not report exactly the two loads this fixture pays in a clocked window',
+    );
+    // The remedy is the one PR #10120 landed, printed as a line to paste.
+    expect(
+      clockedIn('packages/clocked-load/src/thing.test.ts').every(
+        (f) => f.includes('COLLECTION') && f.includes("import '@fx/"),
+      ),
+      'the clocked-window finding printed no module-top import to add, or did not say where the cost moves TO',
+    );
+    // The convention sentence itself, carried in the text the author reads.
+    // #10126 asked for it in a doc; the doc that should hold it is on a
+    // headroom-0 line ceiling, so until that is ruled on, THIS is where an
+    // author meets it — which makes it a pin, not a comment.
+    expect(
+      clockedIn('packages/clocked-load/src/thing.test.ts').every((f) =>
+        f.includes('clocked windows measure behaviour, never loading'),
+      ),
+      'the clocked-window finding no longer states the convention it enforces — the sentence is back to being comment-only',
+    );
+
+    // BOTH PRESENT IS COMPLIANT: the module top already paid it, so the dynamic
+    // call is a registry lookup. A reader that reports this has undone the fix.
+    expect(
+      clockedIn('packages/clocked-load-paid').length === 0,
+      'a file with the module-top import AND the dynamic call was reported anyway — that is the remediation, not the defect',
+    );
+
+    // THE DECOY: a dynamic import of a specifier outside the measured set
+    // (`@fx/source-only` resolves to source), plus a relative import and a node
+    // builtin. None is a stale-able artifact and none may be flagged.
+    expect(
+      clockedIn('packages/clocked-decoy').length === 0,
+      'the clocked-window rule flagged a specifier outside the ledger population — it has re-scoped itself to every import anywhere',
+    );
+
+    // Module scope is wider than "a static import": a top-level `await import()`,
+    // and one inside a top-level `if` block, are both paid during collection.
+    expect(
+      clockedIn('packages/clocked-top-level-await').length === 0,
+      'a module-scope dynamic import was not accepted as paying the load — the rule invents a failure for top-level await',
+    );
+
+    // …and a TYPE QUERY is neither. `typeof import('x')` is erased before
+    // anything resolves, so it cannot satisfy the rule on the file's behalf.
+    expect(
+      clockedIn('packages/clocked-type-query/src/thing.test.ts:4').length === 1,
+      "`typeof import('x')` was read as a real module-scope load, and silenced a finding it never paid for",
+    );
+
+    // A module-level helper called from a test body is still a clocked window,
+    // and its signature is where this classifier is hardest. Pinned by shape
+    // because the corpus taught it: the miss was silent, and a silent exemption
+    // is indistinguishable from compliance in every report the gate prints.
+    expect(
+      clockedIn('packages/clocked-typed-signature/src/thing.test.ts:6').length === 1,
+      'a helper whose multi-line signature ends `}): Promise< { … } > {` was read as not a function body — a SILENT exemption',
     );
 
     // The population the green line prints has to BE a number. `check()` returning

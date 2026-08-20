@@ -320,7 +320,7 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
     // request (falling back to the id, quietly, when there is none).
     // `organizationId` remains the blessed developer-facing name for the
     // caller's active org (matches columns + `current_user.organizationId`);
-    // the deprecated `tenantId` alias (#3280) was removed in v11 (#3290).
+    // the deprecated `tenantId` alias (#3280) was removed in v16 (#3290).
     const ec: any = _context?.executionContext;
     const userFromAuth = actorUserFromExecutionContext(
         ec,

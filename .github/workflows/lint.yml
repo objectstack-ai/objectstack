@@ -183,6 +183,19 @@ jobs:
       - name: PM skill issue-ID lint
         run: pnpm check:pm-skill-id-lint
 
+      # PM label description cap. GitHub hard-caps label descriptions at 100
+      # CHARACTERS and `gh label create` 422s above it; the `|| true` that makes
+      # scripts/pm/ensure-pm-labels.sh rerunnable swallows that 422, so an
+      # over-long -d means the label is never created on a repo that lacks it
+      # and a rerun can never repair it. Headroom is thin (one description sits
+      # at exactly 100), and the only previous enforcement was the author
+      # counting by hand. Measured in characters, never bytes: the live
+      # needs:contract-review description is 97 characters / 101 bytes, so a
+      # byte-length guard would red a label GitHub accepts. Unconditional, like
+      # the other self-tested gates above.
+      - name: PM label description cap
+        run: pnpm check:pm-label-desc-cap
+
       # PM dispatch-gates self-test (#8162). `scripts/pm/dispatch-gates.mjs`
       # derives the "local gates for this card" line of every dispatch prompt,
       # and carried a 61-case --self-test that NO job ran: it executed only when
@@ -284,12 +297,22 @@ jobs:
 
       # Governed-merges audit self-test (#9495) — same family, same split as
       # the half-state sweeper above: the live sweep enumerates the governed
-      # merges (docs/adr/**, .claude/**, skills/**, AGENTS.md, CLAUDE.md)
-      # since a date/ref for the PM round report — report-only by design, the
-      # human-merge-is-the-review-record regime's detection half — while this
-      # step runs only the offline self-test (pure predicates + replay
-      # fixtures; no network, no token), so the predicates cannot rot unrun
-      # the way an uninvoked self-test does (#4690).
+      # merges since a date/ref for the PM round report — report-only by
+      # design, the human-merge-is-the-review-record regime's detection half
+      # — while this step runs only the offline self-test (pure predicates +
+      # replay fixtures; no network, no token), so the predicates cannot rot
+      # unrun the way an uninvoked self-test does (#4690).
+      #
+      # ⛔ WHICH surfaces are governed is deliberately NOT restated here
+      # (#9840). The register is `GOVERNED_SURFACES` in
+      # `scripts/pm/check-governed-merges.mjs`, and this comment used to spell
+      # the five out by hand — a copy nothing read. The register grew three
+      # times in two days, and the two hand copies a seat DOES act on went
+      # stale twice (#9395, #9511); those two are pinned by the step below,
+      # over backtick spans inside an anchored region. A bare YAML comment
+      # cannot present that shape, so this one points at the register rather
+      # than restating it: the copy that does not exist cannot go stale.
+      # ⛔ Do not helpfully re-add the list here.
       - name: Governed-merges audit self-test
         run: pnpm check:pm-governed-merges
 
@@ -523,29 +546,52 @@ jobs:
       - name: Docs image-tag version-time rewriter self-test
         run: pnpm check:docs-image-tag-sync
 
-      # #9348 — the same treatment for the OTHER version-time rewriter, and the
-      # scheduling gap that made it necessary after #9648 already added a vitest
-      # file which runs the CLI. `create-objectstack#test` is reachable only from
-      # ci.yml's `test` job, which is gated on the `core` paths-filter; `core` is
-      # `packages/**`, `examples/**`, `apps/!(docs)/**`, `package.json`,
-      # `pnpm-lock.yaml`, `tsconfig.json`, `.github/workflows/ci.yml` and matches
-      # no path under `scripts/`. Measured with picomatch 4.0.5 (the matcher
-      # dorny/paths-filter uses): a diff confined to
-      # scripts/sync-template-versions.mjs yields core=false, so Test Core is
-      # skipped ENTIRELY on the PR that changes the rewriter, and with it the
-      # vitest. The two layers that look like they cover it do not: `turbo ls
-      # --affected` returns ZERO packages for that diff (a package-local edit
-      # returns 1, so the probe is live) — turbo.json's `$TURBO_ROOT$` entry
-      # moves the task HASH, which is what stops a cached green on the merge
-      # queue, not what schedules the job — and the `--union-into` step that DOES
-      # pull create-objectstack back in is a step inside the skipped job. The
-      # queue build catches it, one merge late, as batch collateral; that is the
-      # failure shape check-cross-package-test-inputs.mjs's own ledger records
-      # twice.
+      # #9348 — the same treatment for the OTHER version-time rewriter, argued
+      # there from two measured gaps after #9648 had already added a vitest file
+      # which runs the CLI. GAP 1 has since closed; it is recorded here rather
+      # than deleted, so the next reader does not re-derive a conclusion the
+      # workflow no longer supports.
       #
-      # This workflow carries no paths filter and no filter job, so this step
-      # runs on every pull request, push and merge-queue build. That is the whole
-      # reason the flag exists rather than more cases in the vitest file.
+      # GAP 1 — SCHEDULING. CLOSED by #9829 / #10014. The original claim:
+      # `create-objectstack#test` is reachable, at PR time, only from ci.yml's
+      # `test` job; that job was gated on the `core` paths-filter ALONE; and
+      # `core` — `packages/**`, `examples/**`, `apps/!(docs)/**`,
+      # `package.json`, `pnpm-lock.yaml`, `tsconfig.json`,
+      # `.github/workflows/ci.yml` — matches no path under `scripts/`, so a diff
+      # confined to scripts/sync-template-versions.mjs skipped Test Core
+      # ENTIRELY, and the vitest with it. `core` is still false on that diff — it
+      # was never widened — but the `test` job now ORs in a SECOND filter output,
+      # `scripts: ['scripts/**']`, which matches, so
+      # `if: ... (core != 'false' || scripts != 'false')` resolves to RUN.
+      # Re-measured against the merged filter with picomatch 2.3.1 — the version
+      # dorny/paths-filter@v4's own package-lock.json resolves, NOT this repo's
+      # 4.0.5, which is what the old text cited; the two agree on these globs, so
+      # the wrong figure never produced a wrong verdict — `core=false`,
+      # `scripts=true`. With the job running the rest of the chain follows:
+      # `--union-into` is a step inside it, so it runs and unions
+      # create-objectstack back in off its declared globs; `create-objectstack#test`
+      # declares
+      # `$TURBO_ROOT$/scripts/sync-template-versions.mjs` in turbo.json, so the
+      # task hash moves and no cached green is replayed. PR CI is the first
+      # signal now, not the queue build one merge later.
+      #
+      # Two halves of that argument are UNCHANGED, and they are why `--union-into`
+      # has to exist at all: `turbo ls --affected` returns ZERO packages for that
+      # diff (a package-local edit returns 1, so the probe is live), and the
+      # `$TURBO_ROOT$` entry moves the task HASH, which is what stops a cached
+      # green — a different thing from scheduling the job. Unchanged too is the
+      # failure SHAPE the retired sentence pointed at — the merge queue as first
+      # signal, one merge late, as batch collateral — which
+      # check-cross-package-test-inputs.mjs's own ledger records twice. It is
+      # simply no longer what happens to a diff confined to this rewriter.
+      #
+      # GAP 2 — THE RED PATHS. Open, and it carries this step alone now. This
+      # workflow still carries no paths filter and no filter job, so the step
+      # runs on every pull request, push and merge-queue build, unconditionally,
+      # where the vitest's scheduling now rides a chain (filter output, then the
+      # union's declaration, then the task hash). That is robustness; it is no
+      # longer the reason the flag exists. The reason is that the cases below are
+      # executed nowhere else.
       #
       # Only the --self-test runs here, for the same reason as the step above:
       # the rewriter has nothing to do on a green corpus. The cases are scoped to
@@ -655,7 +701,7 @@ jobs:
 
       # #3280/#3290 org-identifier guard: `organizationId` is the blessed
       # developer-facing name for the caller's active org in hook/action bodies;
-      # the `session.tenantId` alias was REMOVED in v11 (#3290). Keeps our own
+      # the `session.tenantId` alias was REMOVED in v16 (#3290). Keeps our own
       # reference code (examples/, apps/, AND packages/) — which authors and AIs
       # copy from — off the removed name. Hard-fail (surfaces carry zero
       # occurrences today); tests, comments, skills/ and docs/ are excluded, and
@@ -997,6 +1043,46 @@ jobs:
           node scripts/check-cross-repo-closer-outcome.mjs --self-test
           node scripts/check-cross-repo-closer-outcome.mjs
 
+      # Merge-queue triage outcome contract (#10128, over the #4859 bot).
+      # merge-queue-triage.yml carries ~450 lines of inline github-script that
+      # only ever runs on a RED merge_group build — a condition nobody can
+      # produce on demand, so its two 2026-08-20 limbs would otherwise be
+      # unexercised code. This step is the exercise, on the same method as the
+      # cross-repo closer step above: the shipped script is extracted from the
+      # YAML with a real parser (never retyped) and run under doubles the way
+      # actions/github-script runs it, as one AsyncFunction body. No network.
+      #
+      # What it holds: (1) the excerpt names the failure REASON beside the FAIL
+      # line, driven against REAL captured vitest logs of the incident's own
+      # test file — one timeout, one assertion, byte-identical FAIL lines and
+      # opposite diagnoses, which is the confusion that produced a confidently
+      # wrong card (#10112) and cost a whole dispatch; and (2) the cross-PR
+      # aggregation files exactly ONE anchor issue at >= 2 DISTINCT PRs,
+      # REFRESHES it on the next ejection instead of filing a second, and files
+      # none for two different keys or for one PR ejecting twice. The refresh
+      # leg is driven as a PAIR — run 2's world is built from run 1's output —
+      # because idempotency is a property of the pair and a hand-written marker
+      # would prove each half while leaving the two runs free to disagree.
+      #
+      # Its --self-test runs first and is the half that stops the battery
+      # rotting into decoration: it mutates the shipped script fourteen ways —
+      # drop the reason lookahead, test the FAIL pattern before the reason
+      # pattern (which silently loses every assertion), count runs instead of
+      # distinct PRs, always create instead of refreshing, drop the sighting
+      # markers, downgrade each anti-no-op announcement to an info line, and
+      # more — and requires the battery to go RED for each, naming the scenario
+      # that catches it. A mutation whose anchor no longer exists is a failure
+      # too, so a rewrite of the workflow cannot leave the mutations silently
+      # matching nothing.
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias, same
+      # reason as the step above: root package.json is declared territory of
+      # the @changesets/cli v3 migration lane (#9465) while it runs.
+      - name: Merge-queue triage outcome contract
+        run: |
+          node scripts/check-merge-queue-triage-outcome.mjs --self-test
+          node scripts/check-merge-queue-triage-outcome.mjs
+
       # Shard positive-attestation gate (#6082). ci.yml's two aggregate gates
       # used to decide from one `needs.<matrix>.result` word, which cannot carry
       # three shards' verdicts: run 31120902911 read the undocumented
@@ -1068,6 +1154,26 @@ jobs:
       # Reads ~2000 test sources; sub-second.
       - name: Cross-package test inputs
         run: pnpm check:cross-package-test-inputs
+
+      # The READING half of the gate above (#10046). `--union-into` appends the
+      # cross-package scans to the `turbo ls` document ci.yml is about to shard,
+      # and `scripts/partition-test-shards.mjs` is the only thing that reads it.
+      # That script asserts the payload shape loudly on purpose — an
+      # experimental-command upgrade should become a red step naming the cause
+      # rather than a silently empty shard — but it had carried a `--self-test`
+      # that NOTHING ran since it was written, so every assertion in it, the
+      # partitioner's determinism and coverage pins included, evaluated never.
+      # A pin nobody runs is not a weaker pin, it is no pin: `--union-into` wrote
+      # a `count: 0` document alongside two items for as long as nobody looked,
+      # and the reader-side refusal that now catches that needs a live pin of its
+      # own or it rots the same way.
+      # Invoked as `node` rather than through a `pnpm check:*` alias for the same
+      # reason as the release-rehearsal self-test above: that alias belongs in
+      # root package.json, declared territory of the @changesets/cli v3 lane
+      # (#9465) while it runs. dispatch-gates.mjs derives gate families from
+      # either spelling. Pure functions, no IO, milliseconds.
+      - name: Shard partitioner self-test
+        run: node scripts/partition-test-shards.mjs --self-test
 
       # The inventory of `packages/**` tests coupled to `examples/**` (#8754).
       # Sibling of the gate above, on the axis it cannot see: that one detects

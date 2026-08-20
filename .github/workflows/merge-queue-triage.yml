@@ -15,12 +15,51 @@ name: Merge Queue Triage
 #
 # So: every red merge_group CI run gets a triage comment on its PR — the
 # failed jobs/steps, the failing test lines pulled from the logs (best
-# effort), how many times THIS PR has already failed in the queue in the last
-# 24 h, and the queue-wide failure count. The checklist tells the author
-# (human or agent) to diagnose before re-queueing. The comment is the
-# machine-readable signal the PM dispatch loop can key on, and the cross-PR
-# flake evidence lives in these comments: the same test name appearing in two
-# unrelated PRs' triage comments is a confirmed flake.
+# effort) WITH the deciding failure-reason line beside each one, how many
+# times THIS PR has already failed in the queue in the last 24 h, the
+# queue-wide failure count, and which OTHER PRs the same failing test file has
+# ejected in the last 24 h. The checklist tells the author (human or agent) to
+# diagnose before re-queueing. The comment is the machine-readable signal the
+# PM dispatch loop can key on.
+#
+# ## The reason line, and why it is not decoration (#10128, limb ①)
+#
+# Until 2026-08-20 the excerpt carried the `FAIL <file> > <suite> > <test>`
+# line and NOT the line under it that says WHY. Those two failure modes look
+# identical in the excerpt and are diagnosed in opposite directions:
+#
+#     FAIL  src/dev-plugin-security-enforcement-warning.test.ts > … > bail #1 …
+#     Error: Test timed out in 5000ms.                    <- load/timing defect
+#
+#     FAIL  src/dev-plugin-security-enforcement-warning.test.ts > … > bail #1 …
+#     AssertionError: SecurityPlugin.init() ran: expected false to be true
+#                                                         <- a real regression
+#
+# The FAIL lines above are byte-identical; only the second line differs. On
+# 2026-08-20 a first responder reproduced the ASSERTION form of that very file
+# locally, matched it against an excerpt that was actually reporting the
+# TIMEOUT form, and filed a confidently wrong diagnosis (#10112, "missing build
+# edge"); a whole dispatch was then spent falsifying it, and the real fix
+# (#10120, via #10115) was a module-load cost that no assertion was ever
+# involved in. One grep in this file would have separated them, so it is here.
+#
+# ## Cross-PR aggregation, and its boundary (#10128, limb ②)
+#
+# The same test file ejected #10105, then #10003, then #10008 — three unrelated
+# PRs — before a human joined the dots at 04:08Z. Each victim got its own
+# comment and nothing connected them, so the first shared record was hand-filed
+# and carried the wrong diagnosis. This job now keys each ejection by the
+# FAILING TEST FILE PATH, records that sighting in its own comment as a
+# machine-readable marker, and reads 24 h of those markers back on the next
+# ejection. When one key has ejected >= 2 DISTINCT PRs inside the window it
+# files ONE anchor issue for the key — or refreshes the open one, matched on a
+# stable marker in the issue body, the same idempotency idiom as this file's
+# own per-run comment marker — and links it from every later victim's comment.
+#
+# ⛔ The boundary is the point: this job NAMES and AGGREGATES, and DECIDES
+# NOTHING. No auto-requeue, no auto-quarantine, no label on anybody's PR, no
+# `skip`/`only` written anywhere. Weakening a gate stays a human act, and an
+# anchor issue is a place for that conversation, not a verdict in it.
 #
 # Fires on conclusion == failure ONLY. 'cancelled' is the queue evicting an
 # entry because something AHEAD of it failed (or a manual cancel) — it says
@@ -31,7 +70,7 @@ name: Merge Queue Triage
 # workflow_run executes in the DEFAULT branch's context: this file must be on
 # main before it fires, it never checks out or runs PR code, and it holds the
 # minimum permissions (actions: read for logs, pull-requests: write for the
-# comment).
+# comment, issues: write for the anchor issue limb ② files and refreshes).
 #
 # Delivery is retried, never assumed (#9424). A transient GitHub API failure used
 # to kill this job outright — github-script hands any throw from the script to
@@ -50,6 +89,13 @@ name: Merge Queue Triage
 # and is in no required context, so a red costs nothing — while a green that
 # quietly delivered nothing is the same silence this workflow exists to break, one
 # layer further in.
+#
+# ⚠️ That invariant is about the COMMENT, and limb ② deliberately does not join
+# it. The anchor issue is a convenience — a single place for one conversation —
+# and every fact it carries is also printed inline in the comment, so an anchor
+# that could not be written loses no diagnosis. It is therefore reported as an
+# annotation AND as a line in the comment, and does not change this job's
+# verdict. Failing the job on it would be claiming an equivalence that is false.
 
 on:
   workflow_run:
@@ -69,6 +115,7 @@ jobs:
     permissions:
       actions: read
       pull-requests: write
+      issues: write
     steps:
       - name: Post the triage comment
         uses: actions/github-script@v9
@@ -128,6 +175,11 @@ jobs:
             // #9423 chose the opposite for docs-drift-check.yml, and correctly: that
             // marker is STABLE across runs, so posting blind there strands a second
             // advisory which the dedup then updates forever alongside the first.
+            //
+            // This early return also fences limb ② off from repeat deliveries: a
+            // redelivered workflow_run stops HERE, before any sighting is recorded
+            // and before any anchor is touched, so one queue build contributes its
+            // signature exactly once however many times GitHub delivers it.
             let alreadyPosted = false;
             try {
               const existing = await github.rest.issues.listComments({
@@ -153,19 +205,49 @@ jobs:
             });
             const failedJobs = jobs.filter((j) => j.conclusion === 'failure');
 
-            // Best-effort log harvest: the lines a human would grep for first.
-            // Aggregate gate jobs (Test Core / Dogfood Regression Gate) fail
-            // with no information of their own, so prefer real jobs when both
-            // are present. A 4xx on the logs endpoint degrades to names only.
-            const FAIL_LINE = /(?:^|[\s|])(?:✗|×|✕|FAIL\s|AssertionError|STALL)/;
+            // ── Log harvest ────────────────────────────────────────────────
+            //
+            // Best-effort: the lines a human would grep for first, plus the line
+            // that says WHY. Aggregate gate jobs (Test Core / Dogfood Regression
+            // Gate) fail with no information of their own, so prefer real jobs
+            // when both are present. A 4xx on the logs endpoint degrades to
+            // names only.
+            //
+            // The ESC byte is built rather than typed: a raw control byte in a
+            // repo file makes grep treat the whole file as binary and is a gate
+            // failure here (scripts/check-nul-bytes.mjs).
+            const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
+            const plain = (l) => l.replace(ANSI, '').replace(/\r/g, '');
+
+            // A FAIL line, matched on the ANSI-STRIPPED text. The three cross
+            // marks must sit at the START of their line, which is where vitest
+            // prints them (`     × test name 14ms`). Anywhere-matching cost real
+            // budget: on 2026-08-20 four of the twelve excerpted lines on PR
+            // #10008 were `stdout | …` lines whose only qualification was the
+            // multiplication sign inside a test TITLE (`(#7986 × #7799/#8022)`),
+            // crowding out lines that carried the failure.
+            const FAIL_LINE = /^\s*(?:✗|×|✕)\s|(?:^|[\s|])(?:FAIL\s|AssertionError|STALL)/;
+            // The deciding line (#10128 limb ①). `Error:` last and unanchored is
+            // the card's "first `Error:` after the FAIL" fallback; the three
+            // timeout spellings are vitest's own (`testTimeout`, `hookTimeout`,
+            // `teardownTimeout`) and are listed explicitly so the label stays
+            // right when the fallback would also have matched them.
+            const REASON_LINE = /(?:Test|Hook|Teardown) timed out in \d+\s*ms|(?:^|[\s|>])(?:AssertionError|Error):\s/;
+            // The aggregation key (#10128 limb ②): the failing test FILE.
+            const TEST_FILE = /(?:^|[\s|"'(\[])((?:[\w.@-]+\/)*[\w.@-]+\.(?:test|spec)\.[cm]?[jt]sx?)/;
+            const REASON_WINDOW = 12;
+            const MAX_FAILS = 12;
+
             const informative = failedJobs.filter((j) => (j.steps ?? []).some(
               (s) => s.conclusion === 'failure' && !/^Verify .* results$/.test(s.name)));
             const details = [];
+            let logsRefused = 0;
             for (const job of (informative.length ? informative : failedJobs).slice(0, 4)) {
               const steps = (job.steps ?? [])
                 .filter((s) => s.conclusion === 'failure')
                 .map((s) => s.name);
               let lines = [];
+              let keys = [];
               try {
                 const res = await github.request(
                   'GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs',
@@ -173,15 +255,63 @@ jobs:
                 const text = typeof res.data === 'string'
                   ? res.data
                   : Buffer.from(res.data).toString('utf8');
-                lines = text.split('\n')
-                  .map((l) => l.replace(/^[^ ]*Z /, ''))
-                  .filter((l) => FAIL_LINE.test(l))
-                  .map((l) => l.trim().slice(0, 200))
-                  .slice(0, 12);
+                const all = text.split('\n').map((l) => plain(l.replace(/^[^ ]*Z /, '')));
+                const hits = [];
+                // A line already printed as somebody's reason is not printed
+                // again as an excerpt line of its own. `AssertionError`
+                // qualifies under both patterns, so without this the assertion
+                // case reports every failure twice and spends half the budget
+                // saying the same thing.
+                const consumed = new Set();
+                for (let i = 0; i < all.length && hits.length < MAX_FAILS; i++) {
+                  if (consumed.has(i)) continue;
+                  if (!FAIL_LINE.test(all[i])) continue;
+                  // vitest prints the reason UNDER the `FAIL <file> > <test>`
+                  // header of its Failed-Tests block, never under the `× <test>`
+                  // line of the file list. So only a FAIL-shaped line is asked
+                  // for a reason, and only it can report one as missing --
+                  // "no reason found" printed under a line that never carries
+                  // one is noise that reads like a finding.
+                  const wantsReason = /(?:^|[\s|])FAIL\s/.test(all[i]);
+                  let reason = null;
+                  if (wantsReason) {
+                    // Look ahead from the FAIL line, and STOP at the next FAIL
+                    // line so one failure cannot borrow the next one's reason.
+                    const last = Math.min(i + REASON_WINDOW, all.length - 1);
+                    for (let j = i + 1; j <= last; j++) {
+                      // REASON first, deliberately: `AssertionError` qualifies
+                      // under BOTH patterns, and testing the FAIL pattern first
+                      // makes the assertion case break out on the very line it
+                      // was looking for -- a timeout would then be reported and
+                      // an assertion never would, which is the worse half of
+                      // the split this limb exists to end.
+                      if (REASON_LINE.test(all[j])) {
+                        reason = all[j].trim().slice(0, 200);
+                        consumed.add(j);
+                        break;
+                      }
+                      if (FAIL_LINE.test(all[j])) break;
+                    }
+                  }
+                  hits.push({ fail: all[i].trim().slice(0, 200), reason, wantsReason });
+                  const f = TEST_FILE.exec(all[i]);
+                  if (f) keys.push(f[1]);
+                }
+                lines = hits.flatMap((h) => {
+                  if (!h.wantsReason) return [h.fail];
+                  return [
+                    h.fail,
+                    h.reason
+                      ? `  ↳ 失败原因: ${h.reason}`
+                      : '  ↳ 失败原因: (这条 FAIL 之后 12 行内没有可识别的原因行 —— 点进 job 看)',
+                  ];
+                });
+                keys = [...new Set(keys)];
               } catch (e) {
+                logsRefused++;
                 core.info(`logs unavailable for job ${job.id}: ${e.message}`);
               }
-              details.push({ name: job.name, url: job.html_url, steps, lines });
+              details.push({ name: job.name, url: job.html_url, steps, lines, keys });
             }
 
             // History: this PR's earlier queue failures + queue-wide count, 24 h.
@@ -194,6 +324,191 @@ jobs:
               r.conclusion === 'failure' && (r.head_branch ?? '').includes(`/pr-${prNumber}-`)).length;
             const queueFailures24h = ciRuns.filter((r) => r.conclusion === 'failure').length;
 
+            // ── Limb ②: cross-PR signature aggregation ─────────────────────
+            //
+            // The ledger is this workflow's OWN comments. Every triage comment
+            // carries one machine-readable sighting marker per failing test
+            // file, and a later ejection reads 24 h of them back. That keeps the
+            // evidence where the header always said it lived, needs no state
+            // outside the repo, and cannot disagree with what a human reading
+            // the comments would conclude.
+            const SIGHTING = /<!-- queue-signature:([^|]+)\|pr=(\d+)\|run=(\d+) -->/g;
+            const runKeys = [...new Set(details.flatMap((d) => d.keys))];
+
+            /** key -> Map(prNumber -> Set(runId)) */
+            const sightings = new Map();
+            const note = (key, pr, runId) => {
+              if (!sightings.has(key)) sightings.set(key, new Map());
+              const byPr = sightings.get(key);
+              if (!byPr.has(pr)) byPr.set(pr, new Set());
+              byPr.get(pr).add(String(runId));
+            };
+            for (const k of runKeys) note(k, prNumber, run.id);
+
+            // A bounded read: newest-first inside the window, at most 5 pages.
+            // Reaching the cap is NOT "no other PR hit this key" — it is "I did
+            // not look at the whole window", and the two are reported
+            // differently on purpose. An enumerator that cannot say which of
+            // those it found is the no-op this limb would otherwise decay into.
+            const MAX_LEDGER_PAGES = 5;
+            let ledgerComplete = true;
+            let ledgerRefusal = null;
+            try {
+              let page = 1;
+              for (; page <= MAX_LEDGER_PAGES; page++) {
+                const res = await github.rest.issues.listCommentsForRepo({
+                  owner, repo, since, sort: 'created', direction: 'desc', per_page: 100, page,
+                });
+                for (const c of res.data) {
+                  for (const s of String(c.body ?? '').matchAll(SIGHTING)) {
+                    note(s[1], Number(s[2]), s[3]);
+                  }
+                }
+                if (res.data.length < 100) break;
+                if (page === MAX_LEDGER_PAGES) ledgerComplete = false;
+              }
+            } catch (error) {
+              ledgerComplete = false;
+              ledgerRefusal = describe(error);
+            }
+
+            // Only keys THIS ejection actually hit are aggregated: an ejection
+            // must not re-file anchors for signatures it had nothing to do with.
+            const aggregated = runKeys
+              .map((key) => ({ key, prs: sightings.get(key) ?? new Map() }))
+              .filter((a) => a.prs.size >= 2)
+              .sort((a, b) => b.prs.size - a.prs.size);
+
+            const ANCHOR_LABEL = 'finding';
+            const MAX_ANCHOR_PAGES = 3;
+            const anchorNotes = [];
+            for (const a of aggregated.slice(0, 3)) {
+              const anchorMarker = `<!-- queue-signature-anchor:${a.key} -->`;
+              // Stable across refreshes — the victim count lives in the body, so
+              // a growing count cannot make the anchor unfindable by title.
+              const title = `Queue-flake anchor: ${a.key}`;
+              const prRows = [...a.prs.entries()].sort((x, y) => x[0] - y[0]).map(([pr, runs]) =>
+                `| #${pr} | ${[...runs].map((r) => `[${r}](https://github.com/${owner}/${repo}/actions/runs/${r})`).join(' · ')} |`);
+              const body = [
+                `\`${a.key}\` has ejected **${a.prs.size} distinct pull requests** from the merge queue`,
+                'within a rolling 24 hours. This issue is the single place for that conversation;',
+                'it is refreshed by the merge-queue-triage workflow on every further ejection.',
+                '',
+                '| PR | queue build |',
+                '|---|---|',
+                ...prRows,
+                '',
+                '**This issue is a NAME, not a diagnosis.** The workflow that files it reads the',
+                'failing test file path out of the job logs and counts distinct PRs; it does not',
+                'know whether this is a flake, a load/timing cliff, a semantic conflict between',
+                'queued PRs, or a real regression, and it does not act on any of those. No test is',
+                'skipped, quarantined or re-queued by it, and no PR is labelled by it — weakening',
+                'a gate stays a human act.',
+                '',
+                'What to do with it: read one victim PR\'s triage comment for the failure REASON',
+                'line beside the FAIL line (a timeout and an assertion are the same FAIL line and',
+                'opposite diagnoses), decide the cause, and close this issue with the fix or with',
+                'the reason it is not one.',
+                '',
+                `Last refreshed by queue build [${run.id}](${run.html_url}) (PR #${prNumber}).`,
+                '',
+                '---',
+                '_Filed by the merge-queue-triage workflow (#4859, aggregation #10128)._',
+                '',
+                anchorMarker,
+              ].join('\n');
+
+              let existing = null;
+              let scanComplete = true;
+              let refusal = null;
+              try {
+                for (let p = 1; p <= MAX_ANCHOR_PAGES; p++) {
+                  const res = await github.rest.issues.listForRepo({
+                    owner, repo, state: 'open', labels: ANCHOR_LABEL,
+                    sort: 'created', direction: 'desc', per_page: 100, page: p,
+                  });
+                  // Identity is the body marker; the exact title is a second
+                  // way in, because a body is the one channel GitHub is known
+                  // to rewrite and an anchor that cannot be found is an anchor
+                  // that gets duplicated.
+                  existing = res.data.find((i) => !i.pull_request
+                    && (String(i.body ?? '').includes(anchorMarker) || i.title === title)) ?? null;
+                  if (existing || res.data.length < 100) break;
+                  if (p === MAX_ANCHOR_PAGES) scanComplete = false;
+                }
+              } catch (error) {
+                scanComplete = false;
+                refusal = describe(error);
+              }
+
+              if (existing) {
+                try {
+                  await github.rest.issues.update({
+                    owner, repo, issue_number: existing.number, body,
+                  });
+                  anchorNotes.push(`- \`${a.key}\` — 24h 内已弹出 **${a.prs.size} 个不同 PR**（${[...a.prs.keys()].sort((x, y) => x - y).map((p) => `#${p}`).join('、')}）。汇总 issue：#${existing.number}（已刷新）`);
+                } catch (error) {
+                  anchorNotes.push(`- \`${a.key}\` — 24h 内已弹出 **${a.prs.size} 个不同 PR**（${[...a.prs.keys()].sort((x, y) => x - y).map((p) => `#${p}`).join('、')}）。⚠️ 汇总 issue #${existing.number} 刷新失败（${describe(error)}），上面的名单就是全部事实。`);
+                  core.warning(`Could not refresh the anchor issue #${existing.number} for ${a.key} (${describe(error)}).`,
+                    { title: 'Queue-signature anchor not refreshed' });
+                }
+                continue;
+              }
+
+              if (!scanComplete) {
+                // Not found AND not fully looked for. Creating here would risk a
+                // second anchor for a key that already has one, which is exactly
+                // the duplication the marker exists to prevent — so this says so
+                // instead of guessing.
+                anchorNotes.push(`- \`${a.key}\` — 24h 内已弹出 **${a.prs.size} 个不同 PR**（${[...a.prs.keys()].sort((x, y) => x - y).map((p) => `#${p}`).join('、')}）。⚠️ 没能确认是否已有汇总 issue（${refusal ?? `open issue 列表超过 ${MAX_ANCHOR_PAGES} 页仍未匹配`}），本次不新建，避免开出重复的锚点。`);
+                core.warning(`Could not establish whether an anchor issue already exists for ${a.key}; not creating one.`,
+                  { title: 'Queue-signature anchor not created' });
+                continue;
+              }
+
+              try {
+                const created = await github.rest.issues.create({
+                  owner, repo, title, body, labels: [ANCHOR_LABEL],
+                });
+                anchorNotes.push(`- \`${a.key}\` — 24h 内已弹出 **${a.prs.size} 个不同 PR**（${[...a.prs.keys()].sort((x, y) => x - y).map((p) => `#${p}`).join('、')}）。汇总 issue：#${created.data.number}（新建）`);
+              } catch (error) {
+                anchorNotes.push(`- \`${a.key}\` — 24h 内已弹出 **${a.prs.size} 个不同 PR**（${[...a.prs.keys()].sort((x, y) => x - y).map((p) => `#${p}`).join('、')}）。⚠️ 汇总 issue 新建失败（${describe(error)}），上面的名单就是全部事实。`);
+                core.warning(`Could not file the anchor issue for ${a.key} (${describe(error)}).`,
+                  { title: 'Queue-signature anchor not created' });
+              }
+            }
+
+            // Keys this run saw that are NOT yet shared with another PR still get
+            // a line: "seen once" and "not looked at" must not read alike.
+            for (const key of runKeys) {
+              const prs = sightings.get(key) ?? new Map();
+              if (prs.size >= 2) continue;
+              anchorNotes.push(`- \`${key}\` — 24h 窗口内只有本 PR 撞到过，暂不汇总（再有一个不同 PR 撞到就会自动开汇总 issue）。`);
+            }
+
+            // The anti-no-op limb. An enumerator over a corpus it could not read
+            // prints exactly what an enumerator over a clean corpus prints, and
+            // both of them are green. These three say which one happened.
+            if (runKeys.length === 0) {
+              const why = logsRefused > 0
+                ? `${logsRefused} 个 job 的日志读不到`
+                : '日志里没有能解析出测试文件名的 FAIL 行';
+              anchorNotes.push(`- ⚠️ **本次没有可用的聚合签名**（${why}）—— 这不是「没有同签名的其他 PR」，是**这一轮没测到**。跨 PR 聚合本次不可用，请手工比对其他 PR 的同类评论。`);
+              core.warning(
+                `No signature key could be derived from this run's logs (${why}), so the cross-PR `
+                + 'aggregation did nothing this time. That is an absent measurement, not an absent signal.',
+                { title: 'Queue-signature aggregation had nothing to key on' },
+              );
+            }
+            if (!ledgerComplete) {
+              anchorNotes.push(`- ⚠️ 24h 评论账本**没读完**（${ledgerRefusal ?? `超过 ${MAX_LEDGER_PAGES} 页仍未读到窗口尽头`}），所以上面的「不同 PR 数」是**下界**，不是全量。`);
+              core.warning(
+                `The 24h sighting ledger was truncated (${ledgerRefusal ?? 'page cap reached'}); `
+                + 'distinct-PR counts in this comment are lower bounds.',
+                { title: 'Queue-signature ledger incomplete' },
+              );
+            }
+
             const jobSections = details.map((d) => {
               const head = `- **[${d.name}](${d.url})** — 失败步骤: ${d.steps.join('、') || '(无步骤级结论)'}`;
               return d.lines.length
@@ -205,6 +520,9 @@ jobs:
               ? `⚠️ **本 PR 过去 24h 已在队列失败 ${priorFailuresThisPr} 次（不含本次）。** 内容未变而反复失败 ⇒ 高度怀疑 flaky 测试或与同组 PR 的语义冲突，重排不解决。`
               : '本 PR 过去 24h 无队列失败记录（首次）。';
 
+            // The sighting markers this comment contributes to the 24 h ledger.
+            const sightingMarkers = runKeys.map((k) => `<!-- queue-signature:${k}|pr=${prNumber}|run=${run.id} -->`);
+
             const body = [
               '### ⛔ merge queue 构建失败 — 先分诊，再决定要不要重排',
               '',
@@ -215,16 +533,24 @@ jobs:
               '',
               jobSections || '- （没拿到 job 级信息，点上面的 run 链接看）',
               '',
+              '> `↳ 失败原因` 是判读的关键：**超时**（`Test timed out in …` / `Hook timed out in …`）多半是负载/时序，不是本 PR 的回归；',
+              '> **断言**（`AssertionError: …`）才指向真实的行为改变。两者的 `FAIL` 行长得一模一样，只有这一行能区分。',
+              '',
+              '**跨 PR 相同签名（24h，按失败测试文件聚合）：**',
+              '',
+              anchorNotes.join('\n') || '- （本次没有可聚合的失败测试文件）',
+              '',
               '**历史信号：**',
               `- ${flakeHint}`,
               `- 过去 24h 队列共有 ${queueFailures24h} 个失败构建（不含本次）。`,
               '',
               '**分诊清单：**',
               '1. 失败测试在本 PR 改动的包里 → 真回归，修 PR。',
-              '2. 失败测试与本 PR 无关 → 在其他 PR 的同类评论里搜同名测试；出现过 ⇒ flaky 实锤，开 issue 修/隔离那条测试。修好前重排只会再烧一轮全队列。',
+              '2. 失败测试与本 PR 无关 → 看上面的「跨 PR 相同签名」；已有汇总 issue ⇒ flaky/环境问题实锤，去那张 issue 上谈，修好前重排只会再烧一轮全队列。',
               '3. 两者都不是 → 可能与同组 PR 语义冲突；等前面的 PR 落地或失败出队后再重排一次即可，不要连续重排。',
               '',
               marker,
+              ...sightingMarkers,
               '---',
               '_Generated by [Claude Code](https://claude.ai/code) · merge-queue-triage workflow (#4859)_',
             ].join('\n');
@@ -256,6 +582,7 @@ jobs:
                   `- 这是**投递**失败，不是分诊失败。下面就是本次运行算出来的完整分诊内容 —— PR #${prNumber} 上没有它。`,
                   '- 可以直接复制到 PR 上；也可以在 API 恢复后 re-run 本 job，重复投递会被评论里的 marker 挡掉。',
                   '- 怎么分辨：5xx / 429 / 网络错误码是平台抖动，re-run 即可；4xx（422 正文超长、403 权限）是本仓自己的 bug，re-run 不会变绿，去修它。',
+                  '- ⚠️ 本次的签名 sighting 也随这条评论一起丢了：跨 PR 聚合账本读的就是这些评论，所以在补发之前，本次弹出对后续聚合是不可见的。',
                   '- 本 job 判红是有意的：这个 workflow 的结论不出现在任何 check 列表上，红的代价是零，而绿会让「信号丢了」跟「信号送到了」长得一模一样。',
                   '',
                   '---',

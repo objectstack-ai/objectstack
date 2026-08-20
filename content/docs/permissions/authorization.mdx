@@ -297,11 +297,17 @@ Every user-grant row (`sys_user_position`, `sys_user_permission_set`) carries
 optional **effective-dating columns** — `valid_from` / `valid_until` (half-open
 `[from, until)`, UTC; null = unbounded).
 
-ADR-0091 D1 declares four further nullable columns on both grant tables:
-`reason`, `delegated_from`, `last_certified_at`, `certified_by`. They are
-declared together and **enforced separately**, so they are listed here one by
-one rather than as one set of audit columns — what a value in any of them is
-worth depends on the column *and* on which grant table it sits on. Access
+ADR-0091 D1 declared four further nullable columns on both grant tables:
+`reason`, `delegated_from`, `last_certified_at`, `certified_by`. Three of the
+four are still declared on both; `delegated_from` now exists **only on
+`sys_user_position`** — it was retired from `sys_user_permission_set` under
+ADR-0049 enforce-or-remove (maintainer ruling 2026-08-18): the runtime
+delegation gate is structurally scoped to the position table, so on the
+permission-set table the column was writable provenance no runtime consumer
+ever read. The columns are declared together but **enforced separately**, so
+they are listed here one by one rather than as one set of audit columns —
+what a value in any of them is worth depends on the column *and* on which
+grant table it sits on. Access
 recertification is a compliance surface (SOX / ISO 27001 access review), where
 "the platform maintains this column" and "the platform stores what you write
 here" are very different statements:
@@ -309,7 +315,7 @@ here" are very different statements:
 | Column | On `sys_user_position` | On `sys_user_permission_set` |
 |---|---|---|
 | `reason` | **Enforced at runtime.** The D3 delegation gate rejects a delegation insert whose row carries no non-empty `reason` — the dual-audit half described below. | **Written by the platform, read by nothing.** The org-admin grant auto-derived from a membership grade stamps its own provenance here; no gate, resolver or lint reads the value back. |
-| `delegated_from` | **Enforced at runtime, and load-bearing.** Stamping it is what *makes* a write a delegation: the gate requires it to name the writer and refuses to re-delegate a row that itself arrived by delegation, and the explain engine attributes the position "via delegation from X, until Y". | **Authoring lint only — no runtime reader.** Both readers opposite are guarded on `sys_user_position` (the gate's delegation branch, and explain's delegation attribution alike). A seed row that sets it must still carry a `reason` (below), but at runtime the column is provenance you record, not provenance the platform checks or acts on. |
+| `delegated_from` | **Enforced at runtime, and load-bearing.** Stamping it is what *makes* a write a delegation: the gate requires it to name the writer and refuses to re-delegate a row that itself arrived by delegation, and the explain engine attributes the position "via delegation from X, until Y". | **Not declared — retired.** Removed under ADR-0049 enforce-or-remove (maintainer ruling 2026-08-18): both runtime readers opposite are guarded on `sys_user_position`, so here the column was provenance an author could record and nothing checked or acted on. A row written with the key today is refused as an undeclared field (`400 INVALID_FIELD`). If permission-set-granularity delegation is ever wanted, the column returns together with a runtime reader in the same change. |
 | `last_certified_at` / `certified_by` | **Inert** — the ADR-0091 D5 recertification *substrate*, storage and nothing more. | **Inert** — identically. |
 
 The D5 pair is worth spelling out, because it is the pair a compliance reader
@@ -331,12 +337,18 @@ unscoped `admin_full_access` grant no longer derives `platform_admin`.
 
 The explain engine reports an expired-but-present row as a dedicated
 contributor state ("held until 2026-08-01 — expired"), so "why did access
-disappear" is self-answering. Two authoring lint rules cover seed grants: one
+disappear" is self-answering. The state member is one shared "held but not
+resolving, because X" vocabulary: a closed enumeration of reasons (`expired`
+here; `deactivated` for the ADR-0049 `active` switch below), extended only
+deliberately — every lifecycle control that silently drops a held grant
+answers through the same member rather than growing its own shape. Two authoring lint rules cover seed grants: one
 mirrors D2 — a seed grant whose `valid_until` is already past (or unparseable)
 is dead on arrival (error) — and one mirrors the D3 dual audit: a delegation
-row (`delegated_from`) without `reason` is an error. The second runs on **both**
-grant tables, so on `sys_user_permission_set`, where no runtime gate reads
-`delegated_from`, it is the only enforcement that column has.
+row (`delegated_from`) without `reason` is an error. The first runs on **both**
+grant tables; the second runs on `sys_user_position` only, the one table that
+declares `delegated_from` — on `sys_user_permission_set` this lint used to be
+the retired column's only enforcement, which is precisely why the column is
+gone rather than still linted.
 
 **Delegation of duty (职务代理, ADR-0091 D3)** builds on this substrate and is
 enforced today. A position opts in with `delegatable: true`; a holder may then
@@ -378,6 +390,18 @@ place, by the same discipline: **resolution-time filtering, fail-closed**, in
 - Assignments are untouched. `sys_user_position` and
   `sys_user_permission_set` rows stay exactly as they were, and re-activating
   the catalogue row restores every grant it carried, at the next resolution.
+
+The explain engine reports a deactivated-but-held row with the same dedicated
+contributor state the expired case gets (`state: 'deactivated'`, "held —
+deactivated") — the shared vocabulary above. This matters more here than for
+an expiry: deactivation is an incident-response control, installation-wide,
+and there is no date on the user's own grant row to notice — without the
+state, the admin diagnosing "why did access disappear" would get the same
+answer as for a user who never held the grant, with no pointer to the
+catalogue row somebody switched off. Reported for the grant rows explain
+already walks: `sys_user_position` rows and direct `sys_user_permission_set`
+grants (a deactivated set reached only through an active position's linkage is
+not re-derived — that would replicate the resolver's aggregation).
 
 **Absent is ACTIVE.** Only a stored value that really reads false takes a grant
 away, so a row that predates the column keeps granting. The same predicate

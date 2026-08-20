@@ -71,6 +71,14 @@
 //     licenses that many new erasures, which is how a ratchet stops meaning
 //     anything.
 //
+// And it REFUSES to report at all (exit 2) when a file in either population
+// does not PARSE. ESLint's Node API returns a parse failure as a message
+// carrying no rule id, so it matches neither count above: before #10123 such a
+// file contributed zero sites and this gate printed `✓ … holds` and exited 0 —
+// a clean verdict on a file it had never read, while `pnpm lint` failed loudly
+// on the same input. scripts/eslint-fatal-guard.mjs carries the measurement and
+// why a fatal is the measurement failing rather than a finding.
+//
 //   node scripts/check-query-options-erasure-ratchet.mjs [--update] [--self-test]
 //
 // The counts are produced by running ESLint itself over the real config with
@@ -89,6 +97,7 @@ import eslintConfig, {
   QUERY_OPTIONS_TEST_GLOBS,
   QUERY_OPTIONS_ANY_MESSAGE,
 } from '../eslint.config.mjs';
+import { checkGuardAdoption, collectFatalMessages, lintFilesStrict } from './eslint-fatal-guard.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
@@ -119,7 +128,13 @@ async function measure(drop, targets = [LINT_TARGET]) {
     // purpose, so an eslint-disable comment must not shrink a count here either.
     allowInlineConfig: false,
   });
-  const results = await eslint.lintFiles(targets);
+  // Not `eslint.lintFiles`: a parse failure inside the population is the
+  // measurement failing, not a file with nothing to report, and it matches
+  // neither count below. The guard names the file and stops (#10123).
+  const results = await lintFilesStrict(eslint, targets, {
+    gate: 'check-query-options-erasure-ratchet',
+    repoRoot,
+  });
   const counts = {};
   for (const result of results) {
     const hits = result.messages.filter((m) => m.ruleId === QUERY_OPTIONS_RULE_ID).length;
@@ -358,6 +373,76 @@ async function selfTest() {
     assert(got === expected, `diffRatchet: ${name} — expected ${expected} error(s), got ${got}`);
   }
 
+  // ── 3. The fatal-parse guard, in both directions (#10123). ───────────────
+  //
+  // ESLint does not throw on a file that will not parse: it returns the failure
+  // as a message with no rule id, which matches neither count this gate keeps.
+  // Before the guard such a file contributed zero sites and the gate printed
+  // `✓ … holds`, so the harm is a QUIET GREEN — a case showing the guard silent
+  // on today's (parseable) corpus would prove nothing at all. Both directions
+  // are therefore driven through real ESLint output, and the fixture is a file
+  // that genuinely does not parse rather than a hand-built message object.
+  {
+    const [broken] = await eslint.lintText('export const x = (', {
+      filePath: 'packages/objectql/src/__selftest_unparseable__.ts',
+      warnIgnored: false,
+    });
+    assert(
+      (broken?.messages ?? []).some((m) => m.fatal),
+      'ESLint must report an unparseable file as a fatal message — the premise of the guard',
+    );
+    assert(
+      (broken?.messages ?? []).filter((m) => m.ruleId === QUERY_OPTIONS_RULE_ID).length === 0,
+      'and that message must match no counted rule, which is exactly why it needs its own check',
+    );
+
+    const fatals = collectFatalMessages([broken], repoRoot);
+    assert(fatals.length === 1, `the guard must collect the fatal (collected ${fatals.length})`);
+    assert(
+      fatals[0]?.file.endsWith('__selftest_unparseable__.ts') && /Parsing error/i.test(fatals[0]?.message ?? ''),
+      `the collected fatal must name the file and the parse error (got ${JSON.stringify(fatals[0])})`,
+    );
+
+    const [parses] = await eslint.lintText('export const x = 1;', {
+      filePath: 'packages/objectql/src/__selftest_parses__.ts',
+      warnIgnored: false,
+    });
+    assert(
+      collectFatalMessages([parses], repoRoot).length === 0,
+      'a file that parses must produce no fatal — the guard must not fire on a healthy tree',
+    );
+
+    // The call site the gates actually use: it must refuse to hand back results
+    // for a population it could not measure, and say which file broke.
+    let reported = null;
+    const refused = await lintFilesStrict({ lintFiles: async () => [broken] }, [LINT_TARGET], {
+      gate: 'self-test',
+      repoRoot,
+      onFatal: (report) => { reported = report; return 'refused'; },
+    });
+    assert(refused === 'refused', 'lintFilesStrict must not return results when a file did not parse');
+    assert(
+      (reported ?? '').includes('__selftest_unparseable__.ts') && /Parsing error/i.test(reported ?? ''),
+      `the failure text must name the file and the parse error (got: ${reported})`,
+    );
+
+    let fired = false;
+    const passed = await lintFilesStrict({ lintFiles: async () => [parses] }, [LINT_TARGET], {
+      gate: 'self-test',
+      repoRoot,
+      onFatal: () => { fired = true; },
+    });
+    assert(
+      !fired && Array.isArray(passed) && passed.length === 1,
+      'lintFilesStrict must pass the results through when every file parsed',
+    );
+
+    // A guard imported once is not a guard still called. This is also the only
+    // wired coverage of the OTHER gate's call site: `pnpm check:slot-lookup`
+    // has no --self-test hook, and CI runs this one before the gate itself.
+    for (const problem of checkGuardAdoption(repoRoot)) assert(false, problem);
+  }
+
   // A missing config block must ABORT, never report clean.
   assert(eslintConfig.some(carriesRule), 'the config must carry the query-options rule');
 
@@ -368,7 +453,8 @@ async function selfTest() {
   }
   console.log(
     `✓ self-test: ${reports.length} reporting shape(s), ${silent.length} silent counterpart(s), ` +
-    `grandfathering + test-glob channels proved in both directions, ${cases.length} ratchet case(s).`,
+    `grandfathering + test-glob channels proved in both directions, ${cases.length} ratchet case(s), ` +
+    `fatal-parse guard proved both ways over real ESLint output, both gates still routed through it.`,
   );
 }
 
@@ -450,8 +536,8 @@ if (errors.length > 0) {
 
 console.log(
   `✓ query-options-erasure ratchet holds: ${sum(nonTest)} unswept non-test site(s) in ` +
-  `${Object.keys(nonTest).length} file(s), none new. Every other non-test file under ` +
-  `packages/ is covered by \`pnpm lint\`.`,
+  `${Object.keys(nonTest).length} file(s), none new, and every file measured parsed. ` +
+  `Every other non-test file under packages/ is covered by \`pnpm lint\`.`,
 );
 console.log(
   `  test surface: ${testSites} site(s) in ${Object.keys(testOnly).length} file(s) — at the ` +

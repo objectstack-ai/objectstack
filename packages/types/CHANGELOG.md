@@ -1,5 +1,354 @@
 # @objectstack/types
 
+## 17.1.0
+
+### Minor Changes
+
+- 2f65b1b: `error.code` is a closed vocabulary at every door (#9106, maintainer ruling
+  2026-08-16): the runtime dispatcher's thrown-error exits
+  (`HttpDispatcher.errorFromThrown`, `dispatcher-plugin`'s `errorResponseBase`,
+  `endpoint-executor`'s `endpointErrorAnswer` — the actions door among them) now
+  serve the narrowed `code` the shared resolver (`resolveThrownHttpError`,
+  `@objectstack/types`) has always computed, exactly as the REST door has since
+  #8016. A thrown code that is not a member of `StandardErrorCode ∪
+  ERROR_CODE_LEDGER` no longer reaches `error.code`.
+  
+  It is not dropped: `ApiErrorSchema` declares a new optional `declaredCode`
+  field — the open, author-authored channel — and the demoted spelling rides
+  there. Presence means demotion: the field is absent whenever the producer's
+  code is a vocabulary member (it is already in `error.code`) or the producer
+  declared none. The #7867 sandbox passthrough capability is preserved — a
+  metadata app's own thrown `.code` still crosses the QuickJS boundary and still
+  reaches the wire.
+  
+  For a metadata app that throws its own code (e.g.
+  `Object.assign(new Error('pick another'), { code: 'DUPLICATE' })` in an action
+  body) and reads it back from an actions-door failure:
+  
+  - FROM: `error.code === 'DUPLICATE'`
+  - TO: `error.code` is the closed member the status derives (e.g.
+    `VALIDATION_ERROR` on a 400) and `error.declaredCode === 'DUPLICATE'`.
+    One-line fix: branch on `error.declaredCode` for app-specific spellings;
+    branch on `error.code` for platform conditions.
+  
+  Platform producers are unaffected: every registered code reaches `error.code`
+  verbatim, as before (post-#8846 the dispatcher-vocabulary gate holds that set
+  registered). Measured before landing (the ruling's binding precondition): no
+  existing consumer of the actions door branches on author-authored strings in
+  `error.code`.
+  
+  `@objectstack/types` adds `demotedDeclaredCode(thrown)` — the one definition of
+  "which spelling a boundary surfaces beside the closed `code`".
+- 79c46da: feat(contract): a hook refusal can mark its message user-facing — `userMessage`, the producer-side opt-in channel (#9934, producer half of objectui#5210)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Purely additive: one
+  new OPTIONAL field on the two error-envelope schemas, a new shared reader in
+  @objectstack/types, and passthrough plumbing at the boundaries. Nothing
+  authorable is renamed, retired, aliased or tombstoned, so there is no
+  conversion to register. Unmarked errors produce byte-identical wire bodies. -->
+  
+  The console form deliberately discards the server `message` on 403 and
+  substitutes a generic string — the recorded #3821 fix for platform diagnostics
+  leaking to end users. That substitution also suppressed every deliberate,
+  localized refusal an application hook author wrote (11 real hook guards in the
+  objectui#5210 report), and incentivized misusing 400 for permission refusals.
+  The maintainer-accepted ruling (2026-08-19, option 1): give the AUTHOR a
+  producer-side way to mark a refusal message user-facing, once, at the contract
+  level — status-agnostic, with #3821 preserved by construction for everything
+  unmarked.
+  
+  **The marking**: set `userMessage` (non-empty string) on the thrown error at
+  throw time. It is a text-carrying field, not a boolean beside `message` — the
+  mark and the marked text are one value, so no boundary that rewraps or
+  substitutes `message` can promote platform prose into the marked channel, and
+  platform/driver code never sets it.
+  
+  - `@objectstack/spec`: `ApiErrorSchema.userMessage` and
+    `EnhancedApiErrorSchema.userMessage` (optional, additive).
+  - `@objectstack/types`: `declaredUserMessage(error)` — the ONE "is this
+    marked?" read (non-empty string, nothing invented) — and
+    `ThrownHttpError.userMessage` on `resolveThrownHttpError`.
+  - `@objectstack/rest`: `mapDataError` / `resolveErrorResponse` ride a declared
+    marking onto whatever envelope classification chose (flat body top-level
+    `userMessage`, truncated at the same #5423 bound as the 4xx message).
+  - `@objectstack/runtime`: the QuickJS side-channel carries `userMessage`
+    across the sandbox boundary (both directions, joining `code`/`fields`/
+    `status`), and the dispatcher door emits it as a declared sibling in the
+    nested envelope.
+  - `@objectstack/client`: the SDK attaches `err.userMessage` from both wire
+    dialects, so a UI renders it verbatim when present and keeps its generic
+    substitution when absent.
+  
+  The consumer half — the console form rendering a marked message instead of the
+  generic `form.noPermissionToSave` — is objectui#5210.
+
+### Patch Changes
+
+- 2d0af57: fix(tests): give two default-vitest-timeout cases real margin instead of a bare default (#9311)
+  
+  Two cases only passed `pnpm test` when they were not competing for CPU — the
+  same defect class as the already-closed precedents #3662, #4186, #4485,
+  #5421, #6329: a test running under vitest's **default** `testTimeout` /
+  `hookTimeout` with no margin for anything heavier than an idle box.
+  
+  **`packages/types/src/node.test.ts`** — `"falls back to the importing
+  package's own resolution when the host does not declare"` is the only case
+  in the file that performs a real dynamic `import()` of `@objectstack/spec` (a
+  multi-megabyte package); every sibling in the same `describe` block resolves
+  a small on-disk fixture or fails fast, all under 10ms. Measured on this box:
+  ~0.9-1.1s unloaded, already observed failing at 5061ms against the 5000ms
+  default under nothing heavier than `turbo run test --concurrency=2` (#9311's
+  own isolation runs). Gave that one case an explicit 30s `testTimeout` — the
+  same order of magnitude the repo already uses for subprocess/real-load cases
+  (`#3662` precedent) — and left every sub-10ms sibling alone.
+  
+  **`packages/qa/dogfood/test/semantic-roles.dogfood.test.ts`** — its
+  `beforeAll` boots the full showcase stack (ObjectQL + ~45 plugins) through
+  `@objectstack/verify`'s `bootStack`, which does not fit vitest's 10s
+  `hookTimeout` default with any margin at all: observed failing at 10027ms
+  against the 10000ms budget, and this file's own isolated run measured 18.3s
+  (vitest `Duration`) / 19.5s wall clock for the whole file even with the box
+  otherwise idle. Gave the hook an explicit 180s timeout, matching this
+  package's own existing house pattern for the identical
+  `bootStack(showcaseStack, …)` call
+  (`admin-identity-audit-trail.dogfood.test.ts`'s `beforeAll(…, 180_000)`)
+  rather than inventing a new number for the same operation.
+  
+  **No behaviour change** — both suites already pass; this only gives the two
+  timeout-sensitive cases room to finish on a loaded box. The repo's full test
+  suite is confirmed green at low concurrency (#9311), so this is margin
+  repair, not a product fix. `turbo.json`'s default concurrency is out of scope
+  for this change (a maintainer-level default, per #9311's own filing).
+- 27a567d: fix(types): teach the internal-leak predicate MySQL's three error templates (#8739)
+  
+  `looksLikeInternalErrorLeak` decides whether a message is a driver dump that
+  must not reach an API client. It is applied at three HTTP boundaries
+  (`@objectstack/rest`'s `mapDataError`, `@objectstack/runtime`'s
+  dispatcher-plugin and endpoint-executor, the hono adapter) and by
+  `@objectstack/objectql`'s log redactor. Its dialect list covered the SQLite
+  family and Postgres; on a MySQL deployment it returned `false` for every one of
+  these conditions — **silent, not clearing**.
+  
+  Under the maintainer's 2026-08-15 ruling on #8739, **MySQL is a supported
+  deployment target**, not merely a tested dialect — the answer already implied by
+  what is published (`OS_DATABASE_DRIVER=mysql` as a documented deployment knob,
+  `MysqlConfig` as authorable datasource config, per-field MySQL DDL in
+  `types.mdx`) and by a required CI check that stands up a live `mysql:8.0`. A
+  supported target's driver text reaches those boundaries in production, so its
+  templates belong in the list.
+  
+  **Now recognised** — one per condition the other two dialects were already
+  covered for, each anchored on MySQL's own errmsg template rather than on a bare
+  substring:
+  
+  - `Table 'app.t' doesn't exist` (ER_NO_SUCH_TABLE 1146). MySQL's contracted
+    spelling quotes `db.table` as one identifier, so the Postgres
+    `relation "t" does not exist` limb could never reach it.
+  - `Unknown column 'c' in 'field list'` (ER_BAD_FIELD_ERROR 1054). Both quoted
+    parts are required; the second is MySQL's clause name (`field list`,
+    `where clause`, `order clause`, `on clause`), and it is what distinguishes the
+    driver's template from a sentence that merely calls a column unknown.
+  - `Duplicate entry 'x' for key 'i'` (ER_DUP_ENTRY 1062). The `for key` tail plus
+    a quoted index is the anchor. This is the one MySQL template whose text embeds
+    a **caller's value** rather than an identifier — SQLite's
+    `UNIQUE constraint failed: t.c` and Postgres' `violates unique constraint "…"`
+    both name only an index — which is why closing this gap was worth a behaviour
+    change rather than another comment.
+  
+  **Deliberately still NOT recognised**, so the boundary of the change is on the
+  record rather than inferred:
+  
+  - **MySQL's ACL family** — `Access denied for user 'u'@'h' to database 'd'`
+    (1044), `SELECT command denied to user … for table 't'` (1142) — the
+    counterpart of the Postgres `permission denied for table` limb. Nothing in
+    this repo has raised one off a live server, and the standing rule in this
+    neighbourhood (`unique-violation.ts`) is that a dialect's spelling is added
+    once it has been MEASURED off a thrown error, never from a reading of the
+    manual. `Access denied` also collides with this platform's own security prose
+    (`[Security] Access denied: …`), so a guessed pattern here would over-match —
+    and over-matching suppresses diagnostics an operator needs.
+  - **MSSQL and Oracle** — `Invalid object name 'sys_metadata'.`,
+    `ORA-00942: table or view does not exist` still return `false`.
+  - **Prose that shares the keywords without the driver's anchoring** — an import
+    summary saying `duplicate entry in the uploaded file`, a mapping message
+    saying `Unknown column in the uploaded CSV header`, `The table you selected
+    does not exist`. Pinned as negative cases, because a phrasing list that says
+    "leak" too often replaces real answers with `Internal server error`.
+  
+  **The `false`-means-UNCOVERED rule survives the change and keeps a live
+  subject.** A `false` here has never meant the text is safe, only that the
+  predicate never learned that dialect — the reading a reviewer on PR #8737 got
+  wrong while sizing a disclosure residual, which is what produced this card. The
+  four `toBe(false)` pins PR #8824 planted as a tripwire for this exact moment
+  went red as designed and are rewritten, not deleted: the same three measured
+  messages now assert `true`, so a future change that silently drops MySQL
+  coverage fails there, and a second block keeps the original `false`-means-
+  uncovered shape pointed at MSSQL and Oracle. `declaresServerFault` remains the
+  phrasing-independent answer.
+  
+  **No status mapping moves.** `@objectstack/rest` answers the 409 conflict
+  question with `isUniqueViolationError`, above and independently of this
+  predicate (#6250), so a MySQL duplicate-entry error is still `409
+  UNIQUE_VIOLATION` and a MySQL unknown-column error is still `400 INVALID_FIELD`
+  — both decided before the leak branch is reached. The log redactor is unchanged
+  too: a bare MySQL diagnostic carries no knex ` - ` separator, so there is no
+  statement to cut. Measured across the predicate's full consumer set — types,
+  objectql, rest, runtime, metadata-protocol, hono, service-package,
+  service-analytics — the only verdicts that moved are the two that measure this
+  predicate directly.
+  
+  No live MySQL deployment leaking through these boundaries was measured; this
+  closes a gap in what the boundary recognises, and the card is explicit that no
+  leak was demonstrated.
+- bbbfcfc: fix(types): `isUniqueViolationError` stops claiming the sentences that say a unique constraint is ABSENT (#8590)
+  
+  The shared predicate's message limb was a bare `unique constraint`, and a word
+  pair is not a condition. Every dialect that can say "this row violated a unique
+  constraint" can also say "there is no unique constraint here", and the same two
+  words sit adjacent in both — so the predicate answered **true** for errors
+  meaning the exact opposite of what it detects. `rest-server.ts` maps that
+  verdict to `409 UNIQUE_VIOLATION`, which tells a client to change a value when
+  nothing was ever compared, on a status an SDK will not retry.
+  
+  **Measured on live servers for this fix, all three supported dialect families**
+  — SQLite via better-sqlite3, PostgreSQL 16.13 via `pg` 8.22.0, MariaDB 10.11.14
+  via `mysql2` 3.23.1, all through knex 3.3.0 — driving each dialect through both
+  conditions plus the NOT NULL / FOREIGN KEY near misses:
+  
+  ```
+  sqlite   ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint
+             -> was true, WRONG (the reported defect, #8590)
+  postgres there is no unique constraint matching given keys for referenced table "t"
+             -> was true, WRONG (42830 — found by this fix's dialect sweep)
+  postgres there is no unique or exclusion constraint matching the ON CONFLICT specification
+             -> false (the pair is not adjacent here)
+  mysql    the condition cannot arise: knex compiles to ON DUPLICATE KEY UPDATE,
+           which carries no conflict target (confirmed against a live server)
+  ```
+  
+  **Postgres was not clean either, and that chose the fix.** #8590 was filed
+  reading the collision as SQLite-only, with Postgres escaping "by luck of word
+  order". The sweep raised **42830** — a `FOREIGN KEY` referencing a non-unique
+  column — where Postgres puts `unique constraint` adjacent in its own absence
+  sentence. The card offered two candidate fixes; only one survives 42830. A
+  negative lookahead on SQLite's missing-index sentence is a blocklist that can
+  only enumerate absence sentences somebody already tripped over, and it answers
+  `true` on 42830. So the limb now requires a **violation phrasing** —
+  `unique constraint failed` (SQLite) or `violates unique constraint` (Postgres) —
+  which restores the module's own stated default, *unrecognised is `false`*, to
+  the message channel.
+  
+  **Both spellings the retired limb covered are preserved exactly**, which was the
+  constraint on the fix: the limb was inherited verbatim from the REST branch
+  #6250 replaced and covered SQLite's `UNIQUE constraint failed: t.c` *and*
+  Postgres' `... violates unique constraint "..."`. The `unique violation`,
+  `duplicate key` and `duplicate entry` limbs are untouched, as are the `code` and
+  `errno` channels — MySQL's `Duplicate entry` path never went through the
+  narrowed limb at all.
+  
+  **No user-visible behaviour changes today; this closes a latent inversion.** The
+  one site compiling a caller-supplied conflict target (`SqlDriver.upsert`)
+  recognises the unbacked target *first* in its catch and throws a refusal
+  declaring `status: 400`, and `mapDataError` reads `declaredHttpStatus` before it
+  reaches the unique-violation branch — so the 409 was gated off the wire by
+  ordering, not by the verdict. That ordering was the only thing standing between
+  this and a wrong status, which is why the verdict is now pinned rather than left
+  to it. A repo-wide scan of every string literal whose verdict moves found no
+  consumer relying on the old answer: all of them are prose, a different
+  predicate's vocabulary (`looksLikeInternalErrorLeak` keeps its own list), or
+  fixtures asserted through the status-passthrough path.
+  
+  `unbacked-conflict-target.test.ts`'s pin — written by #8567 to point at itself
+  rather than go quietly green — is **inverted, not deleted**, and
+  `unique-violation-absence-sentences.test.ts` pins the absence sentences per
+  dialect in both directions, including the code channel, so re-reading `code`
+  cannot undo the message-side fix from the other side.
+- Updated dependencies [56656aa]
+- Updated dependencies [07e630e]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [420804d]
+- Updated dependencies [716ac9b]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [11b779e]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [e2899f6]
+- Updated dependencies [3851f87]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [30d3752]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [44bc51d]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+  - @objectstack/spec@17.1.0
+
 ## 17.0.0
 
 ### Minor Changes

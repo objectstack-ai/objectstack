@@ -18,6 +18,13 @@ import {
 } from './rule-validator.js';
 import { ValidationError } from './record-validator.js';
 
+// [#10126] Pay the first transform of these dist-resolved workspace deps at MODULE
+// LOAD. Each is reached below through a dynamic `import()` inside an `it()` body or a
+// hook -- both of which vitest clocks, while collection is clocked against nothing. See
+// `scripts/check-test-source-alias.mjs` (the clocked-window rule) and #10115 / PR #10120,
+// where the same shape cost 30 ejected merge-queue builds in one night.
+import '@objectstack/spec';
+
 // B2 — field-level conditional rules (CEL over `record`).
 const invoiceFields = {
   fields: {

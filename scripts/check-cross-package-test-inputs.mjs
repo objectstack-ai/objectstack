@@ -109,8 +109,9 @@
 //   node scripts/check-cross-package-test-inputs.mjs --list-escapes
 //   node scripts/check-cross-package-test-inputs.mjs --self-test
 
-import { readFileSync, readdirSync, statSync, existsSync, writeFileSync } from 'node:fs';
-import { join, resolve, relative, dirname, sep } from 'node:path';
+import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve, relative, dirname, sep, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
@@ -139,11 +140,11 @@ const CROSS_PACKAGE_TEST_INPUTS = {
       // scripts/dist-freshness.test.ts stages a fixture around the root scripts dir
       'scripts/**',
       // `serve.ts` is named in a comment rather than read, the same shape as
-      // `check-nul-bytes.mjs` / `sync-template-versions.mjs` / the realtime
-      // protocol page below, and settled the same way: the literal collector
-      // takes quoted paths without parsing, so a mention forces a declaration,
-      // and declaring the file is cheaper than rewording prose to dodge the
-      // scanner. scripts/publish-smoke-port-collision.test.ts cites it for the
+      // `check-nul-bytes.mjs` / the realtime protocol page below, and settled
+      // the same way: the literal collector takes quoted paths without parsing,
+      // so a mention forces a declaration, and declaring the file is cheaper
+      // than rewording prose to dodge the scanner.
+      // scripts/publish-smoke-port-collision.test.ts cites it for the
       // measurement that justifies its whole existence — `serve.ts` auto-shifts
       // off a busy port whenever `flags.dev` is set, which is the only reason
       // publish-smoke.sh cannot trust the port it asked for. One file, not the
@@ -295,7 +296,33 @@ const CROSS_PACKAGE_TEST_INPUTS = {
   '@objectstack/plugin-auth': {
     // src/managed-extension-fields.test.ts walks every `*.object.ts`, and pins
     // core's api-key source alongside it.
-    globs: ['packages/**/*.object.ts', 'packages/core/src/security/**'],
+    globs: [
+      'packages/**/*.object.ts',
+      'packages/core/src/security/**',
+      // src/rate-limit-storage-isolation.test.ts (#6040) walks BOTH consumer
+      // packages of the `./rate-limit-storage` subpath by directory, checking
+      // that neither reaches the counter through the package ROOT — which would
+      // silently reinstate the whole better-auth load for them. The diff that
+      // breaks that invariant is a diff in one of these two directories, so
+      // without them declared the affected-subset filter never adds plugin-auth
+      // and turbo replays a cached green over the scan (#10029, the #7802
+      // shape). Measured: before this entry, `@objectstack/plugin-auth#test`
+      // hashed to `1bf3935543ab055b` both before and after a change under
+      // `packages/runtime/src`, and the re-run was `>>> FULL TURBO` in 135ms
+      // while the invariant was live-broken in the tree.
+      'packages/runtime/src/**',
+      'packages/services/service-sms/src/**',
+      // The three below are NAMED in that test's prose rather than read by it —
+      // the same shape as `serve.ts` on the @objectstack/spec entry above and
+      // `realtime-protocol.mdx` on @objectstack/dogfood, and settled the same
+      // way: the literal collector takes quoted paths without parsing, so a
+      // mention forces a declaration, and declaring the file is cheaper than
+      // rewording prose to dodge the scanner. All three are low-churn, so the
+      // added cache invalidation is nominal next to the two directories above.
+      'scripts/check-published-files.mjs',
+      'scripts/check-cross-package-test-inputs.mjs',
+      'packages/types/src/node-isolation.test.ts',
+    ],
   },
   '@objectstack/plugin-security': {
     // src/audience-anchor-set-claims.pin.test.ts pins against spec's
@@ -1010,6 +1037,34 @@ function expectedInputs(globs) {
 }
 
 /**
+ * `turbo ls --output=json` emits `packages.count` beside `packages.items`, and
+ * keeps the two equal -- measured on turbo 2.10.10, all of the bare, `--filter`
+ * and `--affected` forms agree. So `count` is TURBO's field, not this script's
+ * invention, and a document we have appended to is a valid `turbo ls` payload
+ * only while the count moves with the array.
+ *
+ * Nothing reads `count` today, which is exactly what makes it cheap to keep
+ * true and expensive to leave stale: the consumer is partition-test-shards.mjs,
+ * whose stated posture is to assert this payload's shape LOUDLY so an
+ * experimental-command upgrade becomes a red step naming the cause rather than
+ * a silently empty shard. A hand-mutated document that contradicts itself about
+ * its own size is the input to that assertion. The reader now checks the
+ * agreement (`readPackageItems()` there), so this is a checked invariant across
+ * the two scripts rather than a convention someone has to remember.
+ *
+ * Reconciling inside the SERIALIZER rather than as a statement beside the write
+ * is the point: `unionInto()` has exactly one `writeFileSync`, and it has no
+ * other source of bytes, so "appended to `items` but forgot to move `count`" is
+ * not a state this script can reach. A separate `reconcile(); write();` pair
+ * would have re-created the original defect the first time someone added a
+ * second write path.
+ */
+function serializePackageList(parsed) {
+  parsed.packages.count = parsed.packages.items.length;
+  return JSON.stringify(parsed);
+}
+
+/**
  * Layer A. Adds any declaring package whose globs the diff touches to the
  * package list ci.yml is about to shard, so the scan runs on the PR that
  * actually changed its inputs.
@@ -1042,10 +1097,22 @@ function unionInto(listPath, changedPath) {
     if (!hit) continue;
     const dir = escapingDirs.get(name);
     if (!dir) continue;
-    items.push({ name, path: join(REPO_ROOT, dir) });
+    // Repo-relative, because that is the convention `turbo ls` emits for every
+    // entry it wrote (measured on turbo 2.10.10: 0 of 77 items absolute). An
+    // absolute path here is not wrong for today's only consumer, but it makes a
+    // single document carry two conventions, and the obvious way to read such a
+    // document -- `join(REPO_ROOT, it.path)`, correct for every entry turbo
+    // wrote -- produces a garbage path for exactly these appended entries, which
+    // are the cross-package scans this function exists to keep running. One
+    // document, one convention; the consumer resolves it explicitly
+    // (partition-test-shards.mjs `packageDir()`).
+    items.push({ name, path: dir });
     added.push(`${name}  (declared glob matched ${hit})`);
   }
-  writeFileSync(listPath, JSON.stringify(parsed));
+  // The push above changed the list's size, so the size the document DECLARES
+  // moves with it -- serializePackageList() is the only way this function turns
+  // `parsed` into bytes, precisely so that cannot be skipped.
+  writeFileSync(listPath, serializePackageList(parsed));
   if (added.length) {
     console.log('Cross-package scans pulled into this run because the diff touched their declared inputs:');
     for (const a of added) console.log(`  + ${a}`);
@@ -1370,6 +1437,44 @@ function selfTest() {
   ok('but it DOES cover that directory as a listing', coversDirectory('packages/lint/src', ['packages/lint/src/**']));
   ok('a single-file glob does not cover the directory it sits in', !coversDirectory('scripts', ['scripts/check-nul-bytes.mjs']));
   ok('a directory that does not exist is covered by nothing', !coversDirectory('scripts/no-such-dir-9763', ['**']));
+
+  // `--union-into`'s output document. `packages.count` is turbo's field and the
+  // append changes the size it describes, so the two are one operation -- these
+  // pin the half of the cross-script invariant this side owns (the reader's
+  // half is partition-test-shards.mjs `--self-test`).
+  // These run the real serializer -- the one and only source of the bytes
+  // `unionInto()` writes -- and assert on the parsed-back document, so they pin
+  // what lands on disk rather than an intermediate object.
+  const written = (packages) => JSON.parse(serializePackageList({ packageManager: 'pnpm9', packages })).packages;
+  ok('count follows an appended item', written({ count: 0, items: [{ name: 'a', path: 'p' }, { name: 'b', path: 'q' }] }).count === 2);
+  ok('a correct count is left correct', written({ count: 1, items: [{ name: 'a', path: 'p' }] }).count === 1);
+  ok('count follows an empty list down', written({ count: 7, items: [] }).count === 0);
+  ok('the write never invents items', written({ count: 0, items: [] }).items.length === 0);
+  ok('the write leaves turbo\'s other fields alone', JSON.parse(serializePackageList({ packageManager: 'pnpm9', packages: { count: 0, items: [] } })).packageManager === 'pnpm9');
+
+  // The path convention this function appends in. `turbo ls` writes every entry
+  // of this document repo-relative; an entry appended in the other convention
+  // is not wrong for today's consumer but it makes one array carry two rules,
+  // and the obvious way to read it -- `join(REPO_ROOT, it.path)` -- then breaks
+  // on exactly the appended entries. End-to-end through the real `unionInto()`
+  // and the real serializer, on the fixture that first measured the divergence:
+  // a diff touching `scripts/**` pulls @objectstack/spec in by its declaration.
+  const unionDir = mkdtempSync(join(tmpdir(), 'os-union-into-'));
+  const unionList = join(unionDir, 'turbo-ls.json');
+  const unionChanged = join(unionDir, 'changed-files.txt');
+  writeFileSync(unionList, JSON.stringify({ packageManager: 'pnpm9', packages: { count: 0, items: [] } }));
+  writeFileSync(unionChanged, 'scripts/sync-template-versions.mjs\n');
+  unionInto(unionList, unionChanged);
+  const unioned = JSON.parse(readFileSync(unionList, 'utf8')).packages.items;
+  ok('the union appends the package its declaration matched', unioned.length > 0);
+  ok(
+    'every appended path is repo-relative, the convention `turbo ls` emits',
+    unioned.length > 0 && unioned.every((i) => !isAbsolute(i.path)),
+  );
+  ok(
+    'and each one still names a real directory once resolved against the repo root',
+    unioned.length > 0 && unioned.every((i) => existsSync(resolve(REPO_ROOT, i.path))),
+  );
 
   const failed = cases.filter((c) => !c.cond);
   for (const c of cases) console.log(`${c.cond ? 'ok  ' : 'FAIL'} ${c.label}`);

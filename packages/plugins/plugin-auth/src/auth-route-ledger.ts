@@ -179,6 +179,14 @@ export const AUTH_ROUTE_LEDGER: readonly AuthRouteLedgerEntry[] = [
   { route: 'GET /api/v1/auth/bootstrap-status', family: 'objectstack-mount', source: 'objectstack', disposition: 'sdk', client: 'auth.bootstrapStatus' },
   { route: 'GET /api/v1/auth/config', family: 'objectstack-mount', source: 'objectstack', disposition: 'sdk', client: 'auth.getConfig' },
   { route: 'POST /api/v1/auth/organization/accept-invitation', family: 'organization', source: 'better-auth', disposition: 'sdk', client: 'organizations.invitations.accept', requires: 'organization' },
+  // #9941 — better-auth declares `addMember` with NO HTTP path (server-only
+  // `auth.api.addMember`; measured on the installed 1.7.1), so the catch-all
+  // never publishes it and it is correctly ABSENT from
+  // BETTER_AUTH_MOUNTED_SURFACE. auth-plugin.ts mounts this wrapper itself,
+  // ahead of the catch-all, behind the ADR-0068 platform-admin gate — it
+  // restores the URL the `sys_member` `add_member` toolbar action has always
+  // targeted (on multi-org the only UI path to attach an existing user).
+  { route: 'POST /api/v1/auth/organization/add-member', family: 'organization', source: 'objectstack', disposition: 'server-only', requires: 'organization', note: 'no SDK method builds this URL — the sys_member add_member action posts it directly; ObjectStack mount wrapping the vendor server-only auth.api.addMember, platform-admin gated (ADR-0068), #9941' },
   { route: 'POST /api/v1/auth/organization/add-team-member', family: 'organization', source: 'better-auth', disposition: 'sdk', client: 'organizations.teams.addMember', requires: 'organization' },
   { route: 'POST /api/v1/auth/organization/cancel-invitation', family: 'organization', source: 'better-auth', disposition: 'sdk', client: 'organizations.invitations.cancel', requires: 'organization' },
   { route: 'POST /api/v1/auth/organization/create', family: 'organization', source: 'better-auth', disposition: 'sdk', client: 'organizations.create', requires: 'organization' },

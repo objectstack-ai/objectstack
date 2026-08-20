@@ -100,8 +100,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, resolve } from 'node:path';
 import { getAuthTables } from 'better-auth/db';
 import { jwt } from 'better-auth/plugins';
 import { admin } from 'better-auth/plugins/admin';
@@ -174,8 +173,8 @@ interface UnmappedManagedObject {
  * coverage at all, so the reason has to say why that is the right answer for
  * this table rather than an oversight. `managedBy` alone does not mean
  * better-auth's core `getAuthTables()` surface owns the columns — a plugin may
- * be opt-in, ship in its own package, or (for sso/scim) expose no `schema`
- * option this call can read.
+ * be opt-in, ship in its own package, or (for sso/scim) be passed no `schema`
+ * option by the auth manager, leaving this call no mapping to key off.
  */
 const UNMAPPED_MANAGED_OBJECTS: Record<string, UnmappedManagedObject> = {
   sys_api_key: {
@@ -211,21 +210,32 @@ const UNMAPPED_MANAGED_OBJECTS: Record<string, UnmappedManagedObject> = {
   // ── Plugins getAuthTables() cannot ADDRESS as an ObjectStack object (#3653) ─
   // Both plugins are now in the call (#7820), so their models do appear in the
   // derived tables — under better-auth's own names (`ssoProvider`,
-  // `scimProvider`, …). What they accept no `schema` option for is the mapping:
-  // there is no way to tell getAuthTables() that `ssoProvider` materializes as
-  // `sys_sso_provider`, so MODEL_TO_OBJECT cannot key off anything the library
-  // reports and the derivation has nothing to compare against the object.
+  // `scimProvider`, …). The MAPPING is what this call cannot reach: the auth
+  // manager passes neither plugin a `schema` option, so nothing tells
+  // getAuthTables() that `ssoProvider` materializes as `sys_sso_provider`,
+  // MODEL_TO_OBJECT cannot key off anything the library reports, and the
+  // derivation has nothing to compare against the object.
+  //
+  // Note the reason above is about what the auth manager PASSES, not about what
+  // the plugins ACCEPT — the two were conflated here until #8224. Measured
+  // 2026-08-19: `@better-auth/sso@1.7.1` does accept a `schema` option
+  // (`SSOOptions.schema.ssoProvider`), so passing one is a live option rather
+  // than something the dependency forbids; `@better-auth/scim@1.7.0-rc.1` still
+  // accepts none.
   sys_sso_provider: {
     reason:
-      '@better-auth/sso accepts no `schema` option, so getAuthTables() reports its models only under '
-      + "better-auth's own names and they cannot be mapped onto this object (#3653). Its columns are "
+      'The auth manager passes @better-auth/sso no `schema` option, so getAuthTables() reports its '
+      + "models only under better-auth's own names and they cannot be mapped onto this object (#3653). "
+      + '(The plugin DOES accept one as of 1.7.1 — measured 2026-08-19, #8224; it is simply not passed.) '
+      + 'Its columns are '
       + 'bridged mechanically by objectql-adapter.ts and gated by the dedicated sso/scim block in '
       + 'better-auth-schema-parity.test.ts.',
   },
   sys_scim_provider: {
     reason:
-      '@better-auth/scim accepts no `schema` option, so getAuthTables() reports its models only under '
-      + "better-auth's own names and they cannot be mapped onto this object (#3653). Same bridge and "
+      '@better-auth/scim accepts no `schema` option at all (measured 2026-08-19 against the installed '
+      + '1.7.0-rc.1, and the auth manager passes none either), so getAuthTables() reports its models '
+      + "only under better-auth's own names and they cannot be mapped onto this object (#3653). Same bridge and "
       + 'same dedicated gate as sys_sso_provider.',
   },
 
@@ -278,7 +288,36 @@ const COVERED_OBJECTS: readonly string[] = [
   'sys_device_code',
 ];
 
-const HERE = dirname(fileURLToPath(import.meta.url));
+/**
+ * Seeded from `__dirname`, not from `dirname(fileURLToPath(import.meta.url))`,
+ * and both halves of that choice are load-bearing — the same pair
+ * `platform-objects/src/managed-api-method-affordance-sweep.test.ts` states for
+ * the sibling repo-wide walk:
+ *
+ *  - `import.meta` is a TS1470 here. This package is CJS-typed (no
+ *    `"type": "module"`, it publishes `dist/index.js` as CommonJS), so under
+ *    `module: NodeNext` the meta-property is an error however well it runs
+ *    under vitest — and this package's test layer IS in front of tsc, through
+ *    the `@objectstack/plugin-auth` TEST_DEBT entry
+ *    in `check-type-check-coverage.mjs` under `scripts/`, a ledger that may
+ *    only shrink.
+ *    `__dirname` type-checks under the package's own config and is defined at
+ *    runtime by vitest's transform (verified, not assumed).
+ *  - `check:cross-package-test-inputs` recognises exactly two seeds —
+ *    `dirname(fileURLToPath(import.meta.url))` and `__dirname` — when it
+ *    detects statically that a test escapes its package. This file's walk of
+ *    `PACKAGES_DIR` below is the ONLY escaping read the gate can see in
+ *    plugin-auth, so it is what holds the package's declared radius
+ *    (`packages/**\/*.object.ts`) and the matching `turbo.json` inputs.
+ *    Deriving the root any other way — the `findUp` walk from `process.cwd()`
+ *    that `rate-limit-storage-isolation.test.ts` and
+ *    `member-role-canonical.test.ts` use — makes this radius INVISIBLE to that
+ *    gate, which then reports the declaration as stale and asks for its
+ *    removal. Losing it would put this sweep back in #7802's blind spot:
+ *    turbo would replay a cached green for a diff that changed another
+ *    package's object file. Measured both ways.
+ */
+const HERE = __dirname;
 /** …/packages/plugins/plugin-auth/src → repo root */
 const REPO_ROOT = resolve(HERE, '../../../..');
 const PACKAGES_DIR = join(REPO_ROOT, 'packages');
@@ -413,6 +452,18 @@ const AUTH_MANAGER_PLUGINS: Record<string, { construct: () => unknown } | { skip
   // entry's licence the moment that import goes away.
   hasPermission: {
     skip: 'permission predicate exported by the organization plugin — declares no schema',
+  },
+  // [#10069] NOT a plugin factory either — same scanner shape as
+  // `hasPermission` above. `defaultRoles` is the admin plugin's exported
+  // role→AccessControl map (`better-auth/plugins/admin/access`); it declares no
+  // schema, contributes no model and no column, so there is nothing here for
+  // the collision loop to compare. `assertAdminRevokeUserSessionIdentifiesRecord`
+  // reads it so the admin-revoke-user-session gate asks the vendor's own
+  // permission question (its `hasPermission` fallback roles) rather than keeping
+  // a second spelling of it. The `stale` assertion below removes this entry's
+  // licence the moment that import goes away.
+  defaultRoles: {
+    skip: 'role→AccessControl map exported by the admin plugin — declares no schema',
   },
 };
 

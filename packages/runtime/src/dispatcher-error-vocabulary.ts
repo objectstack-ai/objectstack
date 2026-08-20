@@ -134,8 +134,11 @@ export type CodeDoor = 'dispatcher' | 'rest' | 'plugin-route' | 'none';
 
 export type CodeVerdict =
     /**
-     * Reaches a wire `error.code` verbatim and the ledger does not know it.
-     * The body cannot parse. ⇒ #8846's registration input.
+     * Reaches a wire and the ledger does not know it. Since #9106 the door
+     * narrows — the unregistered spelling rides the wire's `declaredCode`
+     * instead of `error.code`, so the body now parses; the producer's
+     * semantic code is silently demoted off `error.code` until registered.
+     * ⇒ #8846's registration input.
      */
     | 'pending-registration'
     /**
@@ -378,8 +381,17 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
         verdict: 'pending-registration',
         why:
             'The ADR-0090 D7 / ADR-0086 D1 refusal: an environment overlay may only TIGHTEN a packaged ' +
-            "object's OWD. It reaches the wire verbatim — `packages/rest/src/meta-object-owd-gate.test.ts` " +
-            'drives `PUT /api/v1/meta/object/:name` and reads a 403 body whose `code` is this string. ' +
+            "object's OWD. The token reaches the wire verbatim but NOT in `code` — it rides the wire in " +
+            'TWO fields since #9232 narrowed the flat REST door like every other: the 403 body carries the ' +
+            'closed member the status derives in `code` (`PERMISSION_DENIED`) and this string, unchanged, ' +
+            'in the open `declaredCode` sibling beside it. `packages/rest/src/meta-object-owd-gate.test.ts` ' +
+            'drives `PUT /api/v1/meta/object/:name` and asserts BOTH fields on the refusal body. So the ' +
+            'body PARSES (`ApiErrorSchema.declaredCode` is an open `z.string()`), and a consumer keying on ' +
+            '`code` alone reads a generic `PERMISSION_DENIED` and cannot tell this refusal from any other ' +
+            '403. ⚠️ That demote is not an escape from this table — it is the shape this file\'s header ' +
+            'already names: the body parses, and what an unswept producer loses instead is its semantic ' +
+            'code, silently demoted off `error.code` until registered. Which is exactly what a ' +
+            '`pending-registration` row records, and registering the code is still what ratchets it out. ' +
             '[#9460] Invisible to BOTH vocabulary gates until now, and not for its casing: the file throws ' +
             'through a code-carrying helper (`postureError(code, message)`), so the stamp `(err as any).code ' +
             '= code` knows the token `code` but not the value, while the call site knows the value and never ' +

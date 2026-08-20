@@ -15,9 +15,9 @@ import type {
  * `sys_attachment` rows are written through the generic data path, and the
  * default member permission sets grant wildcard CRUD with no row scoping —
  * without these hooks any member can attach files to records they cannot
- * see and delete any other user's attachments. Salesforce semantics
- * (ContentDocumentLink): an attachment's access is derived from its PARENT
- * record.
+ * see and rewrite or delete any other user's attachments. Salesforce
+ * semantics (ContentDocumentLink): an attachment's access is derived from
+ * its PARENT record.
  *
  *  - beforeInsert: the caller must be able to READ the parent record —
  *    verified with a caller-scoped findOne so RLS/OWD/sharing apply.
@@ -25,6 +25,20 @@ import type {
  *    on the parent; v1 enforces read visibility — strictly better than
  *    nothing, edit-parity is a tracked follow-up.) `uploaded_by` is
  *    server-stamped from the session — a client-supplied value never wins.
+ *  - beforeUpdate (#10091): the caller must be the uploader OR hold edit on
+ *    the parent record — the delete rule, applied to the verb that could
+ *    otherwise rewrite the other two gates away: an ungated update let any
+ *    member re-point `parent_id` at a record they cannot see, or rewrite
+ *    `uploaded_by` and walk through the delete gate's uploader shortcut.
+ *    Fail-closed 403, standard catalog code `RECORD_NOT_ACCESSIBLE` (see
+ *    {@link UPDATE_DENY_CODE}). A re-point of `parent_object`/`parent_id`
+ *    must additionally satisfy the attach rule on the NEW parent (403
+ *    `ATTACHMENT_PARENT_ACCESS`), and an unscoped multi-update is refused
+ *    outright — mirroring the delete verb below, through the same
+ *    `dispatchUnscopedMultiWrite` declaration (#9974 made it valid on both
+ *    write verbs). This is the rule the derived sys_comment kit
+ *    (`comment-access-hooks.ts`) has carried on update since #4630; the
+ *    source kit was missing the limb its derivative copied.
  *  - beforeDelete: the caller must be the uploader OR hold edit on the
  *    parent record (sharing service's `canEdit`; public-model parents are
  *    editable by design). Fail-closed 403 `ATTACHMENT_DELETE_DENIED`; a
@@ -32,13 +46,13 @@ import type {
  *    NEITHER an id NOR a `where` is refused outright (#4757) — the engine
  *    would hand `deleteMany` an AST over the whole table, and a gate that
  *    resolved no rows for it would be authorizing exactly that. The refusal
- *    reaches this handler through the `dispatchUnscopedMultiDelete`
+ *    reaches this handler through the `dispatchUnscopedMultiWrite`
  *    whole-operation dispatch its registration declares (#9719) — the
  *    per-row dispatch alone can never deliver the shape it refuses.
  *
  * System-context operations (engine self-writes, seeds, lifecycle sweeps)
- * bypass both gates, as do context-less programmatic calls on bare kernels
- * (no principal to authorize — REST always carries a context).
+ * bypass all three gates, as do context-less programmatic calls on bare
+ * kernels (no principal to authorize — REST always carries a context).
  *
  * These run alongside plugin-audit's `enforceFilesCapability` (the
  * enable.files opt-in gate); both are fail-closed 403s, so their relative
@@ -52,9 +66,25 @@ export interface AttachmentSharingLike {
 
 const PACKAGE_ID = 'com.objectstack.service.storage';
 const SYSTEM_CTX = { isSystem: true } as const;
-/** Bound on join rows authorized per multi-delete; mirrors the lifecycle
- * hooks' resolve bound. Larger multi-deletes fail closed. */
-const MULTI_DELETE_AUTH_LIMIT = 1_000;
+/** Bound on join rows authorized per multi-update/-delete; mirrors the
+ * lifecycle hooks' resolve bound. Larger multi-writes fail closed. */
+const MULTI_WRITE_AUTH_LIMIT = 1_000;
+
+/**
+ * The wire code the UPDATE gate emits. Deliberately the STANDARD catalog
+ * member (`StandardErrorCode`, "Sharing rule restriction") rather than an
+ * `ATTACHMENT_UPDATE_DENIED` sibling of the insert/delete codes: ADR-0112
+ * says a generic permission condition takes the catalog, and since #8211 the
+ * error-code ledger's admission gate mechanically REFUSES a new extension
+ * code that shadows a standard member. `ATTACHMENT_PARENT_ACCESS` /
+ * `ATTACHMENT_DELETE_DENIED` predate that rule (grandfathered, wire values
+ * unchanged — consolidating either is a deliberate wire change with its own
+ * card per the #8211 adjudication), so the delete gate keeps its code and
+ * the new verb takes the vocabulary the rule asks for — exactly what the
+ * derived comment kit did (`DENY_CODE` in `comment-access-hooks.ts`). REST
+ * already maps this code 403 + object-preserving (`error-response.ts`).
+ */
+const UPDATE_DENY_CODE = 'RECORD_NOT_ACCESSIBLE';
 
 function forbid(code: string, message: string, object?: string): never {
   const err: any = new Error(message);
@@ -152,6 +182,117 @@ export function installAttachmentAccessHooks(
   getSharing: () => AttachmentSharingLike | null | undefined,
   logger: AttachmentLifecycleLogger,
 ): void {
+  /** Resolve every sys_attachment row a write matches, under SYSTEM context
+   * — the caller may legitimately be unable to READ rows they are allowed to
+   * touch (and the read-visibility middleware below must not narrow the
+   * authorization input). Fails closed on an unscoped multi-write and on an
+   * over-large match set. One resolver for BOTH write verbs — the shape of
+   * `resolveTargetRows` in the derived sys_comment kit — so the two gates
+   * cannot drift apart on what "the matched rows" means. */
+  const resolveTargetRows = async (
+    ctx: any,
+    verb: 'update' | 'delete',
+    denyCode: string,
+  ): Promise<Array<Record<string, unknown>>> => {
+    const ids = asIdList(ctx?.input?.id);
+    if (ids) {
+      const rows: Array<Record<string, unknown>> = [];
+      for (const id of ids) {
+        const row = await engine.findOne('sys_attachment', { where: { id }, context: { ...SYSTEM_CTX } });
+        if (row) rows.push(row);
+      }
+      return rows;
+    }
+    const where = ctx?.input?.options?.where;
+    if (where === undefined || where === null) {
+      // #4757 — no id AND no predicate: the engine hands the driver an AST of
+      // `{ object }`, i.e. the WHOLE table. Falling through here would
+      // authorize that by resolving zero rows, so refuse instead. "Nothing to
+      // authorize" and "nothing was ever queried" are not the same verdict;
+      // reading the second as the first is fail-open. (Mirrors #4630's
+      // `resolveTargetRows` for sys_comment.)
+      //
+      // [#9719/#9974] Reached through the wired engine ONLY via the
+      // `dispatchUnscopedMultiWrite` whole-operation dispatch BOTH write
+      // registrations below declare: the per-row contract (#5038/#5574)
+      // binds `input.id` on every predicate dispatch — which routes into the
+      // by-id branch above — and a zero-match predicate dispatches nothing
+      // at all, so without that declaration this refusal cannot fire,
+      // whatever this file says. #9719 built the dispatch for `beforeDelete`
+      // only; #9974 (option A, 2026-08-19) ruled it onto `beforeUpdate`, on
+      // the recoverability asymmetry: an overwrite leaves no trace and no
+      // pre-image, so the verb with the less recoverable failure must not be
+      // the less guarded one.
+      //
+      // ⛔ If this branch ever stops firing on a verb, the fix is the
+      // DISPATCH, not this policy — do not widen the branch to compensate.
+      forbid(
+        denyCode,
+        `Refusing an unscoped multi-${verb} of attachments — scope the ${verb} to the rows you mean (an id or a where predicate)`,
+      );
+    }
+    const rows = await engine.find('sys_attachment', {
+      where,
+      limit: MULTI_WRITE_AUTH_LIMIT + 1,
+      context: { ...SYSTEM_CTX },
+    });
+    if (rows.length > MULTI_WRITE_AUTH_LIMIT) {
+      forbid(
+        denyCode,
+        `Refusing to authorize a multi-${verb} matching more than ${MULTI_WRITE_AUTH_LIMIT} attachments`,
+      );
+    }
+    return rows;
+  };
+
+  /** Uploader-or-parent-editor over every matched row. Parent-edit verdicts
+   * are memoized per (object, id) — a multi-row write usually targets one
+   * record. Degrades to caller-scoped parent READ visibility when no sharing
+   * service is present — still strictly tighter than no gate. */
+  const authorizeRows = async (
+    ctx: any,
+    rows: Array<Record<string, unknown>>,
+    verb: 'update' | 'delete',
+    denyCode: string,
+  ): Promise<void> => {
+    const userId = ctx.session.userId as string | undefined;
+    const sharing = getSharing();
+    const callerCtx = callerContext(ctx);
+    const canEditCache = new Map<string, boolean>();
+    for (const row of rows) {
+      if (userId && row.uploaded_by === userId) continue; // the uploader governs their own attachment
+
+      const parentObject = String(row.parent_object ?? '');
+      const parentId = String(row.parent_id ?? '');
+      const cacheKey = `${parentObject}\u0000${parentId}`;
+      let allowed = canEditCache.get(cacheKey);
+      if (allowed === undefined) {
+        if (sharing && typeof sharing.canEdit === 'function') {
+          allowed = await sharing.canEdit(parentObject, parentId, callerCtx);
+        } else {
+          // Degraded mode (no sharing service): fall back to caller-scoped
+          // parent READ visibility — still strictly tighter than no gate.
+          try {
+            allowed = !!(await ctx.api.object(parentObject).findOne({ where: { id: parentId } }));
+          } catch {
+            allowed = false;
+          }
+          logger.debug?.(
+            `[storage] attachment access: sharing service absent — ${verb} gated on parent read visibility`,
+          );
+        }
+        canEditCache.set(cacheKey, allowed);
+      }
+      if (!allowed) {
+        forbid(
+          denyCode,
+          `Cannot ${verb} attachment ${row.id}: only the uploader or a user who can edit the parent record (${parentObject}/${parentId}) may ${verb} it`,
+          parentObject,
+        );
+      }
+    }
+  };
+
   // ── Create: parent-record EDIT access + uploaded_by stamping ────────
   engine.registerHook(
     'beforeInsert',
@@ -201,106 +342,135 @@ export function installAttachmentAccessHooks(
     { object: 'sys_attachment', packageId: PACKAGE_ID },
   );
 
+  // ── Update: uploader or parent editor (+ the attach rule on a re-point) ──
+  engine.registerHook(
+    'beforeUpdate',
+    async (ctx: any) => {
+      if (ctx?.session?.isSystem) return;
+      if (!ctx?.session) return; // context-less programmatic call (bare kernel)
+      const rows = await resolveTargetRows(ctx, 'update', UPDATE_DENY_CODE);
+      // Reached only after a real resolve (the unscoped shape was refused in
+      // the resolver): ids that name no live row mean the driver writes
+      // nothing, so there is genuinely nothing to gate. The re-point check
+      // below is deliberately per-ROW for the same reason — with no matched
+      // row a partial re-point (`parent_object` and `parent_id` are two
+      // independent columns) has no effective target to authorize, and no
+      // write to carry it.
+      if (!rows.length) return;
+      await authorizeRows(ctx, rows, 'update', UPDATE_DENY_CODE);
+
+      // NOTE `uploaded_by` is deliberately NOT re-stamped here: the insert
+      // stamp records provenance at creation, and re-stamping on update would
+      // hand the row to whoever edits it. Nor is a client-supplied value
+      // refused: to reach this point at all the caller is already the
+      // uploader or a parent editor, and a parent editor already holds every
+      // verb the uploader shortcut grants — so rewriting `uploaded_by` buys
+      // no privilege the row rule did not just verify. (Same posture as the
+      // derived comment kit takes for `author_id` on update. The escalation
+      // the issue names — rewrite `uploaded_by`, then delete as "uploader" —
+      // is closed by the row rule itself, not by stamping.)
+
+      // Re-pointing an attachment is an INSERT into the new parent's files
+      // panel: the NEW parent must satisfy the attach rule (EDIT via the
+      // sharing service, degrading to caller-scoped read visibility — the
+      // beforeInsert gate above), or an authorized edit of your own
+      // attachment would be a way to plant files on records you cannot see.
+      // Mirrors the comment kit's thread re-point rule (#4630).
+      const data: any = ctx?.input?.data;
+      if (!data || typeof data !== 'object') return;
+      if (data.parent_object === undefined && data.parent_id === undefined) return;
+
+      const sharing = getSharing();
+      /** Attach-rule verdicts memoized per effective (object, id) target. */
+      const canAttachCache = new Map<string, boolean>();
+      for (const row of rows) {
+        const nextObject = data.parent_object === undefined ? row.parent_object : data.parent_object;
+        const nextId = data.parent_id === undefined ? row.parent_id : data.parent_id;
+        if (
+          String(nextObject ?? '') === String(row.parent_object ?? '') &&
+          String(nextId ?? '') === String(row.parent_id ?? '')
+        ) {
+          continue; // parent unchanged on this row — no re-point to authorize
+        }
+        // An unauthorizable target is a REFUSED one (fail closed, like the
+        // comment kit's unparseable thread_id) — never "let validation report
+        // the miss" as the insert gate does for absent fields: here the field
+        // IS present, and a `null`/empty half that validation happened to
+        // admit would otherwise sail past this gate.
+        if (typeof nextObject !== 'string' || !nextObject || nextId === undefined || nextId === null || nextId === '') {
+          forbid(
+            'ATTACHMENT_PARENT_ACCESS',
+            `Cannot move attachment ${row.id}: ${JSON.stringify(nextObject ?? null)}/${JSON.stringify(nextId ?? null)} does not name a record`,
+          );
+        }
+        const cacheKey = `${nextObject}\u0000${String(nextId)}`;
+        let allowed = canAttachCache.get(cacheKey);
+        if (allowed === undefined) {
+          if (sharing && typeof sharing.canEdit === 'function') {
+            allowed = await sharing.canEdit(nextObject, String(nextId), callerContext(ctx));
+          } else {
+            try {
+              allowed = !!(await ctx.api.object(nextObject).findOne({ where: { id: nextId } }));
+            } catch {
+              allowed = false;
+            }
+            logger.debug?.(
+              '[storage] attachment access: sharing service absent — re-point gated on parent read visibility',
+            );
+          }
+          canAttachCache.set(cacheKey, allowed);
+        }
+        if (!allowed) {
+          forbid(
+            'ATTACHMENT_PARENT_ACCESS',
+            `Cannot move attachment ${row.id} to ${nextObject}/${String(nextId)}: the parent record does not exist or you cannot edit it`,
+            nextObject,
+          );
+        }
+      }
+    },
+    // [#9974] `dispatchUnscopedMultiWrite` is what makes the unscoped refusal
+    // in `resolveTargetRows` REACHABLE on update: the per-row contract
+    // (#5038/#5574) binds `input.id` on every predicate dispatch (so the
+    // by-id branch shadows the shape check), and a zero-match predicate
+    // dispatches nothing at all — the whole-operation dispatch is the one
+    // call that arrives with no id and the caller's raw `options`, before any
+    // row is resolved. Same declaration the `beforeDelete` registration below
+    // carries (#9719), and the same both-verbs pairing the derived comment
+    // kit ships.
+    { object: 'sys_attachment', packageId: PACKAGE_ID, dispatchUnscopedMultiWrite: true },
+  );
+
   // ── Delete: uploader or parent editor ───────────────────────────────
   engine.registerHook(
     'beforeDelete',
     async (ctx: any) => {
       if (ctx?.session?.isSystem) return;
       if (!ctx?.session) return; // context-less programmatic call (bare kernel)
-      const userId = ctx.session.userId as string | undefined;
-
       // Resolve every row this delete matches (system read — the caller may
       // legitimately be unable to READ rows they are allowed to detach).
-      let rows: Array<Record<string, unknown>> = [];
-      const ids = asIdList(ctx?.input?.id);
-      if (ids) {
-        for (const id of ids) {
-          const row = await engine.findOne('sys_attachment', { where: { id }, context: { ...SYSTEM_CTX } });
-          if (row) rows.push(row);
-        }
-      } else {
-        const where = ctx?.input?.options?.where;
-        if (where === undefined || where === null) {
-          // #4757 — no id AND no predicate: the engine hands `deleteMany` an
-          // AST of `{ object }`, i.e. the WHOLE table. Falling through here
-          // would authorize that by resolving zero rows, so refuse instead.
-          // "Nothing to authorize" and "nothing was ever queried" are not the
-          // same verdict; reading the second as the first is fail-open.
-          // (Mirrors #4630's `resolveTargetRows` for sys_comment.)
-          //
-          // [#9719] Reached through the wired engine ONLY via the
-          // `dispatchUnscopedMultiDelete` whole-operation dispatch declared on
-          // this registration (see the registration options below): the
-          // per-row contract (#5038/#5574) binds `input.id` on every predicate
-          // dispatch — which routes into the by-id branch above — and a
-          // zero-match predicate dispatches nothing at all, so without that
-          // declaration this refusal cannot fire, whatever this file says.
-          forbid(
-            'ATTACHMENT_DELETE_DENIED',
-            'Refusing an unscoped multi-delete of attachments — scope the delete to the rows you mean (an id or a where predicate)',
-          );
-        }
-        rows = await engine.find('sys_attachment', {
-          where,
-          limit: MULTI_DELETE_AUTH_LIMIT + 1,
-          context: { ...SYSTEM_CTX },
-        });
-        if (rows.length > MULTI_DELETE_AUTH_LIMIT) {
-          forbid(
-            'ATTACHMENT_DELETE_DENIED',
-            `Refusing to authorize a multi-delete matching more than ${MULTI_DELETE_AUTH_LIMIT} attachments`,
-          );
-        }
-      }
+      const rows = await resolveTargetRows(ctx, 'delete', 'ATTACHMENT_DELETE_DENIED');
       // Reached only after a real resolve: the query ran and matched no row
       // (or the ids name no live row), so there is genuinely nothing to gate.
       if (!rows.length) return;
-
-      const sharing = getSharing();
-      const callerCtx = callerContext(ctx);
-      /** Parent-edit results memoized per (object, id) — multi-deletes on one record. */
-      const canEditCache = new Map<string, boolean>();
-
-      for (const row of rows) {
-        if (userId && row.uploaded_by === userId) continue; // uploader may always detach
-
-        const parentObject = String(row.parent_object ?? '');
-        const parentId = String(row.parent_id ?? '');
-        const cacheKey = `${parentObject}\u0000${parentId}`;
-        let allowed = canEditCache.get(cacheKey);
-        if (allowed === undefined) {
-          if (sharing && typeof sharing.canEdit === 'function') {
-            allowed = await sharing.canEdit(parentObject, parentId, callerCtx);
-          } else {
-            // Degraded mode (no sharing service): fall back to caller-scoped
-            // parent READ visibility — still strictly tighter than no gate.
-            try {
-              allowed = !!(await ctx.api.object(parentObject).findOne({ where: { id: parentId } }));
-            } catch {
-              allowed = false;
-            }
-            logger.debug?.(
-              '[storage] attachment access: sharing service absent — delete gated on parent read visibility',
-            );
-          }
-          canEditCache.set(cacheKey, allowed);
-        }
-        if (!allowed) {
-          forbid(
-            'ATTACHMENT_DELETE_DENIED',
-            `Cannot delete attachment ${row.id}: only the uploader or a user who can edit the parent record (${parentObject}/${parentId}) may delete it`,
-            parentObject,
-          );
-        }
-      }
+      await authorizeRows(ctx, rows, 'delete', 'ATTACHMENT_DELETE_DENIED');
     },
-    // [#9719] `dispatchUnscopedMultiDelete` is what makes the #4757 branch
-    // above REACHABLE through the wired engine: the predicate path dispatches
-    // per row with `input.id` bound (so the by-id branch shadows the check),
-    // and a zero-match predicate dispatches nothing at all — the engine's
-    // opt-in whole-operation dispatch is the one call that arrives with no id
-    // and the caller's raw `options`, before any row is resolved.
-    { object: 'sys_attachment', packageId: PACKAGE_ID, dispatchUnscopedMultiDelete: true },
+    // [#9719] `dispatchUnscopedMultiWrite` is what makes the #4757 branch in
+    // `resolveTargetRows` REACHABLE through the wired engine: the predicate
+    // path dispatches per row with `input.id` bound (so the by-id branch
+    // shadows the check), and a zero-match predicate dispatches nothing at
+    // all — the engine's opt-in whole-operation dispatch is the one call that
+    // arrives with no id and the caller's raw `options`, before any row is
+    // resolved.
+    //
+    // [#9974] The flag was renamed from `dispatchUnscopedMultiDelete` when
+    // the mechanism was ruled onto `beforeUpdate` as well; the refusal stays
+    // PER REGISTRATION. This one carries #4757's delete refusal under its
+    // grandfathered `ATTACHMENT_DELETE_DENIED` envelope; the `beforeUpdate`
+    // registration above declares the update-verb refusal (#10091) under the
+    // standard catalog code — the same both-verbs pairing the derived
+    // comment kit ships.
+    { object: 'sys_attachment', packageId: PACKAGE_ID, dispatchUnscopedMultiWrite: true },
   );
 }
 

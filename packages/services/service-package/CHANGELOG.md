@@ -1,5 +1,159 @@
 # @objectstack/service-package
 
+## 17.1.0
+
+### Patch Changes
+
+- e6e1de4: fix(rest): `DELETE /api/v1/packages/:id` answers a driver fault as a 5xx, and stops swallowing coded refusals (#8275)
+  
+  `packageService.delete` swallowed every throw and reported failure by returning
+  a bare `{ success: false }`, so the door answered
+  `400 PACKAGE_DELETE_FAILED`. The statement behind it is
+  `DELETE FROM sys_packages WHERE id = ? [AND version = ?]`, so a missing table, a
+  lock timeout or a foreign-key restriction — a **server** fault — was answered as
+  a client error: it invited the caller to fix a request that was never the
+  problem, and it hid a real fault from every dashboard that buckets by status.
+  
+  This is the sibling of what #8016 fixed on the throw path and #8131 fixed for
+  `publish`. `service-package` had been left **partially converted** by #8131 —
+  the same service answering two different classifications for the same kind of
+  fault — and this closes that.
+  
+  **Two changes, both small:**
+  
+  - `delete`'s catch re-throws a throw that **declares its own status**, so a
+    coded refusal reachable from this call path keeps the producer's status and
+    code through the door's #8016 mapping (a `409 DESTRUCTIVE_CHANGE` stays a
+    409) instead of being flattened into one 400. It reuses the existing
+    `declaresHttpAnswer` predicate rather than declaring a second one.
+  - an undeclared throw stays a returned failure, and the door answers it **500**.
+  
+  ⛔ The discriminant is the **status** channel, never `.code`. Every SQL driver
+  populates a string `code` on its errors (`ERR_SQLITE_ERROR`, `SQLITE_ERROR`, the
+  SQLSTATE `42P01`, `ER_NO_SUCH_TABLE`), so a `.code`-reading predicate re-throws
+  genuine driver faults as if they were refusals — resolving them to a `500
+  INTERNAL_ERROR` that carries the driver's own message. Pinned per dialect in
+  `delete-driver-fault.test.ts`, on this seam rather than inherited from
+  `publish`'s suite by analogy.
+  
+  **4xx is not swept**, which is the other half of the fix: the
+  repeated-`?version=` refusal is checked before `delete` is called at all,
+  `PACKAGE_DELETE_PARTIAL` keeps its 400 (per-item uninstall failures are a
+  different outcome), a declared 4xx thrown from below keeps its own status and
+  code, and a declared 5xx keeps its own too.
+  
+  **No message changed, and that is deliberate.** Unlike `publish`, this path
+  never disclosed anything: the door builds its sentence from the request's own
+  `:id` and `?version=`, and the producer returns a bare flag with **no message
+  channel at all**. Mirroring `publish`'s `driverFault` message here for symmetry
+  would have *created* a channel to the wire that nothing filters — the 5xx
+  withhold (#8086) lives in `sendThrownError`, which a returned failure never
+  reaches at any status. The new suites pin that absence from both sides: the
+  producer's returned shape has exactly one key, and the door answers its own
+  sentence even when handed a producer that grows a message.
+  
+  Verified against a real `node:sqlite` database running the real statements from
+  `index.ts` — including a genuine foreign-key restriction, the fault family only
+  `DELETE` can have.
+- Updated dependencies [56656aa]
+- Updated dependencies [07e630e]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [2782805]
+- Updated dependencies [e43d63a]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [420804d]
+- Updated dependencies [716ac9b]
+- Updated dependencies [a38408a]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [24173e9]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [f8eb736]
+- Updated dependencies [11b779e]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [e2899f6]
+- Updated dependencies [b6c7690]
+- Updated dependencies [3851f87]
+- Updated dependencies [845e164]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [e1bb0ca]
+- Updated dependencies [30d3752]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [7fc01db]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [402c125]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [44bc51d]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+  - @objectstack/spec@17.1.0
+  - @objectstack/core@17.1.0
+  - @objectstack/metadata-core@17.1.0
+
 ## 17.0.0
 
 ### Minor Changes

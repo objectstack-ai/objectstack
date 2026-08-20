@@ -1,5 +1,348 @@
 # @objectstack/dogfood
 
+## 0.0.41
+
+### Patch Changes
+
+- 2ce1eb4: docs(qa): narrow the ADR-0056 D10 authz conformance matrix's advertised completeness claim to what its ratchet actually checks (#8711)
+  
+  The matrix header and its companion test's header previously read as though
+  a new declared-but-unenforced authorization primitive would "break CI." It
+  would not, for most of the ledger: the completeness `discover()` ratchets is
+  over a **curated table of HTTP/transport entry points** (15 probes over 11
+  named source files), not over primitives. A primitive enforced by a predicate
+  inside an existing resolver — the `sys_permission_set.active` /
+  `sys_position.active` rows added in #8812 are the normal case, not an
+  exception — adds no entry point, so it can be neither UNCLASSIFIED nor STALE.
+  
+  Both headers now say so explicitly, carrying the measured numbers so the
+  narrowed claim is load-bearing rather than vague: 43 of the matrix's 50 rows
+  carry no `covers` key at all, 37 of the 43 `enforced` rows are exactly that
+  in-resolver shape, and — preserved, because it is real — 5 of the file's 9
+  `covers` keys are gate-pins that vanish (and fail CI) when the guard call
+  they name is deleted. Prose and comments only; nothing about the ratchet's
+  checking behaviour, the `discover()` table, or any row changes. Maintainer
+  ruling on #8711 (Option A): narrow the claim, do not build a
+  primitive-discovery ratchet (measured unachievable in general form).
+- 3c4c2ff: test(qa): a wired realtime transport can no longer be signed off by the row that records the absence of authorization (#9083)
+  
+  The ADR-0056 D10 authz conformance matrix carries a tripwire note promising
+  that wiring an end-user realtime transport reds CI "until this row is upgraded
+  with the enforcement site." The gate did not hold that out. `checkLedger`
+  requires an `enforcement` site only when `state === 'enforced'`, while a row's
+  `covers` keys classify a discovered surface **regardless of state** — so the
+  shortest path from red back to green was to append the tripwire key to the
+  `experimental` `realtime-delivery-authz` row, whose own summary records that
+  realtime fan-out has **NO** per-recipient authorization.
+  
+  Measured on `origin/main` before the fix, both legs reproduced from the filing:
+  wiring `new EventSource('/api/v1/stream')` into `packages/client/src/realtime-api.ts`
+  fails 2 of 15 cases as `UNCLASSIFIED surface — … realtime:client/realtime-api.ts:transport(TRANSPORT-WIRED)`;
+  appending that one key to the experimental row — with the transport still wired
+  and zero authorization written — returns 15/15 green. The `removed` state was
+  measured to admit the identical exit, so the rule keys on **not `enforced`**
+  rather than on `experimental`.
+  
+  `checkTransportWiredAdmission` in `authz-conformance.test.ts` now refuses a
+  `TRANSPORT-WIRED` key covered by any row that is not `enforced`, and
+  `checkLedger`'s existing enforced-has-site invariant supplies the other half —
+  the two compose into the promise the note makes, so flipping a row's state
+  without writing the site is refused as well. The rule lives beside the probe
+  table rather than in the shared ADR-0060 `checkLedger` helper on purpose:
+  `TRANSPORT-WIRED` is this ledger's own vocabulary, and five other conformance
+  ledgers share that helper without having transport tripwires. Tripwire keys are
+  now minted through one `tripwireKey()` helper so the marker cannot drift out of
+  the rule's sight (the keys themselves are byte-identical to before), and every
+  assertion in the file drives the composed gate instead of `checkLedger`.
+  
+  The matrix note, the `covers` field TSDoc and both file headers were corrected
+  to describe the gate that actually ships — the declared-≠-enforced defect here
+  was in the *note*, so leaving it in place would only have moved the
+  discrepancy. Six cases pin the new rule, including both reverse-verification
+  legs and a positive control proving an `enforced` row naming its site still
+  admits the key; each refusal case also asserts that bare `checkLedger` accepts
+  the same ledger, so none can pass for an unrelated reason. Gate behaviour only
+  — no runtime, spec or product surface changes, and no matrix row changed state.
+- 0bb8dbd: docs(qa): record `dispatcher-plugin.ts` as deliberately outside the #2992 transport tripwire set, with the reason (#9410)
+  
+  `packages/runtime/src/dispatcher-plugin.ts` has both properties that make a file
+  a plausible landing site for a realtime transport, and neither the conformance
+  test nor the protocol page said anything about it. It **mounts routes** —
+  `/actions`, `/automation` and `/packages`, the registration path separate from
+  the `@objectstack/rest` one — and it **already writes SSE**: two
+  `text/event-stream` sites with `no-cache` and `keep-alive`, working plumbing an
+  agent could extend without writing any new transport mechanics. None of the five
+  `#2992` / ADR-0096 D4 transport tripwires watch it, so a subscribe/fan-out
+  transport wired there mints no `TRANSPORT-WIRED` key, produces no UNCLASSIFIED
+  surface and reds no build. The protocol page stated the general limitation ("a
+  transport wired outside the watched files produces no key and no failure")
+  without naming the specific already-SSE-capable file sitting inside it.
+  
+  **This change is a recording. It changes no behaviour**: no probe is added, no
+  key is minted, and no matrix row is written for the two existing sites.
+  
+  The reason is recorded because it is the part a reader cannot re-derive cheaply.
+  Those two `text/event-stream` sites are **per-request AI response streaming, not
+  realtime subscription fan-out**: each drains one `AsyncIterable` that the route
+  handler itself returned into that same request's response body and then calls
+  `res.end()` — the second site's own source comment names its producer as the AI
+  routes. No subscriber is registered, no event is delivered to a *set* of
+  recipients, and the file carries no upgrade handler, no subscribe registration
+  and no realtime-service call. Watching it with the existing mechanics pattern
+  would therefore mint a key on day one for a surface that is not the hazard
+  `#2992` is about, leaving only two exits: classify two non-realtime sites in the
+  matrix vocabulary, or weaken the pattern. Neither is acceptable, so the file
+  stays out and the boundary is written down instead.
+  
+  It is written in the two places a reader actually lands. In
+  `authz-conformance.test.ts` the note closes the tripwire probe list, so a reader
+  who has just finished enumerating the watched set reads the set's boundary in
+  the same breath — beside, and explicitly distinguished from, the pre-existing
+  `#5519` mention of the same file, which is about anonymous gates on the mounted
+  routes and is a different point. In `realtime-protocol.mdx` it extends the
+  identity-admission callout at the exact sentence that states the general
+  limitation.
+  
+  The exclusion is drawn on **fan-out, not on the SSE content type**, and both
+  records say so: wiring an upgrade handler, a subscribe registration or a
+  realtime-service call into that file puts it back inside the hazard while the
+  recorded boundary still claims otherwise. Promoting it into the tripwire
+  population with such a fan-out-specific marker is written into #8347's
+  acceptance as a precondition of the WebSocket/SSE transport landing, so the
+  design effort is spent when the hazard becomes real rather than now.
+- 2d0af57: fix(tests): give two default-vitest-timeout cases real margin instead of a bare default (#9311)
+  
+  Two cases only passed `pnpm test` when they were not competing for CPU — the
+  same defect class as the already-closed precedents #3662, #4186, #4485,
+  #5421, #6329: a test running under vitest's **default** `testTimeout` /
+  `hookTimeout` with no margin for anything heavier than an idle box.
+  
+  **`packages/types/src/node.test.ts`** — `"falls back to the importing
+  package's own resolution when the host does not declare"` is the only case
+  in the file that performs a real dynamic `import()` of `@objectstack/spec` (a
+  multi-megabyte package); every sibling in the same `describe` block resolves
+  a small on-disk fixture or fails fast, all under 10ms. Measured on this box:
+  ~0.9-1.1s unloaded, already observed failing at 5061ms against the 5000ms
+  default under nothing heavier than `turbo run test --concurrency=2` (#9311's
+  own isolation runs). Gave that one case an explicit 30s `testTimeout` — the
+  same order of magnitude the repo already uses for subprocess/real-load cases
+  (`#3662` precedent) — and left every sub-10ms sibling alone.
+  
+  **`packages/qa/dogfood/test/semantic-roles.dogfood.test.ts`** — its
+  `beforeAll` boots the full showcase stack (ObjectQL + ~45 plugins) through
+  `@objectstack/verify`'s `bootStack`, which does not fit vitest's 10s
+  `hookTimeout` default with any margin at all: observed failing at 10027ms
+  against the 10000ms budget, and this file's own isolated run measured 18.3s
+  (vitest `Duration`) / 19.5s wall clock for the whole file even with the box
+  otherwise idle. Gave the hook an explicit 180s timeout, matching this
+  package's own existing house pattern for the identical
+  `bootStack(showcaseStack, …)` call
+  (`admin-identity-audit-trail.dogfood.test.ts`'s `beforeAll(…, 180_000)`)
+  rather than inventing a new number for the same operation.
+  
+  **No behaviour change** — both suites already pass; this only gives the two
+  timeout-sensitive cases room to finish on a loaded box. The repo's full test
+  suite is confirmed green at low concurrency (#9311), so this is margin
+  repair, not a product fix. `turbo.json`'s default concurrency is out of scope
+  for this change (a maintainer-level default, per #9311's own filing).
+- Updated dependencies [56656aa]
+- Updated dependencies [c9f5950]
+- Updated dependencies [d6e80b2]
+- Updated dependencies [07e630e]
+- Updated dependencies [66beee0]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [e717ba1]
+- Updated dependencies [f287435]
+- Updated dependencies [e43d63a]
+- Updated dependencies [e374b4d]
+- Updated dependencies [1408fe3]
+- Updated dependencies [fe90efa]
+- Updated dependencies [445ae4d]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [03520eb]
+- Updated dependencies [a751f7d]
+- Updated dependencies [eccb8b2]
+- Updated dependencies [650cd3d]
+- Updated dependencies [b735507]
+- Updated dependencies [91c6c28]
+- Updated dependencies [75b7c24]
+- Updated dependencies [cf0d902]
+- Updated dependencies [498f4e8]
+- Updated dependencies [cc5c07b]
+- Updated dependencies [d5552ca]
+- Updated dependencies [c7655d4]
+- Updated dependencies [d9813a9]
+- Updated dependencies [4c178c1]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [04d03c3]
+- Updated dependencies [2d0af57]
+- Updated dependencies [7337f30]
+- Updated dependencies [420804d]
+- Updated dependencies [8656d67]
+- Updated dependencies [716ac9b]
+- Updated dependencies [e9534a4]
+- Updated dependencies [6feac91]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [27a567d]
+- Updated dependencies [4ea921c]
+- Updated dependencies [42b05af]
+- Updated dependencies [0ccea4a]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [b705a6c]
+- Updated dependencies [f8eb736]
+- Updated dependencies [11b779e]
+- Updated dependencies [4e71ae1]
+- Updated dependencies [739fe5b]
+- Updated dependencies [20067c5]
+- Updated dependencies [d09d0fd]
+- Updated dependencies [5ed8ee6]
+- Updated dependencies [ff4ba6a]
+- Updated dependencies [f9d7acf]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [2a9752c]
+- Updated dependencies [b348ac2]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [4dfa369]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [44738f7]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [5e2f594]
+- Updated dependencies [e2899f6]
+- Updated dependencies [bbd86ed]
+- Updated dependencies [b6c7690]
+- Updated dependencies [2a6ebaf]
+- Updated dependencies [855591f]
+- Updated dependencies [3851f87]
+- Updated dependencies [c73eacd]
+- Updated dependencies [f8537df]
+- Updated dependencies [712e185]
+- Updated dependencies [d693ba1]
+- Updated dependencies [53fc099]
+- Updated dependencies [693c788]
+- Updated dependencies [845e164]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [0425db9]
+- Updated dependencies [cd455c8]
+- Updated dependencies [326f5de]
+- Updated dependencies [30d3752]
+- Updated dependencies [b3de42c]
+- Updated dependencies [21995d7]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [6a5e6ad]
+- Updated dependencies [30b1c63]
+- Updated dependencies [7fc01db]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [03fa4c9]
+- Updated dependencies [f01c0ee]
+- Updated dependencies [fab693b]
+- Updated dependencies [b53d38e]
+- Updated dependencies [06f9848]
+- Updated dependencies [b0fa4fc]
+- Updated dependencies [4012a70]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [b5f6b26]
+- Updated dependencies [04f8fdb]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [b2a451f]
+- Updated dependencies [c25b2d5]
+- Updated dependencies [6158146]
+- Updated dependencies [84cb121]
+- Updated dependencies [ca19ee8]
+- Updated dependencies [147eadc]
+- Updated dependencies [90417a8]
+- Updated dependencies [a675b4d]
+- Updated dependencies [b887013]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [402c125]
+- Updated dependencies [7901b2d]
+- Updated dependencies [7c2f386]
+- Updated dependencies [56bca91]
+- Updated dependencies [b3f9831]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [8a9e7f4]
+- Updated dependencies [3d0ded8]
+- Updated dependencies [44bc51d]
+- Updated dependencies [bbbfcfc]
+- Updated dependencies [1258dca]
+- Updated dependencies [4639cec]
+- Updated dependencies [91c4ff5]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+- Updated dependencies [682b86b]
+- Updated dependencies [6a1b45e]
+- Updated dependencies [b278695]
+- Updated dependencies [5126e79]
+  - @objectstack/spec@17.1.0
+  - @objectstack/platform-objects@17.1.0
+  - @objectstack/plugin-auth@17.1.0
+  - @objectstack/types@17.1.0
+  - @objectstack/plugin-security@17.1.0
+  - @objectstack/objectql@17.1.0
+  - @objectstack/plugin-audit@17.1.0
+  - @objectstack/plugin-email@17.1.0
+  - @objectstack/plugin-sharing@17.1.0
+  - @objectstack/metadata@17.1.0
+  - @objectstack/service-messaging@17.1.0
+  - @objectstack/mcp@17.1.0
+  - @objectstack/service-analytics@17.1.0
+  - @objectstack/service-storage@17.1.0
+  - @objectstack/metadata-core@17.1.0
+  - @objectstack/example-showcase@0.3.15
+  - @objectstack/plugin-webhooks@17.1.0
+  - @objectstack/example-crm@4.0.93
+  - @objectstack/connector-mcp@17.1.0
+  - @objectstack/connector-openapi@17.1.0
+  - @objectstack/connector-rest@17.1.0
+  - @objectstack/verify@17.1.0
+
 ## 0.0.40
 
 ### Patch Changes

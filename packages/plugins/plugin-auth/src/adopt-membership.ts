@@ -66,10 +66,14 @@
  * membership**, so a `create` naming an (org, user) pair that already exists is
  * not a second membership — it is that membership.
  *
- * Blast radius, measured against better-auth 1.7.0-rc.2 rather than assumed —
- * accept-invitation is the ONLY `member` create that can reach an existing pair:
+ * Blast radius, measured against the installed better-auth (re-measured on
+ * 1.7.1) rather than assumed — accept-invitation is the ONLY `member` create
+ * that can reach an existing pair:
  *
- *  - `POST /organization/add-member` pre-checks and refuses first
+ *  - The vendor's `addMember` is SERVER-ONLY (declared with no HTTP path;
+ *    reachable over HTTP only through ObjectStack's platform-admin-gated
+ *    `POST /organization/add-member` mount, #9941 — see
+ *    organization-add-member.ts), and it pre-checks and refuses first
  *    (`crud-members.mjs`: `findMemberByEmail` →
  *    `USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION`, a 400).
  *  - `POST /organization/create-organization` mints a fresh organization id, so

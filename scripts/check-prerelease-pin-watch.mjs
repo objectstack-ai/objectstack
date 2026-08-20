@@ -81,9 +81,10 @@
 //   1  AVAILABLE  a stable release exists. Loud; names the follow-up card.
 //   2  UNKNOWN    at least one registry read failed; no hit among the rest.
 //
-// Exit 2 is deliberately NOT exit 1. Unlike `check:objectui-pin-fresh` — a
-// required PR gate, where an unreadable remote must block because the alternative
-// is shipping the thing the gate exists to catch — this is an unattended nightly,
+// Exit 2 is deliberately NOT exit 1. Unlike a blocking release gate that reads a
+// remote, where an unreadable remote must block because the alternative is
+// shipping the thing the gate exists to catch (`check:objectui-pin-fresh` was
+// this repo's example until #10134 deleted it) — this is an unattended nightly,
 // and its failure mode is asymmetric: a transient npm 5xx that turns the nightly
 // red teaches everyone to skim it, and a nightly nobody reads is precisely the
 // "no producer" state #5024 is about. Missing one night costs at most a day,

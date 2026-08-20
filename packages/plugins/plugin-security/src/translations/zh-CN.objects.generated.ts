@@ -323,10 +323,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "原因",
         help: "[ADR-0091 D1] 该授权存在的原因。自由文本；委派（D3）和紧急提权（D4）记录必填。智能体授权在此记录任务/运行归属（D6）。"
       },
-      delegated_from: {
-        label: "委派自",
-        help: "[ADR-0091 D3] 该记录所承载权限的委派人。设置了 delegated_from 的记录本身不可再委派，也不可自助续期。"
-      },
       last_certified_at: {
         label: "最近认证时间",
         help: "[ADR-0091 D5] 为未来的访问权限重新认证(定期复核)流程预留:届时用于记录此授予最近一次被认证的时间。当前该列是惰性的:平台不会写入它,也没有任何代码读取它——没有任何解析路径、门禁或 lint 会参考它,也没有任何地方据此推导出「从未认证」或「认证已过期」。因此为空只表示该流程尚不存在,并不表示此授予未经复核。"

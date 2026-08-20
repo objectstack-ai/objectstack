@@ -1,5 +1,952 @@
 # @objectstack/driver-sql
 
+## 17.1.0
+
+### Minor Changes
+
+- 9c4d096: feat(driver-sql): MySQL joins the unresolvable-column predicate — the `INVALID_FILTER` refusal envelope AND the #3821 recoveries, full dialect parity (#8926)
+  
+  **BREAKING** accept-set change on a GA public data API — in both directions at
+  once, on MySQL only — shipped as `minor` under the lockstep launch-window
+  convention, like the #8790 change it completes.
+  
+  <!-- adr-0087: not-required (already-registered driver-sql-unresolvable-where-column-refused) MySQL joining the refusal is a reach extension of the migration #8790 registered one card earlier; the surface and the prescription are unchanged — name a column the object actually has, or run schema sync. The entry's dialect-reach paragraph is amended in a follow-up spec PR, filed from #8926 -->
+  
+  ## What changes, on MySQL only
+  
+  `isUnresolvableColumnError` — the ONE predicate `SqlDriver.findRows()`'s #3821
+  recovery ladder and `SqlDriver.count()` both read — now recognises MySQL's
+  spelling of "the statement named a column the backend could not resolve":
+  `Unknown column 'x' in 'where clause'` / `'field list'` / `'order clause'`
+  (`ER_BAD_FIELD_ERROR`). SQLite and Postgres behaviour is untouched.
+  
+  Measured on live MySQL 8.0.46 (`SqlDriver` over mysql2), before → after:
+  
+  - **WHERE** — `find()` and `count()` alike: raw `ER_BAD_FIELD_ERROR`, no
+    `status` (an unclassified 5xx at the REST boundary), the statement's bound
+    literals inlined in the message → refused with `INVALID_FILTER` / 400 naming
+    the column; the dialect message goes to the server log. The narrowing — the
+    #7929 predicate-text disclosure shape closed on the last dialect that still
+    had it.
+  - **Projection** — `find({ fields: [...] })` naming a column the table lacks
+    threw the raw error → retries selecting `*`; the rows come back, WHERE
+    honoured. The widening.
+  - **ORDER BY** — sorting by a column the table lacks threw the raw error →
+    drops the sort and returns the rows unordered, WHERE honoured. The widening.
+  
+  Both directions were ruled together on #8926 (option A, maintainer,
+  2026-08-16); a split predicate — the envelope without the recoveries — was
+  refused. The widening cannot drop a predicate: every ladder rung is rebuilt
+  from `buildBase()`, which unconditionally re-applies `query.where`, so the
+  recoveries reach the projection and the sort only.
+  
+  ## Migration
+  
+  Nothing stored needs rewriting. A MySQL caller that relied on catching the raw
+  `ER_BAD_FIELD_ERROR` from `find()`/`count()` should catch `INVALID_FILTER` /
+  400 instead — the same envelope SQLite and Postgres already answer, and the
+  same prescription the registered
+  `driver-sql-unresolvable-where-column-refused` migration carries.
+- 716ac9b: fix(driver-sql): one unresolvable WHERE column, one answer — `find()` and `count()` both refuse with `INVALID_FILTER` / 400 naming the column (#8790)
+  
+  **BREAKING** accept-set narrowing on a GA public data API, shipped as `minor`
+  under the lockstep launch-window convention. The migration prescription is
+  registered under protocol major 18, where `os migrate meta` users will look.
+  
+  <!-- adr-0087: registered driver-sql-unresolvable-where-column-refused -->
+  
+  ## The defect
+  
+  One predicate had two answers. `SqlDriver.findRows()` carries the #3821
+  unknown-column recovery ladder, and every rung of it is built from
+  `buildBase()`, which **always re-applies `query.where`**. So the ladder can drop
+  a projection and can drop an ORDER BY, but it can never drop the clause that
+  actually failed when the unresolvable column is in the WHERE — both rungs raise
+  the same error and the method fell to `return []`. `SqlDriver.count()` runs a
+  separate statement and has no ladder at all, so the identical predicate threw.
+  
+  Measured on a real `SqlDriver` over better-sqlite3, one table, one seeded row:
+  
+  ```
+  where { 'title.x': 'y' }
+    find()   ->  0 rows, NO ERROR
+    count()  ->  THREW  code=SQLITE_ERROR  status=undefined
+                 select count(*) as `count` from `task` where `title`.`x` = 'y'
+                   - no such column: title.x
+  
+  CONTROL  where { title: 'Design' }
+    find()   ->  1 row
+    count()  ->  1
+  ```
+  
+  A list view calls both halves, so one query produced an empty page from the rows
+  half and a 500-shaped failure from the total half. A caller reading only the rows
+  got a silent empty page that says "no records exist" for what was really "your
+  predicate never ran" — the single most AI-legible failure to get wrong, since an
+  agent reads "no matching records" and writes its next query on that belief.
+  
+  The thrown half was no better: the dialect's own `code`, no `status` (so an
+  unclassified 5xx at the REST boundary rather than a caller mistake), and the
+  statement's **bound literals inlined in the message** — the same predicate-text
+  disclosure shape #7929 redacted elsewhere.
+  
+  ## The fix
+  
+  Ruled 2026-08-15 on #8790: **refuse both halves** with `INVALID_FILTER` / 400,
+  naming the column. That envelope is not minted here — it is what every sibling
+  refusal on this path already answers, required on both SQL drivers by
+  `cross-field-conformance-cases.ts` and pinned by
+  `sql-driver-boolean-identity.test.ts` and
+  `sql-driver-cross-field-conformance.test.ts`. What closes is a
+  declared-vs-enforced gap, not a new posture.
+  
+  The caller-visible message names the column and the object and nothing else. The
+  dialect's own message — the compiled statement, bound literals and all — goes to
+  the **server log** instead, so the operator keeps the debugging aid that
+  `count()`'s raw throw used to provide without it reaching the caller.
+  
+  **The #3821 ladder keeps both of its recoveries.** Only the WHERE-failure
+  terminal `return []` became a refusal, and the asymmetry is the ruling rather
+  than an oversight: "rows matter more than their order" is an argument about how
+  rows are *presented*, and it does not transfer to a predicate. A dropped sort is
+  a correct answer in an unhelpful order; a dropped WHERE is records the caller
+  explicitly excluded. Recover-both was rejected for exactly that reason.
+  
+  ## Reach, stated rather than assumed
+  
+  The refusal fires on the wordings the ladder has always recognised — SQLite
+  (`no such column: x`) and Postgres (`column "x" does not exist`). MySQL spells
+  the condition `Unknown column 'x' in 'where clause'`, which neither arm matches,
+  so on MySQL an unresolvable column still travels out as the raw dialect error.
+  That gap is pinned as a fact in the new suite and filed separately: widening the
+  predicate would also hand MySQL the #3821 projection and ORDER-BY recoveries it
+  has never had, which is an accept-set change in the opposite direction from this
+  one.
+  
+  ## Who is affected
+  
+  Callers that reach the driver with a filter key the table has no column for. The
+  ingress doors already refuse this where they can judge — `assertFilterFieldsExist`
+  (`@objectstack/metadata-protocol`) answers `INVALID_FIELD` / 400 for everything
+  reaching `findData`, with the sentence this refusal now echoes verbatim: *a
+  filter on a field that does not exist can only match zero records, so the query
+  was refused instead of answered with an empty list*. What changes is the
+  backstop underneath them: a registry the door could not read, and a dotted key
+  judged on its head segment only.
+- c8806ae: fix(driver-sql): MySQL refuses an upsert whose `conflictKeys` no PRIMARY KEY or UNIQUE index backs — calls that previously "resolved" now throw (#8621)
+  
+  **This narrows MySQL's accept set.** A `SqlDriver.upsert(object, data, conflictKeys)`
+  call on MySQL whose conflict target is backed by no PRIMARY KEY and no UNIQUE
+  index used to resolve; it now throws `VALIDATION_ERROR` / 400. That is why this
+  is a `minor` and not a patch: code that ran without error against MySQL will
+  start failing, deliberately, and the rows it was writing were not the rows the
+  caller asked for.
+  
+  SQLite and Postgres have refused this exact call since #8445 / #8567, with this
+  exact sentence. MySQL did not, and could not: knex compiles
+  `onConflict([...]).merge(...)` on `mysql2` to `ON DUPLICATE KEY UPDATE`, which
+  takes **no conflict target at all**, so the named keys are dropped before the
+  statement leaves the process and the server is never asked to find an index for
+  them. The existing refusal classifies an error the server raised, so on MySQL it
+  had nothing to classify.
+  
+  Measured on live MySQL 8.0.46 — `email` is the column the caller names, `tax_id`
+  carries the only unique index:
+  
+  ```
+  seed  upsert({email:'a@b.com',     tax_id:'T-1', title:'first'},  ['email'])  -> resolved
+  B     upsert({email:'other@b.com', tax_id:'T-1', title:'second'}, ['email'])  -> resolved
+          ONE row: merged on `tax_id`, which the caller never named, across two
+          different `email` values.
+  D     seed, then upsert({email:'a@b.com', tax_id:'T-2'}, ['email'])           -> resolved
+          TWO rows, both `email='a@b.com'`: the merge that WAS asked for did not
+          happen either.
+  ```
+  
+  So the failure being replaced is not an illegible error — it is a silent wrong
+  write. `upsert` now consults the table's physical keys before compiling on MySQL
+  and answers the wording, `code` and `status` the other two dialects already
+  answer (#5240 — one condition, one wording).
+  
+  **What this means for an existing MySQL deployment.** The calls that change are
+  exactly those naming a conflict target no key covers — the same calls that have
+  always been errors on SQLite and Postgres. The most likely one to surface is a
+  tenant-scoped `unique: true` field: its index materializes as the composite
+  `(COALESCE(organization_id, '__global__'), field)` (ADR-0120 D3), so
+  `conflictKeys: ['field']` alone is not backed by it. The remedy is the one the
+  refusal already prints: declare the column(s) `unique: true` and re-run schema
+  sync, name the full composite, or upsert on the primary key.
+  
+  Deliberately unchanged:
+  
+  - **SQLite and Postgres.** They already refuse this from the server, and they
+    attach the server's own sentence as `cause` — ground truth a pre-flight cannot
+    reconstruct. Running the pre-flight there would replace a planner verdict with
+    an introspection verdict for no gain.
+  - **The default `['id']` path.** The pre-flight runs only when the caller names
+    a target; the default is this driver's own primary key on every table it
+    creates, so probing it would add a round trip to every ordinary upsert to
+    answer a question with only one possible answer.
+  - **Anything the pre-flight cannot prove.** A failed introspection, a table
+    reporting no keys at all (indistinguishable from a table that does not exist),
+    and a possibly stale cache all proceed rather than refuse — the cache is
+    re-read from the database before any refusal is thrown.
+  
+  **Not fixed here, and filed as #8755:** `ON DUPLICATE KEY UPDATE` carries no
+  conflict target even when the named one IS backed, so on MySQL a second unique
+  index can still absorb the conflict and merge on a key the caller never named.
+  This change closes the unbacked-target hole; it does not make MySQL honour
+  `conflictKeys` as a target.
+- bb96297: fix(driver-sql): refuse a MySQL upsert whose named conflict target another UNIQUE key can absorb (#8755)
+  
+  `ON DUPLICATE KEY UPDATE` — the only merge statement MySQL compiles — carries no
+  conflict target, so the merge lands on whichever UNIQUE key the row collides with
+  first. `#8621` closed the half where nothing backed the named target; this closes
+  the half where the target IS backed and a *second* UNIQUE key absorbs the
+  conflict instead.
+  
+  Measured on live MySQL 8.0.46, `email` and `tax_id` both `unique: true`, the
+  caller naming `email`: the second upsert merged on `tax_id`, across two different
+  values of the named key, leaving one row and no error. The identical call on
+  SQLite and PostgreSQL raises `UNIQUE constraint failed: …tax_id` and leaves the
+  seeded row untouched.
+  
+  **Accept-set change, MySQL only.** An `upsert(object, data, conflictKeys)` naming
+  a non-primary target on a table that carries any other UNIQUE key is now refused
+  before the statement is compiled — `code: 'VALIDATION_ERROR'`, `status: 400`,
+  nothing written and no auto-number reserved. The message names the colliding
+  index and both workarounds: drop or rename the extra UNIQUE key, or run the
+  object on a dialect that honours the target.
+  
+  Deliberately unchanged: a table whose only UNIQUE key IS the conflict target (the
+  common shape) merges exactly as before, as do the `conflictKeys`-less default and
+  an explicitly named primary key. The MySQL dialect limit and that residue are
+  documented under *Database Drivers → MySQL*.
+- d00d2f6: fix(driver-sql): refuse — and roll back — a MySQL upsert that merges onto a row the caller never identified (#8807)
+  
+  `ON DUPLICATE KEY UPDATE` carries no conflict target, so on MySQL a merge lands on
+  whichever UNIQUE key the row collides with first. `#8621` closed the half where
+  nothing backed a caller-named target; `#8755` closed the half where a rival key
+  could absorb a caller-named one. This closes the residue those two left by
+  construction: the `conflictKeys`-less call and the `['id']` call, which compile
+  byte-identically and which no pre-flight can judge, because neither names anything.
+  
+  Measured on live MySQL 8.0.46, `email` and `tax_id` both `unique: true`, **no**
+  `conflictKeys`: seeding `{email:'d@b.com', tax_id:'T-9'}` inserted one row, and
+  `{email:'e@b.com', tax_id:'T-9'}` then resolved with no error — one row, the
+  *seeded* one, its `email` rewritten `d@b.com` to `e@b.com`, and the id the caller
+  was handed back present in no row at all. The identical pair on SQLite raises
+  `UNIQUE constraint failed: …tax_id` and leaves the seeded row untouched.
+  
+  Per the maintainer ruling on #8807 this enforces a contract principle, not a MySQL
+  detail: *an `upsert` must never modify a row whose identity the caller did not
+  supply and whose conflict key it did not name.*
+  
+  **Accept-set change, MySQL only.** After the statement and inside the same
+  transaction, the driver checks whether the row it landed on is the one the call
+  supplied. If it is not, the write is **rolled back** and the call refuses with
+  `code: 'VALIDATION_ERROR'`, `status: 400`, naming the UNIQUE key that absorbed the
+  merge and stating that nothing was changed.
+  
+  The check is exact rather than heuristic — `id` is insert-only on the merge path
+  (#8622), so a row merged on the primary key always still carries the supplied id
+  and a row merged on any other key never does — which is why it has no false
+  refusals.
+  
+  Deliberately unchanged: tables whose only key is the primary key are not verified
+  and open no transaction, so the ordinary upsert keeps its single round trip; every
+  insert and every re-upsert of the same row still merges; the caller-named
+  single-unique-key fast path is untouched; and SQLite and PostgreSQL are unaffected,
+  because `ON CONFLICT (...)` already honours the named arbiter. The lifecycle
+  archiver's hot→cold copy passes by construction — it supplies each row's own id —
+  and of the two objects declaring `lifecycle.archive`, neither carries a
+  non-primary unique field. The dialect limit is documented under
+  *Database Drivers → MySQL*.
+
+### Patch Changes
+
+- 8bbf459: fix(driver-sql): boot schema-sync's MySQL widening ALTER bounds its metadata-lock wait too — a blocked boot warns and carries on instead of hanging for a year (#9542)
+  
+  #9354 bounded `lock_wait_timeout` to 120s on the widening `ALTER TABLE … MODIFY
+  COLUMN` and made a blocked `os migrate apply` refuse loudly — but only while
+  `flushDeferredSchemaDdl` was running. The same two widenings
+  (`migrateMysqlDatetimeColumns` / `migrateMysqlTimeColumns`, #3942 / #3994) are
+  reached from **boot schema-sync** through the same `initObjects` lines, and on
+  that path the `runWideningAlters` seam returned early: the ALTER ran through the
+  pool inheriting MySQL's own default `lock_wait_timeout` of **31,536,000 seconds
+  — one year**.
+  
+  So a single other session holding a metadata lock on the table parked boot at
+  schema-sync for that long, printing nothing — indistinguishable from a crash.
+  The widening's own `logger.warn` could not help, because it lives in a `catch`
+  and an ALTER that never returns is never caught.
+  
+  The bound is now armed **unconditionally** in that seam. What stays gated on the
+  flush is the **refusal**, and only it: boot still swallows. Correctness never
+  depends on the widening having run and a migration must never take boot down, so
+  throwing there would trade a silent hang for a failed boot — a different answer,
+  not the same one.
+  
+  **What changes for a deployment.** On MySQL, a boot whose widening ALTER is
+  blocked on a metadata lock now waits at most 120s, then logs
+  `[sql-driver] could not widen MySQL datetime columns on …` (or its `TIME(3)`
+  twin) naming the table, with the server's own `Lock wait timeout exceeded` as
+  the `error` field — and boot carries on. The widening is idempotent, so the
+  first boot after the blocker is gone completes it. Nothing changes on any other
+  dialect, on an ALTER that is not blocked, or for `os migrate apply`, which keeps
+  #9354's `DATABASE_ERROR` / 500 refusal.
+  
+  120s is #9354's number, kept for boot deliberately rather than lengthened: the
+  reasoning behind it is about how long a legitimate metadata-lock holder can
+  plausibly hold the lock, which is a property of the lock and not of who is
+  waiting on it. Boot's difference from the flush is what happens when the bound
+  fires, never how long it waits. No retry logic and no configurability — the
+  2026-08-17 ruling's minimality, unchanged.
+- 2c570f3: fix(driver-sql): a blocked `os migrate` now refuses in 120s instead of hanging for a year on a MySQL metadata lock (#9354)
+  
+  The deferred-DDL flush widens legacy MySQL `TIMESTAMP` columns to `DATETIME(3)`
+  and `TIME` to `TIME(3)` with `ALTER TABLE … MODIFY COLUMN`, which needs an
+  **exclusive metadata lock** on the table. That ALTER ran on a session inheriting
+  MySQL's default `lock_wait_timeout` — **31,536,000 seconds, one year**. A single
+  other session holding a lock on the table (a long-running transaction, an open
+  uncommitted session, a stuck report query) parked the ALTER in
+  `Waiting for table metadata lock` for that long, and nothing printed.
+  
+  An operator running `os migrate apply` against a busy production table met this
+  as a command that simply hangs — indistinguishable from a crash, with no output
+  to diagnose from. It was first measured as a CI stall: a sub-second test blew a
+  5000ms budget with **no error at all**, because the ALTER just sat in a lock wait
+  until vitest killed the process.
+  
+  Two things were wrong, and a bound alone would have fixed neither:
+  
+  - **Nothing bounded the wait.** `lock_wait_timeout` had zero occurrences
+    anywhere in `packages/`.
+  - **The widening swallows its failures.** That policy is right on boot — a
+    migration must never take boot down, and correctness never depended on the
+    widening having run — but on the flush it means `os migrate apply` reports
+    success for work it did not do.
+  
+  The flush now runs its widening ALTERs on **one pinned connection**, bounds
+  `lock_wait_timeout` to **120 seconds** on that same session, and lets exactly one
+  condition escape the swallow: a metadata-lock timeout is re-thrown as an ADR-0112
+  envelope — `DATABASE_ERROR` / 500, from the existing closed vocabulary — whose
+  message names the lock wait, the table, the bound it hit, and how to find the
+  holder. `os migrate apply` prints that message and exits 1.
+  
+  The connection pinning is the load-bearing half: `lock_wait_timeout` is a SESSION
+  variable, so a `SET SESSION` issued through the pool lands on a connection the
+  ALTER never uses — a no-op that looks exactly like a fix.
+  
+  **120 seconds** is chosen as a diagnosis deadline, not a capacity knob: three
+  orders of magnitude above the milliseconds a normal OLTP transaction holds a
+  metadata lock (so an ordinary busy table never trips it), and still inside the
+  window where the operator is watching the command. The widening is idempotent,
+  so the cost of firing too eagerly is one re-run.
+  
+  Unchanged, deliberately: boot schema-sync still runs unbounded and still
+  swallows; every non-lock-wait failure during the flush keeps the swallow it had.
+  No retry logic and no configurability — both wait for measured demand.
+- 7337f30: chore(deps): production-dependency patch bumps from the weekly Dependabot group (#9212)
+  
+  Routine dependency-range refresh, no behavior change: `@oclif/core` 4.13.2→4.13.3,
+  `esbuild` 0.28.1→0.28.2 and `better-sqlite3` ^13.0.2→^13.0.3 (optional) on
+  `@objectstack/cli`; `mingo` 7.2.2→7.2.4 on `@objectstack/driver-memory`; `nanoid`
+  6.0.0→6.0.1 on `@objectstack/driver-mongodb`, `@objectstack/driver-sql`,
+  `@objectstack/driver-sqlite-wasm` and `@objectstack/driver-turso`, plus
+  `better-sqlite3` ^13.0.2→^13.0.3 (optional on `@objectstack/driver-sql`, peer on
+  `@objectstack/driver-turso`); `js-yaml` 5.2.2→5.2.3 on `@objectstack/metadata`;
+  `@noble/hashes` 2.2.0→2.3.0 and `jose` 6.2.5→6.2.8 on `@objectstack/plugin-auth`;
+  `nodemailer` 9.0.3→9.0.5 on `@objectstack/plugin-email`; `@hono/node-server`
+  2.0.12→2.1.1 and `hono` 4.12.34→4.13.2 on `@objectstack/plugin-hono-server`;
+  `pinyin-pro` 3.28.2→3.29.1 on `@objectstack/plugin-pinyin-search`; and
+  `@noble/ciphers` 2.2.0→2.3.0 on `@objectstack/service-settings`.
+  
+  Every entry above changed a `dependencies`, `optionalDependencies` or
+  `peerDependencies` range in the published manifest — the only kind of change
+  that reaches a consumer's install. The same Dependabot group also bumped
+  `devDependencies` on `@objectstack/hono`, `@objectstack/client`,
+  `@objectstack/core`, `@objectstack/plugin-sharing` and `@objectstack/spec`
+  (none consumer-facing), and touched the private `apps/docs`,
+  `examples/app-todo` and workspace-root manifests (none published) — none of
+  those get an entry here.
+- cbf4b40: fix(driver-sql): a dialect error the driver cannot attribute leaves the read exits as an ADR-0112 backend-fault envelope instead of raw (#8931)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is
+  added, renamed, retired or tombstoned — no metadata key, no spec surface, no
+  declaration an author writes. The change is entirely in what a failing READ
+  throws: an error that already declared no `status` and carried the compiled
+  statement now declares `DATABASE_ERROR` / 500 and does not. There is no source
+  file for a consumer to migrate and therefore no semantic-migration TODO to
+  emit; the accept set is unchanged, since every condition below failed before
+  this change and fails after it. -->
+  
+  `SqlDriver.find()` / `findOne()` / `count()` had one exit that answered with the
+  **database's own error object**: a `code` from the backend's vocabulary
+  (`42P01`, `SQLITE_ERROR`, `42601`, `22P02`, …), **no `status`** at all, and a
+  message opening with the compiled statement. Two things travelled out of it that
+  should not have — the statement's shape, and on one measured row the caller's
+  own value.
+  
+  Ruled 2026-08-17 on #8931: the driver stops answering an unenveloped dialect
+  error. Any dialect error the existing classification does not claim now leaves
+  as a **generic backend-fault envelope**, `DATABASE_ERROR` / 500, asserting only
+  *"the backend rejected this statement"*.
+  
+  **Not a filter verdict, and that is the ruling rather than a preference.**
+  Measured live on PostgreSQL 16.13, a dotted WHERE key and a table that was never
+  created raise the *same* SQLSTATE:
+  
+  ```
+  dotted key        42P01  missing FROM-clause entry for table "title"
+  table not created 42P01  relation "no_such_object" does not exist
+  ```
+  
+  An `INVALID_FILTER` here would tell an operator whose schema sync had not run
+  that their *filter* was wrong. The signal cannot support the claim, so the
+  envelope does not make it — and the driver still never inspects the caller's key
+  for a `.` (that verdict is #8371's, and it landed there).
+  
+  **Mechanism: a terminal catch-all, not a new recognizer.** No predicate learns
+  `42P01`. `isUnresolvableColumnError` and `isMissingTableError` are untouched, so
+  the #8790 refusal (`INVALID_FILTER` / 400 naming the column) still wins wherever
+  it applies, and the #3821 projection / ORDER-BY recoveries still return rows.
+  
+  **What now takes the envelope**, measured on live PG 16.13 and better-sqlite3:
+  a table that was never provisioned; a dotted WHERE key on Postgres; a
+  comparand-shape syntax fault; a value the column type rejects; and connection,
+  pool-acquisition, timeout or permission failures.
+  
+  **The disclosure this closes on a route nobody had named.** Postgres puts the
+  caller's rejected VALUE in its own `22P02` diagnostic (`invalid input syntax for
+  type integer: "…"`), *downstream* of everything knex parameterised — so no
+  statement cut removes it. Withholding the dialect text whole is what closes it.
+  (#8931's headline premise, a bound literal inlined on the *dotted* route, was
+  measured false and pinned by #9108; this is the neighbouring row where a value
+  really does travel.)
+  
+  **The original error is kept as a non-enumerable `cause`.** That is load-bearing,
+  not tidiness: `isMissingTableError` follows `cause`, and thirteen read paths use
+  it to tell "the table was never provisioned" — a benign emptiness — from a
+  failure that must stay loud. Non-enumerable so the statement cannot ride back
+  out through `JSON.stringify(err)` or a spread.
+  
+  **For callers.** At the REST boundary the wire answer for these conditions is
+  materially unchanged — `mapDataError` already derived `500` + `DATABASE_ERROR`
+  for them by sniffing the message; it is now *declared* by the producer that
+  knows, per ADR-0112, and every non-REST consumer (an in-process ObjectQL caller,
+  a plugin, an AI-authored action) gets the same declared answer instead of having
+  to pattern-match a SQLSTATE that differs per backend. Two consequences worth
+  naming: code that matched on the raw dialect `code` or message of a failing
+  **read** must read `error.cause` instead; and a read against a **registered
+  object whose table was never created** now answers `500 DATABASE_ERROR` where it
+  previously answered `404 OBJECT_NOT_FOUND` with the body `Object 'x' is not
+  registered` — a sentence that was false in exactly that state.
+- 86431f7: docs(driver-sql): rewrite the published README to the shipped driver surface (#9867)
+  
+  `packages/drivers/driver-sql/README.md` is in the package's `files` array with
+  `private` unset, so it is the page npm renders. It told the reader to build a
+  stack with a static factory on a class that is not exported, at three call sites:
+  
+  ```ts
+  driver: DriverSQL.configure(getDatabaseConfig())
+  ```
+  
+  Measured against the built `dist/index.d.ts`: `DriverSQL` occurs **zero** times,
+  and no `configure` static exists on `SqlDriver` or on anything else the package
+  exports. `DriverSQL.configure()` was never real — the commit that first repaired
+  these snippets elsewhere in the same file (2026-05-07) called it "the imaginary
+  `.configure(...)` static factory", and it fixed only the Basic Usage section, so
+  the page has contradicted itself since: correct `SqlDriver` import at line 43,
+  fabricated `DriverSQL` at 448/482/516. The receiver is a free identifier that
+  imports nothing, which is why `check:published-readme-exports` — both halves of
+  which key on an *imported* name — could not see it.
+  
+  Renaming would not have produced working code, and the sweep this card asked for
+  found the surrounding shape was fabricated too. Every claim on the page was
+  re-measured; the ones that were wrong:
+  
+  - **`defineStack({ driver: … })` does not exist** — the six `driver:` call sites
+    (three `new SqlDriver(...)`, three `DriverSQL.configure(...)`) all named a key
+    `ObjectStackDefinitionSchema` never declared. Since #8687 that schema is
+    `.strict()`, so it does not merely drop the key: `defineStack` **throws**
+    (`Unrecognized key(s) on this stack definition: 'driver'`), and `tsc` refuses
+    the literal with `TS2353`. A driver is a plugin —
+    `plugins: [new DriverPlugin(new SqlDriver({ … }))]`, `DriverPlugin` from
+    `@objectstack/runtime`. The env-var route (`OS_DATABASE_URL`) is documented
+    alongside it.
+  - **Four of the six documented driver methods do not exist.** `driver.raw()` (six
+    call sites) is `execute()`; `checkConnection()` (two) is `checkHealth()`, which
+    resolves `false` rather than throwing, so the try/catch example was wrong in
+    shape as well as in name; `destroy()` is `disconnect()`; `transaction(cb)` is
+    `beginTransaction()` + `options.transaction` + `commit()`/`rollback()`, and the
+    callback's `trx.insert({ object, data })` names nothing at all. `getKnex()` was
+    the only one that resolved.
+  - **`kernel.getDriver()`** — three call sites; `ObjectKernel` has no such member
+    (`getDriver` is *private* on the engine).
+  - **The query AST was wrong in three places.** `find` takes the object name as
+    its first argument, so `find({ object, … })` is an arity error; the filter key
+    is `where` with the ObjectQL dialect (`{ amount: { $gte: 10000 } }`), not
+    `filters: [{ field, operator, value }]`; and sorting is
+    `orderBy: [{ field, order }]` — `sort`/`direction` is the spelling
+    `SortNodeSchema` lists as a retired alias.
+  - **The config type name was wrong.** The page declared
+    `interface SQLDriverConfig`; the export is `SqlDriverConfig`
+    (`TS2724 … Did you mean 'SqlDriverConfig'?`), it is `Knex.Config` plus four
+    ObjectStack keys, and all four — `schemaMode`, `autoMigrate`,
+    `sqliteJournalMode`, `sqliteAbsentFile` — were undocumented.
+  - **A config block that could not load.** The tenant-field example wrote
+    `tenancy: { enabled: true, strategy: 'shared', … }`; `tenancy.strategy` was
+    removed after spec 15.0 (#2763) and is now a tombstone that rejects with a
+    prescription.
+  - **The environment-config example did not compile even setting the fabricated
+    factory aside** — `configs[env]` with `env: string` is `TS7053`, and `ssl` sat
+    at the top level of the config, where Knex does not read it (it belongs to
+    `connection`).
+  - **Every raw-SQL example queried tables that do not exist.** The physical table
+    name *is* the namespace-prefixed object name (`crm_account`, `sys_user`);
+    nothing is prefixed `objectstack_`.
+  - **The Migrations section documented an off-platform workflow** — a `knexfile.js`
+    plus `npx knex migrate:latest`. Schema is reconciled from object metadata
+    (`schemaMode: 'managed'`, `autoMigrate`), reviewed with `os migrate plan` and
+    applied with `os migrate apply`; indexes are declared on the object
+    (`indexes: [{ fields, unique }]`), not issued as DDL. The "always use
+    migrations, never raw DDL" best-practice line said the opposite of how the
+    platform works.
+  - **A dead import.** The Vercel example imported `createClient` from
+    `@vercel/postgres` and never used it.
+  
+  All 19 TypeScript fences on the rewritten page are extracted verbatim and
+  compiled against the built `.d.ts` files the `exports` maps resolve; the two
+  `defineStack` shapes are additionally executed. Docs only — no runtime code
+  changed and no API was added.
+- a9df51c: fix(drivers): withhold the target field from a policy-authored `INVALID_FILTER` refusal (#8197)
+  
+  `#7929`/B stopped `driver-sql` echoing the operands of a cross-field
+  `{ $field }` refusal, and `#8220` gave that withhold a spec-declared provenance
+  mark so an author-written predicate gets its diagnostic back. Neither reached
+  the rest of the `INVALID_FILTER` family: five other refusals still named the
+  refused constraint's own **target column** to every caller.
+  
+  That column is not always the caller's. The security middleware ANDs an
+  administrator's compiled CEL rule into `opCtx.ast.where`, and on such a
+  predicate the target is as administrator-authored as the referent `#7929`
+  already withholds — the argument that ruling accepted, one step out. The most
+  reachable case is a permission rule over a `multiple: true` field, which lowers
+  to a membership test on a JSON-stored column and is refused by `#7398`'s gate
+  while naming the column the administrator wrote.
+  
+  Measured on a real `SqlDriver` (better-sqlite3, `:memory:`) through
+  `driver.find`, all five answered `INVALID_FILTER` / 400 naming the target, and
+  the author-marked spelling was byte-identical to the unmarked one — the mark
+  reached these sites but was never consulted, because none of these builders
+  passed through the withheld-refusal carrier.
+  
+  They now do. The five join the seam `#8220` already owns, with its fail
+  direction unchanged:
+  
+  - the JSON-column operator gate (`#7398`),
+  - the zero-operator field constraint (`#5240`),
+  - the unbindable comparand (`#5041`) — which also answers a **malformed**
+    `{ $field }`, one whose referent is not a string and so never reaches the
+    cross-field arm,
+  - the `$between` arity refusal,
+  
+  plus `driver-turso`'s copied `RemoteTransport.uncompilableComparand`, so one
+  deployment does not disclose differently depending on its connection mode.
+  `driver-sqlite-wasm` inherits `SqlDriver`'s compiler and needed no source
+  change.
+  
+  **Who sees what.** A subtree positively marked `'author'` by a read-scope merge
+  boundary keeps the whole diagnostic, target column included. Everything else —
+  `'policy'`, unmarked, and ambiguous — receives the refusal's identity
+  (`INVALID_FILTER` / 400), which class fired, and the capability statement and
+  repair prescription with placeholder names; the naming half goes to the server
+  log. Unmarked withholds by design: the mark is permission to reveal, never a
+  requirement to prove secrecy, and any design where a missing mark lands on the
+  disclosing branch re-opens `#7929`.
+  
+  **The accepted cost, stated rather than hidden.** The author-vouch surface is
+  two call sites, and `plugin-security`'s is conditional on `ast.where` still
+  being the caller's verbatim object — which fails once `plugin-sharing` has
+  composed (`#8430`). Until that lands, an author on an object with active
+  sharing rules loses the target-field name from these messages. That is
+  fail-closed, and it is the price of the ruling rather than a defect.
+  
+  Redaction takes everything derived from the predicate — the target field, the
+  operator, the comparand preview, the filter path — for the reason `#7929` gave
+  when it withheld both operands rather than one: a comparand preview is the
+  administrator's literal just as surely as a column name is, and half a
+  redaction is none.
+- ab8b10f: test(driver-sql): attribute each `legacyUniqueReplacements` guard to exactly one case (#8557)
+  
+  **`patch`, and deliberately not `none`.** This adds no runtime code and changes
+  no behaviour — every assertion is green on `main` before the change. The bump is
+  the floor rather than a skipped changeset because the file it protects is
+  release-relevant: what lands is the pin that makes a future single-guard
+  deletion visible, and the release notes for the version that first carries it
+  are the place a maintainer looks to learn the pin exists. A `minor` would claim
+  a capability; `none` would leave the protection undocumented at the only moment
+  anyone reads for it.
+  
+  The declared-index replacement arm's guards were **individually unpinned**:
+  measured on #8468, deleting the ADR-0120 S6 name-identity guard, or admitting a
+  declared bare `unique: true` through the scope filter, left the entire suite
+  green — including the two tests whose names say they cover exactly those cases.
+  The protection was real but collective, so no test attributed it to a line, and
+  a refactor could remove any single guard and be told nothing.
+  
+  `schema-drift.legacy-unique-guard-attribution.test.ts` adds that attribution.
+  The existing object-level suites are untouched — they are broader than any one
+  guard, which is why they could not do this job.
+  
+  - **Nine guards are individually attributable.** One input per guard,
+    constructed so only that guard can reject it, each paired with a **twin** —
+    the same input with the single property that guard reads changed, which must
+    produce exactly one replacement. The twin is the reachability witness: without
+    it a case would still pass while some earlier guard swallowed the input, which
+    is the failure mode being fixed, one level up. Measured: deleting any one of
+    the nine turns **exactly one** test red, and its name says which line went.
+  - **Five guards cannot be attributed at all**, because another guard rejects a
+    superset of their inputs — deleting one is behaviour-preserving for every
+    possible argument, so a test claiming to pin it would be lying. For those,
+    what is pinned is the **fact the domination rests on**, so the day it breaks
+    and the guard becomes load-bearing alone, something goes red.
+  
+  Behind the dominated S6 guard are the hand-written organization composites on
+  `sys_team`, `sys_business_unit` and `sys_member` — three shipped platform
+  objects on a spelling valid indefinitely. Those composites are now pinned
+  directly, in both the shipped bare-`true` spelling and the respelled
+  `'organization'` form.
+  
+  The bare-spelling case is the test-side half of a pair whose first half already
+  shipped: #8463 (PR #8512) put the same divergence into prose on
+  `isOrganizationScopedUnique`'s JSDoc, in this same file, with no test attributing
+  it. Routing the declared branch through the field predicate remains the rejected
+  option 1 of #8323 (maintainer ruling 2026-08-13), and is now refused by a test
+  rather than only by a comment.
+- 3b3f67d: Report an un-run MySQL widening ALTER at `error`, naming the fix
+  
+  Boot schema-sync widens legacy MySQL `TIMESTAMP` columns to `DATETIME(3)` and
+  zero-precision `TIME` columns to `TIME(3)`. When that DDL cannot run — most
+  often another session holding the table's metadata lock — the failure is
+  swallowed on purpose so a migration never takes boot down. It was reported at
+  `warn`.
+  
+  That is the case AGENTS.md's degradation rule names for `error` by name: after
+  the swallow the platform boots, serves traffic and looks entirely normal, while
+  the DDL that was supposed to run did not. An un-widened `TIMESTAMP` keeps
+  truncating milliseconds and an un-widened `TIME` keeps rounding fractional
+  seconds to whole ones, against a canonical storage form that promises the
+  milliseconds are kept, and nothing else reports the column as outstanding.
+  
+  Both lines now report at `error` and say what to do about it — identify the
+  metadata-lock holder, end it, then re-run `os migrate apply` or restart, the
+  widening being idempotent. Control flow is unchanged: the swallow stays, and
+  the deferred-DDL flush keeps its loud refusal.
+  
+  `scripts/check-durability-degradation-log-level.mjs` gains `runWideningAlters`
+  in its durability vocabulary, so the class stays fixed rather than these two
+  sites.
+- cd455c8: docs: four published READMEs stop documenting symbols and call sites that do not exist (#9544)
+  
+  All four packages ship `README.md` in their `files` array with `private` unset, so these
+  are the pages npm renders. Each finding was re-measured against the **built `.d.ts`**, not
+  against source, because that is what a consumer resolves through the `exports` map.
+  
+  - **`@objectstack/driver-sql`** — `import type { IDriver } from '@objectstack/spec'` named
+    a type that exists **nowhere in the repository** (0 hits across every package's `src`
+    and `dist`). The real contract is `IDataDriver` on `@objectstack/spec/contracts` — the
+    one `SqlDriver` actually declares (`export class SqlDriver implements IDataDriver`). The
+    adjacent operation list was corrected too: the method is `create`, not `insert`.
+  
+  - **`@objectstack/mcp`** — `DriverSql` has never existed (the export is `SqlDriver`), and
+    the README then called `DriverSql.configure({...})` on it. Renaming alone would have
+    been wrong twice over: `SqlDriver` has **no static `configure` either**, and `driver:`
+    is not a key of `defineStack` at all. The example now declares a datasource the way the
+    shipped templates do. `MCPServerPlugin.configure({...})` — five call sites — becomes
+    `new MCPServerPlugin({...})`, the form the class's own JSDoc and every in-repo caller
+    use. The documented options block claimed `serverName`, `autoRegisterTools`,
+    `autoExposeObjects`, `enableStreaming`, `port` and `debug`; the real
+    `MCPServerPluginOptions` is `name`, `version`, `transport`, `autoStart`, `instructions`,
+    and the env switches are named instead.
+  
+  - **`@objectstack/objectql`** — `registerObject` is an **instance** method, so
+    `SchemaRegistry.registerObject(...)` on the class could never run. The example now
+    reaches it through the engine's registry and states the real parameter order
+    (`schema, packageId, namespace?`).
+  
+  - **`@objectstack/spec`** — the protocol package's own front page imported
+    `MCPServerConfigSchema` from `@objectstack/spec/ai`, which exports `MCPServerRefSchema`.
+    A rename by itself would have swapped a broken import for a broken **parse**: the
+    documented payload was built for a schema that does not exist, and
+    `MCPServerRefSchema.safeParse` rejects it (`transport` is an enum of
+    `stdio | http | websocket`, not an object, and `endpoint` is required and was absent).
+    The example is now a payload that parses green, and the page says plainly that tools,
+    resources and prompts are derived from metadata at runtime rather than authored there.
+- a4acb8d: fix(driver-sql): a merge-path upsert stops rewriting the row's primary key (#8622)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key is
+  renamed, retired or tombstoned. The change is entirely inside
+  `SqlDriver.upsert`'s merge-set construction: one column joins the existing
+  insert-only exclusion set that `created_at` and `auto_number` are already in. -->
+  
+  `upsert(data, conflictKeys)` on a **business key** — the ordinary way to ingest
+  external data — silently replaced the `id` of the row it merged into. Every
+  relationship, audit record, external id mapping and client-held reference
+  pointing at that row was left dangling, with no error raised on any dialect.
+  
+  Measured on a properly BACKED conflict target (`email` declared `unique: true`),
+  so this was the supported path, not an error path:
+  
+  ```
+  upsert({ email: 'x@b.com', title: 'first'  }, ['email'])
+  upsert({ email: 'x@b.com', title: 'second' }, ['email'])
+  
+  [sqlite] before=[{id:'yMh3oywrp0Z6p-oJ', title:'first'}]
+           after =[{id:'d8T8rUlTxlRlaUhN', title:'second'}]   idPreserved=false
+  [pg]     before=[{id:'T3AlYiyDi5buzGvW', title:'first'}]
+           after =[{id:'TvbCTa5mydWPYP76', title:'second'}]   idPreserved=false
+  ```
+  
+  One row throughout, as intended — with a different primary key. `upsert` mints a
+  nanoid for any call that supplies none, and `id` travelled in the merge set, so
+  `… on conflict ("email") do update set …, "id" = excluded."id"` wrote the
+  **losing** insert's fresh id over the winning row's. On the default `['id']`
+  conflict target that clause is a no-op (both sides hold the same value), which is
+  exactly why it stayed invisible for so long.
+  
+  `id` is now insert-only on the merge path, joining `created_at` and the
+  `auto_number` columns (#7011) in `insertOnlyUpsertColumns` — the same exclusion
+  argument at its strongest instance, since the primary key *is* the platform's row
+  identity. It is resolved through `remoteColumn`, because a federated object can
+  bind `id` to a differently-named physical column (ADR-0015 §18) and a literal
+  `'id'` would filter nothing there.
+  
+  **The accept set is unchanged**: the same calls still succeed, still merge, and
+  still advance `updated_at` and every other mergeable column — the merge simply
+  stops rewriting row identity. Re-keying a row deliberately is still `update()`'s
+  job, which writes exactly the columns it is handed.
+  
+  Measured on SQLite and live PostgreSQL 16.13. Live MySQL 8.0.46 measured the same
+  rewrite in #8592 and its characterization pin is rewritten here to assert
+  preservation; that cell had no server available in this container and runs first
+  in CI's `Temporal Conformance (live PG + MySQL)` job.
+- 682b86b: fix(objectql): a caller value containing " - " no longer eats the diagnostic's template head, and no longer leaves its own suffix in the log (#9275)
+  
+  `redactStatementFromMessage` cuts the bound statement off a driver error at the
+  **last** ` - `, because a bound value may itself contain that separator and
+  cutting at the first would leave a fragment of the value standing.
+  
+  When the value the DATABASE inlines into its own diagnostic also contains ` - `,
+  that reasoning inverts: the last separator lands **inside the diagnostic's
+  value**, so the cut discards the template head — the half that could not leak —
+  and keeps a suffix of the caller's data, which is the half that does. Re-measured
+  at HEAD on live PostgreSQL 16.13 with the canary
+  `SENSITIVE-CANARY-9275 - 2026 - Q3`:
+  
+  ```
+  raised:   insert into "t" ("age") values ($1)
+              - invalid input syntax for type integer: "SENSITIVE-CANARY-9275 - 2026 - Q3"
+  logged:   Q3" [statement and bound values redacted]
+  ```
+  
+  `Q3` is the caller's data, at ERROR level, which is what this neighbourhood
+  exists to prevent. Families with a right anchor (`for key …`,
+  `for column … at row N`) already recovered through their `tail` pattern; the ones
+  whose value runs to end of message had nothing to recover from.
+  
+  **The cut is now template-aware.** When a separator in the message stands
+  immediately before a diagnostic head this file has measured, that separator is
+  the true cut point whatever its position: the head survives and the value after
+  it — separator and all — is dropped whole by the template that owns it. After
+  the fix the same error logs
+  `invalid input syntax for type integer: [value redacted] [statement and bound
+  values redacted]`, so the operator keeps strictly more diagnostic than before.
+  
+  **Three families, not the two the card named.** `pg 22003` was left without a
+  head-gone recovery on the reasoning that an out-of-range value is a number and a
+  number cannot contain ` - `. Measured through the driver's own bind path, that is
+  false — Postgres detects the overflow while scanning digits, *before* it rejects
+  the trailing junk, so it echoes the caller's whole string:
+  `insert({ age: '99999999999 - 2026 - Q3' })` logged `Q3` too. It keeps its right
+  anchor, so it takes the #8823 anchor recovery rather than the new cut.
+  
+  The trade this takes deliberately, and its bound: matching a template before the
+  cut lets a hostile value steer where the cut lands. That steering is bounded to
+  **over-redaction, never exposure** — a template may declare a head only if its
+  value runs to end of message, so a cut landing inside a statement is swallowed
+  whole by that template; and the **last** matching head wins, so a value that
+  mimics a head is cut at the mimic and cannot survive behind its own decoy. What a
+  crafted value can do is suppress a real diagnostic; that cost is asserted by its
+  own case rather than left to be discovered. The six identifier-bearing families
+  the live probe pins are untouched — over-matching deletes the diagnostic an
+  operator came for, and remains the expensive direction.
+- 6a1b45e: fix(objectql): stop logging the caller's value for four MORE diagnostic families — measured off live MySQL 8.0 / PostgreSQL 16, not read off a manual (#9160)
+  
+  #8823 established that a database's diagnostic does not always name only
+  IDENTIFIERS: MySQL's `ER_DUP_ENTRY` inlines the conflicting VALUE, and
+  `redactStatementFromMessage` redacts that one slot while keeping the index name
+  an operator needs.
+  
+  The list it introduced had **exactly one entry and no way to notice a second was
+  missing**. Nothing measured whether a diagnostic a driver produced carried a
+  value; the single entry got there because a human read one template closely, and
+  the standing rule (`packages/types/src/unique-violation.ts`) — a dialect's
+  spelling goes in once measured off a thrown error, never from a reading of the
+  manual — correctly prevented the list from growing on a guess.
+  
+  **The instrument now exists.** `sql-driver-diagnostic-value-probe.test.ts` plants
+  a canary, raises each candidate family through the driver's own bind path against
+  the live MySQL 8.0 / PostgreSQL 16 services the `Temporal Conformance (live PG +
+  MySQL)` job already stands up, and asserts of every family — value-bearing or not
+  — **where the canary lands**: `error.message` (which `ObjectLogger.write`
+  serializes, so an exposure) or `error.detail` (which it does not). A family that
+  starts inlining a value it did not inline before is now a named red naming the
+  file to edit, instead of a silent leak.
+  
+  Measured with a positive control first (`ER_DUP_ENTRY`, the known-value-bearing
+  neighbour, reproduced verbatim — without it a zero elsewhere would be
+  uninterpretable):
+  
+  | dialect | family | diagnostic, verbatim | verdict |
+  |:--|:--|:--|:--|
+  | mysql | 1062 | `Duplicate entry 'CANARY' for key 'probe.uq'` | value on `message` (already encoded) |
+  | mysql | 1366 | `Incorrect integer value: 'CANARY' for column 'age' at row 1` | **value on `message`** |
+  | mysql | 1292 | `Incorrect datetime value: 'CANARY' for column 'when_at' at row 1` | **value on `message`** |
+  | mysql | 1264 | `Out of range value for column 'age' at row 1` | identifier only |
+  | mysql | 1406 | `Data too long for column 'label' at row 1` | identifier only |
+  | mysql | 1054 | `Unknown column 'zzz…' in 'field list'` | identifier only |
+  | pg | 22P02 | `invalid input syntax for type integer: "CANARY"` | **value on `message`** |
+  | pg | 22007 | `invalid input syntax for type timestamp with time zone: "CANARY"` | **value on `message`** |
+  | pg | 22003 | `value "99999999999" is out of range for type integer` | **value on `message`** |
+  | pg | 23505 | `duplicate key value violates unique constraint "…"` | value on `detail` only |
+  | pg | 23502 | `null value in column "id" … violates not-null constraint` | value on `detail` only |
+  | pg | 22001 | `value too long for type character varying(20)` | identifier only |
+  
+  Both families the card named as candidates **are** value-bearing, and the
+  Postgres one is the sharper result: #8823 recorded that Postgres escapes the
+  unique-violation leak only because its value sits on `error.detail`, a field the
+  logger never serializes — *"coincidence, not a defence"*. `22P02` / `22007` /
+  `22003` put the caller's value on **`error.message`**, the field that IS
+  serialized, so the coincidence does not cover them.
+  
+  The one-off regex pair is now an enumerable `VALUE_BEARING_TEMPLATES` table, one
+  row per measured family, each citing the live server that produced it. Every
+  identifier-bearing tail is still kept whole — over-matching deletes the
+  diagnostic an operator came for, which is the expensive direction #8682 paid to
+  avoid, and the six identifier-only families above are pinned against exactly that
+  regression.
+  
+  **Known residue, measured and deliberately not closed here:** when the caller's
+  value itself contains ` - `, the statement cut lands inside it and eats the
+  template head. Families with a right anchor (`for key …`, `for column … at row
+  N`) recover; the two whose value runs to end of message (pg 22P02/22007, mysql
+  1292's `Truncated incorrect …` spelling) have no anchor and leave a suffix
+  standing. Closing that requires the cut itself to become template-aware — a
+  change to #8682's contract, filed rather than decided.
+- Updated dependencies [56656aa]
+- Updated dependencies [07e630e]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [2782805]
+- Updated dependencies [e43d63a]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [899052a]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [2d0af57]
+- Updated dependencies [420804d]
+- Updated dependencies [716ac9b]
+- Updated dependencies [a38408a]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [27a567d]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [1e050a5]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [24173e9]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [f8eb736]
+- Updated dependencies [11b779e]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [e2899f6]
+- Updated dependencies [3851f87]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [e1bb0ca]
+- Updated dependencies [30d3752]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [402c125]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [44bc51d]
+- Updated dependencies [bbbfcfc]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+  - @objectstack/spec@17.1.0
+  - @objectstack/types@17.1.0
+  - @objectstack/core@17.1.0
+  - @objectstack/observability@17.1.0
+
 ## 17.0.0
 
 ### Major Changes

@@ -146,11 +146,12 @@ import { stripCodeSpans, stripFencedBlocks } from './check-adr-links.mjs';
  * substring of it rather than a second constant, so the two cannot drift apart
  * — the failure that would otherwise replace a silent gate with a lying one.
  *
- * What this does NOT reach: `EXTRA_SOURCES` below. A top-level FILE name
- * carries no separator either, and teaching the scanner to accept one would
- * admit every `package.json` basename in the tree. A card editing only
- * `README.md` or `ARCHITECTURE.md` still has to reach this gate by judgment;
- * that residue is recorded in `hintCovers`' docblock as a decided loss.
+ * What this constant does NOT reach: `EXTRA_SOURCES` below. A top-level FILE
+ * name carries no separator either, and teaching the scanner to accept one
+ * would admit every `package.json` basename in the tree — that widening stays
+ * refused, and `hintCovers`' docblock carries the measurement. Those two files
+ * are declared instead, one line down, in the subtree spelling the extractor
+ * already accepts; they no longer depend on a dispatching seat's judgment.
  */
 const CONTENT_GLOB = 'content/**';
 
@@ -160,6 +161,33 @@ const CONTENT_ROOT = CONTENT_GLOB.slice(0, CONTENT_GLOB.indexOf('/'));
 
 /** Link sources outside `content/`, matching the lychee globs. */
 const EXTRA_SOURCES = ['README.md', 'ARCHITECTURE.md'];
+
+/**
+ * `EXTRA_SOURCES` above, declared for `scripts/pm/dispatch-gates.mjs` (#9979,
+ * applying #9964's pattern).
+ *
+ * `CONTENT_GLOB` closed the `content/**` half of this gap; these two files were
+ * the remainder, and they are the ones it costs most to miss. This gate is
+ * REQUIRED in lint.yml and is the repo's ONLY fragment coverage
+ * (`check-links.yml` sets `include_fragments = "none"` and says so — a link to
+ * a heading that does not exist is reported `[200] OK` there). Until this
+ * declaration, a card editing only `README.md` or `ARCHITECTURE.md` derived
+ * ZERO gates and met that coverage as red CI instead of as a local command.
+ *
+ * `<file>/**` is the form that reaches a repo-root file: the extractor requires
+ * a separator, and `collapseHint` reduces the hint back to that one path before
+ * comparing. Nothing in this tree lives under `README.md/` or
+ * `ARCHITECTURE.md/`, so neither claims a directory, and a same-named file
+ * inside one (a package's own `README.md`) is not reached — which is correct,
+ * because this gate reads the repo-root pair and nothing else.
+ *
+ * ⚠️ Provenance, NOT a lookup key. `listSources` joins each `EXTRA_SOURCES`
+ * entry with the repo root and stats it; the glob spelling appearing there
+ * would make every extra source vanish from the sweep — silently, since
+ * `existsSync` filters them out, which is the "checked nothing, reported green"
+ * disease this file's own header opens with. The self-test pins both halves.
+ */
+const ROOT_FILE_WATCH_HINTS = ['README.md/**', 'ARCHITECTURE.md/**'];
 
 const PAGE_EXTENSIONS = ['.mdx', '.md'];
 
@@ -541,6 +569,32 @@ function selfTest() {
   //    clean corpus apart from an extractor that matches nothing.
   const live = sweep();
   assert(live.checked > 0, 'the real corpus yielded zero fragment links — the extractor is over-stripping');
+
+  // 8. The dispatch-gates declaration (#9979). Enforcement cannot hold any of
+  //    these: the declaration is read by another tool entirely, so a wrong or
+  //    missing entry runs perfectly green here and shows up only as a dev
+  //    dispatched on a README.md / ARCHITECTURE.md card who is not told that
+  //    this REQUIRED gate — the repo's only fragment coverage — reads it.
+  assert(
+    EXTRA_SOURCES.every((f) => ROOT_FILE_WATCH_HINTS.includes(`${f}/**`)),
+    `every extra source declares a root-file watch hint: ${EXTRA_SOURCES.join(', ')} vs ${ROOT_FILE_WATCH_HINTS.join(', ')}`,
+  );
+  assert(
+    ROOT_FILE_WATCH_HINTS.every((h) => EXTRA_SOURCES.includes(h.replace(/\/\*+$/, ''))),
+    `the declaration names no file this gate does not read: ${ROOT_FILE_WATCH_HINTS.join(', ')}`,
+  );
+  // Provenance, never a lookup key: `listSources` joins each EXTRA_SOURCES
+  // entry with the repo root, so the glob form there would drop both from the
+  // sweep — and `existsSync` would drop them SILENTLY.
+  assert(
+    !EXTRA_SOURCES.some((f) => ROOT_FILE_WATCH_HINTS.includes(f)),
+    'the declared form is NOT an EXTRA_SOURCES entry — it would silently empty the extra-source half of the sweep',
+  );
+  // The population the declaration claims is the one the gate really reads.
+  assert(
+    ROOT_FILE_WATCH_HINTS.every((h) => listSources(process.cwd()).includes(h.replace(/\/\*+$/, ''))),
+    'the declared root files are in the live source population this gate sweeps',
+  );
 
   console.log(
     `✅ check-doc-anchors --self-test: slug parity, custom ids, duplicate counters, extraction discrimination and both finding classes verified (${live.checked} live fragment links)`,

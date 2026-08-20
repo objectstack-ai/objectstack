@@ -104,6 +104,11 @@ export type {
     SeedTenancyCollision,
 } from './migrations/seed-tenancy-backfill.js';
 export type { UninstallCleanup, UninstallCleanupOutcome } from './protocol.js';
+// [#9960] The ONE declared shape of the `deletePackage` seam, exported so the
+// two consumers that speak it (`@objectstack/rest`'s direct-mount package
+// registrar and the `@objectstack/runtime` dispatcher twin) type the seam
+// against the producer's contract instead of restating it locally.
+export type { DeletePackageRequest, DeletePackageResponse } from './protocol.js';
 export type { MetadataMutationEvent, MetadataMutationProjector, MutationProjectionOutcome } from './protocol.js';
 export type { MetadataAuthoringGate, MetadataAuthoringGateContext } from './protocol.js';
 

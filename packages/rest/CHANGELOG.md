@@ -1,5 +1,1067 @@
 # @objectstack/rest
 
+## 17.1.0
+
+### Minor Changes
+
+- 66dbec4: fix(rest): the flat error responder narrows a thrown `code` to the declared ADR-0112 vocabulary, demoting an unregistered spelling to `declaredCode` (#9232)
+  
+  **If you read `error.code` off a `packages/rest` flat error body today, read this.**
+  
+  `packages/rest` answers errors in the flat dialect — `{ error: 'message', code: 'X' }`,
+  with `code` at the body's top level. Until now, when that body came from a *caught*
+  error, whatever string the producer had put on `.code` was copied to the wire verbatim,
+  including spellings that are not members of the ADR-0112 error vocabulary
+  (`StandardErrorCode` plus the registered ledger). Every other HTTP door in the platform
+  had already stopped doing that.
+  
+  It stops here too. A thrown `code` is now resolved exactly as the dispatcher door
+  resolves it, by the same shared `resolveThrownHttpError` / `demotedDeclaredCode` pair:
+  
+  - **A registered code is unchanged.** It still arrives in `code`, verbatim, with nothing
+    added beside it. If your branches read registered codes — and every consumer branch
+    measured in this repo, the SDK and the console does — nothing about your code changes.
+  - **An unregistered code is demoted.** `code` now carries the vocabulary member the HTTP
+    status derives (a 403 gives `PERMISSION_DENIED`, a 409 `RESOURCE_CONFLICT`, and so on),
+    and the producer's own spelling moves, unchanged, to a new top-level `declaredCode`
+    field beside it. Nothing is lost — but a branch written against an *unregistered*
+    spelling in `code` will stop matching, and must read `declaredCode` instead.
+    Presence of `declaredCode` means demotion: it is absent whenever the producer's code
+    was recognised.
+  - **A throw that declared no code still carries none.** Narrowing the vocabulary does not
+    start inventing codes for bodies that had none.
+  - **A non-string `code` no longer reaches the body at all.** A numeric driver errno could
+    previously land in `code`; it was never a legal value there and is now treated as
+    context, as it already was at every other door.
+  
+  The observable case in this repo: the object-posture gate's `403 owd_widening_forbidden`
+  now answers `{ code: 'PERMISSION_DENIED', declaredCode: 'owd_widening_forbidden' }`. That
+  body could not previously satisfy the schema it claimed to satisfy.
+  
+  The error body's **position** is unchanged — this dialect still puts `code` at the top
+  level rather than in `error.code`. Converging the position is a separate, still-open line
+  held by the `check:route-envelope` ratchet, and was explicitly not a precondition here.
+- b537855: fix(rest): `POST /meta/:type/:name/publish` and `.../rollback` require the `manage_metadata` capability (#8919)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Two route handlers gain
+  the capability gate their four sibling doors already carry, plus one new test
+  file. No authorable property is added, renamed, retired or tombstoned, so there
+  is no conversion to register. The behavioural change is that two metadata write
+  doors stop accepting callers who hold no authoring capability. -->
+  
+  **BREAKING for any integration that publishes or rolls back metadata with a
+  principal holding no authoring capability.** Landing after the v17.0.0 cut, so
+  it ships as `minor` under the lockstep launch-window convention.
+  
+  `packages/rest` gates four metadata-authoring doors on ADR-0066 D1's
+  `manage_metadata` capability — `POST /meta/_migrate-stored`, `PUT /meta/:type/:name`
+  (#6603), `PUT /meta/:type/:section/:name` and `DELETE /meta/:type/:name` (#7019).
+  The two **promotion** verbs did not, and promotion is what decides which body is
+  live: `publishMetaItem` flips the `sys_metadata` row `state: 'draft'` to
+  `'active'` (ADR-0027 (E)(5) defines sealing a publish as exactly that flip), and
+  `rollbackMetaItem` restores a caller-supplied `toVersion` as the new live row.
+  
+  **Measured through a composed host, down to the protocol layer, before the fix:**
+  
+  | principal | publish | rollback |
+  |:--|:--|:--|
+  | anonymous | 401, protocol not reached | 401, protocol not reached |
+  | authenticated, **no** `manage_metadata` | **200, protocol reached** | **200, protocol reached** |
+  | authenticated, `manage_metadata` | 200, protocol reached | 200, protocol reached |
+  
+  So the reachable cohort was every authenticated principal holding no authoring
+  capability at all: it could take a draft somebody else authored and make it
+  live, or restore any historical version over the live row. Anonymous callers
+  were already refused by the `/meta` umbrella (`registerMetadataEndpoints`), so
+  what these gates add is precisely the authenticated-but-uncapable cohort.
+  
+  **`rollback` is the sharper of the two.** The caller supplies `toVersion`, which
+  makes it a mechanism for reverting security hardening — a permission set as it
+  stood before it was tightened, a validation rule from before it existed, a
+  layout from before field-level security. It is also the door with the least
+  behind it: publish at least re-runs `assertRuntimeAuthoringRules` on the
+  promoted draft (#4463 D1), while rollback runs no content gate at all. Neither
+  of those reads the caller in any case — D1 answers "is this metadata valid", not
+  "may you press this button" — so nothing downstream was ever doing this job.
+  Audit rows are still written either way, so the action remains traceable after
+  the fact.
+  
+  **No legitimate caller loses anything, and that is measured rather than
+  assumed.** The Studio designer's save-then-publish loop saves `?mode=draft` and
+  then POSTs `/publish`, and its **first** step already demanded
+  `manage_metadata` — so every principal that can author a draft already clears
+  the new gate. The shipped sets bear this out: `admin_full_access` (the only set
+  carrying `studio.access`) carries `manage_metadata` too, while
+  `organization_admin` and `member_default` are refused at the save door **today**.
+  The only callers the gap benefited were exactly the ones already refused the
+  authoring door — able to promote a draft they could not have written.
+  
+  **Migration — grant `manage_metadata` to any service principal that publishes.**
+  An integration that promotes metadata on its own schedule (a CI job sealing a
+  release, an AI authoring agent) needs the capability explicitly; there is no
+  automatic replacement, deliberately. `isSystem` contexts bypass, as on every
+  other capability gate on the platform, so in-process callers are unaffected.
+  
+  The gate is the sibling doors' four lines verbatim, deliberately not a second
+  way of demanding the same capability, and it fires **before** the protocol is
+  resolved so 403-vs-501 leaks no kernel capability and nothing is promoted before
+  the refusal.
+  
+  ⚠️ **An author/publisher capability split is NOT introduced here.** Separating
+  "may write a draft" from "may make it live" is a defensible design, but it needs
+  a *different* declared capability and is a product decision; both defensible
+  designs require a gate, and the state this fixes was neither.
+  
+  Ships with an **enumeration pin** rather than two assertions. The defect was not
+  that two handlers forgot a gate — it was that the gate was a convention held by
+  repetition and nothing else, so the next metadata write door had a one-in-three
+  chance of copying an ungated neighbour with no test going red. The new suite
+  derives the write doors from the composed server's own route table and compares
+  them against a declared list, so a new mutating `/meta` route fails the build
+  until it is enumerated and its refusal asserted.
+- 4dc8a61: **Audit attribution change — the recorded actor on `/meta` writes is now the authenticated identity, and `X-Actor` is ignored.** All five `/meta` write sites (save, delete/reset, publish, rollback, compound save) stamp `sys_metadata_audit.actor` and `sys_metadata_history.recorded_by` with the identity the request was actually authorized as. A request that sends `X-Actor` is recorded against its own authenticated caller, not the header's value. Maintainer ruling 2026-08-12 on #7941, re-confirmed 2026-08-15.
+  
+  Why: the header used to outrank the authenticated identity. That ordering was inert for as long as the other limb produced nothing — `req.user` / `req.userId` are never set on this transport — so nothing depended on it. Fixing that producer (#7749) made the precedence load-bearing for the first time, and what it then meant was that any caller already holding `manage_metadata` could sign somebody else's name to a metadata write: the compliance trail answered "who *claimed* to change this" rather than "who changed this", which is the question #7749 was filed to make answerable. Attribution now cannot drift from authorization, because both read the same `resolveExecCtx` the route's own capability gate reads.
+  
+  The header limb is **removed rather than reordered**. The ruling permitted keeping it for genuine machine/system callers with no authenticated user, but only if a consumer census showed that shape exists — it does not, so a caller cannot choose the recorded name in any shape, including on the machine-write path where there is no identity for the header to lose to.
+  
+  Deliberately unchanged:
+  
+  - **Real impersonation still attributes correctly.** The platform's impersonation is session-level (better-auth admin plugin, `sys_session.impersonated_by`), so `resolveExecCtx` already resolves to the impersonated user and their metadata writes are recorded against them. Nothing in that path went through `X-Actor`.
+  - **Machine and anonymous writes.** No resolved principal still means no actor, so the protocol's own `'system'` / `NULL` defaults apply exactly as before — a machine write is never stamped with a real user.
+  - **Sending `X-Actor` is not an error.** It is ignored, not rejected; no request that succeeds today starts failing.
+  
+  Who is affected: any caller that relied on `X-Actor` to attribute a `/meta` write to somebody other than itself. The census over `objectstack` and `objectui` found no such caller — `objectui`'s `MetadataClient` can send the header through an optional `options.actor`, but nothing in that repo ever passes one, leaving that option inert against this server.
+
+### Patch Changes
+
+- e7bccaa: fix(rest): anchor `looksLikeMissingRelation` on the driver's quoted template (#8264)
+  
+  `mapDataError`'s Postgres limb read `relation` and `does not exist` anywhere in
+  the message, not necessarily the same sentence — so ordinary business prose
+  using both words (`This relation does not exist in the diagram`) matched.
+  `does not exist` is ordinary business English; #8132 already anchored the
+  shared `@objectstack/types` leak predicate on the driver's own quoted
+  template for exactly this reason, and pinned the identical string as a
+  negative case. This file's copy of the same question was not covered by that
+  change (different package, different call site) and kept the loose reading.
+  
+  Anchored the same way here — a quoted identifier required between `relation`
+  and `does not exist` — as a locally-owned pattern rather than a call into the
+  shared leak predicate: that
+  predicate answers a different question ("may this be withheld from the
+  client"), and its other limbs (`sqlite_`, `unique constraint`, `foreign key`,
+  a bare SQL statement) have nothing to do with this file's question (is this
+  specifically an unknown-relation condition, for the 404-vs-500 split
+  `looksLikeMissingRelation` feeds). `relation-sub-object.ts` documents "two
+  widths, on purpose" for a neighbouring pair of consumers that ask genuinely
+  different questions; that does not extend to the two USES inside this file,
+  which both ask the same question and share one predicate correctly.
+  
+  **Both of the predicate's two call sites are covered, not just the reported
+  one:** the `DATA_STORE_FAULT` (500) gate the issue named, and the
+  `looksLikeUnknownObject` (404) limb the issue's own text did not measure. A
+  business message no longer gets mislabelled a `DATABASE_ERROR`, and a
+  crafted unquoted-but-attributable message no longer gets silently answered
+  `OBJECT_NOT_FOUND` — both now fall through to the generic, still-sanitised
+  terminal fault, which is the direction the branch's own #5462 comment already
+  argues for ("the safe way to be wrong is loud").
+  
+  No reachable production path producing the unanchored shape was found at this
+  call site — this is consistency/invariant restoration between two spellings
+  of one question, not a fix for a demonstrated live misclassification.
+- 5047cb8: fix(metadata-protocol): scope the metadata audit read to the caller's organization (#8747)
+  
+  `ObjectStackProtocolImplementation.auditMetaItem` declared
+  `organizationId?: string | null` and never read it. The comment directly above
+  its query described the filter it would have built — "include rows for the
+  specific org AND env-wide (`organization_id IS NULL`) rows" — while the `where`
+  was exactly `{ type, name }`. The parameter was dead on the caller side too:
+  `GET /api/v1/meta/:type/:name/audit` never passed one.
+  
+  The consequence was a cross-tenant disclosure, measured rather than inferred:
+  three saves of one view name under two organizations and env-wide, then one
+  `auditMetaItem({ type, name })` read, returned all three organizations' rows —
+  and with each row its `actor`, `note`, `lock_state`, `code`, `operation`,
+  `source` and `request_id`. Nothing compensated lower down. The driver's tenant
+  wall never engaged, because it is armed only from an execution context this
+  read did not pass; the security plugin's Layer 0 never engaged, because the
+  middleware short-circuits on a principal-less call long before the field gate
+  that would have carried it; and no tenancy posture would have supplied the
+  scope either. The route carries no capability gate — unlike its `PUT` twin,
+  which gates on `manage_metadata` — so the reachable cohort was any
+  authenticated principal of any tenant, on the published `meta.getAudit` SDK
+  surface.
+  
+  The query now builds the described filter: rows for the caller's organization
+  plus env-wide (`organization_id IS NULL`) rows, and nothing else. The env-wide
+  limb is load-bearing rather than defensive — the REST `PUT /meta/:type/:name`
+  door passes no organization, so every row it writes is stamped
+  `organization_id: null`, and an equality-only filter would have blanked the
+  audit tab on those deployments instead of scoping it. A read that resolves no
+  organization is fail-closed onto the env-wide rows, symmetric with what an
+  org-less write produces, so omitting the parameter is no longer a skeleton key.
+  
+  The REST route supplies the organization from the execution context it already
+  resolves for 40-plus handlers, adding no new organization-resolution plumbing
+  to `packages/rest`. The same call also stopped passing `environmentId`, which
+  the request type never declared and the method body never read; environment
+  scoping is unaffected, since it comes from which protocol instance is resolved
+  rather than from the request payload.
+  
+  Behaviour change worth stating plainly: a caller that previously saw another
+  tenant's metadata audit rows for a same-named item no longer sees them. Own-org
+  and env-wide rows are unchanged.
+- ed4ca59: fix(rest): a missing `auditMetaItem` capability is refused, not answered as "this item has no audit trail" (#9426)
+  
+  `GET /api/v1/meta/:type/:name/audit` feature-detects `auditMetaItem` on the
+  resolved protocol. When the method was absent the route answered
+  `200 { events: [] }` — so a **capability gap** reached the wire as the statement
+  **"the audit trail was read and this item has no entries"**.
+  
+  Per ADR-0110 D3 those are different facts, and this one is a **compliance**
+  surface. The route's own comment says it exists so Studio's 审计日志 / Audit log
+  tab can show "who tried what and whether a lock blocked it". An empty answer
+  there reads as *nobody touched this item* — precisely the claim a compliance
+  reader must not be given on false pretenses.
+  
+  The branch now refuses:
+  
+  ```
+  501  { error: { code: 'NOT_IMPLEMENTED',
+                  message: 'protocol.auditMetaItem() is not available in this kernel' } }
+  ```
+  
+  — the ADR-0112 nested envelope the sibling `/meta` 501 refusals converged on
+  (#7035), so `body.error.code` is readable by the same one line of consumer code
+  that already reads the others. This is the last limb in `rest-server.ts` that
+  answered a capability gap with a well-formed empty collection; #9326 / PR #9425
+  fixed the `findReferencesToMeta` twin, and five siblings already refused.
+  
+  **The unprovisioned-table answer is unchanged, and the two were never the same
+  path.** The route's header comment promises "Empty array on environments where
+  the table is not yet provisioned" — that condition is handled one layer down, in
+  `ObjectStackProtocolImplementation.auditMetaItem`, whose `catch` returns
+  `{ events: [] }` after a `console.warn`. That path requires the method to exist
+  and to be called; this branch returns before the call. Separate frames, separate
+  packages.
+  
+  **Does any caller's observed response change? Yes, on one deployment shape, and
+  only there.** A protocol that *has* the method is untouched: an empty trail and a
+  populated one both still pass through verbatim as `200`. What changes is the
+  answer given when the protocol has no such method — previously `200` with an
+  empty list, now `501`. No assembly in this repo produces such a protocol today:
+  `ObjectStackProtocolImplementation` is the only implementation registered under
+  the `protocol` service and it defines the method unconditionally. The branch is
+  reachable rather than dead because `auditMetaItem` is **not** a member of
+  `RestProtocol` (`= DataProtocol & MetadataProtocol`) and is not declared in
+  `@objectstack/spec` at all — it is an ADR-0076 D9 server-only extension reached
+  through a runtime cast. A host that implements the declared contract exactly, or
+  that points `protocolServiceName` at its own service, is a *conforming*
+  deployment that lands on this branch with no type error.
+  
+  Refusing at the route rather than asserting at assembly is deliberate: a
+  boot-time assertion would promote an undeclared optional extension into a
+  required one, which is a contract decision for `@objectstack/spec` rather than a
+  route one, and it would reject the partial protocol doubles that legitimately
+  exist today.
+- c766ec3: refactor(metadata-protocol,rest,runtime): one declared shape for the `protocol.deletePackage` seam, imported by both doors (#9960)
+  
+  `deletePackage` had **three** independent statements of its own contract, and
+  they did not agree:
+  
+  | site | what it said |
+  |---|---|
+  | `packages/metadata-protocol/src/protocol.ts` (the producer) | an inline structural type on the method — `packageId`, `organizationId?`, `allTenants?`, `actor?`, `keepData?` |
+  | `packages/rest/src/package-routes.ts` (direct-mount option) | `{ packageId; actor?; allTenants? }` — named **neither** `organizationId` **nor** `keepData`, and its response omitted `deleted` |
+  | `packages/runtime/src/domains/packages.ts` (dispatcher twin) | nothing at all — it reached the verb through `(protocol as any)` |
+  
+  The twin routinely sent exactly the two keys the REST option's type could not
+  express, and the only reason that was not a compile error was the cast.
+  
+  `organizationId` is the member that makes this load-bearing rather than
+  cosmetic: the protocol refuses a call naming neither it nor `allTenants`
+  (`TENANT_SCOPE_REQUIRED`, 400), so it is precisely the key whose presence
+  decides an uninstall's blast radius — and it was the key one of the two doors
+  had no word for.
+  
+  **What changes:** `DeletePackageRequest` and `DeletePackageResponse` are
+  declared once at the producer and exported from `@objectstack/metadata-protocol`
+  (the only user-visible half of this change — two additive type exports); both
+  consumers import them, and the `as any` seam is gone. `@objectstack/rest` also
+  gains three compile-time pins over its option, in compiled source rather than a
+  test file, so a later hand-rolled restatement fails `tsc` instead of drifting
+  green.
+  
+  **What does not change:** nothing about what the verb accepts or returns. The
+  members are identical to the ones the implementation already had, the live call
+  sites send the same keys, and the emitted JavaScript of both consumers is
+  unchanged. The member stays optional at both seams and the runtime's
+  `typeof … === 'function'` capability probe stays — the `protocol` service slot
+  is deliberately uncontracted, the spec's `PackageProtocol` does not declare this
+  verb, and registrants carrying no `deletePackage` are real.
+  
+  No `packages/spec` declaration: minting protocol surface for a verb with zero
+  external consumers is a spec-seat decision nobody has asked for.
+- 51a46a4: fix(rest): `/discovery` describes the request's environment, not the control plane (#9292)
+  
+  `registerDiscoveryEndpoints`' handler opened with `this.protocol.getDiscovery()` — the
+  **control-plane** protocol captured at construction — while roughly thirty sibling
+  handlers in the same file obtain theirs from `resolveProtocol(environmentId, req)`.
+  Everything else in the handler composes over that one document, so the entire body
+  followed the host's kernel. `/discovery` is the surface SDKs, codegen and AI clients read
+  to decide what a deployment can do.
+  
+  **Yes, an observed document changes** — on multi-environment and single-environment
+  deployments. On a control-plane-only boot nothing changes at all.
+  
+  The sharper half is the **scoped** route. `registerRoutes` registers the same closure for
+  the unscoped base and for `.../environments/:environmentId`, so
+  `GET /api/v1/environments/abc/discovery` — a request naming its environment in the URL —
+  still received the control plane's document.
+  
+  **Measured on a two-kernel host before the fix**, with real `getDiscovery()` producers
+  per environment: two environments with genuinely different kernels received
+  **byte-identical** `capabilities`, `services` and `locale`, and both received the
+  *host's* answers rather than either environment's. For the richer of the two tenants that
+  meant all 13 capability keys wrong (`transactionalBatch`, `automation`, `cron`, `export`,
+  `comments`, `analytics`, `ai`, `i18n` each reported `false` while the environment
+  delivered them), its whole `services` map wrong, its `locale` wrong (`en` reported for an
+  environment serving `zh-CN`), four of its real route keys missing, and a phantom
+  `routes.notifications` advertised that no tenant could serve.
+  
+  That is wider than a two-capability defect because the builder derives the whole document
+  from its own kernel: the `services` map and the optional `routes` keys come from that
+  kernel's service registry, `locale` from its `i18n` occupant, and the capabilities from
+  its engine and registry.
+  
+  The unscoped route reaches the same shared resolution
+  (`resolveRequestEnvironmentId`, ADR-0076 D11 step ④) rather than getting a special case,
+  and keeps the control-plane answer exactly where that is the correct one: with no
+  environment in scope the chain returns `undefined` and `resolveProtocol` falls through to
+  the captured control-plane protocol. A single-environment boot resolves through step 3
+  (the default provider) and now describes the kernel that actually serves its data; a
+  hostname-routed multi-tenant host follows the same authority the HTTP dispatcher uses, so
+  `/discovery` and the data routes beside it describe one kernel.
+  
+  Two halves of the handler were already correct and are unchanged: the `realBase` route-
+  string substitution and the trailing `scoping` block already read
+  `req.params.environmentId`. The `version` field is overwritten from server config on
+  every request and never followed the wrong protocol either.
+- 3ab2488: fix(rest): stamp the export download's filename in the business timezone (#8484)
+  
+  `exportContentDisposition` built the `-YYYYMMDD-HHMMSS` half of the suggested
+  filename from process-local getters (`now.getFullYear()` / `getHours()` / …),
+  which read the deployment host's `TZ` — a hosting fact, not the caller's
+  business timezone. The route had already resolved that timezone one frame up
+  (`ExecutionContext.timezone`, the platform-default → global → tenant cascade)
+  and simply never passed it here.
+  
+  After #8373 moved the export's **contents** onto the business timezone, the
+  filename was the last export surface still on the host clock, so the two
+  disagreed exactly when `TZ` was not the business zone: a container at `TZ=UTC`
+  serving an Asia/Shanghai tenant downloaded `orders-20260731-220000.csv` whose
+  first row read `2026-08-01 06:00:00` — off by a day, and at a month boundary by
+  a month. The name and the rows inside it now read one clock.
+  
+  **The no-timezone fallback stays PROCESS-LOCAL, deliberately not UTC.** This is
+  the opposite of the cell path's UTC fallback, and the asymmetry is the point:
+  each fallback preserves the historical output of the surface it serves. The
+  cells were hardcoded to UTC before #8373; this filename has always used the
+  process clock. Defaulting it to UTC would look safer while silently re-timing
+  the filename of every deployment that sets a host `TZ` but resolves no business
+  timezone — a user-visible rename for zero correctness gain. An explicitly
+  resolved `'UTC'` is a *resolved* zone, not a missing one, and does produce a UTC
+  stamp regardless of the host.
+  
+  The shared clock helper is split rather than parameterised with a default:
+  `zonedWallClock` now returns `null` when no usable zone resolves, and each of
+  the two callers supplies its own fallback at the call site where it can be read
+  and pinned. Baking either fallback into the shared helper would silently
+  re-time the other surface.
+  
+  Filename **naming** is untouched — label selection, sanitization and the RFC
+  5987/6266 `filename*` encoding all behave exactly as before, and the export's
+  contents are not touched at all.
+- 185c7bd: fix(security): the external-datasource federation HTTP family requires an authenticated caller, on every route (#9686)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The change is an
+  authentication floor on five mounted HTTP routes plus the composition edge that
+  feeds it the caller's identity. No authorable metadata key is added, renamed,
+  retired or tombstoned, and no stored shape changes, so there is no conversion to
+  register. The behavioural change is that `/api/v1/datasources/:name/external/*`
+  now answers `401 UNAUTHENTICATED` to a caller with no resolvable identity, where
+  it previously served every route — including the two that write. -->
+  
+  `registerExternalDatasourceRoutes` mounts the five federation routes
+  (`GET .../external/tables`, `POST .../external/tables/:remote/draft`,
+  `POST .../external/tables/:remote/import`, `POST .../external/refresh-catalog`,
+  `POST .../external/validate`) straight onto `IHttpServer`, so they pass through
+  none of the seams that produce the platform's 401s: `RestServer.enforceAuth` is
+  a private method invoked inside that server's own handlers — not middleware a
+  direct mount is routed through — and the dispatcher domains' floor runs inside
+  the dispatcher. Being composed by `RestServer` was not itself a guard.
+  
+  **The missing piece was an edge in the composition, not a line in a handler.**
+  `mountAndRecordDirectRoutes` resolves the `RestServer`'s execution-context
+  resolver and handed it to ONE of the two registrars it mounts:
+  `registerPackageRoutes` got the identity and applied the shared anonymous floor,
+  `registerExternalDatasourceRoutes` got nothing and checked nothing. The resolver
+  now reaches both, and the federation registrar applies the same floor:
+  
+  - the **decision** is `shouldDenyAnonymous` (`@objectstack/core`), the one
+    function every HTTP seam on the platform shares — `isSystem` is not settable
+    from the wire and a CORS `OPTIONS` preflight passes, both by its construction;
+  - the **identity** is the `RestServer`'s own resolver, which admits every
+    credential kind the platform admits — a better-auth session *and* a
+    `sys_api_key`. This family is SDK-expressed (`datasources.external.*` on
+    `ObjectStackClient`), so a floor that read only a session would have refused
+    callers the rest of the surface accepts;
+  - it **fails closed**: anything that throws, and anything resolving to no
+    identity, is refused. No configuration, posture or absent service opens it;
+  - the check runs **before** the service lookup, so an anonymous caller cannot
+    learn from a `503` which services a deployment has wired — and, on the two
+    routes that change state, the refusal provably precedes the write;
+  - the 401 is written through this surface's shared `sendError`, so the status,
+    code and message are the platform's while the envelope stays this family's.
+  
+  **A pinned equivalence is restored, not merely an exposure closed.**
+  `GET .../external/tables` and `GET /api/v1/datasources/:name/remote-tables` reach
+  the same `listRemoteTables`; `POST .../external/tables/:remote/draft` and
+  `POST /api/v1/datasources/:name/object-draft` reach the same
+  `generateObjectDraft`. #4249 gave those two spellings one failure contract and
+  #7955 one request shape. After the datasource-admin family grew its own floor
+  (#9391), one operation answered 401 at one spelling and served anonymously at
+  the other. `remote-tables-twin.equivalence.test.ts` now compares the two on the
+  admission axis as well, so a guard added to one spelling and not the other fails
+  whichever side it is added to.
+  
+  Authentication and nothing more: whether these routes should further require a
+  capability is the separately-ruled question #9593 asks of the admin family, and
+  is deliberately not folded in here.
+- 45862a5: refactor(rest): the non-door `getMetaItems` request literals are compiled against the declared contract (#9805)
+  
+  Nine `getMetaItems` call sites in `packages/rest/src/rest-server.ts` outside the
+  four meta-read doors still passed their request through `as any` (or through a
+  `p: any` parameter), so the compiler checked nothing about them. Every member
+  they thread has been expressible in declared types since #9741 landed
+  `previewDrafts` on `GetMetaItemsRequest` and the `TransportScopedMetaRequest`
+  envelope for the transport-level `environmentId` — the casts were pure
+  blindness, and an un-typed request literal is exactly the class that lets a
+  future key drift silently.
+  
+  Each literal is now a named const typed
+  `TransportScopedMetaRequest<GetMetaItemsRequest>` (or plain
+  `GetMetaItemsRequest` where the site threads no `environmentId`), the same shape
+  #9741 gave the doors: the object-metadata read behind the API-exposure gate, the
+  audience book fetch, the book-tree book and doc listings, the doc corpus behind
+  the audience resolver, the public-form view lookup, the public-form object
+  schema, the public-lookup reference resolution, and the dataset listing.
+  
+  **No behaviour change of any kind, and nothing about the wire moves.** The
+  outgoing payloads are byte-identical (same keys, same conditional spreads); the
+  edit hoists each literal into a const and drops a type-level cast. Two spellings
+  at these sites deliberately SURVIVE, because retiring either would change
+  behaviour rather than typing, and both are now documented on the envelope alias:
+  
+  - the optional call (`getMetaItems?.(…)`) and the `typeof … === 'function'`
+    guards — `getMetaItems` is a required `MetadataProtocol` member, so these are
+    not feature detection in the type sense, but a host may occupy the protocol
+    slot with an object that does not implement the whole surface (the reason
+    `metaTypeIsLive` documents the same spelling for `getMetaTypes`). Retiring one
+    turns a tolerated absence into a `TypeError`;
+  - the result handling — the verb is declared to return `{ type, items }` while
+    these sites also tolerate the bare-array shape older hosts and stubs return,
+    so the response stays runtime-shaped on purpose.
+  
+  Genuinely feature-detected server-only verbs (`getMetaDiagnostics`,
+  `listDrafts`, `migrateStoredMetadata`, …) are untouched — runtime casts are the
+  documented convention there, and tightening one would turn optional capability
+  detection into a hard dependency.
+- 79c46da: feat(contract): a hook refusal can mark its message user-facing — `userMessage`, the producer-side opt-in channel (#9934, producer half of objectui#5210)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Purely additive: one
+  new OPTIONAL field on the two error-envelope schemas, a new shared reader in
+  @objectstack/types, and passthrough plumbing at the boundaries. Nothing
+  authorable is renamed, retired, aliased or tombstoned, so there is no
+  conversion to register. Unmarked errors produce byte-identical wire bodies. -->
+  
+  The console form deliberately discards the server `message` on 403 and
+  substitutes a generic string — the recorded #3821 fix for platform diagnostics
+  leaking to end users. That substitution also suppressed every deliberate,
+  localized refusal an application hook author wrote (11 real hook guards in the
+  objectui#5210 report), and incentivized misusing 400 for permission refusals.
+  The maintainer-accepted ruling (2026-08-19, option 1): give the AUTHOR a
+  producer-side way to mark a refusal message user-facing, once, at the contract
+  level — status-agnostic, with #3821 preserved by construction for everything
+  unmarked.
+  
+  **The marking**: set `userMessage` (non-empty string) on the thrown error at
+  throw time. It is a text-carrying field, not a boolean beside `message` — the
+  mark and the marked text are one value, so no boundary that rewraps or
+  substitutes `message` can promote platform prose into the marked channel, and
+  platform/driver code never sets it.
+  
+  - `@objectstack/spec`: `ApiErrorSchema.userMessage` and
+    `EnhancedApiErrorSchema.userMessage` (optional, additive).
+  - `@objectstack/types`: `declaredUserMessage(error)` — the ONE "is this
+    marked?" read (non-empty string, nothing invented) — and
+    `ThrownHttpError.userMessage` on `resolveThrownHttpError`.
+  - `@objectstack/rest`: `mapDataError` / `resolveErrorResponse` ride a declared
+    marking onto whatever envelope classification chose (flat body top-level
+    `userMessage`, truncated at the same #5423 bound as the 4xx message).
+  - `@objectstack/runtime`: the QuickJS side-channel carries `userMessage`
+    across the sandbox boundary (both directions, joining `code`/`fields`/
+    `status`), and the dispatcher door emits it as a declared sibling in the
+    nested envelope.
+  - `@objectstack/client`: the SDK attaches `err.userMessage` from both wire
+    dialects, so a UI renders it verbatim when present and keeps its generic
+    substitution when absent.
+  
+  The consumer half — the console form rendering a marked message instead of the
+  generic `form.noPermissionToSave` — is objectui#5210.
+- 24173e9: fix(rest): read an offset-free import cell in the business timezone, not the host `TZ` (#8485)
+  
+  `parseDateCell` ended in `new Date(s)`. A spreadsheet cell like
+  `2026-08-01 06:00:00` carries no offset, so ECMAScript resolves it against the
+  **process** timezone, and the instant bulk import stored became a property of
+  the deployment host:
+  
+  ```
+  TZ=Asia/Shanghai → 2026-07-31T22:00:00.000Z
+  TZ=UTC           → 2026-08-01T06:00:00.000Z
+  ```
+  
+  Same file, same tenant, same cell — eight hours apart, decided by a setting
+  nobody authoring the spreadsheet can see, and never consulting the business
+  timezone the route had already resolved one frame up
+  (`ExecutionContext.timezone`, the platform-default → global → tenant cascade).
+  
+  Since the export renders `datetime` cells in that business timezone (#8373), the
+  advertised export → edit in a spreadsheet → re-import round trip was lossless
+  only where the host `TZ` happened to equal the business zone. `import-coerce.ts`
+  opens by calling itself "the inverse of `export-format.ts`"; it now is one, and
+  the regression proof asserts inverse-ness on the **pair** — every fixture under
+  a host `TZ` deliberately different from the business timezone, because a test
+  that runs only under a matching `TZ` cannot fail.
+  
+  **An offset-free datetime cell is now read in the caller's business timezone**,
+  through `@objectstack/core`'s new `zonedWallClockToUtcMs` — the DST-safe wall
+  clock → instant primitive that `zonedDateStartToUtcMs` (the date-bucket drill
+  path) is now the midnight special case of. One implementation of zone
+  arithmetic, `Intl` offsets from the platform tz database, never hand-rolled;
+  generalising the existing one rather than hand-rolling a second in `rest` is
+  what keeps the export and import halves of this seam from drifting apart again.
+  Two wall clocks are not a bijection with instants, and both degenerate DST
+  readings resolve to the earlier candidate instant — a gap reading lands just
+  before the gap, an ambiguous reading on its first occurrence (pinned, measured).
+  
+  Three things deliberately do **not** move:
+  
+  - **A cell that carries an explicit offset** (`…Z`, `…+08:00`) already names one
+    instant and is honoured exactly as written. This change affects naive cells
+    only.
+  - **The date-only fast path stays UTC.** `YYYY-MM-DD` is UTC per ECMAScript and
+    a `date` is a timezone-naive calendar day (ADR-0053); sweeping it into the
+    zoned handling to make the code look uniform would silently re-time every
+    date-only import to fix nothing.
+  - **No timezone resolved ⇒ UTC**, never the process clock. That is the fallback
+    the export's cell path takes in the same case, so the round trip stays exact
+    for deployments that configure no zone — and a process-`TZ` fallback would
+    preserve the defect for exactly the deployments that cannot see it. This is
+    the one **behaviour change for existing deployments**: a host with a non-UTC
+    `TZ` and no resolved business timezone previously read naive cells in the host
+    clock and now reads them as UTC. An explicitly resolved `'UTC'` is a resolved
+    zone, not a missing one.
+  
+  Two adjacent legs of the same defect, both on the naive-cell path:
+  
+  - **A naive cell landing in a `date` or `time` field** now takes the typed
+    components verbatim (`2026-08-01 06:00:00` → `2026-08-01` / `06:00:00`).
+    Those branches also read the process clock, so a host east of the cell stored
+    the *previous calendar day* for a `date` column.
+  - **An xlsx date cell.** An Excel serial date carries no timezone; ExcelJS
+    materialises it as a `Date` whose UTC components are the sheet's wall clock,
+    and `import-prepare.ts` rendered it with `toISOString()` — stamping a `Z` the
+    file never had. That fabricated offset then outranked the business timezone by
+    the very carve-out above, so every real date cell in a user-authored workbook
+    imported as UTC whatever the tenant's zone. It now flattens to the same
+    offset-free `YYYY-MM-DD HH:mm:ss` a CSV export writes, which is what that
+    function's contract already claimed to produce.
+- 6cb88d9: fix(rest): `GET /api/v1/meta/:type` refuses a type name that names nothing, instead of serving it as an empty collection (#9488)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is
+  renamed, retired or tombstoned, and no `packages/spec` declaration moves. This
+  narrows the accept-set of one READ route over type-name segments that were
+  already refused by the WRITE door for the same name, so there is no stored
+  configuration for a migration to prescribe a rewrite of. -->
+  
+  ```
+  GET /api/v1/meta/totally_invented_type   →  200 {"type":"totally_invented_type","items":[]}
+  PUT /api/v1/meta/totally_invented_type/x →  400 "'totally_invented_type' is not a metadata type"
+  ```
+  
+  The two doors disagreed about which type names exist. A
+  200-with-an-empty-collection is **indistinguishable from "this type exists and
+  holds nothing"**, so a typo'd or renamed type name read as an empty surface
+  rather than as a mistake — the same trap `GET /meta/app?id=<unknown>` was
+  already filed for, where the answer read to a runner as "the app metadata is
+  gone".
+  
+  The list door now answers **`400` / `INVALID_REQUEST`**, naming the type: the
+  same status and the same code the write door has emitted since `PUT /meta//x`
+  was closed, so one condition has one answer on both doors. `INVALID_REQUEST` is
+  already registered to `@objectstack/rest` in the ADR-0112 `ERROR_CODE_LEDGER`;
+  no code is minted. The refusal is thrown rather than hand-built, so its wire
+  body is byte-identical to the write door's for the same condition.
+  
+  **What still answers `200` with an empty collection**, because a type that
+  exists and has no items is the legitimate case the defect was indistinguishable
+  from — breaking it would be worse than the bug:
+  
+  - every member of the static spelling contract (`sharing_rule`, `theme`,
+    `objects`, `api`, …), whether or not the deployment holds one item of it;
+  - the live-only keys an ordinary `registerApp` produces — `data`, `kind`,
+    `package`, `policy` — which sit outside the static contract but are
+    enumerated by `GET /api/v1/meta/types`;
+  - a plugin's own type, which enters the live set as a side effect of
+    registering items of it.
+  
+  That is why the rule is the **union** of the two authorities the platform
+  already has — the static predicate the write door consults, and the live
+  listing `GET /meta/types` serves — rather than the static predicate alone.
+  Refusing on the static half alone would answer `400` for types this same
+  service advertises, which is the objection recorded when the write-side verdict
+  landed and was deliberately not raised on the read entries then. Neither list
+  is restated here; both are read from their producers.
+  
+  The static verdict runs first and is silent for every accepted spelling, so an
+  ordinary list request pays nothing; the live listing is consulted only by a
+  request already headed for a refusal. If that listing cannot be read — no
+  `getMetaTypes` on the host's protocol, or a rejecting call — the route **fails
+  open** and keeps its prior answer: "no such type" is an existence claim, and
+  stating it while the authority that would know is unreachable is the mistake
+  the write door's own store probe avoids.
+  
+  **Scope.** The list door only. The compound arity `/meta/lead/views/all_leads`
+  carries an *object* name in the `:type` segment, which no static contract can
+  enumerate, and is untouched. The single-item doors already refuse
+  distinguishably (`404 RESOURCE_NOT_FOUND`, or `501 NOT_IMPLEMENTED` on the
+  `/references`, `/layers`, `/history`, `/audit`, `/diff`, `/published` limbs), so
+  none of them carried this defect.
+- b6c7690: fix(rest): org-overridable metadata is served back by every `/meta` read door, not just persisted (#9454)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key is
+  added, renamed, retired or tombstoned. One new exported predicate in
+  `metadata-core` (`organizationIdForMetaRead`), one widened optional request
+  member on an existing protocol method (`getMetaItemCached`'s `organizationId`),
+  and caller-side threading in `packages/rest`. The accept/reject behaviour of
+  every write door is unchanged — this card is read-side only. -->
+  
+  A runtime `PUT` of an org-overridable metadata type — `view`, `dashboard`,
+  `report`, `translation`, `email_template` — answered **200** with a receipt
+  reporting `state: 'active'` plus a version and sequence number, **persisted the
+  row with its `organization_id`**, and was then served back by **nothing**: the
+  direct `GET` answered 404, the scoped listing was unchanged, the unfiltered
+  listing was missing it, and the browser rendered an empty view or "Dashboard Not
+  Found". The platform reported success in the same breath as not delivering the
+  work, which is declared ≠ enforced in the direction hardest for an author to
+  notice — the write path says everything worked.
+  
+  **The write door was correct as-is.** The row really is persisted, so the
+  receipt is truthful; this was persisted-but-not-served, never a silent write
+  no-op. **The overlay-resolution layer was correct too**, and type-agnostic:
+  `getMetaItem` resolves `(orgId ? findOverlay(orgId) : undefined) ??
+  findOverlay(null)`, `getMetaItems` unions both scopes under org-wins precedence,
+  and `getMetaItemLayered` even reports `overlayScope`. The defect was that the
+  REST read doors **never stated the scope**, so every one of them asked for the
+  env-wide partition and the org partition was never consulted.
+  
+  **The repair is one registry-derived predicate, threaded at the read doors.**
+  `organizationIdForMetaRead` joins `organizationIdForMetaWrite` in
+  `metadata-core`, deriving from the same `allowOrgOverride` registry flag, so
+  read scope and write scope cannot drift and a registry entry flipping the flag
+  moves both doors together. It is threaded through the **already-memoised**
+  `resolveExecCtx`, so no new per-request organization resolution is introduced.
+  
+  ⛔ **Not a bare `ctx?.tenantId` at each site**, and the reason is measurable
+  rather than stylistic: deployments predating the #6190 ruling hold **phantom
+  org-scoped rows for types the registry declares non-overridable** (the runtime
+  used to stamp `organization_id` on every type). Boot hydration deliberately
+  walks past those rows, so they are dead. A read door naming the org for *every*
+  type would resolve them again — serving, on the read side, a document that
+  vanishes at the next restart.
+  
+  **`getMetaItemCached` gains an `organizationId` member** — it was the only meta
+  read verb that could not express one, having hard-coded a two-key delegation to
+  `getMetaItem`. The organization is also folded into its **ETag**. The mechanism
+  differs from `locale` and the difference is stated rather than glossed: `locale`
+  is invisible to the hash (the body is translated after the validator runs), so
+  folding it in was the only way it could vary the validator at all, whereas the
+  org-resolved document *is* the thing hashed. No cache leak is claimed — the
+  directive is `private, no-cache` and there is no server-side cache entry keyed by
+  type+name. It is folded in because that makes scope a **declared** property of
+  the validator instead of an emergent property of the body.
+  
+  **Both REST branches are fixed, which is the half-fix this card could easily
+  have shipped instead.** `view` and `dashboard` share one mechanism but reach it
+  through two different arms: `view` takes the cached arm (`getMetaItemCached`),
+  while `dashboard` bypasses the cache via `isDashboardType` and takes the
+  uncached arm. Both omitted the org, so a fix applied to one arm would have
+  fixed exactly one type while the receipt kept claiming success for the other.
+  The scope is now resolved **above** the fork, so the two arms cannot disagree.
+  
+  The regression proof drives real REST routes against a real protocol over a stub
+  engine — write-then-read agreement on **one boot**, for all five types, through
+  both arms. Its most important assertions are the ones that do **not** merely
+  check the item comes back: an org-less caller and a **second organization** must
+  each be refused it. An org-blind overlay fallback would satisfy every other
+  assertion in the file while matching an arbitrary tenant's row.
+- e6e1de4: fix(rest): `DELETE /api/v1/packages/:id` answers a driver fault as a 5xx, and stops swallowing coded refusals (#8275)
+  
+  `packageService.delete` swallowed every throw and reported failure by returning
+  a bare `{ success: false }`, so the door answered
+  `400 PACKAGE_DELETE_FAILED`. The statement behind it is
+  `DELETE FROM sys_packages WHERE id = ? [AND version = ?]`, so a missing table, a
+  lock timeout or a foreign-key restriction — a **server** fault — was answered as
+  a client error: it invited the caller to fix a request that was never the
+  problem, and it hid a real fault from every dashboard that buckets by status.
+  
+  This is the sibling of what #8016 fixed on the throw path and #8131 fixed for
+  `publish`. `service-package` had been left **partially converted** by #8131 —
+  the same service answering two different classifications for the same kind of
+  fault — and this closes that.
+  
+  **Two changes, both small:**
+  
+  - `delete`'s catch re-throws a throw that **declares its own status**, so a
+    coded refusal reachable from this call path keeps the producer's status and
+    code through the door's #8016 mapping (a `409 DESTRUCTIVE_CHANGE` stays a
+    409) instead of being flattened into one 400. It reuses the existing
+    `declaresHttpAnswer` predicate rather than declaring a second one.
+  - an undeclared throw stays a returned failure, and the door answers it **500**.
+  
+  ⛔ The discriminant is the **status** channel, never `.code`. Every SQL driver
+  populates a string `code` on its errors (`ERR_SQLITE_ERROR`, `SQLITE_ERROR`, the
+  SQLSTATE `42P01`, `ER_NO_SUCH_TABLE`), so a `.code`-reading predicate re-throws
+  genuine driver faults as if they were refusals — resolving them to a `500
+  INTERNAL_ERROR` that carries the driver's own message. Pinned per dialect in
+  `delete-driver-fault.test.ts`, on this seam rather than inherited from
+  `publish`'s suite by analogy.
+  
+  **4xx is not swept**, which is the other half of the fix: the
+  repeated-`?version=` refusal is checked before `delete` is called at all,
+  `PACKAGE_DELETE_PARTIAL` keeps its 400 (per-item uninstall failures are a
+  different outcome), a declared 4xx thrown from below keeps its own status and
+  code, and a declared 5xx keeps its own too.
+  
+  **No message changed, and that is deliberate.** Unlike `publish`, this path
+  never disclosed anything: the door builds its sentence from the request's own
+  `:id` and `?version=`, and the producer returns a bare flag with **no message
+  channel at all**. Mirroring `publish`'s `driverFault` message here for symmetry
+  would have *created* a channel to the wire that nothing filters — the 5xx
+  withhold (#8086) lives in `sendThrownError`, which a returned failure never
+  reaches at any status. The new suites pin that absence from both sides: the
+  producer's returned shape has exactly one key, and the door answers its own
+  sentence even when handed a producer that grows a message.
+  
+  Verified against a real `node:sqlite` database running the real statements from
+  `index.ts` — including a genuine foreign-key restriction, the fault family only
+  `DELETE` can have.
+- 6a12e5e: refactor(rest): `package-routes`' `protocol.getMetaItems` option reads the spec's declared request/response instead of a hand-rolled local shape (#9846)
+  
+  `PackageRoutesOptions.protocol` declared its meta-read verb as a local
+  structural type — `getMetaItems?(req: { type: string }): Promise<{ items: any[] }>`
+  — rather than naming the shapes `packages/spec` already declares. Nothing was
+  broken by it: both call sites send exactly `{ type: 'package' }`, which is a
+  valid `GetMetaItemsRequest`, and both read `result?.items` defensively.
+  
+  What it was, is the same blindness class one level up from the sibling
+  meta-read doors: a request type *re-stated locally* rather than *read from the
+  spec* lets the contract move underneath this module — a narrowed `type`
+  vocabulary, a newly required member, a renamed key — while the file keeps
+  compiling green against a shape the protocol no longer has.
+  
+  Both are now sourced from `@objectstack/spec/api`:
+  
+  ```ts
+  getMetaItems?(req: GetMetaItemsRequest): Promise<GetMetaItemsResponse>;
+  ```
+  
+  **The optionality and the runtime feature-detection are deliberately kept.**
+  `MetadataProtocol` declares `getMetaItems` as a **required** member, while this
+  option is optional and both call sites guard with
+  `typeof … === 'function'`. Adopting `MetadataProtocol` whole would change what
+  the seam tolerates — a behaviour question, deliberately not answered here.
+  
+  Naming the declared response surfaced one thing the local `any[]` had been
+  hiding: the spec types `items` as `unknown[]`, because it says nothing about
+  what a metadata item *contains*. The registry-specific keys this module reads
+  off each entry (`manifest.id`) are not spec-declared, so the **element** read
+  stays runtime-shaped on purpose — the same disposition the sibling doors take
+  via `metaItemsArray`. The seam is typed; the element read is coerced at the
+  read and unchanged in behaviour.
+  
+  A compile-time pin holds the coupling: an exact type-equality assertion that
+  the option's request/response types are still the spec's, so re-hand-rolling
+  the local shape fails the build rather than passing unnoticed. It lives in
+  compiled source rather than a test file, because this package's `tsconfig.json`
+  excludes its test files and no sibling gate type-checks them — a type-level
+  assertion written there would be compiled by nothing.
+  
+  `deletePackage`'s local structural type is untouched: no declared spec shape
+  exists for that verb, and minting one is a contract act rather than a typing
+  cleanup.
+  
+  Internal typing only — `PackageRoutesOptions` is not exported from the
+  package's entrypoint, so no public surface changes and no route changes what it
+  accepts or rejects.
+- 2a29caa: Declare the draft-visibility switches on the meta-read request schemas, exactly where the implementation enforces them (#9741, maintainer ruling 2026-08-18): `GetMetaItemsRequestSchema` gains `previewDrafts?: boolean`, and `GetMetaItemRequestSchema` gains `state?: 'active' | 'draft'` plus `previewDrafts?: boolean`. Both members are draft-visibility switches only — declaration ≠ authorization: ADR-0106 masking is unaffected, and draft access stays admin-gated upstream. The cached and layered read requests deliberately declare neither (their implementations enforce neither). `environmentId` stays OUT of the protocol request shape by explicit ruling — it is the transport-level multi-kernel routing key, recorded schema-side as a decision rather than an omission. The REST meta-read doors (list, cached and uncached single-item, layered) drop their `as any` request casts: each request literal now compiles against the declared spec shape, with the transport-level `environmentId` carried by a typed transport envelope (`TransportScopedMetaRequest`) instead of a cast. Accept-set widening catch-up on the declared surface; zero runtime behaviour change.
+- 9e2e682: fix(rest): `/discovery`'s `mcp` advertisement follows the request's environment — `probeMcpServeable` routes through the shared resolution entry point (#9120)
+  
+  `RestServer.resolveRequestEnvironmentId` calls itself, in its own doc-comment,
+  "THE single entry point for every unscoped-route environment decision (protocol,
+  i18n, exec-ctx, analytics, …) so they can never disagree about which kernel a
+  request belongs to." Eight consumers go through it. `probeMcpServeable` — the
+  ninth site that needs the request's environment, and the one whose answer decides
+  whether `/discovery` advertises `routes.mcp` — re-derived its own:
+  
+  ```ts
+  let environmentId: string | undefined = req?.params?.environmentId;
+  if ((!environmentId || environmentId === ':environmentId') && this.defaultEnvironmentIdProvider) {
+      try { environmentId = this.defaultEnvironmentIdProvider() || undefined; } catch { /* ignore */ }
+  }
+  ```
+  
+  That is the shared chain minus its first and middle steps: the host's ADR-0006
+  `kernel-resolver` seam (wired through `RestRequestEnvResolver`), and the legacy
+  hostname / `X-Environment-Id` chain beneath it.
+  
+  **Single-environment boots were correct throughout** — there
+  `defaultEnvironmentIdProvider` is registered, and it is also step 3 of the shared
+  chain, so both spellings agreed. The defect is multi-tenant-only: on a
+  hostname-routed host an unscoped `/discovery` request carries no
+  `params.environmentId`, and no default provider is registered (that is
+  `createSingleEnvironmentPlugin`'s wiring). Neither input the probe read was
+  present, so it fell through to `serviceExistsProvider` — which answers for the
+  **host** kernel, not the request's environment. Both misadvertisement directions
+  were reachable, and are now pinned as regression tests:
+  
+  - the host kernel has `mcp` and the request's environment does not ⇒ `/discovery`
+    advertised `routes.mcp` for an environment whose `/mcp` answers 501 — the
+    `declared ≠ enforced` shape the probe was added to close;
+  - the host kernel lacks it and the environment has it ⇒ the route was withheld
+    from an environment that would have served it (`mcpServeable !== false` fails
+    open only for a `null` probe, never for a confident `false` computed against
+    the wrong kernel).
+  
+  The probe now calls `resolveRequestEnvironmentId` like its eight siblings. The
+  `'platform'` guard and the `serviceExistsProvider` fallback are unchanged, and
+  the unsubstituted `':environmentId'` route pattern is normalised to "no id"
+  before the call — the entry point short-circuits on any truthy explicit value,
+  so passing the pattern through would have sent it to `getOrCreate`. This also
+  makes good the parity the probe's doc-comment already claimed with
+  `resolveRegisteredServices`, whose kernel arrives as `ctx.__kernel` — set
+  downstream of the same entry point.
+- 499f55e: fix(rest): a missing `findReferencesToMeta` capability is refused, not answered as "nothing depends on this item" (#9326)
+  
+  `GET /api/v1/meta/:type/:name/references` feature-detects `findReferencesToMeta`
+  on the resolved protocol. When the method was absent the route answered
+  `200 { references: [] }` — so a **capability gap** reached the wire as the
+  statement **"nothing depends on this item"**.
+  
+  Per ADR-0110 D3 those are different facts, and here they have opposite
+  consequences. The consumer is the admin "Used by" panel, whose empty state reads,
+  verbatim from `objectui`'s `metadata-admin/i18n.ts`:
+  
+  ```
+  'engine.edit.refsEmptyDesc': 'Nothing in the metadata graph points at this item. Safe to delete.'
+  ```
+  
+  An operator about to delete something was shown that sentence on a deployment
+  where the question had never actually been asked.
+  
+  The branch now refuses:
+  
+  ```
+  501  { error: { code: 'NOT_IMPLEMENTED',
+                  message: 'protocol.findReferencesToMeta() is not available in this kernel' } }
+  ```
+  
+  — the ADR-0112 nested envelope the sibling `/meta` 501 refusals converged on
+  (#7035), so `body.error.code` is readable by the same one line of consumer code
+  that already reads the others.
+  
+  **Does any caller's observed response change? Yes, on one deployment shape, and
+  only there.** A protocol that *has* the method is untouched: both an empty and a
+  non-empty result still pass through verbatim as `200`. What changes is the
+  answer given when the protocol has no such method — previously `200` with an
+  empty list, now `501`. No assembly in this repo produces such a protocol today:
+  `ObjectStackProtocolImplementation` is the only implementation registered under
+  the `protocol` service and it defines the method unconditionally. The branch is
+  reachable rather than dead because `findReferencesToMeta` is **not** a member of
+  `RestProtocol` (`= DataProtocol & MetadataProtocol`) and is not declared in
+  `@objectstack/spec` at all — it is an ADR-0076 D9 server-only extension reached
+  through a runtime cast. A host that implements the declared contract exactly, or
+  that points `protocolServiceName` at its own service, is a *conforming*
+  deployment that lands on this branch with no type error.
+  
+  Refusing at the route rather than asserting at assembly is deliberate: a
+  boot-time assertion would promote an undeclared optional extension into a
+  required one, which is a contract decision for `@objectstack/spec` rather than a
+  route one, and it would reject the partial protocol doubles that legitimately
+  exist today.
+- 7fc01db: REST `/meta` write doors now carry the caller's organization, so audit rows are no longer stamped environment-wide
+  
+  `PUT /meta/:type/:name` (both arities), `DELETE /meta/:type/:name`,
+  `POST /meta/:type/:name/publish` and `POST /meta/:type/:name/rollback` passed no
+  organization, so every `sys_metadata_audit` row a REST-authored metadata write produced was
+  stamped `organization_id: null`. Composed with the scoped audit read shipped alongside it —
+  which returns own-org rows **plus** environment-wide ones, a limb that is required rather
+  than optional — that left every REST-authored audit row readable by every tenant, carrying
+  its `actor`, `note`, `lock_state` and `request_id`. The read side could not close this: the
+  rows were genuinely unscoped, so no filter could separate them.
+  
+  The organization is taken from the execution context these doors already resolve, and is
+  threaded through `organizationIdForMetaWrite` — the same registry-derived predicate the
+  runtime `/metadata` dispatcher uses. Types the registry declares `allowOrgOverride: true`
+  (`view`, `dashboard`, `report`, `translation`, `email_template`) now scope both the overlay
+  row and its audit row to the caller's organization; every other type continues to write
+  environment-wide, because its write genuinely is environment-wide and the protocol refuses
+  an org-scoped write for it. `null` is now reserved for writes that really are
+  environment-wide.
+  
+  Two behaviour changes ride along, both required for the fix to be usable rather than
+  separate improvements: `publish` and `rollback` resolve their row through the organization,
+  so scoping the save without scoping them would have broken the draft → publish loop; and
+  `GET /meta/:type/:name/published` is now organization-scoped (organization-first, then
+  environment-wide), without which it would answer 404 for an item the same caller had just
+  published through the same transport.
+  
+  `organizationIdForMetaWrite` / `declaresOrgOverride` moved from `@objectstack/runtime` into
+  `@objectstack/metadata-core` so both doors share one implementation — `@objectstack/rest`
+  cannot import from `runtime`, which depends on it. Runtime behaviour is unchanged.
+- 8f266f1: A sandboxed hook/action body that declares its own HTTP status (`e.status = 403; throw e`) is now served with that status on the `/api/v1/data` routes, instead of an unconditional 400 — the same #7867 declared-status rule the custom-action route already applies. The unwrapped business message stays the body text for a declared 4xx; a declared 5xx keeps the status and takes the standard sanitised server-fault envelope. Undeclared body throws (verbatim-message 400) and body crashes (sanitised 500) are unchanged.
+- Updated dependencies [56656aa]
+- Updated dependencies [c9f5950]
+- Updated dependencies [d6e80b2]
+- Updated dependencies [07e630e]
+- Updated dependencies [66beee0]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [2782805]
+- Updated dependencies [e43d63a]
+- Updated dependencies [9aa8890]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [03520eb]
+- Updated dependencies [899052a]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [2d0af57]
+- Updated dependencies [420804d]
+- Updated dependencies [716ac9b]
+- Updated dependencies [a38408a]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [27a567d]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [1e050a5]
+- Updated dependencies [7ff3975]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [24173e9]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [f8eb736]
+- Updated dependencies [11b779e]
+- Updated dependencies [739fe5b]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [4d47afe]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [e2899f6]
+- Updated dependencies [b6c7690]
+- Updated dependencies [e6e1de4]
+- Updated dependencies [3851f87]
+- Updated dependencies [845e164]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [e1bb0ca]
+- Updated dependencies [30d3752]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [7fc01db]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [04f8fdb]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [6158146]
+- Updated dependencies [84cb121]
+- Updated dependencies [ca19ee8]
+- Updated dependencies [a675b4d]
+- Updated dependencies [b887013]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [90c5285]
+- Updated dependencies [402c125]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [b3f9831]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [44bc51d]
+- Updated dependencies [bbbfcfc]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+  - @objectstack/spec@17.1.0
+  - @objectstack/platform-objects@17.1.0
+  - @objectstack/types@17.1.0
+  - @objectstack/core@17.1.0
+  - @objectstack/observability@17.1.0
+  - @objectstack/metadata-core@17.1.0
+  - @objectstack/service-package@17.1.0
+
 ## 17.0.0
 
 ### Major Changes

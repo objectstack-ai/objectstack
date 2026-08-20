@@ -208,6 +208,32 @@ describe('#3842 — every dispatcher error exit answers in the declared envelope
         expect(error.code).toBe('CONNECTOR_UPSTREAM_UNAVAILABLE');
     });
 
+    it('[#9934] carries a producer-marked `userMessage` as a declared sibling — and the body stays conformant', async () => {
+        // The producer-side user-facing marking (objectui#5210 ruling): a hook
+        // guard's marked refusal reaches the nested envelope's declared
+        // `ApiErrorSchema.userMessage` channel, verbatim, at whatever status it
+        // declared. `expectConformantError` parses the body against the real
+        // schema, so this also proves a marked body IS the declared envelope.
+        const marked = Object.assign(new Error('close-period guard refused'), {
+            code: 'PERMISSION_DENIED',
+            status: 403,
+            userMessage: '该记录已进入结账期，暂不能修改。',
+        });
+        const error = expectConformantError((makeDispatcher() as any).errorFromThrown(marked));
+        expect(error.code).toBe('PERMISSION_DENIED');
+        expect(error.userMessage).toBe('该记录已进入结账期，暂不能修改。');
+        expect(error.message).toBe('close-period guard refused');
+
+        // The other half of the pin — unmarked carries NO user-facing marking,
+        // which is what preserves the console's #3821 generic substitution.
+        const unmarked = Object.assign(new Error('close-period guard refused'), {
+            code: 'PERMISSION_DENIED',
+            status: 403,
+        });
+        const bare = expectConformantError((makeDispatcher() as any).errorFromThrown(unmarked));
+        expect('userMessage' in bare).toBe(false);
+    });
+
     it('keeps the `Allow` header on the MCP 405 while sharing the body builder', async () => {
         const result = await makeDispatcher().handleMcpSkill('POST', { request: {} } as any);
 

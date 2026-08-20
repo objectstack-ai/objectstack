@@ -1,5 +1,1276 @@
 # @objectstack/objectql
 
+## 17.1.0
+
+### Minor Changes
+
+- e374b4d: fix(metadata-protocol): arm the three `kernel:ready` platform-table migrations on a self-hosted boot, and keep the read-only CLI commands read-only (#9380)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) One new optional
+  declaration (`runPlatformMigrations`) added to three existing option bags and
+  one Zod boot config. Nothing authorable is renamed, retired or tombstoned, so
+  there is no conversion to register. The behavioural change is that three
+  migrations which never ran on a self-hosted install now run on its serving
+  boot. -->
+  
+  `assembleMetadataProtocol` arms three `kernel:ready` migrations — #5839's
+  `sys_view_definition` active-row index, #8629's `sys_setting` row-identity
+  index, and #8686's seed/API tenancy backfill — behind one gate whose own comment
+  states the intent: *"platform / standalone kernels own their local sys_metadata;
+  per-project (cloud) kernels source metadata from the control plane and must NOT
+  provision these tables locally."* So standalone was always meant to be on the
+  INSIDE of that gate.
+  
+  It never was. The gate **deduced** ownership from `environmentId === undefined`,
+  and `runtime/src/standalone-stack.ts` stamps `'proj_local'` on every boot — so
+  the block never ran on a self-hosted install at all. #8686's own header calls
+  its `kernel:ready` half the one that "repairs an install that is ALREADY in that
+  state, which covers every existing deployment"; on self-hosted it covered none,
+  and those installs kept minting duplicate business identifiers.
+  
+  **The fix is a declaration, not a wider deduction.** `environmentId` is a
+  row-scoping key, not a topology signal — the same lesson `authoringChannel`
+  already records one field above it in the same options bag. A new optional
+  `runPlatformMigrations` is threaded from the host that knows the answer down to
+  the one assembly both protocol mounts share:
+  
+  - `AssembleMetadataProtocolOptions` / `MetadataProtocolPluginOptions` /
+    `ObjectQLPluginOptions` gain `runPlatformMigrations?: boolean`;
+  - `createStandaloneStack` gains the same key and **defaults it to `true`** — a
+    standalone kernel owns its local platform tables, whatever environment id it
+    stamps rows with;
+  - the predicate is exported as `shouldRunPlatformMigrations(environmentId,
+    declared)` so the default lives in exactly one place.
+  
+  **Undeclared means unchanged.** The default is `environmentId === undefined`,
+  the historical deduction, so every caller that does not declare — including
+  cloud's per-project kernels (`createMetadataProtocolPlugin({ environmentId })`)
+  and the control-plane assembly (`createMetadataProtocolPlugin()`) — keeps
+  today's behaviour exactly.
+  
+  **The read-only contract is preserved, and not by keying on deferral.** The
+  CLI's one-shot boot funnel (`bootSchemaStack`) declares
+  `runPlatformMigrations: false` for every `os migrate *` / `os meta *` command.
+  Keying it on `deferSchemaDdl` would have covered only `os migrate plan` and
+  `os migrate duplicates`; `os migrate summary-nulls`, `value-shapes`,
+  `recorded-by`, `resume`, `files-to-references` and `os migrate meta` all boot
+  **non-deferred** and are still dry-run-by-default ("a dry run writes NOTHING"),
+  so that half would have quietly repaired rows behind a report. The serving boots
+  — `os dev`, `os serve`, `os start` — do not come through that funnel and take
+  the default, which is where an install now gets repaired.
+  
+  Proven on real kernels over a real SQLite file carrying the real #8686 damage,
+  not on the predicate: the serving boot merges the split counter and adopts the
+  movable seed row while leaving the colliding one reported-not-renumbered; the
+  deferred and non-deferred one-shot boots both leave the data untouched; and a
+  per-project kernel assembled cloud's way still repairs nothing.
+  `os migrate duplicates`' own byte-identical-after-run pin
+  (`duplicates.integration.test.ts`) still passes unchanged.
+- a8189ae: feat(objectql,metadata-protocol): refuse a dotted filter key whose head is a relation, a formula, or a plain scalar — at both doors (#8371)
+  
+  <!-- adr-0087: registered engine-dotted-filter-refused -->
+  
+  **BREAKING** accept-set narrowing on the FILTER axis, landing after the v17.0.0
+  cut (the lockstep launch-window convention ships it as `minor`; the migration
+  prescription is registered under protocol major 18, where `objectstack migrate
+  meta` users will look).
+  
+  FILTER was the last of the four query axes with no verdict for a dotted name:
+  SORT refuses it (#4256), PROJECTION refuses it at both doors (#7589), while
+  `where: { 'project_id.name': 'Apollo' }` cleared the unknown-field check on its
+  head segment and answered `200` with zero rows. Measured across all three
+  drivers before ruling (#8371): relation-head, formula-head, system-column-head
+  and plain-scalar-head dotted filters return zero rows on `driver-memory`,
+  `driver-sql` and `driver-mongodb` alike — a lookup stores the related record's
+  scalar id, so there is no working capability for this refusal to remove; every
+  answer was a silent empty list indistinguishable from an empty table, and the
+  virtual case answered one unserviceable intent two ways by spelling
+  (`{is_open: true}` refused since #8296, `{'is_open.x': true}` not).
+  
+  **What is refused:** a dotted filter key whose head field is a relation
+  (`lookup`/`master_detail`/`user`/`tree`), a virtual `formula`, or a plain
+  scalar — `400 INVALID_FIELD`, naming the whole offending key, at both the REST
+  ingress (`assertFilterFieldsExist`) and the engine's own filter seam
+  (`assertFilterIsMaterializable`, reached by saved reports, flows and dashboard
+  widgets whose filters never pass the ingress). Both doors judge the head by the
+  shared `@objectstack/spec/data` classification (`classifyDottedFilterHead`,
+  new export), so they cannot drift apart. Precedence mirrors the sort axis:
+  `unknown` > `dotted` > unmaterializable.
+  
+  **What stays accepted:** a dotted path into a structured/JSON head
+  (`{'address.city': 'Beijing'}`) — deliberately unjudged per the ruling, since
+  it genuinely works on two of three backends; array-valued and file heads, for
+  the same reason; the nested-relation OBJECT form `{ owner: { region: 'NA' } }`;
+  and every undotted spelling, byte-identically.
+  
+  ## FROM → TO
+  
+  ```ts
+  // before — 200, zero rows, indistinguishable from an empty table
+  await engine.find('task', { where: { 'project_id.name': 'Apollo' } });
+  
+  // after — 400 INVALID_FIELD naming 'project_id.name', with the remedy:
+  // denormalise the value onto a stored field of the queried object and
+  // filter that (or, to test the relation itself, filter the head field):
+  await engine.find('task', { where: { project_id: apolloId } });
+  ```
+  
+  There is deliberately no automatic rewrite: the platform cannot invent the
+  stored column the remedy prescribes, and it must not join or post-filter
+  instead — the drivers have already applied `limit`/`offset`, so a post-hoc
+  predicate would filter an arbitrary page.
+- 326f5de: fix(objectql): a TRUE `readonlyWhen` no longer strips hook-derived values — the conditional strip judges only API-boundary callers (#9107)
+  
+  `stripReadonlyWhenFields` runs AFTER the before-phase hooks and was keyed on
+  `name in data` over the POST-hook payload, so a value a `beforeUpdate` hook
+  computed was judged exactly like a key the caller forged. Unlike the static
+  `readonly` strip immediately beside it, it carried no `isSystem` exemption
+  either — so a field locked by a TRUE predicate had **no server-side write path
+  at all**: a hook derived it and the strip deleted it; a cron or plugin wrote it
+  with `{ context: { isSystem: true } }` and the strip deleted that too.
+  
+  Net effect before this change: the derived-field pattern (hook-computed column)
+  and a conditional form lock could not coexist on one field. An author wanting
+  "visible on the form but locked" **and** "recomputed by a hook" had no
+  spec-compliant spelling, and the failure was silent behind an HTTP 200.
+  
+  Measured downstream (steedos-labs/os-project-titanwind-ehr#1446):
+  `equipment.next_maintenance_date` is hook-derived (last maintenance date + cycle
+  days) and declared with an always-true `readonlyWhen` to render
+  visible-but-locked. After a maintenance sign-off the recompute never landed, and
+  a scheduler keyed on that date regenerated the same maintenance plan on every
+  scan — a user-visible duplicate-plans loop, diagnosed only by reading the
+  engine's strip order in the dist bundle.
+  
+  The conditional strip now carries the exact key discipline #5591 gave the static
+  one, on **both** branches (by-id and multi-row) off one engine-entry snapshot: a
+  key is judged only while it is still an own property of the caller's payload as
+  it arrived at engine entry AND still holds that caller's value by `Object.is`. A
+  key a hook added, or overwrote, is a server value and survives.
+  
+  **The API-boundary lock is unchanged, and a caller cannot launder a write
+  through the hook phase.** To reach the exempt side of either test a value must
+  differ from what arrived at engine entry — which only server code can arrange. A
+  client that echoes the locked key back is stripped exactly as before; if a hook
+  overwrites that key, what persists is the **hook's** value, never the client's.
+  `isSystem` is still deliberately NOT an exemption for `readonlyWhen`: a state
+  lock that any system-context write could bypass would not be a state lock (the
+  frozen paid-invoice-lines case depends on it).
+  
+  What moves for callers:
+  
+  - A `beforeUpdate` hook may now write a field locked by a TRUE `readonlyWhen`.
+    This is the sanctioned channel for a conditionally-locked derived field.
+  - `onFieldsDropped` no longer reports such a key under `readonly_when` — it is
+    written, not dropped, so reporting it would make the observability seam lie.
+  - `strictReadonlyWrites` no longer refuses a write whose only `readonlyWhen`
+    "drop" was a hook's own value; a caller-supplied locked field is still refused.
+  - The `ERR_READONLY_FIELD_REJECTED` refusal message's `readonlyWhen` remedy
+    clause now reads "every **API-boundary** caller, isSystem included" and names
+    the hook path. The error `code` is unchanged; a pin on the exact message text
+    moves with it.
+  
+  If an app relied on the strip discarding a hook's own write to a locked field,
+  that write now lands — remove the hook assignment, or narrow the predicate.
+- 1258dca: Restore the #4757 unscoped multi-delete refusal on `sys_attachment` through the wired engine (#9719).
+  
+  `ObjectQL.registerHook` gains an opt-in `dispatchUnscopedMultiDelete` declaration (valid on `beforeDelete` registrations only — anything else is refused at registration): when a `multi: true` delete arrives with no `where` at all (absent or `null`), the engine's predicate path dispatches the whole-operation context ONCE to declaring registrations — before any matched row is resolved, zero-match included — so a guard about the operation's shape can refuse it. Binding `input.id` on that context is refused (`HookTargetRebindError`, path `'unscoped-multi'`). Undeclared registrations, scoped deletes (including the match-all `where: {}`), and by-id deletes see no new dispatch.
+  
+  The `sys_attachment` access guard declares the flag, so its documented refusal of a predicate-less multi-delete fires again with its declared envelope (`ATTACHMENT_DELETE_DENIED`, HTTP 403): since the per-row dispatch contract (#5038/#5574) that branch was unreachable, and a predicate-less `multi: true` delete quietly removed every row the caller happened to be entitled to. System-context and context-less programmatic deletes bypass the guard exactly as before.
+- 4639cec: **Behaviour change:** an unscoped `multi: true` UPDATE of `sys_comment` is now refused, where it previously succeeded for a caller entitled to every row (#9974).
+  
+  This is not the restoration of a guard that used to work — it is a deliberate narrowing of what the engine accepts, ruled by the maintainer on 2026-08-19. If you issue `ql.update('sys_comment', data, { multi: true })` with **no `where` at all**, that call works today and will start failing with `RECORD_NOT_ACCESSIBLE` / 403. **The fix at the call site is to say which rows you mean** — pass a `where`. The explicit match-all `where: {}` is still accepted and still authorizes every matched row individually; only an *absent* or `null` predicate is refused.
+  
+  Why the accept set narrowed rather than the declaration: `resolveTargetRows` has declared this refusal for both write verbs since #4630, but on update it could only ever fire by accident — when the sweep happened to touch a row the caller lacked rights to, and then with a per-row message (`Cannot update comment c2: …`) naming a row rather than the shape. A caller who owned every row had the whole table rewritten, and a zero-match probe resolved silently. A guard that fires by accident reads as enforcement while enforcing nothing. The ruling weighed recoverability: a delete leaves a trace of who removed what, an overwrite leaves none — the old value is gone on the spot with nothing to restore from — and a forgotten `where` is the mistake generated code makes most often.
+  
+  **Engine (`@objectstack/objectql`).** #9719's opt-in whole-operation dispatch now covers `beforeUpdate`'s predicate path as well as `beforeDelete`'s, and the registration flag is **renamed** `dispatchUnscopedMultiDelete` → **`dispatchUnscopedMultiWrite`** (one flag generalized to both events rather than a second flag; it is per-registration and per-event, so a delete-only guard still says "delete only" by declaring it on `beforeDelete` alone). Declaring it on any other event is still refused at registration time. Binding `input.id` on the whole-operation context is refused on both verbs (`HookTargetRebindError`, path `unscoped-multi`), and the error now names the caller's event.
+  
+  **Blast radius.** The dispatch is delivered ONLY to registrations that declare the flag, so `sys_comment` is the only object whose update accept set changes; every other object's unscoped `multi: true` update behaves exactly as before. `sys_attachment` keeps its delete-only declaration and is unaffected on update. A repo-wide structural sweep of 4 663 source files found no in-tree caller — none in `examples/`, none in the dogfood apps, none in `packages/` source — that issues an unscoped `multi: true` update against a declaring object.
+  
+  **`@objectstack/service-storage`** is a rename-only follow: its `sys_attachment` guard declares the renamed flag on the same event, with the same behaviour.
+
+### Patch Changes
+
+- a751f7d: fix(objectql): a cascade-delete dependents probe that FAILS no longer skips the referential guard — only an unprovisioned child table is read as "no dependents" (#8895)
+  
+  `ObjectQL.cascadeDeleteRelations()` probes each child relation
+  (`find(child, { where: { fk: id } })`) to decide what the parent's delete must
+  do. That probe **is** the referential-integrity guard, and it sat behind a bare
+  `catch { continue; }` — so **any** failure of it (a connection drop, a timeout,
+  a permission denial, a query error, a missing column) was indistinguishable
+  from "this child has no rows":
+  
+  - a `deleteBehavior: 'restrict'` relation never refused the delete, so a delete
+    the integrity rules say must be **refused was allowed through**;
+  - `set_null` / `cascade` never ran, so child rows that should have been nulled
+    or removed were **left orphaned**, pointing at a parent that no longer exists;
+  - nothing was logged and nothing was returned, so the caller was told the
+    delete **succeeded**.
+  
+  That is fail-OPEN on an integrity guard: the read never happened and the answer
+  "there are none" was invented for it (ADR-0110 D3 — "the probe found nothing"
+  and "the probe could not run" are different facts, and here they have opposite
+  meanings).
+  
+  The `catch` is not removed; it is **discriminated by error type**, through the
+  same shared `isMissingTableError` predicate (`@objectstack/metadata/errors`)
+  that `seedAutonumber` and `resolveFileReferences` already use:
+  
+  - **benign, unchanged** — the child object is registered but its **table** was
+    never provisioned (schema sync not run yet). It cannot hold a row referencing
+    anything, so zero dependents is the truth and the relation is skipped exactly
+    as before.
+  - **everything else now surfaces** — the delete fails with the probe's own
+    error, envelope intact, and nothing is written. A guard that could not be
+    **evaluated** must not silently pass.
+  
+  No new error code, no new response field: the caller receives the failure the
+  probe itself raised. The only behavioural change is that a delete which used to
+  report success over an unreadable child relation now reports the failure that
+  made the relation unreadable.
+- eccb8b2: fix(engine): `cascadeDeleteRelations` probes a `multiple: true` reference field with a spelling its storage can answer, so REST DELETE stops returning 400 for every object such a field points at (#9362)
+  
+  Any object pointed at by any registered `multiple: true` `lookup` /
+  `master_detail` field had its data-plane delete refused outright:
+  
+  ```
+  POST   /api/v1/data/showcase_account  {"name":"anything","status":"active"} -> 201
+  DELETE /api/v1/data/showcase_account/<id>                                   -> 400 INVALID_FILTER
+  ```
+  
+  On the stock showcase that is `showcase_account`, because
+  `showcase_field_zoo.f_lookups` is `Field.lookup('showcase_account', { multiple: true })`.
+  The fault is **schema-driven, not data-driven** — the dependents probe runs once
+  per DECLARED relation, so emptying the referring table changes nothing.
+  
+  **Mechanism.** The probe built a bare-equality filter for every reference field
+  aimed at the object being deleted, including the multi-value ones. A
+  `multiple: true` field stores an array, which every SQL backend here puts in a
+  JSON TEXT column, so bare equality compares the whole serialization (`["a","b"]`)
+  against one id and can never hold. `driver-sql` refuses that spelling
+  (`INVALID_FILTER` / 400) rather than compiling a silently wrong answer.
+  
+  **Neither of the two correct behaviours around it was touched.** The driver's
+  refusal stays — it is right, and loosening it would restore the fail-both-ways
+  comparison it exists to stop. The discriminate-or-propagate `catch` that
+  surfaces a probe failure instead of inventing "no dependents" stays too: the
+  probe's filter spelling was never correct, and that tightening only turned a
+  silent wrong answer into a loud one.
+  
+  **The fix is at the probe's construction site, and nowhere else.** A multi-value
+  field is asked with `$contains` — the membership spelling the refusal itself
+  prescribes, and the one every driver here answers (`driver-sql` and the two
+  drivers extending it lower it to `LIKE '%v%'` over the serialization,
+  `driver-mongodb` and `driver-memory` to a `$regex` that matches per element). No
+  filter or predicate surface is widened: `$contains` was already declared, and the
+  single-valued probe is byte-identical to what it was.
+  
+  `$contains` is a SUBSTRING test, so on every one of those backends the pushdown
+  answers a **superset** — with ids `acc_1` and `acc_10`, a row holding `acc_10`
+  matches a probe for `acc_1`. The rows are therefore narrowed exactly afterwards,
+  element-wise, the same reading the dangling-reference audit already applies to a
+  stored reference. Without that half the fix would make `cascade` delete and
+  `set_null` clear rows that never referenced the record — worse than the 400. An
+  id needing JSON escaping is asked for in both stored spellings, so the guard
+  cannot fail open on it either.
+  
+  Both directions are pinned, against a driver double that reproduces the JSON
+  column refusal and against a real `SqlDriver` on better-sqlite3 driven through
+  the real data-plane delete: the delete succeeds and the row is gone, a live
+  dependent through the array still refuses with `DELETE_RESTRICTED` / 409, and an
+  id that is a prefix of another neither inherits its dependents nor loses its own.
+  
+  ## Shipping with it: a TEMPORARY refusal on `set_null` over a multi-value reference
+  
+  Maintainer-ruled to land in the same change, and **explicitly a holding position
+  rather than a semantic**: while a `multiple: true` reference field would take the
+  `set_null` limb, the delete is now refused (`DELETE_RESTRICTED` / 409) instead of
+  executed.
+  
+  Repairing the probe is what would make that limb run for the first time in this
+  codebase — before #8895 the probe swallowed its own failure and skipped the
+  relation, after #8895 it raised `INVALID_FILTER` and aborted the delete — and the
+  limb writes `null` over the WHOLE array, discarding every other member. Measured
+  on the real stack: a row holding `["acc_a","acc_b"]` re-reads as `null` once
+  `acc_a` is deleted.
+  
+  The right semantics is "remove just the deleted member", but the residual shape
+  when the array empties (`[]` or `null`) is observable on the read path and to a
+  required multi-value validator, and nothing in `FieldSchema` pins it. That
+  question is tracked in objectstack#9438; refusing loudly until it is answered
+  decides nothing and reverts in one `if`, while writing would decide it by
+  accident and cannot be undone for the rows it touched.
+  
+  **Scope of the refusal, and what it deliberately leaves alone.** It is the
+  required-FK escalation directly above it, applied to an adjacent case: the same
+  `behavior` reassignment, reading the same `behavior === 'set_null'`. Because
+  `fdef.deleteBehavior || 'set_null'` collapses an absent declaration and an
+  explicitly authored `set_null` into one value, both are covered — the same way
+  both are already covered by the required-FK escalation, and without adding a
+  distinction the existing shape does not make. An explicit `cascade` or `restrict`
+  is untouched, a single-valued `set_null` still clears its foreign key, and a
+  relation with no dependent rows still deletes: only the disposition changes, so
+  the P0 above genuinely closes for every other path.
+  
+  **No new wire code**, per the rule `operation-message.ts` already states for this
+  envelope — one `DELETE_RESTRICTED` with more than one sentence, splitting the
+  sentence and never the code. The reason is developer-facing, so it rides
+  `developerMessage`, which names the refusal as temporary and cites the tracking
+  issue literally so removing this is one grep. The business message a user reads is
+  unchanged, because their action is unchanged: clear or reassign the referencing
+  records.
+- 650cd3d: fix(objectql): the delete-cascade path's two registry reads propagate instead of answering "no relations" (#9002)
+  
+  `ObjectQL.delete()`'s by-id branch reads `registry.getAllObjects()` twice, and
+  both reads sat behind a swallow that invented an answer for a read that never
+  happened:
+  
+  - `planCascadeAtomicity()` — `catch { return 'none' }`. `'none'` is the verdict
+    that asserts *nothing references this object*, so #7413's cascade atomicity
+    was silently switched off on a registry nobody could read.
+  - `cascadeDeleteRelations()`, its first statement — `catch { return }`. That
+    skips the cascade entirely: no `restrict` refusal, no `set_null`, no
+    `cascade`, nothing logged, and the caller told the delete succeeded.
+  
+  This is the #8895 shape one layer up, with a strictly larger blast radius:
+  #8895's `catch` invented "no dependents" for one relation whose probe could not
+  run; this one invented "no relations" for every relation at once, before the
+  per-relation probe was ever reached.
+  
+  #8895 ruled the family *discriminate or propagate*. Discrimination needs a
+  benign failure class — there, an unprovisioned child table, which genuinely
+  cannot hold a referencing row. Here there is none: an unreadable registry is
+  never truthfully "no relations". So both `catch`es are removed and the read's
+  own failure reaches the caller, envelope intact — no new error code, no new
+  response field, and the second seam is decided in the same direction as the
+  first because its own argument rested on the first one firing.
+  
+  **No shipped behaviour changes.** `SchemaRegistry.getAllObjects()` is a walk
+  over in-memory `Map`s (`resolveObject()` returns `undefined` on every failure
+  branch it models) with no I/O and no `throw` on the measured path, so nothing in
+  a running deployment can reach either seam today. This is a structural close of
+  a fail-open shape, pinned by tests, so that the day the registry read grows a
+  throwing path it fails loudly instead of disabling every referential guard at
+  once.
+- b735507: fix(engine): the required-FK escalation on a `multiple: true` lookup is judged per ROW — a parent delete is refused only over the rows member removal would EMPTY (#9688)
+  
+  `cascadeDeleteRelations` escalated `set_null` → `restrict` on `fdef.required === true`
+  before the multi-value branch and before the dependents probe had run, so a delete was
+  refused for every row that referenced the record, whatever else that row's set held.
+  Measured with a real engine + stub driver: a child holding `accounts: [acct_a, acct_b]`
+  on a `required: true, multiple: true` lookup refused `DELETE acct_a` with
+  `DELETE_RESTRICTED` / 409 / `dependentCount: 1`, leaving the set untouched.
+  
+  **The escalation's own rationale is what bounds it.** It exists because clearing a
+  required foreign key issues an UPDATE the child's validator rejects with a misleading
+  `"<field> is required"` 400. On a `multiple: true` field the `set_null` limb does not
+  clear the slot — since #9438 it removes the deleted MEMBER and writes the remainder — so
+  that failure is only reachable for a row the removal would EMPTY. Removing `acct_a`
+  above writes `[acct_b]`, a non-empty required set no validator objects to; the delete was
+  refused citing a failure that could not have happened.
+  
+  **Now decided per row, after the dependents probe and the exact multi-value narrowing:**
+  
+  - remainder non-empty → the member is removed and the delete proceeds (#9438 semantics,
+    which the #9447 ruling accepts);
+  - remainder empty (the deleted member was the last) → `DELETE_RESTRICTED` stands, because
+    `[]` violates `required` on a multi-value field under #9447 and is rejected by the
+    record validator since #9476;
+  - when both kinds of row reference the record the whole delete is refused, and
+    `dependentCount` now counts **only the rows that would be emptied** — previously it
+    counted every referencing row, naming rows the delete no longer objects to.
+  
+  The judgement and the write share one function (`remainderAfterMemberRemoval`), so the
+  predicate that clears the write can never predict a shape the write would not produce.
+  
+  **Unchanged:** single-valued `set_null` on a required lookup still escalates (clearing a
+  scalar FK always writes `null`), an authored `deleteBehavior: 'restrict'` still refuses
+  regardless of emptiness, `cascade` is untouched, and a non-required multi-value lookup
+  keeps removing the member as before.
+  
+  The #9625 fixture pinning the previous, broader refusal is updated deliberately rather
+  than repaired — that is what it was pinned for — and the last-member refusal is pinned
+  beside it, since that pin is what makes the narrowing safe. Also pinned: the defaulted
+  `set_null` spelling reaches the same per-row judgement as the explicit one, an authored
+  `restrict` is not narrowed, and `dependentCount` reports the refused rows only.
+- 91c6c28: fix(engine): `deleteBehavior: 'set_null'` on a `multiple: true` reference field removes the deleted MEMBER from the stored array instead of nulling the whole slot, and the temporary 409 hold shipped with #9437 is removed (#9438)
+  
+  On a set-valued foreign key, "set null" now means what it has to mean: the
+  reference to the deleted record is filtered out of the stored array and the
+  remaining members are written back untouched. Before the interim hold, this
+  limb wrote `null` over the WHOLE array — a row holding `["acc_a","acc_b"]`
+  re-read as `null` after `acc_a` was deleted, silently dropping the live
+  reference to `acc_b`.
+  
+  **The residual shape is the ruled one, consumed rather than decided here.**
+  When the last member is removed, the field is written as **`[]`, never
+  `null`** — the representation `FieldSchema` pins as verbatim contract
+  (`packages/spec/src/data/field.zod.ts`, the `multiple` and `required` doc
+  blocks; #9447, maintainer ruling 2026-08-18, binding for every writer). The
+  open question that kept this limb held back was exactly that shape; it is
+  now answered at the spec, and this write consumes the answer.
+  
+  **The temporary holding position is removed in the same stroke — it was
+  built to be removed.** #9437 shipped an explicit interim: any delete that
+  would take the `set_null` limb on a multi-value reference was refused
+  `DELETE_RESTRICTED` / 409, with a `developerMessage` naming the refusal
+  TEMPORARY and citing the tracking issue literally. Those deletes now
+  succeed and remove the member. The refusal envelope for a genuinely
+  configured `restrict` is unchanged, and the interim's extra sentence is gone
+  with the interim.
+  
+  Removal compares whole members (`String(v) !== String(id)`), the same
+  reading the dependents narrowing already applies — the probe's `$contains`
+  pushdown is a substring superset, so an id that is a prefix of another
+  neither loses its own member nor takes its neighbor's. Every other
+  disposition is untouched: `cascade` still deletes dependents, a
+  single-valued `set_null` still clears its foreign key to `null`, an
+  explicit `restrict` still refuses with its own sentence, and the required-FK
+  escalation stays exactly as it was.
+  
+  Pinned against the driver double that models the JSON TEXT column and
+  against a real `SqlDriver` on better-sqlite3 through the real data-plane
+  delete: member removal with a surviving sibling that still resolves, the
+  emptying case asserted literally as `[]` and not `null` on a re-read of the
+  database, and the controls beside them.
+  
+  Note: `required` on a multi-value lookup now *documents* non-empty-array
+  semantics (same ruling), but the validator does not yet enforce it — that
+  enforcement gap is tracked separately in #9476 and is not changed here.
+- 4e71ae1: lifecycle: a failed governance row-count probe is no longer indistinguishable from a quiet object
+  
+  `LifecycleService.checkGovernance()` probed each declared object's row count and swallowed
+  every failure with a bare `catch { continue }`. A driver outage therefore read exactly like
+  an object with nothing to alert on: no `quota-exceeded`, no `growth`, nothing logged, and
+  nothing in the sweep report — and because the failed object also dropped out of the count
+  map that becomes the next sweep's baseline, the next sweep could not alert on growth for it
+  either.
+  
+  The probe now discriminates by error type through the shared `isMissingTableError`
+  predicate. An unprovisioned table is truthful emptiness and stays silent; every other
+  failure is reported per object in the sweep report's existing `errors` list and logged at
+  `warn`, both naming the lost growth baseline. No new report field, no new error code, and
+  the sweep is still isolated — one object's failed probe never costs the others their
+  governance.
+- 739fe5b: fix(spec): enforce the list-comparand rule at the shared compile face, so a scalar `in`/`nin` no longer reaches a driver (#9228)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key is
+  added, renamed, retired or tombstoned. The change moves an existing runtime rule
+  from `@objectstack/objectql` to `@objectstack/spec` and calls it from
+  `parseFilterAST`; the authorable metadata surface is byte-identical. -->
+  
+  `FieldOperatorsSchema` has always declared `$in` / `$nin` as `z.array(z.any())`
+  and `$between` as `z.tuple([min, max])`, and #5869 / PR #6209 built the gate that
+  enforces it — but only at `@objectstack/objectql`'s lowering seam. That covers
+  every query reaching a driver **through the engine** and nothing else. A caller
+  that lowers a filter with `parseFilterAST` and calls a driver directly — an
+  embedder, and this repo's own driver conformance suites — met no gate at all:
+  `parseFilterAST([['name', 'notin', 'alpha']])` returned `{ name: { $nin:
+  'alpha' } }`, a shape the contract forbids, and handed it over.
+  
+  That path was carried by mingo's own coercion of a non-array `$in`/`$nin`
+  operand. mingo 7.2.3 removed the coercion, so from 7.2.4 on the same input
+  escapes as an unhandled third-party `TypeError: b.filter is not a function` —
+  no `code`, no `status`, no field name — straight to the caller. It is the sole
+  failure blocking the `mingo` 7.2.2 -> 7.2.4 bump.
+  
+  **Fixed at the shared face, with exactly one implementation.** The rule now
+  lives in `@objectstack/spec`'s `data/filter-comparand-shape.ts`, the same place
+  the comparand-TYPE door (#7872 / PR #8234) was promoted to for the same reason
+  ("enforced once at the shared compile face for all five drivers"), and
+  `parseFilterAST` runs it on everything it returns — shape first, then type, the
+  order the engine's own seam already applied. `@objectstack/objectql`'s
+  `assertListComparandShapes` is now a delegating wrapper whose only remaining job
+  is the engine's `find('deal'): ` caller prefix; no driver was patched (both
+  driver families are under the #5499 investment freeze).
+  
+  **The accept/reject delta is narrow and one-directional.** Newly refused, with
+  the ADR-0112 `INVALID_FILTER` / 400 envelope: a non-array `$in` / `$nin`
+  comparand and a non-`[min, max]` `$between` comparand, reaching a driver via a
+  direct `parseFilterAST` call. Nothing else changes — every filter the engine
+  accepted still lowers byte-identically, `$in: []` / `$nin: []` remain legitimate
+  declared predicates, list MEMBER types stay unjudged here, and a field spec with
+  no `$` key is still not descended into. The same inputs were already refused
+  with the same envelope on every engine verb and at the REST ingress, so no
+  authored metadata in the repo or in `objectui` produces a shape that newly
+  fails: a survey of `examples/**`, `content/docs/**`, fixtures, seeded platform
+  objects and objectui's view definitions found every membership rule already
+  carrying an array.
+  
+  `parseFilterAST` gains an optional second argument, `context` — the caller
+  prefix both doors in `@objectstack/spec` already take. It is additive and
+  defaulted; existing calls are unaffected.
+- 4dfa369: Keep a caller's value out of the server log when MySQL reports a duplicate entry
+  
+  The driver-fault redaction added for #8682 replaces the bound statement in a logged
+  write fault and keeps the database's own diagnostic, because that diagnostic names the
+  failing identifier an operator needs. On MySQL's `ER_DUP_ENTRY` (1062) that premise does
+  not hold: the template is `Duplicate entry '<value>' for key '<index>'`, so the
+  conflicting value is in the diagnostic rather than in the statement and survived the cut.
+  
+  The tail is still kept — including `for key '<index>'`, which is the answer to "which
+  constraint?" — and only the value slot is replaced:
+  
+  ```
+  before  Duplicate entry 'acme@example.com' for key 'crm_account.email' [statement and bound values redacted]
+  after   Duplicate entry [value redacted] for key 'crm_account.email' [statement and bound values redacted]
+  ```
+  
+  Also closed: a value spelled with `" - "` in it used to leave a fragment behind, because
+  the statement cut takes the last separator and that separator was inside the value.
+  
+  Identifier-bearing diagnostics on every dialect are unchanged, the rethrown error is
+  untouched, and no HTTP response moves — this narrows one log slot only.
+- 5e2f594: fix(objectql): `ObjectQLPlugin`'s three registry reads stop inventing an empty registry — one of them silently skipped schema sync for every object at boot (#9285)
+  
+  `ObjectQLPlugin` read the registered object set in three places, all spelled
+  `this.ql.registry?.getAllObjects?.() ?? []`. That expression folds three
+  different facts into one value:
+  
+  1. the registry answered, and holds no objects;
+  2. the engine exposes no `registry` at all;
+  3. the registry exposes no `getAllObjects` — a **structural** omission that
+     never throws, so it is invisible precisely when it is wrong.
+  
+  Only (1) is truthfully *"no objects"*. #8895 ruled this family **discriminate or
+  propagate**; #9002 and #9154 applied it to the two delete-cascade seams and the
+  roll-up summary index. This closes the same shape in the plugin, where the
+  consequential seam is at **boot**.
+  
+  The three seams get three different answers, and the difference is the fix:
+  
+  - **`syncRegisteredSchemas` — propagates.** Its next line is
+    `if (allObjects.length === 0) return;`, so an invented empty answer meant **no
+    registered object's schema was synced to any driver** — no table created, no
+    column added — silently, at boot, with the plugin reporting a clean start.
+    Failing the boot is more truthful than starting against a store whose DDL
+    never ran. On the `metadata:reloaded` path the existing caller already catches
+    this and reports it at `error` (#4632), so propagation there is a loud
+    durability report rather than a dead kernel.
+  - **`reconcileFederatedBindings` — reports at `error`, then degrades.** The pass
+    exists to *name* the federated objects it could not bind ("a boot with nothing
+    to report says nothing"), so an unreadable registry making it report nothing
+    was exactly the silence it was written to prevent. It stays exception-proof:
+    it is a post-hoc reconciliation run after every `start()`, deliberately not a
+    boot gate.
+  - **`runGovernanceInventory` — reports at `warn`, then skips.** This seam
+    carried **two independent swallows** (`?.()` *and* a wrapping
+    `try { … } catch { return [] }`), so a *throwing* registry was
+    indistinguishable from an empty one. Feeding the audit an invented empty
+    object set is worse than silence: with no objects, every handler declared *on*
+    an object reconciles as an "undeclared handler … REFUSED at dispatch", so an
+    unreadable registry accused a healthy deployment. The inventory is warn-only
+    and exception-proof by contract, so it reports and skips instead of
+    propagating, and leaves its report fingerprint untouched so the next
+    successful run is not suppressed as "unchanged".
+  
+  All three now read through one shared helper that throws rather than inventing,
+  naming the consequence; a registry that *throws* propagates its own error
+  verbatim.
+  
+  This is a **structural** close, not a live defect — re-derived on this tree:
+  `SchemaRegistry.getAllObjects()` is a walk over in-memory `Map`s calling
+  `resolveObject()`, which returns `undefined` on every failure branch it models
+  and never throws, and `ObjectQL.registry` is a getter over a field-initialized
+  `SchemaRegistry`, so for a real engine neither optional link can short-circuit.
+  The reach that is real is a duck-typed `ql` — an incomplete test double, which
+  #9154 measured shipping in nine suites at once.
+  
+  The `objectsRegistered` count in the `ObjectQL engine started` info log is
+  deliberately unchanged: a wrong `0` there costs one advisory line and no data.
+- 855591f: fix(objectql): a failed `sys_organization` probe stops reading as "this install has no organizations" (#9261)
+  
+  `probeInstallOrganizations` — the read the #8844 system-write organization
+  resolution decides on — sat behind a bare `} catch { ids = [] }`. Every failure
+  answered with the count that means *none*, and `resolveSystemWriteOrganization`
+  maps 0 / 1 / 2+ organizations to *proceed unstamped* / *stamp the derived id* /
+  *refuse*. So one transient probe failure silently skipped **both** halves of the
+  2026-08-15 ruling:
+  
+  - on a `single`-posture install that really has one organization, system-context
+    inserts (a hook, a cron tick, a `runAs: system` flow) landed **unstamped** —
+    filing the row under the `__global__` pseudo-tenant and forking exactly the
+    per-organization autonumber counter and partitioned unique index the ruling
+    exists to protect;
+  - on a multi-organization install, the refusal the ruling mandates
+    (`ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`) **never fired** — fail-open on a
+    guard that must be loud.
+  
+  Aggravated by the memo: the invented answer was cached in
+  `organizationProbeMemo`, so the outage's consequence outlived the outage — every
+  later system write inherited "no organizations" until an organization write
+  happened to clear it.
+  
+  The probe now discriminates by error TYPE, the disposition ADR-0110 D3 requires
+  ("the probe found nothing" and "the probe could not run" are different facts):
+  
+  - **benign** — `sys_organization` routes but its table was never provisioned
+    (schema sync not run yet). It cannot hold a row, so zero really is the count,
+    and first boot still proceeds unstamped. Asked through the shared
+    `isMissingTableError` predicate (`@objectstack/metadata/errors`), the same call
+    the file's sibling read seams make, never a hand-rolled code test.
+  - **everything else** — connection loss, pool exhaustion, a timeout mid-boot, a
+    datasource that never connected, a permission denial — propagates with its
+    envelope intact, and is **not memoised**. The write that asked fails loudly
+    instead of being filed under a guessed topology, and the next write re-probes
+    rather than inheriting the guess. No new error code and no new response field.
+  
+  Measured rather than assumed: the old comment's "`sys_organization` may not be
+  registered at all (a lean embedding, a bare-kernel test)" is not a second benign
+  cause. An object missing from the registry does not fail the read at all on a
+  driver that tolerates an unknown table (`find` returns `[]` through the normal
+  path), a strict driver surfaces it as the missing table above, and an engine
+  with no driver fails the write on its own object one frame before the probe runs.
+- cd455c8: docs: four published READMEs stop documenting symbols and call sites that do not exist (#9544)
+  
+  All four packages ship `README.md` in their `files` array with `private` unset, so these
+  are the pages npm renders. Each finding was re-measured against the **built `.d.ts`**, not
+  against source, because that is what a consumer resolves through the `exports` map.
+  
+  - **`@objectstack/driver-sql`** — `import type { IDriver } from '@objectstack/spec'` named
+    a type that exists **nowhere in the repository** (0 hits across every package's `src`
+    and `dist`). The real contract is `IDataDriver` on `@objectstack/spec/contracts` — the
+    one `SqlDriver` actually declares (`export class SqlDriver implements IDataDriver`). The
+    adjacent operation list was corrected too: the method is `create`, not `insert`.
+  
+  - **`@objectstack/mcp`** — `DriverSql` has never existed (the export is `SqlDriver`), and
+    the README then called `DriverSql.configure({...})` on it. Renaming alone would have
+    been wrong twice over: `SqlDriver` has **no static `configure` either**, and `driver:`
+    is not a key of `defineStack` at all. The example now declares a datasource the way the
+    shipped templates do. `MCPServerPlugin.configure({...})` — five call sites — becomes
+    `new MCPServerPlugin({...})`, the form the class's own JSDoc and every in-repo caller
+    use. The documented options block claimed `serverName`, `autoRegisterTools`,
+    `autoExposeObjects`, `enableStreaming`, `port` and `debug`; the real
+    `MCPServerPluginOptions` is `name`, `version`, `transport`, `autoStart`, `instructions`,
+    and the env switches are named instead.
+  
+  - **`@objectstack/objectql`** — `registerObject` is an **instance** method, so
+    `SchemaRegistry.registerObject(...)` on the class could never run. The example now
+    reaches it through the engine's registry and states the real parameter order
+    (`schema, packageId, namespace?`).
+  
+  - **`@objectstack/spec`** — the protocol package's own front page imported
+    `MCPServerConfigSchema` from `@objectstack/spec/ai`, which exports `MCPServerRefSchema`.
+    A rename by itself would have swapped a broken import for a broken **parse**: the
+    documented payload was built for a schema that does not exist, and
+    `MCPServerRefSchema.safeParse` rejects it (`transport` is an enum of
+    `stdio | http | websocket`, not an object, and `endpoint` is required and was absent).
+    The example is now a payload that parses green, and the page says plainly that tools,
+    resources and prompts are derived from metadata at runtime rather than authored there.
+- 21995d7: fix(objectql): the redactor's end-of-message head invariant becomes a load-time guard and a type, not a doc comment (#9359)
+  
+  #9275 made the driver-fault statement cut **template-aware**: a separator standing
+  immediately before a *measured* diagnostic head is the true cut point wherever it falls,
+  so the head survives and the caller's value is dropped whole. That amendment is safe
+  because of exactly one property:
+  
+  > **Only an end-of-message template may declare a head.**
+  
+  That property is what bounds a hostile value's influence to **over-redaction** — a value
+  spelling a known head can suppress a real diagnostic and show a forged one, but it cannot
+  make a value leak. Give a `head` to a family with a **right anchor** and the same cut keeps
+  everything after that anchor, which on such a cut is statement, which is caller values.
+  
+  Until now the invariant was held by **prose plus one behavioural case** that forges the
+  heads the table declares *today*. Nothing stopped a future author adding a head-bearing
+  row whose `whole` is not end-anchored — the single shape that turns the amendment into a
+  leak surface.
+  
+  **The argument for closing it structurally comes from this file's own history.** The head
+  note once claimed leak-freedom rested on taking the LAST matching head as well as on
+  end-of-message. Ablated: with the cut changed to take the FIRST head, all 50 cases in the
+  suite stayed green — an end-of-message pattern matches only once, from its earliest
+  position. A documented property about this very mechanism was wrong for weeks of reading
+  and fell only to an ablation. A doc comment is not a guard.
+  
+  The invariant is now held in two places a future author cannot write past:
+  
+  - **The type.** `ValueBearingTemplate` is a union of `AnchoredTemplate` (`tail?`, and
+    `head?: never`) and `EndOfMessageTemplate` (`head`, and `tail?: never`), so a row
+    carrying both no longer compiles.
+  - **`assertHeadBearingTemplatesAreEndAnchored()`**, called at module load over
+    `VALUE_BEARING_TEMPLATES` — the `assertMetaUrlSpellingsAgree()` shape. For every row
+    that declares a `head` it requires the `whole` to end with `$()`, to carry no `m` flag
+    (under `m`, `$` is end of LINE, so an "end-anchored" template would stop at the first
+    newline of a multi-line dump and leave the rest standing) and to have exactly two
+    capture groups (`redactDiagnosticValues` reads `whole[1]` and `whole[2]` by index).
+  
+  **No redaction behaviour changes.** The statement cut, the head set and the templates
+  themselves are untouched; the guard only refuses tables that could not have been correct.
+  The existing behavioural case that forges each head is kept — it is evidence, and the
+  guard is additional rather than a replacement.
+  
+  The guard is proved to FIRE rather than merely to exist: eight new cases drive each shape
+  it rejects (right-anchored `whole` with a head, the `m` flag, a wrong group count, a bad
+  row behind a good one) and pin that it does **not** fire on the shipped rows or on
+  right-anchored rows that correctly take a `tail`. Reverse-verified both legs — a
+  head-bearing right-anchored row added to the shipped table makes every test in the package
+  fail at module load, and a row carrying `head` and `tail` together fails `tsc`.
+- 6a5e6ad: fix(objectql): `[]` no longer satisfies `required` on a multi-value field — the #9447 ruling's enforcement half (#9476)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A write-time validation
+  tightening on the DATA plane; nothing authorable is renamed, retired or
+  tombstoned, so there is no conversion to register. The spec doc block already
+  states the ruled contract (landed with #9447); this aligns the record
+  validator's enforcement to it. -->
+  
+  Per the #9447 maintainer ruling (2026-08-18): `required` on a multi-value
+  field means **non-empty array**. The empty set is representable — it reads
+  back as `[]`, never `null` — so `required` judges emptiness.
+  
+  Before this, `validateRecord` judged `required` through `isMissing`, which
+  knows `undefined` / `null` / blank strings — an explicit `[]` sailed through
+  on both INSERT and UPDATE while `null` was correctly rejected. Now:
+  
+  - INSERT: `[]` on a required multi-value field is rejected — 400
+    `VALIDATION_FAILED`, field code `required`, the same envelope a missing
+    value already got.
+  - UPDATE: a SUPPLIED `[]` is an explicit clear — rejected with the distinct
+    `required_cleared` sentence (wire code `required`), exactly like an
+    explicit `null`. An omitted field still never 400s — legacy rows rest.
+  - Scope is the spec's own multi-value predicate (ADR-0104 D1):
+    inherently-multi option types plus multi-capable types flagged
+    `multiple: true`. Structured-JSON fields are untouched — `[]` there is a
+    document, not an emptied set. Populated arrays and non-required
+    multi-value fields are untouched.
+- b2a451f: fix(objectql): the roll-up summary index's registry read propagates, and a failed read is never cached as an empty index (#9154)
+  
+  `ObjectQL.buildSummaryIndex()` opened with
+  
+  ```ts
+  try { objects = (this._registry as any).getAllObjects?.() ?? []; } catch { objects = []; }
+  ```
+  
+  and `ensureSummaryIndexes()` MEMOIZES what that build returns, stamped with the
+  registry's current `objectRevision`. So a read that could not run was answered
+  with an invented *"no object declares a roll-up"* — and then remembered as if it
+  had been measured. `recomputeSummaries()` consults that index after every insert,
+  update and delete to decide which parent roll-ups a child write must recompute,
+  so an empty index means no roll-up is ever recomputed: every parent summary field
+  keeps a stale value, nothing is logged, and every write reports success.
+  
+  Two changes, because the cache is the half that made this worse than the
+  identical seams fixed in #9002:
+  
+  - **The read propagates.** Same family as #8895 (*discriminate or propagate*) and
+    #9002, same reasoning: discrimination needs a benign failure class and there is
+    none — an unreadable registry is never truthfully "no roll-ups". Both halves of
+    the swallow are gone, the `catch` and the optional call `?.()`, which absorbed a
+    registry that does not implement `getAllObjects` at all — the structural
+    omission that never throws and is therefore invisible.
+  - **A failed build leaves no cache entry.** `objectRevision` moves only on a
+    metadata mutation (`registerObject`, `unregisterObject`,
+    `unregisterObjectsByPackage`, `removeObjectOverlay`, `invalidate`,
+    `invalidateAll`, `reset`) and never on a data write, so the invented emptiness
+    outlived the condition that caused it — a steady-state deployment performs none
+    of those, leaving every parent roll-up frozen until a restart or an unrelated
+    publish. The build now runs to completion into a local before anything is
+    published to the instance, the revision stamp is written last, and a throw
+    clears any cached index and resets the stamp before rethrowing unchanged: the
+    next call rebuilds. *A poisoned cache entry must not survive the read that
+    poisoned it.*
+  
+  **No shipped behaviour changes.** `SchemaRegistry.getAllObjects()` is a walk over
+  in-memory `Map`s calling `resolveObject()` — which returns `undefined` on every
+  failure branch it models — over a fold that is spreads and comparisons. No I/O,
+  no driver, no `throw` on the measured path, re-derived on today's tree. This is a
+  structural close of a fail-open shape, pinned by tests, so that the day the
+  registry read grows a throwing path it fails loudly instead of silently freezing
+  every roll-up in the deployment.
+- ff08691: fix(engine-core): a system-context insert on a tenant-scoped object resolves the install's organization the way a session write does, or is refused — the runtime producer of the autonumber fork #8686's backfill cannot reach (#8844)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key is
+  added, renamed, retired or tombstoned. One error code is registered in the
+  ADR-0112 ledger and one engine-internal module is added; the behavioural change
+  is that a system-context insert on a tenant-scoped APPLICATION object now
+  resolves an organization instead of landing NULL, and refuses rather than
+  guessing where none is derivable. Stored data is untouched: already-minted
+  duplicates are reported, never rewritten (the #8686 posture, ruled again here).
+  -->
+  
+  #8686 fixed **one** producer of untenanted rows — the seed loader — and shipped
+  a one-shot backfill for what it had already written. This card is the **other
+  producer, which is still running**: an ordinary application write made under a
+  system execution context (a hook, a scheduled job, a custom endpoint, a
+  `runAs: system` flow). A backfill cannot reach it, because it mints a fresh
+  duplicate on every tick — which makes #8686's repair **self-undoing on any
+  install with server-side automation**, i.e. every business app.
+  
+  **Measured on 17.0.0 GA**, a single-tenant EHR/MES install with ~44 autonumbered
+  objects: two records, same object, same install, the **same** value on a field
+  the app declared `unique`, with no error and no warning. The `notification` case
+  shows both producers side by side — `NT-00002 .. NT-00011` each existing twice,
+  copy A written by the "maintenance overdue" cron job, copy B by a user action.
+  
+  **Mechanism.** A session write carries the caller's active organization, the SQL
+  driver stamps it onto the row (`injectTenantOnInsert`), and the autonumber
+  counter reads it back off the row (`fillAutoNumberFields`, resolving
+  `row[tenantField] ?? options.tenantId ?? null`). A system-context write carries
+  none, so the column lands `NULL` and the counter files the row under the
+  `__global__` pseudo-tenant. One object then runs two counters that cannot see
+  each other, each correct within its own scope, and the partitioned unique index
+  — `(COALESCE(organization_id, '__global__'), <field>)`, ADR-0120 D3 — cannot see
+  across the two partitions either.
+  
+  ⛔ **Not a counter bug**, and not fixed by making the allocator smarter: both
+  counters are already correct within their own scopes (the reasoning #8686
+  recorded, unchanged). The defect is upstream of the counter.
+  
+  **The fix, per the 2026-08-15 maintainer ruling (Option 1)** — a system-context
+  write resolves the install's organization the way a session write does, at the
+  engine's stamp resolution, so every driver is covered at the source (which
+  matters here because `fillAutoNumberFields` is duplicated in `driver-sql` and
+  `driver-turso`; neither driver changed):
+  
+  - **Single-tenant, exactly one organization ⇒ derive and stamp.** The
+    `__global__` fork stops being minted by hooks, cron and system endpoints.
+  - **Multi-organization ⇒ carry an explicit organization or be REFUSED LOUDLY**,
+    never silently defaulted. A walled posture (`group` / `isolated`), or a
+    `single` posture whose data holds several organizations, has no derivable
+    answer — the refusal is `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` (500,
+    registered in the ADR-0112 ledger), thrown before anything reaches the driver,
+    and its message names the condition, what would otherwise have been written,
+    and both remedies.
+  - **Already-minted duplicates are reported, never rewritten** — the #8686
+    posture, ruled again here. Nothing in this change renumbers anything.
+  
+  **Three populations are outside the rule by construction, not by exemption**, so
+  that the refusal cannot break unattended automation that was never at risk:
+  objects with no organization column, objects declaring `tenancy: { enabled:
+  false }` (ADR-0066 — the *declared* way to hold org-less rows, rather than a
+  per-write bypass flag) and federated objects (ADR-0015); the platform namespaces
+  `sys_` / `cloud_` / `ai_`, whose rows are deliberately global (#8672's reasoning,
+  which this ruling confirms holds for platform objects and does **not** generalize
+  to application objects); and any write that already carries an organization — on
+  the execution context, on the record, or stamped by a `beforeInsert` hook.
+  
+  **First boot is untouched:** before any organization exists there is nothing to
+  derive and no second partition to fork away from, so those rows still land
+  org-less for #8686's `sys_organization`-insert handoff to adopt.
+  
+  Scoped to **insert**, deliberately: the ruling's yardstick is "the way a session
+  write does", and stamping the organization is an insert-side mechanism — an
+  update neither stamps it nor can fork a counter.
+- 402c125: fix(objectql): a temporal filter comparand the platform cannot interpret is refused at the engine door instead of answering 200 with zero rows (#8690)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is
+  renamed, retired or tombstoned — no spec schema is touched at all. The change
+  is a new runtime refusal at the engine's filter collection point, plus the
+  routing decline that stops the raw-SQL analytics path bypassing it. -->
+  
+  A `datetime` / `date` / `time` field filtered with a bare string the platform
+  cannot read — `last_30_days`, `not-a-date-at-all` — was bound **as written**
+  all the way to the driver, where the comparison is false for every row. The
+  caller received `HTTP 200`, an empty result set, and nothing to indicate the
+  filter was meaningless. An unknown `{placeholder}` in the same position was
+  already refused loudly (`FILTER_TOKEN_UNKNOWN` / 400, listing the resolvable
+  tokens), so one API answered two shapes of unusable comparand two different
+  ways.
+  
+  It is concretely reachable rather than theoretical: `last_7_days` /
+  `last_30_days` / `last_90_days` are **declared preset names** in the dashboard
+  schema. The shipped console lowers them to `{N_days_ago}` macros before they
+  reach the API, so the console path was always safe — but a saved report, an
+  integration, an MCP client or an AI-authored query sends the preset name itself
+  and got a silent zero. An empty chart is the hardest failure to debug: it is
+  indistinguishable from "there is genuinely no data".
+  
+  Such a comparand is now refused at the ObjectQL engine's single filter
+  collection point, with `code: 'INVALID_FILTER'` and `status: 400`, naming the
+  field, the value, the key path and the spellings that would work. That seam is
+  the one place holding the caller's comparand and the field's **declared type**
+  at the same moment, and every verb (`find` / `findOne` / `count` / `aggregate`
+  / `update` / `delete`) and both filter spellings (the array sugar and the
+  lowered condition) pass through it, so all four backends inherit one answer
+  rather than four. `NativeSQLStrategy` additionally **declines** such a query so
+  the raw-SQL analytics path falls through to that door instead of binding the
+  value into its own statement.
+  
+  Deliberately unchanged, each by ruling: a `{placeholder}` keeps its existing
+  refusal one layer down (the door runs before token resolution and steps around
+  them, so `{30_days_ago}` still resolves normally); non-string comparands are
+  untouched (a number is epoch milliseconds, a `Date` is an instant); and the
+  **empty string** keeps today's behaviour exactly — it binds as `''` and matches
+  every non-null row, which is a separate question that remains its own card.
+- 7c2f386: fix(objectql): the tenant-scope index follows the WALL's derivation, so an object that opts out with `systemFields: false` while declaring its own `organization_id` stops running the wall predicate unindexed (#8608)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key is
+  added, renamed, retired or tombstoned. One internal predicate in
+  `packages/objectql/src/registry.ts` is rebound from the spec's injection plan to
+  the two clauses plugin-security already derives `tenancyDisabled` from, so the
+  index the platform declares now covers the same objects the wall filters. -->
+  
+  Two places answered *"is this object tenant-scoped?"* and read different
+  declarations. The platform's tenant-scope index was gated on the spec's
+  **injection plan** (`resolveInjectedSystemColumns(...).tenant`), while
+  plugin-security's Layer 0 wall derives `tenancyDisabled` from exactly two
+  clauses:
+  
+  ```ts
+  tenancy.enabled === false || systemFields.tenant === false
+  ```
+  
+  `systemFields: false` — the hard object-level opt-out — is in the plan and in
+  neither of those clauses. So an object using that opt-out **while declaring its
+  own `organization_id`** had `organization_id = <org>` AND-composed onto
+  essentially every read, with no index behind it: the deployment's hottest
+  predicate, unindexed. Not a security hole — isolation still held; it was slow,
+  not wrong, which is why nothing surfaced it.
+  
+  **Both halves were measured end to end** rather than read off the source. On the
+  pre-fix tree, for one such object, the registry answered `indexes: null` while
+  `SecurityPlugin#getReadFilter` answered `{ organization_id: 'org-1' }` for an
+  ordinary member.
+  
+  The wall's derivation is authoritative and the index now follows it: the index
+  is declared when tenancy is not disabled by the wall's two clauses **and** the
+  object carries `organization_id` — whether the platform provisions the column or
+  the author declared it. `managedBy: 'better-auth'` is deliberately not re-added
+  as a third clause, because the wall does not read it either; the one shipped
+  platform object whose answer changes is `sys_member`, which is walled on
+  `organization_id` and whose only tenant-leading index was the composite
+  `['organization_id', 'user_id']`.
+  
+  Unchanged, and pinned beside the fix: `systemFields.tenant: false` and
+  `tenancy.enabled: false` still declare no index (the wall composes no predicate
+  there, so an index would serve nothing), a single-tenant deployment still
+  declares none at all, an author's own tenant index still suppresses the
+  platform's, and the hard opt-out still injects no platform columns — only the
+  index decision was ever owed at that exit.
+- 8a9e7f4: Refuse undeclared fields on insert at the schema, and keep bound values out of the write-path logs (#8682)
+  
+  **A single mistyped field name in a client request no longer writes an entire row's values to disk.** A driver-level write fault is logged by prefixing the fully bound SQL statement — values inlined — to the database's own message, and the logger serializes both `message` and `stack`, so the statement was written twice at ERROR level. Confirmed with planted canaries: the row's values landed in the log alongside the organization id and the acting user id. The insert, update and delete loggers now write the database's own diagnostic — which still names the failing column and the object — with the statement and its bound values cut from both fields. The level, the message and the entry itself are unchanged: a driver fault nobody can debug would be a worse outcome than one logged too loudly.
+  
+  **An undeclared field is now refused by the object's field map, before anything runs for a request that was already going to be refused.** Previously an unknown key was caught only at the very end, by the driver, after an id, an auto-number, a normalized name, owner/creator resolution, the column defaults and the app's `beforeInsert` hooks had all been produced for it. The auto-number was the durable damage: the refused request consumed a sequence value and left a permanent gap in a document number an end user reads. `insertMany` now culls such a row per row instead of letting it fail the whole batch.
+  
+  The client-facing answer is deliberately unchanged — the same `400 INVALID_FIELD`, with the same message and the same `field` / `object` — and the rethrown error is untouched, so only what reaches the log has moved. Objects whose field map is absent or empty get no verdict at all, and `id` / `created_at` / `updated_at` stay accepted even when a declaration omits them, matching what the read path already tolerates; in every one of those cases the driver remains the backstop it has always been.
+- 3d0ded8: Refuse undeclared fields on update at the schema, before the `beforeUpdate` hooks run (#8738)
+  
+  **An undeclared key on `engine.update(...)` is now refused by the object's field map, before anything runs for a request that was already going to be refused.** Previously it travelled the whole update path and was refused at the very end by the driver — measured on both branches of the verb: `driver.update` on the by-id path and `driver.updateMany` on the predicate path each received the mistyped key. The `beforeUpdate` hooks ran first, so a hook that stamps a ledger, calls out, or derives a field executed for a write that was then rejected; in the reproduction the hook's derived value travelled into the statement the driver refused.
+  
+  **What a caller observes changing.** The refusal itself does not move: an undeclared update key was already rejected, and the client-facing answer is deliberately unchanged — the same `400 INVALID_FIELD` with the same message, `field` and `object`, which `@objectstack/rest` re-emits verbatim. What changes is where the refusal is decided, and therefore what the error carries **inside the process**: an in-process caller of `ObjectQL.update()` that caught the old failure saw the driver's raw error (no `code`, no `status`, its message containing the bound SQL statement) and now sees the ADR-0112 envelope (`code: 'INVALID_FIELD'`, `status: 400`) with a message naming the field. An in-process caller matching on the driver's SQL text — rather than on the envelope — is the one shape that has to change. The write no longer costs a driver round-trip either: the pre-update read is skipped along with the hooks.
+  
+  The door is the same one `insert()` has carried since #8682 — one condition, one implementation, now with two callers — including its three deliberate no-opinion cases, which are unchanged and reused rather than re-derived: an absent field map, a field map the door sees as empty, and `id` / `created_at` / `updated_at` when a declaration omits them. Schema drift (a declared field whose physical column is missing) stays the driver's to refuse, as before. Nothing is widened; `declared = enforced` (Prime Directive #10) is restored on the second write verb.
+- 91c4ff5: fix(objectql): an unscoped `GET /api/v1/search` stops answering 400 when a federated object is registered and pinyin recall is on — the `__search` companion is no longer declared on objects the platform runs no DDL for (#9469)
+  
+  On the **stock** showcase configuration an unscoped `GET /api/v1/search` — no
+  `objects=` parameter — answered **400** for the whole search. Measured on a real
+  boot, with the scoped query as the control:
+  
+  ```
+  GET /api/v1/search?q=acme                            → 400 INVALID_FILTER
+  GET /api/v1/search?q=acme&objects=showcase_account   → 200, 1 hit
+  ```
+  
+  Nothing in the console was affected, because the console always scopes its
+  queries with `objects=`. An unscoped search is the obvious first call for a
+  direct API consumer, so the defect was reachable by every one of them and by no
+  console user.
+  
+  **The mechanism, and why it is a producer bug rather than a search bug.** The
+  hidden `__search` companion column is not metadata — it is a real column the
+  platform promises to build: the SchemaRegistry declares it at object compile
+  time and the driver's `syncSchema` materializes it as an additive migration
+  (ADR-0045). On a **federated** object (ADR-0015) that promise cannot be kept.
+  The remote database owns the schema, DDL is forbidden, and the schema-sync seam
+  skips those objects outright. The declaration went on anyway, so the object
+  carried a field with no column — and `expandSearchToFilter`, which keys the
+  companion clause on the **declared** field, ORed `{ __search: { $contains: term } }`
+  into every `$search` against it. The backend then refused a statement it could
+  not compile, correctly (#8790): the predicate really could not run. From the
+  server log, verbatim:
+  
+  ```
+  select * from `customers` where ((lower(`name`) GLOB lower('*acme*')) or …
+    or (`__search` GLOB '*acme*')) limit 5 - no such column: __search
+  ```
+  
+  Every source-column clause was fine; only the companion named a column that does
+  not exist. The unscoped call is the one that sweeps every registered object, so
+  it is the only global-search call that included a federated object — which is
+  why scoping hid it.
+  
+  **The fix** is one gate at the provisioning seam: an object carrying an
+  `external` binding gets no companion declaration. The predicate is
+  `external != null`, deliberately the **same** expression the schema-sync seam
+  already tests rather than a second question about the same fact, so the two ends
+  agree by construction — every object the sync seam declines to build a column
+  for is exactly an object the provisioning seam declines to declare one on.
+  (Asking the datasource's `schemaMode` here instead would be a second
+  implementation of one rule, and the SchemaRegistry holds no datasource
+  definitions at all, so that drift would be structural rather than merely
+  possible.)
+  
+  **Scope of the behaviour change**, all of it a restoration:
+  
+  - unscoped `GET /api/v1/search` returns results instead of 400;
+  - `?search=` on a federated object's own list endpoint stops refusing — the same
+    defect, on a call that never involved global search, and the reason the fix
+    lands at the declaration rather than in the global-search sweep;
+  - federated objects are searched through their source columns, as they were
+    before pinyin recall existed;
+  - pinyin recall is **unchanged** wherever the column is really built, and a
+    federated object whose remote table genuinely has a `__search` column keeps
+    its recall: the author declares that column as an ordinary field and
+    provisioning returns early on an already-present entry.
+  
+  `/meta` for a federated object no longer advertises a `__search` field it could
+  never serve.
+- 682b86b: fix(objectql): a caller value containing " - " no longer eats the diagnostic's template head, and no longer leaves its own suffix in the log (#9275)
+  
+  `redactStatementFromMessage` cuts the bound statement off a driver error at the
+  **last** ` - `, because a bound value may itself contain that separator and
+  cutting at the first would leave a fragment of the value standing.
+  
+  When the value the DATABASE inlines into its own diagnostic also contains ` - `,
+  that reasoning inverts: the last separator lands **inside the diagnostic's
+  value**, so the cut discards the template head — the half that could not leak —
+  and keeps a suffix of the caller's data, which is the half that does. Re-measured
+  at HEAD on live PostgreSQL 16.13 with the canary
+  `SENSITIVE-CANARY-9275 - 2026 - Q3`:
+  
+  ```
+  raised:   insert into "t" ("age") values ($1)
+              - invalid input syntax for type integer: "SENSITIVE-CANARY-9275 - 2026 - Q3"
+  logged:   Q3" [statement and bound values redacted]
+  ```
+  
+  `Q3` is the caller's data, at ERROR level, which is what this neighbourhood
+  exists to prevent. Families with a right anchor (`for key …`,
+  `for column … at row N`) already recovered through their `tail` pattern; the ones
+  whose value runs to end of message had nothing to recover from.
+  
+  **The cut is now template-aware.** When a separator in the message stands
+  immediately before a diagnostic head this file has measured, that separator is
+  the true cut point whatever its position: the head survives and the value after
+  it — separator and all — is dropped whole by the template that owns it. After
+  the fix the same error logs
+  `invalid input syntax for type integer: [value redacted] [statement and bound
+  values redacted]`, so the operator keeps strictly more diagnostic than before.
+  
+  **Three families, not the two the card named.** `pg 22003` was left without a
+  head-gone recovery on the reasoning that an out-of-range value is a number and a
+  number cannot contain ` - `. Measured through the driver's own bind path, that is
+  false — Postgres detects the overflow while scanning digits, *before* it rejects
+  the trailing junk, so it echoes the caller's whole string:
+  `insert({ age: '99999999999 - 2026 - Q3' })` logged `Q3` too. It keeps its right
+  anchor, so it takes the #8823 anchor recovery rather than the new cut.
+  
+  The trade this takes deliberately, and its bound: matching a template before the
+  cut lets a hostile value steer where the cut lands. That steering is bounded to
+  **over-redaction, never exposure** — a template may declare a head only if its
+  value runs to end of message, so a cut landing inside a statement is swallowed
+  whole by that template; and the **last** matching head wins, so a value that
+  mimics a head is cut at the mimic and cannot survive behind its own decoy. What a
+  crafted value can do is suppress a real diagnostic; that cost is asserted by its
+  own case rather than left to be discovered. The six identifier-bearing families
+  the live probe pins are untouched — over-matching deletes the diagnostic an
+  operator came for, and remains the expensive direction.
+- 6a1b45e: fix(objectql): stop logging the caller's value for four MORE diagnostic families — measured off live MySQL 8.0 / PostgreSQL 16, not read off a manual (#9160)
+  
+  #8823 established that a database's diagnostic does not always name only
+  IDENTIFIERS: MySQL's `ER_DUP_ENTRY` inlines the conflicting VALUE, and
+  `redactStatementFromMessage` redacts that one slot while keeping the index name
+  an operator needs.
+  
+  The list it introduced had **exactly one entry and no way to notice a second was
+  missing**. Nothing measured whether a diagnostic a driver produced carried a
+  value; the single entry got there because a human read one template closely, and
+  the standing rule (`packages/types/src/unique-violation.ts`) — a dialect's
+  spelling goes in once measured off a thrown error, never from a reading of the
+  manual — correctly prevented the list from growing on a guess.
+  
+  **The instrument now exists.** `sql-driver-diagnostic-value-probe.test.ts` plants
+  a canary, raises each candidate family through the driver's own bind path against
+  the live MySQL 8.0 / PostgreSQL 16 services the `Temporal Conformance (live PG +
+  MySQL)` job already stands up, and asserts of every family — value-bearing or not
+  — **where the canary lands**: `error.message` (which `ObjectLogger.write`
+  serializes, so an exposure) or `error.detail` (which it does not). A family that
+  starts inlining a value it did not inline before is now a named red naming the
+  file to edit, instead of a silent leak.
+  
+  Measured with a positive control first (`ER_DUP_ENTRY`, the known-value-bearing
+  neighbour, reproduced verbatim — without it a zero elsewhere would be
+  uninterpretable):
+  
+  | dialect | family | diagnostic, verbatim | verdict |
+  |:--|:--|:--|:--|
+  | mysql | 1062 | `Duplicate entry 'CANARY' for key 'probe.uq'` | value on `message` (already encoded) |
+  | mysql | 1366 | `Incorrect integer value: 'CANARY' for column 'age' at row 1` | **value on `message`** |
+  | mysql | 1292 | `Incorrect datetime value: 'CANARY' for column 'when_at' at row 1` | **value on `message`** |
+  | mysql | 1264 | `Out of range value for column 'age' at row 1` | identifier only |
+  | mysql | 1406 | `Data too long for column 'label' at row 1` | identifier only |
+  | mysql | 1054 | `Unknown column 'zzz…' in 'field list'` | identifier only |
+  | pg | 22P02 | `invalid input syntax for type integer: "CANARY"` | **value on `message`** |
+  | pg | 22007 | `invalid input syntax for type timestamp with time zone: "CANARY"` | **value on `message`** |
+  | pg | 22003 | `value "99999999999" is out of range for type integer` | **value on `message`** |
+  | pg | 23505 | `duplicate key value violates unique constraint "…"` | value on `detail` only |
+  | pg | 23502 | `null value in column "id" … violates not-null constraint` | value on `detail` only |
+  | pg | 22001 | `value too long for type character varying(20)` | identifier only |
+  
+  Both families the card named as candidates **are** value-bearing, and the
+  Postgres one is the sharper result: #8823 recorded that Postgres escapes the
+  unique-violation leak only because its value sits on `error.detail`, a field the
+  logger never serializes — *"coincidence, not a defence"*. `22P02` / `22007` /
+  `22003` put the caller's value on **`error.message`**, the field that IS
+  serialized, so the coincidence does not cover them.
+  
+  The one-off regex pair is now an enumerable `VALUE_BEARING_TEMPLATES` table, one
+  row per measured family, each citing the live server that produced it. Every
+  identifier-bearing tail is still kept whole — over-matching deletes the
+  diagnostic an operator came for, which is the expensive direction #8682 paid to
+  avoid, and the six identifier-only families above are pinned against exactly that
+  regression.
+  
+  **Known residue, measured and deliberately not closed here:** when the caller's
+  value itself contains ` - `, the statement cut lands inside it and eats the
+  template head. Families with a right anchor (`for key …`, `for column … at row
+  N`) recover; the two whose value runs to end of message (pg 22P02/22007, mysql
+  1292's `Truncated incorrect …` spelling) have no anchor and leave a suffix
+  standing. Closing that requires the cut itself to become template-aware — a
+  change to #8682's contract, filed rather than decided.
+- Updated dependencies [56656aa]
+- Updated dependencies [07e630e]
+- Updated dependencies [2f65b1b]
+- Updated dependencies [720ee95]
+- Updated dependencies [f287435]
+- Updated dependencies [2782805]
+- Updated dependencies [e43d63a]
+- Updated dependencies [e374b4d]
+- Updated dependencies [5047cb8]
+- Updated dependencies [9aa8890]
+- Updated dependencies [40d5b2d]
+- Updated dependencies [7c9c1dd]
+- Updated dependencies [75b7c24]
+- Updated dependencies [d5552ca]
+- Updated dependencies [d9813a9]
+- Updated dependencies [13d7864]
+- Updated dependencies [8640fb2]
+- Updated dependencies [2420641]
+- Updated dependencies [2ad91c3]
+- Updated dependencies [f57fb38]
+- Updated dependencies [00777a0]
+- Updated dependencies [d491625]
+- Updated dependencies [2d0af57]
+- Updated dependencies [c766ec3]
+- Updated dependencies [7337f30]
+- Updated dependencies [420804d]
+- Updated dependencies [177442d]
+- Updated dependencies [950bd94]
+- Updated dependencies [3043e98]
+- Updated dependencies [716ac9b]
+- Updated dependencies [a38408a]
+- Updated dependencies [7b3c033]
+- Updated dependencies [62b1427]
+- Updated dependencies [7ea1372]
+- Updated dependencies [23abe27]
+- Updated dependencies [985a9cd]
+- Updated dependencies [5f5e234]
+- Updated dependencies [a8189ae]
+- Updated dependencies [26e70fb]
+- Updated dependencies [27a567d]
+- Updated dependencies [42b05af]
+- Updated dependencies [2b292ce]
+- Updated dependencies [abcf853]
+- Updated dependencies [14935ab]
+- Updated dependencies [8b9eba5]
+- Updated dependencies [d575779]
+- Updated dependencies [94f7ef8]
+- Updated dependencies [c5ac5e4]
+- Updated dependencies [a777944]
+- Updated dependencies [dd88e1c]
+- Updated dependencies [856527c]
+- Updated dependencies [870f710]
+- Updated dependencies [79c46da]
+- Updated dependencies [7ff3975]
+- Updated dependencies [fd6bdf8]
+- Updated dependencies [29d055b]
+- Updated dependencies [65589d6]
+- Updated dependencies [2c86fe3]
+- Updated dependencies [e196c6a]
+- Updated dependencies [24173e9]
+- Updated dependencies [4ab7523]
+- Updated dependencies [19539b4]
+- Updated dependencies [f8eb736]
+- Updated dependencies [11b779e]
+- Updated dependencies [739fe5b]
+- Updated dependencies [bc03179]
+- Updated dependencies [4bfe1a5]
+- Updated dependencies [2065e31]
+- Updated dependencies [ead96d0]
+- Updated dependencies [b69d0f5]
+- Updated dependencies [c15eb23]
+- Updated dependencies [4d47afe]
+- Updated dependencies [2a9752c]
+- Updated dependencies [b740440]
+- Updated dependencies [e4e5c6e]
+- Updated dependencies [9a56784]
+- Updated dependencies [d00d2f6]
+- Updated dependencies [df0c12d]
+- Updated dependencies [d31785f]
+- Updated dependencies [c308a4f]
+- Updated dependencies [e2899f6]
+- Updated dependencies [b6c7690]
+- Updated dependencies [3851f87]
+- Updated dependencies [845e164]
+- Updated dependencies [2a29caa]
+- Updated dependencies [09a6eee]
+- Updated dependencies [6f5a449]
+- Updated dependencies [8d017eb]
+- Updated dependencies [1a7f907]
+- Updated dependencies [cd455c8]
+- Updated dependencies [e1bb0ca]
+- Updated dependencies [4e3a4c3]
+- Updated dependencies [3b0b61c]
+- Updated dependencies [30d3752]
+- Updated dependencies [8914915]
+- Updated dependencies [a4c11ad]
+- Updated dependencies [c80e7ae]
+- Updated dependencies [09a9a8a]
+- Updated dependencies [07026cf]
+- Updated dependencies [5d4f3d5]
+- Updated dependencies [4d80e8b]
+- Updated dependencies [30b1c63]
+- Updated dependencies [7fc01db]
+- Updated dependencies [079b457]
+- Updated dependencies [e43b211]
+- Updated dependencies [2416dd5]
+- Updated dependencies [88ef34d]
+- Updated dependencies [add2d19]
+- Updated dependencies [5d4d20e]
+- Updated dependencies [2b9d33a]
+- Updated dependencies [ad217b1]
+- Updated dependencies [890b38f]
+- Updated dependencies [8bee54b]
+- Updated dependencies [7a537ce]
+- Updated dependencies [593c4bf]
+- Updated dependencies [0f59584]
+- Updated dependencies [f6c904a]
+- Updated dependencies [ff08691]
+- Updated dependencies [60e0f90]
+- Updated dependencies [159e299]
+- Updated dependencies [90c5285]
+- Updated dependencies [402c125]
+- Updated dependencies [7901b2d]
+- Updated dependencies [56bca91]
+- Updated dependencies [52fbba6]
+- Updated dependencies [d5156b9]
+- Updated dependencies [75e66fc]
+- Updated dependencies [79394d7]
+- Updated dependencies [730fd9a]
+- Updated dependencies [a726154]
+- Updated dependencies [44bc51d]
+- Updated dependencies [bbbfcfc]
+- Updated dependencies [73cfddf]
+- Updated dependencies [d634e66]
+  - @objectstack/spec@17.1.0
+  - @objectstack/types@17.1.0
+  - @objectstack/core@17.1.0
+  - @objectstack/metadata-protocol@17.1.0
+  - @objectstack/metadata@17.1.0
+  - @objectstack/metadata-core@17.1.0
+  - @objectstack/formula@17.1.0
+
 ## 17.0.0
 
 ### Major Changes

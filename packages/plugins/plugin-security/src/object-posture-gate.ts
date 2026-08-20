@@ -90,8 +90,21 @@ export function objectPostureGate(ctx: ObjectPostureGateContext): void {
 
   // R1 — ADR-0086 D1: an environment may only TIGHTEN a packaged object's
   // posture. Applies only to overlay writes over an artifact-backed object
-  // (the OS_METADATA_WRITABLE escape-hatch path — the default deploy already
-  // 403s these before this gate runs).
+  // (`ctx.isArtifactBacked`, the OS_METADATA_WRITABLE escape-hatch path).
+  // The answering layer is picked by the body's DIRECTION, not by deploy
+  // posture: a widening body meets R1 first on every leg — hatch open or
+  // closed, `?package=` named or not. On the host-config kernel the
+  // showcase boots, `saveMetaItem` runs `runAuthoringGate` ahead of the
+  // overlay/package doors (`environmentId` undefined, so protocol.ts's
+  // env-partitioned NOT_OVERRIDABLE branch never arms — see that file's own
+  // #7674 note). A non-widening body passes R1 and only then meets the
+  // overlay door: 403 NOT_OVERRIDABLE (no `?package=`) or 403 ITEM_LOCKED
+  // (`?package=` naming the read-only base) on stock, 200 under the escape
+  // hatch — WRITABLE_PACKAGE_REQUIRED appears on none of these paths.
+  // Measured on a stock showcase boot, six legs: #9477 (PR #9953, revision
+  // 3). Wire shape is `code: PERMISSION_DENIED` with `declaredCode:
+  // owd_widening_forbidden`, so a check keyed on `code` alone misses it
+  // (#9958).
   if (!ctx.isArtifactBacked) return;
   const declared = ctx.declaredBody as Record<string, unknown> | null;
   if (!declared || typeof declared !== 'object') return;

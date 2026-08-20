@@ -90,13 +90,19 @@ export const SysUserPermissionSet = ObjectSchema.create({
         'Agent grants carry the task/run attribution here (D6).',
     }),
 
-    delegated_from: Field.lookup('sys_user', {
-      label: 'Delegated From',
-      required: false,
-      description:
-        '[ADR-0091 D3] The delegator whose authority this row carries. ' +
-        'A row with delegated_from set is not itself delegatable and not self-renewable.',
-    }),
+    // [#9730] `delegated_from` was RETIRED from this object (maintainer ruling
+    // 2026-08-18, ADR-0049 enforce-or-remove). The runtime delegation gate is
+    // structurally scoped to `sys_user_position` (`delegated-admin-gate.ts`
+    // `isDelegationWrite`), so on THIS table the column was enforced at
+    // authoring time only while staying data-door-writable — a declared-but-
+    // unenforced surface on a security object, with zero producers measured
+    // across packages/, apps/ and examples/. The sibling declaration on
+    // `sys_user_position` is untouched and fully enforced (gate + explain
+    // engine + lint). If delegation at permission-set granularity ever becomes
+    // a real need, it is re-declared WITH a runtime reader in the same PR —
+    // declare-and-enforce or don't declare. A write that still carries the key
+    // is refused loudly by the engine's schema preflight (400 INVALID_FIELD).
+    // Ledger: `ups-delegated-from-column-retired` (ADR-0087 semantic entry).
 
     // [#9046] ADR-0091 D5 calls these two columns the recertification
     // "substrate", and they are exactly that and nothing more. A whole-tree
@@ -105,9 +111,11 @@ export const SysUserPermissionSet = ObjectSchema.create({
     // generated i18n bundles that carry their strings. No producer, no
     // consumer - nothing stamps them, nothing reads them, and no surface
     // derives "never certified" or "certification stale". Their siblings on
-    // this object are not like that: valid_from/valid_until are enforced by
-    // isGrantActive at resolution time, and reason/delegated_from are read by
-    // the delegated-admin gate and the security-posture lint.
+    // this object are not like that in the same way: valid_from/valid_until
+    // are enforced by isGrantActive at resolution time, and `reason` is
+    // stamped by the platform's own writer (auto-org-admin-grant provenance).
+    // (`delegated_from` used to be listed here too — it was retired from this
+    // object, see the [#9730] note above.)
     //
     // The old descriptions ("When this grant was last attested in a
     // recertification review", "Reviewer who last attested this grant") stated
