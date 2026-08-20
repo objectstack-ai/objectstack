@@ -39,9 +39,9 @@
 // absence direction is asserted against the same doors.
 
 import { describe, it, expect } from 'vitest';
-import type { DataEngineInsertOptions, EngineQueryOptions, EngineReadOptions } from '@objectstack/spec/data';
+import type { DataEngineInsertOptions, EngineQueryOptions } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { ObjectQL } from './engine.js';
+import { ObjectQL, type EngineReadOptions } from './engine.js';
 
 interface ObservedCall {
   object: string;

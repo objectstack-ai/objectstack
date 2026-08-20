@@ -168,7 +168,7 @@ describe('#7279 — stdio ExecutionContext, assembled by the shared assembler', 
     const getRecord = await startStdio(ctx);
     await getRecord('crm_account', 'r_1');
 
-    const context = finds.at(-1)!.options.context!;
+    const context = finds[finds.length - 1]!.options.context!;
     expect(context.tabPermissions).toEqual(AUTHZ.tabPermissions);
   });
 
@@ -177,7 +177,7 @@ describe('#7279 — stdio ExecutionContext, assembled by the shared assembler', 
     const getRecord = await startStdio(ctx);
     await getRecord('crm_account', 'r_1');
 
-    const context = finds.at(-1)!.options.context!;
+    const context = finds[finds.length - 1]!.options.context!;
     // Absent as a KEY, not merely undefined: the assembler drops undefined
     // values, so a wired-then-empty token and a withheld one would otherwise
     // read the same.
@@ -190,7 +190,7 @@ describe('#7279 — stdio ExecutionContext, assembled by the shared assembler', 
     const getRecord = await startStdio(ctx);
     await getRecord('crm_account', 'r_1');
 
-    const context = finds.at(-1)!.options.context!;
+    const context = finds[finds.length - 1]!.options.context!;
     // `timezone` is what moves formula evaluation off the `UTC` default
     // (`cel-engine.ts`: `ctx.timezone ?? 'UTC'`); `locale` is what localizes a
     // denial message instead of rendering it in English.
@@ -204,7 +204,7 @@ describe('#7279 — stdio ExecutionContext, assembled by the shared assembler', 
     const getRecord = await startStdio(ctx);
     await getRecord('crm_account', 'r_1');
 
-    const context = finds.at(-1)!.options.context! as ExecutionContext & {
+    const context = finds[finds.length - 1]!.options.context! as ExecutionContext & {
       org_user_ids?: string[];
       accessible_org_ids?: string[];
     };
