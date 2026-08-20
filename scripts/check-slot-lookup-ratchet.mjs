@@ -46,9 +46,16 @@ import { ESLint } from 'eslint';
 
 import eslintConfig, { SLOT_LOOKUP_ANY_MESSAGE } from '../eslint.config.mjs';
 import { lintFilesStrict } from './eslint-fatal-guard.mjs';
+import { ensureStackHeadroom } from './eslint-stack-headroom.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
+
+// This gate lints IN-PROCESS, so it does not inherit the `--stack-size` the
+// root `lint` script puts on ESLint's CLI entry, and this repo's deepest file
+// does not parse without it (#10449). Re-exec once, before any linting, so the
+// gate carries its own headroom whatever spelling invoked it.
+ensureStackHeadroom(fileURLToPath(import.meta.url));
 const BASELINE_PATH = 'scripts/slot-lookup-baseline.json';
 
 /**
