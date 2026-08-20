@@ -31,6 +31,7 @@ export {
   provisionSearchCompanion,
   resolveSearchCompanionSources,
   isCompanionSourceEligible,
+  isPrimaryKeyField,
   isCompanionMatchableTerm,
   isSearchCompanionRequested,
   stripSearchCompanion,
