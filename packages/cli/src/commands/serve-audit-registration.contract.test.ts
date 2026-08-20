@@ -59,10 +59,16 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
  * `packages/cli/src/commands/` → `packages/`. Reading verify's harness from
  * here is what makes fact 3 an assertion instead of a comment;
  * `@objectstack/verify` is a real dependency of this package and the read is
- * test-only (tests never ship — `files: ["dist"]`). The glob is already
- * declared for `@objectstack/cli` in `scripts/check-cross-package-test-inputs.mjs`
- * and hashed by `@objectstack/cli#test` in turbo.json, for the sibling parity
- * scan; this file adds a second reader of the same path, not a new radius.
+ * test-only (tests never ship — `files: ["dist"]`). The glob is already declared
+ * for `@objectstack/cli` by `pnpm check:cross-package-test-inputs`, and hashed
+ * by `@objectstack/cli#test` in turbo.json, for the sibling parity scan; this
+ * file adds a second reader of the same path, not a new radius.
+ *
+ * That gate is named by its runnable script rather than by its file path on
+ * purpose. Its literal collector takes any quoted path without parsing, so
+ * spelling the path here — in prose, about a file this test never opens — would
+ * demand a declaration for it and put cli's whole suite on every edit of the
+ * gate. The reads this scan really makes are the two below.
  */
 const PACKAGES_DIR = path.resolve(HERE, '../../..');
 
