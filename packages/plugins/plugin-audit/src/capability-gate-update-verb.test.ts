@@ -33,6 +33,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
+import type { EngineQueryOptions, EngineUpdateOptions } from '@objectstack/spec/data';
 import { installAuditWriters } from './audit-writers.js';
 
 const text = (name: string, primaryKey = false) => ({
@@ -238,11 +239,11 @@ describe('[#10170] enable.files is asked on the UPDATE verb too', () => {
     await expect(
       engine.update('sys_attachment', { parent_object: 'lead_walled' } as any, {
         where: { id: String(row.id) },
-      }),
+      } satisfies EngineUpdateOptions),
     ).rejects.toMatchObject({ code: 'FILES_DISABLED', status: 403, object: 'lead_walled' });
 
     // Refused BEFORE the statement: the stored row still names its old parent.
-    const after: any = await engine.findOne('sys_attachment', { where: { id: String(row.id) } } as any);
+    const after: any = await engine.findOne('sys_attachment', { where: { id: String(row.id) } } satisfies EngineQueryOptions);
     expect(after.parent_object).toBe('lead_open');
   });
 
@@ -253,10 +254,10 @@ describe('[#10170] enable.files is asked on the UPDATE verb too', () => {
     await expect(
       engine.update('sys_attachment', { parent_object: 'lead_open', parent_id: 'rec-2' } as any, {
         where: { id: String(row.id) },
-      }),
+      } satisfies EngineUpdateOptions),
     ).resolves.toBeTruthy();
 
-    const after: any = await engine.findOne('sys_attachment', { where: { id: String(row.id) } } as any);
+    const after: any = await engine.findOne('sys_attachment', { where: { id: String(row.id) } } satisfies EngineQueryOptions);
     expect(after.parent_id).toBe('rec-2');
   });
 
@@ -269,10 +270,10 @@ describe('[#10170] enable.files is asked on the UPDATE verb too', () => {
       engine.update('sys_attachment', { parent_object: 'lead_walled' } as any, {
         multi: true,
         where: { file_id: 'file-1' },
-      }),
+      } satisfies EngineUpdateOptions),
     ).rejects.toMatchObject({ code: 'FILES_DISABLED', status: 403, object: 'lead_walled' });
 
-    const rows: any[] = await engine.find('sys_attachment', { where: {} } as any);
+    const rows: any[] = await engine.find('sys_attachment', { where: {} } satisfies EngineQueryOptions);
     expect(rows.map((r) => r.parent_object)).toEqual(['lead_open', 'lead_open']);
   });
 
@@ -285,10 +286,10 @@ describe('[#10170] enable.files is asked on the UPDATE verb too', () => {
       engine.update('sys_attachment', { parent_id: 'rec-9' } as any, {
         multi: true,
         where: { file_id: 'file-1' },
-      }),
+      } satisfies EngineUpdateOptions),
     ).resolves.toBeTruthy();
 
-    const rows: any[] = await engine.find('sys_attachment', { where: {} } as any);
+    const rows: any[] = await engine.find('sys_attachment', { where: {} } satisfies EngineQueryOptions);
     expect(rows.map((r) => r.parent_id)).toEqual(['rec-9', 'rec-9']);
   });
 
@@ -303,10 +304,10 @@ describe('[#10170] enable.files is asked on the UPDATE verb too', () => {
     await seedAttachment(engine, 'lead_open', 'file-1');
 
     await expect(
-      engine.update('sys_attachment', { parent_object: 'lead_walled' } as any, { multi: true } as any),
+      engine.update('sys_attachment', { parent_object: 'lead_walled' } as any, { multi: true } satisfies EngineUpdateOptions),
     ).rejects.toMatchObject({ code: 'FILES_DISABLED', status: 403, object: 'lead_walled' });
 
-    const rows: any[] = await engine.find('sys_attachment', { where: {} } as any);
+    const rows: any[] = await engine.find('sys_attachment', { where: {} } satisfies EngineQueryOptions);
     expect(rows.map((r) => r.parent_object)).toEqual(['lead_open', 'lead_open']);
   });
 
@@ -322,13 +323,13 @@ describe('[#10170] enable.files is asked on the UPDATE verb too', () => {
     await expect(
       engine.update('sys_attachment', { file_name: 'renamed.pdf' } as any, {
         where: { id: String(row.id) },
-      }),
+      } satisfies EngineUpdateOptions),
     ).resolves.toBeTruthy();
     await expect(
       engine.update('sys_attachment', { file_name: 'bulk.pdf' } as any, {
         multi: true,
         where: { file_id: 'file-1' },
-      }),
+      } satisfies EngineUpdateOptions),
     ).resolves.toBeTruthy();
   });
 });
@@ -345,10 +346,10 @@ describe('[#10170] enable.feeds is asked on the UPDATE verb too', () => {
     await expect(
       engine.update('sys_comment', { thread_id: 'lead_walled:rec-1' } as any, {
         where: { id: String(row.id) },
-      }),
+      } satisfies EngineUpdateOptions),
     ).rejects.toMatchObject({ code: 'FEEDS_DISABLED', status: 403, object: 'lead_walled' });
 
-    const after: any = await engine.findOne('sys_comment', { where: { id: String(row.id) } } as any);
+    const after: any = await engine.findOne('sys_comment', { where: { id: String(row.id) } } satisfies EngineQueryOptions);
     expect(after.thread_id).toBe('lead_open:rec-1');
   });
 
@@ -359,7 +360,7 @@ describe('[#10170] enable.feeds is asked on the UPDATE verb too', () => {
     await expect(
       engine.update('sys_comment', { thread_id: 'lead_open:rec-2' } as any, {
         where: { id: String(row.id) },
-      }),
+      } satisfies EngineUpdateOptions),
     ).resolves.toBeTruthy();
   });
 
@@ -372,7 +373,7 @@ describe('[#10170] enable.feeds is asked on the UPDATE verb too', () => {
       engine.update('sys_comment', { thread_id: 'lead_walled:rec-1' } as any, {
         multi: true,
         where: { body: 'hello' },
-      }),
+      } satisfies EngineUpdateOptions),
     ).rejects.toMatchObject({ code: 'FEEDS_DISABLED', status: 403, object: 'lead_walled' });
   });
 
@@ -385,7 +386,7 @@ describe('[#10170] enable.feeds is asked on the UPDATE verb too', () => {
       engine.update('sys_comment', { thread_id: 'lead_open:rec-2' } as any, {
         multi: true,
         where: { body: 'hello' },
-      }),
+      } satisfies EngineUpdateOptions),
     ).resolves.toBeTruthy();
   });
 
@@ -394,12 +395,12 @@ describe('[#10170] enable.feeds is asked on the UPDATE verb too', () => {
     const row = await seedComment(engine);
 
     await expect(
-      engine.update('sys_comment', { body: 'edited' } as any, { where: { id: String(row.id) } }),
+      engine.update('sys_comment', { body: 'edited' } as any, { where: { id: String(row.id) } } satisfies EngineUpdateOptions),
     ).resolves.toBeTruthy();
     await expect(
       engine.update('sys_comment', { thread_id: 'free-form-thread' } as any, {
         where: { id: String(row.id) },
-      }),
+      } satisfies EngineUpdateOptions),
     ).resolves.toBeTruthy();
   });
 });
